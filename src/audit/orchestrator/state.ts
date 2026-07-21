@@ -84,6 +84,28 @@ export interface DeriveAuditStateOptions {
    * render/report callers, which are not the gate.
    */
   newlyReachableBackends?: readonly string[];
+  /**
+   * The capability-evidence gate's PRECOMPUTED delta: dispatchable pools whose
+   * capability lookup does not resolve — no external rank source covers the model AND
+   * the confirmation records no rank for it. Non-empty ⇒ the `provider_confirmation`
+   * obligation re-opens so the pool is PINNED DOWN (LLM-proposed relative ordering,
+   * operator reorder, or the explicit "unrankable, accept at band X" escape) rather
+   * than silently fail-opening at the admission capability floor and becoming eligible
+   * for `deep` work it may be entirely unfit for.
+   *
+   * Precomputed for the SAME reason as `newlyReachableBackends`: resolving it needs the
+   * pool build + the confirmation read (both async, both I/O), and `deriveAuditState`
+   * is sync, pure, and called ~20× per invocation including 3× inside the drain.
+   *
+   * Each entry is a MODEL id — the same keyspace the dispatch join uses
+   * (`readConfirmedCapabilityRanks` → `pool.hostModel`). Entries are defined as "the
+   * join does not resolve", never a parallel predicate: a pool the join cannot reach
+   * at all (no model) is unpinnable, so admitting it here would re-prompt forever.
+   *
+   * Absent ⇒ presence-only, exactly as before — the right default for the render/report
+   * callers, which are not the gate.
+   */
+  unevidencedCapabilityPools?: readonly string[];
 }
 
 export function deriveAuditState(
@@ -100,18 +122,30 @@ export function deriveAuditState(
   // operator confirms model choices, so a backend they never saw must not silently
   // become dispatchable. The delta is precomputed by the caller (see
   // `newlyReachableBackends`); absent ⇒ presence-only, as before.
+  //
+  // PLUS the capability-evidence gate: a confirmation that exists but leaves a
+  // dispatchable pool with no resolvable capability rank is NOT satisfied either. The
+  // admission capability floor fails OPEN on an unranked pool, so without this the pool
+  // is eligible for `deep` work on no evidence at all. Same precomputed-delta shape and
+  // same reason as the reach gate above.
   const newlyReachable = options.newlyReachableBackends ?? [];
+  const unevidenced = options.unevidencedCapabilityPools ?? [];
+  const reasons: string[] = [];
+  if (newlyReachable.length > 0) {
+    reasons.push(`reachable backends the operator never confirmed: ${newlyReachable.join(", ")}`);
+  }
+  if (unevidenced.length > 0) {
+    reasons.push(`dispatch pools with no capability evidence: ${unevidenced.join(", ")}`);
+  }
   obligations.push(
     obligation(
       "provider_confirmation",
       !has(bundle.provider_confirmation)
         ? "missing"
-        : newlyReachable.length > 0
+        : reasons.length > 0
           ? "stale"
           : "satisfied",
-      newlyReachable.length > 0
-        ? `reachable backends the operator never confirmed: ${newlyReachable.join(", ")}`
-        : undefined,
+      reasons.length > 0 ? reasons.join("; ") : undefined,
     ),
   );
 

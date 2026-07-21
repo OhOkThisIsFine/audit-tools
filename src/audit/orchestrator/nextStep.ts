@@ -109,6 +109,12 @@ export interface DecideNextStepOptions {
    * disagree with it and dispatch the executor for a DIFFERENT obligation.
    */
   newlyReachableBackends?: readonly string[];
+  /**
+   * Forwarded to `deriveAuditState` — the capability-evidence gate's precomputed
+   * delta. Same MUST as above: a gate-blind `decideNextStep` would disagree with the
+   * obligation engine's gate-aware `derive` and dispatch the wrong executor.
+   */
+  unevidencedCapabilityPools?: readonly string[];
 }
 
 export function decideNextStep(
@@ -129,6 +135,9 @@ export function decideNextStep(
     emitStaleness: options.emitStaleness ?? true,
     ...(options.newlyReachableBackends
       ? { newlyReachableBackends: options.newlyReachableBackends }
+      : {}),
+    ...(options.unevidencedCapabilityPools
+      ? { unevidencedCapabilityPools: options.unevidencedCapabilityPools }
       : {}),
   });
   const next = findObligation(state.obligations);

@@ -15,7 +15,7 @@ import {
 } from "../../state/types.js";
 import type { SessionConfig, HostModelRosterEntry } from "audit-tools/shared";
 import { captureStepBoundaryFriction, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
-import { readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
+import { readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedCapabilityRanks } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -377,6 +377,11 @@ export async function prepareImplementDispatch(
     hostModelId: waveOptions?.hostModelId,
     itemCount: items.length,
     estimatedSlotTokens,
+    // The capability floor bands against THESE pools (this schedule's `capacity_pools`
+    // feed `buildDispatchQuota` below), so the ranks must be stamped here or every pool
+    // bands `null` and every `deep` packet admits everywhere. Read from the same root
+    // as the sibling cost/bias reads a few lines down — one confirmation, three fields.
+    capabilityRanks: await readConfirmedCapabilityRanks(options.root),
   });
   // Admission packets in plan order: id = the node's block id (what
   // `admission.granted_packet_ids` references and the host matches to nodes),

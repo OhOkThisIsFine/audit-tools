@@ -4,7 +4,7 @@ import {
   buildHostPoolPreamble,
   createReservationLedger,
   admissionPoolsFromSummaries,
-  buildCapabilityFloorCapable,
+  buildObservedCapabilityFloorCapable,
   assembleDispatchQuota,
 } from "audit-tools/shared";
 import type {
@@ -101,6 +101,12 @@ export async function buildDispatchPool(params: {
    * behavior.
    */
   onEscalation?: (escalation: HostSessionEscalation) => void;
+  /**
+   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`), stamped onto
+   * every pool at construction so the capability floor bands on real evidence rather
+   * than fail-opening. Required — `null` is the explicit "no confirmation in scope".
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName =
@@ -137,6 +143,7 @@ export async function buildDispatchPool(params: {
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
     roster: params.hostModelRoster,
+    capabilityRanks: params.capabilityRanks,
     ...(params.onEscalation ? { onEscalation: params.onEscalation } : {}),
     enrichDiscoveredLimits: async (capability, { poolKey, hostModel }) => {
       const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
@@ -327,12 +334,11 @@ export async function finalizeDispatchQuota(params: {
   // plan-only block (the rolling engine leases per-packet itself, no double-count).
   // Step C: the composed capability gate — size-fit AND the packet's RELATIVE
   // capability floor over this batch's pool set (fail-open + recorded on unknown).
-  // Deduped per (pool, packet) so a re-evaluation never double-records.
-  const failOpenSeen = new Set<string>();
-  const capable = buildCapabilityFloorCapable(admissionPools, (info) => {
-    const key = `${info.poolId}\u0000${info.packetId}`;
-    if (failOpenSeen.has(key)) return;
-    failOpenSeen.add(key);
+  // Deduped per (pool, packet) so a re-evaluation never double-records — in the SHARED
+  // helper, not here. This dedup used to be audit's private local, and remediate had no
+  // reporter at all; that asymmetry made a missing capability report look like a per-mode
+  // policy difference instead of the gap it was. One core, two draws.
+  const capable = buildObservedCapabilityFloorCapable(admissionPools, (info) => {
     params.onCapabilityFailOpen?.(info);
   });
   // H5: the admission math + contract shape live in the shared emit core; this

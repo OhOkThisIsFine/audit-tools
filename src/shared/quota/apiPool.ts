@@ -138,6 +138,38 @@ function finiteRankOrNull(value: number | undefined): number | null {
 }
 
 /**
+ * Resolve a pool's capability rank (LOWER = more capable) at CONSTRUCTION — the single
+ * join both CapacityPool constructors take, so a host pool and a source pool are ranked
+ * by exactly the same rule. Stamping here (rather than at an admission-pool build site)
+ * is what makes the rank part of the pool's IDENTITY: the host-admission path inherits
+ * it via the capacity summary (`summarizeDispatchCapacityPools` → `capability_rank` →
+ * `admissionPoolsFromSummaries`), and the in-process rolling engine inherits it by
+ * reading `declaredCapabilityRank` off the pool directly. A join at either consumer
+ * alone would silently leave the other banding on registry ranks.
+ *
+ * **Precedence: external evidence first, confirmed ordering second.** A registry/roster
+ * rank is someone-else-maintained data about the model; the confirmed map is the
+ * capability-evidence obligation's gap-filler for models no rank source covers. So the
+ * gate's path-1 (external evidence) is authoritative and paths 2/3 (LLM-proposed
+ * ordering / operator escape) only fill holes — they never override real data.
+ *
+ * Joined on the pool's `hostModel`, which BOTH constructors derive and which is the
+ * same keyspace `readConfirmedCostPositions` uses. A pool with no model is unjoinable
+ * by design and simply stays unranked (it cannot be pinned either — see the plan's
+ * model-less-pool trap).
+ */
+function resolveDeclaredCapabilityRank(params: {
+  hostModel: string | null;
+  declared: number | undefined;
+  confirmed: ReadonlyMap<string, number> | null | undefined;
+}): number | null {
+  const external = finiteRankOrNull(params.declared);
+  if (external !== null) return external;
+  if (!params.hostModel || !params.confirmed) return null;
+  return finiteRankOrNull(params.confirmed.get(params.hostModel));
+}
+
+/**
  * Bridge a generic {@link DispatchableSource} to the concrete per-provider config
  * block its provider constructor expects, so `createFreshSessionProvider` can build
  * the right backend FROM the source (not the global block). `endpoint` + `parameters`
@@ -230,10 +262,32 @@ export async function buildHostModelPool(params: {
   quotaStateEntry: QuotaStateEntry | null;
   discoveredLimits: DiscoveredRateLimitsInput | null;
   quotaSource: QuotaSource;
+  /**
+   * Confirmed per-model capability ranks (see {@link resolveDeclaredCapabilityRank}).
+   * The host's models are ranked exactly like every other model — a host pool is not
+   * capability-evidence-free by nature, it was simply never looked up (before this,
+   * `declaredCapabilityRank` had a single writer on the SOURCE path, so every host pool
+   * banded to `null` and took the floor's fail-open branch on every ordinary wave).
+   *
+   * Required (never optional): the floor fails OPEN, so an unwired call site would be
+   * indistinguishable from a working one. `null` is the explicit "no confirmation in
+   * scope" answer.
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<CapacityPool> {
   const probe = await probeQuotaSource(params.quotaSource, params.poolKey).catch(
     (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
   );
+  const hostModel = parseProviderModelKey(params.poolKey).model;
+  // The host roster (`HostModelRosterEntrySchema`, .strict()) carries NO capability
+  // field — model_id there is opaque quota-key material by design. So a host model's
+  // rank arrives only through the confirmed map, which is where Gate-0 lands both the
+  // ranker's numbers and the LLM/operator gap-fill for host models.
+  const declaredCapabilityRank = resolveDeclaredCapabilityRank({
+    hostModel,
+    declared: undefined,
+    confirmed: params.capabilityRanks,
+  });
   return {
     id: params.poolKey,
     // Host pool keys are provider-shaped by construction (quotaPoolKey), so
@@ -241,8 +295,9 @@ export async function buildHostModelPool(params: {
     // whose key may be an opaque operator-declared id.
     accountKey: accountKeyFromProviderShapedKey(params.poolKey),
     providerName: params.providerName,
-    hostModel: parseProviderModelKey(params.poolKey).model,
+    hostModel,
     ...(params.rank ? { rank: params.rank } : {}),
+    ...(declaredCapabilityRank !== null ? { declaredCapabilityRank } : {}),
     hostConcurrencyLimit: params.hostConcurrencyLimit,
     quotaStateEntry: params.quotaStateEntry ?? null,
     discoveredLimits: params.discoveredLimits,
@@ -271,6 +326,8 @@ export async function buildHostModelPools(params: {
   quotaSource: QuotaSource;
   quotaEntries: Record<string, QuotaStateEntry>;
   roster: HostModelRosterEntry[] | null;
+  /** Confirmed per-model capability ranks — see {@link resolveDeclaredCapabilityRank}. Required (never optional): the floor fails OPEN, so an unwired call site would be indistinguishable from a working one. `null` is the explicit "no confirmation in scope" answer. */
+  capabilityRanks: ReadonlyMap<string, number> | null;
   resolve: (
     entry: HostModelRosterEntry | null,
   ) => Promise<{ poolKey: string; discoveredLimits: DiscoveredRateLimitsInput | null }> | {
@@ -300,6 +357,7 @@ export async function buildHostModelPools(params: {
         quotaStateEntry: params.quotaEntries[poolKey] ?? null,
         discoveredLimits: resolved.discoveredLimits,
         quotaSource: params.quotaSource,
+        capabilityRanks: params.capabilityRanks,
       });
     }),
   );
@@ -329,6 +387,8 @@ export async function buildSourcePool(params: {
   source: DispatchableSource;
   quotaSource: QuotaSource;
   quotaEntries: Record<string, QuotaStateEntry>;
+  /** Confirmed per-model capability ranks — see {@link resolveDeclaredCapabilityRank}. Required (never optional): the floor fails OPEN, so an unwired call site would be indistinguishable from a working one. `null` is the explicit "no confirmation in scope" answer. */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<CapacityPool> {
   const { source, quotaSource, quotaEntries } = params;
   // Scope the probe + account read to THIS source's own credential when it declares
@@ -382,10 +442,16 @@ export async function buildSourcePool(params: {
     // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
     // first. null when unset/invalid ⇒ falls through to the catalog price / tier.
     declaredCostPerMtok: nonNegativeCostOrNull(source.cost_per_mtok),
-    // Raw per-model capability rank (LOWER = more capable) → the host-path admission
-    // tiebreak among cost-equal, same-tier pools. Finite-or-null; a non-finite value
-    // degrades to null (no finer signal) rather than poisoning the comparator.
-    declaredCapabilityRank: finiteRankOrNull(source.capability_rank),
+    // Raw per-model capability rank (LOWER = more capable) → the admission capability
+    // FLOOR (banding) and the tiebreak among cost-equal, same-tier pools. Finite-or-null;
+    // a non-finite value degrades to null (no finer signal) rather than poisoning the
+    // comparator. The source's own declared/registry rank wins; the confirmed map fills
+    // the gap for a model no external rank source covers.
+    declaredCapabilityRank: resolveDeclaredCapabilityRank({
+      hostModel: source.model ?? null,
+      declared: source.capability_rank,
+      confirmed: params.capabilityRanks,
+    }),
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
     // output) — the operator-declared per-source rate limit feeds the S4 fold.
@@ -644,6 +710,8 @@ export async function buildSourcePools(params: {
    * no confirmation to read behaves exactly as before.
    */
   excludedBackends?: DispatchExclusion;
+  /** Confirmed per-model capability ranks — see {@link resolveDeclaredCapabilityRank}. Required (never optional): the floor fails OPEN, so an unwired call site would be indistinguishable from a working one. `null` is the explicit "no confirmation in scope" answer. */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<SourcePoolBuild> {
   const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     commandWorkers: params.commandWorkers,
@@ -654,7 +722,12 @@ export async function buildSourcePools(params: {
     : gathered;
   const pools = await Promise.all(
     sources.map((source) =>
-      buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),
+      buildSourcePool({
+        source,
+        quotaSource: params.quotaSource,
+        quotaEntries: params.quotaEntries,
+        capabilityRanks: params.capabilityRanks,
+      }),
     ),
   );
   return {

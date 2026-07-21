@@ -62,6 +62,8 @@ import {
   serviceExclusionPattern,
 } from "./identity.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
+import { gatherDispatchableSources } from "../quota/apiPool.js";
+import { resolveFreshSessionProviderName } from "./providerFactory.js";
 import type {
   ConfirmedPoolEntry,
   PersistedPoolEntry,
@@ -126,14 +128,49 @@ export function sharedProviderConfirmationPath(root: string): string {
  */
 export interface ConfirmedDispatchPolicy {
   /**
-   * {@link DispatchExclusionPattern}s the operator ruled out of the dispatchable
+   * {@link DispatchExclusionPattern}s **the OPERATOR** ruled out of the dispatchable
    * pool. Model-granular by default (`provider:model`) — the operator confirms
    * *model* choices, so excluding one model of a multi-model backend must not drop
    * the backend's other models.
+   *
+   * ⚠ Operator-authored ONLY. Tool-generated fail-closed patterns live in
+   * {@link auto_exclude} and must never be merged into this list: the two have
+   * different lifetimes, and once merged they are indistinguishable, so a
+   * carry-forward would launder a tool guess into permanent operator policy.
    */
   exclude?: DispatchExclusionPattern[];
+  /**
+   * Patterns **the GATE** authored on the operator's behalf — the fail-closed
+   * reconciliation excluding a newly-reachable backend that no operator decision
+   * covers (autonomous/headless path only).
+   *
+   * Kept separate from {@link exclude} because provenance decides lifetime. An
+   * operator exclusion is a durable rule and is carried forward across promotions; an
+   * auto-exclusion is a *placeholder for an answer that was never given*, so the next
+   * operator submission SUPERSEDES it. Merged into one list, the carry-forward cannot
+   * tell them apart and makes the tool's guess permanent — with no signal, because the
+   * backend is a confirmed key by then and the reconciliation delta never re-surfaces
+   * it. Honored at dispatch exactly like {@link exclude} (see
+   * {@link resolveDispatchExclusion}), so separating them weakens nothing.
+   */
+  auto_exclude?: DispatchExclusionPattern[];
   /** Self-spawn-blocked provider names the operator explicitly opted back IN. */
   include?: ResolvedProviderName[];
+  /**
+   * The operator's RAW capability answer — the `capability_order` key list exactly as
+   * submitted, most-capable-first.
+   *
+   * Stored verbatim rather than reconstructed from the resulting `capability_rank`s,
+   * which is the same reason `exclude` stores raw patterns. Reconstruction cannot
+   * distinguish a rank the operator authored from one that came from EXTERNAL evidence
+   * (a source's own registry rank), so it laundered external numbers into the
+   * operator's answer: a no-op promotion silently re-ranked confirmed models, and the
+   * laundered id then read as "evidenced" permanently — even after the external
+   * evidence disappeared, which is precisely the fail-open this obligation exists to
+   * close. Persisting the answer makes the distinction unrepresentable instead of
+   * merely documented.
+   */
+  capability_order?: string[];
 }
 
 /**
@@ -269,6 +306,10 @@ function toPersistedPoolEntry(entry: ConfirmedPoolEntry): PersistedPoolEntry {
     name: entry.name,
     ...(entry.model_id !== undefined ? { model_id: entry.model_id } : {}),
     ...(entry.cost_order !== undefined ? { cost_order: entry.cost_order } : {}),
+    // The capability-evidence decision persists (it is a DECISION, not reach) — and it
+    // must be carried explicitly: this builder reconstructs field-by-field, so a field
+    // absent here is silently dropped on every round-trip.
+    ...(entry.capability_rank !== undefined ? { capability_rank: entry.capability_rank } : {}),
   };
 }
 
@@ -327,9 +368,17 @@ export function buildProviderConfirmationRender(
   detectCommand?: (command: string) => boolean,
   input?: ProviderConfirmationInput,
   sources: DispatchableSource[] = [],
+  /**
+   * Gate-authored fail-closed patterns, kept SEPARATE from the operator's `exclude`
+   * so provenance survives to disk (see {@link ConfirmedDispatchPolicy.auto_exclude}).
+   * Both kinds mark a pool entry excluded in the render — the split governs lifetime,
+   * not enforcement — so the two are unioned for the display/routing decision below
+   * and only split again when the policy is persisted.
+   */
+  autoExclude: DispatchExclusionPattern[] = [],
 ): RenderedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
-  const operatorExcluded = buildExclusion(migrateExclusionPatterns(exclude));
+  const operatorExcluded = buildExclusion(migrateExclusionPatterns([...exclude, ...autoExclude]));
   const includeSet = new Set<ResolvedProviderName>(include);
   // Evaluate a pool entry against the operator's rules at the SAME key the routing
   // filter uses — `representativeModelId` is what `computeNewlyReachableBackends`
@@ -400,7 +449,15 @@ export function buildProviderConfirmationRender(
     ...(clampDispatchBias(input?.dispatch_bias) != null
       ? { dispatch_bias: clampDispatchBias(input?.dispatch_bias) }
       : {}),
-    ...(buildConfirmedDispatchPolicy(exclude, include) ?? {}),
+    ...(buildConfirmedDispatchPolicy(
+      exclude,
+      include,
+      autoExclude,
+      // The operator's RAW capability answer, persisted verbatim so the next
+      // carry-forward reads back what they SAID rather than re-deriving it from the
+      // ranks it produced (which cannot distinguish it from external evidence).
+      input?.capability_order ?? [],
+    ) ?? {}),
   };
 }
 
@@ -412,12 +469,26 @@ export function buildProviderConfirmationRender(
 function buildConfirmedDispatchPolicy(
   exclude: readonly DispatchExclusionPattern[],
   include: readonly ResolvedProviderName[],
+  autoExclude: readonly DispatchExclusionPattern[] = [],
+  capabilityOrder: readonly string[] = [],
 ): { policy: ConfirmedDispatchPolicy } | undefined {
-  if (exclude.length === 0 && include.length === 0) return undefined;
+  if (
+    exclude.length === 0 &&
+    include.length === 0 &&
+    autoExclude.length === 0 &&
+    capabilityOrder.length === 0
+  ) {
+    return undefined;
+  }
   return {
     policy: {
       ...(exclude.length > 0 ? { exclude: sortStrings(exclude) } : {}),
+      // Sorted like its sibling — an auto-exclusion is a set membership, order-free.
+      ...(autoExclude.length > 0 ? { auto_exclude: sortStrings(autoExclude) } : {}),
       ...(include.length > 0 ? { include: sortNames(include) } : {}),
+      // NOT sorted, NOT deduped by sortStrings: this is a positional ORDERING, and
+      // sorting it would destroy the operator's answer outright.
+      ...(capabilityOrder.length > 0 ? { capability_order: [...capabilityOrder] } : {}),
     },
   };
 }
@@ -631,10 +702,15 @@ export function resolveDispatchExclusion(
   const blocked = RESOLVED_PROVIDER_NAMES.filter(
     (name) => !included.has(name) && isSelfSpawnBlocked(name, env),
   );
-  return buildExclusion([
-    ...migrateExclusionPatterns(policy?.exclude ?? []),
-    ...blocked.map((name) => `transport:${name}` as DispatchExclusionPattern),
-  ]);
+  // Both provenances are enforced identically — the split is about LIFETIME (which
+  // survives the next submission), never about which patterns bite at dispatch.
+  return buildExclusion(
+    migrateExclusionPatterns([
+      ...(policy?.exclude ?? []),
+      ...(policy?.auto_exclude ?? []),
+      ...blocked.map((name) => `transport:${name}` as DispatchExclusionPattern),
+    ]),
+  );
 }
 
 /**
@@ -1014,11 +1090,21 @@ function parseConfirmedDispatchPolicy(
   // CLOSED provider-name set and stays membership-checked, so an unknown name cannot
   // type-assert its way into overriding a self-spawn block.
   const exclude = parseExclusionPatterns(obj.exclude);
+  const autoExclude = parseExclusionPatterns(obj.auto_exclude);
   const include = parseProviderNameList(obj.include);
-  if (!exclude?.length && !include?.length) return undefined;
+  // Same open-grammar treatment as `exclude`: a capability key is a model id, not a
+  // member of any closed set, so it is kept verbatim and an unmatchable key is inert.
+  const capabilityOrder = Array.isArray(obj.capability_order)
+    ? obj.capability_order.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    : undefined;
+  if (!exclude?.length && !autoExclude?.length && !include?.length && !capabilityOrder?.length) {
+    return undefined;
+  }
   return {
     ...(exclude?.length ? { exclude } : {}),
+    ...(autoExclude?.length ? { auto_exclude: autoExclude } : {}),
     ...(include?.length ? { include } : {}),
+    ...(capabilityOrder?.length ? { capability_order: capabilityOrder } : {}),
   };
 }
 
@@ -1054,9 +1140,20 @@ export async function readSharedProviderConfirmation(
   let raw: unknown;
   try {
     raw = await readJsonFile<unknown>(sharedProviderConfirmationPath(root));
-  } catch {
-    // Absent (ENOENT) OR unreadable / invalid-JSON both degrade to the
-    // never-block path — a missing or corrupt artifact is never an error here.
+  } catch (error) {
+    // Both degrade to the never-block path, but only ABSENCE is legitimately silent.
+    //
+    // A file that EXISTS and cannot be read (truncated, invalid JSON, permissions) used
+    // to return `null` with no warning, and that composed with two other
+    // individually-justified silences into TOTAL silence: no pool gets a rank ⇒
+    // `anyBanded === false`, which by design suppresses the capability fail-open
+    // reporter; and `resolveUnevidencedCapabilityPools` returns `[]` on a null
+    // confirmation ⇒ the obligation reports SATISFIED. Net effect on a corrupt file: the
+    // capability floor is globally inert, every `deep` packet routes anywhere, and not
+    // one path says a word — the exact case the loud path was built for.
+    if ((error as NodeJS.ErrnoException | null)?.code !== "ENOENT") {
+      warnConfirmationUnreadable(error, root);
+    }
     return null;
   }
   // Malformed (wrong shape / version drift) → never-block, but never SILENT (D).
@@ -1077,6 +1174,28 @@ export async function readSharedProviderConfirmation(
  * the same loud-degrade shape as `readQuotaStateOrDegrade` and the blind-dispatch
  * warning. Reached only on the rejection path, so it cannot become hot.
  */
+/**
+ * The sibling of {@link warnConfirmationRejected} for a file that exists but cannot be
+ * READ (truncated write, invalid JSON, permissions) — the case that used to degrade
+ * silently. Same never-block contract, same loud-degrade shape.
+ *
+ * The message names the CAPABILITY consequence explicitly because that is the one a
+ * corrupt file silences most dangerously: with no ranks, nothing bands, the fail-open
+ * reporter self-suppresses (it fires only when something else banded), and the
+ * capability obligation simultaneously reports satisfied. Nothing else would tell the
+ * operator their capability floor stopped existing.
+ */
+function warnConfirmationUnreadable(error: unknown, root: string): void {
+  const why = error instanceof Error ? error.message : String(error);
+  process.stderr.write(
+    `WARNING: the provider confirmation at ${sharedProviderConfirmationPath(root)} exists ` +
+      `but could NOT be read (${why}). It is being treated as absent: the operator's ` +
+      `confirmed cost order, dispatch bias, and CAPABILITY RANKS are all unavailable, so ` +
+      `the admission capability floor is inert for this run and packets may route to pools ` +
+      `above their capability. Repair or delete the file and re-confirm at Gate-0.\n`,
+  );
+}
+
 function warnConfirmationRejected(raw: unknown, root: string): void {
   const version =
     raw !== null && typeof raw === "object" && !Array.isArray(raw)
@@ -1163,6 +1282,159 @@ export async function readConfirmedCostPositions(
 }
 
 /**
+ * Read the confirmed per-model CAPABILITY ranks (LOWER = more capable) from the shared
+ * Gate-0 confirmation as a model-keyed `Map<model_id, capability_rank>` for the pool
+ * CONSTRUCTION sites (`buildHostModelPool` / `buildSourcePool` in shared/quota/apiPool).
+ *
+ * The capability-evidence obligation's read half: where an external rank source covers a
+ * model, that evidence wins and this map is never consulted; where none does, this
+ * carries the LLM-proposed or operator-authored RELATIVE ordering (or the explicit
+ * "unrankable, accept at band X" escape) that cleared the gate.
+ *
+ * Deliberately mirrors {@link readConfirmedCostPositions} field-for-field — same three
+ * sources, same model keyspace, same merge order — so a pool that has a confirmed cost
+ * position and a confirmed capability rank resolves BOTH against the identical key. A
+ * parallel keyspace here would reintroduce the model-less-pool unjoinability trap.
+ *
+ * Best-effort and never throws: absent `root`, missing/malformed confirmation, or an
+ * absent field all yield an empty map — the pool then falls back to its registry rank,
+ * and an entirely unranked pool bands to `null` exactly as before.
+ *
+ * **Not gated on reach**, for the same reason the cost positions are not: capability
+ * evidence is a durable statement about a MODEL, not about what this auditor can
+ * currently reach.
+ */
+/** One capability-rank-bearing entry on the confirmation, in the model keyspace. */
+interface CapabilitySubject {
+  modelId: string | undefined;
+  rank: number | undefined;
+  /** An excluded entry never dispatches, so it needs no evidence and is never asked about. */
+  excluded: boolean;
+}
+
+/**
+ * THE enumeration of every persisted entry that can carry a `capability_rank`, across
+ * all three confirmation arrays.
+ *
+ * Single-sourced deliberately, and this is the fix for the round-3 critical defect: the
+ * rank JOIN read three arrays while the evidence OBLIGATION enumerated only two, so
+ * `provider_pool` was a rank SOURCE but never a delta SUBJECT — the conversation-first
+ * default (host pool, no volunteered roster) therefore banded `null` forever and the
+ * gate never once asked about it. Two independent walks over "the same" set is exactly
+ * the drift this project keeps paying for; with one walk, a new rank-bearing array is
+ * added HERE and both consumers follow automatically. Do not re-inline either walk.
+ */
+function* capabilitySubjects(
+  confirmation: SharedProviderConfirmation,
+): Generator<CapabilitySubject> {
+  for (const entry of confirmation.provider_pool ?? []) {
+    yield { modelId: entry.model_id, rank: entry.capability_rank, excluded: entry.excluded === true };
+  }
+  for (const entry of confirmation.host_model_cost_order ?? []) {
+    yield { modelId: entry.model_id, rank: entry.capability_rank, excluded: false };
+  }
+  // `SourcePoolCostEntry.capability_rank` has existed and been WRITTEN since the Gate-0
+  // source fold (providerConfirmation.ts) with no reader at all. This is that reader.
+  for (const entry of confirmation.source_pool_cost_order ?? []) {
+    yield { modelId: entry.model_id, rank: entry.capability_rank, excluded: false };
+  }
+}
+
+/**
+ * Is this a usable capability rank? A rank is a position in a relative ordering: finite
+ * and non-negative. Shared by the join and the delta so "evidenced" means the same thing
+ * to both — a predicate they disagreed on would re-create the drift above in miniature.
+ */
+function isUsableRank(rank: number | undefined): rank is number {
+  return rank !== undefined && Number.isFinite(rank) && rank >= 0;
+}
+
+export async function readConfirmedCapabilityRanks(
+  root: string | undefined,
+): Promise<Map<string, number>> {
+  if (!root) return new Map();
+  const confirmation = await readSharedProviderConfirmation(root);
+  if (!confirmation) return new Map();
+  const ranks = new Map<string, number>();
+  for (const subject of capabilitySubjects(confirmation)) {
+    // An entry without a model_id is display-only and contributes no dispatch rank (it
+    // is unjoinable by the model-keyed lookup — the infinite-re-prompt trap).
+    if (!subject.modelId || !isUsableRank(subject.rank)) continue;
+    ranks.set(subject.modelId, subject.rank);
+  }
+  return ranks;
+}
+
+/**
+ * The capability-evidence delta: dispatchable models with NO resolvable capability
+ * rank. Computed once per invocation (it reads the confirmation + gathers sources)
+ * and threaded by reference on the gate, exactly like the reach delta.
+ *
+ * "Evidenced" is deliberately defined as **the dispatch join resolves** — the same
+ * lookup the pool constructors take ({@link readConfirmedCapabilityRanks} keyed on the
+ * pool's model), never a parallel predicate. Two consequences, both load-bearing:
+ *   - a pool with NO model is skipped entirely. It is unjoinable, so pinning it could
+ *     never clear the delta and it would re-prompt forever.
+ *   - external evidence (`source.capability_rank`) counts, so a fully-ranked roster
+ *     never fires the gate at all.
+ *
+ * Returns [] when no confirmation exists yet — the first-time `missing` case already
+ * pauses for the operator, and reporting a delta against a pool they have never seen
+ * would fold a second question into a prompt that has not asked the first one yet.
+ *
+ * Lives HERE, beside {@link readConfirmedCapabilityRanks}, rather than in the audit CLI
+ * command it is called from: its failure mode is a LIVELOCK (wrongly admitting an
+ * unrankable pool re-prompts `provider_confirmation` forever), and a delta computation
+ * with that failure mode must be reachable by a test.
+ */
+export async function resolveUnevidencedCapabilityPools(
+  root: string,
+  effectiveConfig: SessionConfig,
+): Promise<string[]> {
+  const confirmation = await readSharedProviderConfirmation(root);
+  if (!confirmation) return [];
+  const primaryProviderName = resolveFreshSessionProviderName(
+    undefined,
+    effectiveConfig,
+    { env: process.env },
+  );
+  const sources = await gatherDispatchableSources(
+    effectiveConfig,
+    primaryProviderName,
+  );
+  const confirmedRanks = await readConfirmedCapabilityRanks(root);
+  const unevidenced = new Set<string>();
+  for (const source of sources) {
+    // Unjoinable ⇒ unpinnable ⇒ never admitted to the delta (see above).
+    if (!source.model) continue;
+    if (source.capability_rank != null) continue;
+    if (confirmedRanks.has(source.model)) continue;
+    unevidenced.add(source.model);
+  }
+  // Every PERSISTED rank-bearing entry, walked through the SAME enumeration the join
+  // uses ({@link capabilitySubjects}) so the two can never disagree about what the
+  // subjects are. Host models are ranked exactly like any other model — the host is not
+  // a special case, it was simply never looked up — and `provider_pool` is included
+  // here, which it previously was not (the round-3 critical defect: the default
+  // conversation-first pool was unrankable AND unpinnable, so the fail-open it caused
+  // had no road to a fix).
+  for (const subject of capabilitySubjects(confirmation)) {
+    // Unjoinable ⇒ unpinnable ⇒ never admitted to the delta, same rule as sources.
+    if (!subject.modelId) continue;
+    // An excluded pool never dispatches, so it needs no capability evidence — asking
+    // about it would be a question whose answer changes nothing.
+    if (subject.excluded) continue;
+    if (isUsableRank(subject.rank)) continue;
+    if (confirmedRanks.has(subject.modelId)) continue;
+    unevidenced.add(subject.modelId);
+  }
+  // Stable, content-derived order (never gather/iteration order) — this string list
+  // reaches the obligation's reason text and the prompt, and an incidentally-ordered
+  // array churns downstream content hashes.
+  return [...unevidenced].sort();
+}
+
+/**
  * Read the operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the shared
  * Gate-0 confirmation for the dispatch build sites (spec/dispatch-cost-speed-dial.md).
  * Single-sourced so audit and remediate apply the identical operating point.
@@ -1210,6 +1482,13 @@ export function parseProviderConfirmationInput(
       ? (v as string[])
       : undefined;
   const costOrder = stringArray(obj.cost_order);
+  // The capability-evidence answer. MUST be reconstructed here explicitly: this parser
+  // is field-by-field, so an unlisted field is silently dropped — and dropping THIS one
+  // is not a degrade, it is a livelock. The operator answers the prompt, the answer
+  // never reaches `annotateConfirmedPool`, no `capability_rank` is written, the delta
+  // recomputes identical, and `provider_confirmation` (PRIORITY[0]) re-prompts the same
+  // question forever. Any future field on ProviderConfirmationInput needs a line here.
+  const capabilityOrder = stringArray(obj.capability_order);
   // No cast: `exclude` is the OPEN exclusion grammar, so asserting the operator's
   // raw strings into the closed provider-name union would be a lie — and the exact
   // type-assert-your-way-in move the policy parser refuses for `include`.
@@ -1218,29 +1497,401 @@ export function parseProviderConfirmationInput(
     | ResolvedProviderName[]
     | undefined;
   const dispatchBias = clampDispatchBias(obj.dispatch_bias);
+  // An EXPLICIT empty array is preserved, not dropped to absent. `[]` is the
+  // operator deliberately emptying their host roster; omission is them saying
+  // nothing about it. `carryForwardConfirmationInput` reseeds only the second case,
+  // so collapsing the two here would resurrect a roster the operator deleted — and
+  // there would be no way left to express the deletion at all.
   const hostModels = Array.isArray(obj.host_models)
     ? obj.host_models
         .filter(
-          (m): m is { model_id: string; tier?: unknown } =>
+          (m): m is { model_id: string } =>
             m !== null &&
             typeof m === "object" &&
             typeof (m as { model_id?: unknown }).model_id === "string",
         )
-        .map((m) => ({
-          model_id: m.model_id,
-          ...(typeof m.tier === "string"
-            ? { tier: m.tier as CapabilityTier }
-            : {}),
-        }))
+        .map((m) => ({ model_id: m.model_id }))
     : undefined;
   return {
     schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
     ...(costOrder ? { cost_order: costOrder } : {}),
+    ...(capabilityOrder ? { capability_order: capabilityOrder } : {}),
     ...(exclude ? { exclude } : {}),
     ...(include ? { include } : {}),
-    ...(hostModels && hostModels.length > 0 ? { host_models: hostModels } : {}),
+    ...(hostModels ? { host_models: hostModels } : {}),
     ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
   };
+}
+
+/**
+ * Seed an incoming Gate-0 submission from the PRIOR confirmation, field by field.
+ *
+ * **The defect class this closes.** `buildProviderConfirmationRender` rebuilds the
+ * whole confirmation from the submission ALONE — every operator decision it persists
+ * (`cost_order`, `capability_rank`, the host roster, λ, and the `policy` exclusions) is
+ * reconstructed from `input` and from nothing else. So *any* field a submission omits
+ * is not "left alone", it is DESTROYED. That is one defect with six faces, and fixing
+ * it per-field is what let three of them survive a review round: the prompt's capability
+ * example is `{ "capability_order": [...] }`, so an operator answering exactly what was
+ * asked omits all five other fields and silently wipes them.
+ *
+ * Two rules, both load-bearing:
+ *
+ * 1. **`undefined` means "said nothing"; an explicit empty array means "delete".** A
+ *    submission that never mentions host models is not a decision to remove them; an
+ *    explicit `"host_models": []` is. `parseProviderConfirmationInput` therefore
+ *    PRESERVES an empty array rather than dropping it to absent — without that the two
+ *    cases are indistinguishable here and the carry-forward resurrects a roster the
+ *    operator deleted.
+ * 2. **It applies with `input === null` too.** The autonomous/headless path promotes
+ *    with no submission at all, and the capability delta is a brand-new trigger for
+ *    that path — so short-circuiting on `input &&` would let an unattended re-promotion
+ *    wipe the operator's entire persisted decision and then report convergence.
+ *
+ * Returns `null` only when there is nothing on either side. A prior confirmation with
+ * no incoming submission still yields a synthesized input carrying it forward.
+ */
+/**
+ * The gate-authored exclusions that SURVIVE this promotion.
+ *
+ * Round-3 defect (high, fail-OPEN): `auto_exclude` was rebuilt on every promotion from
+ * `gate.newlyReachable` alone. But `confirmedBackendKeys` counts an excluded entry as
+ * CONFIRMED, so once the gate fail-closed-excludes backend X and folds it into the pool,
+ * the reach delta is empty forever — and the very next promotion rebuilt `auto_exclude`
+ * from that empty delta and dropped X, making a backend the operator never confirmed
+ * dispatchable. The docstring's "a submission supersedes it" was true; the code
+ * superseded it on EVERY promotion, including the no-submission one.
+ *
+ * The rule is therefore narrower than "any submission clears it". A submission
+ * supersedes an auto-exclusion only when it actually ADDRESSES that backend:
+ *   - the operator re-stated the pattern in `exclude` — it is now operator-authored and
+ *     lives there, so retaining an `auto_exclude` copy would double-record it; or
+ *   - the operator named that provider in `include` — an explicit opt-back-IN.
+ * Anything else is SILENCE, and silence is not confirmation ("the operator confirms
+ * model choices"). A capability-only answer must not lift an exclusion the operator was
+ * never even shown — the reach section does not render once the backend is a confirmed
+ * key, so they cannot see what they would be lifting.
+ *
+ * Fail-CLOSED by construction: the uncertain case retains the exclusion.
+ */
+export function retainAutoExclusions(
+  priorAuto: readonly DispatchExclusionPattern[],
+  input: ProviderConfirmationInput | null,
+): DispatchExclusionPattern[] {
+  if (priorAuto.length === 0) return [];
+  const restated = new Set(input?.exclude ?? []);
+  const optedIn = input?.include ?? [];
+  const addressed = (pattern: DispatchExclusionPattern): boolean => {
+    if (restated.has(pattern)) return true;
+    // `provider` and `provider:model` tiers both belong to the named provider.
+    return optedIn.some(
+      (provider) => pattern === provider || pattern.startsWith(`${provider}:`),
+    );
+  };
+  return priorAuto.filter((pattern) => !addressed(pattern));
+}
+
+export function carryForwardConfirmationInput(
+  input: ProviderConfirmationInput | null,
+  prior: SharedProviderConfirmation | null,
+): ProviderConfirmationInput | null {
+  if (!prior) return input;
+  const base: ProviderConfirmationInput = input ?? {
+    schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+  };
+  const priorHostModels = (prior.host_model_cost_order ?? []).map((entry) => ({
+    model_id: entry.model_id,
+  }));
+  const priorCostOrder = priorConfirmedCostOrder(prior);
+  // The operator's RAW answer, read back verbatim — never reconstructed from the
+  // resulting `capability_rank`s. Reconstruction could not tell an operator-authored
+  // rank from EXTERNAL evidence, so it laundered external numbers into the operator's
+  // ordering and made the laundered model read as evidenced forever.
+  const priorCapabilityOrder = prior.policy?.capability_order ?? [];
+  // `exclude` ONLY — `auto_exclude` is deliberately NOT carried. It is the gate's
+  // placeholder for an answer the operator never gave, and a submission supersedes it.
+  const priorExclude = prior.policy?.exclude ?? [];
+  const priorInclude = prior.policy?.include ?? [];
+  return {
+    ...base,
+    // `=== undefined` at every field, never a truthiness/length test: that is the
+    // said-nothing-vs-delete distinction, and a `!length` test collapses them.
+    ...(base.cost_order === undefined && priorCostOrder.length > 0
+      ? { cost_order: priorCostOrder }
+      : {}),
+    // The capability answer is the ONE field that does not follow the plain
+    // said-nothing/carry rule, because its PROMPT is delta-scoped: it renders only the
+    // unevidenced models, so a submission is a partial answer BY CONSTRUCTION and
+    // taking it as the whole ordering erases every rank the operator gave before —
+    // the `PRIORITY[0]` livelock. It is therefore MERGED by anchored insertion rather
+    // than replacing or being replaced (see {@link mergeCapabilityOrder}).
+    //
+    // The MERGED order is what gets persisted, not the raw submission:
+    // `buildConfirmedDispatchPolicy` stores whatever `input.capability_order` holds, and
+    // `policy.capability_order` is the only thing the NEXT promotion reads back. Keeping
+    // the raw answer there instead would mean the prior answers exist nowhere on disk and
+    // the merge would have nothing to merge against on the third promotion — the livelock
+    // one round-trip later. This does NOT undo "store the operator's answer verbatim":
+    // that rule exists to keep EXTERNAL evidence out of the operator's ordering, and both
+    // operands here are operator answers. Nothing derived from a `capability_rank` (which
+    // cannot distinguish operator from external provenance) enters this list.
+    ...(base.capability_order === undefined
+      ? priorCapabilityOrder.length > 0
+        ? { capability_order: priorCapabilityOrder }
+        : {}
+      : { capability_order: mergeCapabilityOrder(priorCapabilityOrder, base.capability_order) }),
+    ...(base.host_models === undefined && priorHostModels.length > 0
+      ? { host_models: priorHostModels }
+      : {}),
+    ...(base.exclude === undefined && priorExclude.length > 0
+      ? { exclude: [...priorExclude] }
+      : {}),
+    ...(base.include === undefined && priorInclude.length > 0
+      ? { include: [...priorInclude] }
+      : {}),
+    ...(base.dispatch_bias === undefined && prior.dispatch_bias !== undefined
+      ? { dispatch_bias: prior.dispatch_bias }
+      : {}),
+  };
+}
+
+/** How many already-ranked models the capability prompt shows as fixed reference points. */
+export const DEFAULT_CAPABILITY_ANCHOR_COUNT = 5;
+
+/**
+ * Pick a BOUNDED, spread sample of an already-confirmed capability ordering to show
+ * beside the unevidenced models as fixed reference points.
+ *
+ * The roster may be HUNDREDS of models, so the prompt must be O(new + constant) — it
+ * can never render the whole ordering. First, last, and evenly-spaced interior picks
+ * give the operator a usable coordinate space (top / middle / bottom of the confirmed
+ * ranking) at constant cost, which is exactly what {@link mergeCapabilityOrder}
+ * interpolates against.
+ *
+ * @param priorOrder - The confirmed ordering, most-capable-first.
+ * @param exclude    - Models already being asked about (the unevidenced delta); an
+ *   anchor must be a model whose rank is settled, never one under question.
+ * @param max        - Ceiling on the sample size.
+ */
+export function selectCapabilityAnchors(
+  priorOrder: readonly string[],
+  exclude: readonly string[] = [],
+  max: number = DEFAULT_CAPABILITY_ANCHOR_COUNT,
+): string[] {
+  const excluded = new Set(exclude);
+  const unique = [...new Set(priorOrder)].filter((id) => !excluded.has(id));
+  if (max <= 0) return [];
+  if (unique.length <= max || max === 1) return unique.slice(0, max);
+  // Evenly spaced, endpoints included. `Set` absorbs a repeated index when the
+  // ordering is barely longer than `max`, so the result is never padded with dupes.
+  const picks = new Set<number>();
+  for (let i = 0; i < max; i++) {
+    picks.add(Math.round((i * (unique.length - 1)) / (max - 1)));
+  }
+  return [...picks].sort((a, b) => a - b).map((i) => unique[i] as string);
+}
+
+/**
+ * The anchor ids whose relative order the submission changed but the merge will NOT
+ * honor — i.e. an operator reorder that is about to be silently discarded.
+ *
+ * {@link mergeCapabilityOrder} treats every submitted id already present in
+ * `priorOrder` as a FIXED reference point, so a submission that swaps two of them
+ * returns the prior order unchanged. Without this, that is invisible: the promotion
+ * succeeds, the artifact is byte-identical, and nothing anywhere says the operator's
+ * decision was dropped. `unrankedOnPromotion` cannot catch it either — a reordered id
+ * IS present in `capability_order`, so it reports nothing.
+ *
+ * An accepted-then-discarded operator decision is the same defect class as laundering a
+ * tool guess into operator policy: not corruption, but SILENCE. The standing rule is
+ * that the operator must never have to notice — so the caller reports this loudly.
+ *
+ * Returns `[]` when the reorder will actually be honored: a TOTAL submission (every
+ * prior id restated) is applied verbatim, and a submission with fewer than two anchors
+ * cannot express a reorder at all.
+ *
+ * NOTE this reports the LIMITATION, it does not lift it. Making a repositioning
+ * expressible without restating the whole roster needs the anchor-provenance split
+ * tracked in `docs/backlog.md`; this only ensures the drop is never silent.
+ */
+export function detectDiscardedCapabilityReorder(
+  priorOrder: readonly string[],
+  submitted: readonly string[],
+): string[] {
+  const prior = [...new Set(priorOrder)];
+  const answer = [...new Set(submitted)];
+  if (prior.length === 0 || answer.length === 0) return [];
+  const priorPos = new Map(prior.map((id, index) => [id, index]));
+  // A total submission is honored verbatim — nothing is discarded. Mirrors the same
+  // condition in `mergeCapabilityOrder`; the two must agree or this reports phantoms.
+  if (prior.every((id) => answer.includes(id))) return [];
+  const anchors = answer.filter((id) => priorPos.has(id));
+  if (anchors.length < 2) return [];
+  // Discarded iff the anchors' order in the SUBMISSION differs from their order in the
+  // PRIOR ordering — compare against the anchors sorted by prior position.
+  const asConfirmed = [...anchors].sort(
+    (a, b) => (priorPos.get(a) as number) - (priorPos.get(b) as number),
+  );
+  // Report only the anchors that actually MOVED, not every anchor in the submission.
+  // `["a","c","b"]` against `["a","b","c","d"]` moves `c` and `b`; naming `a` too would
+  // tell the operator their unchanged entry was dropped, which is false — and a warning
+  // that over-reports is one the operator learns to discount.
+  return anchors.filter((id, i) => id !== asConfirmed[i]);
+}
+
+/**
+ * Merge an operator's capability answer into the previously confirmed ordering by
+ * **ANCHORED INSERTION**.
+ *
+ * **The livelock this closes.** The capability prompt is DELTA-SCOPED — it renders only
+ * the models with no evidence — while `annotateConfirmedPool` built its positions from
+ * the submission ALONE, i.e. total replacement. So each answer erased the last: rank A,
+ * the delta asks C, rank C, A loses its rank, the delta asks A, forever. `PRIORITY[0]`
+ * never converges. Reproduced across three promotions.
+ *
+ * The fix cannot be "render the whole ordering" (the roster may be hundreds of models —
+ * the prompt must stay O(new + constant)) and it cannot be an absolute score or tier
+ * (only a RELATIVE ordering is representable, by standing decision). Anchored insertion
+ * is what remains: show a bounded, spread sample of the confirmed ordering
+ * ({@link selectCapabilityAnchors}) as fixed reference points, and interpolate the new
+ * models into the coordinate space those points define.
+ *
+ * Semantics, exactly:
+ *
+ * - **Anchors** = submitted entries that already appear in `priorOrder`. They are
+ *   REFERENCE POINTS: their prior positions define the coordinate space, and **a
+ *   reordering of anchors relative to each other is deliberately NOT honored** on a
+ *   partial submission. The operator saw at most a handful of them out of a possibly
+ *   enormous ordering, so a swap between two anchors carries no information about the
+ *   models BETWEEN them — honoring it would silently reshuffle models the operator
+ *   never saw.
+ * - **Exception — a TOTAL submission is a total replacement.** When the submission
+ *   mentions every model in `priorOrder` there are no unmentioned models, so the
+ *   coordinate space is fully respecified and the answer is honored verbatim. This is
+ *   the only case where "reorder what you already confirmed" is a well-defined request,
+ *   and it is the pre-existing behavior for a complete re-ranking.
+ * - **New models** (not in `priorOrder`) interpolate to a fractional position between
+ *   the prior positions of the nearest preceding and following anchors IN THE SUBMITTED
+ *   LIST. Before the first anchor ⇒ just below it (more capable); after the last ⇒ just
+ *   above it. Consecutive new models keep their submitted relative order.
+ * - **Every model in `priorOrder` the submission does not mention keeps its prior
+ *   position.** THIS IS THE LIVELOCK FIX.
+ * - **No anchors at all** (a partial submission naming only unknown models): there is no
+ *   coordinate to interpolate against, so the new models are appended AFTER the whole
+ *   prior ordering — the conservative direction, since a higher rank is less capable and
+ *   therefore trusted with less.
+ * - **Duplicates**: first occurrence wins, matching `annotateConfirmedPool`'s rule that a
+ *   positional list is the operator's ordering and a later repeat must not re-rank it.
+ * - **Result** is every model sorted by resolved position, ties broken by model id.
+ *   Deterministic by construction: an incidentally-ordered array here would churn the
+ *   confirmation's content hash on every promotion and cascade phantom staleness.
+ *
+ * Degenerate cases: an empty `priorOrder` (the first-ever answer) returns the submission;
+ * an empty submission returns the prior ordering unchanged (an omitted answer is
+ * "said nothing" — there is no way to express "delete the whole ranking", and the
+ * un-delete direction is the one that cannot livelock).
+ *
+ * Pure — no I/O, no clock, no config. Exported so the merge that decides whether the
+ * gate converges is directly testable.
+ */
+export function mergeCapabilityOrder(
+  priorOrder: readonly string[],
+  submitted: readonly string[],
+): string[] {
+  const prior = [...new Set(priorOrder)];
+  const answer = [...new Set(submitted)];
+  if (prior.length === 0) return answer;
+  if (answer.length === 0) return prior;
+  const priorPos = new Map<string, number>(prior.map((id, index) => [id, index]));
+  // TOTAL submission ⇒ total replacement (see the docstring's exception).
+  if (prior.every((id) => priorPos.has(id) && answer.includes(id))) return answer;
+
+  /** Resolved position per model — seeded with every prior model, so an unmentioned one keeps its rank. */
+  const positions = new Map<string, number>(priorPos);
+  const anchorCount = answer.filter((id) => priorPos.has(id)).length;
+  if (anchorCount === 0) {
+    answer.forEach((id, index) => positions.set(id, prior.length + index));
+  } else {
+    let i = 0;
+    while (i < answer.length) {
+      if (priorPos.has(answer[i] as string)) {
+        i++;
+        continue;
+      }
+      // A maximal run of NEW models, [i, j). `answer[i - 1]` is necessarily an anchor
+      // when `i > 0` — otherwise the run would have started earlier.
+      let j = i;
+      while (j < answer.length && !priorPos.has(answer[j] as string)) j++;
+      const before = i > 0 ? priorPos.get(answer[i - 1] as string) : undefined;
+      const after = j < answer.length ? priorPos.get(answer[j] as string) : undefined;
+      let lo: number;
+      let hi: number;
+      if (before === undefined) {
+        hi = after as number;
+        lo = hi - 1;
+      } else if (after === undefined) {
+        lo = before;
+        hi = lo + 1;
+      } else {
+        lo = before;
+        // A reordered anchor pair yields an inverted or empty span. Anchor reordering
+        // is not honored, so degrade to "insert just after the preceding anchor"
+        // rather than emitting descending positions.
+        hi = after > lo ? after : lo + 1;
+      }
+      const run = j - i;
+      for (let t = 0; t < run; t++) {
+        positions.set(answer[i + t] as string, lo + ((hi - lo) * (t + 1)) / (run + 1));
+      }
+      i = j;
+    }
+  }
+  return [...positions.entries()]
+    .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+    .map(([id]) => id);
+}
+
+/**
+ * Reconstruct the operator's confirmed cost ordering as the `cost_order` KEY list a
+ * fresh submission would carry — i.e. the inverse of `resolveFinalCostOrder`'s
+ * index⇒position mapping.
+ *
+ * Keyspace is the CANDIDATE key (`annotateConfirmedPool`'s `CostCandidate.key`):
+ * provider NAME for a provider pool, `model_id` for a host tier, `source_id` for a
+ * source pool. Deliberately NOT the MODEL keyspace the capability ordering
+ * ({@link mergeCapabilityOrder}) uses — the two genuinely key differently on the write
+ * side (a provider entry is capability-ranked by its `model_id`, never by its provider
+ * name), and unifying
+ * them here would silently drop every provider pool's position.
+ */
+function priorConfirmedCostOrder(prior: SharedProviderConfirmation): string[] {
+  const ranked: Array<{ key: string; order: number }> = [];
+  for (const entry of prior.provider_pool ?? []) {
+    if (typeof entry.cost_order === "number") {
+      ranked.push({ key: entry.name, order: entry.cost_order });
+    }
+  }
+  for (const entry of prior.host_model_cost_order ?? []) {
+    ranked.push({ key: entry.model_id, order: entry.cost_order });
+  }
+  for (const entry of prior.source_pool_cost_order ?? []) {
+    ranked.push({ key: entry.source_id, order: entry.cost_order });
+  }
+  return sortRankedKeys(ranked);
+}
+
+/**
+ * Rank-ascending key list, de-duplicated first-occurrence-wins. The key tiebreak keeps
+ * the result deterministic when two pools share a position (a host tier defaulting to
+ * `cost_order: 0`, say) — an incidentally-ordered list here would churn the artifact's
+ * content hash on every promotion and cascade phantom staleness downstream.
+ */
+function sortRankedKeys(ranked: Array<{ key: string; order: number }>): string[] {
+  const seen = new Set<string>();
+  return ranked
+    .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+    .filter((entry) => (seen.has(entry.key) ? false : (seen.add(entry.key), true)))
+    .map((entry) => entry.key);
 }
 
 /**

@@ -97,6 +97,14 @@ export interface HostPoolPreambleInput {
   hostOutputTokens?: number | null;
   /** Ordered model roster; one pool per rank. Sorted most-capable-first here. */
   roster?: HostModelRosterEntry[] | null;
+  /**
+   * Confirmed per-model capability ranks (LOWER = more capable), read from the shared
+   * Gate-0 confirmation via `readConfirmedCapabilityRanks`. Stamped onto each host pool
+   * at construction so the host's models band exactly like every other pool's. Required
+   * (never optional) — the capability floor fails OPEN, so an unwired site would look
+   * identical to a working one; `null` is the explicit "no confirmation in scope".
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
   env?: NodeJS.ProcessEnv;
   /**
    * A retained host-session source to thread through BOTH pool sizing and the
@@ -199,6 +207,7 @@ export async function buildHostPoolPreamble(
     quotaSource,
     quotaEntries,
     roster,
+    capabilityRanks: input.capabilityRanks,
     resolve: async (entry) => {
       const poolKey = entry?.model_id
         ? quotaPoolKey(providerName, entry.model_id)

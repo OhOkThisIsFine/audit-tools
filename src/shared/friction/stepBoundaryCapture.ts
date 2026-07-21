@@ -88,6 +88,7 @@ export type StepBoundaryEventType =
   | "quota_unclassified"
   | "newly_reachable_backend"
   | "exclusion_zeroed_capacity"
+  | "unranked_capability_promotion"
   | (string & {});
 
 /**
@@ -144,6 +145,11 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // "operator must reconcile" shape, and the one case where the tool would otherwise
   // dispatch nothing and say nothing.
   exclusion_zeroed_capacity: "tool_should_decide",
+  // The capability gate promoted a confirmation that left model(s) unranked, so they
+  // fail OPEN at the admission capability floor. Only the operator can close it — by
+  // supplying a ranker or answering `capability_order` on an attended run — which is
+  // the same "operator must reconcile" shape as a newly-reachable backend.
+  unranked_capability_promotion: "tool_should_decide",
 };
 
 /**
@@ -385,6 +391,57 @@ export async function captureZeroCapacityFriction(
     },
     source,
   );
+}
+
+/**
+ * Route a capability-evidence promotion that left model(s) unranked through the
+ * step-boundary chokepoint as an `unranked_capability_promotion` fact.
+ *
+ * The counterpart of {@link captureNewlyReachableBackendFriction} on the capability
+ * axis, and it exists for the same reason: the obligation's whole point is that a
+ * pool with no capability evidence is never SILENTLY routed around. Promoting anyway
+ * is the correct call — refusing would livelock, and fail-closed-excluding an
+ * unranked pool would silently shrink the dispatch set — but the unranked models
+ * then fail OPEN at the admission capability floor, which is a real routing
+ * consequence the operator must be able to find and close out of band.
+ *
+ * The progress summary already states it, but a summary can be folded away by a
+ * drain; the friction record is what survives to the per-category walk. One fact per
+ * MODEL, discriminated by model id, so re-derives never double-count and each
+ * unranked model is individually triageable.
+ *
+ * AWAITED for the same reason as the reach capture: this fires at Gate-0, where the
+ * CLI can emit its step and exit immediately after, so a dropped write would mean the
+ * fail-open happened silently. Safe to await — `captureFrictionEvent` swallows every
+ * failure internally, so it can never break the in-flight obligation (INV-O1-5).
+ */
+export async function captureUnrankedCapabilityPromotionFriction(
+  artifactsDir: string,
+  runId: string,
+  models: readonly string[],
+  source: FrictionCaptureArtifact["tool"],
+): Promise<void> {
+  // Sequential for the same reason as the reach capture: the merge is under a file
+  // lock, so concurrent appends would contend on that lock for no gain.
+  for (const model of models) {
+    await captureStepBoundaryFriction(
+      artifactsDir,
+      runId,
+      {
+        eventType: "unranked_capability_promotion",
+        discriminator: model,
+        note:
+          `model "${model}" was promoted with NO capability evidence — it stays ` +
+          `unranked and fails OPEN at the admission capability floor, so it can be ` +
+          `admitted for work above its real capability. Supply a ranker, or answer ` +
+          `capability_order at the next attended provider-confirmation gate.`,
+        severity: "medium",
+        area: "dispatch/provider-confirmation",
+      },
+      source,
+    );
+  }
+}
 }
 
 /** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */

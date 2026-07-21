@@ -95,6 +95,7 @@ async function runSingleAdvanceStep(
   const decision = decideNextStep(bundle, {
     emitStaleness: false,
     newlyReachableBackends: gateDeltaKeys(options),
+    unevidencedCapabilityPools: gateCapabilityDelta(options),
   });
   const forcedExecutor = options.preferredExecutor ?? null;
   const selectedExecutor = forcedExecutor ?? decision.selected_executor;
@@ -164,6 +165,7 @@ async function runSingleAdvanceStep(
     const state = deriveAuditState(bundle, {
       emitStaleness: false,
       newlyReachableBackends: gateDeltaKeys(options),
+      unevidencedCapabilityPools: gateCapabilityDelta(options),
     });
     state.last_executor = selectedExecutor;
     state.last_obligation = selectedObligation ?? undefined;
@@ -241,6 +243,7 @@ async function runSingleAdvanceStep(
   const updatedState = deriveAuditState(metadataBundle, {
     emitStaleness: false,
     newlyReachableBackends: gateDeltaKeys(options),
+    unevidencedCapabilityPools: gateCapabilityDelta(options),
   });
   updatedState.last_executor = selectedExecutor;
   updatedState.last_obligation = selectedObligation ?? undefined;
@@ -360,6 +363,7 @@ function deriveObligationState(
       state = deriveAuditState(bundle, {
         emitStaleness: false,
         newlyReachableBackends: gateDeltaKeys(options),
+        unevidencedCapabilityPools: gateCapabilityDelta(options),
       });
       cache.set(bundle, state);
     }
@@ -453,6 +457,16 @@ function buildDrainObligations(
  */
 function gateDeltaKeys(options: AdvanceAuditOptions): string[] {
   return (options.providerConfirmationGate?.newlyReachable ?? []).map((b) => b.key);
+}
+
+/**
+ * The capability-evidence delta, read through the shared gate for the same reason as
+ * {@link gateDeltaKeys}. A drain decide blind to THIS delta would see
+ * `provider_confirmation` satisfied and dispatch the next obligation's executor —
+ * the capability gate would never fire inside a drain at all.
+ */
+function gateCapabilityDelta(options: AdvanceAuditOptions): string[] {
+  return options.providerConfirmationGate?.unevidencedCapability ?? [];
 }
 
 /**

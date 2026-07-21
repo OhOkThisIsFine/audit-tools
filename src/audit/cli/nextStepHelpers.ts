@@ -169,6 +169,7 @@ import {
   readSettledPools,
   addSettledPool,
   readConfirmedDispatchPolicy,
+  readConfirmedCapabilityRanks,
   resolveDispatchExclusion,
   captureZeroCapacityFriction,
   PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
@@ -1322,6 +1323,17 @@ function gateKeys(gate: ProviderConfirmationGateState | undefined): string[] {
   return (gate?.newlyReachable ?? []).map((b) => b.key);
 }
 
+/**
+ * The capability-evidence delta as bare model ids. Read through the shared gate object
+ * on every call for exactly the same reason as {@link gateKeys} — the executor clears
+ * it on promotion, and a stale read re-selects `PRIORITY[0]` forever.
+ */
+function gateUnevidencedCapability(
+  gate: ProviderConfirmationGateState | undefined,
+): string[] {
+  return gate?.unevidencedCapability ?? [];
+}
+
 /** The engine state audit folds on: the in-memory bundle (reloaded per transition). */
 type AuditEngineState = ArtifactBundle;
 
@@ -1371,6 +1383,9 @@ async function runDeterministicExecutor(
   // executor for the one the engine actually picked.
   const decision = decideNextStep(bundle, {
     newlyReachableBackends: gateKeys(ctx.params.providerConfirmationGate),
+    unevidencedCapabilityPools: gateUnevidencedCapability(
+      ctx.params.providerConfirmationGate,
+    ),
   });
 
   const noProgress = await checkNoProgressBeforeDispatch({
@@ -1431,6 +1446,7 @@ function deriveObligationState(
     if (bundle.audit_state?.status === "complete") return "satisfied";
     const state = deriveAuditState(bundle, {
       newlyReachableBackends: gateKeys(gate),
+      unevidencedCapabilityPools: gateUnevidencedCapability(gate),
     });
     const found = state.obligations.find((o) => o.id === id);
     if (!found) return "satisfied";
@@ -1477,10 +1493,21 @@ export function buildAuditObligations(
           // Operator has submitted → consume it (writes both canonical artifacts).
           return runDeterministicExecutor(bundle, ctx);
         }
-        if ((gate?.newlyReachable.length ?? 0) > 0 && gate?.autonomous) {
+        const hasDelta =
+          (gate?.newlyReachable.length ?? 0) > 0 ||
+          (gate?.unevidencedCapability.length ?? 0) > 0;
+        if (hasDelta && gate?.autonomous) {
           // G3, autonomous: a backend the operator never confirmed became reachable
           // and there is nobody to ask. Fold to the executor, which fail-closed-
           // excludes it + records the friction — never emit a prompt no one will read.
+          //
+          // The capability-evidence delta folds here too, and deliberately does NOT
+          // fail closed: excluding an unranked pool would silently shrink the dispatch
+          // set, which is a worse failure than promoting it unranked. There is no LLM
+          // on this path to synthesize an ordering — the executor is deterministic — so
+          // what it records is the promotion ITSELF: the still-unranked models go to the
+          // progress summary and to an `unranked_capability_promotion` friction event.
+          // Promoted, fails open at the floor, never silent.
           //
           // Scoped to the DELTA case deliberately: a first-time confirmation (no
           // artifact at all) still pauses even under `autonomous_mode`, exactly as
@@ -1498,6 +1525,7 @@ export function buildAuditObligations(
             kind: "provider_confirmation",
             state: deriveAuditState(bundle, {
               newlyReachableBackends: gateKeys(gate),
+              unevidencedCapabilityPools: gateUnevidencedCapability(gate),
             }),
             bundle,
           },
@@ -1758,6 +1786,10 @@ async function runHostDelegationObligation(
   );
   const { pools: auditSourcePools, zeroedByExclusion } = await buildAuditSourcePools(hybridCfg, {
     excludedBackends: auditExcludedBackends,
+    // These pools ARE the headless rolling drive's `poolsOverride`, not a preview —
+    // omitting the ranks here would leave every headless audit run fail-opening at the
+    // capability floor, the exact behavior this obligation exists to remove.
+    capabilityRanks: await readConfirmedCapabilityRanks(ctx.params.root),
     // D1 cross-class collision rule: an attended host identity colliding with a
     // folded source keeps exactly one pool (the in-process source survives — the
     // engine drives that one account; a non-in-process collider is dropped).

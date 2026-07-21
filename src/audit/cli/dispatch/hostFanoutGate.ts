@@ -199,6 +199,12 @@ export async function gateHostFanout(params: {
   // a host-subagent panel.
   const pool = await buildDispatchPool({
     sessionConfig,
+    // Deliberately null, not unwired: this gate paces a HOST-ONLY subagent panel in a
+    // single window with no roster tiering and no backend spill (see above), so the
+    // admission capability floor has nothing to band between — every unit runs on the
+    // same conversation-host session. Reading the confirmation here would buy nothing
+    // and would force a `root` param through five `gateHostFanoutOrPause` call sites.
+    capabilityRanks: null,
     hostModel: params.hostModel ?? null,
     queryLimits: undefined,
     hostActiveSubagentLimit: params.hostActiveSubagentLimit,

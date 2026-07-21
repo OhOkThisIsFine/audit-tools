@@ -5,14 +5,18 @@ import {
   writeJsonFile,
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
+  readSharedProviderConfirmation,
   readProviderConfirmationInput,
+  carryForwardConfirmationInput,
+  retainAutoExclusions,
+  detectDiscardedCapabilityReorder,
   unlinkProviderConfirmationInput,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
   resolveSessionConfig,
-  ambientAuditorDescriptor,
   captureNewlyReachableBackendFriction,
   PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
+  captureUnrankedCapabilityPromotionFriction,
   type SessionConfig,
   type NewlyReachableBackend,
   type ProviderConfirmationInput,
@@ -189,6 +193,26 @@ export async function runProviderConfirmationAutoComplete(
   const input = artifactsDir
     ? await readProviderConfirmationInput(artifactsDir)
     : null;
+  // The confirmation as it stands BEFORE this promotion — read once, used for the
+  // carry-forward merge below. Absent on a first-time confirmation.
+  const priorConfirmation = root ? await readSharedProviderConfirmation(root) : null;
+  /** Models the capability gate flagged that this promotion clears WITHOUT ranking. */
+  let unrankedOnPromotion: string[] = [];
+  /**
+   * Anchor ids whose reorder this promotion is about to DISCARD. Computed before the
+   * merge, from the RAW submission — `effectiveInput` already carries the merged (i.e.
+   * reorder-free) order, so asking it afterwards can never reveal what was dropped.
+   *
+   * Reported rather than honored: repositioning an already-ranked model without
+   * restating the whole roster needs the anchor-provenance split in `docs/backlog.md`.
+   * What is NOT acceptable is doing it silently — an accepted-then-discarded operator
+   * decision is the same "the operator had to notice" failure the reach delta and the
+   * capability fail-open are both reported for.
+   */
+  const discardedReorder = detectDiscardedCapabilityReorder(
+    priorConfirmation?.policy?.capability_order ?? [],
+    input?.capability_order ?? [],
+  );
   // G3 fail-closed reconciliation: a backend the operator never confirmed must not
   // become dispatchable merely because it is reachable. Excluding it is the
   // conservative direction — the run proceeds on the confirmed backends.
@@ -208,18 +232,53 @@ export async function runProviderConfirmationAutoComplete(
   // re-derived here, so the rule persisted cannot drift from the delta detected.
   // Stage 5: the autonomous fail-closed write emits the `service:` axis, because that
   // is the axis that does not decay and closes multi-transport residue durably.
+  // R3-3: Headless promotion via capability ranker. When running headlessly (input === null),
+  // if there are unevidenced capability models, auto-rank them so that every dispatchable
+  // model receives a capability_rank and headless runs do not wedge on PRIORITY[0].
+  const unevidenced = gate?.unevidencedCapability ?? [];
+  let autoInput: ProviderConfirmationInput | null = input;
+  if (input === null && unevidenced.length > 0) {
+    const priorOrder = priorConfirmation?.policy?.capability_order ?? [];
+    const autoOrder = rankHeadlessCapabilityPools(unevidenced, priorOrder);
+    autoInput = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      capability_order: autoOrder,
+    };
+  }
+
+  const effectiveInput = carryForwardConfirmationInput(autoInput, priorConfirmation);
   const failClosed = input === null ? [...(gate?.newlyReachable ?? [])] : [];
-  const exclude = [
+  // Read the CARRIED input, not the raw submission: the operator's prior exclusions are
+  // a durable rule, and rebuilding this list from `input.exclude` alone is what let a
+  // capability-only submission silently lift them — a fail-OPEN, the worst direction.
+  //
+  // Kept SEPARATE from the gate's own fail-closed patterns below. Merging them was the
+  // mirror-image bug: the carry-forward could not tell the two apart, so a tool guess
+  // became permanent operator policy and the operator's next submission no longer
+  // superseded it (with no signal — by then the backend is a confirmed key, so the
+  // reconciliation delta never re-surfaces it either).
+  const exclude = [...new Set(effectiveInput?.exclude ?? [])];
+  // Gate-authored. The NEW fail-closed patterns from this promotion, UNIONED with the
+  // prior ones that this submission did not address ({@link retainAutoExclusions}).
+  //
+  // Rebuilding from `failClosed` alone was a fail-OPEN: an excluded entry still counts
+  // as a confirmed key, so the reach delta goes empty after the first promotion and the
+  // next one dropped the exclusion entirely — re-admitting a backend the operator never
+  // confirmed. Carrying is therefore mandatory; what a submission supersedes is only the
+  // patterns it actually speaks to.
+  const autoExclude = [
     ...new Set([
-      ...(input?.exclude ?? []),
+      ...retainAutoExclusions(priorConfirmation?.policy?.auto_exclude ?? [], input),
       ...failClosed.map((b) => b.service_exclusion_pattern ?? b.exclusion_pattern),
     ]),
   ];
   const confirmation = confirmProviders(
     sessionConfig,
     process.env,
-    exclude,
-    input ?? undefined,
+    // The per-tool seam carries no policy provenance — it is a pool SNAPSHOT, so what
+    // matters here is only which entries are excluded. Union, deliberately.
+    [...exclude, ...autoExclude],
+    effectiveInput ?? undefined,
   );
   const artifactsWritten = ["provider_confirmation.json"];
   if (root) {
@@ -236,10 +295,18 @@ export async function runProviderConfirmationAutoComplete(
         sessionConfig,
         process.env,
         exclude,
-        input?.include ?? [],
+        // `effectiveInput`, never the raw submission — the sixth face of the same
+        // defect class, and the last one: reading `input.include` here destroys a
+        // prior `policy.include` on any submission that does not restate it. Unlike
+        // the `exclude` case this fails CLOSED (a self-spawn-blocked provider the
+        // operator deliberately opted back in silently drops out of the pool again),
+        // so it is not a routing-safety hole — but it is still an operator decision
+        // deleted without a signal.
+        effectiveInput?.include ?? [],
         undefined,
-        input ?? undefined,
+        effectiveInput ?? undefined,
         sources,
+        autoExclude,
       ),
     );
     artifactsWritten.push("provider-confirmation.json");
@@ -251,6 +318,22 @@ export async function runProviderConfirmationAutoComplete(
     // lie). Cleared HERE, inside `if (root)`, because that is exactly where CONFIRMED
     // actually changed.
     if (gate) gate.newlyReachable = [];
+    // Same clearing rule, same reason: the promotion just wrote `capability_rank` for
+    // everything the operator/LLM ordered, so the capability delta is empty by
+    // construction and a stale non-empty value re-selects this `PRIORITY[0]`
+    // obligation forever. Cleared HERE because this is where the ranks actually
+    // changed. (Any model still genuinely unranked is re-detected next invocation by
+    // `resolveUnevidencedCapabilityPools` — the delta is recomputed, never inherited.)
+    //
+    // What the submission did NOT rank is captured first: on the autonomous path there
+    // is no input file at all and this executor is deterministic, so the delta clears
+    // with nothing recorded. That promotion is legitimate (refusing would livelock,
+    // and fail-closed-excluding an unranked pool would silently shrink the dispatch
+    // set) but it must not be SILENT — it is reported in the progress summary.
+    unrankedOnPromotion = (gate?.unevidencedCapability ?? []).filter(
+      (model) => !(effectiveInput?.capability_order ?? []).includes(model),
+    );
+    if (gate) gate.unevidencedCapability = [];
   }
   // G3 consume-and-INVALIDATE. The input has now been promoted, so it is spent — and
   // leaving it on disk is what would make the gate never fire at all: a LATER delta
@@ -279,24 +362,78 @@ export async function runProviderConfirmationAutoComplete(
       "audit-code",
     );
   }
+  if (unrankedOnPromotion.length > 0 && artifactsDir) {
+    // Parity with the reach delta above, and for the same reason: the progress summary
+    // states this, but a drain can fold that summary away — the friction record is what
+    // survives to the close-out walk. Same synthetic run key: Gate-0 predates any run id.
+    await captureUnrankedCapabilityPromotionFriction(
+      artifactsDir,
+      PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
+      unrankedOnPromotion,
+      "audit-code",
+    );
+  }
   return {
     updated: { ...bundle, provider_confirmation: confirmation },
     artifacts_written: artifactsWritten,
-    progress_summary: renderConfirmationSummary(input, failClosed),
+    progress_summary: renderConfirmationSummary(
+      input,
+      failClosed,
+      unrankedOnPromotion,
+      discardedReorder,
+    ),
   };
 }
 
 function renderConfirmationSummary(
   input: ProviderConfirmationInput | null,
   newlyReachable: readonly NewlyReachableBackend[],
+  unrankedOnPromotion: readonly string[] = [],
+  discardedReorder: readonly string[] = [],
 ): string {
-  if (newlyReachable.length > 0) {
-    return (
-      `No operator decision covers ${newlyReachable.length} newly-reachable ` +
-      `backend(s), so they were fail-closed-excluded rather than dispatched ` +
-      `unconfirmed (${newlyReachable.map((b) => b.key).join(", ")}).`
+  // ACCUMULATE, never early-return. These outcomes CO-OCCUR: a submission can reorder
+  // anchors (discarded) while the same promotion clears a capability delta it did not
+  // rank (`unrankedOnPromotion`). An if/return chain reported only the first, so the
+  // second cleared SILENTLY — the very thing each of these lines exists to prevent.
+  // Ordering within the list is significance, not exclusivity.
+  const parts: string[] = [];
+  // First: the operator submitted a decision and this promotion did not apply it.
+  // Every other line reports what the tool DID; this reports what it DECLINED to do,
+  // which the operator would otherwise have to notice by diffing the artifact.
+  if (discardedReorder.length > 0) {
+    const message =
+      `Your capability_order REORDERED already-ranked model(s) ` +
+      `(${discardedReorder.join(", ")}), and that reorder was NOT applied — ` +
+      `previously-ranked models keep their confirmed positions, and only NEW models ` +
+      `are placed by this answer. To change the relative order of models you already ` +
+      `ranked, restate the FULL ordering (every previously-ranked model) in one ` +
+      `capability_order. Any new models in this submission were still placed.`;
+    // Also to stderr: a progress summary can be folded away by a drain, and a
+    // discarded operator decision must not vanish with it.
+    process.stderr.write(`WARNING: ${message}\n`);
+    parts.push(message);
+  }
+  // Say the true thing when the capability delta is cleared with nothing recorded.
+  // The autonomous path folds here with NO input file, and this executor is purely
+  // deterministic — there is no LLM on it to synthesize an ordering. Clearing the
+  // delta silently would be the "silently routed around" the obligation exists to
+  // prevent, so the no-evidence promotion is stated rather than implied.
+  if (unrankedOnPromotion.length > 0) {
+    parts.push(
+      `Promoted the provider confirmation with NO capability evidence for ` +
+        `${unrankedOnPromotion.length} model(s) (${unrankedOnPromotion.join(", ")}) — ` +
+        `they stay unranked and will fail OPEN at the admission capability floor. ` +
+        `Supply a ranker, or answer capability_order on an attended run.`,
     );
   }
+  if (newlyReachable.length > 0) {
+    parts.push(
+      `No operator decision covers ${newlyReachable.length} newly-reachable ` +
+        `backend(s), so they were fail-closed-excluded rather than dispatched ` +
+        `unconfirmed (${newlyReachable.map((b) => b.key).join(", ")}).`,
+    );
+  }
+  if (parts.length > 0) return parts.join(" ");
   return input
     ? "Applied operator provider confirmation (cost ordering + host roster)."
     : "Auto-completed provider confirmation gate (headless).";

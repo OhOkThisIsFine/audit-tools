@@ -15,7 +15,7 @@ import {
   createReservationLedger,
   admissionPoolsFromSummaries,
   assembleDispatchQuota,
-  buildCapabilityFloorCapable,
+  buildObservedCapabilityFloorCapable,
 } from "audit-tools/shared";
 import type { DispatchModelTier } from "audit-tools/shared";
 import {
@@ -72,6 +72,30 @@ export interface ScheduleWaveInput {
    */
   hostModelId?: string | null;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`) — stamped
+   * onto the host pools this wave sizes against.
+   *
+   * **REQUIRED, and `null` must be written out explicitly.** It was optional, on the
+   * justification that "every DISPATCH path goes through `buildConfirmedPools`". That
+   * was false: `marshal.ts` feeds this schedule's `capacity_pools` straight into
+   * `buildDispatchQuota` → `buildCapabilityFloorCapable`, so omitting ranks there made
+   * every pool band `null` and every `deep` packet admit everywhere — the exact
+   * fail-open the capability obligation exists to close, live on the remediate draw
+   * while this comment asserted it could not happen.
+   *
+   * An omission and a deliberate "no ranks here" were indistinguishable, and for a
+   * fail-open mechanism an unwired site looks identical to a working one. Requiring the
+   * field makes the compiler ask at every call site; a genuine sizing-only preview
+   * answers `null` in writing.
+   *
+   * ⚠ Scope of that guarantee: `tsconfig.json` includes `src` ONLY and vitest transpiles
+   * without typechecking, so this is enforced across production code — where the live
+   * defect was — but NOT across the test tree. A test omitting the field still runs, and
+   * silently gets `undefined`. Do not read a green suite as proof that every call site
+   * was swept.
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }
 
 export function normalizeSlotTokens(tokens: number[] | undefined, count: number): number[] {
@@ -121,6 +145,12 @@ async function buildRemediateHostPools(input: {
   env?: NodeJS.ProcessEnv;
   /** Optional retained host-session source (the rolling driver threads its own). */
   hostSession?: HostSessionQuotaSource;
+  /**
+   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). Required —
+   * the capability floor fails OPEN, so an unwired site is indistinguishable from a
+   * working one, and remediate passes no `onFailOpen`, so its fail-opens are invisible.
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<HostPoolPreamble & { sessionConfig: SessionConfig }> {
   const sessionConfig = input.sessionConfig ?? {};
   const providerName =
@@ -138,6 +168,7 @@ async function buildRemediateHostPools(input: {
     hostContextTokens: input.hostContextTokens,
     hostOutputTokens: input.hostOutputTokens,
     roster: input.hostModels,
+    capabilityRanks: input.capabilityRanks,
     ...(input.env ? { env: input.env } : {}),
     ...(input.hostSession ? { hostSession: input.hostSession } : {}),
   });
@@ -162,6 +193,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     hostModels: input.hostModels,
     hostModelId: input.hostModelId,
     env: input.env,
+    capabilityRanks: input.capabilityRanks ?? null,
   });
   const capacity = computeDispatchCapacity({
     pools: preamble.pools,
@@ -209,6 +241,13 @@ export async function buildConfirmedPools(input: {
   hostCanDispatch?: boolean;
   /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
   excludedBackends?: DispatchExclusion;
+  /**
+   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). Required —
+   * stamped onto BOTH halves below (host pools and source pools), so remediate's floor
+   * bands on the same evidence audit's does. Omitting it on one half is the exact
+   * one-sided-capability drift [[auditor-remediator-mirroring-is-common-logic]] warns of.
+   */
+  capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<SourcePoolBuild> {
   // The ACTUAL configured backend (the primary the fold synthesizes a source for) vs
   // the HOST-pool identity. When the primary is a headless in-process backend it is a
@@ -233,6 +272,7 @@ export async function buildConfirmedPools(input: {
       hostOutputTokens: input.hostOutputTokens,
       hostModels: input.hostModels,
       hostModelId: input.hostModelId,
+      capabilityRanks: input.capabilityRanks,
       ...(input.env ? { env: input.env } : {}),
       ...(input.hostSession ? { hostSession: input.hostSession } : {}),
     });
@@ -251,6 +291,7 @@ export async function buildConfirmedPools(input: {
     quotaEntries,
     commandWorkers: true,
     excludedBackends: input.excludedBackends,
+    capabilityRanks: input.capabilityRanks,
   });
 
   // Headless: no host pool in the eligible set — the engine drives the source pools.
@@ -317,7 +358,16 @@ export async function buildDispatchQuota(
     ledger: createReservationLedger(),
     // F4 parity with audit's finalizeDispatchQuota: size-fit AND each packet's
     // RELATIVE capability floor over this batch's pool set (fail-open on unknown).
-    capable: buildCapabilityFloorCapable(pools),
+    // Parity now includes REPORTING the fail-open. This draw passed no reporter, so an
+    // unranked pool taking `deep` work was silent here while audit recorded it — and
+    // that asymmetry is why an unwired `capabilityRanks` upstream stayed invisible.
+    capable: buildObservedCapabilityFloorCapable(pools, (info) => {
+      process.stderr.write(
+        `WARNING: capability fail-open — pool "${info.poolId}" has no capability evidence ` +
+          `and was admitted for a "${info.requiredTier}" packet (${info.packetId}). ` +
+          `Confirm a capability_order at Gate-0, or supply a rank source.\n`,
+      );
+    }),
     ...(dispatchBias != null ? { dispatchBias } : {}),
     base: {
       phase,

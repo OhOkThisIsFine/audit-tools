@@ -112,6 +112,18 @@ export interface ProviderConfirmationGateState {
    */
   newlyReachable: NewlyReachableBackend[];
   /**
+   * Model ids of dispatchable pools whose capability lookup does not resolve — the
+   * capability-evidence delta. Same mutable-by-reference discipline and the same
+   * clearing rule as {@link newlyReachable}: CLEARED to `[]` by the executor on a
+   * successful promotion, because the promotion is the only thing that can add the
+   * missing ranks. A frozen delta here is the identical `PRIORITY[0]` livelock.
+   *
+   * Only ever holds models the dispatch join CAN reach (`pool.hostModel` non-null).
+   * A model-less pool is unjoinable, so pinning it could never clear the delta and it
+   * would re-prompt forever — it is excluded at computation, not here.
+   */
+  unevidencedCapability: string[];
+  /**
    * Unattended run ⇒ nobody to prompt ⇒ the delta fails closed instead. Read by the
    * EXECUTOR itself, not just its caller — the fail-closed write must be impossible
    * to trigger on an attended run regardless of which entrypoint calls it.

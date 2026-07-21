@@ -408,6 +408,19 @@ export function annotateConfirmedPool(
     [...providerCandidates, ...hostCandidates, ...sourceCandidates],
     input?.cost_order,
   );
+  // Capability-evidence ordering: the operator/LLM answer to the capability gate, over
+  // the SAME candidate keyspace the cost order uses. Position ⇒ `capability_rank`
+  // (LOWER = more capable), so the list is most-capable-first. Unlike the cost order
+  // there is no tool-computed suggestion to fall back to: absent input ⇒ no confirmed
+  // ranks at all, and pools keep whatever external evidence they carry.
+  //
+  // First occurrence wins on a duplicated key — a positional list is the operator's
+  // ORDERING, and silently re-ranking on a later repeat would make the tail of a
+  // typo'd list authoritative over its head.
+  const capabilityPositions = new Map<string, number>();
+  (input?.capability_order ?? []).forEach((key, index) => {
+    if (!capabilityPositions.has(key)) capabilityPositions.set(key, index);
+  });
   const provider_pool = pool.map((entry) => {
     const model = representativeModelId(entry.name, sessionConfig);
     const order = positions.get(entry.name);
@@ -416,6 +429,14 @@ export function annotateConfirmedPool(
       ...(model ? { model_id: model } : {}),
       blended_price_usd_per_mtok: model ? resolveModelPrice(model) ?? null : null,
       ...(order !== undefined ? { cost_order: order } : {}),
+      // Keyed on the MODEL, never the provider name: `capability_rank` is read back
+      // by the model-keyed dispatch join (`readConfirmedCapabilityRanks` →
+      // `pool.hostModel`), and the delta + prompt both name models. Matching on the
+      // provider name here would silently drop the operator's answer, leaving the
+      // delta non-empty ⇒ `PRIORITY[0]` re-prompts the same question forever.
+      ...(model && capabilityPositions.has(model)
+        ? { capability_rank: capabilityPositions.get(model) }
+        : {}),
     };
   });
   // Recorded at the only point the host is known for certain, rather than re-derived
@@ -425,6 +446,12 @@ export function annotateConfirmedPool(
     provider: hostProvider,
     blended_price_usd_per_mtok: resolveModelPrice(m.model_id) ?? null,
     cost_order: positions.get(m.model_id) ?? 0,
+    // A host model is ranked exactly like any other model. The roster carries no
+    // capability field (HostModelRosterEntrySchema is .strict()), so the confirmed
+    // order is the ONLY road a host model's rank travels to dispatch.
+    ...(capabilityPositions.has(m.model_id)
+      ? { capability_rank: capabilityPositions.get(m.model_id) }
+      : {}),
   }));
   const source_pool_cost_order: SourcePoolCostEntry[] = foldedSources.map((source) => {
     const key = sourceCandidateKey(source);
@@ -444,7 +471,14 @@ export function annotateConfirmedPool(
       ...(source.model ? { model_id: source.model } : {}),
       blended_price_usd_per_mtok: price,
       price_declared: declared !== undefined,
-      ...(source.capability_rank != null ? { capability_rank: source.capability_rank } : {}),
+      // External evidence FIRST: a source's own registry/declared rank is
+      // someone-else-maintained data about the model, so the confirmed ordering only
+      // fills the gap where none exists. Same precedence the pool constructors apply.
+      ...(source.capability_rank != null
+        ? { capability_rank: source.capability_rank }
+        : source.model && capabilityPositions.has(source.model)
+          ? { capability_rank: capabilityPositions.get(source.model) }
+          : {}),
       cost_order: positions.get(key) ?? 0,
     };
   });

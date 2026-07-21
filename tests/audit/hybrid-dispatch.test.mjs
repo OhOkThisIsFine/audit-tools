@@ -229,10 +229,10 @@ const { buildAuditSourcePools } = await import("../../src/audit/cli/hybridDispat
 test("audit pool assembly: an agy primary ALWAYS folds in as a source pool (D4 — red on HEAD twice over)", async () => {
   // HEAD: agy was absent from the demotable set AND primaryInProcessSource had no
   // agy arm — an attended agy run had no pool at all. Now the fold is unconditional.
-  const { pools } = await buildAuditSourcePools({
-    provider: "agy",
-    agy: { command: "agy", model: "gemini-3-pro" },
-  });
+  const { pools } = await buildAuditSourcePools(
+    { provider: "agy", agy: { command: "agy", model: "gemini-3-pro" } },
+    { capabilityRanks: null },
+  );
   const agyPool = pools.find((p) => p.providerName === "agy");
   expect(agyPool).toBeTruthy();
   expect(agyPool.source?.transport).toBe("agy");
@@ -240,10 +240,10 @@ test("audit pool assembly: an agy primary ALWAYS folds in as a source pool (D4 �
 });
 
 test("audit pool assembly: a codex primary folds with NO demote flag; the option is gone", async () => {
-  const { pools } = await buildAuditSourcePools({
-    provider: "codex",
-    codex: { command: "codex", model: "gpt-5" },
-  });
+  const { pools } = await buildAuditSourcePools(
+    { provider: "codex", codex: { command: "codex", model: "gpt-5" } },
+    { capabilityRanks: null },
+  );
   expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
 });
 
@@ -252,14 +252,15 @@ test("audit pool assembly (D1/D6): an attended host identity colliding with the 
   // "the engine/source pool survives" so the engine drives that single account.
   const { pools } = await buildAuditSourcePools(
     { provider: "codex", codex: { command: "codex", model: "gpt-5" } },
-    { attendedHostProviderName: "codex" },
+    { attendedHostProviderName: "codex", capabilityRanks: null },
   );
   expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
 });
 
 test("audit pool assembly: audit's policy excludes a command-shaped primary (no fold, no pool)", async () => {
-  const { pools } = await buildAuditSourcePools({
-    provider: "worker-command",
-  });
+  const { pools } = await buildAuditSourcePools(
+    { provider: "worker-command" },
+    { capabilityRanks: null },
+  );
   expect(pools).toEqual([]);
 });

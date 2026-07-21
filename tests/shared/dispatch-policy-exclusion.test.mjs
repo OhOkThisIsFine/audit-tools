@@ -345,7 +345,7 @@ describe("readConfirmedDispatchPolicy — the artifact round-trip", () => {
     });
   });
 
-  test("a `provider:model` pattern survives the round-trip verbatim", async () => {
+  test("a `transport:model` pattern survives the round-trip verbatim", async () => {
     // The parser must not membership-check `exclude` against the provider-name
     // set: a model pattern is not a provider name and would be dropped, silently
     // un-excluding the backend the operator ruled out.
@@ -575,10 +575,14 @@ describe("B+D — the two builders stay wired to the right call sites", () => {
       "utf8",
     );
     expect(source).toContain("buildSharedProviderConfirmation(");
+    // Match the CALL form (trailing paren), not the bare identifier. What is dangerous
+    // is invoking the render builder here; NAMING it in a comment is not, and the bare
+    // match forbade explaining the distinction this very test exists to protect — it
+    // went red the moment a comment mentioned the function.
     expect(
       source,
       "persisting the render DTO would write the writing auditor's reach for another auditor to inherit — the exact bug B+D removes",
-    ).not.toContain("buildProviderConfirmationRender");
+    ).not.toContain("buildProviderConfirmationRender(");
   });
 
   test("the RENDER site (nextStepCommand) uses the render builder", async () => {

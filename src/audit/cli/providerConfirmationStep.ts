@@ -43,6 +43,35 @@ export function renderProviderConfirmationPrompt(opts: {
    * first-time gate.
    */
   newlyReachable?: readonly NewlyReachableBackend[];
+  /**
+   * The capability-evidence delta: dispatchable models with no resolvable capability
+   * rank. Non-empty ⇒ the prompt additionally asks for a most-capable-first ordering
+   * over exactly these models, which persists as `capability_rank` and stops them
+   * fail-opening at the admission capability floor.
+   */
+  unevidencedCapability?: readonly string[];
+  /**
+   * A BOUNDED, spread sample of the already-confirmed capability ordering
+   * (`selectCapabilityAnchors`), most-capable-first — the fixed reference points the
+   * operator ranks the unevidenced models against.
+   *
+   * Without them the capability ask is unanswerable without livelocking: the prompt is
+   * delta-scoped, so an answer over the new models alone used to REPLACE the confirmed
+   * ordering and the models it dropped came straight back as the next delta. Rendering
+   * the whole ordering instead is not an option — the roster may be hundreds of models
+   * and this prompt must stay O(new + constant). Empty on a first-ever ranking.
+   */
+  capabilityAnchors?: readonly string[];
+  /**
+   * True ⇒ a prior confirmation exists on disk, i.e. this is a RE-confirmation.
+   *
+   * Drives the do-not-re-litigate guardrail INDEPENDENTLY of the reach delta. It used to
+   * ride on `newlyReachable`, so a capability-only re-prompt rendered the full table with
+   * no warning at all — while also telling the operator that an omitted field keeps its
+   * confirmed value. An operator transcribing the displayed ordering into `cost_order`
+   * then silently reverted their own confirmed order.
+   */
+  hasPriorConfirmation?: boolean;
 }): string {
   const sorted = [...opts.providerPool].sort(
     (a, b) => (a.cost_order ?? Number.MAX_SAFE_INTEGER) - (b.cost_order ?? Number.MAX_SAFE_INTEGER),
@@ -85,8 +114,91 @@ export function renderProviderConfirmationPrompt(opts: {
   const hasCodex = sorted.some((e) => e.name === "codex");
 
   const newlyReachable = opts.newlyReachable ?? [];
+  const unevidencedCapability = opts.unevidencedCapability ?? [];
+  // Anchors must be disjoint from the models under question — one cannot be both a
+  // settled reference point and the thing being ranked.
+  const unevidencedSet = new Set(unevidencedCapability);
+  const capabilityAnchors = (opts.capabilityAnchors ?? []).filter(
+    (model) => !unevidencedSet.has(model),
+  );
+  // The combined set the operator returns ONE ordering over. Anchors first, in their
+  // confirmed order, with the new models appended: a complete, acceptable file that a
+  // host may copy verbatim, defaulting the unranked models to LEAST capable — the
+  // conservative direction if the host does not move them.
+  const capabilityAnswerExample = [...capabilityAnchors, ...unevidencedCapability];
+
+  // The capability block is ADDITIVE to whatever gate section follows — a run can owe
+  // both a reach reconciliation and a capability ordering, and folding them into one
+  // prompt is what keeps this a single operator round-trip.
+  const capabilitySection =
+    unevidencedCapability.length > 0
+      ? [
+          "## Rank these models by capability",
+          "",
+          "No rank source covers these dispatchable models, so the admission",
+          "capability floor currently **fails open** on them — they are eligible for",
+          "`deep` work they may be entirely unfit for:",
+          "",
+          ...unevidencedCapability.map((model) => `  - \`${model}\``),
+          "",
+          ...(capabilityAnchors.length > 0
+            ? [
+                "These models are **already ranked** — they are FIXED REFERENCE POINTS,",
+                "shown in their confirmed order (most capable first) so you can place the",
+                "models above relative to them. They are a bounded sample spread across the",
+                "full ranking, not the whole ranking:",
+                "",
+                ...capabilityAnchors.map((model) => `  - \`${model}\`  (already ranked)`),
+                "",
+                "Answer with `capability_order`: **one ordering over the combined set**,",
+                "most capable first — the unranked models interleaved among the reference",
+                "points wherever they belong.",
+                "",
+                "> Reordering the reference points against each other has no effect: they",
+                "> anchor a ranking you are only seeing a sample of, so a swap between two",
+                "> of them carries no information about the models in between. Move the",
+                "> **unranked** models; leave the anchors where they are.",
+                "",
+                "> Models you do not mention keep the rank they already have — you never",
+                "> need to restate the whole ranking, and omitting one never clears it.",
+                "",
+              ]
+            : [
+                "Answer with `capability_order`: these model ids, **most capable first**.",
+                "",
+              ]),
+          // `schema_version` is NOT optional here even though every other field is:
+          // `parseProviderConfirmationInput` rejects the whole file without it, the
+          // rejection is indistinguishable from "no submission", and this same prompt
+          // then re-emits — the infinite-re-prompt livelock, reintroduced by a host
+          // that did exactly what the prompt showed it. A fragment a host may copy
+          // verbatim must be a COMPLETE, acceptable file.
+          "```json",
+          "{",
+          `  "schema_version": "${PROVIDER_CONFIRMATION_INPUT_VERSION}",`,
+          `  "capability_order": [${capabilityAnswerExample
+            .map((m) => JSON.stringify(m))
+            .join(", ")}]`,
+          "}",
+          "```",
+          "",
+          "Write it to the same file as the ordering below — one submission answers",
+          "both. Any field you omit keeps the value you confirmed previously; it is",
+          "not reset.",
+          "",
+          "This is a **relative ordering only** — rank them against each other. Do not",
+          "invent an absolute score or a tier; there is no field for one. If you",
+          "genuinely cannot rank a model, still place it (a considered guess beats a",
+          "fail-open) and say so to the user.",
+          "",
+          "> Ordering is not inclusion. To keep a model OUT of the pool entirely, use",
+          "> `exclude` — `capability_order` only decides what it is trusted with.",
+          "",
+        ]
+      : [];
 
   return [
+    ...capabilitySection,
     ...(newlyReachable.length > 0
       ? [
           "# Reconcile Newly-Reachable Backends (Gate-0)",
@@ -122,12 +234,45 @@ export function renderProviderConfirmationPrompt(opts: {
           "",
         ]
       : []),
+    // The SAME guardrail, on the branch that used to go without one. It rode on
+    // `newlyReachable`, so a capability-only re-prompt rendered the full table with no
+    // warning — while the capability block newly promises that an omitted field keeps
+    // its confirmed value. An operator transcribing the displayed ordering back into
+    // `cost_order` then reverted their own confirmed order, silently. Enforced here in
+    // the tool rather than left to the operator noticing.
+    ...(opts.hasPriorConfirmation === true && newlyReachable.length === 0
+      ? [
+          "# This is a RE-confirmation",
+          "",
+          "You already confirmed a route decision for this session. The table below",
+          "reflects **what you confirmed** — do not re-litigate it. Answer only the",
+          "question(s) above.",
+          "",
+          "**Every field you omit keeps the value you confirmed previously.** Do not",
+          "transcribe the table back into `cost_order` to \"keep\" it: restating an",
+          "ordering you are not changing is how a confirmed order gets reverted by",
+          "accident. To change nothing but the answer above, write just that field.",
+          "",
+          "---",
+          "",
+        ]
+      : []),
     "# Confirm Provider Cost Ordering (Gate-0)",
     "",
-    "Dispatch routes work to the cheapest capable provider first. Below is the",
-    "tool's **suggested** cost ordering — ascending real price (models.dev), with",
-    "capability as the tiebreak and unpriceable pools last. Review it, then confirm,",
-    "reorder, exclude, or **add a provider that wasn't auto-detected**.",
+    "Dispatch routes work to the cheapest capable provider first.",
+    "",
+    ...(opts.hasPriorConfirmation === true
+      ? [
+          "Below is the ordering **as you confirmed it** (the table is rendered from your",
+          "persisted decision, not from a fresh suggestion). Leave it alone unless you",
+          "actually want to change it.",
+        ]
+      : [
+          "Below is the tool's **suggested** cost ordering — ascending real price",
+          "(models.dev), with capability as the tiebreak and unpriceable pools last.",
+          "Review it, then confirm, reorder, exclude, or **add a provider that wasn't",
+          "auto-detected**.",
+        ]),
     "",
     "| # | Provider | Model | $/Mtok (blended) | Tier | Status |",
     "|---|----------|-------|------------------|------|--------|",
@@ -190,9 +335,10 @@ export function renderProviderConfirmationPrompt(opts: {
     "{",
     `  "schema_version": "${PROVIDER_CONFIRMATION_INPUT_VERSION}",`,
     '  "cost_order": ["<provider-or-model-key>", "..."],',
+    '  "capability_order": ["<model-id>", "..."],',
     '  "exclude": ["<provider>:<model>", "<provider>", "<endpoint-host>"],',
     '  "include": ["<self-spawn-blocked provider to opt back in>"],',
-    '  "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }],',
+    '  "host_models": [{ "model_id": "<your model id>" }],',
     '  "dispatch_bias": 0',
     "}",
     "```",

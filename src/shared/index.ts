@@ -643,8 +643,8 @@ export {
   captureQuotaUnclassifiedFriction,
   captureModelUnavailableFriction,
   capturePacketTooLargeFriction,
-  captureNewlyReachableBackendFriction,
   captureZeroCapacityFriction,
+  captureUnrankedCapabilityPromotionFriction,
   PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
 } from "./friction/stepBoundaryCapture.js";
 export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
@@ -1349,7 +1349,7 @@ export {
   admitBatch,
   computeDispatchAdmission,
   deriveThroughputConcurrency,
-  admissionPoolsFromSummaries, buildCapabilityFloorCapable,
+  admissionPoolsFromSummaries, buildCapabilityFloorCapable, buildObservedCapabilityFloorCapable,
   AdmissionGrantSchema,
   AdmissionExplainSchema,
   DispatchAdmissionSchema,
@@ -1450,7 +1450,7 @@ export {
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
 export type { SharedProviderConfirmation, RenderedProviderConfirmation, ConfirmedDispatchPolicy, DispatchExclusionPattern, DispatchExclusion, ExcludableBackend, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedCapabilityRanks, resolveUnevidencedCapabilityPools, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput, carryForwardConfirmationInput, retainAutoExclusions, detectDiscardedCapabilityReorder, mergeCapabilityOrder, selectCapabilityAnchors, DEFAULT_CAPABILITY_ANCHOR_COUNT } from "./providers/sharedProviderConfirmation.js";
 
 // 3c — POPULATE trigger for the proxy lane (Gate-0 build time / explicit
 // refresh; the resolve path only READS the cache).

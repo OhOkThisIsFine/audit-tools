@@ -1660,6 +1660,12 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
       sessionConfig: sessionConfig ?? null,
       itemCount: modules.length,
       env: process.env,
+      // Genuinely sizing-only: the sole field read is `max_concurrent`, interpolated
+      // into the prompt as a fan-out cap. `capacity_pools` never reaches
+      // `buildDispatchQuota` from here, so no capability floor bands against this
+      // schedule and there is nothing for ranks to affect. Stated in writing because
+      // the field is required — an omission must never again pass for a decision.
+      capabilityRanks: null,
     });
     const maxConcurrent = schedule.max_concurrent;
 

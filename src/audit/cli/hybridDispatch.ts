@@ -54,7 +54,7 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
  */
 export async function buildAuditSourcePools(
   sessionConfig: SessionConfig,
-  options?: {
+  options: {
     /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
     excludedBackends?: DispatchExclusion;
     /**
@@ -65,6 +65,16 @@ export async function buildAuditSourcePools(
      * drives that one account). Omit on a headless run (no host identity).
      */
     attendedHostProviderName?: ResolvedProviderName | null;
+    /**
+     * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). REQUIRED,
+     * like every other builder on this path: the capability floor fails OPEN, so an
+     * unwired site is indistinguishable from a working one. This was briefly optional
+     * on a "read-only/preview callers have no root" justification that was simply
+     * false — the sole production caller is the headless rolling-dispatch drive, with
+     * `root` in scope — and the optionality is exactly what let that site go unwired.
+     * `null` is the explicit "no confirmation in scope" answer.
+     */
+    capabilityRanks: ReadonlyMap<string, number> | null;
   },
 ): Promise<SourcePoolBuild> {
   const primaryProviderName =
@@ -82,6 +92,7 @@ export async function buildAuditSourcePools(
     quotaSource,
     quotaEntries,
     excludedBackends: options?.excludedBackends,
+    capabilityRanks: options.capabilityRanks,
   });
   return {
     pools: dedupHostAndSourcePools({

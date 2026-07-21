@@ -331,9 +331,42 @@ function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolea
  * own `capabilityScore`/`capabilityRank` fields, never a transport's catalog
  * ([[litellm-replaces-repair-proxy]]).
  */
+export interface CapabilityFailOpenInfo {
+  poolId: string;
+  packetId: string;
+  requiredTier: DispatchModelTier;
+}
+
+/**
+ * {@link buildCapabilityFloorCapable} with the per-(pool, packet) de-duplication its
+ * reporters all need — the predicate is re-evaluated as the loop rescans, so a raw
+ * `onFailOpen` fires repeatedly for one routing decision.
+ *
+ * Single-sourced because the dedup was audit's alone: remediate passed no reporter at
+ * all, so on that draw an unranked pool admitting `deep` work was completely SILENT —
+ * and silence is exactly what let the unwired `marshal.ts` schedule go unnoticed. Both
+ * draws now report through one core ([[dissolve-auditor-remediator-distinction]]); a
+ * fail-open is a routing fact, not an audit-only concern.
+ */
+export function buildObservedCapabilityFloorCapable(
+  pools: readonly AdmissionPool[],
+  onFailOpen: (info: CapabilityFailOpenInfo) => void,
+): (pool: AdmissionPool, packet: AdmissionCandidate) => boolean {
+  const seen = new Set<string>();
+  return buildCapabilityFloorCapable(pools, (info) => {
+    // Structured key: pool and packet ids are opaque strings, so a printable separator
+    // could occur inside one and collide two distinct pairs into a single key —
+    // silently suppressing a real fail-open report. JSON of the pair cannot collide.
+    const key = JSON.stringify([info.poolId, info.packetId]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    onFailOpen(info);
+  });
+}
+
 export function buildCapabilityFloorCapable(
   pools: readonly AdmissionPool[],
-  onFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void,
+  onFailOpen?: (info: CapabilityFailOpenInfo) => void,
 ): (pool: AdmissionPool, packet: AdmissionCandidate) => boolean {
   // Tercile-band the scored pools once per batch (deterministic: score asc, poolId tiebreak).
   const scored = pools

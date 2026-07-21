@@ -1,4 +1,4 @@
-import { resolveSessionConfig, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
+import { resolveSessionConfig, readConfirmedCapabilityRanks, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -16,6 +16,7 @@ import {
   getAuditorDescriptor,
   getExplicitProvider,
   getHostModel,
+  getRootDir,
 } from "./args.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
@@ -62,6 +63,9 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   // command never calls finalizeDispatchQuota, so nothing is written to disk.
   const dispatchPool = await buildDispatchPool({
     sessionConfig,
+    // The preview must band exactly as real dispatch does, so it reads the same
+    // confirmed capability evidence rather than passing null.
+    capabilityRanks: await readConfirmedCapabilityRanks(getRootDir(argv)),
     providerName,
     hostModel,
     queryLimits: undefined,

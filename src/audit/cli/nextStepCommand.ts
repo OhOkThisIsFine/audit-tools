@@ -19,6 +19,9 @@ import {
   resolveAutonomousMode,
   populateDeclaredProxyCatalog,
   readSharedProviderConfirmation,
+  resolveUnevidencedCapabilityPools,
+  selectCapabilityAnchors,
+  carryForwardConfirmationInput,
   computeNewlyReachableBackends,
   renderHostWallExplanation,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
@@ -415,6 +418,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // that — otherwise this `PRIORITY[0]` obligation never converges.
   const providerConfirmationGate: ProviderConfirmationGateState = {
     newlyReachable: await resolveNewlyReachableBackends(root, effectiveConfig),
+    unevidencedCapability: await resolveUnevidencedCapabilityPools(root, effectiveConfig),
     autonomous: resolveAutonomousMode({ sessionConfig: effectiveConfig }),
   };
 
@@ -971,14 +975,30 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       env: process.env,
     });
     const dispatchSources = await gatherDispatchableSources(effectiveConfig, primaryProviderName);
+    // BL-2: render the table from the operator's CARRIED decision, never from a bare
+    // suggestion. Passing no prior/input here made a RE-confirmation display the tool's
+    // price-ascending suggestion as though it were current — stale state shown as fact,
+    // beside a prompt that promises omitted fields keep their confirmed values. The
+    // executor promotes through the identical `carryForwardConfirmationInput` seam, so
+    // what is displayed is now exactly what routes if the operator accepts verbatim.
+    const priorConfirmation = await readSharedProviderConfirmation(root);
+    const carriedInput = carryForwardConfirmationInput(null, priorConfirmation);
     const suggested = buildProviderConfirmationRender(
       effectiveConfig,
       process.env,
-      [],
-      [],
+      carriedInput?.exclude ?? [],
+      carriedInput?.include ?? [],
       undefined,
-      undefined,
+      carriedInput ?? undefined,
       dispatchSources,
+      // MUST be passed separately: `carriedInput.exclude` deliberately omits
+      // gate-authored patterns (provenance — `auto_exclude` is the gate's placeholder
+      // for an answer the operator never gave, so a submission supersedes it). That
+      // split governs LIFETIME, not enforcement, so the render still has to mark the
+      // entry excluded — omitting this argument showed a backend the gate had
+      // fail-closed-excluded as routable, in the very prompt asking the operator to
+      // confirm it.
+      priorConfirmation?.policy?.auto_exclude ?? [],
     );
     const step = await writeCurrentStep({
       artifactsDir,
@@ -1000,6 +1020,19 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         // G3: non-empty ⇒ this is a re-confirmation; the prompt leads with the delta
         // so the operator answers what changed, not the whole table again.
         newlyReachable: providerConfirmationGate.newlyReachable,
+        // Non-empty ⇒ the prompt additionally asks for a most-capable-first ordering
+        // over these models, so the pools stop fail-opening at the capability floor.
+        unevidencedCapability: providerConfirmationGate.unevidencedCapability,
+        // BL-1: a bounded, spread sample of the confirmed ordering, so the delta-scoped
+        // capability ask is answerable as ONE ordering over new + reference points. The
+        // prompt stays O(new + constant) no matter how large the roster grows.
+        capabilityAnchors: selectCapabilityAnchors(
+          priorConfirmation?.policy?.capability_order ?? [],
+          providerConfirmationGate.unevidencedCapability,
+        ),
+        // BL-2: the do-not-re-litigate guardrail is owed to ANY re-confirmation, not
+        // only to one carrying a reach delta.
+        hasPriorConfirmation: priorConfirmation !== null,
       }),
     });
     console.log(JSON.stringify(step, null, 2));

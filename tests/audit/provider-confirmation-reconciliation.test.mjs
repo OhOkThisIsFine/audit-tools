@@ -22,6 +22,7 @@ const {
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readSharedProviderConfirmation,
+  resolveDispatchExclusion,
   readProviderConfirmationInput,
   unlinkProviderConfirmationInput,
   resolveAutonomousMode,
@@ -38,6 +39,9 @@ const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.ts");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
 const { buildAuditObligations } = await import("../../src/audit/cli/nextStepHelpers.ts");
+const { renderProviderConfirmationPrompt } = await import(
+  "../../src/audit/cli/providerConfirmationStep.ts"
+);
 
 // No CLAUDECODE/CODEX so the self-spawn guard never perturbs discovery.
 const CLEAN_ENV = {};
@@ -166,9 +170,21 @@ describe("autonomous fail-closed exclusion", () => {
 
       const read = await readSharedProviderConfirmation(root);
       expect(
-        read.policy?.exclude,
+        read.policy?.auto_exclude,
         "the unconfirmed backend is ruled out on the operator's behalf via the service axis",
       ).toEqual(["service:openai-compatible/brand-new-model"]);
+      expect(
+        read.policy?.exclude ?? [],
+        "a gate-authored pattern is never recorded as an operator decision",
+      ).not.toContain("service:openai-compatible/brand-new-model");
+      expect(
+        resolveDispatchExclusion(read.policy, CLEAN_ENV).excludes({
+          transport: "openai-compatible",
+          model: "brand-new-model",
+        }),
+        }),
+        "separating provenance governs lifetime, never whether the pattern bites",
+      ).toBe(true);
     });
   });
 
@@ -233,7 +249,7 @@ describe("autonomous fail-closed exclusion", () => {
 
       const read = await readSharedProviderConfirmation(root);
       expect(
-        read.policy?.exclude,
+        read.policy?.auto_exclude,
         "no operator decision covers it ⇒ it must not become dispatchable",
       ).toContain("service:openai-compatible/brand-new-model");
     });
@@ -371,7 +387,7 @@ describe("gate → obligation → executor selection", () => {
         newlyReachable: [
       {
         key: "brand-new-model",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         exclusion_pattern: "openai-compatible:brand-new-model",
       },
     ],
@@ -402,7 +418,7 @@ describe("gate → obligation → executor selection", () => {
         newlyReachable: [
       {
         key: "brand-new-model",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         exclusion_pattern: "openai-compatible:brand-new-model",
       },
     ],
@@ -420,10 +436,298 @@ describe("gate → obligation → executor selection", () => {
       // ⇒ no exclusion is ever written and the delta is never resolved.
       const read = await readSharedProviderConfirmation(root);
       expect(
-        read?.policy?.exclude,
+        read?.policy?.auto_exclude,
         "advanceAudit must thread the gate into its OWN decide, or the gate is dead",
       ).toContain("openai-compatible:brand-new-model");
       expect(gate.newlyReachable, "the promotion cleared the delta").toEqual([]);
+    });
+  });
+});
+
+// ── the capability-evidence gate (second delta on the SAME obligation) ──────
+//
+// Same shape as the reach gate above, different question: a confirmation that
+// exists but leaves a dispatchable pool with NO resolvable capability rank is not
+// satisfied either. The admission capability floor fails OPEN on an unranked pool
+// (`buildCapabilityFloorCapable`'s unknown branch), so without this the pool is
+// eligible for `deep` work on no evidence at all.
+//
+// The delta's own contents (which models are unevidenced) are resolved by
+// `resolveUnevidencedCapabilityPools` in shared/providers/sharedProviderConfirmation
+// — see tests/shared/capability-evidence.test.mjs for the join it is built on. These
+// tests cover the delta's CONSUMERS (the state predicate, the decide, the prompt).
+describe("capability-evidence gate → obligation", () => {
+  const UNEVIDENCED = ["model-gamma", "model-strong"];
+  const confirmedBundle = () => ({
+    provider_confirmation: {
+      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
+      confirmed_at: new Date().toISOString(),
+      session_level: true,
+      provider_pool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+    },
+  });
+  const providerObligation = (state) =>
+    state.obligations.find((x) => x.id === "provider_confirmation");
+
+  test("an EMPTY capability delta leaves a present confirmation satisfied", () => {
+    const o = providerObligation(
+      deriveAuditState(confirmedBundle(), { unevidencedCapabilityPools: [] }),
+    );
+    expect(o.state).toBe("satisfied");
+    expect(o.reason).toBeUndefined();
+  });
+
+  test("a non-empty capability delta re-opens the obligation and NAMES the models", () => {
+    const o = providerObligation(
+      deriveAuditState(confirmedBundle(), {
+        unevidencedCapabilityPools: UNEVIDENCED,
+      }),
+    );
+    expect(o.state, "no evidence ⇒ pin it down, never fail open").toBe("stale");
+    expect(o.reason).toContain("no capability evidence");
+    // The prompt is built from this text, so both models must be nameable.
+    expect(o.reason).toContain("model-gamma");
+    expect(o.reason).toContain("model-strong");
+    // …and it must NOT claim a reach problem that did not happen.
+    expect(o.reason).not.toContain("reachable backends");
+  });
+
+  // Two independent deltas on ONE obligation: reporting only the first would send
+  // the operator to reconcile reach while the capability question stays invisible
+  // (and vice versa) — and the obligation would re-open again immediately after.
+  test("BOTH deltas non-empty ⇒ the reason mentions both, neither is swallowed", () => {
+    const o = providerObligation(
+      deriveAuditState(confirmedBundle(), {
+        newlyReachableBackends: ["brand-new-model"],
+        unevidencedCapabilityPools: UNEVIDENCED,
+      }),
+    );
+    expect(o.state).toBe("stale");
+    expect(o.reason).toContain("reachable backends the operator never confirmed");
+    expect(o.reason).toContain("brand-new-model");
+    expect(o.reason).toContain("dispatch pools with no capability evidence");
+    expect(o.reason).toContain("model-gamma");
+  });
+
+  // The half four prior gate drafts got wrong: re-opening the obligation is inert
+  // unless the SELECTION lands on its executor.
+  //
+  // REGRESSION GUARD. `decideNextStep` must FORWARD the capability delta to
+  // `deriveAuditState`. It briefly declared the option and dropped it, so the
+  // decide saw `provider_confirmation` satisfied and selected the NEXT
+  // obligation's executor — the gate never fired on that path at all.
+  // `advanceAudit`'s drain decide has the same requirement.
+  test("a capability delta makes decideNextStep select the provider_confirmation EXECUTOR", () => {
+    const decision = decideNextStep(confirmedBundle(), {
+      unevidencedCapabilityPools: UNEVIDENCED,
+    });
+    expect(decision.selected_obligation).toBe("provider_confirmation");
+    expect(decision.selected_executor).toBe("provider_confirmation_executor");
+  });
+
+  // The path that DOES work today: the obligation engine derives gate-aware, so a
+  // capability-only delta still reaches the provider_confirmation step and waits for
+  // the operator's `capability_order` submission.
+  test("attended + capability delta + no submission ⇒ EMITS the prompt", async () => {
+    await withTempRoot(async (_root, artifactsDir) => {
+      const defs = buildAuditObligations({
+        newlyReachable: [],
+        unevidencedCapability: UNEVIDENCED,
+        autonomous: false,
+      });
+      const def = defs.find((d) => d.id === "provider_confirmation");
+      const outcome = await def.execute(confirmedBundle(), {
+        params: { artifactsDir },
+      });
+      expect(outcome.kind, "attended ⇒ ask the operator to pin the ranks").toBe("emit");
+      expect(outcome.step.kind).toBe("provider_confirmation");
+      const o = outcome.step.state.obligations.find(
+        (x) => x.id === "provider_confirmation",
+      );
+      expect(o.state, "and it stays open until they answer").toBe("stale");
+    });
+  });
+
+  // The OTHER arm of the same `hasDelta` OR, and the one that shipped untested.
+  //
+  // REGRESSION GUARD, and it guards the "gate that could never fire" class specifically.
+  // `hasDelta` ORs the reach delta with the capability delta; only the reach arm was ever
+  // driven with `autonomous: true`. If the capability term were dropped from that OR (or
+  // the fold branch keyed on `newlyReachable` alone, which is what it originally did), an
+  // autonomous run with a capability-only delta would take the ELSE branch and EMIT — a
+  // prompt into a run with no operator to read it, re-emitted every invocation, which is
+  // the PRIORITY[0] livelock. It must FOLD to the executor instead.
+  test("autonomous + capability-only delta ⇒ FOLDS to the executor, never emits", async () => {
+    await withTempRoot(async (_root, artifactsDir) => {
+      const defs = buildAuditObligations({
+        newlyReachable: [],
+        unevidencedCapability: UNEVIDENCED,
+        autonomous: true,
+      });
+      const def = defs.find((d) => d.id === "provider_confirmation");
+      // Observed as a DIFFERENTIAL against the attended control above, on a deliberately
+      // identical thin ctx. The emit branch returns from `def.execute` itself and needs
+      // nothing more than `artifactsDir` — that is why the attended test passes with this
+      // ctx. The fold branch hands off to `runDeterministicExecutor`, which requires the
+      // real drain refs this ctx omits and therefore rejects. So on THIS ctx: emit ⇒
+      // resolves, fold ⇒ rejects. Asserting the rejection is asserting the branch.
+      //
+      // Deliberately not stubbing the refs to make the fold succeed: that runs the entire
+      // `advanceAudit` drain, which tests the executor rather than the routing decision
+      // this test exists for (and it is covered directly by the friction test below).
+      const thinCtx = { params: { artifactsDir } };
+      await expect(
+        def.execute(confirmedBundle(), thinCtx),
+        "nobody is there to answer the prompt — emitting it would livelock PRIORITY[0], " +
+          "so this must hand off to the executor and never return an emit",
+      ).rejects.toThrow();
+    });
+  });
+
+  // The capability twin of the `newly_reachable_backend` friction test above, and it
+  // exists for the same reason: promoting unranked is the RIGHT call (refusing livelocks,
+  // fail-closed-excluding silently shrinks the dispatch set) but it leaves those models
+  // failing OPEN at the admission capability floor. The progress summary says so — and a
+  // drain can fold that summary away, so the friction record is what actually survives to
+  // the close-out walk. Without it the fail-open is discoverable only by diffing artifacts.
+  test("an unranked promotion is LOUD: an unranked_capability_promotion friction event lands", async () => {
+    await withTempRoot(async (root, artifactsDir) => {
+      const gate = {
+        newlyReachable: [],
+        unevidencedCapability: [...UNEVIDENCED],
+        autonomous: true,
+      };
+      const result = await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, gate);
+      // Awaited by the executor, exactly like the reach capture — if this ever needs a
+      // sleep to pass, that guarantee broke.
+      const frictionPath = frictionCapturePath(artifactsDir, "provider-confirmation");
+      expect(await exists(frictionPath), "the operator can find out this happened").toBe(true);
+      const body = JSON.stringify(JSON.parse(await readFile(frictionPath, "utf8")));
+      expect(body).toContain("unranked_capability_promotion");
+      // One fact PER MODEL, discriminated by model id — so each is individually triageable
+      // and a re-derive cannot double-count them.
+      expect(body).toContain("model-gamma");
+      expect(body).toContain("model-strong");
+      // And the summary still names it: the two channels are belt-and-braces, not
+      // either/or. Asserting only the friction file would let the summary line rot.
+      expect(result.progress_summary).toContain("NO capability evidence");
+      expect(result.progress_summary).toContain("model-gamma");
+    });
+  });
+
+  // The prompt is the operator's ONLY way to clear this delta, so it must name both
+  // the unranked models and the exact field that answers them — and it must state
+  // the sign, since `capability_order` is most-capable-FIRST while the persisted
+  // `capability_rank` is LOWER = more capable.
+  test("the prompt asks for capability_order over exactly the unevidenced models", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+      unevidencedCapability: UNEVIDENCED,
+    });
+    expect(prompt).toContain("capability_order");
+    expect(prompt).toContain("model-gamma");
+    expect(prompt).toContain("model-strong");
+    expect(prompt, "the sign must be stated, not assumed").toContain("most capable first");
+    // The exact JSON the operator is told to write, in the exact delta order — and it
+    // MUST carry `schema_version`. A host that writes this fragment verbatim has to
+    // produce a file `parseProviderConfirmationInput` ACCEPTS: without the version the
+    // parser rejects it wholesale, the rejection is indistinguishable from "no
+    // submission", and this same prompt re-emits forever. That livelock is what the
+    // multi-line shape below pins, so do not collapse this back to a one-liner.
+    expect(prompt).toContain('"schema_version": "provider-confirmation-input/v1",');
+    expect(prompt).toContain('"capability_order": ["model-gamma", "model-strong"]');
+    // Relative-only is the CLAUDE.md "never a named-model→tier map" rule made
+    // explicit at the one place an LLM could be tempted to invent a score.
+    expect(prompt).toContain("relative ordering only");
+  });
+
+  test("an empty capability delta emits NO capability SECTION, but still documents the field", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+      unevidencedCapability: [],
+    });
+    // The ASK is what must be absent — nothing is unranked, so there is no question.
+    expect(prompt).not.toContain("## Rank these models by capability");
+    expect(prompt).not.toContain("most capable first");
+    // But the canonical shape block documents the WHOLE input contract, so
+    // `capability_order` stays listed there exactly like every other optional field.
+    // Omitting it is what left a host using the authoritative shape with no field to
+    // answer with — so asserting the bare token is absent would re-create that gap.
+    expect(prompt).toContain('"capability_order": ["<model-id>", "..."]');
+  });
+
+  // A pool the join cannot reach at all (no model) is UNPINNABLE — pinning it could
+  // never clear the delta, so `provider_confirmation` (PRIORITY[0]) would re-select
+  // forever.
+  //
+  // ⚠ This test used to hand `[]` straight to `deriveAuditState` and assert
+  // `satisfied` — which is TAUTOLOGICAL: it asserts only that the predicate treats an
+  // empty list as empty, and would pass unchanged even if a model-less pool were
+  // wrongly admitted to the delta (the actual livelock). It now COMPUTES the delta
+  // from a real confirmation on disk against a roster whose only source has no model,
+  // so the assertion is the skip talking.
+  test("a model-less pool produces an EMPTY delta and PRIORITY[0] converges", async () => {
+    await withTempRoot(async (root) => {
+      const { resolveUnevidencedCapabilityPools } = await import("audit-tools/shared");
+      await writeSharedProviderConfirmation(
+        root,
+        buildSharedProviderConfirmation({}, CLEAN_ENV, [], [], () => false),
+      );
+      // `provider: "claude-code"` keeps the primary fold inert, so the gathered set
+      // is exactly this one unjoinable source.
+      const delta = await resolveUnevidencedCapabilityPools(root, {
+        provider: "claude-code",
+        sources: [
+          {
+            id: "no-model-src",
+            transport: "openai-compatible",
+            endpoint: "http://nomodel.local/v1",
+          },
+        ],
+      });
+      expect(
+        delta,
+        "an unjoinable pool must never enter the delta — no operator answer could " +
+          "ever clear it, so PRIORITY[0] would re-prompt forever",
+      ).toEqual([]);
+
+      // …and THAT computed delta is what converges the obligation.
+      const cleared = providerObligation(
+        deriveAuditState(confirmedBundle(), { unevidencedCapabilityPools: delta }),
+      );
+      expect(cleared.state).toBe("satisfied");
+      expect(
+        decideNextStep(confirmedBundle(), { unevidencedCapabilityPools: delta })
+          .selected_obligation,
+      ).not.toBe("provider_confirmation");
+
+      // The contrast case: a JOINABLE unranked source DOES re-open it, which proves
+      // the convergence above came from the skip and not from an inert code path.
+      const joinable = await resolveUnevidencedCapabilityPools(root, {
+        provider: "claude-code",
+        sources: [
+          {
+            id: "real-src",
+            transport: "openai-compatible",
+            model: "model-unranked",
+            endpoint: "http://real.local/v1",
+          },
+        ],
+      });
+      expect(joinable).toEqual(["model-unranked"]);
+      expect(
+        providerObligation(
+          deriveAuditState(confirmedBundle(), {
+            unevidencedCapabilityPools: joinable,
+          }),
+        ).state,
+      ).toBe("stale");
     });
   });
 });
@@ -446,5 +750,138 @@ describe("policy is not gated by reach (bug 2)", () => {
       expect(await readConfirmedDispatchBias(root)).toBe(0.75);
       expect(await readConfirmedCostPositions(root)).toBeInstanceOf(Map);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BL-1 (prompt half) + BL-2 — the RE-confirmation prompt
+// ---------------------------------------------------------------------------
+
+const { selectCapabilityAnchors: pickAnchors } = await import("audit-tools/shared");
+
+describe("BL-1 prompt: anchored insertion makes the delta-scoped ask answerable", () => {
+  const POOL = [{ name: "worker-command", capability_tier: "unknown", excluded: false }];
+
+  test("anchors render as fixed reference points and join the answer fragment", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: ["m-new"],
+      capabilityAnchors: ["m-top", "m-mid", "m-bottom"],
+    });
+    expect(prompt).toContain("already ranked");
+    expect(prompt).toContain("m-top");
+    expect(prompt).toContain("m-bottom");
+    // ONE ordering over the COMBINED set — that is what `mergeCapabilityOrder`
+    // interpolates against. A fragment naming only the new model is the livelock.
+    expect(prompt).toContain(
+      '"capability_order": ["m-top", "m-mid", "m-bottom", "m-new"]',
+    );
+    // Still a complete, acceptable file (the NEW-4 lesson).
+    expect(prompt).toContain('"schema_version": "provider-confirmation-input/v1",');
+    // The operator must be told that silence preserves, or they will restate the
+    // whole ranking they cannot see.
+    expect(prompt).toContain("keep the rank they already have");
+    // And that reordering the anchors is inert — otherwise a swap reads as accepted.
+    expect(prompt).toContain("has no effect");
+  });
+
+  test("the prompt stays O(new + constant) — a huge roster never reaches it", () => {
+    // Zero-padded so no id is a substring of another — otherwise the `includes`
+    // count below over-reports and the assertion is not the anchor bound talking.
+    const roster = Array.from(
+      { length: 300 },
+      (_, i) => `roster-model-${String(i).padStart(3, "0")}`,
+    );
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: ["m-new"],
+      capabilityAnchors: pickAnchors(roster, ["m-new"]),
+    });
+    const mentioned = roster.filter((m) => prompt.includes(m));
+    expect(
+      mentioned.length,
+      "rendering the whole confirmed ordering is the fix this design exists to avoid",
+    ).toBeLessThanOrEqual(5);
+  });
+
+  test("a model under question is never also offered as a settled anchor", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: ["m-new"],
+      // A caller passing an overlapping anchor must not produce a contradictory ask.
+      capabilityAnchors: ["m-top", "m-new"],
+    });
+    expect(prompt).toContain('"capability_order": ["m-top", "m-new"]');
+    expect(prompt).not.toContain("`m-new`  (already ranked)");
+  });
+
+  test("no anchors (a first-ever ranking) keeps the original single-list ask", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: ["m-new"],
+      capabilityAnchors: [],
+    });
+    expect(prompt).toContain("these model ids, **most capable first**");
+    expect(prompt).not.toContain("already ranked");
+  });
+});
+
+// ⚠ RED-GREEN VALIDATED. Reverting `hasPriorConfirmation` to being derived from
+// `newlyReachable.length > 0` (its pre-fix gating) turns every assertion below RED.
+//
+// The defect: on a capability-only re-confirmation the prompt rendered the tool's
+// price-ascending SUGGESTION with no guardrail at all — while the capability block
+// newly promises "any field you omit keeps the value you confirmed previously". An
+// operator transcribing the displayed table into `cost_order` to "keep" it thereby
+// silently reverted their own confirmed ordering. Enforced in the tool, not left to
+// the operator noticing (CLAUDE.md auditor-agnostic robustness).
+describe("BL-2: a RE-confirmation never shows stale state as if it were current", () => {
+  const POOL = [{ name: "worker-command", capability_tier: "unknown", excluded: false }];
+
+  test("the do-not-re-litigate guardrail renders with NO reach delta at all", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: ["m-new"],
+      newlyReachable: [],
+      hasPriorConfirmation: true,
+    });
+    expect(prompt).toContain("This is a RE-confirmation");
+    expect(prompt).toContain("do not re-litigate");
+    // The specific footgun, named.
+    expect(prompt).toContain("cost_order");
+    expect(prompt).toContain("as you confirmed it");
+    // The suggestion framing must be GONE — it is what made stale state read as current.
+    expect(prompt).not.toContain("tool's **suggested** cost ordering");
+  });
+
+  test("a FIRST-time gate keeps the suggestion framing and carries no guardrail", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      unevidencedCapability: [],
+      hasPriorConfirmation: false,
+    });
+    expect(prompt).toContain("tool's **suggested** cost ordering");
+    expect(prompt).not.toContain("This is a RE-confirmation");
+    expect(prompt).not.toContain("do not re-litigate");
+  });
+
+  test("a reach delta still gets exactly one guardrail, not two", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: POOL,
+      newlyReachable: [
+        {
+          key: "brand-new",
+          transport: "openai-compatible",
+          exclusion_pattern: "openai-compatible:brand-new",
+        },
+      ],
+      hasPriorConfirmation: true,
+    });
+    // The delta block's own guardrail covers it.
+    expect(prompt).toContain("do not re-litigate");
+    expect(prompt.match(/do not re-litigate/g)).toHaveLength(1);
+    expect(prompt).not.toContain("This is a RE-confirmation");
+    // …and the table is still labelled as the confirmed ordering, not a suggestion.
+    expect(prompt).toContain("as you confirmed it");
   });
 });

@@ -47,12 +47,19 @@ export const PROVIDER_CONFIRMATION_INPUT_VERSION =
  * deterministically at dispatch. `model_id` is both the price-lookup key
  * (models.dev) and the dispatch cost-position key. Never hardcoded — the host
  * supplies it.
+ *
+ * A `tier` field used to live here. It was WRITE-ONLY: the parser read it, and
+ * `annotateConfirmedPool` then discarded it on purpose — `HostRosterModel`'s
+ * `CapabilityTier` is a different vocabulary from `CostCandidate`'s
+ * `DispatchModelTier`, and a host model is keyed + priced by `model_id`, which is
+ * what actually threads to dispatch. Stored-but-unread data reads as authoritative
+ * to the next reader, so it is deleted rather than plumbed through the
+ * carry-forward. Capability is expressed by `capability_order` — an ordering, never
+ * a self-declared tier.
  */
 export interface HostRosterModel {
   /** Model id used to price (models.dev) and to key the dispatch cost position. */
   model_id: string;
-  /** Optional capability tier for the price-unknown tiebreak in the suggestion. */
-  tier?: CapabilityTier;
 }
 
 /**
@@ -72,6 +79,25 @@ export interface ProviderConfirmationInput {
    * both provider pools and host models so one total cost order drives dispatch.
    */
   cost_order?: string[];
+  /**
+   * Confirmed capability ordering as a list of candidate keys, MOST-CAPABLE-FIRST.
+   * Array index becomes `capability_rank` (LOWER = more capable), exactly as
+   * {@link cost_order}'s index becomes `cost_order`.
+   *
+   * This answers the capability-evidence obligation: a pool no external rank source
+   * covers is PINNED here rather than silently fail-opening at the admission
+   * capability floor (where an unranked pool is eligible for `deep` work it may be
+   * entirely unfit for).
+   *
+   * **Relative by construction.** A positional list can only express an ORDERING —
+   * there is no field in which an LLM could invent an absolute score, which is the
+   * CLAUDE.md "never a named-model→tier map" rule made unrepresentable rather than
+   * merely instructed. Externally-sourced absolute numbers reach dispatch by a
+   * different road (a rank source someone else maintains), never through here.
+   *
+   * Omit when every pool already has external evidence — the gate does not fire.
+   */
+  capability_order?: string[];
   /**
    * Exclusion patterns ruling backends out of the dispatchable pool
    * (`DispatchExclusionPattern`): `provider:model` (the default granularity — the
@@ -128,6 +154,14 @@ export interface HostModelCostEntry {
   blended_price_usd_per_mtok: number | null;
   /** Operator-confirmed 0-based cost position (rung 1 of costRank). */
   cost_order: number;
+  /**
+   * Confirmed per-model capability rank (LOWER = more capable) — the capability-evidence
+   * obligation's record for a host model that no external rank source covers. A host
+   * model is ranked exactly like any other model; this field exists only so the
+   * gap-filling ordering has somewhere to land. External evidence takes precedence
+   * (see `buildHostModelPool`), so this is consulted only when the roster carries none.
+   */
+  capability_rank?: number;
 }
 
 /**
@@ -231,6 +265,19 @@ export interface PersistedPoolEntry {
    * first. Read back at dispatch via `resolveConfirmedCostPositions`.
    */
   cost_order?: number;
+  /**
+   * Confirmed per-model capability rank (LOWER = more capable), from the
+   * capability-evidence obligation — an LLM-proposed or operator-authored RELATIVE
+   * ordering among pools that no external rank source covers, or the explicit
+   * "unrankable, accept at band X" escape. Read back at dispatch via
+   * {@link readConfirmedCapabilityRanks} and stamped onto the pool at construction.
+   *
+   * A DECISION, not reach — so unlike the `?: never`-branded reach fields above it
+   * legitimately persists and is legitimately inherited by a reading auditor.
+   * Deliberately RELATIVE only: an LLM may order pools against each other, never
+   * invent an absolute score (CLAUDE.md — "never a named-model→tier map").
+   */
+  capability_rank?: number;
 }
 
 /**
@@ -280,6 +327,12 @@ export interface ConfirmedPoolEntry {
    * the pool falls to real price then tier at dispatch.
    */
   cost_order?: number;
+  /**
+   * Confirmed per-model capability rank (LOWER = more capable) — see
+   * {@link PersistedPoolEntry.capability_rank}. Part of the DECISION half, so
+   * `toPersistedPoolEntry` carries it to disk (unlike the reach fields above).
+   */
+  capability_rank?: number;
 }
 
 /**

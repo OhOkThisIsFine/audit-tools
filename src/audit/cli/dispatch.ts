@@ -18,7 +18,7 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits, QuotaBindingWindow } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedCapabilityRanks, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
 import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -384,6 +384,11 @@ export async function prepareDispatchArtifacts(params: {
   } else {
     dispatchPool = await buildDispatchPool({
       sessionConfig,
+      // Capability evidence is stamped onto every pool at CONSTRUCTION so the admission
+      // capability floor bands on real ranks instead of fail-opening. Read here (not at
+      // the floor) because the in-process rolling engine reads the pool directly and
+      // would otherwise never see it.
+      capabilityRanks: await readConfirmedCapabilityRanks(params.root),
       providerName: params.providerName,
       hostModel: params.hostModel,
       queryLimits: params.queryLimits,
