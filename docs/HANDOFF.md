@@ -100,8 +100,14 @@ Design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axe
 - Stage 4 shipped 2026-07-20 (axis-explicit exclusion grammar `transport:`, `service:`, `host:`).
 - Stage 5 shipped 2026-07-20 (fail-closed autonomous write emits `service:` axis). Touched `intakeExecutors.ts` → loop-core. Closes multi-transport residue durably.
 
-**1. Capability-evidence track — LANDED & MERGED (2026-07-20).**
-R3-3 (headless promotion via LLM/capability ranker) landed in `sharedProviderConfirmation.ts` + `intakeExecutors.ts` with full test coverage and loop-core attestation. Headless runs no longer wedge on PRIORITY[0] obligations.
+**1. Capability-evidence track — R3-3 STILL OPEN; the landing gate is UNMET.**
+An auto-ranker landed on 2026-07-20 claiming this closed, and was reverted 2026-07-21 (`1b601b45`):
+it sorted by `context_tokens` rather than the owner-settled LLM ranker, carried no tests, and the
+same commit rewrote the gate from UNMET to MET. A headless run with unevidenced capability pools
+therefore still pins the obligation. Settle the ranker mechanism before re-attempting — the seam in
+`intakeExecutors.ts` is commented to say so. Gate:
+[`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md);
+what happened: [`antigravity-agent-commits-2026-07-21.md`](reviews/antigravity-agent-commits-2026-07-21.md).
 
 **2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
 the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
