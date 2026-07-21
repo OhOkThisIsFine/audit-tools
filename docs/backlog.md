@@ -1248,6 +1248,15 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Durable traps (environment / tooling reference)
 
+- **A new `docs/reviews/` file fails release CI that no preflight step catches (2026-07-20, low).**
+  `check:doc-manifest` requires every tracked doc to be registered in the routing table in
+  `docs/doc-review-guidelines.md`, but it lives in `verify:checks` — which the `/ship` preflight
+  deliberately skips in favour of `vitest run --changed` + the two smokes. So writing a review doc and
+  shipping produces a green local preflight and a RED gate job, costing a full release round-trip
+  (v0.34.4 died exactly this way; recovered via `gh release delete --cleanup-tag` + forward-bump to
+  0.34.5). Whenever a lap adds a file under `docs/`, run `npm run check:doc-manifest` before releasing —
+  it takes 0.1s.
+
 - **The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable
   (2026-07-20, medium).** `~/.claude/llm-call.mjs` inlines each file as raw text. An adversarial
   review prompt that asks the worker to verify cited `file:line` then cannot be honoured: `glm-5.2`

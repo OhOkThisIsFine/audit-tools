@@ -8,8 +8,8 @@
 ## Live state
 
 - **Current version = `package.json`** (authoritative).
-- **Tree is green and published.** The dispatch/quota fix cluster, unified-routing collapse, the
-  proxy-contract swap, and the Gate-0 backend-identity fix all shipped.
+- **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
+  the proxy-contract swap, the Gate-0 backend-identity fix, and the stage-4 **capacity guard** all shipped.
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
   Both now key on ONE service-scoped `CapacityPool.accountKey`; `deriveLocalAccountId` is deleted.
