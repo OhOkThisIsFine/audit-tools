@@ -100,7 +100,7 @@ AUTO-APPLY (only the safe class)
 11. Each applied change is ONE discrete, revertible commit titled
     `doc-review: <summary>`. Then push `main`.
 
-ESCALATE (needs Ethan)
+ESCALATE (needs the owner)
 12. Write design-decisions, proposed instruction-file edits, and A->B backlog
     drafts into doc-review-findings.md on the `doc-review` branch, inside the
     markers exactly:
@@ -120,7 +120,7 @@ ESCALATE (needs Ethan)
 SILENT ON CLEAN: if nothing was applied and nothing escalated, don't churn the
 findings file beyond the ledger and emit no notification.
 
-INVARIANTS: verify from code never prose; no code anchor -> a question for Ethan,
+INVARIANTS: verify from code never prose; no code anchor -> a question for the owner,
 never a silent deletion; instruction files never auto-edited; no auto-apply rests
 on the verdict of a single reviewer; green gate passes before any `main` push;
 `main` only ever receives reviewed, green-gated doc edits.
