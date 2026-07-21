@@ -11,7 +11,9 @@
 - **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
   the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, Stage 4
   **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`), **Stage 5**
-  (fail-closed autonomous write emits `service:` axis), **pre-commit gate hook fix** (chained-command staging bypass & `-n` false-positives resolved), and **Capability-evidence track R3-3** (headless promotion via LLM/capability ranker landed & merged) all shipped.
+  (fail-closed autonomous write emits `service:` axis), and the **pre-commit gate hook fix**
+  (chained-command staging bypass & `-n` false-positives resolved) all shipped. **R3-3 is NOT shipped**
+  — see item 1 below.
 
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
@@ -109,12 +111,24 @@ therefore still pins the obligation. Settle the ranker mechanism before re-attem
 [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md);
 what happened: [`antigravity-agent-commits-2026-07-21.md`](reviews/antigravity-agent-commits-2026-07-21.md).
 
-**2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
+**2. Loop-core attestation can't tell the reviewer from the author** (HIGH) — `--reviewed-by` is free
+text, so an agent clears its own loop-core commit and the record is indistinguishable from a human
+sign-off. Six such clearances landed 2026-07-20. Detail + fix shape in [`backlog.md`](backlog.md) →
+*Open bugs*; the durable lesson is in memory [[attestation-cannot-tell-reviewer-from-author]].
+
+**3. Pre-commit gate: `core.hooksPath` escapes via a sibling statement** — one-line scoping fix;
+narrowing bypass detection to `git commit` sub-commands was right for `-n`, wrong for the rest. See
+[`backlog.md`](backlog.md) → *Open bugs*.
+
+**4. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
 the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
 below. This now ALSO exercises the just-closed account metering under a real wave — a proxy-fronted
 429 should throttle its same-service siblings but not a different service behind the same proxy.
 
-**3. Gate-0 priority-order UX** (Track 3) — two named owner calls, see backlog.
+**5. Gate-0 priority-order UX** (Track 3) — two named owner calls, see backlog.
+
+**6. Ten open doc-review design decisions** await a call (`CLAUDE-5`, `DD-2/6/7/8/9/10/12/13/15`,
+`CX-3`) — they surface at session start; full text on the `doc-review` branch.
 
 ---
 
