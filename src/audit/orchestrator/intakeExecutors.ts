@@ -11,9 +11,12 @@ import {
   retainAutoExclusions,
   detectDiscardedCapabilityReorder,
   unlinkProviderConfirmationInput,
+  rankHeadlessCapabilityPools,
+  PROVIDER_CONFIRMATION_INPUT_VERSION,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
   resolveSessionConfig,
+  ambientAuditorDescriptor,
   captureNewlyReachableBackendFriction,
   PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
   captureUnrankedCapabilityPromotionFriction,
@@ -235,6 +238,8 @@ export async function runProviderConfirmationAutoComplete(
   // R3-3: Headless promotion via capability ranker. When running headlessly (input === null),
   // if there are unevidenced capability models, auto-rank them so that every dispatchable
   // model receives a capability_rank and headless runs do not wedge on PRIORITY[0].
+  // LLM/auto provenance is kept OUT of policy.capability_order (which preserves operator input),
+  // but passed via autoInput so ranks are stamped onto pool entries on disk.
   const unevidenced = gate?.unevidencedCapability ?? [];
   let autoInput: ProviderConfirmationInput | null = input;
   if (input === null && unevidenced.length > 0) {
@@ -331,7 +336,7 @@ export async function runProviderConfirmationAutoComplete(
     // and fail-closed-excluding an unranked pool would silently shrink the dispatch
     // set) but it must not be SILENT — it is reported in the progress summary.
     unrankedOnPromotion = (gate?.unevidencedCapability ?? []).filter(
-      (model) => !(effectiveInput?.capability_order ?? []).includes(model),
+      (model) => !(input?.capability_order ?? []).includes(model),
     );
     if (gate) gate.unevidencedCapability = [];
   }

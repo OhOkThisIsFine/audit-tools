@@ -182,7 +182,6 @@ describe("autonomous fail-closed exclusion", () => {
           transport: "openai-compatible",
           model: "brand-new-model",
         }),
-        }),
         "separating provenance governs lifetime, never whether the pattern bites",
       ).toBe(true);
     });
@@ -272,7 +271,7 @@ describe("autonomous fail-closed exclusion", () => {
       await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, gate);
 
       const read = await readSharedProviderConfirmation(root);
-      expect(read.policy?.exclude).toEqual(["service:nim/z-ai/glm-5.2"]);
+      expect(read.policy?.auto_exclude).toEqual(["service:nim/z-ai/glm-5.2"]);
 
       // Verify that resolveDispatchExclusion blocks both claude-worker and direct openai-compatible transports reaching nim
       const { resolveDispatchExclusion } = await import("audit-tools/shared");

@@ -442,7 +442,6 @@ export async function captureUnrankedCapabilityPromotionFriction(
     );
   }
 }
-}
 
 /** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */
 export interface CreditExhaustionInfo {
