@@ -88,7 +88,8 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — STAGE 1 IS DONE; stage 2 is the next build.** Design of record:
+**0. Backend-identity migration — STAGES 1+2 SHIPPED; the stage-4 CAPACITY GUARD is now in too, so
+stage 4 itself is the next build.** Design of record:
 [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
 [`backlog.md`](backlog.md) → *Forward tracks*. Stage 1 shipped 2026-07-19: the rename
 (`provider` → `transport`, `backend_provider` → `service`, 394 refs / 43 files), the
@@ -99,11 +100,24 @@ Classification record: [`identity-migration-stage1-plan-2026-07-19.md`](reviews/
 `src/shared/providers/identity.ts` (a leaf, NOT `providerConfirmation.ts` as the spec said: that file
 reaches quota through `costRank`, so quota importing it would cycle). Pure move, arguments preserved.
 
-**Next is stage 3** (`Locus` discriminated union) — but note the backlog rates it lowest of the five
-and says it is justified BY stage 4, not independently. **Stage 4** (axis-explicit exclusion grammar)
-is the higher-value next build, and doc-review item DD-14 is waiting on it: `spec/backend-identity-axes.md`
-presents the `transport:`/`service:`/`host:` grammar in present tense while the live parser implements
-none of it, so an operator writing a `service:` rule today gets silence.
+**Next is stage 4** (axis-explicit exclusion grammar) — NOT stage 3, which the backlog rates lowest of
+the five and says is justified BY stage 4. Doc-review item DD-14 is waiting on it:
+`spec/backend-identity-axes.md` presents the `transport:`/`service:`/`host:` grammar in present tense
+while the live parser implements none of it, so an operator writing a `service:` rule today gets silence.
+
+**Stage 4's declared prerequisite — the capacity guard — SHIPPED 2026-07-20** (`v0.34.3`+, commit
+`b220171e`). `buildSourcePools` now returns `{pools, zeroedByExclusion}` and both seams emit an
+`exclusion_zeroed_capacity` friction fact naming the culprit patterns, so a policy that removes every
+reachable lane can no longer zero dispatch silently. `DispatchExclusion` gained `excludedBy` (and
+`excludes` is derived from it). Record: [`capacity-guard-2026-07-20.md`](reviews/capacity-guard-2026-07-20.md).
+
+⚠ **What stage 4 still has to do, verified against HEAD this lap:** `parseExclusionRule`
+(`sharedProviderConfirmation.ts`) still infers kind from the head token against the closed
+`RESOLVED_PROVIDER_NAMES` set and **falls back to `kind: endpoint`**, so `service:nim` parses as an
+endpoint host literal and matches nothing — fail-open and silent. `ExcludableBackend` still carries
+`{transport, model?, endpoint?}` and **no `service` field**, so `ruleMatches` has nothing to match a
+service rule against. Both must change together; a parser that recognizes `service:` without a matcher
+that can evaluate it reproduces the exact Gate-0 burn (a rule that parses fine and matches nothing).
 
 ⚠ **Two things stage 1 learned that stage 2+ must carry:**
 - **Normalize in `collectDispatchableSources`, never the `gatherDispatchableSources` wrapper.** Both
