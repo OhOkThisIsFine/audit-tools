@@ -204,22 +204,6 @@ followed" is otherwise indistinguishable from a bug.
   design of record but is pinned nowhere except a test comment. **Property to hold:** a pool with no
   calibration is probed, not admitted at full width.
 
-- **`dispatch-quota.json` cannot re-parse its own output when a budget is cold-start
-  (2026-07-19, found by independent review during account-metering step 2).** `pool.budget`
-  defaults to `+Infinity` at cold start, so `headroom_before: Infinity` reaches the admission
-  explain artifact. Zod's `z.number()` accepts `Infinity` in memory, but `JSON.stringify` writes
-  `null`, and `admissionLoop.ts`'s `z.number().optional()` inside a `.strict()` object REJECTS
-  `null` on read-back. Already on disk:
-  `.audit-tools/audit/fanout-quota/design_review/dispatch-quota.json` → `"headroom_before": null`.
-  Latent only because no production path re-parses `DispatchQuotaContractSchema` (it is `parse`d at
-  emit only). **The test that should catch it cannot:** `tests/shared/admission-loop.test.mjs`
-  validates the IN-MEMORY object, never a serialize/parse round-trip, and its `pool()` helper
-  defaults `budget = Infinity` — so the one test named for artifact-shape validity asserts the
-  schema accepts exactly the value that does not survive the round trip. **Properties to hold:**
-  a non-finite headroom serializes to something the schema accepts on read-back (or the schema
-  admits it explicitly), and the artifact-shape test asserts a round trip, not an in-memory object.
-  Pre-existing; not introduced by the multi-constraint change.
-
 - **`tests/audit/linux-cycle-regression.test.mjs` times out under full-suite parallel load
   (2026-07-19).** Passes alone in ~29s; exceeded its 120s timeout when run as part of `vitest run`
   over the whole suite, then passed alone immediately after. Load-sensitivity, not a regression —
