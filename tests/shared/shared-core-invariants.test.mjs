@@ -710,6 +710,10 @@ test("INV-shared-core-16: pre-commit-gate.mjs rejects hook-bypass commits (--no-
     "git commit -n -m x",
     "git -c core.hooksPath=/tmp commit -m x",
     "git -c core.hooksPath= commit -m x",
+    // Sibling-statement escape: the override is armed in a statement that carries
+    // no `commit`, so a commit-sub-command-scoped check never scans it.
+    "git config core.hooksPath /dev/null && git commit -m x",
+    "git push --no-verify && git commit -m x",
   ]) {
     const r = runGate(bypass);
     expect(r.status, `pre-commit-gate must block bypass: ${bypass}\n${r.stderr}`).toBe(2);

@@ -8,7 +8,7 @@
 // gate checks the STAGED content and always restores the worktree afterward.
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,9 @@ beforeEach(() => {
   );
   writeFileSync(join(repo, "check.mjs"), CHECK_SCRIPT);
   writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
+  // Mirror the real repo: the attestation dir is gitignored, so the untracked
+  // attestation record survives the staged-snapshot materialization round-trip.
+  writeFileSync(join(repo, ".gitignore"), ".claude/\n");
   g("add", "-A");
   g("commit", "-qm", "init");
 });
@@ -140,5 +143,74 @@ describe("pre-commit gate: staged-snapshot validation (CP-NODE-1)", () => {
     const r = runGate("git commit --no-verify -m x");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("hook-bypass");
+  });
+});
+
+const ATTEST = resolve(HERE, "../../.claude/hooks/attest-loop-core-review.mjs");
+
+function runAttest(args) {
+  return spawnSync(process.execPath, [ATTEST, ...args], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+  });
+}
+
+// Stage a loop-core file in the fixture repo so the loop-core attestation gate arms.
+function stageLoopCoreFile() {
+  mkdirSync(join(repo, "src", "shared", "quota"), { recursive: true });
+  writeFileSync(join(repo, "src", "shared", "quota", "x.ts"), "export const x = 1;\n");
+  g("add", "-A");
+}
+
+describe("pre-commit gate: bypass scoping, attester class, destination-keyed concerns", () => {
+  test("sibling-statement core.hooksPath override is rejected (scoping regression)", () => {
+    // The override is armed in a statement that carries no `commit`, so a
+    // commit-sub-command-scoped check never scans it — must match whole-command.
+    const r = runGate("git config core.hooksPath /dev/null && git commit -m x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("hook-bypass");
+  });
+
+  test("`grep -n` in a sibling statement does not false-positive the -n check", () => {
+    const r = runGate("grep -n GOOD sentinel.txt && git commit -m x");
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+  });
+
+  test("attest script requires --attester-class and records it + detected env markers", () => {
+    stageLoopCoreFile();
+    const checked = "checked the fixture loop-core edit for accounting drift and off-by-one";
+
+    const missing = runAttest(["--reviewed-by", "t", "--checked", checked]);
+    expect(missing.status, `expected fail (1); stderr:\n${missing.stderr}`).toBe(1);
+    expect(missing.stderr).toContain("--attester-class");
+
+    const ok = runAttest(["--reviewed-by", "t", "--attester-class", "agent", "--checked", checked]);
+    expect(ok.status, `expected success (0); stderr:\n${ok.stderr}`).toBe(0);
+    const sha = g("write-tree").stdout.trim();
+    const rec = JSON.parse(readFileSync(join(repo, ".claude", "loop-core-review", `${sha}.json`), "utf8"));
+    expect(rec.attester_class).toBe("agent");
+    expect(Array.isArray(rec.agent_env_markers)).toBe(true);
+    expect(rec.reviewed_by).toBe("t");
+  });
+
+  test("concerns without override: blocked on main, accepted on a side branch (destination-keyed)", () => {
+    g("branch", "-M", "main");
+    stageLoopCoreFile();
+    const at = runAttest([
+      "--reviewed-by", "t",
+      "--attester-class", "human",
+      "--verdict", "concerns",
+      "--checked", "review-blocked WIP preserved pending an independent adversarial review",
+    ]);
+    expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
+
+    const onMain = runGate();
+    expect(onMain.status, `expected block (2) on main; stderr:\n${onMain.stderr}`).toBe(2);
+    expect(onMain.stderr).toContain('verdict "concerns"');
+
+    g("checkout", "-qb", "wip/preserve");
+    const onBranch = runGate();
+    expect(onBranch.status, `expected allow (0) off main; stderr:\n${onBranch.stderr}`).toBe(0);
   });
 });

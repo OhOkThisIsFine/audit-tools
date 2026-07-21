@@ -96,17 +96,22 @@ if (commitSubCmds.length === 0) process.exit(0);
 
 // Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,
 // so refuse it outright (the gate can't run `check` if git skips the hook, and
-// silently allowing the bypass defeats green-at-every-commit). Covers the
-// `--no-verify`/`-n` flag and any `core.hooksPath` override (`-c core.hooksPath=…`
-// or the GIT_CONFIG_* env form), evaluated ONLY on `git commit` sub-commands.
-for (const sub of commitSubCmds) {
-  if (/--no-verify\b|\bcore\.hooksPath\b/.test(sub) || /(?:^|\s)-n(?=\s|$)/.test(sub)) {
-    console.error(
-      'pre-commit gate: commit rejected — hook-bypass flag detected (`--no-verify`/`-n` or `core.hooksPath` override). ' +
-        'These skip the green-at-every-commit gate. Remove the bypass and commit normally; if `npm run check` fails, fix it first.',
-    );
-    process.exit(2);
-  }
+// silently allowing the bypass defeats green-at-every-commit).
+// `--no-verify` and `core.hooksPath` are matched against the WHOLE command: a
+// SIBLING statement can arm the bypass before the commit runs
+// (`git config core.hooksPath /dev/null && git commit -m …`), so scoping these
+// to commit sub-commands is a hole. Only the short `-n` form stays scoped to
+// `git commit` sub-commands — that scoping exists for flags that are common in
+// unrelated tools (`grep -n`), which is not true of the other two vectors.
+if (
+  /--no-verify\b|\bcore\.hooksPath\b/.test(cmd) ||
+  commitSubCmds.some((sub) => /(?:^|\s)-n(?=\s|$)/.test(sub))
+) {
+  console.error(
+    'pre-commit gate: commit rejected — hook-bypass detected (`--no-verify`/`-n` or a `core.hooksPath` override anywhere in the command). ' +
+      'These skip the green-at-every-commit gate. Remove the bypass and commit normally; if `npm run check` fails, fix it first.',
+  );
+  process.exit(2);
 }
 
 // Whether the command sequence stages changes (e.g. `git add -A && git commit` or `git commit -a`).
@@ -275,9 +280,12 @@ function runGate() {
   // 3. Loop-core adversarial-review attestation — only when the STAGED set
   // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
   // staged-tree-hash-bound review attestation. This enforces attestation
-  // existence + freshness + binding MECHANICALLY; review QUALITY stays a logged,
-  // attributable human step (the honest limit). FAIL-CLOSED on a missing/stale
-  // attestation for loop-core; FAIL-OPEN only on a genuine git write-tree fault.
+  // existence + freshness + binding MECHANICALLY; review QUALITY is carried by
+  // an attributable, tree-bound audit record — the attestation records the
+  // attester's CLASS (agent or human) and the reviewing identities, it cannot
+  // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
+  // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
+  // write-tree fault.
   if (staged.some(pinsLoopCore)) {
     const loopCoreStaged = staged.filter(pinsLoopCore);
     let sha = null;
@@ -301,7 +309,7 @@ function runGate() {
     const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
     const runHint =
       `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> ` +
-      `--checked "<what was adversarially checked>"`;
+      `--attester-class <agent|human> --checked "<what was adversarially checked>"`;
     if (!existsSync(attestPath)) {
       return {
         blocked: true,
@@ -333,13 +341,25 @@ function runGate() {
           `Re-review the current staged snapshot:\n  ${runHint}`,
       };
     }
-    if (attest.verdict === 'block' || (attest.verdict === 'concerns' && !attest.override)) {
+    // Destination-keyed strictness: the gate protects what can LAND on main,
+    // not the act of committing. A `concerns` verdict without an override blocks
+    // only when the commit can reach main (current branch IS main) — preserving
+    // review-blocked WIP on a side branch is the wanted path and must not force
+    // an override, or the override trains into a reflex and stops signalling.
+    // `block` always blocks; an unreadable branch state stays strict (fail-closed).
+    let concernsBlocks = attest.verdict === 'concerns' && !attest.override;
+    if (concernsBlocks) {
+      const br = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+      if (br.ok && br.stdout.trim() !== 'main') concernsBlocks = false;
+    }
+    if (attest.verdict === 'block' || concernsBlocks) {
       return {
         blocked: true,
         message:
           `pre-commit gate: loop-core commit blocked — the review recorded verdict "${attest.verdict}"` +
           (attest.checked ? ` (checked: ${attest.checked})` : '') +
-          `. Resolve the concerns and re-attest, or re-run with --override "<reason>" if intentional:\n  ${runHint}`,
+          `. Resolve the concerns and re-attest, or re-run with --override "<reason>" if intentional ` +
+          `(a \`concerns\` attestation is accepted without an override on a non-main branch — WIP preservation):\n  ${runHint}`,
       };
     }
   }
