@@ -180,9 +180,9 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       EXPANDED.map((s) => `${s.service}:${s.model}`).sort(),
     );
     // Each exclusion pattern rules out exactly that model at the provider tier the
-    // routing filter matches (`claude-worker:<model>`).
+    // routing filter matches (`transport:claude-worker/<model>`).
     expect(delta.map((b) => b.exclusion_pattern).sort()).toEqual(
-      EXPANDED.map((s) => `claude-worker:${s.model}`).sort(),
+      EXPANDED.map((s) => `transport:claude-worker/${s.model}`).sort(),
     );
   });
 
@@ -208,7 +208,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     expect(delta[0].key).toBe("nim:z-ai/glm-5.2");
     // ...and the RULE stays transport-qualified, because `ruleMatches` compares the
     // transport provider — a `nim:` rule would match nothing at dispatch.
-    expect(delta[0].exclusion_pattern).toBe("claude-worker:z-ai/glm-5.2");
+    expect(delta[0].exclusion_pattern).toBe("transport:claude-worker/z-ai/glm-5.2");
   });
 
   it("two DIFFERENT services sharing a model string are TWO backends (gate-bypass regression)", () => {

@@ -9,7 +9,8 @@
 
 - **Current version = `package.json`** (authoritative).
 - **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
-  the proxy-contract swap, the Gate-0 backend-identity fix, and the stage-4 **capacity guard** all shipped.
+  the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, and Stage 4
+  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`) all shipped.
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
   Both now key on ONE service-scoped `CapacityPool.accountKey`; `deriveLocalAccountId` is deleted.
@@ -88,53 +89,18 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — STAGES 1+2 SHIPPED; the stage-4 CAPACITY GUARD is now in too, so
-stage 4 itself is the next build.** Design of record:
-[`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
-[`backlog.md`](backlog.md) → *Forward tracks*. Stage 1 shipped 2026-07-19: the rename
-(`provider` → `transport`, `backend_provider` → `service`, 394 refs / 43 files), the
-`service = declared ?? transport` normalization, and the `id`-outranks-derivation precedence fix.
-Classification record: [`identity-migration-stage1-plan-2026-07-19.md`](reviews/identity-migration-stage1-plan-2026-07-19.md).
+**0. Backend-identity migration — STAGES 1, 2, 4 + CAPACITY GUARD SHIPPED; Stage 5 is next.**
+Design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
+[`backlog.md`](backlog.md) → *Forward tracks*.
+- Stage 1 shipped 2026-07-19 (field renames, service normalization, id precedence).
+- Stage 2 shipped 2026-07-20 (identity projections in `identity.ts`).
+- Capacity guard shipped 2026-07-20 (`b220171e`).
+- **Stage 4 shipped 2026-07-20** (axis-explicit exclusion grammar `transport:`, `service:`, `host:`,
+  matcher update with `ExcludableBackend.service`, `exclusionPattern` prefixing, invalid-axis parse
+  errors, and read-time pattern migration helper). Resolves DD-14.
 
-**Stage 2 shipped 2026-07-20** — all four projections now live in the leaf module
-`src/shared/providers/identity.ts` (a leaf, NOT `providerConfirmation.ts` as the spec said: that file
-reaches quota through `costRank`, so quota importing it would cycle). Pure move, arguments preserved.
-
-**Next is stage 4** (axis-explicit exclusion grammar) — NOT stage 3, which the backlog rates lowest of
-the five and says is justified BY stage 4. Doc-review item DD-14 is waiting on it:
-`spec/backend-identity-axes.md` presents the `transport:`/`service:`/`host:` grammar in present tense
-while the live parser implements none of it, so an operator writing a `service:` rule today gets silence.
-
-**Stage 4's declared prerequisite — the capacity guard — SHIPPED 2026-07-20** (`v0.34.3`+, commit
-`b220171e`). `buildSourcePools` now returns `{pools, zeroedByExclusion}` and both seams emit an
-`exclusion_zeroed_capacity` friction fact naming the culprit patterns, so a policy that removes every
-reachable lane can no longer zero dispatch silently. `DispatchExclusion` gained `excludedBy` (and
-`excludes` is derived from it). Record: [`capacity-guard-2026-07-20.md`](reviews/capacity-guard-2026-07-20.md).
-
-⚠ **What stage 4 still has to do, verified against HEAD this lap:** `parseExclusionRule`
-(`sharedProviderConfirmation.ts`) still infers kind from the head token against the closed
-`RESOLVED_PROVIDER_NAMES` set and **falls back to `kind: endpoint`**, so `service:nim` parses as an
-endpoint host literal and matches nothing — fail-open and silent. `ExcludableBackend` still carries
-`{transport, model?, endpoint?}` and **no `service` field**, so `ruleMatches` has nothing to match a
-service rule against. Both must change together; a parser that recognizes `service:` without a matcher
-that can evaluate it reproduces the exact Gate-0 burn (a rule that parses fine and matches nothing).
-
-⚠ **Two things stage 1 learned that stage 2+ must carry:**
-- **Normalize in `collectDispatchableSources`, never the `gatherDispatchableSources` wrapper.** Both
-  are exported, so the wrapper leaves the inner function as a bypass of any invariant put there.
-- **An adversarial review reproduced two breaks that all local tests passed through.** Renaming a
-  field whose values are PERSISTED is not a rename: a pre-versioned `catalog-cache.json` still held
-  tool-stamped ids that silently re-split a proxied lane from its direct twin, and the repo's own
-  example declared `id` + `service` together and split identically. `PROXY_CATALOG_VERSION` now
-  degrades a stale-shape cache to absent. **Before any further identity change, enumerate what is on
-  DISK in the old shape, not just what is in the tree.**
-
-The design survived an adversarial review only in part: four claims were refuted and corrected in
-place, the ACCOUNT axis was missing entirely, and three preconditions now gate the grammar stage — in
-particular, `service:` rules can zero out all dispatch capacity with nothing noticing, so a capacity
-guard is a prerequisite of that stage rather than a follow-up. Read the doc's own "did NOT survive
-review" notes before re-proposing anything it rules out (especially the `url | command` locus union and
-a `model:` axis — both are recorded as refuted, with reasons).
+**Next is stage 5** (fail-closed autonomous write emits `service:` axis). Touches `intakeExecutors.ts` →
+loop-core, attestation required. Closes multi-transport residue durably.
 
 **0b. Or: the capability-evidence track** — now salvaged onto `salvage/capability-evidence` (green); its
 one remaining build is **R3-3** (see item 1). Independent of 0.

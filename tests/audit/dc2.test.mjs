@@ -301,7 +301,7 @@ await test("G3: a newly-reachable SOURCE appears in the delta, keyed by its mode
     {
       key: "openai-compatible:brand-new-model",
       provider: "openai-compatible",
-      exclusion_pattern: "openai-compatible:brand-new-model",
+      exclusion_pattern: "transport:openai-compatible/brand-new-model",
     },
   ]);
 });
@@ -320,7 +320,7 @@ await test("G3/A″: a modelless backend deltas by provider and rules out at the
     CLEAN_ENV,
   );
   expect(delta).toEqual([
-    { key: "opencode", provider: "opencode", exclusion_pattern: "opencode" },
+    { key: "opencode", provider: "opencode", exclusion_pattern: "transport:opencode" },
   ]);
 });
 

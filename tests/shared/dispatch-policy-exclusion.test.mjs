@@ -28,7 +28,7 @@ const {
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 
 /** The matcher's operand: a backend, not a name. */
-const backend = (transport, model, endpoint) => ({ transport, model, endpoint });
+const backend = (transport, model, endpoint, service) => ({ transport, model, endpoint, service });
 
 describe("the operator's explicit decision is persisted reach-free", () => {
   test("exclude/include round-trip onto `policy`", () => {
@@ -64,7 +64,7 @@ describe("the operator's explicit decision is persisted reach-free", () => {
     expect(JSON.stringify(confirmation.policy)).not.toContain("claude-code");
   });
 
-  test("a `provider:model` rule marks the pool entry whose model it names", () => {
+  test("a `transport:provider/model` rule marks the pool entry whose model it names", () => {
     // Display and routing must agree: the entry the operator sees marked
     // "excluded" is the one the routing filter will drop. `representativeModelId`
     // is the shared key, so a matching model marks — and a non-matching one does
@@ -73,8 +73,8 @@ describe("the operator's explicit decision is persisted reach-free", () => {
 
     // The `excluded` MARK is a render concern (B+D: never persisted), so this
     // drives the render builder — the persisted shape carries no such field.
-    const hit = buildProviderConfirmationRender(config, {}, ["openai-compatible:model-a"]);
-    const miss = buildProviderConfirmationRender(config, {}, ["openai-compatible:model-z"]);
+    const hit = buildProviderConfirmationRender(config, {}, ["transport:openai-compatible/model-a"]);
+    const miss = buildProviderConfirmationRender(config, {}, ["transport:openai-compatible/model-z"]);
 
     const entryOf = (c) => c.provider_pool.find((e) => e.name === "openai-compatible");
     expect(entryOf(hit)?.excluded).toBe(true);
@@ -141,100 +141,95 @@ describe("resolveDispatchExclusion — policy inherited, reach recomputed", () =
 });
 
 // ---------------------------------------------------------------------------
-// A″ — the exclusion GRAMMAR. Three tiers, disambiguated by the head token
-// against the closed provider-name set. The model tier is the point: the
-// operator confirms *model* choices, so ruling out one model of a multi-model
-// backend must leave that backend's other models routable (A′ dropped them all).
+// Axis-explicit exclusion GRAMMAR — transport: / service: / host:
 // ---------------------------------------------------------------------------
 
-describe("the exclusion grammar — provider / provider:model / endpoint", () => {
-  const NIM_A = backend("openai-compatible", "model-a", "https://nim.invalid:8443/v1");
-  const NIM_B = backend("openai-compatible", "model-b", "https://other.invalid/v1");
+describe("the exclusion grammar — transport / service / host", () => {
+  const NIM_A = backend("openai-compatible", "model-a", "https://nim.invalid:8443/v1", "nim");
+  const NIM_B = backend("openai-compatible", "model-b", "https://other.invalid/v1", "nim");
 
-  test("`provider:model` matches ONLY that model of that provider", () => {
-    const excluded = resolveDispatchExclusion({ exclude: ["openai-compatible:model-a"] }, {});
+  test("`transport:provider/model` matches ONLY that model of that transport", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["transport:openai-compatible/model-a"] }, {});
 
     expect(excluded.excludes(NIM_A)).toBe(true);
-    // THE A″ FIX: A′'s provider-name list dropped this sibling too.
     expect(excluded.excludes(NIM_B)).toBe(false);
-    // …and says nothing about a different provider that happens to share a model id.
     expect(excluded.excludes(backend("codex", "model-a"))).toBe(false);
   });
 
-  test("a bare `provider` is the coarse tier — every model of it", () => {
-    const excluded = resolveDispatchExclusion({ exclude: ["openai-compatible"] }, {});
+  test("`transport:provider` is the coarse transport tier — every model of it", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["transport:openai-compatible"] }, {});
 
     expect(excluded.excludes(NIM_A)).toBe(true);
     expect(excluded.excludes(NIM_B)).toBe(true);
   });
 
-  test("`provider:model` does NOT match a modelless backend of that provider", () => {
-    // A CLI's model arrives at the dispatch handshake, so it carries no model
-    // here. The operator ruled out one MODEL, not the backend — ruling out the
-    // backend is what the coarse `provider` tier is for. Matching it here would
-    // silently widen a narrow rule.
-    const excluded = resolveDispatchExclusion({ exclude: ["opencode:model-a"] }, {});
+  test("`service:vendor` excludes every transport reaching that vendor", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["service:nim"] }, {});
+
+    expect(excluded.excludes(NIM_A)).toBe(true);
+    expect(excluded.excludes(NIM_B)).toBe(true);
+    // A proxied claude-worker lane targeting nim is also excluded
+    expect(excluded.excludes(backend("claude-worker", "model-a", "http://127.0.0.1:8791", "nim"))).toBe(true);
+    // A different service is NOT excluded
+    expect(excluded.excludes(backend("openai-compatible", "model-a", undefined, "openrouter"))).toBe(false);
+  });
+
+  test("`service:vendor/model` excludes one model from that vendor regardless of transport", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["service:nim/model-a"] }, {});
+
+    expect(excluded.excludes(NIM_A)).toBe(true);
+    expect(excluded.excludes(backend("claude-worker", "model-a", undefined, "nim"))).toBe(true);
+    expect(excluded.excludes(NIM_B)).toBe(false);
+  });
+
+  test("`transport:provider/model` does NOT match a modelless backend of that transport", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["transport:opencode/model-a"] }, {});
 
     expect(excluded.excludes(backend("opencode", undefined))).toBe(false);
     expect(excluded.excludes(backend("opencode", "model-a"))).toBe(true);
   });
 
-  test("an endpoint host matches port-agnostically; `host:port` is port-specific", () => {
-    const byHost = resolveDispatchExclusion({ exclude: ["nim.invalid"] }, {});
-    expect(byHost.excludes(NIM_A)).toBe(true); // :8443 — the pattern named no port
+  test("`host:endpoint` matches port-agnostically; `host:host:port` is port-specific", () => {
+    const byHost = resolveDispatchExclusion({ exclude: ["host:nim.invalid"] }, {});
+    expect(byHost.excludes(NIM_A)).toBe(true);
     expect(byHost.excludes(NIM_B)).toBe(false);
 
-    const byHostPort = resolveDispatchExclusion({ exclude: ["nim.invalid:8443"] }, {});
+    const byHostPort = resolveDispatchExclusion({ exclude: ["host:nim.invalid:8443"] }, {});
     expect(byHostPort.excludes(NIM_A)).toBe(true);
-    // `localhost` is not a provider name, so `localhost:8000` can only ever parse
-    // as the endpoint tier — the closed name set is what keeps the grammar
-    // unambiguous.
-    const local = resolveDispatchExclusion({ exclude: ["localhost:8000"] }, {});
+
+    const local = resolveDispatchExclusion({ exclude: ["host:localhost:8000"] }, {});
     expect(local.excludes(backend("openai-compatible", "m", "http://localhost:8000/v1"))).toBe(true);
     expect(local.excludes(backend("openai-compatible", "m", "http://localhost:9000/v1"))).toBe(false);
   });
 
-  test("a non-URL endpoint matches its literal pattern (URL parsing must not eat it)", () => {
-    // `new URL()` accepts ANY scheme-shaped string, so it does NOT throw on
-    // `localhost:8000` (protocol `localhost:`) or `C:\tools\codex.cmd` (protocol
-    // `c:`) — both parse to an EMPTY hostname. Trusting the `catch` alone would
-    // silently yield no hosts for exactly these, so the operator's
-    // literal-identical rule would match nothing and the backend would still route.
-    const bare = resolveDispatchExclusion({ exclude: ["localhost:8000"] }, {});
+  test("a non-URL endpoint matches its literal pattern under host:", () => {
+    const bare = resolveDispatchExclusion({ exclude: ["host:localhost:8000"] }, {});
     expect(bare.excludes(backend("openai-compatible", "m", "localhost:8000"))).toBe(true);
 
-    const cmd = resolveDispatchExclusion({ exclude: ["C:\\tools\\codex.cmd"] }, {});
-    expect(cmd.excludes(backend("codex", undefined, "C:\\tools\\codex.cmd"))).toBe(true);
-    expect(cmd.excludes(backend("codex", undefined, "C:\\tools\\other.cmd"))).toBe(false);
+    const cmd = resolveDispatchExclusion({ exclude: ["host:c:\\tools\\codex.cmd"] }, {});
+    expect(cmd.excludes(backend("codex", undefined, "c:\\tools\\codex.cmd"))).toBe(true);
+    expect(cmd.excludes(backend("codex", undefined, "c:\\tools\\other.cmd"))).toBe(false);
   });
 
-  test("`provider:` (empty tail) is the PROVIDER tier — the head decides the tier", () => {
-    // Reads as "codex, every model". Demoting a provider-name head to an
-    // (unmatchable) endpoint rule on an empty tail would silently drop the
-    // operator's intent and break the head-decides rule the grammar documents.
-    const excluded = resolveDispatchExclusion({ exclude: ["codex:"] }, {});
-
-    expect(excluded.excludes(backend("codex", "gpt-5-codex"))).toBe(true);
-    expect(excluded.excludes(backend("codex", undefined))).toBe(true);
-    expect(excluded.excludes(backend("opencode", "gpt-5-codex"))).toBe(false);
-  });
-
-  test("a colon-bearing model id survives (split on the FIRST colon only)", () => {
-    const excluded = resolveDispatchExclusion({ exclude: ["openai-compatible:qwen2.5:7b"] }, {});
+  test("a colon-bearing model id survives with / model delimiter", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["transport:openai-compatible/qwen2.5:7b"] }, {});
 
     expect(excluded.excludes(backend("openai-compatible", "qwen2.5:7b"))).toBe(true);
     expect(excluded.excludes(backend("openai-compatible", "qwen2.5"))).toBe(false);
   });
 
-  test("an unmatchable pattern is INERT — it never widens to something else", () => {
-    // The grammar is OPEN (an endpoint host is not a provider name), so an
-    // unrecognized pattern cannot be "dropped as unknown" without deleting the
-    // endpoint tier. It must simply match nothing — never fall back to a coarser
-    // tier, which would exclude backends the operator never named.
-    const excluded = resolveDispatchExclusion({ exclude: ["not-a-real-provider:model-a"] }, {});
+  test("an unknown axis prefix is INVALID — matches nothing", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["model:model-a"] }, {});
 
     expect(excluded.excludes(NIM_A)).toBe(false);
     expect(excluded.excludes(backend("not-a-real-provider", "model-a"))).toBe(false);
+  });
+
+  test("a bare un-prefixed pattern is migrated automatically in resolveDispatchExclusion", () => {
+    const excluded = resolveDispatchExclusion({ exclude: ["openai-compatible:model-a"] }, {});
+
+    expect(excluded.excludes(NIM_A)).toBe(true);
+    expect(excluded.excludes(NIM_B)).toBe(false);
   });
 });
 
@@ -636,7 +631,7 @@ describe("the capacity guard: a policy that zeroes ALL reach must not be silent"
     expect(zeroedByExclusion.gatheredCount).toBe(3);
     // Deduplicated + sorted: two of the three sources matched the SAME pattern, and a
     // re-derive must produce a byte-identical discriminator.
-    expect(zeroedByExclusion.patterns).toEqual(["openai-compatible", "opencode"]);
+    expect(zeroedByExclusion.patterns).toEqual(["transport:openai-compatible", "transport:opencode"]);
   });
 
   test("a PARTIAL exclusion is normal operation and reports nothing", async () => {
@@ -651,21 +646,21 @@ describe("the capacity guard: a policy that zeroes ALL reach must not be silent"
   });
 
   test("a rule matching NOTHING leaves reach intact and reports nothing", async () => {
-    const { pools, zeroedByExclusion } = await buildExcluding(["nonexistent.invalid"]);
+    const { pools, zeroedByExclusion } = await buildExcluding(["host:nonexistent.invalid"]);
     expect(pools.length).toBe(3);
     expect(zeroedByExclusion).toBeNull();
   });
 
   test("excludedBy names the pattern responsible, and never disagrees with excludes", async () => {
     const exclusion = resolveDispatchExclusion(
-      { exclude: ["openai-compatible:model-a", "opencode"] },
+      { exclude: ["transport:openai-compatible/model-a", "transport:opencode"] },
       {},
     );
     const nimA = { transport: "openai-compatible", model: "model-a" };
     const nimB = { transport: "openai-compatible", model: "model-b" };
     const ocA = { transport: "opencode", model: "model-b" };
-    expect(exclusion.excludedBy(nimA)).toBe("openai-compatible:model-a");
-    expect(exclusion.excludedBy(ocA)).toBe("opencode");
+    expect(exclusion.excludedBy(nimA)).toBe("transport:openai-compatible/model-a");
+    expect(exclusion.excludedBy(ocA)).toBe("transport:opencode");
     expect(exclusion.excludedBy(nimB)).toBeNull();
     // Derived, not a parallel implementation — the two verdicts cannot drift.
     for (const backend of [nimA, nimB, ocA]) {

@@ -48,7 +48,7 @@ import type { DispatchExclusionPattern } from "./sharedProviderConfirmation.js";
  * silently — reopening the exact PATH-appearance case the gate exists to catch, blind
  * rather than loud.
  *
- * ⚠ NOT interchangeable with {@link transportRoute}. Building an exclusion rule from
+ * ⚠ NOT interchangeable with {@link exclusionPattern}. Building an exclusion rule from
  * this identity matches nothing for a proxied lane — `ruleMatches` compares the
  * TRANSPORT. They were unified once; that was the bypass.
  *
@@ -106,19 +106,24 @@ export function quotaPoolKey(
 }
 
 /**
- * **"What must the routing filter match to drop this?"** → **transport** + model.
+ * **"What pattern rules this backend out?"** → **transport** + model.
  *
- * The pattern that rules out one backend at the finest granularity its model is
- * knowable at — keyed on the TRANSPORT provider, because that is the field
- * `ruleMatches` compares (`ExcludableBackend.transport`). A backend whose model
+ * The axis-explicit exclusion pattern that rules out one backend at the finest
+ * granularity its model is knowable at — prefixed with `transport:` because the
+ * routing filter matches on `ExcludableBackend.transport`. A backend whose model
  * arrives only at the dispatch handshake (a CLI) must be ruled out at the coarse
- * `provider` tier or the rule would never match.
+ * `transport:provider` tier or the rule would never match.
+ *
+ * Model-granular form uses `/` as the delimiter (not `:`) because model ids can
+ * contain colons (e.g. `qwen2.5:7b`).
  *
  * ⚠ NOT the same value as {@link backendIdentity} — see that function's note.
  */
-export function transportRoute(
+export function exclusionPattern(
   modelId: string | undefined,
   transportProvider: string,
 ): DispatchExclusionPattern {
-  return modelId ? `${transportProvider}:${modelId}` : transportProvider;
+  return modelId
+    ? `transport:${transportProvider}/${modelId}`
+    : `transport:${transportProvider}`;
 }

@@ -55,7 +55,7 @@ import {
   representativeModelId,
   type CapabilityTier,
 } from "./providerConfirmation.js";
-import { backendIdentity, sourceService, transportRoute } from "./identity.js";
+import { backendIdentity, sourceService, exclusionPattern } from "./identity.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
@@ -132,18 +132,21 @@ export interface ConfirmedDispatchPolicy {
 }
 
 /**
- * One rule in the operator's exclusion grammar — **reach-independent by
- * construction**, so a rule authored on one auditor means the same thing to an
- * auditor with a different reachable set (spec/unified-dispatch-worker-model.md).
+ * The string form of an exclusion pattern. Axis-explicit: the rule names its
+ * axis as a prefix, so the grammar is unambiguous against open namespaces and
+ * an unknown axis is a PARSE ERROR, not an inert rule.
  *
- * Three forms, disambiguated by the head token against the CLOSED set of provider
- * names ({@link RESOLVED_PROVIDER_NAMES}) — so no form can shadow another:
- *
- * | Pattern | Head is a provider name? | Matches |
+ * | Pattern | Axis | Matches |
  * |---|---|---|
- * | `openai-compatible:gpt-oss-120b` | yes | that provider AND that exact model — the **default** granularity |
- * | `codex` | yes (no `:`) | every backend of that provider — the coarse provider tier |
- * | `integrate.api.nvidia.com` / `localhost:8000` | no | every source whose `endpoint` host (and port, when the pattern names one) matches — the coarse endpoint tier |
+ * | `transport:codex` | transport | every model on that adapter |
+ * | `transport:openai-compatible/glm-5.2` | transport | one model on that adapter (model after `/`) |
+ * | `service:nim` | service | every model from that vendor, however reached |
+ * | `service:nim/z-ai/glm-5.2` | service | one model from that vendor |
+ * | `host:localhost:8000` | host | by endpoint address (port-specific) |
+ * | `host:integrate.api.nvidia.com` | host | by endpoint address (port-agnostic) |
+ *
+ * There is deliberately **no `model:` axis** — a cross-service model rule
+ * recombines the identities the gate exists to keep apart.
  *
  * ⚠ This is a THIRD keyspace, deliberately distinct from the quota-ledger pool
  * identity (`provider[#account]/model`, `quotaPoolKey`): an account is
@@ -154,6 +157,7 @@ export type DispatchExclusionPattern = string;
 /** A backend an exclusion rule can be evaluated against — structurally a `DispatchableSource`. */
 export interface ExcludableBackend {
   transport: string;
+  service?: string;
   model?: string;
   endpoint?: string;
 }
@@ -320,7 +324,7 @@ export function buildProviderConfirmationRender(
   sources: DispatchableSource[] = [],
 ): RenderedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
-  const operatorExcluded = buildExclusion(exclude);
+  const operatorExcluded = buildExclusion(migrateExclusionPatterns(exclude));
   const includeSet = new Set<ResolvedProviderName>(include);
   // Evaluate a pool entry against the operator's rules at the SAME key the routing
   // filter uses — `representativeModelId` is what `computeNewlyReachableBackends`
@@ -569,7 +573,7 @@ export function computeNewlyReachableBackends(
     reachNow.set(identity, {
       key: identity,
       provider,
-      exclusion_pattern: transportRoute(modelId, provider),
+      exclusion_pattern: exclusionPattern(modelId, provider),
     });
   };
   for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {
@@ -609,13 +613,16 @@ export function resolveDispatchExclusion(
   env: NodeJS.ProcessEnv = process.env,
 ): DispatchExclusion {
   const included = new Set(policy?.include ?? []);
-  // The local reach half: a self-spawn-blocked provider is ruled out at PROVIDER
-  // granularity (blockedness is a property of the provider, not of one of its
-  // models), recomputed against THIS process's env rather than inherited.
+  // The local reach half: a self-spawn-blocked provider is ruled out at the
+  // TRANSPORT axis (blockedness is a property of the process, not the vendor),
+  // recomputed against THIS process's env rather than inherited.
   const blocked = RESOLVED_PROVIDER_NAMES.filter(
     (name) => !included.has(name) && isSelfSpawnBlocked(name, env),
   );
-  return buildExclusion([...(policy?.exclude ?? []), ...blocked]);
+  return buildExclusion([
+    ...migrateExclusionPatterns(policy?.exclude ?? []),
+    ...blocked.map((name) => `transport:${name}` as DispatchExclusionPattern),
+  ]);
 }
 
 /**
@@ -639,35 +646,96 @@ function buildExclusion(
 }
 
 /**
- * One parsed exclusion rule. The `kind` is decided by the head token against the
- * CLOSED provider-name set, which is what makes the grammar unambiguous: a bare
- * `codex` can only ever be the provider tier, and `localhost:8000` can only ever be
- * the endpoint tier, because `localhost` is not a provider name.
+ * One parsed exclusion rule. Axis-explicit: the kind is decided by the literal
+ * axis prefix (`transport:`, `service:`, `host:`). An unrecognized or absent
+ * prefix is a PARSE ERROR (`invalid`), not an inert rule — the "typo'd rule
+ * persists happily and matches nothing, silently" defect becomes impossible.
+ *
+ * Model-granular forms use `/` as the model delimiter (not `:`) because model
+ * ids can contain colons (e.g. `qwen2.5:7b`). `transport:` and `service:` tiers
+ * each have a coarse form (every model) and a model-specific form.
  */
 type ExclusionRule =
-  | { kind: "provider"; provider: string }
-  | { kind: "provider_model"; provider: string; model: string }
-  | { kind: "endpoint"; host: string };
+  | { kind: "transport"; transport: string }
+  | { kind: "transport_model"; transport: string; model: string }
+  | { kind: "service"; service: string }
+  | { kind: "service_model"; service: string; model: string }
+  | { kind: "host"; host: string }
+  | { kind: "invalid"; raw: string };
+
+/** The three recognized axis prefixes. */
+const VALID_EXCLUSION_AXES = new Set(["transport", "service", "host"]);
 
 function parseExclusionRule(pattern: DispatchExclusionPattern): ExclusionRule {
   const colon = pattern.indexOf(":");
   if (colon === -1) {
+    // No axis prefix — invalid under the axis-explicit grammar.
+    return { kind: "invalid", raw: pattern };
+  }
+  const axis = pattern.slice(0, colon);
+  const rest = pattern.slice(colon + 1);
+  if (!VALID_EXCLUSION_AXES.has(axis) || rest.length === 0) {
+    return { kind: "invalid", raw: pattern };
+  }
+  switch (axis) {
+    case "transport": {
+      const slash = rest.indexOf("/");
+      if (slash === -1) return { kind: "transport", transport: rest };
+      if (slash === rest.length - 1) return { kind: "transport", transport: rest.slice(0, slash) };
+      return { kind: "transport_model", transport: rest.slice(0, slash), model: rest.slice(slash + 1) };
+    }
+    case "service": {
+      const slash = rest.indexOf("/");
+      if (slash === -1) return { kind: "service", service: rest };
+      if (slash === rest.length - 1) return { kind: "service", service: rest.slice(0, slash) };
+      return { kind: "service_model", service: rest.slice(0, slash), model: rest.slice(slash + 1) };
+    }
+    case "host":
+      return { kind: "host", host: rest.toLowerCase() };
+    default:
+      return { kind: "invalid", raw: pattern };
+  }
+}
+
+/**
+ * Migrate persisted bare-form exclusion patterns (pre-stage-4) to the
+ * axis-explicit grammar. The old grammar was unambiguous within its own rules
+ * (head token against the closed provider set), so the migration reproduces
+ * exactly what the old parser would have inferred, then emits the explicit form.
+ *
+ * Applied at read time in {@link resolveDispatchExclusion}. A re-confirmation
+ * (any Gate-0 delta) persists new-form patterns naturally because the pattern
+ * generator now emits prefixed strings.
+ */
+function migrateExclusionPatterns(
+  patterns: readonly DispatchExclusionPattern[],
+): DispatchExclusionPattern[] {
+  return patterns.map(migrateExclusionPattern);
+}
+
+function migrateExclusionPattern(pattern: DispatchExclusionPattern): DispatchExclusionPattern {
+  // Already axis-explicit — no migration needed.
+  if (VALID_EXCLUSION_AXES.has(pattern.slice(0, pattern.indexOf(":"))) && pattern.indexOf(":") > 0) {
+    return pattern;
+  }
+  const colon = pattern.indexOf(":");
+  if (colon === -1) {
+    // Bare token: `codex` → `transport:codex`, `localhost` → `host:localhost`
     return isResolvedProviderName(pattern)
-      ? { kind: "provider", provider: pattern }
-      : { kind: "endpoint", host: pattern.toLowerCase() };
+      ? `transport:${pattern}`
+      : `host:${pattern}`;
   }
   const head = pattern.slice(0, colon);
   const tail = pattern.slice(colon + 1);
-  if (!isResolvedProviderName(head)) {
-    return { kind: "endpoint", host: pattern.toLowerCase() };
+  if (isResolvedProviderName(head)) {
+    // `openai-compatible:model-a` → `transport:openai-compatible/model-a`
+    // `codex:` (empty tail) → `transport:codex`
+    return tail.length > 0
+      ? `transport:${head}/${tail}`
+      : `transport:${head}`;
   }
-  // The head decides the tier — an empty tail does NOT demote a provider-name head
-  // to the endpoint tier. `codex:` reads as "codex, every model"; classifying it as
-  // an (unmatchable) endpoint rule would silently drop the operator's intent, and
-  // the head-decides rule this type documents would not actually hold.
-  return tail.length > 0
-    ? { kind: "provider_model", provider: head, model: tail }
-    : { kind: "provider", provider: head };
+  // `integrate.api.nvidia.com` / `localhost:8000` → `host:<pattern>`
+  return `host:${pattern}`;
 }
 
 function isResolvedProviderName(value: string): boolean {
@@ -676,16 +744,25 @@ function isResolvedProviderName(value: string): boolean {
 
 function ruleMatches(rule: ExclusionRule, backend: ExcludableBackend): boolean {
   switch (rule.kind) {
-    case "provider":
-      return backend.transport === rule.provider;
-    case "provider_model":
+    case "transport":
+      return backend.transport === rule.transport;
+    case "transport_model":
       // A model-granular rule matches ONLY that model. A backend of the same
-      // provider carrying no model (a CLI whose model arrives at the dispatch
+      // transport carrying no model (a CLI whose model arrives at the dispatch
       // handshake) is NOT matched: the operator ruled out one model, not the
-      // backend — the coarse `provider` tier is how they rule out the backend.
-      return backend.transport === rule.provider && backend.model === rule.model;
-    case "endpoint":
+      // backend — the coarse `transport` tier is how they rule out the backend.
+      return backend.transport === rule.transport && backend.model === rule.model;
+    case "service":
+      return (backend.service ?? backend.transport) === rule.service;
+    case "service_model":
+      return (
+        (backend.service ?? backend.transport) === rule.service &&
+        backend.model === rule.model
+      );
+    case "host":
       return endpointHosts(backend.endpoint).includes(rule.host);
+    case "invalid":
+      return false;
   }
 }
 
