@@ -86,22 +86,35 @@ try {
   process.exit(0); // unparseable payload — never wedge the session
 }
 
-// A real commit invocation: `git … commit` within one shell statement,
-// not the word "commit" elsewhere (e.g. git log --grep=commit).
-if (!/\bgit\b[^\n|;&]*\bcommit\b/.test(cmd)) process.exit(0);
+// Split shell statements to isolate `git commit` commands and prevent
+// false-positives from flags in preceding/succeeding sub-commands (e.g. `grep -n`).
+const subCmds = cmd.split(/&&|\|\||;|\n/).map((s) => s.trim()).filter(Boolean);
+const commitSubCmds = subCmds.filter((s) => /\bgit\b[^\n]*\bcommit\b/.test(s));
+
+// Exit early if no `git commit` invocation exists in any shell statement.
+if (commitSubCmds.length === 0) process.exit(0);
 
 // Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,
 // so refuse it outright (the gate can't run `check` if git skips the hook, and
 // silently allowing the bypass defeats green-at-every-commit). Covers the
 // `--no-verify`/`-n` flag and any `core.hooksPath` override (`-c core.hooksPath=…`
-// or the GIT_CONFIG_* env form), matched anywhere in the statement.
-if (/--no-verify\b|(^|[\s;&|])-n(?=[\s;&|]|$)|\bcore\.hooksPath\b/.test(cmd)) {
-  console.error(
-    'pre-commit gate: commit rejected — hook-bypass flag detected (`--no-verify`/`-n` or `core.hooksPath` override). ' +
-      'These skip the green-at-every-commit gate. Remove the bypass and commit normally; if `npm run check` fails, fix it first.',
-  );
-  process.exit(2);
+// or the GIT_CONFIG_* env form), evaluated ONLY on `git commit` sub-commands.
+for (const sub of commitSubCmds) {
+  if (/--no-verify\b|\bcore\.hooksPath\b/.test(sub) || /(?:^|\s)-n(?=\s|$)/.test(sub)) {
+    console.error(
+      'pre-commit gate: commit rejected — hook-bypass flag detected (`--no-verify`/`-n` or `core.hooksPath` override). ' +
+        'These skip the green-at-every-commit gate. Remove the bypass and commit normally; if `npm run check` fails, fix it first.',
+    );
+    process.exit(2);
+  }
 }
+
+// Whether the command sequence stages changes (e.g. `git add -A && git commit` or `git commit -a`).
+// When true, the gate inspects both currently staged files and pending modified/untracked files
+// so chained commands cannot bypass loop-core / doc-contract gates before staging occurs.
+const hasStageCommand =
+  subCmds.some((s) => /\bgit\b[^\n]*\badd\b/.test(s)) ||
+  commitSubCmds.some((s) => /(?:^|\s)-(?:a|A|-all)\b/.test(s));
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -212,10 +225,22 @@ function runGate() {
   // the staged set (git diff --cached) — the files that will actually commit.
   const cached = git(['diff', '--cached', '--name-only']);
   if (!cached.ok) return { blocked: false }; // can't list staged — skip subset
-  const staged = cached.stdout
+  let staged = cached.stdout
     .split(/\r?\n/)
     .map((p) => p.trim())
     .filter(Boolean);
+
+  if (hasStageCommand) {
+    const status = git(['status', '--porcelain']);
+    if (status.ok) {
+      const pending = status.stdout
+        .split(/\r?\n/)
+        .map((line) => line.slice(3).trim())
+        .map((p) => (p.includes(' -> ') ? p.split(' -> ')[1] : p))
+        .filter(Boolean);
+      staged = Array.from(new Set([...staged, ...pending]));
+    }
+  }
 
   // The docs/assets the doc-contract subset pins: any markdown (docs/**.md,
   // CLAUDE.md, AGENTS.md, copilot-instructions.md, auditor.agent.md) plus the
@@ -255,9 +280,24 @@ function runGate() {
   // attestation for loop-core; FAIL-OPEN only on a genuine git write-tree fault.
   if (staged.some(pinsLoopCore)) {
     const loopCoreStaged = staged.filter(pinsLoopCore);
-    const wt = git(['write-tree']);
-    if (!wt.ok) return { blocked: false }; // can't bind → don't wedge (infra fail-open)
-    const sha = wt.stdout.trim();
+    let sha = null;
+    if (hasStageCommand) {
+      const scratchIndex = join(tmpdir(), `scratch-idx-${randomBytes(6).toString('hex')}`);
+      if (gitWithIndex(scratchIndex, ['read-tree', 'HEAD']).ok && gitWithIndex(scratchIndex, ['add', '-A']).ok) {
+        const wtScratch = gitWithIndex(scratchIndex, ['write-tree']);
+        if (wtScratch.ok) sha = wtScratch.stdout.trim();
+      }
+      try {
+        rmSync(scratchIndex, { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!sha) {
+      const wt = git(['write-tree']);
+      if (!wt.ok) return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+      sha = wt.stdout.trim();
+    }
     const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
     const runHint =
       `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> ` +
