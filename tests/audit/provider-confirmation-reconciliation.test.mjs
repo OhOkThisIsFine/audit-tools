@@ -284,12 +284,17 @@ describe("autonomous fail-closed exclusion", () => {
   // The attended path's whole point: the gate prompts the delta and the operator
   // answers. Their submission IS the decision and must supersede the fail-closed
   // default — otherwise the tool would exclude what they just confirmed.
+  // R3-3: the gate is ATTENDED — on an autonomous gate this same submission would be
+  // LLM-authored and its `exclude` stripped rather than honored.
   test("an operator submission SUPERSEDES the fail-closed exclusion", async () => {
     await withTempRoot(async (root, artifactsDir) => {
       // A submission that explicitly excludes something ELSE — so `policy.exclude` is
       // genuinely present and the assertion cannot pass merely by policy being absent.
       await writeInput(artifactsDir, { exclude: ["worker-command"] });
-      await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, autonomousGate());
+      await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, {
+        ...autonomousGate(),
+        autonomous: false,
+      });
 
       const read = await readSharedProviderConfirmation(root);
       expect(read.policy?.exclude, "the operator's own exclusion is honored").toContain(
@@ -549,20 +554,26 @@ describe("capability-evidence gate → obligation", () => {
     });
   });
 
-  // The OTHER arm of the same `hasDelta` OR, and the one that shipped untested.
+  // The OTHER arm of the same reach/capability decision, and the one that shipped
+  // untested pre-R3-3.
   //
-  // REGRESSION GUARD, and it guards the "gate that could never fire" class specifically.
-  // `hasDelta` ORs the reach delta with the capability delta; only the reach arm was ever
-  // driven with `autonomous: true`. If the capability term were dropped from that OR (or
-  // the fold branch keyed on `newlyReachable` alone, which is what it originally did), an
-  // autonomous run with a capability-only delta would take the ELSE branch and EMIT — a
-  // prompt into a run with no operator to read it, re-emitted every invocation, which is
-  // the PRIORITY[0] livelock. It must FOLD to the executor instead.
-  test("autonomous + capability-only delta ⇒ FOLDS to the executor, never emits", async () => {
+  // REGRESSION GUARD, and it guards the "gate that could never fire" class specifically
+  // — now split across TWO tests, since R3-3 gives the two arms genuinely different
+  // behavior (capability EMITS to the host LLM; reach still FOLDS, since reach is
+  // never an LLM's call). The reach-only arm below is the ORIGINAL guard, narrowed to
+  // an empty capability delta so it keeps pinning the fold; the capability arm after
+  // it is the NEW R3-3 behavior this same regression class now requires.
+  test("autonomous + reach-only delta (no capability delta) ⇒ FOLDS to the executor, never emits", async () => {
     await withTempRoot(async (_root, artifactsDir) => {
       const defs = buildAuditObligations({
-        newlyReachable: [],
-        unevidencedCapability: UNEVIDENCED,
+        newlyReachable: [
+          {
+            key: "brand-new-model",
+            transport: "openai-compatible",
+            exclusion_pattern: "openai-compatible:brand-new-model",
+          },
+        ],
+        unevidencedCapability: [],
         autonomous: true,
       });
       const def = defs.find((d) => d.id === "provider_confirmation");
@@ -579,10 +590,121 @@ describe("capability-evidence gate → obligation", () => {
       const thinCtx = { params: { artifactsDir } };
       await expect(
         def.execute(confirmedBundle(), thinCtx),
-        "nobody is there to answer the prompt — emitting it would livelock PRIORITY[0], " +
-          "so this must hand off to the executor and never return an emit",
+        "reach is never an LLM's call either (see intakeExecutors.ts's authoredByLlm " +
+          "sharp edge) — nobody is there to answer it, so this must hand off to the " +
+          "executor and never return an emit",
       ).rejects.toThrow();
     });
+  });
+
+  // R3-3: autonomous ≠ "no LLM" — it means no HUMAN operator. `next-step` still
+  // returns a prompt contract to the host agent driving the run, so a capability-only
+  // delta now EMITS the ranker prompt addressed to it, instead of folding to the
+  // (rank-blind) deterministic executor the way it used to.
+  test("R3-3: autonomous + capability-only delta ⇒ EMITS the LLM-ranker prompt (does not fold)", async () => {
+    await withTempRoot(async (_root, artifactsDir) => {
+      const defs = buildAuditObligations({
+        newlyReachable: [],
+        unevidencedCapability: UNEVIDENCED,
+        autonomous: true,
+      });
+      const def = defs.find((d) => d.id === "provider_confirmation");
+      const outcome = await def.execute(confirmedBundle(), {
+        params: { artifactsDir },
+      });
+      expect(
+        outcome.kind,
+        "an autonomous run still has a host LLM driving it to ask",
+      ).toBe("emit");
+      expect(outcome.step.kind).toBe("provider_confirmation");
+      const o = outcome.step.state.obligations.find(
+        (x) => x.id === "provider_confirmation",
+      );
+      expect(o.state, "stays open until the LLM answers").toBe("stale");
+    });
+  });
+
+  // The co-occurrence case: BOTH deltas non-empty under autonomous. Capability must
+  // still win the emit (the reach delta is never shown to the LLM — see the prompt
+  // test below) rather than the reach arm forcing a fold that would silently strand
+  // the capability question.
+  test("R3-3: autonomous + BOTH deltas ⇒ still EMITS (capability takes priority, reach is never asked)", async () => {
+    await withTempRoot(async (_root, artifactsDir) => {
+      const defs = buildAuditObligations({
+        newlyReachable: [
+          {
+            key: "brand-new-model",
+            transport: "openai-compatible",
+            exclusion_pattern: "openai-compatible:brand-new-model",
+          },
+        ],
+        unevidencedCapability: UNEVIDENCED,
+        autonomous: true,
+      });
+      const def = defs.find((d) => d.id === "provider_confirmation");
+      const outcome = await def.execute(confirmedBundle(), {
+        params: { artifactsDir },
+      });
+      expect(outcome.kind).toBe("emit");
+    });
+  });
+
+  // R3-3: the RENDERED prompt itself — the autonomous variant addresses the
+  // capability section to the host LLM and omits the reach section entirely, even
+  // when a reach delta is passed alongside it (the co-occurrence case above).
+  test("R3-3: the autonomous prompt addresses the host LLM and OMITS the reach section", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+      unevidencedCapability: UNEVIDENCED,
+      newlyReachable: [
+        {
+          key: "brand-new-model",
+          transport: "openai-compatible",
+          exclusion_pattern: "openai-compatible:brand-new-model",
+        },
+      ],
+      autonomous: true,
+    });
+    expect(prompt).toContain("You (the host agent) must rank these models");
+    expect(prompt).toContain("an autonomous run has no operator to ask");
+    expect(prompt).toContain("capability_order");
+    expect(
+      prompt,
+      "reach is never an LLM's call — the section must not render at all",
+    ).not.toContain("Reconcile Newly-Reachable Backends");
+    expect(prompt).not.toContain("brand-new-model");
+  });
+
+  // The ATTENDED variant is unaffected by `autonomous` being absent/false — same
+  // operator-framed text as before R3-3.
+  test("the ATTENDED prompt keeps the operator framing (autonomous absent)", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+      unevidencedCapability: UNEVIDENCED,
+    });
+    expect(prompt).toContain("No rank source covers these dispatchable models");
+    expect(prompt).not.toContain("You (the host agent) must rank");
+  });
+
+  // R3-3: the attended variant's anchor marker distinguishes an LLM-ranked anchor
+  // (freely repositionable) from a genuinely operator-ranked one (a fixed point).
+  test("R3-3: an LLM-ranked anchor gets the reposition marker; an operator-ranked one does not", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "worker-command", capability_tier: "unknown", excluded: false },
+      ],
+      unevidencedCapability: ["m-new"],
+      capabilityAnchors: ["m-llm", "m-operator"],
+      capabilityOrderLlmRanked: ["m-llm"],
+    });
+    expect(prompt).toContain(
+      "`m-llm`  (LLM-ranked — restate it in your order to reposition it)",
+    );
+    expect(prompt).toContain("`m-operator`  (already ranked)");
   });
 
   // The capability twin of the `newly_reachable_backend` friction test above, and it

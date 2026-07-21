@@ -72,6 +72,29 @@ export function renderProviderConfirmationPrompt(opts: {
    * then silently reverted their own confirmed order.
    */
   hasPriorConfirmation?: boolean;
+  /**
+   * R3-3: true on an autonomous (no-operator) run. Only changes rendering when
+   * `unevidencedCapability` is non-empty — addresses that section to the HOST LLM
+   * (an autonomous run has no operator to ask, but the CLI's `next-step` prompt is
+   * always executed by a host agent, so THAT is who ranks) instead of an operator,
+   * and OMITS the reach-reconciliation section entirely: reach is never an LLM's
+   * call to make (`intakeExecutors.ts`'s executor fails it closed regardless of
+   * what an LLM-authored submission says), so the prompt must not ask one to answer
+   * a question it must not answer. Absent/false renders the ordinary operator
+   * variant, unchanged.
+   */
+  autonomous?: boolean;
+  /**
+   * R3-3: anchor ids whose current position is LLM-authored rather than
+   * operator-authored (`ConfirmedDispatchPolicy.capability_order_llm_ranked`).
+   * Drives the ATTENDED variant's anchor marker only — an operator sees
+   * "(LLM-ranked — restate it in your order to reposition it)" instead of
+   * "(already ranked)" for these, since (unlike a genuinely operator-ranked
+   * anchor) they may freely reposition one without restating the whole roster.
+   * Has no effect on the autonomous variant (the LLM must not reorder ANY anchor,
+   * regardless of who ranked it) or when the id is not among `capabilityAnchors`.
+   */
+  capabilityOrderLlmRanked?: readonly string[];
 }): string {
   const sorted = [...opts.providerPool].sort(
     (a, b) => (a.cost_order ?? Number.MAX_SAFE_INTEGER) - (b.cost_order ?? Number.MAX_SAFE_INTEGER),
@@ -115,6 +138,8 @@ export function renderProviderConfirmationPrompt(opts: {
 
   const newlyReachable = opts.newlyReachable ?? [];
   const unevidencedCapability = opts.unevidencedCapability ?? [];
+  const autonomous = opts.autonomous === true;
+  const llmRankedAnchors = new Set(opts.capabilityOrderLlmRanked ?? []);
   // Anchors must be disjoint from the models under question — one cannot be both a
   // settled reference point and the thing being ranked.
   const unevidencedSet = new Set(unevidencedCapability);
@@ -126,6 +151,14 @@ export function renderProviderConfirmationPrompt(opts: {
   // host may copy verbatim, defaulting the unranked models to LEAST capable — the
   // conservative direction if the host does not move them.
   const capabilityAnswerExample = [...capabilityAnchors, ...unevidencedCapability];
+  // R3-3: the ATTENDED variant marks an LLM-ranked anchor distinctly — an operator
+  // may freely reposition one without restating the whole roster, unlike a
+  // genuinely operator-ranked anchor. The autonomous variant never marks it: the
+  // LLM must not reorder ANY anchor, regardless of who ranked it.
+  const anchorLine = (model: string): string =>
+    !autonomous && llmRankedAnchors.has(model)
+      ? `  - \`${model}\`  (LLM-ranked — restate it in your order to reposition it)`
+      : `  - \`${model}\`  (already ranked)`;
 
   // The capability block is ADDITIVE to whatever gate section follows — a run can owe
   // both a reach reconciliation and a capability ordering, and folding them into one
@@ -135,10 +168,23 @@ export function renderProviderConfirmationPrompt(opts: {
       ? [
           "## Rank these models by capability",
           "",
-          "No rank source covers these dispatchable models, so the admission",
-          "capability floor currently **fails open** on them — they are eligible for",
-          "`deep` work they may be entirely unfit for:",
-          "",
+          ...(autonomous
+            ? [
+                "**You (the host agent) must rank these models by capability for agentic",
+                "code-audit work** — an autonomous run has no operator to ask. This is LLM",
+                "judgment, recorded as provenance; a later operator confirmation can",
+                "reorder anything you rank. Rank on what you know of each model's",
+                "demonstrated coding/agentic capability; if you genuinely do not know a",
+                "model, place it conservatively LOW and note that in the ordering (an",
+                "explicit recorded judgment, never a silent guess).",
+                "",
+              ]
+            : [
+                "No rank source covers these dispatchable models, so the admission",
+                "capability floor currently **fails open** on them — they are eligible for",
+                "`deep` work they may be entirely unfit for:",
+                "",
+              ]),
           ...unevidencedCapability.map((model) => `  - \`${model}\``),
           "",
           ...(capabilityAnchors.length > 0
@@ -148,7 +194,7 @@ export function renderProviderConfirmationPrompt(opts: {
                 "models above relative to them. They are a bounded sample spread across the",
                 "full ranking, not the whole ranking:",
                 "",
-                ...capabilityAnchors.map((model) => `  - \`${model}\`  (already ranked)`),
+                ...capabilityAnchors.map(anchorLine),
                 "",
                 "Answer with `capability_order`: **one ordering over the combined set**,",
                 "most capable first — the unranked models interleaved among the reference",
@@ -199,7 +245,13 @@ export function renderProviderConfirmationPrompt(opts: {
 
   return [
     ...capabilitySection,
-    ...(newlyReachable.length > 0
+    // R3-3: OMITTED entirely on the autonomous variant, regardless of the reach
+    // delta's actual content — reach is never an LLM's call to make (see
+    // `intakeExecutors.ts`'s executor, which fails it closed no matter what an
+    // LLM-authored submission says), so the prompt must not invite an answer to a
+    // question it must not answer. It is not deferred or summarized here; the
+    // reach delta simply waits for a later ATTENDED re-confirmation.
+    ...(newlyReachable.length > 0 && !autonomous
       ? [
           "# Reconcile Newly-Reachable Backends (Gate-0)",
           "",
@@ -323,6 +375,33 @@ export function renderProviderConfirmationPrompt(opts: {
       : []),
     "## What to do",
     "",
+    // R3-3: the autonomous variant documents ONLY the field the executor will read.
+    // The executor strips everything else from an LLM-authored submission (see
+    // `runProviderConfirmationAutoComplete`'s sanitize step) — documenting the full
+    // operator field set here would invite answers to questions the LLM was not
+    // asked (an `include` "fixing" an exclusion whose reach-section rationale this
+    // variant deliberately omits), which the tool would then have to loudly drop.
+    ...(autonomous
+      ? [
+          "Write your capability ranking to:",
+          "",
+          `  ${opts.inputPath}`,
+          "",
+          "```json",
+          "{",
+          `  "schema_version": "${PROVIDER_CONFIRMATION_INPUT_VERSION}",`,
+          '  "capability_order": ["<model-id, most capable first>", "..."]',
+          "}",
+          "```",
+          "",
+          "`capability_order` is the ONLY field read from an autonomous submission —",
+          "exclude/include/cost_order/host_models/dispatch_bias are operator decisions",
+          "and are stripped (and reported) if present.",
+          "",
+          `Then run: ${opts.continueCommand}`,
+          "",
+        ]
+      : [
     "Ask the user whether the suggested ordering is right (a single, brief round).",
     "Then write the operator's decision to:",
     "",
@@ -374,5 +453,6 @@ export function renderProviderConfirmationPrompt(opts: {
     "",
     `Then run: ${opts.continueCommand}`,
     "",
+        ]),
   ].join("\n");
 }

@@ -727,7 +727,11 @@ describe("key ordering: cost_order (candidate keyspace) vs capability_order (mod
 // Do NOT reroute these through `promote()`.
 
 /** The executor's gate object. MUTABLE (the executor clears it) ⇒ a fresh one per use. */
-const gateWith = (newlyReachable = []) => ({ newlyReachable, autonomous: true });
+// ATTENDED gate: these fixtures construct OPERATOR submissions, and R3-3 made the
+// flag meaningful — on an autonomous gate a submission is LLM-authored and the
+// executor strips its operator-only fields. Tests that mean an LLM submission pass
+// an explicit `autonomous: true` gate inline.
+const gateWith = (newlyReachable = []) => ({ newlyReachable, autonomous: false });
 
 const NEW_BACKEND = {
   key: "brand-new-model",
@@ -858,9 +862,13 @@ describe("B1 PROVENANCE: an AUTO exclusion is superseded by the next submission;
 
       // The operator names the provider in `include` — an explicit decision about THIS
       // backend, which is exactly what the placeholder was standing in for.
+      //
+      // R3-3: the gate is ATTENDED here, deliberately — an opt-back-in is an OPERATOR
+      // decision. The identical submission on an autonomous gate is LLM-authored and
+      // gets its `include` STRIPPED (the sanitize test below) rather than honored.
       await writeInputFile(artifactsDir, { include: ["openai-compatible"] });
       await runProviderConfirmationAutoComplete(
-        {}, root, artifactsDir, CONFIG, gateWith(),
+        {}, root, artifactsDir, CONFIG, { newlyReachable: [], autonomous: false },
       );
 
       const after = await readPersisted(root);
@@ -875,6 +883,68 @@ describe("B1 PROVENANCE: an AUTO exclusion is superseded by the next submission;
         ).excludes({ transport: "openai-compatible", model: "brand-new-model" }),
         "and the backend really is routable again — not merely untagged",
       ).toBe(false);
+    });
+  });
+
+  // R3-3 SANITIZE: the reviewer-found exploit, pinned. Round 1 fail-closed-excludes a
+  // backend on an autonomous run; round 2's LLM-authored ranking answer smuggles the
+  // exact `include` (plus an `exclude`) that would supersede the placeholder. The
+  // executor must strip every operator-only field from an LLM-authored submission —
+  // honoring the capability_order alone — and say so in the progress summary. Without
+  // the sanitize, `retainAutoExclusions` reads the raw input, drops the placeholder,
+  // and a backend no human ever confirmed becomes dispatchable.
+  test("an LLM-authored submission's include/exclude are STRIPPED: the fail-closed placeholder survives", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeSharedProviderConfirmation(root, buildPrior(PRIOR_INPUT, ["agy"]));
+
+      await runProviderConfirmationAutoComplete(
+        {}, root, artifactsDir, CONFIG, { newlyReachable: [NEW_BACKEND], autonomous: true },
+      );
+      expect((await readPersisted(root)).policy?.auto_exclude).toEqual([
+        NEW_BACKEND.exclusion_pattern,
+      ]);
+
+      // The LLM answers the ranking question — and "helpfully" opts the excluded
+      // backend back in. Autonomous gate ⇒ authoredByLlm ⇒ everything but
+      // capability_order must be dropped, loudly.
+      await writeInputFile(artifactsDir, {
+        capability_order: ["model-gamma", "model-alpha", "host-beta"],
+        include: ["openai-compatible"],
+        exclude: ["agy"],
+      });
+      const result = await runProviderConfirmationAutoComplete(
+        {}, root, artifactsDir, CONFIG, { newlyReachable: [], autonomous: true },
+      );
+
+      const after = await readPersisted(root);
+      expect(
+        after.policy?.auto_exclude,
+        "the LLM's include must NOT supersede the placeholder — only an attended " +
+          "operator submission may (the contrast test above)",
+      ).toEqual([NEW_BACKEND.exclusion_pattern]);
+      expect(
+        resolveDispatchExclusion(
+          await readConfirmedDispatchPolicy(root),
+          CLEAN_ENV,
+        ).excludes({ transport: "openai-compatible", model: "brand-new-model" }),
+        "and the backend really is still ruled out at dispatch",
+      ).toBe(true);
+      expect(
+        after.policy?.exclude,
+        "the LLM's exclude must not restate/replace the operator's list either way — " +
+          "the operator's own rule survives untouched",
+      ).toEqual(["agy"]);
+      expect(
+        after.policy?.capability_order,
+        "the one question the LLM WAS asked still promotes",
+      ).toContain("model-gamma");
+      expect(
+        result.progress_summary,
+        "stripping must be loud — silent stripping leaves the host believing its " +
+          "include took effect",
+      ).toContain("Dropped operator-only field(s)");
     });
   });
 });
@@ -1029,7 +1099,45 @@ const {
   mergeCapabilityOrder,
   selectCapabilityAnchors,
   DEFAULT_CAPABILITY_ANCHOR_COUNT,
+  advanceCapabilityOrderLlmRanked,
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
+
+describe("R3-3: the total-replacement escape is OPERATOR-only", () => {
+  // On a small roster the anchor sample can cover the ENTIRE prior ordering, so an
+  // LLM answer over "new models + all anchors" is total by coverage. Honoring it
+  // verbatim would let the LLM silently reorder operator ranks through the escape
+  // hatch; the escape is therefore authorship-gated, and the LLM path treats prior
+  // ids as immovable anchors with the attempted reorder detected and reported.
+  test("an LLM-authored TOTAL submission does NOT replace — prior order holds, new ids interpolate", () => {
+    expect(
+      mergeCapabilityOrder(["a", "b"], ["b", "a", "x"], new Set(), true),
+      "b/a reorder must be discarded; only x is the LLM's to place",
+    ).toEqual(["a", "x", "b"]);
+  });
+
+  test("the same LLM-authored total submission's anchor reorder is REPORTED, not silent", () => {
+    expect(
+      detectDiscardedCapabilityReorder(["a", "b"], ["b", "a", "x"], new Set(), true).length,
+      "merge did not honor the reorder, so the discard report must say so",
+    ).toBeGreaterThan(0);
+  });
+
+  test("an OPERATOR total submission keeps the pre-existing verbatim-replacement behavior", () => {
+    expect(mergeCapabilityOrder(["a", "b"], ["b", "a", "x"], new Set(), false)).toEqual([
+      "b",
+      "a",
+      "x",
+    ]);
+    expect(detectDiscardedCapabilityReorder(["a", "b"], ["b", "a", "x"], new Set(), false)).toEqual([]);
+  });
+
+  test("LLM authorship-set advance marks ONLY genuinely new ids, even on a total answer", () => {
+    expect(
+      advanceCapabilityOrderLlmRanked([], ["a", "b"], ["b", "a", "x"], true),
+      "a and b stay operator-authored — the LLM never moved them",
+    ).toEqual(["x"]);
+  });
+});
 
 describe("mergeCapabilityOrder: anchored insertion", () => {
   test("a model the submission never mentions KEEPS its prior rank (the livelock fix)", () => {
@@ -1747,6 +1855,241 @@ describe("renderConfirmationSummary ACCUMULATES: co-occurring outcomes are ALL r
       expect(result.progress_summary).toMatch(/NO capability evidence/);
       expect(result.progress_summary).toContain(UNRANKED);
       expect(result.progress_summary).not.toMatch(/NOT applied/);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3-3 — headless promotion via LLM ranker: executor authorship + supersession
+// ---------------------------------------------------------------------------
+//
+// The mechanism: on an autonomous run, `authoredByLlm = gate.autonomous === true &&
+// input != null` (intakeExecutors.ts). It decides two things at once — the reach
+// fail-closed keying (an LLM submission must NEVER supersede a reach delta, the one
+// sharp edge) and which side of the `capability_order_llm_ranked` provenance split
+// (rule 1 vs rule 2) this promotion falls on. These tests drive the REAL executor.
+
+const configWithModels = (models) => ({
+  provider: "claude-code",
+  sources: models.map((model) => ({
+    id: `${model}-src`,
+    transport: "openai-compatible",
+    endpoint: `http://${model}.local/v1`,
+    model,
+  })),
+});
+
+describe("R3-3: executor authorship — capability_order_llm_ranked + the reach sharp edge", () => {
+  test("autonomous + input with capability_order ⇒ ranks stamped, models recorded LLM-ranked, AND newlyReachable STILL fail-closed-excluded", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeInputFile(artifactsDir, { capability_order: ["m-a", "m-b"] });
+      const gate = {
+        newlyReachable: [NEW_BACKEND],
+        unevidencedCapability: ["m-a", "m-b"],
+        autonomous: true,
+      };
+      const result = await runProviderConfirmationAutoComplete(
+        {},
+        root,
+        artifactsDir,
+        configWithModels(["m-a", "m-b"]),
+        gate,
+      );
+
+      // Ranks stamped exactly as an operator's would be.
+      const ranks = await readConfirmedCapabilityRanks(root);
+      expect(ranks.get("m-a")).toBe(0);
+      expect(ranks.get("m-b")).toBe(1);
+
+      // Authorship recorded.
+      const raw = await readPersisted(root);
+      expect(
+        raw.policy?.capability_order_llm_ranked?.slice().sort(),
+        "the LLM's submission is tagged, not laundered as an operator decision",
+      ).toEqual(["m-a", "m-b"]);
+
+      // THE SHARP EDGE: reach is fail-closed-excluded regardless — an LLM ranking
+      // capability never also confirms a newly-reachable backend on the operator's
+      // behalf, even though a submission (the LLM's) genuinely existed this round.
+      expect(raw.policy?.auto_exclude).toEqual([NEW_BACKEND.exclusion_pattern]);
+      expect(
+        raw.policy?.exclude ?? [],
+        "never laundered into an operator-authored exclusion either",
+      ).not.toContain(NEW_BACKEND.exclusion_pattern);
+      expect(
+        gate.newlyReachable,
+        "cleared by the fail-closed write, not by silently honoring it",
+      ).toEqual([]);
+      expect(result.progress_summary).toMatch(/fail-closed/i);
+    });
+  });
+
+  test("attended + input ⇒ reach SUPERSEDES (today's behavior, unchanged); nothing marked llm-ranked", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeInputFile(artifactsDir, { capability_order: ["m-a", "m-b"] });
+      const gate = {
+        newlyReachable: [NEW_BACKEND],
+        unevidencedCapability: ["m-a", "m-b"],
+        autonomous: false,
+      };
+      await runProviderConfirmationAutoComplete(
+        {},
+        root,
+        artifactsDir,
+        configWithModels(["m-a", "m-b"]),
+        gate,
+      );
+
+      const raw = await readPersisted(root);
+      expect(
+        raw.policy?.auto_exclude ?? [],
+        "an ATTENDED submission is the operator's decision and supersedes the reach delta",
+      ).not.toContain(NEW_BACKEND.exclusion_pattern);
+      expect(
+        raw.policy?.capability_order_llm_ranked ?? [],
+        "an attended submission is operator-authored — nothing is ever tagged llm-ranked",
+      ).toEqual([]);
+    });
+  });
+});
+
+describe("R3-3: supersession — an operator submission repositions a previously LLM-ranked id", () => {
+  test("repositioning two LLM-ranked ids is HONORED (not discarded) and removes them from capability_order_llm_ranked; a third, un-named, LLM-ranked id is untouched", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      const config = { provider: "claude-code" };
+
+      // Promotion 1 — an autonomous run's LLM ranks all three.
+      await writeInputFile(artifactsDir, {
+        capability_order: ["m-a", "m-b", "m-c"],
+      });
+      await runProviderConfirmationAutoComplete({}, root, artifactsDir, config, {
+        newlyReachable: [],
+        unevidencedCapability: ["m-a", "m-b", "m-c"],
+        autonomous: true,
+      });
+      const afterLlm = await readPersisted(root);
+      expect(afterLlm.policy.capability_order).toEqual(["m-a", "m-b", "m-c"]);
+      expect(afterLlm.policy.capability_order_llm_ranked.slice().sort()).toEqual([
+        "m-a",
+        "m-b",
+        "m-c",
+      ]);
+
+      // Promotion 2 — an ATTENDED operator submits a PARTIAL answer that swaps two
+      // of the three LLM-ranked ids. Under the old (operator-only) anchor rule this
+      // would be a discarded reorder; under R3-3 rule 2 the two named ids are NOT
+      // anchors for an operator, so the reposition is honored.
+      await writeInputFile(artifactsDir, { capability_order: ["m-b", "m-a"] });
+      const result = await runProviderConfirmationAutoComplete({}, root, artifactsDir, config, {
+        newlyReachable: [],
+        unevidencedCapability: [],
+        autonomous: false,
+      });
+
+      const afterOperator = await readPersisted(root);
+      expect(
+        afterOperator.policy.capability_order.indexOf("m-b"),
+        "the operator's reorder of the two llm-ranked ids is honored, not discarded",
+      ).toBeLessThan(afterOperator.policy.capability_order.indexOf("m-a"));
+      expect(
+        result.progress_summary,
+        "honored, not discarded — no discard warning",
+      ).not.toMatch(/NOT applied/);
+      expect(
+        afterOperator.policy.capability_order_llm_ranked ?? [],
+        "both named ids are operator-authored from here on",
+      ).not.toContain("m-a");
+      expect(afterOperator.policy.capability_order_llm_ranked ?? []).not.toContain(
+        "m-b",
+      );
+      expect(
+        afterOperator.policy.capability_order_llm_ranked,
+        "m-c was never named by this submission — untouched, still LLM-ranked",
+      ).toContain("m-c");
+    });
+  });
+
+  test("an operator reordering two GENUINELY operator-ranked anchors still gets the discard report (rule unchanged)", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      const config = { provider: "claude-code" };
+
+      // Promotion 1 — an ATTENDED operator ranks all three themselves.
+      await writeInputFile(artifactsDir, {
+        capability_order: ["m-a", "m-b", "m-c"],
+      });
+      await runProviderConfirmationAutoComplete({}, root, artifactsDir, config, {
+        newlyReachable: [],
+        unevidencedCapability: [],
+        autonomous: false,
+      });
+      expect(
+        (await readPersisted(root)).policy.capability_order_llm_ranked ?? [],
+      ).toEqual([]);
+
+      // Promotion 2 — the SAME operator swaps two of their own anchors.
+      await writeInputFile(artifactsDir, { capability_order: ["m-c", "m-a"] });
+      const result = await runProviderConfirmationAutoComplete({}, root, artifactsDir, config, {
+        newlyReachable: [],
+        unevidencedCapability: [],
+        autonomous: false,
+      });
+
+      expect(result.progress_summary).toMatch(/NOT applied/);
+      expect((await readPersisted(root)).policy.capability_order).toEqual([
+        "m-a",
+        "m-b",
+        "m-c",
+      ]);
+    });
+  });
+});
+
+describe("R3-3: an LLM-authored submission's anchor-reorder still lands in the discarded-reorder report", () => {
+  test("an autonomous run's LLM reordering two anchors is discarded AND reported, exactly like an operator's would be", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      const config = { provider: "claude-code" };
+
+      // Promotion 1 — establish a confirmed ordering (attended, for a clean setup).
+      await writeInputFile(artifactsDir, {
+        capability_order: ["m-a", "m-b", "m-c"],
+      });
+      await runProviderConfirmationAutoComplete({}, root, artifactsDir, config, {
+        newlyReachable: [],
+        unevidencedCapability: [],
+        autonomous: false,
+      });
+
+      // Promotion 2 — an AUTONOMOUS run's LLM submits a partial answer swapping two
+      // already-ranked anchors ("m-c", "m-a") instead of leaving them alone. The LLM
+      // must not move an anchor any more than an operator may on a partial answer —
+      // same honesty rule, same report.
+      await writeInputFile(artifactsDir, { capability_order: ["m-c", "m-a"] });
+      const reorderResult = await runProviderConfirmationAutoComplete(
+        {},
+        root,
+        artifactsDir,
+        config,
+        { newlyReachable: [], unevidencedCapability: [], autonomous: true },
+      );
+
+      expect(reorderResult.progress_summary).toMatch(/NOT applied/);
+      expect(reorderResult.progress_summary).toContain("m-c");
+      expect(reorderResult.progress_summary).toContain("m-a");
+      const persisted = await readPersisted(root);
+      expect(
+        persisted.policy.capability_order,
+        "the anchors keep their confirmed positions — the LLM's reorder was discarded",
+      ).toEqual(["m-a", "m-b", "m-c"]);
     });
   });
 });

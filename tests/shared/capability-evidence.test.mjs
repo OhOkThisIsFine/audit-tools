@@ -28,6 +28,7 @@ const {
   sharedProviderConfirmationPath,
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
+  readSharedProviderConfirmation,
   readConfirmedCapabilityRanks,
   resolveUnevidencedCapabilityPools,
   readConfirmedCostPositions,
@@ -831,6 +832,101 @@ describe("resolveUnevidencedCapabilityPools: the capability delta", () => {
         "this list reaches the obligation reason + prompt; gather order would churn " +
           "downstream content hashes",
       ).toEqual(["model-a", "model-b", "model-c"]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. R3-3 — capability_order_llm_ranked: additive schema + round-trip
+// ---------------------------------------------------------------------------
+
+describe("R3-3 additive schema: a confirmation written before capability_order_llm_ranked existed", () => {
+  // A confirmation from AFTER `capability_order` existed but BEFORE its authorship
+  // set did — the precise migration boundary this field adds, distinct from the
+  // broader pre-capability LEGACY fixture above.
+  const LEGACY_WITH_CAPABILITY_ORDER = {
+    schema_version: "1.0.0",
+    session_level: true,
+    confirmed_at: "2026-01-01T00:00:00.000Z",
+    provider_pool: [
+      {
+        name: "openai-compatible",
+        model_id: "legacy-model",
+        cost_order: 0,
+        capability_rank: 0,
+      },
+      { name: "worker-command" },
+    ],
+    policy: {
+      capability_order: ["legacy-model"],
+    },
+  };
+
+  test("it still parses: capability_order survives, capability_order_llm_ranked is simply absent", async () => {
+    await withTempRoot(async (root) => {
+      await writeFile(
+        sharedProviderConfirmationPath(root),
+        JSON.stringify(LEGACY_WITH_CAPABILITY_ORDER),
+        "utf8",
+      );
+      const read = await readSharedProviderConfirmation(root);
+      expect(read, "an additive field must never null the whole parse").not.toBeNull();
+      expect(read.policy?.capability_order).toEqual(["legacy-model"]);
+      expect(
+        read.policy?.capability_order_llm_ranked,
+        "an old artifact never claims LLM authorship for anything — absent, not [] " +
+          "or an error",
+      ).toBeUndefined();
+      // The rank itself still reads back fine — the new field opened no leak into
+      // the existing evidence path.
+      const ranks = await readConfirmedCapabilityRanks(root);
+      expect(ranks.get("legacy-model")).toBe(0);
+    });
+  });
+});
+
+describe("R3-3 round-trip: capability_order_llm_ranked survives write → read", () => {
+  test("the LLM-ranked set persists (sorted, as a SET, not a positional ordering) and round-trips", async () => {
+    await withTempRoot(async (root) => {
+      const built = buildSharedProviderConfirmation(
+        RT_CONFIG,
+        CLEAN_ENV,
+        [],
+        [],
+        NO_CLI,
+        RT_INPUT,
+        RT_SOURCES,
+        [],
+        ["model-gamma", "model-alpha"],
+      );
+      await writeSharedProviderConfirmation(root, built);
+      const back = await readSharedProviderConfirmation(root);
+      expect(
+        back.policy?.capability_order_llm_ranked,
+        "sorted on persist — it is an authorship SET, not an ordering, so an " +
+          "incidentally-ordered array must never churn the content hash",
+      ).toEqual(["model-alpha", "model-gamma"]);
+      // Subset invariant: every llm-ranked id is genuinely IN capability_order.
+      for (const id of back.policy.capability_order_llm_ranked) {
+        expect(back.policy.capability_order).toContain(id);
+      }
+    });
+  });
+
+  test("an empty llm-ranked set persists as absent, not an empty array", async () => {
+    await withTempRoot(async (root) => {
+      const built = buildSharedProviderConfirmation(
+        RT_CONFIG,
+        CLEAN_ENV,
+        [],
+        [],
+        NO_CLI,
+        RT_INPUT,
+        RT_SOURCES,
+      );
+      await writeSharedProviderConfirmation(root, built);
+      const raw = JSON.parse(await readFile(sharedProviderConfirmationPath(root), "utf8"));
+      expect(Object.hasOwn(raw.policy ?? {}, "capability_order_llm_ranked")).toBe(false);
     });
   });
 });

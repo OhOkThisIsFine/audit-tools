@@ -983,3 +983,57 @@ test("a declared in-flight cap is passed VERBATIM regardless of window count", a
   // Cap 3, one already in flight ⇒ 2 more. Counting rows would see 2 in flight ⇒ 1.
   expect(res.granted).toHaveLength(2);
 });
+
+// ── admissionPoolsFromSummaries — capability_rank field flow ──────────
+// The capability_rank from DispatchCapacityPoolSummary flows through to the
+// AdmissionPool.capabilityScore field (LOWER = MORE CAPABLE). This test verifies
+// that a summary with capability_rank: 2 produces an AdmissionPool.capabilityScore === 2,
+// and that an absent field produces capabilityScore: null (fail-open).
+
+test("admissionPoolsFromSummaries: summary with capability_rank: 2 produces AdmissionPool.capabilityScore === 2", () => {
+  const summaries = [
+    {
+      pool_id: "test-pool-1",
+      model: "gpt-4",
+      rank: "deep",
+      is_conversation_host: false,
+      concurrency_cap: null,
+      host_concurrency_limit: null,
+      declared_cost_per_mtok: null,
+      remaining_token_budget: Infinity,
+      context_cap_tokens: null,
+      calibrating: false,
+      capability_rank: 2, // explicit capability rank
+      account_key: "acc-1",
+      resolved_limits: { context_tokens: 200_000, output_tokens: 32_000 },
+      window_budgets: [],
+    },
+  ];
+  const pools = admissionPoolsFromSummaries(summaries);
+  expect(pools).toHaveLength(1);
+  expect(pools[0].capabilityScore).toBe(2);
+});
+
+test("admissionPoolsFromSummaries: summary without capability_rank field produces AdmissionPool.capabilityScore === null", () => {
+  const summaries = [
+    {
+      pool_id: "test-pool-2",
+      model: "gpt-3.5",
+      rank: "standard",
+      is_conversation_host: false,
+      concurrency_cap: null,
+      host_concurrency_limit: null,
+      declared_cost_per_mtok: null,
+      remaining_token_budget: Infinity,
+      context_cap_tokens: null,
+      calibrating: false,
+      // capability_rank deliberately omitted — undefined
+      account_key: "acc-2",
+      resolved_limits: { context_tokens: 100_000, output_tokens: 16_000 },
+      window_budgets: [],
+    },
+  ];
+  const pools = admissionPoolsFromSummaries(summaries);
+  expect(pools).toHaveLength(1);
+  expect(pools[0].capabilityScore).toBe(null);
+});

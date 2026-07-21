@@ -1033,6 +1033,17 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         // BL-2: the do-not-re-litigate guardrail is owed to ANY re-confirmation, not
         // only to one carrying a reach delta.
         hasPriorConfirmation: priorConfirmation !== null,
+        // R3-3: only ever true here when this step was emitted for a non-empty
+        // capability delta on an autonomous run (`nextStepHelpers.ts`'s emission
+        // branch never emits `provider_confirmation` for autonomous otherwise, and
+        // this gate is the exact one that branch read) — addresses the capability
+        // section to the host LLM and omits the reach section.
+        autonomous: providerConfirmationGate.autonomous,
+        // R3-3: which of the rendered anchors are LLM-ranked rather than
+        // operator-ranked — drives the "restate it to reposition" marker on the
+        // attended variant only (harmless to pass unconditionally: the renderer
+        // ignores it on the autonomous variant).
+        capabilityOrderLlmRanked: priorConfirmation?.policy?.capability_order_llm_ranked ?? [],
       }),
     });
     console.log(JSON.stringify(step, null, 2));

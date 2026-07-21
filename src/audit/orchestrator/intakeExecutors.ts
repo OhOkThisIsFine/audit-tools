@@ -10,6 +10,8 @@ import {
   carryForwardConfirmationInput,
   retainAutoExclusions,
   detectDiscardedCapabilityReorder,
+  capabilityOrderNonAnchors,
+  advanceCapabilityOrderLlmRanked,
   unlinkProviderConfirmationInput,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
@@ -144,14 +146,20 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
  * carries a delta and there is NO operator submission, it fails CLOSED (persists an
  * exclusion) and records a `newly_reachable_backend` friction event.
  *
- * That rule is deliberately NOT keyed on `autonomous`, and the asymmetry matters:
- * `autonomous` decides who gets ASKED — the CLI emits the delta prompt on an attended
- * run and folds straight to this executor on an unattended one — but it can never
- * make silently including an unconfirmed backend correct. This function is exported
- * and reachable from `advanceAudit` directly, so the no-silent-honor property is
- * enforced HERE rather than resting on a caller's branch being right (a caller that
- * promotes an attended delta without asking IS the bug the gate exists to catch).
- * Enforce in the tool, never in a caller remembering.
+ * That rule is deliberately NOT keyed on `autonomous` ALONE, and the asymmetry
+ * matters: `autonomous` decides who gets ASKED — the CLI emits the delta prompt on
+ * an attended run and folds straight to this executor on an unattended one — but it
+ * can never make silently including an unconfirmed backend correct. This function is
+ * exported and reachable from `advanceAudit` directly, so the no-silent-honor
+ * property is enforced HERE rather than resting on a caller's branch being right (a
+ * caller that promotes an attended delta without asking IS the bug the gate exists
+ * to catch). Enforce in the tool, never in a caller remembering.
+ *
+ * R3-3 sharpens the edge rather than replacing it: on an autonomous run, a
+ * submission CAN now exist (the host LLM answering the capability-ranker prompt),
+ * but it is never an operator's reach decision — so `authoredByLlm` (derived below)
+ * fails closed on reach exactly like `input === null` does. An LLM may rank
+ * capability; it may never confirm a newly-reachable backend.
  *
  * A first-ever confirmation is unaffected: with no confirmation on disk there is no
  * decision to reconcile against, so the delta is empty and nothing fails closed.
@@ -191,12 +199,65 @@ export async function runProviderConfirmationAutoComplete(
   // Interactive Gate-0: the host may have submitted an operator ordering + host
   // roster to `provider-confirmation.input.json` (spec/cost-first-routing.md).
   // Absent ⇒ the tool's price-ascending suggestion (headless / no-operator path).
-  const input = artifactsDir
+  const rawInput = artifactsDir
     ? await readProviderConfirmationInput(artifactsDir)
     : null;
   // The confirmation as it stands BEFORE this promotion — read once, used for the
   // carry-forward merge below. Absent on a first-time confirmation.
   const priorConfirmation = root ? await readSharedProviderConfirmation(root) : null;
+  /**
+   * R3-3 authorship, tool-derived — never host-supplied, so the host cannot mislabel
+   * it. On an autonomous run nobody is present to submit input, so a submission that
+   * exists there was written by the host LLM answering the ranker prompt
+   * (`nextStepHelpers.ts`'s `provider_confirmation` emission branch), never an
+   * operator. An attended submission is always the operator's, regardless of who
+   * technically typed it. This one boolean decides the reach fail-closed keying
+   * below, which side of the `capability_order_llm_ranked` provenance split
+   * (rule 1 vs rule 2) this promotion falls on, and the sanitize step next.
+   */
+  const authoredByLlm = gate?.autonomous === true && rawInput != null;
+  /**
+   * R3-3 sanitize — the LLM was asked exactly ONE question, so `capability_order` is
+   * the only field an LLM-authored submission may carry into the promotion. Every
+   * other field (`exclude` / `include` / `cost_order` / `host_models` /
+   * `dispatch_bias`) is an OPERATOR decision: the carry-forward branches and
+   * `retainAutoExclusions` are authorship-blind, so an un-stripped LLM `include`
+   * (or an `exclude` addressing a fail-closed pattern) would drop a prior
+   * auto-exclusion and silently re-admit a backend no human ever confirmed — the
+   * exact negation of the G3 gate, reachable one round after a fail-closed write.
+   * Stripped HERE, at the single point every consumer reads from, so the guarantee
+   * never depends on the prompt having asked nicely — and stripped LOUDLY: the
+   * dropped field names go to the progress summary rather than vanishing.
+   */
+  const droppedLlmFields: string[] = [];
+  let input = rawInput;
+  if (authoredByLlm && rawInput) {
+    for (const [key, value] of Object.entries(rawInput)) {
+      if (key !== "schema_version" && key !== "capability_order" && value !== undefined) {
+        droppedLlmFields.push(key);
+      }
+    }
+    if (droppedLlmFields.length > 0) {
+      droppedLlmFields.sort();
+      input = {
+        schema_version: rawInput.schema_version,
+        ...(rawInput.capability_order !== undefined
+          ? { capability_order: rawInput.capability_order }
+          : {}),
+      };
+    }
+  }
+  /**
+   * Which previously-ranked ids this submission may freely reposition (R3-3 rule 2)
+   * rather than treat as fixed anchors (rule 1) — see `capabilityOrderNonAnchors`.
+   * Threaded into BOTH the discard-detector below and the merge inside
+   * `carryForwardConfirmationInput`, so the two can never disagree about what an
+   * "anchor" is for this submission.
+   */
+  const capabilityNonAnchors = capabilityOrderNonAnchors(
+    priorConfirmation?.policy?.capability_order_llm_ranked ?? [],
+    authoredByLlm,
+  );
   /** Models the capability gate flagged that this promotion clears WITHOUT ranking. */
   let unrankedOnPromotion: string[] = [];
   /**
@@ -208,22 +269,28 @@ export async function runProviderConfirmationAutoComplete(
    * restating the whole roster needs the anchor-provenance split in `docs/backlog.md`.
    * What is NOT acceptable is doing it silently — an accepted-then-discarded operator
    * decision is the same "the operator had to notice" failure the reach delta and the
-   * capability fail-open are both reported for.
+   * capability fail-open are both reported for. An LLM-authored submission is held to
+   * the identical honesty rule: reordering an anchor it must not move is discarded
+   * AND reported exactly like an operator's would be.
    */
   const discardedReorder = detectDiscardedCapabilityReorder(
     priorConfirmation?.policy?.capability_order ?? [],
     input?.capability_order ?? [],
+    capabilityNonAnchors,
+    authoredByLlm,
   );
   // G3 fail-closed reconciliation: a backend the operator never confirmed must not
   // become dispatchable merely because it is reachable. Excluding it is the
   // conservative direction — the run proceeds on the confirmed backends.
   //
-  // Keyed on `input === null` ALONE, not on `autonomous`: a submission IS the
-  // operator's decision and supersedes (on the attended path the gate prompts the
-  // delta and this promotes their answer), but with NO submission there is no
-  // decision to honor and including the backend would be the silent dispatch the gate
-  // exists to prevent — attended or not. See the header for why this is enforced here
-  // rather than in the caller's branch.
+  // Keyed on `input === null` OR `authoredByLlm`: a submission IS the operator's
+  // decision and supersedes ONLY on an attended run (the gate prompts the delta and
+  // this promotes their answer) — with NO submission, or one an autonomous run's LLM
+  // wrote, there is no OPERATOR decision to honor, and including the backend would be
+  // the silent dispatch the gate exists to prevent. R3-3 draws this line explicitly:
+  // an LLM may rank capability (that judgment IS recorded, see `capability_order`
+  // below); it may never confirm a newly-reachable backend on the operator's behalf.
+  // See the header for why this is enforced here rather than in the caller's branch.
   //
   // A″: each backend carries the `DispatchExclusionPattern` that rules out EXACTLY
   // it — `provider:model` where the model is knowable, else the coarse `provider`
@@ -233,14 +300,20 @@ export async function runProviderConfirmationAutoComplete(
   // re-derived here, so the rule persisted cannot drift from the delta detected.
   // Stage 5: the autonomous fail-closed write emits the `service:` axis, because that
   // is the axis that does not decay and closes multi-transport residue durably.
-  // R3-3 (OPEN — do not re-add an auto-ranker here without settling the mechanism):
-  // a headless run with unevidenced capability pools PINS the obligation rather than
-  // inventing a rank for it. Auto-ranking by any locally-derivable proxy (context window,
-  // price, name) manufactures evidence where the design says there is none — it is the
-  // fail-open this obligation exists to close, re-entered through a different door.
-  // See `docs/reviews/capability-evidence-salvage-2026-07-20.md` → Landing gate.
-  const effectiveInput = carryForwardConfirmationInput(input, priorConfirmation);
-  const failClosed = input === null ? [...(gate?.newlyReachable ?? [])] : [];
+  // R3-3 (SHIPPED): a headless run with a non-empty capability-evidence delta no
+  // longer wedges here — `nextStepHelpers.ts`'s emission branch routes it to the
+  // host LLM instead of folding to this executor, addressing the same ranker prompt
+  // an operator would answer. The LLM's `capability_order` submission is promoted
+  // through this exact seam on the NEXT invocation (the generic `if (input)` fold in
+  // `nextStepHelpers.ts` applies regardless of attended/autonomous), tagged
+  // LLM-authored via `authoredByLlm` above rather than fabricated locally — never a
+  // locally-derived proxy (context window, price, name), which would manufacture
+  // evidence where the design says there is none. See
+  // `docs/reviews/capability-evidence-salvage-2026-07-20.md` → Landing gate for the
+  // wedge this replaces.
+  const effectiveInput = carryForwardConfirmationInput(input, priorConfirmation, authoredByLlm);
+  const failClosed =
+    input === null || authoredByLlm ? [...(gate?.newlyReachable ?? [])] : [];
   // Read the CARRIED input, not the raw submission: the operator's prior exclusions are
   // a durable rule, and rebuilding this list from `input.exclude` alone is what let a
   // capability-only submission silently lift them — a fail-OPEN, the worst direction.
@@ -282,6 +355,16 @@ export async function runProviderConfirmationAutoComplete(
       env: process.env,
     });
     const sources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
+    // R3-3: advance the LLM-ranked authorship set across this promotion (rule 1/2 —
+    // see `advanceCapabilityOrderLlmRanked`), from the RAW submission (never
+    // `effectiveInput.capability_order`, which is already the merged ordering and
+    // no longer distinguishes "named by this submission" from "carried forward").
+    const capabilityOrderLlmRanked = advanceCapabilityOrderLlmRanked(
+      priorConfirmation?.policy?.capability_order_llm_ranked ?? [],
+      priorConfirmation?.policy?.capability_order ?? [],
+      input?.capability_order,
+      authoredByLlm,
+    );
     await writeSharedProviderConfirmation(
       root,
       buildSharedProviderConfirmation(
@@ -300,6 +383,7 @@ export async function runProviderConfirmationAutoComplete(
         effectiveInput ?? undefined,
         sources,
         autoExclude,
+        capabilityOrderLlmRanked,
       ),
     );
     artifactsWritten.push("provider-confirmation.json");
@@ -374,6 +458,7 @@ export async function runProviderConfirmationAutoComplete(
       failClosed,
       unrankedOnPromotion,
       discardedReorder,
+      droppedLlmFields,
     ),
   };
 }
@@ -383,6 +468,7 @@ function renderConfirmationSummary(
   newlyReachable: readonly NewlyReachableBackend[],
   unrankedOnPromotion: readonly string[] = [],
   discardedReorder: readonly string[] = [],
+  droppedLlmFields: readonly string[] = [],
 ): string {
   // ACCUMULATE, never early-return. These outcomes CO-OCCUR: a submission can reorder
   // anchors (discarded) while the same promotion clears a capability delta it did not
@@ -390,6 +476,18 @@ function renderConfirmationSummary(
   // second cleared SILENTLY — the very thing each of these lines exists to prevent.
   // Ordering within the list is significance, not exclusivity.
   const parts: string[] = [];
+  // R3-3 sanitize report — like the discarded reorder below, this states what the
+  // tool DECLINED to do: an LLM-authored submission carried operator-only fields and
+  // they were stripped, not honored. Silent stripping would leave the host believing
+  // its exclude/include took effect.
+  if (droppedLlmFields.length > 0) {
+    parts.push(
+      `Dropped operator-only field(s) from the LLM-authored submission ` +
+        `(${droppedLlmFields.join(", ")}) — an autonomous ranking answer may carry ` +
+        `only capability_order; exclude/include/cost_order/host_models/dispatch_bias ` +
+        `are operator decisions and require an attended confirmation.`,
+    );
+  }
   // First: the operator submitted a decision and this promotion did not apply it.
   // Every other line reports what the tool DID; this reports what it DECLINED to do,
   // which the operator would otherwise have to notice by diffing the artifact.

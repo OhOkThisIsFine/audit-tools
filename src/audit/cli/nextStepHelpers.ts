@@ -1493,21 +1493,42 @@ export function buildAuditObligations(
           // Operator has submitted → consume it (writes both canonical artifacts).
           return runDeterministicExecutor(bundle, ctx);
         }
-        const hasDelta =
-          (gate?.newlyReachable.length ?? 0) > 0 ||
-          (gate?.unevidencedCapability.length ?? 0) > 0;
-        if (hasDelta && gate?.autonomous) {
-          // G3, autonomous: a backend the operator never confirmed became reachable
-          // and there is nobody to ask. Fold to the executor, which fail-closed-
-          // excludes it + records the friction — never emit a prompt no one will read.
-          //
-          // The capability-evidence delta folds here too, and deliberately does NOT
-          // fail closed: excluding an unranked pool would silently shrink the dispatch
-          // set, which is a worse failure than promoting it unranked. There is no LLM
-          // on this path to synthesize an ordering — the executor is deterministic — so
-          // what it records is the promotion ITSELF: the still-unranked models go to the
-          // progress summary and to an `unranked_capability_promotion` friction event.
-          // Promoted, fails open at the floor, never silent.
+        // `?.` on the property too, not just `gate` itself: unlike the old single
+        // `||` expression (whose short-circuit meant a fixture setting only one of
+        // the two fields never evaluated the other), both are now read
+        // unconditionally below, so an omitted field must degrade to `0`, not throw.
+        const capabilityDelta = (gate?.unevidencedCapability?.length ?? 0) > 0;
+        const reachDelta = (gate?.newlyReachable?.length ?? 0) > 0;
+        if (gate?.autonomous && capabilityDelta) {
+          // R3-3: autonomous ≠ "no LLM" — it means no HUMAN operator. `next-step`
+          // still returns a prompt contract to the host agent driving the run, so a
+          // capability-evidence delta on an autonomous run EMITS the ranker prompt
+          // addressed to that host LLM instead of folding to the executor (which
+          // today can only promote the pools unranked — a loud fail-open, not a
+          // fix). The reach delta, if also present, does NOT get asked here: reach
+          // is never an LLM's call (the executor fails it closed regardless of what
+          // this submission says — see `intakeExecutors.ts`'s `authoredByLlm`), so
+          // the prompt omits that section entirely and the reach delta is resolved
+          // on a LATER attended re-confirmation, not this one.
+          return {
+            kind: "emit",
+            step: {
+              kind: "provider_confirmation",
+              state: deriveAuditState(bundle, {
+                newlyReachableBackends: gateKeys(gate),
+                unevidencedCapabilityPools: gateUnevidencedCapability(gate),
+              }),
+              bundle,
+            },
+          };
+        }
+        if (gate?.autonomous && reachDelta) {
+          // G3, autonomous, reach-only (no capability delta): a backend the operator
+          // never confirmed became reachable and there is nobody to ask — and unlike
+          // capability, reach is not something an LLM may answer on the operator's
+          // behalf either (see the executor's sharp edge). Fold to the executor,
+          // which fail-closed-excludes it + records the friction — never emit a
+          // prompt no one will read.
           //
           // Scoped to the DELTA case deliberately: a first-time confirmation (no
           // artifact at all) still pauses even under `autonomous_mode`, exactly as

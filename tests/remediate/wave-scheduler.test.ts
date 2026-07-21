@@ -1539,3 +1539,117 @@ describe("F4 fail-4 [CP-NODE-52]: unusable quota state => default wave, non-fata
   });
 });
 
+describe("scheduleWave — capabilityRanks rank-stamping", () => {
+  it("with a non-empty capabilityRanks map on roster handshake, capacity_pools entries carry the matching capability_rank values", async () => {
+    // The roster entries carry explicit model_ids that the map keys on, so the
+    // positive assertion below can never be skipped by a fixture/model mismatch —
+    // a conditional `if (map.has(pool.model))` assertion here passed vacuously.
+    const capabilityRanks = new Map([
+      ["model-std", 3],
+      ["model-deep", 0],
+    ]);
+    const result = await scheduleWave({
+      sessionConfig: { quota: {} } as any,
+      itemCount: 4,
+      estimatedSlotTokens: Array.from({ length: 4 }, () => 500),
+      hostModels: [
+        { rank: "standard", context_tokens: 100_000, output_tokens: 16_000, model_id: "model-std" },
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "model-deep" },
+      ],
+      capabilityRanks,
+      env: {} as any,
+    });
+    expect(result.capacity_pools).toBeDefined();
+    const stamped = result.capacity_pools!.filter(
+      (p) => p.model != null && capabilityRanks.has(p.model),
+    );
+    expect(
+      stamped.length,
+      "fixture must produce at least one pool whose model the map covers — zero here means the test is not reaching the stamping path at all",
+    ).toBeGreaterThan(0);
+    for (const pool of stamped) {
+      expect(pool.capability_rank).toBe(capabilityRanks.get(pool.model!));
+    }
+  });
+
+  it("with capabilityRanks: null (explicit), capacity_pools entries carry null/absent capability_rank (fail-open path)", async () => {
+    const result = await scheduleWave({
+      sessionConfig: { quota: {} } as any,
+      itemCount: 4,
+      estimatedSlotTokens: Array.from({ length: 4 }, () => 500),
+      hostModels: [
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "model-1" },
+      ],
+      capabilityRanks: null, // explicit fail-open
+      env: {} as any,
+    });
+    expect(result.capacity_pools).toBeDefined();
+    expect(result.capacity_pools!.length).toBeGreaterThan(0);
+    // Every pool should have capability_rank as null or absent when capabilityRanks: null
+    for (const pool of result.capacity_pools!) {
+      expect([null, undefined]).toContain(pool.capability_rank);
+    }
+  });
+});
+
+describe("buildConfirmedPools — capabilityRanks parameter flow", () => {
+  it("when capabilityRanks is a map, both host and source pools are stamped with the mapped ranks", async () => {
+    const { buildConfirmedPools } = await import(
+      "../../src/remediate/steps/dispatch/waveScheduling.js"
+    );
+    // The host pool's model is pinned via hostModels/hostModelId so the map is
+    // GUARANTEED to cover it — an `if (map.has(model))` conditional assertion here
+    // passed vacuously when the fixture's model never matched.
+    const capabilityRanks = new Map([["model-host", 2]]);
+    const result = await buildConfirmedPools({
+      sessionConfig: null,
+      hostCanDispatch: true,
+      hostModels: [
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "model-host" },
+      ],
+      hostModelId: "model-host",
+      capabilityRanks,
+      env: {} as any,
+    });
+    expect(result.pools).toBeDefined();
+    // Raw CapacityPools carry `hostModel` + `declaredCapabilityRank` (the summary
+    // names `model`/`capability_rank` exist only on scheduleWave's capacity_pools
+    // summaries) — asserting the summary names here is how this test passed
+    // vacuously in its first draft.
+    const stamped = result.pools.filter(
+      (p) => p.hostModel != null && capabilityRanks.has(p.hostModel),
+    );
+    expect(
+      stamped.length,
+      "fixture must produce at least one pool whose model the map covers — zero here means the stamping path was never reached",
+    ).toBeGreaterThan(0);
+    for (const pool of stamped) {
+      expect(pool.declaredCapabilityRank).toBe(capabilityRanks.get(pool.hostModel!));
+    }
+  });
+
+  it("when capabilityRanks: null, both host and source pools carry null/absent capability_rank", async () => {
+    const { buildConfirmedPools } = await import(
+      "../../src/remediate/steps/dispatch/waveScheduling.js"
+    );
+    const result = await buildConfirmedPools({
+      sessionConfig: null,
+      hostCanDispatch: true,
+      hostModels: [
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "model-host" },
+      ],
+      hostModelId: "model-host",
+      capabilityRanks: null,
+      env: {} as any,
+    });
+    expect(result.pools).toBeDefined();
+    expect(result.pools.length).toBeGreaterThan(0);
+    // Same fixture as the positive test above, so the pools genuinely REACH the
+    // stamping path — with `capabilityRanks: null` every one must band unranked
+    // (declaredCapabilityRank absent), the explicit fail-open answer.
+    for (const pool of result.pools) {
+      expect([null, undefined]).toContain(pool.declaredCapabilityRank);
+    }
+  });
+});
+

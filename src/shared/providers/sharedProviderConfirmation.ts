@@ -172,6 +172,19 @@ export interface ConfirmedDispatchPolicy {
    * merely documented.
    */
   capability_order?: string[];
+  /**
+   * R3-3: the model ids whose CURRENT position in {@link capability_order} was
+   * LLM-authored rather than operator-authored — always a subset of
+   * `capability_order`, never a superset. Tool-derived provenance, never itself
+   * submitted: an autonomous run has no operator to ask, so the CLI asks the host
+   * LLM instead (same submission machinery an operator would use), and the
+   * executor tags the result here rather than trusting either side to self-report
+   * authorship. An operator's later submission naming one of these ids repositions
+   * it freely (it is NOT an anchor on that submission) and removes it from this set
+   * — it is operator-authored from then on. See `advanceCapabilityOrderLlmRanked`
+   * and `capabilityOrderNonAnchors`.
+   */
+  capability_order_llm_ranked?: string[];
 }
 
 /**
@@ -377,6 +390,13 @@ export function buildProviderConfirmationRender(
    * and only split again when the policy is persisted.
    */
   autoExclude: DispatchExclusionPattern[] = [],
+  /**
+   * R3-3: the FINAL `capability_order_llm_ranked` set for this promotion (already
+   * advanced across rule 1/2 by the caller — {@link advanceCapabilityOrderLlmRanked}).
+   * Persisted verbatim into the policy; empty for the display-only "suggested"
+   * render nextStepCommand builds (that call never persists, so provenance is moot).
+   */
+  capabilityOrderLlmRanked: readonly string[] = [],
 ): RenderedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
   const operatorExcluded = buildExclusion(migrateExclusionPatterns([...exclude, ...autoExclude]));
@@ -458,6 +478,7 @@ export function buildProviderConfirmationRender(
       // carry-forward reads back what they SAID rather than re-deriving it from the
       // ranks it produced (which cannot distinguish it from external evidence).
       input?.capability_order ?? [],
+      capabilityOrderLlmRanked,
     ) ?? {}),
   };
 }
@@ -472,12 +493,14 @@ function buildConfirmedDispatchPolicy(
   include: readonly ResolvedProviderName[],
   autoExclude: readonly DispatchExclusionPattern[] = [],
   capabilityOrder: readonly string[] = [],
+  capabilityOrderLlmRanked: readonly string[] = [],
 ): { policy: ConfirmedDispatchPolicy } | undefined {
   if (
     exclude.length === 0 &&
     include.length === 0 &&
     autoExclude.length === 0 &&
-    capabilityOrder.length === 0
+    capabilityOrder.length === 0 &&
+    capabilityOrderLlmRanked.length === 0
   ) {
     return undefined;
   }
@@ -490,6 +513,11 @@ function buildConfirmedDispatchPolicy(
       // NOT sorted, NOT deduped by sortStrings: this is a positional ORDERING, and
       // sorting it would destroy the operator's answer outright.
       ...(capabilityOrder.length > 0 ? { capability_order: [...capabilityOrder] } : {}),
+      // An AUTHORSHIP SET, not an ordering — sorted like `exclude`/`auto_exclude` so
+      // an incidentally-ordered array never churns the artifact's content hash.
+      ...(capabilityOrderLlmRanked.length > 0
+        ? { capability_order_llm_ranked: sortStrings(capabilityOrderLlmRanked) }
+        : {}),
     },
   };
 }
@@ -1098,7 +1126,26 @@ function parseConfirmedDispatchPolicy(
   const capabilityOrder = Array.isArray(obj.capability_order)
     ? obj.capability_order.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     : undefined;
-  if (!exclude?.length && !autoExclude?.length && !include?.length && !capabilityOrder?.length) {
+  // R3-3 provenance — same open-grammar, verbatim treatment: a set of model ids, not
+  // itself a positional ordering, so order within the parsed array is immaterial (the
+  // writer sorts it anyway). Must be reconstructed here explicitly like every other
+  // field on this parser: an unlisted field is silently dropped on every round-trip,
+  // and dropping this one is not a degrade — it reverts every LLM-ranked id to
+  // "unattributed" (still a valid rank, just an authorship the next operator
+  // repositioning would then wrongly discard-and-report as a moved anchor instead of
+  // silently honoring — see `capabilityOrderNonAnchors`).
+  const capabilityOrderLlmRanked = Array.isArray(obj.capability_order_llm_ranked)
+    ? obj.capability_order_llm_ranked.filter(
+        (v): v is string => typeof v === "string" && v.trim().length > 0,
+      )
+    : undefined;
+  if (
+    !exclude?.length &&
+    !autoExclude?.length &&
+    !include?.length &&
+    !capabilityOrder?.length &&
+    !capabilityOrderLlmRanked?.length
+  ) {
     return undefined;
   }
   return {
@@ -1106,6 +1153,9 @@ function parseConfirmedDispatchPolicy(
     ...(autoExclude?.length ? { auto_exclude: autoExclude } : {}),
     ...(include?.length ? { include } : {}),
     ...(capabilityOrder?.length ? { capability_order: capabilityOrder } : {}),
+    ...(capabilityOrderLlmRanked?.length
+      ? { capability_order_llm_ranked: capabilityOrderLlmRanked }
+      : {}),
   };
 }
 
@@ -1595,6 +1645,18 @@ export function retainAutoExclusions(
 export function carryForwardConfirmationInput(
   input: ProviderConfirmationInput | null,
   prior: SharedProviderConfirmation | null,
+  /**
+   * R3-3: true when THIS submission is LLM-authored (tool-derived — see
+   * `runProviderConfirmationAutoComplete`'s `authoredByLlm`). Governs which
+   * previously-ranked ids the capability merge below treats as fixed anchors:
+   * an LLM submission anchors every previously-ranked id (operator's and prior
+   * LLM's alike — rule 1); an operator submission does NOT anchor ids already in
+   * `capability_order_llm_ranked` (rule 2 — they interpolate like new models).
+   * Also gates the total-replacement escape in `mergeCapabilityOrder` (operator
+   * only — see its docstring). Defaults `false` (today's operator behavior) so
+   * every pre-existing call site is unaffected.
+   */
+  authoredByLlm: boolean = false,
 ): ProviderConfirmationInput | null {
   if (!prior) return input;
   const base: ProviderConfirmationInput = input ?? {
@@ -1640,7 +1702,17 @@ export function carryForwardConfirmationInput(
       ? priorCapabilityOrder.length > 0
         ? { capability_order: priorCapabilityOrder }
         : {}
-      : { capability_order: mergeCapabilityOrder(priorCapabilityOrder, base.capability_order) }),
+      : {
+          capability_order: mergeCapabilityOrder(
+            priorCapabilityOrder,
+            base.capability_order,
+            capabilityOrderNonAnchors(
+              prior.policy?.capability_order_llm_ranked ?? [],
+              authoredByLlm,
+            ),
+            authoredByLlm,
+          ),
+        }),
     ...(base.host_models === undefined && priorHostModels.length > 0
       ? { host_models: priorHostModels }
       : {}),
@@ -1693,6 +1765,77 @@ export function selectCapabilityAnchors(
 }
 
 /**
+ * Whether `submitted` restates EVERY id in `priorOrder` — the one case
+ * {@link mergeCapabilityOrder} treats as a total, verbatim replacement rather than an
+ * anchored partial answer (OPERATOR path only — see that function's docstring for why
+ * the escape is authorship-gated). Single-sourced so it and
+ * {@link detectDiscardedCapabilityReorder} can never disagree about which case they
+ * are in (a mismatch there reports a phantom discard, or misses a real one).
+ */
+function isTotalCapabilitySubmission(
+  priorOrder: readonly string[],
+  submitted: readonly string[],
+): boolean {
+  const prior = [...new Set(priorOrder)];
+  if (prior.length === 0) return false;
+  const answerSet = new Set(submitted);
+  return prior.every((id) => answerSet.has(id));
+}
+
+/**
+ * R3-3 — the submission's ANCHOR EXCLUSION set, single-sourced so
+ * {@link mergeCapabilityOrder} and {@link detectDiscardedCapabilityReorder} can never
+ * disagree about what counts as a fixed reference point for a given submission:
+ *
+ * - LLM-authored (`authoredByLlm`): every previously-ranked id — the operator's and
+ *   any prior LLM's alike — stays a fixed anchor (rule 1). Nothing is excluded.
+ * - Operator-authored: ids already in `capability_order_llm_ranked` are NOT anchors
+ *   (rule 2) — the operator may reposition them exactly like new models, and doing
+ *   so removes them from that set (see {@link advanceCapabilityOrderLlmRanked}).
+ */
+export function capabilityOrderNonAnchors(
+  priorLlmRanked: readonly string[],
+  authoredByLlm: boolean,
+): Set<string> {
+  return authoredByLlm ? new Set() : new Set(priorLlmRanked);
+}
+
+/**
+ * Advance the R3-3 `capability_order_llm_ranked` authorship SET across one
+ * promotion. Always a subset of the resulting `capability_order` — see
+ * {@link ConfirmedDispatchPolicy.capability_order_llm_ranked}.
+ *
+ * - LLM-authored submission: every id this submission newly ranked — i.e. not
+ *   already in `priorOrder` — is ADDED. `mergeCapabilityOrder` never lets an
+ *   LLM-authored submission move a previously-ranked id (its total-replacement
+ *   escape is operator-only), so a prior id is never repositioned on this path and
+ *   this function does not need to special-case "total" either: it is simply
+ *   `answer \ priorOrder`.
+ * - Operator-authored submission: every id the submission NAMES is REMOVED — naming
+ *   a previously LLM-ranked id (and, via {@link capabilityOrderNonAnchors}'s
+ *   non-anchor treatment, freely repositioning it) makes it operator-authored from
+ *   here on, exactly like a first-time rank.
+ * - No submission at all (`submitted` absent/empty): the running set is unchanged.
+ */
+export function advanceCapabilityOrderLlmRanked(
+  priorLlmRanked: readonly string[],
+  priorOrder: readonly string[],
+  submitted: readonly string[] | undefined,
+  authoredByLlm: boolean,
+): string[] {
+  const running = new Set(priorLlmRanked);
+  const answer = submitted ? [...new Set(submitted)] : [];
+  if (answer.length === 0) return [...running].sort();
+  if (!authoredByLlm) {
+    for (const id of answer) running.delete(id);
+    return [...running].sort();
+  }
+  const priorSet = new Set(priorOrder);
+  for (const id of answer.filter((id) => !priorSet.has(id))) running.add(id);
+  return [...running].sort();
+}
+
+/**
  * The anchor ids whose relative order the submission changed but the merge will NOT
  * honor — i.e. an operator reorder that is about to be silently discarded.
  *
@@ -1707,9 +1850,9 @@ export function selectCapabilityAnchors(
  * tool guess into operator policy: not corruption, but SILENCE. The standing rule is
  * that the operator must never have to notice — so the caller reports this loudly.
  *
- * Returns `[]` when the reorder will actually be honored: a TOTAL submission (every
- * prior id restated) is applied verbatim, and a submission with fewer than two anchors
- * cannot express a reorder at all.
+ * Returns `[]` when the reorder will actually be honored: an OPERATOR-authored TOTAL
+ * submission (every prior id restated) is applied verbatim, and a submission with
+ * fewer than two anchors cannot express a reorder at all.
  *
  * NOTE this reports the LIMITATION, it does not lift it. Making a repositioning
  * expressible without restating the whole roster needs the anchor-provenance split
@@ -1718,15 +1861,31 @@ export function selectCapabilityAnchors(
 export function detectDiscardedCapabilityReorder(
   priorOrder: readonly string[],
   submitted: readonly string[],
+  /**
+   * R3-3: ids to exclude from anchor treatment — must be the SAME set passed to
+   * {@link mergeCapabilityOrder} for this submission ({@link capabilityOrderNonAnchors}),
+   * or the two disagree about what an "anchor" is and this reports a discard the
+   * merge actually honored (or misses one it silently dropped).
+   */
+  nonAnchorIds: ReadonlySet<string> = new Set(),
+  /**
+   * R3-3: mirrors the authorship-gated condition in {@link mergeCapabilityOrder} — the
+   * total-submission escape is OPERATOR-only, so an LLM-authored submission that
+   * happens to restate every prior id (a small roster's anchor sample can cover the
+   * whole ordering) still has its anchor reorder detected and reported, never
+   * silently honored via the escape.
+   */
+  authoredByLlm: boolean = false,
 ): string[] {
   const prior = [...new Set(priorOrder)];
   const answer = [...new Set(submitted)];
   if (prior.length === 0 || answer.length === 0) return [];
   const priorPos = new Map(prior.map((id, index) => [id, index]));
   // A total submission is honored verbatim — nothing is discarded. Mirrors the same
-  // condition in `mergeCapabilityOrder`; the two must agree or this reports phantoms.
-  if (prior.every((id) => answer.includes(id))) return [];
-  const anchors = answer.filter((id) => priorPos.has(id));
+  // authorship-gated condition in `mergeCapabilityOrder`; the two must agree or this
+  // reports phantoms.
+  if (!authoredByLlm && isTotalCapabilitySubmission(prior, answer)) return [];
+  const anchors = answer.filter((id) => priorPos.has(id) && !nonAnchorIds.has(id));
   if (anchors.length < 2) return [];
   // Discarded iff the anchors' order in the SUBMISSION differs from their order in the
   // PRIOR ordering — compare against the anchors sorted by prior position.
@@ -1766,11 +1925,21 @@ export function detectDiscardedCapabilityReorder(
  *   enormous ordering, so a swap between two anchors carries no information about the
  *   models BETWEEN them — honoring it would silently reshuffle models the operator
  *   never saw.
- * - **Exception — a TOTAL submission is a total replacement.** When the submission
- *   mentions every model in `priorOrder` there are no unmentioned models, so the
- *   coordinate space is fully respecified and the answer is honored verbatim. This is
- *   the only case where "reorder what you already confirmed" is a well-defined request,
- *   and it is the pre-existing behavior for a complete re-ranking.
+ * - **Exception — an OPERATOR-authored TOTAL submission is a total replacement.**
+ *   When the submission mentions every model in `priorOrder` there are no unmentioned
+ *   models, so the coordinate space is fully respecified and the answer is honored
+ *   verbatim. This is the only case where "reorder what you already confirmed" is a
+ *   well-defined request, and it is the pre-existing behavior for a complete
+ *   re-ranking. **R3-3: this escape is OPERATOR-only** (`authoredByLlm: false`,
+ *   the default) — on a SMALL roster the bounded anchor sample
+ *   ({@link selectCapabilityAnchors}) can cover the entire prior ordering, so an
+ *   LLM's answer over "new models + all the anchors it was shown" becomes total BY
+ *   ACCIDENT, not by the LLM's intent to reorder. Honoring it verbatim would let an
+ *   LLM silently reorder ranks an operator (or a prior LLM) set; an LLM-authored
+ *   submission therefore NEVER takes this exception — every previously-ranked id
+ *   stays a fixed anchor regardless of coverage, and an attempted reorder is
+ *   discarded and reported exactly like a partial submission's would be (see
+ *   {@link detectDiscardedCapabilityReorder}).
  * - **New models** (not in `priorOrder`) interpolate to a fractional position between
  *   the prior positions of the nearest preceding and following anchors IN THE SUBMITTED
  *   LIST. Before the first anchor ⇒ just below it (more capable); after the last ⇒ just
@@ -1798,31 +1967,57 @@ export function detectDiscardedCapabilityReorder(
 export function mergeCapabilityOrder(
   priorOrder: readonly string[],
   submitted: readonly string[],
+  /**
+   * R3-3: ids to treat as NOT anchored even though they already appear in
+   * `priorOrder` — the operator-authored path passes the current
+   * `capability_order_llm_ranked` set here ({@link capabilityOrderNonAnchors}) so an
+   * operator may freely reposition a previously LLM-ranked id, exactly like a new
+   * model. Empty by default (today's behavior: every previously-ranked id anchors).
+   */
+  nonAnchorIds: ReadonlySet<string> = new Set(),
+  /**
+   * R3-3: true when THIS submission is LLM-authored. Gates the total-replacement
+   * escape below (OPERATOR-only — see the docstring's exception): an LLM-authored
+   * submission never takes it, so a previously-ranked id is NEVER repositioned on
+   * this path, regardless of how much of `priorOrder` the submission happens to
+   * cover.
+   */
+  authoredByLlm: boolean = false,
 ): string[] {
   const prior = [...new Set(priorOrder)];
   const answer = [...new Set(submitted)];
   if (prior.length === 0) return answer;
   if (answer.length === 0) return prior;
   const priorPos = new Map<string, number>(prior.map((id, index) => [id, index]));
-  // TOTAL submission ⇒ total replacement (see the docstring's exception).
-  if (prior.every((id) => priorPos.has(id) && answer.includes(id))) return answer;
+  // TOTAL submission ⇒ total replacement (see the docstring's exception) — OPERATOR
+  // path only. An LLM-authored submission never takes this escape, even when it
+  // happens to cover every prior id (a small roster's anchor sample can do that by
+  // accident): it would otherwise silently reorder ranks the LLM was never asked to
+  // move.
+  if (!authoredByLlm && isTotalCapabilitySubmission(prior, answer)) return answer;
+
+  // A non-anchor id still HOLDS its prior position (seeded below, so an unmentioned
+  // one keeps it) but cannot anchor a run boundary — it is swept into the
+  // surrounding run of new models and repositioned exactly like one (R3-3 rule 2).
+  const isAnchor = (id: string): boolean => priorPos.has(id) && !nonAnchorIds.has(id);
 
   /** Resolved position per model — seeded with every prior model, so an unmentioned one keeps its rank. */
   const positions = new Map<string, number>(priorPos);
-  const anchorCount = answer.filter((id) => priorPos.has(id)).length;
+  const anchorCount = answer.filter(isAnchor).length;
   if (anchorCount === 0) {
     answer.forEach((id, index) => positions.set(id, prior.length + index));
   } else {
     let i = 0;
     while (i < answer.length) {
-      if (priorPos.has(answer[i] as string)) {
+      if (isAnchor(answer[i] as string)) {
         i++;
         continue;
       }
-      // A maximal run of NEW models, [i, j). `answer[i - 1]` is necessarily an anchor
-      // when `i > 0` — otherwise the run would have started earlier.
+      // A maximal run of NEW/non-anchor models, [i, j). `answer[i - 1]` is
+      // necessarily an anchor when `i > 0` — otherwise the run would have started
+      // earlier.
       let j = i;
-      while (j < answer.length && !priorPos.has(answer[j] as string)) j++;
+      while (j < answer.length && !isAnchor(answer[j] as string)) j++;
       const before = i > 0 ? priorPos.get(answer[i - 1] as string) : undefined;
       const after = j < answer.length ? priorPos.get(answer[j] as string) : undefined;
       let lo: number;
