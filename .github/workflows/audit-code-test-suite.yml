@@ -130,7 +130,11 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed on Node ${{ matrix.node-version }}. Review the uploaded audit-code-test-suite npm logs artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally on the same Node line."' ERR
-          npx vitest run --shard=${{ matrix.shard }}/4
+          # run-vitest-gate.mjs, not a bare `npx vitest run` — closes the false-green
+          # defect (docs/backlog.md, search false-green): it fails nonzero if the
+          # ledger's structured outcome reports failures even when vitest's own
+          # process exit code is 0.
+          node scripts/shared/run-vitest-gate.mjs --shard=${{ matrix.shard }}/4
       - name: Upload npm debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
