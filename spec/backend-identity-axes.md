@@ -99,7 +99,7 @@ invent an identity.
 | "Does this operator rule drop this source?" | **whichever axis the rule names** | Policy is authored per-axis — see the grammar below. |
 | "Which config block builds this?" | **transport** | The adapter decides the constructor. |
 | "Is this backend me (self-spawn)?" | **transport** | Self-spawn is about the process, not the vendor. |
-| "What does this cost?" | **model**, disambiguated by **service** | The price table is vendor-keyed. Passing the transport here silently yields the cheapest-collision default — a live defect, see `docs/backlog.md`. A declared per-source price outranks the table. |
+| "What does this cost?" | **model**, disambiguated by **service** | The price table is vendor-keyed. Passing the transport here silently yields the cheapest-collision default — fixed 2026-07-19 (both call sites now pass `sourceService(source)`), and per `docs/backlog.md` inert at HEAD regardless since the current price snapshot carries no cross-provider collisions. A declared per-source price outranks the table. |
 
 **Different questions legitimately bind to different axes. That is the domain, not a defect.** The
 instinct to collapse them into "one identity function" is wrong and was tried: it produces either a
@@ -120,7 +120,7 @@ Gate-0 delta, confirmed set, source fold, quota ledger, and routing filter can a
 ```
 backendIdentity(model, service)   → "nim:z-ai/glm-5.2"            // the confirmation gate
 quotaPoolKey(ref, account)        → "nim#acct/z-ai/glm-5.2"       // the ledger
-transportRoute(ref)               → "claude-worker:z-ai/glm-5.2"  // what the routing filter drops
+exclusionPattern(model, transport) → "transport:claude-worker/z-ai/glm-5.2"  // what the routing filter drops
 ```
 
 ## Normalization at the chokepoint
@@ -187,8 +187,10 @@ Three properties follow, and each retires a known defect:
    multi-transport residue is gone, and gone *durably* — a snapshot of today's transports would have
    decayed the moment proxy expansion added a route.
 
-The autonomous fail-closed write emits the **service** axis, because that is the axis that does not
-decay.
+The autonomous fail-closed write is planned to emit the **service** axis (stage 5, not yet shipped —
+see `docs/HANDOFF.md` → IMMEDIATE NEXT), because that is the axis that does not decay. The shipped
+stage-4 writer (`exclusionPattern` in `src/shared/providers/identity.ts`) still emits the `transport:`
+axis today.
 
 ### Three conditions this change must satisfy — it is NOT "strictly better" without them
 
