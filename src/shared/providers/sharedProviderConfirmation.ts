@@ -1938,24 +1938,3 @@ export async function unlinkProviderConfirmationInput(
   }
 }
 
-/**
- * Headless capability ranker (R3-3).
- * Ranks unevidenced capability models deterministically during headless/autonomous promotion
- * so every dispatchable model receives a capability_rank and headless runs do not wedge.
- */
-export function rankHeadlessCapabilityPools(
-  unevidencedModels: readonly string[],
-  priorCapabilityOrder: readonly string[] = [],
-): string[] {
-  if (unevidencedModels.length === 0) return [...priorCapabilityOrder];
-  const sorted = [...new Set(unevidencedModels)].sort((a, b) => {
-    const statA = resolveModelStatics(a);
-    const statB = resolveModelStatics(b);
-    const ctxA = statA?.context_tokens ?? 0;
-    const ctxB = statB?.context_tokens ?? 0;
-    if (ctxA !== ctxB) return ctxB - ctxA;
-    return a.localeCompare(b);
-  });
-  return mergeCapabilityOrder(priorCapabilityOrder, sorted);
-}
-

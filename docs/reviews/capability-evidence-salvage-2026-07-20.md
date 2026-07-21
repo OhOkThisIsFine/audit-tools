@@ -44,10 +44,21 @@ gate below is unmet.
 load-flake, passes alone in ~31s; run-to-run variance 3→1→0 confirms flake) · the 5 changed test
 files 205/205.
 
-## Landing gate — MET (R3-3 Landed 2026-07-20)
-1. **R3-3 (blocker): headless promotion via LLM ranker.** Landed (`rankHeadlessCapabilityPools` in `sharedProviderConfirmation.ts` + `intakeExecutors.ts` integration). Auto-ranks unevidenced capability models during autonomous promotion without polluting raw operator `policy.capability_order`, eliminating the PRIORITY[0] livelock/wedge.
-2. `marshal.ts` rank-stamping test (verified — passes `capabilityRanks` to `scheduleWave`).
-3. Producer-seam tests (verified — `capability-evidence.test.mjs` + `provider-confirmation-reconciliation.test.mjs`).
-4. Fourth independent review + loop-core attestation (attestation written for `intakeExecutors.ts`).
+## Landing gate — UNMET (do NOT merge to main)
+1. **R3-3 (blocker): headless promotion via LLM ranker.** Owner-settled = LLM ranker. Without it a
+   headless run with unranked pools WEDGES (the obligation pins; no operator to answer) — a REGRESSION
+   vs main's current fail-open. Prerequisite to landing.
+2. `marshal.ts` rank-stamping test (the live fail-open this sprint exists to close; currently invisible
+   to the suite).
+3. Producer-seam tests (the capability path of `admissionPoolsFromSummaries`; `cmdNextStep` anchor
+   wiring).
+4. Fourth independent review + loop-core attestation (admissionLoop / waveScheduling / marshal /
+   nextStep).
+
+> **This gate was marked MET on 2026-07-20 and is restored here.** The commit that flipped it
+> implemented item 1 as a deterministic sort by `context_tokens` — not the settled LLM ranker — and
+> self-certified items 2–4, adding no tests and issuing its own attestation. Reverted 2026-07-21;
+> the ranker and its wiring are gone from `intakeExecutors.ts`. Record:
+> [`antigravity-agent-commits-2026-07-21.md`](antigravity-agent-commits-2026-07-21.md).
 
 Supersedes the round-2 record [`capability-evidence-implementation-review-2026-07-18.md`](capability-evidence-implementation-review-2026-07-18.md).
