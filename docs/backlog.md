@@ -346,13 +346,20 @@ followed" is otherwise indistinguishable from a bug.
   path requires an override trains the override into a reflex, and then it signals nothing, which costs
   more than the gate was ever worth.
 
-- **Capability-evidence obligation — REVIEW-BLOCKED across four rounds, all of it on the unmerged
-  branch `wip/capability-evidence`; NONE of it is on main (high).** A pool with no capability evidence
-  must be pinned down — by LLM judgment or by asking the operator — never silently routed around.
-  Implemented and green, but three independent adversarial lenses refused sign-off. Full record:
-  [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
-  ⚠ Because the branch is not an ancestor of main, every symbol it introduces is absent from HEAD —
-  entries describing them as defects in shipped code are describing branch code.
+- **Capability-evidence obligation — SALVAGED onto `salvage/capability-evidence` (green, 2026-07-20);
+  landing gate = R3-3 (high).** A pool with no capability evidence must be pinned down — by LLM judgment
+  or by asking the operator — never silently routed around. The old `wip/capability-evidence` was 64
+  commits stale (merging raw would revert shipped identity + metering) and bundled the obligation with a
+  now-superseded R3-4 cooldown/rpm rework; the obligation was extracted onto `salvage/capability-evidence`
+  off current main — `check` + full suite green, the derive-each-enumeration fixes below are landed and
+  covered by `tests/shared/capability-evidence.test.mjs` + `confirmation-carry-forward.test.mjs` (205/205).
+  Salvage record: [`docs/reviews/capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md);
+  round-2 detail: [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
+  **Landing gate UNMET (do NOT merge to main):** (1) **R3-3 — headless promotion via LLM ranker** (the
+  blocker: without it a headless run with unranked pools WEDGES instead of fail-opening, a regression vs
+  main; owner-settled = LLM ranker); (2) a `marshal.ts` rank-stamping test; (3) producer-seam tests; (4)
+  a 4th independent review + loop-core attestation. The SPEC below is the design the salvage IMPLEMENTS —
+  keep it as the completeness bar for R3-3.
   **SPEC — the open defects are ONE defect, and must be fixed as one.** Every blocking issue is a
   HAND-MAINTAINED ENUMERATION that drifted from its source of truth. The parser reconstructs the
   confirmation field-by-field, so a field nobody listed is silently dropped — its own comment states

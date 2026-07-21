@@ -122,9 +122,8 @@ guard is a prerequisite of that stage rather than a follow-up. Read the doc's ow
 review" notes before re-proposing anything it rules out (especially the `url | command` locus union and
 a `model:` axis — both are recorded as refuted, with reasons).
 
-**0b. Or: the capability-evidence branch** — the other high-value cluster, one defect class
-(hand-maintained enumerations drifted from their source) rather than the six-item punch list four
-review rounds treated it as. Independent of 0.
+**0b. Or: the capability-evidence track** — now salvaged onto `salvage/capability-evidence` (green); its
+one remaining build is **R3-3** (see item 1). Independent of 0.
 
 ⚠ **A specced mechanism is still a LEAD, not a work order — the Gate-0 identity lap proved it.** That
 item's SPEC said "one identity function consumed by the delta, the confirmed set, and the exclusion
@@ -136,15 +135,22 @@ repo: two adjacent tests in `gate0-proxy-fold.test.mjs` asserted opposite verdic
 mechanism, and `apiPool` already keyed the quota ledger the right way
 ([[backlog-prose-decays-verify-against-head]]).
 
-**1. `wip/capability-evidence` — decide its fate.** Review-blocked across four rounds, pushed, NOT on
-main, and now the source of stale-looking backlog entries because every symbol it introduces is absent
-from HEAD. Green was never the blocker. Six properties must hold before it lands (backlog entry has
-them). Read the review before touching it, and do not re-implement from the plan:
-[`capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
-Owner decisions already settled — injection at the `CapacityPool` constructors not the admission loop;
-the host pool is not a special case; headless unrankable models go to an LLM ranker (not a recorded
-fail-open), with LLM provenance kept out of the operator's raw capability order; an active cooldown
-grants one.
+**1. Capability-evidence — FATE DECIDED + SALVAGED (2026-07-20). Landing gate = R3-3.** `wip/capability-evidence`
+was 64 commits stale: merging raw would have reverted shipped identity stage-1/2 + multi-constraint
+metering and re-introduced a superseded account-metering rework. Its commits bundled the
+capability-evidence obligation with an R3-4 cooldown/rpm rework main has since superseded. The
+obligation was salvaged onto **`salvage/capability-evidence`** (pushed, GREEN, off current main): the
+cap-evidence source slice 3-way-applied 23/24 clean, the cooldown/rpm axis was surgically dropped from
+`admissionLoop.ts`, and the identity rename was translated in fixtures. NEW-1/D2/the delta wiring are
+verified landed; `check` + full suite green (only the known `linux-cycle-regression` load-flake).
+Record: [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md).
+**Do NOT merge to main** — landing gate UNMET: **(R3-3) headless promotion via LLM ranker** is the
+blocker (without it a headless run WEDGES instead of fail-opening — a regression vs main), plus a
+`marshal.ts` rank-stamping test, producer-seam tests, and a 4th independent review + attestation. R3-3
+is the immediate next build on this track. Owner decisions already settled — injection at the
+`CapacityPool` constructors not the admission loop; the host pool is not a special case; headless
+unrankable models go to an LLM ranker (not a recorded fail-open), with LLM provenance kept out of the
+operator's raw capability order.
 
 **2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
 the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
