@@ -95,7 +95,9 @@ import {
 export {
   tryConsumeIncoming,
   consumeArrayIncoming,
+  consumeObjectIncoming,
   renderDesignReviewRejectionNotice,
+  renderEdgeReasoningRejectionNotice,
   buildTerminalStep,
   handleGraphEnrichmentBranch,
   handleDesignReviewBranch,
@@ -106,7 +108,11 @@ export {
   runDeterministicForNextStep,
 } from "./nextStepHelpers.js";
 
-import { runDeterministicForNextStep, renderDesignReviewRejectionNotice } from "./nextStepHelpers.js";
+import {
+  runDeterministicForNextStep,
+  renderDesignReviewRejectionNotice,
+  renderEdgeReasoningRejectionNotice,
+} from "./nextStepHelpers.js";
 
 /**
  * Gate a HOST fan-out step through the quota layer (item C). Registers the host
@@ -1150,6 +1156,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const basePrompt = buildEdgeReasoningPrompt(result.candidates);
     const contentHash = edgeReasoningContentHash(result.candidates);
+    // A prior malformed submission was quarantined (not silently destroyed) —
+    // name it and the shape error in the re-emitted prompt so the producer
+    // fixes the shape instead of resubmitting the same honest mistake forever.
+    const rejectionNotice = await renderEdgeReasoningRejectionNotice(artifactsDir);
 
     if (hostCanDispatch) {
       // Dispatch path: isolate the (potentially large) edge-list prompt in a file
@@ -1160,7 +1170,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         "incoming",
         "edge-reasoning-prompt.md",
       );
-      await writeFile(edgeReasoningPromptPath, basePrompt, "utf8");
+      await writeFile(
+        edgeReasoningPromptPath,
+        rejectionNotice ? `${basePrompt}\n\n${rejectionNotice}` : basePrompt,
+        "utf8",
+      );
       const step = await writeCurrentStep({
         artifactsDir,
         stepKind: "edge_reasoning_dispatch",
@@ -1209,6 +1223,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         resultsPath: edgeReasoningResultsPath,
         continueCommand,
         contentHash,
+        rejectionNotice,
       }),
       access: {
         read_paths: [],

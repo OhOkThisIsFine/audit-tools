@@ -13,7 +13,9 @@ const {
   checkFinalizationCycle,
   tryConsumeIncoming,
   consumeArrayIncoming,
+  consumeObjectIncoming,
   renderDesignReviewRejectionNotice,
+  renderEdgeReasoningRejectionNotice,
 } = await import("../../src/audit/cli/nextStepCommand.ts");
 
 // HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS are internal to the Tier C2
@@ -729,5 +731,250 @@ await test("consumeArrayIncoming accepts a bare array untouched (existing array-
       stillExists = false;
     }
     expect(stillExists).toBe(false);
+  });
+});
+
+// ── handleGraphEnrichmentBranch — malformed-submission quarantine ─────────────
+//
+// The graph_enrichment sibling of the design-review quarantine fix. A malformed
+// edge-reasoning.json used to no-op silently inside applyEdgeReasoning (it
+// never throws), the unconditional unlink then destroyed the file, and the
+// identical edge_reasoning step re-emitted with zero signal. Now: tolerant
+// unwrap (bare array OR single-array-property object), else quarantine + a
+// rejection marker the re-emitted step's prompt reads. analyzer-decisions.json
+// had the related stuck-loop shape (a non-object value was neither merged,
+// deleted, nor diagnosed) — now quarantined via consumeObjectIncoming.
+
+/** Bundle with one low-confidence edge → exactly one edge-reasoning candidate. */
+function edgeReasoningBundle() {
+  return {
+    repo_manifest: null, // no unresolved analyzers → straight to the edge-reasoning gate
+    file_disposition: null,
+    graph_bundle: {
+      graphs: {
+        imports: [
+          { from: "src/a.ts", to: "src/b.ts", kind: "import", confidence: 0.2, reason: "old reason" },
+        ],
+        calls: [],
+        references: [],
+      },
+    },
+  };
+}
+
+function edgeReasoningParams(artifactsDir) {
+  return { root: artifactsDir, artifactsDir, graphLlmEdgeReasoning: true, since: undefined };
+}
+
+async function fileExists(path) {
+  try {
+    await readFile(path, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+await test("handleGraphEnrichmentBranch applies a canonical {rewrites:[...]} submission as a parsed object and deletes it after apply", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    const rewrites = [{ from: "src/a.ts", to: "src/b.ts", kind: "import", reason: "clearer reason" }];
+    await writeFile(resultsPath, JSON.stringify({ rewrites }), "utf8");
+
+    const runStepCalls = [];
+    const branch = await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      { runStep: async (opts) => { runStepCalls.push(opts); } },
+    );
+
+    expect(branch.action).toBe("continue");
+    expect(runStepCalls.length).toBe(1);
+    // The submission arrives validated and parsed — never a raw file path for
+    // an unvalidated readJsonFile cast downstream.
+    expect(runStepCalls[0].edgeReasoningResults).toEqual({ rewrites });
+    expect(runStepCalls[0].edgeReasoningResultsPath).toBe(undefined);
+    // Consumed after the successful apply; nothing quarantined.
+    expect(await fileExists(resultsPath)).toBe(false);
+    expect(await quarantinedFiles(artifactsDir)).toEqual([]);
+  });
+});
+
+await test("handleGraphEnrichmentBranch tolerant-unwraps a bare-array edge-reasoning submission into {rewrites}", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    const rewrites = [{ from: "src/a.ts", to: "src/b.ts", reason: "clearer reason" }];
+    await writeFile(resultsPath, JSON.stringify(rewrites), "utf8");
+
+    const runStepCalls = [];
+    const branch = await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      { runStep: async (opts) => { runStepCalls.push(opts); } },
+    );
+
+    expect(branch.action).toBe("continue");
+    expect(runStepCalls.length).toBe(1);
+    expect(runStepCalls[0].edgeReasoningResults).toEqual({ rewrites });
+    expect(await fileExists(resultsPath)).toBe(false);
+  });
+});
+
+await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning submission instead of destroying it, and the re-emitted step carries the notice", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    await writeFile(resultsPath, JSON.stringify("oops, not rewrites"), "utf8");
+
+    const runStepCalls = [];
+    const deps = { runStep: async (opts) => { runStepCalls.push(opts); } };
+    const branch = await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      deps,
+    );
+
+    // Nothing applied: a malformed submission never reaches runAuditStep (the
+    // old path "applied" it as a silent no-op, then destroyed the file).
+    expect(branch.action).toBe("continue");
+    expect(runStepCalls.length).toBe(0);
+
+    // Gone from incoming/ ... but NOT destroyed: verbatim under quarantine/.
+    expect(await fileExists(resultsPath)).toBe(false);
+    const quarantined = (await quarantinedFiles(artifactsDir)).filter((name) =>
+      name.startsWith("edge-reasoning.json."),
+    );
+    expect(quarantined.length).toBe(1);
+    const quarantinedContent = await readFile(
+      join(artifactsDir, "quarantine", quarantined[0]),
+      "utf8",
+    );
+    expect(JSON.parse(quarantinedContent)).toBe("oops, not rewrites");
+
+    // The rejection marker renders a notice naming the file, path, and reason —
+    // this is what nextStepCommand.ts threads into the re-emitted step prompt.
+    const notice = await renderEdgeReasoningRejectionNotice(artifactsDir);
+    expect(notice).toBeTruthy();
+    expect(notice.includes("edge-reasoning.json")).toBe(true);
+    expect(notice.includes(quarantined[0])).toBe(true);
+    expect(notice.includes("string")).toBe(true);
+
+    // Next fold iteration (incoming now absent): the edge_reasoning step
+    // re-emits — with the marker still pending for its prompt — instead of the
+    // silent identical re-ask the destroy path produced.
+    const reEmit = await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      deps,
+    );
+    expect(reEmit.action).toBe("return");
+    expect(reEmit.result.kind).toBe("edge_reasoning");
+    expect(await renderEdgeReasoningRejectionNotice(artifactsDir)).toBeTruthy();
+  });
+});
+
+await test("handleGraphEnrichmentBranch clears the rejection marker once a valid resubmission is applied", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    const deps = { runStep: async () => {} };
+
+    // Round 1: malformed (two array properties — ambiguous) → quarantined.
+    await writeFile(resultsPath, JSON.stringify({ two: [], arrays: [] }), "utf8");
+    await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      deps,
+    );
+    expect(await renderEdgeReasoningRejectionNotice(artifactsDir)).toBeTruthy();
+
+    // Round 2: fixed shape → applied, marker cleared (no stale notice on the
+    // next re-emit).
+    await writeFile(
+      resultsPath,
+      JSON.stringify({ rewrites: [{ from: "src/a.ts", to: "src/b.ts", reason: "fixed" }] }),
+      "utf8",
+    );
+    const branch = await handleGraphEnrichmentBranch(
+      edgeReasoningParams(artifactsDir),
+      edgeReasoningBundle(),
+      { status: "planning" },
+      { value: undefined },
+      deps,
+    );
+    expect(branch.action).toBe("continue");
+    expect(await renderEdgeReasoningRejectionNotice(artifactsDir)).toBe(undefined);
+  });
+});
+
+// ── consumeObjectIncoming (analyzer-decisions stuck-loop fix) ─────────────────
+
+await test("consumeObjectIncoming quarantines a non-object value instead of leaving it to re-emit forever", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const filePath = join(artifactsDir, "incoming", "analyzer-decisions.json");
+    await writeFile(filePath, JSON.stringify("not a decisions map"), "utf8");
+
+    const stderrWrites = [];
+    const origWrite = process.stderr.write;
+    process.stderr.write = (chunk) => { stderrWrites.push(String(chunk)); return true; };
+    let result;
+    try {
+      result = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+    } finally {
+      process.stderr.write = origWrite;
+    }
+
+    expect(result.status).toBe("quarantined");
+    expect(result.reason.includes("string")).toBe(true);
+    // Diagnosed loudly — the old path was neither merged, deleted, nor diagnosed.
+    expect(stderrWrites.join("").includes("analyzer-decisions.json")).toBe(true);
+    // Gone from incoming/ (the stuck loop), preserved verbatim in quarantine/.
+    expect(await fileExists(filePath)).toBe(false);
+    const quarantined = (await quarantinedFiles(artifactsDir)).filter((name) =>
+      name.startsWith("analyzer-decisions.json."),
+    );
+    expect(quarantined.length).toBe(1);
+    const content = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
+    expect(JSON.parse(content)).toBe("not a decisions map");
+  });
+});
+
+await test("consumeObjectIncoming quarantines an array (never a valid id→decision map) and accepts an object without deleting it", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const filePath = join(artifactsDir, "incoming", "analyzer-decisions.json");
+
+    await writeFile(filePath, JSON.stringify(["ephemeral", "skip"]), "utf8");
+    const origWrite = process.stderr.write;
+    process.stderr.write = () => true;
+    let arrayResult;
+    try {
+      arrayResult = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+    } finally {
+      process.stderr.write = origWrite;
+    }
+    expect(arrayResult.status).toBe("quarantined");
+
+    // A plain object is accepted — and NOT deleted here: the caller unlinks
+    // after applying, so a crash mid-apply retains the submission.
+    await writeFile(filePath, JSON.stringify({ pylint: "skip" }), "utf8");
+    const okResult = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+    expect(okResult.status).toBe("ok");
+    expect(okResult.value).toEqual({ pylint: "skip" });
+    expect(okResult.path).toBe(filePath);
+    expect(await fileExists(filePath)).toBe(true);
   });
 });

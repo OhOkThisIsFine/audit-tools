@@ -82,7 +82,12 @@ export interface RunAuditStepOptions {
   charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
   systemicChallengePath?: string;
-  edgeReasoningResultsPath?: string;
+  /**
+   * Already-validated edge-reasoning rewrites. Parsed + shape-checked by the
+   * caller (`handleGraphEnrichmentBranch` tolerant-unwraps or quarantines the
+   * incoming file) — never a raw file path, so no unvalidated cast here.
+   */
+  edgeReasoningResults?: EdgeReasoningResults;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
@@ -402,10 +407,6 @@ async function executeAdvance(
         await readJsonFile<unknown>(options.systemicChallengePath),
       )
     : undefined;
-  const edgeReasoningResults = options.edgeReasoningResultsPath
-    ? await readJsonFile<EdgeReasoningResults>(options.edgeReasoningResultsPath)
-    : undefined;
-
   const result = await advanceAudit(bundle, {
     root: options.root,
     artifactsDir: options.artifactsDir,
@@ -420,7 +421,7 @@ async function executeAdvance(
     charterDeltaSubmission,
     clarificationAnswers,
     systemicChallenge,
-    edgeReasoningResults,
+    edgeReasoningResults: options.edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     externalAcquisition: options.externalAcquisition,

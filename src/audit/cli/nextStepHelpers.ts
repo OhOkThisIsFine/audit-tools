@@ -62,7 +62,7 @@ import {
 import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
-import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
+import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
 import {
   graphEnrichmentUnresolvedAnalyzers,
   graphEnrichmentLowConfidenceEdges,
@@ -429,7 +429,9 @@ export async function handleGraphEnrichmentBranch(
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
+  deps: { runStep?: typeof runAuditStep } = {},
 ): Promise<GraphEnrichmentBranchResult> {
+  const runStep = deps.runStep ?? runAuditStep;
   // Fold-level pause detection is single-sourced in `hostInputPause` so the drain
   // stop predicate (`nextStepPausesForHostInput`) and this fold agree EXACTLY on
   // when the analyzer-install consent / edge-reasoning turns are owed.
@@ -440,11 +442,17 @@ export async function handleGraphEnrichmentBranch(
   };
   const unresolved = graphEnrichmentUnresolvedAnalyzers(bundle, pauseInputs);
   if (unresolved.length > 0) {
-    const incoming = await tryConsumeIncoming<Record<string, unknown>>(
+    const incoming = await consumeObjectIncoming(
       params.artifactsDir,
       "analyzer-decisions.json",
     );
-    if (incoming && incoming.value !== null && typeof incoming.value === "object") {
+    if (incoming.status === "quarantined") {
+      // A non-object top-level value used to be neither merged, deleted, nor
+      // diagnosed — the file lingered in incoming/ and the analyzer_install
+      // step re-emitted silently forever. Quarantined + diagnosed instead.
+      return { action: "continue" };
+    }
+    if (incoming.status === "ok") {
       const settings: Record<string, AnalyzerSetting> = {};
       for (const [id, value] of Object.entries(incoming.value)) {
         if (
@@ -490,20 +498,46 @@ export async function handleGraphEnrichmentBranch(
   {
     const candidates = graphEnrichmentLowConfidenceEdges(bundle, pauseInputs);
     if (candidates.length > 0) {
-      const edgeReasoningIncoming = await tryConsumeIncoming<EdgeReasoningResults>(
+      const edgeReasoningIncoming = await tryConsumeIncoming<unknown>(
         params.artifactsDir,
         "edge-reasoning.json",
       );
       if (edgeReasoningIncoming) {
-        await runAuditStep({
+        // Same hazard class as the design-review quarantine fix: a malformed
+        // submission used to no-op silently inside applyEdgeReasoning (it never
+        // throws), the unconditional unlink then destroyed the file, and the
+        // identical edge_reasoning step re-emitted with zero signal. Tolerant-
+        // unwrap first (EdgeReasoningResults is a single-array-property object,
+        // so the same "exactly one array-valued top-level property" rule
+        // applies, and a bare rewrites array is accepted too); anything else is
+        // quarantined and named in the re-emitted step's prompt.
+        const unwrapped = unwrapIncomingArray(edgeReasoningIncoming.value);
+        if (!unwrapped.ok) {
+          const quarantinePath = await quarantineIncomingFile(
+            params.artifactsDir,
+            edgeReasoningIncoming.path,
+            "edge-reasoning.json",
+          );
+          await recordEdgeReasoningRejection(params.artifactsDir, {
+            filename: "edge-reasoning.json",
+            quarantine_path: quarantinePath,
+            reason: unwrapped.reason,
+            rejected_at: new Date().toISOString(),
+          });
+          return { action: "continue" };
+        }
+        // Apply BEFORE deleting the incoming file: if runStep throws (locks,
+        // crash), the submission survives for the retry instead of being lost.
+        await runStep({
           root: params.root,
           artifactsDir: params.artifactsDir,
           analyzers: analyzersRef.value,
           graphLlmEdgeReasoning: true,
-          edgeReasoningResultsPath: edgeReasoningIncoming.path,
+          edgeReasoningResults: { rewrites: unwrapped.array as EdgeReasonRewrite[] },
           since: params.since,
         });
         await unlink(edgeReasoningIncoming.path).catch(() => {});
+        await clearEdgeReasoningRejection(params.artifactsDir);
         return { action: "continue" };
       }
       return { action: "return", result: { kind: "edge_reasoning", state, bundle, candidates } };
@@ -573,7 +607,7 @@ type ConsumeArrayIncomingResult<T> =
 /** Human-readable description of why an incoming value is neither an array nor a single-array-wrapped object. */
 function describeIncomingShapeMismatch(value: unknown): string {
   if (value === null) return "null";
-  if (Array.isArray(value)) return "an array"; // callers only reach this on the non-array path
+  if (Array.isArray(value)) return "an array"; // reachable from consumeObjectIncoming (an array is not a key→value map)
   const t = typeof value;
   if (t !== "object") return `a bare ${t}`;
   const entries = Object.entries(value as Record<string, unknown>);
@@ -619,6 +653,26 @@ async function quarantineIncomingFile(
 }
 
 /**
+ * The single tolerant-unwrap rule: a bare array is accepted as-is; a top-level
+ * object wrapping exactly one array-valued property is unambiguous and is
+ * accepted as that array. Anything else fails with a shape description.
+ * Single-sourced so `consumeArrayIncoming` and the edge-reasoning gate cannot
+ * drift on what shapes are accepted.
+ */
+function unwrapIncomingArray(
+  value: unknown,
+): { ok: true; array: unknown[] } | { ok: false; reason: string } {
+  if (Array.isArray(value)) return { ok: true, array: value };
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 1 && Array.isArray(entries[0][1])) {
+      return { ok: true, array: entries[0][1] };
+    }
+  }
+  return { ok: false, reason: describeIncomingShapeMismatch(value) };
+}
+
+/**
  * Read a JSON `incoming/` file expected to be an array (or a top-level object
  * wrapping exactly one array-valued property, the tolerant unwrap). Accepts
  * either shape and deletes the source file; any other shape is quarantined
@@ -631,20 +685,109 @@ export async function consumeArrayIncoming<T>(
   const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
   if (!incoming) return { status: "absent" };
   const { value, path } = incoming;
-  if (Array.isArray(value)) {
+  const unwrapped = unwrapIncomingArray(value);
+  if (unwrapped.ok) {
     await unlink(path).catch(() => {});
-    return { status: "ok", value: value as T[], path };
+    return { status: "ok", value: unwrapped.array as T[], path };
   }
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 1 && Array.isArray(entries[0][1])) {
-      await unlink(path).catch(() => {});
-      return { status: "ok", value: entries[0][1] as T[], path };
-    }
+  const quarantinePath = await quarantineIncomingFile(artifactsDir, path, filename);
+  return { status: "quarantined", quarantinePath, originalFilename: filename, reason: unwrapped.reason };
+}
+
+type ConsumeObjectIncomingResult =
+  | { status: "absent" }
+  | { status: "ok"; value: Record<string, unknown>; path: string }
+  | { status: "quarantined"; quarantinePath: string; reason: string };
+
+/**
+ * Read a JSON `incoming/` file expected to be a plain top-level object (a
+ * key → value map, e.g. analyzer-decisions.json). A non-object value — null,
+ * an array, a bare primitive — is quarantined with a stderr diagnostic rather
+ * than left lingering in `incoming/` (where it used to make the emitting step
+ * re-ask silently forever). Unlike `consumeArrayIncoming`, an accepted file is
+ * NOT deleted here — the caller unlinks after applying, so a crash mid-apply
+ * retains the submission for the retry.
+ */
+export async function consumeObjectIncoming(
+  artifactsDir: string,
+  filename: string,
+): Promise<ConsumeObjectIncomingResult> {
+  const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
+  if (!incoming) return { status: "absent" };
+  const { value, path } = incoming;
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return { status: "ok", value: value as Record<string, unknown>, path };
   }
   const reason = describeIncomingShapeMismatch(value);
   const quarantinePath = await quarantineIncomingFile(artifactsDir, path, filename);
-  return { status: "quarantined", quarantinePath, originalFilename: filename, reason };
+  process.stderr.write(
+    `[audit-code] ${filename} quarantined to ${quarantinePath}: expected a JSON object, got ${reason}. ` +
+      `Fix the shape and resubmit.\n`,
+  );
+  return { status: "quarantined", quarantinePath, reason };
+}
+
+// ── Edge-reasoning rejection marker ──────────────────────────────────────────
+//
+// graph_enrichment has no design_assessment-shaped bundle field to persist a
+// rejection note on, so a quarantined edge-reasoning submission is recorded in
+// a lightweight sibling marker file the re-emitted edge_reasoning step's
+// prompt reads (the graph artifacts themselves are content-hashed — writing a
+// note into them would churn the staleness DAG).
+
+interface EdgeReasoningRejection {
+  filename: string;
+  quarantine_path: string;
+  reason: string;
+  rejected_at: string;
+}
+
+function edgeReasoningRejectionPath(artifactsDir: string): string {
+  return join(artifactsDir, "quarantine", "edge-reasoning.rejection.json");
+}
+
+async function recordEdgeReasoningRejection(
+  artifactsDir: string,
+  rejection: EdgeReasoningRejection,
+): Promise<void> {
+  await mkdir(join(artifactsDir, "quarantine"), { recursive: true });
+  await writeJsonFile(edgeReasoningRejectionPath(artifactsDir), rejection);
+}
+
+async function clearEdgeReasoningRejection(artifactsDir: string): Promise<void> {
+  await unlink(edgeReasoningRejectionPath(artifactsDir)).catch(() => {});
+}
+
+/**
+ * Render the host-facing notice for a pending quarantined edge-reasoning
+ * submission, naming the quarantined file and the shape error — so the
+ * re-emitted edge_reasoning step tells the host its prior submission was
+ * rejected and why, rather than silently asking again. Returns `undefined`
+ * when there is nothing to report.
+ */
+export async function renderEdgeReasoningRejectionNotice(
+  artifactsDir: string,
+): Promise<string | undefined> {
+  let rejection: EdgeReasoningRejection;
+  try {
+    rejection = await readJsonFile<EdgeReasoningRejection>(
+      edgeReasoningRejectionPath(artifactsDir),
+    );
+  } catch (error) {
+    if (isFileMissingError(error)) return undefined;
+    throw error;
+  }
+  return [
+    "## Prior submission rejected",
+    "",
+    "Your last edge-reasoning submission did not match the expected shape and was " +
+      "quarantined (not applied, not silently discarded). Fix the shape and resubmit:",
+    "",
+    `- \`${rejection.filename}\` quarantined to \`${rejection.quarantine_path}\` (${rejection.rejected_at}): ${rejection.reason}`,
+    "",
+    'Expected shape: {"rewrites":[{"from":"...","to":"...","kind":"...","reason":"..."}]} — ' +
+      "a bare JSON array of rewrites is also accepted.",
+  ].join("\n");
 }
 
 /**

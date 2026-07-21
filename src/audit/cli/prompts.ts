@@ -242,9 +242,12 @@ export function renderEdgeReasoningStepPrompt(params: {
   resultsPath: string;
   continueCommand: string;
   contentHash: string;
+  /** Notice for a prior quarantined submission (shape error + quarantine path). */
+  rejectionNotice?: string;
 }): string {
   return [
     params.basePrompt,
+    ...(params.rejectionNotice ? ["", params.rejectionNotice] : []),
     "",
     "## Results path",
     "",

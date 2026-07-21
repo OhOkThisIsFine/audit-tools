@@ -98,23 +98,37 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Ship the R3-3 + gate-hardening release** if the current lap has not already published it
-(check `git log v<package.json-version>..HEAD` — unreleased commits on main mean a
-`release:patch:publish` is owed; `/ship` encodes the trap list).
+**1. RESUME the paused re-dogfood self-audit (v0.34.6, PAUSED mid-rolling-dispatch 2026-07-21).**
+State + 15 observations: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md). It already
+validated: Gate-0 capability/provenance channels, the full charter→delta→design-review pipeline on
+free NIM workers, the 429 wall → graceful resumable pause → learned cooldown, host-dispatch
+fallback with cold-start batching, nested dispatcher subagents, and two HIGH ingest defects.
+Resume: from THIS primary checkout, `audit-code next-step` with the `--auditor` roster handshake
+(the exact command is in any `steps/*/current-step.json` `allowed_commands`; prefix
+`OPENCODE_ZEN_API_KEY=public`). Expect a staleness re-extraction (docs changed at pause,
+deliberate); a replan of the ~60 remaining packets is acceptable — ingested results survive.
+Delegating the rolling loop to a dispatcher subagent WORKS (observation 15) — use it.
 
-**2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the R3-3
-autonomous ranker step in a real wave, plus the proxy track's leftovers (dispatch under a real
-wave, quota behavior at the proxy) and the account-metering close — a proxy-fronted 429 should
-throttle its same-service siblings but not a different service behind the same proxy. Launch
-recipe below. Watch lines: [`backlog.md`](backlog.md) → the condensed capability entry's ⬇ line.
+**2. MERGE QUEUE — two ready worktree branches, HELD to protect the running audit** (merge only
+at run completion, or accept a replan):
+- `worktree-agent-a656590719d7f8343` (`d1cc1b5e`) — vitest false-green gate (ledger outcomes +
+  token handshake + gate script; CI workflows touched — review those hunks).
+- `worktree-agent-a22494cc1a9cb610d` (`f8b7ee71`) — admission-explain Infinity round-trip
+  (loop-core: needs fresh clear attestation at merge).
+Already folded into the primary branch (`claude/awesome-poincare-399ae8`, this checkout):
+`7906c518` (design-review quarantine-loudly, fast-forwarded) and the edge-reasoning +
+analyzer-decisions quarantine follow-up (task_cd0c73da, reconciled onto the same
+`consumeArrayIncoming`/`quarantineIncomingFile` core as required — one helper set). The primary
+branch itself still awaits merge to `main` + release at run completion.
+Each branch carries red-green-validated tests; re-review + attest on main at merge (worktree
+`concerns` attestations do not carry).
 
-**3. Gate-0 priority-order UX** (Track 3) — two named owner calls resolved in backlog (suggestion
-lists every pool; operator order is rung-1 within the cost axis, λ trades the axis) — what remains
-is implementing the prompt clarity + tier-default fallback. See backlog *Open tracks*.
+**3. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
+`DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — NIM-drafted rewrite proposals for the two big ones (DD-2,
+DD-12) are in the session scratchpad (`dd2-draft.json` / `dd12-draft.json` under the 2026-07-21
+session's scratch dir) — regenerate freely if that dir is gone; the drafts cost nothing.
 
-**4. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
-`DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — they surface at session start; full text on the
-`doc-review` branch.
+**4. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
 
 ---
 
