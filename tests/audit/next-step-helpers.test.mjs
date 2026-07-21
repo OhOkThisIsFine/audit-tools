@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,8 @@ const {
   handleDesignReviewBranch,
   checkFinalizationCycle,
   tryConsumeIncoming,
+  consumeArrayIncoming,
+  renderDesignReviewRejectionNotice,
 } = await import("../../src/audit/cli/nextStepCommand.ts");
 
 // HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS are internal to the Tier C2
@@ -481,4 +483,251 @@ await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 8 audit ho
     ["critical_flow_fallback", "synthesis_narrative", "charter_extraction", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
   );
   expect(custom.sort()).toEqual(["graph_enrichment", "design_review"].sort());
+});
+
+// ── handleDesignReviewBranch — malformed-submission quarantine ───────────────
+//
+// Regression coverage for the "silently DESTROYS a malformed submission"
+// defect: `handleDesignReviewBranch` used to unconditionally `unlink` every
+// incoming design-review file and merge ONLY when `Array.isArray(value)` — any
+// other shape (most commonly a JSON-object-mode host wrapping its array as
+// `{findings:[...]}`) was destroyed with no quarantine, no message, and the
+// identical step re-emitted forever. Fixed via `consumeArrayIncoming`
+// (tolerant single-array-property unwrap, else quarantine-not-delete) plus
+// `renderDesignReviewRejectionNotice` (names the quarantined file + reason in
+// the re-emitted step).
+
+async function quarantinedFiles(artifactsDir) {
+  const dir = join(artifactsDir, "quarantine");
+  try {
+    return await readdir(dir);
+  } catch {
+    return [];
+  }
+}
+
+await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} contract submission (tolerant unwrap)", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    // Object-wrapped, not a bare array — the PowerShell/json_object-mode
+    // single-element-array-collapses-to-object shape (memory:
+    // submit-packet-json-array-trap) generalized to a whole-array wrap.
+    await writeFile(
+      contractPath,
+      JSON.stringify({ findings: [{ id: "DR-001", title: "contract finding" }] }),
+      "utf8",
+    );
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    expect(branch.action).toBe("continue");
+
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    expect(written.contract_reviewed).toBe(true);
+    expect(written.contract_findings).toEqual([{ id: "DR-001", title: "contract finding" }]);
+    // Obligation credited (merged), so no quarantine and nothing pending.
+    expect(await quarantinedFiles(artifactsDir)).toEqual([]);
+    expect(written.rejected_submissions ?? []).toEqual([]);
+
+    // The incoming file was consumed (deleted), not left behind.
+    let stillExists = true;
+    try {
+      await readFile(contractPath, "utf8");
+    } catch {
+      stillExists = false;
+    }
+    expect(stillExists).toBe(false);
+  });
+});
+
+await test("handleDesignReviewBranch quarantines a bare-string malformed contract submission instead of destroying it", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    await writeFile(contractPath, JSON.stringify("oops, not an array"), "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+
+    // Genuinely malformed → the step re-emits (nothing merged, contract pass
+    // still unsatisfied) rather than silently swallowing it as "continue".
+    expect(branch.action).toBe("return");
+    expect(["design_review_contract", "design_review_parallel"]).toContain(branch.result.kind);
+
+    // The original incoming file is gone from incoming/ ...
+    let stillInIncoming = true;
+    try {
+      await readFile(contractPath, "utf8");
+    } catch {
+      stillInIncoming = false;
+    }
+    expect(stillInIncoming).toBe(false);
+
+    // ... but NOT destroyed: it survives, verbatim, under quarantine/.
+    const quarantined = await quarantinedFiles(artifactsDir);
+    expect(quarantined.length).toBe(1);
+    expect(quarantined[0].startsWith("design-review-contract-findings.json.")).toBe(true);
+    const quarantinedContent = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
+    expect(JSON.parse(quarantinedContent)).toBe("oops, not an array");
+
+    // The rejection is recorded on design_assessment so it survives the
+    // same-call `continue` re-derivation, and names the file + reason.
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    expect(written.rejected_submissions.length).toBe(1);
+    const rejection = written.rejected_submissions[0];
+    expect(rejection.pass).toBe("contract");
+    expect(rejection.filename).toBe("design-review-contract-findings.json");
+    expect(rejection.reason.includes("string")).toBe(true);
+    expect(rejection.quarantine_path.endsWith(quarantined[0])).toBe(true);
+
+    // The re-emitted step's bundle carries the same note (same in-memory
+    // design_assessment object) — this is what nextStepCommand.ts threads into
+    // the re-emitted step's prompt via renderDesignReviewRejectionNotice.
+    const notice = renderDesignReviewRejectionNotice(branch.result.bundle, ["legacy", "contract"]);
+    expect(notice).toBeTruthy();
+    expect(notice.includes("design-review-contract-findings.json")).toBe(true);
+    expect(notice.includes(rejection.quarantine_path)).toBe(true);
+    expect(notice.includes("string")).toBe(true);
+  });
+});
+
+await test("handleDesignReviewBranch quarantines an ambiguous two-array-property submission (fails both the array check and the unwrap)", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    await writeFile(
+      conceptualPath,
+      JSON.stringify({
+        contract_findings: [{ id: "DR-001" }],
+        conceptual_findings: [{ id: "DR-002" }],
+      }),
+      "utf8",
+    );
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    expect(branch.action).toBe("return");
+
+    const quarantined = await quarantinedFiles(artifactsDir);
+    expect(quarantined.length).toBe(1);
+
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    const rejection = written.rejected_submissions.find((r) => r.pass === "conceptual");
+    expect(rejection).toBeTruthy();
+    expect(rejection.reason.includes("2 array-valued propert")).toBe(true);
+  });
+});
+
+await test("handleDesignReviewBranch quarantines a malformed legacy findings file rather than destroying it", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const findingsPath = join(artifactsDir, "incoming", "design-review-findings.json");
+    await writeFile(findingsPath, JSON.stringify({ not: "an array or a single-array wrapper" }), "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ reviewed: false }), "utf8");
+
+    const bundle = { design_assessment: { reviewed: false, review_findings: [] } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    // Legacy quarantine folds ("continue") — the very next fold iteration
+    // (same drain call, reloaded bundle) re-evaluates contract/conceptual and
+    // surfaces the recorded rejection via the returned host step.
+    expect(branch.action).toBe("continue");
+
+    const quarantined = await quarantinedFiles(artifactsDir);
+    expect(quarantined.length).toBe(1);
+    expect(quarantined[0].startsWith("design-review-findings.json.")).toBe(true);
+
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    expect(written.rejected_submissions.length).toBe(1);
+    expect(written.rejected_submissions[0].pass).toBe("legacy");
+
+    // Legacy file must be gone from incoming/ (quarantined, not left in place).
+    let stillInIncoming = true;
+    try {
+      await readFile(findingsPath, "utf8");
+    } catch {
+      stillInIncoming = false;
+    }
+    expect(stillInIncoming).toBe(false);
+  });
+});
+
+await test("renderDesignReviewRejectionNotice returns undefined when there is nothing to report", () => {
+  const bundle = { design_assessment: { generated_at: "now", findings: [] } };
+  expect(renderDesignReviewRejectionNotice(bundle, ["contract"])).toBe(undefined);
+
+  const bundleWithUnrelatedRejection = {
+    design_assessment: {
+      generated_at: "now",
+      findings: [],
+      rejected_submissions: [
+        {
+          pass: "conceptual",
+          filename: "design-review-conceptual-findings.json",
+          quarantine_path: "/tmp/quarantine/x.json",
+          reason: "a bare string",
+          rejected_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+  };
+  // Asking only about "contract" should not surface an unrelated conceptual rejection.
+  expect(renderDesignReviewRejectionNotice(bundleWithUnrelatedRejection, ["contract"])).toBe(undefined);
+});
+
+// ── consumeArrayIncoming ──────────────────────────────────────────────────────
+
+await test("consumeArrayIncoming returns absent when the file does not exist", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const result = await consumeArrayIncoming(artifactsDir, "nonexistent.json");
+    expect(result).toEqual({ status: "absent" });
+  });
+});
+
+await test("consumeArrayIncoming accepts a bare array untouched (existing array-shaped path)", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const filePath = join(artifactsDir, "incoming", "arr.json");
+    await writeFile(filePath, JSON.stringify([{ id: "A" }, { id: "B" }]), "utf8");
+
+    const result = await consumeArrayIncoming(artifactsDir, "arr.json");
+    expect(result.status).toBe("ok");
+    expect(result.value).toEqual([{ id: "A" }, { id: "B" }]);
+
+    let stillExists = true;
+    try {
+      await readFile(filePath, "utf8");
+    } catch {
+      stillExists = false;
+    }
+    expect(stillExists).toBe(false);
+  });
 });

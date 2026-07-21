@@ -94,6 +94,8 @@ import {
 // Re-export helpers from nextStepHelpers so existing imports remain valid.
 export {
   tryConsumeIncoming,
+  consumeArrayIncoming,
+  renderDesignReviewRejectionNotice,
   buildTerminalStep,
   handleGraphEnrichmentBranch,
   handleDesignReviewBranch,
@@ -104,7 +106,7 @@ export {
   runDeterministicForNextStep,
 } from "./nextStepHelpers.js";
 
-import { runDeterministicForNextStep } from "./nextStepHelpers.js";
+import { runDeterministicForNextStep, renderDesignReviewRejectionNotice } from "./nextStepHelpers.js";
 
 /**
  * Gate a HOST fan-out step through the quota layer (item C). Registers the host
@@ -510,6 +512,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const prompt = renderDesignReviewPrompt(result.bundle, {
       max_units: intent.design_review?.max_units,
     });
+    const legacyRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, ["legacy"]);
     const fullPrompt = [
       prompt,
       "## Results path",
@@ -520,6 +523,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
       `Then run: ${continueCommand}`,
       "",
+      ...(legacyRejectionNotice ? ["", legacyRejectionNotice] : []),
     ].join("\n");
     if (
       await gateHostFanoutOrPause({
@@ -578,12 +582,23 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       result.bundle,
       "conceptual",
     );
+    const contractRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
+      "legacy",
+      "contract",
+    ]);
+    const conceptualRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
+      "legacy",
+      "conceptual",
+    ]);
+    const conceptualNotesSection = [conceptualReReview, conceptualRejectionNotice]
+      .filter((s): s is string => Boolean(s))
+      .join("\n\n");
     const conceptual = await prepareConceptualDispatch({
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
       hostCanSelectSubagentModel,
-      reReviewSection: conceptualReReview,
+      reReviewSection: conceptualNotesSection || undefined,
     });
 
     const contractPromptText = [
@@ -601,6 +616,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       // still mid-parallel-dispatch (the conceptual perspectives run concurrently).
       // The advance belongs solely to the host's dispatchPrompt below.
       ...(contractReReview ? ["", contractReReview] : []),
+      ...(contractRejectionNotice ? ["", contractRejectionNotice] : []),
     ].join("\n");
 
     const contractPromptPath = join(artifactsDir, "incoming", "design-review-contract-prompt.md");
@@ -677,6 +693,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       result.bundle,
       "contract",
     );
+    const contractRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
+      "legacy",
+      "contract",
+    ]);
     const prompt = [
       renderContractReviewPrompt(result.bundle, { max_units: intent.design_review?.max_units }),
       "## Results path",
@@ -688,6 +708,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       `Then run: ${continueCommand}`,
       "",
       ...(contractReReview ? ["", contractReReview] : []),
+      ...(contractRejectionNotice ? ["", contractRejectionNotice] : []),
     ].join("\n");
     if (
       await gateHostFanoutOrPause({
@@ -738,12 +759,19 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       result.bundle,
       "conceptual",
     );
+    const conceptualRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
+      "legacy",
+      "conceptual",
+    ]);
+    const conceptualNotesSection = [conceptualReReview, conceptualRejectionNotice]
+      .filter((s): s is string => Boolean(s))
+      .join("\n\n");
     const conceptual = await prepareConceptualDispatch({
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
       hostCanSelectSubagentModel,
-      reReviewSection: conceptualReReview,
+      reReviewSection: conceptualNotesSection || undefined,
     });
 
     const prompt = [

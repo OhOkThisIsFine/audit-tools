@@ -6,7 +6,7 @@
  * concern.
  */
 
-import { access, unlink } from "node:fs/promises";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   advance,
@@ -40,7 +40,10 @@ import {
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
-import type { DesignAssessment } from "../types/designAssessment.js";
+import type {
+  DesignAssessment,
+  RejectedDesignReviewSubmission,
+} from "../types/designAssessment.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
@@ -537,6 +540,178 @@ function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
   return snapshot ? isDesignReviewStale(snapshot, bundle) : false;
 }
 
+// ── Design-review incoming-array quarantine (malformed-submission fix) ───────
+//
+// `handleDesignReviewBranch` used to unconditionally `unlink` every incoming
+// design-review submission and merge ONLY when `Array.isArray(value)` — any
+// other top-level shape (an object-wrapped `{findings:[...]}`, a bare string,
+// two competing array properties, ...) was silently destroyed with no
+// quarantine, no message, `consumed` staying false, and the identical step
+// re-emitting forever. A host resubmitting the same honest mistake (most
+// commonly a JSON-object-mode LLM wrapping its array in a single top-level
+// key) lost its work every round with zero signal. Fixed here:
+//   1. tolerant unwrap FIRST — a top-level object wrapping exactly one
+//      array-valued property is unambiguous and is accepted as that array;
+//   2. only a shape that survives neither the bare-array check nor the
+//      unwrap is quarantined — moved to `<artifactsDir>/quarantine/`, never
+//      unlinked-and-forgotten;
+//   3. the quarantine is recorded on `design_assessment.rejected_submissions`
+//      so it survives the same-call `continue` re-derivation, and the
+//      re-emitted design-review step names the quarantined file + reason
+//      (see `renderDesignReviewRejectionNotice`, threaded in nextStepCommand.ts).
+
+type ConsumeArrayIncomingResult<T> =
+  | { status: "absent" }
+  | { status: "ok"; value: T[]; path: string }
+  | {
+      status: "quarantined";
+      quarantinePath: string;
+      originalFilename: string;
+      reason: string;
+    };
+
+/** Human-readable description of why an incoming value is neither an array nor a single-array-wrapped object. */
+function describeIncomingShapeMismatch(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array"; // callers only reach this on the non-array path
+  const t = typeof value;
+  if (t !== "object") return `a bare ${t}`;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return "an empty object";
+  const arrayKeys = entries.filter(([, v]) => Array.isArray(v)).map(([k]) => k);
+  const allKeys = entries.map(([k]) => k).join(", ");
+  if (arrayKeys.length === 0) {
+    return `an object with no array-valued properties (keys: ${allKeys})`;
+  }
+  return (
+    `an object with ${arrayKeys.length} array-valued propert${arrayKeys.length === 1 ? "y" : "ies"} ` +
+    `out of ${entries.length} total key(s) (${allKeys}) — exactly one top-level array property is ` +
+    `required for the tolerant unwrap`
+  );
+}
+
+/**
+ * Move a malformed incoming submission to `<artifactsDir>/quarantine/` rather
+ * than deleting it. Falls back to copy+unlink if `rename` fails (e.g. a
+ * cross-device incoming/ mount) so the content is never lost.
+ */
+async function quarantineIncomingFile(
+  artifactsDir: string,
+  filePath: string,
+  originalFilename: string,
+): Promise<string> {
+  const quarantineDir = join(artifactsDir, "quarantine");
+  await mkdir(quarantineDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const quarantinePath = join(quarantineDir, `${originalFilename}.${timestamp}.json`);
+  try {
+    await rename(filePath, quarantinePath);
+  } catch {
+    try {
+      const content = await readFile(filePath, "utf8");
+      await writeFile(quarantinePath, content, "utf8");
+    } catch {
+      // Best-effort: nothing left to quarantine if even the read failed.
+    }
+    await unlink(filePath).catch(() => {});
+  }
+  return quarantinePath;
+}
+
+/**
+ * Read a JSON `incoming/` file expected to be an array (or a top-level object
+ * wrapping exactly one array-valued property, the tolerant unwrap). Accepts
+ * either shape and deletes the source file; any other shape is quarantined
+ * (never unlinked-and-discarded) and reported with a reason.
+ */
+export async function consumeArrayIncoming<T>(
+  artifactsDir: string,
+  filename: string,
+): Promise<ConsumeArrayIncomingResult<T>> {
+  const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
+  if (!incoming) return { status: "absent" };
+  const { value, path } = incoming;
+  if (Array.isArray(value)) {
+    await unlink(path).catch(() => {});
+    return { status: "ok", value: value as T[], path };
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 1 && Array.isArray(entries[0][1])) {
+      await unlink(path).catch(() => {});
+      return { status: "ok", value: entries[0][1] as T[], path };
+    }
+  }
+  const reason = describeIncomingShapeMismatch(value);
+  const quarantinePath = await quarantineIncomingFile(artifactsDir, path, filename);
+  return { status: "quarantined", quarantinePath, originalFilename: filename, reason };
+}
+
+/**
+ * Record a quarantined design-review submission on `design_assessment` (and
+ * persist immediately) so the note survives the same-call `continue`
+ * re-derivation. A no-op when `design_assessment` doesn't exist yet — in
+ * practice unreachable, since `design_assessment_current` is a
+ * higher-priority obligation than either design-review pass (PRIORITY in
+ * nextStep.ts), so `design_assessment` always exists by the time this branch
+ * runs.
+ */
+async function recordRejectedDesignReviewSubmission(
+  artifactsDir: string,
+  existing: DesignAssessment | undefined,
+  pass: RejectedDesignReviewSubmission["pass"],
+  quarantined: Extract<ConsumeArrayIncomingResult<unknown>, { status: "quarantined" }>,
+): Promise<void> {
+  if (!existing) return;
+  const entry: RejectedDesignReviewSubmission = {
+    pass,
+    filename: quarantined.originalFilename,
+    quarantine_path: quarantined.quarantinePath,
+    reason: quarantined.reason,
+    rejected_at: new Date().toISOString(),
+  };
+  existing.rejected_submissions = [
+    ...(existing.rejected_submissions ?? []).filter((r) => r.pass !== pass),
+    entry,
+  ];
+  await writeJsonFile(join(artifactsDir, "design_assessment.json"), existing);
+}
+
+/**
+ * Render a host-facing notice for any pending quarantined design-review
+ * submissions matching the given passes, naming the quarantined file and the
+ * shape error — so a re-emitted design-review step tells the host its prior
+ * submission was rejected and why, rather than silently asking again.
+ * Returns `undefined` when there is nothing to report.
+ */
+export function renderDesignReviewRejectionNotice(
+  bundle: ArtifactBundle,
+  passes: readonly RejectedDesignReviewSubmission["pass"][],
+): string | undefined {
+  const rejected = (bundle.design_assessment?.rejected_submissions ?? []).filter((r) =>
+    passes.includes(r.pass),
+  );
+  if (rejected.length === 0) return undefined;
+  const lines = [
+    "## Prior submission rejected",
+    "",
+    "Your last submission for this pass did not match the expected shape and was " +
+      "quarantined (not merged, not silently discarded). Fix the shape and resubmit:",
+    "",
+  ];
+  for (const r of rejected) {
+    lines.push(
+      `- **${r.pass}** — \`${r.filename}\` quarantined to \`${r.quarantine_path}\` (${r.rejected_at}): ${r.reason}`,
+    );
+  }
+  lines.push(
+    "",
+    "Expected shape: a JSON array of findings, or a top-level object wrapping exactly " +
+      'one array-valued property (e.g. `{"findings": [...]}`).',
+  );
+  return lines.join("\n");
+}
+
 export async function handleDesignReviewBranch(
   params: Pick<NextStepParams, "artifactsDir">,
   bundle: ArtifactBundle,
@@ -544,60 +719,69 @@ export async function handleDesignReviewBranch(
 ): Promise<BranchActionResult> {
   const existing = bundle.design_assessment;
 
-  // Legacy: consume old combined findings file. Always unlink when present to
-  // prevent accumulation, even when design_assessment is absent (COR-68f07c3e).
-  const legacyIncoming = await tryConsumeIncoming<Finding[]>(
+  // Legacy: consume old combined findings file. Tolerant-unwrap or quarantine
+  // (never a bare unconditional delete) — see the quarantine block comment above.
+  const legacyResult = await consumeArrayIncoming<Finding>(
     params.artifactsDir,
     "design-review-findings.json",
   );
-  if (legacyIncoming) {
-    await unlink(legacyIncoming.path).catch(() => {});
-    if (Array.isArray(legacyIncoming.value) && existing) {
-      existing.review_findings = groundDesignFindings(legacyIncoming.value, bundle.repo_manifest);
+  if (legacyResult.status === "quarantined") {
+    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "legacy", legacyResult);
+    return { action: "continue" };
+  }
+  if (legacyResult.status === "ok") {
+    if (existing) {
+      existing.review_findings = groundDesignFindings(legacyResult.value, bundle.repo_manifest);
       existing.reviewed = true;
+      existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
+        (r) => r.pass !== "legacy",
+      );
       await writeJsonFile(
         join(params.artifactsDir, "design_assessment.json"),
         existing,
       );
       return { action: "continue" };
     }
-    // File consumed (deleted) but no target to merge into — keep folding.
+    // File consumed but no target to merge into — keep folding.
     return { action: "continue" };
   }
+  // absent: fall through to the contract/conceptual check.
 
   // New: consume contract-findings and/or conceptual-findings independently.
-  const contractIncoming = await tryConsumeIncoming<Finding[]>(
+  const contractResult = await consumeArrayIncoming<Finding>(
     params.artifactsDir,
     "design-review-contract-findings.json",
   );
-  const conceptualIncoming = await tryConsumeIncoming<Finding[]>(
+  const conceptualResult = await consumeArrayIncoming<Finding>(
     params.artifactsDir,
     "design-review-conceptual-findings.json",
   );
 
   let consumed = false;
 
-  // Always delete incoming files when present; only merge data when existing
-  // design_assessment is present (COR-68f07c3e).
-  if (contractIncoming) {
-    await unlink(contractIncoming.path).catch(() => {});
-    if (Array.isArray(contractIncoming.value) && existing) {
-      existing.contract_findings = groundDesignFindings(contractIncoming.value, bundle.repo_manifest);
-      existing.contract_reviewed = true;
-      consumed = true;
-    }
+  if (contractResult.status === "quarantined") {
+    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "contract", contractResult);
+  } else if (contractResult.status === "ok" && existing) {
+    existing.contract_findings = groundDesignFindings(contractResult.value, bundle.repo_manifest);
+    existing.contract_reviewed = true;
+    existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
+      (r) => r.pass !== "contract",
+    );
+    consumed = true;
   }
 
-  if (conceptualIncoming) {
-    await unlink(conceptualIncoming.path).catch(() => {});
-    if (Array.isArray(conceptualIncoming.value) && existing) {
-      existing.conceptual_findings = groundDesignFindings(conceptualIncoming.value, bundle.repo_manifest);
-      existing.conceptual_reviewed = true;
-      consumed = true;
-    }
+  if (conceptualResult.status === "quarantined") {
+    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "conceptual", conceptualResult);
+  } else if (conceptualResult.status === "ok" && existing) {
+    existing.conceptual_findings = groundDesignFindings(conceptualResult.value, bundle.repo_manifest);
+    existing.conceptual_reviewed = true;
+    existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
+      (r) => r.pass !== "conceptual",
+    );
+    consumed = true;
   }
 
-  if (contractIncoming || conceptualIncoming) {
+  if (contractResult.status !== "absent" || conceptualResult.status !== "absent") {
     // Item C: the design-review fan-out results are in — release the host-fan-out
     // panel's leases now, before the coverage packet dispatch that follows, rather
     // than letting them linger to the 20-min TTL and depress its headroom.
@@ -615,7 +799,7 @@ export async function handleDesignReviewBranch(
     // rather than a blind full re-run. Capture after the design_assessment write
     // so the projection reflects the persisted findings.
     const reviewedAt = new Date().toISOString();
-    if (contractIncoming) {
+    if (contractResult.status === "ok") {
       await captureDesignReviewSnapshot(
         params.artifactsDir,
         "contract",
@@ -624,7 +808,7 @@ export async function handleDesignReviewBranch(
         reviewedAt,
       );
     }
-    if (conceptualIncoming) {
+    if (conceptualResult.status === "ok") {
       await captureDesignReviewSnapshot(
         params.artifactsDir,
         "conceptual",
