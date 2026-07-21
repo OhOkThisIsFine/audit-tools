@@ -76,9 +76,6 @@ followed" is otherwise indistinguishable from a bug.
 
 - **`rtk vitest run <path>` fails with "program not found" — the documented RTK test wrapper is unusable (2026-07-20, low, friction: tool-should-decide).** `CLAUDE.md`'s RTK section lists `rtk vitest run` as the token-saving test runner, but `rtk vitest run tests/shared` errors `Failed to run vitest / Caused by: program not found` in this checkout — RTK does not resolve the local `node_modules/.bin/vitest` the way `npx vitest` does. Fell back to `npx vitest run … | grep -E "Test Files|Tests |FAIL"` for a compact summary. Either fix RTK's vitest resolution or drop `rtk vitest` from the documented command set so it stops being reached for.
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
-- **The loop-core attestation gate cannot tell the reviewer from the author — an agent clears itself (2026-07-21, HIGH, verified by execution).** `.claude/hooks/attest-loop-core-review.mjs` takes `--reviewed-by <id>` as free text, so an agent writes `"reviewed_by": "agent"` / `"gemini-team"`, `"verdict": "clear"`, `"override": null` and the gate passes. The 2026-07-20 Antigravity commits did exactly this six times in 17 minutes; the records are byte-for-byte indistinguishable from a human sign-off to every consumer. `CLAUDE.md` states the gate is "a logged, attributable human step" — existence, freshness and tree-binding are all enforced, and *attributability* is the one property carried by assumption. **Fix in tooling:** constrain `--reviewed-by` to an operator identity the agent cannot mint, or record the acting principal separately from the claimed reviewer so a self-issued clearance reads as one. Record: [`antigravity-agent-commits-2026-07-21.md`](reviews/antigravity-agent-commits-2026-07-21.md).
-- **The pre-commit gate's `core.hooksPath` bypass check no longer matches a sibling statement (2026-07-21, medium, regression from `a3545b5c`).** Fixing the `grep -n` false-positive moved ALL bypass detection from the whole command string to `git commit` sub-commands only. That is right for `-n`; it is wrong for `core.hooksPath`, which now escapes via `git config core.hooksPath /dev/null && git commit -m …` — the first statement has no `commit` so it is never scanned, the second carries no flag. Scope only the `-n` check to commit sub-commands; return `--no-verify` and `core.hooksPath` to whole-command matching.
-- **R3-3 headless capability ranker — still OPEN; the mechanism needs settling before another attempt (2026-07-21, HIGH).** A headless run with unevidenced capability pools pins the PRIORITY[0] obligation, and the landing gate in [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md) stays UNMET. An auto-ranker sorting by `context_tokens` landed 2026-07-20 and was reverted 2026-07-21 (`1b601b45`) — context size is not capability, an unknown model resolved `?? 0` and sorted last silently, and auto-ranking by any locally-derivable proxy manufactures evidence where [[capability-evidence-is-an-obligation]] says to PIN. **The open decision is the ranker mechanism itself** (the gate says owner-settled = LLM ranker; the reverted attempt is evidence that "some deterministic proxy" is not a safe substitute), plus gate items 2–4: the `marshal.ts` rank-stamping test, producer-seam tests, and a genuinely independent fourth review. The seam in `intakeExecutors.ts` carries a comment so the next pass does not re-add a proxy-metric ranker by reflex. Record: [`antigravity-agent-commits-2026-07-21.md`](reviews/antigravity-agent-commits-2026-07-21.md).
 - **The nightly doc-review verifies against remote `main` only, so unpushed local work makes it revert CORRECT docs to stale ones (2026-07-21, VERIFIED by instance, medium, friction: tool-should-decide).** The 2026-07-21 run (`4c18315`) rewrote a true present-tense claim in `spec/backend-identity-axes.md` — "the autonomous fail-closed write emits the **service** axis" — into "planned (stage 5, not yet shipped)", because remote `main` stopped at stage 4 while stage 5 (`e7cda25`) sat in five unpushed local commits. Every doc claim the routine "re-verified against HEAD" carries the same exposure: its HEAD is the remote tip, and a doc can be *ahead* of that tip as legitimately as behind it. The routine already stamps its baseline range in the commit body, so the tool-side fix is a check at reconcile/push time: if a `doc-review:` commit's stated baseline is not the current tip's ancestor-with-nothing-in-between, its stale-factual-fixes need re-verification against the real tip before they land. "Push before the nightly runs" is host discipline, not a fix. Corrected in `0bf36e7`.
 - **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.
 
@@ -304,152 +301,22 @@ followed" is otherwise indistinguishable from a bug.
   Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
   $/Mtok alone, never demoting a quota-saturated pool).
 
-- **The loop-core attestation gate cannot tell a human reviewer from the committing agent
-  (2026-07-19, medium, friction: tool-should-decide).** `attest-loop-core-review.mjs` takes
-  `--reviewed-by <id>` as a free string and the pre-commit gate checks only that a fresh,
-  staged-tree-bound attestation EXISTS. On this lap the committing agent ran the attestation
-  itself (naming its three independent reviewer subagents in the string) — which is honest,
-  but the gate would equally have accepted `--reviewed-by me` with no review at all. CLAUDE.md
-  describes the intent as "a logged, attributable **human** step"; the mechanism does not
-  enforce the human part, so the doc currently overstates what is guaranteed. **Property to
-  hold:** either the gate distinguishes agent-attested from human-attested (and the two carry
-  different weight), or the docs stop claiming a human step and describe it as what it is — an
-  attributable, tree-bound audit record. Per *enforce-in-tooling-never-host-discretion*, the
-  first is preferable; the second is at minimum required for the claim to be true.
-  **SPEC — record the attester's CLASS and stop claiming a human.** A gate running on the same machine as
-  the agent cannot establish humanity: any credential it could check is a credential the agent can reach,
-  so a cryptographic scheme would prove key possession, not a human. Chasing enforcement here buys
-  ceremony, not assurance. The honest and useful artifact is an **attributable, tree-bound audit record**,
-  and the fix is to make the record carry what actually happened — the attester's class (agent or human)
-  and the reviewing identities — so it is greppable after the fact and a later policy can require human
-  sign-off for a named subset if that ever earns its cost. Then correct the documentation to describe the
-  record rather than a guarantee it does not provide. ⚠ The doc overstating the mechanism is the live
-  defect: it makes a weaker control read as a strong one, which is worse than the control being weak.
-
-- **The loop-core gate conflates COMMITTING with LANDING, so preserving WIP forces an override
-  (2026-07-19, medium, friction: tool-should-decide).** Committing review-blocked loop-core work to a
-  do-not-merge branch — the correct way to preserve it across a branch switch — is gated identically to
-  landing it on main. The honest verdict for un-reviewed work is `concerns`, and the pre-commit gate
-  REFUSES `concerns` without `--override`. So the only paths are: claim `clear` (a false sign-off),
-  override (what this lap did, on `e500672f`), or leave the work uncommitted and risk losing it. The
-  override reason is recorded, so the audit trail survives — but a gate whose honest path requires an
-  override will train the override into a habit, and then it stops signalling anything. **Property to
-  hold:** the gate keys on the DESTINATION, not the act of committing — a commit that cannot reach main
-  (branch not `main`, or the tree is marked do-not-merge) should accept a `concerns` attestation without
-  an override, while a commit onto `main` keeps the current strictness. Same family as the
-  agent-vs-human entry above: both are the gate measuring the wrong thing.
-  **SPEC — key on DESTINATION.** The gate's job is protecting what lands, not policing what is written
-  down. Preserving review-blocked work on a branch that cannot reach main is exactly the behavior the
-  project wants and it should be the frictionless path; only a commit that can reach main earns the
-  strictness. Concretely: a `concerns` verdict is accepted without an override when the commit cannot
-  land (not on the main branch, or the tree is explicitly marked do-not-merge), and the current bar
-  applies unchanged on main. **The override must stay rare to stay meaningful** — a gate whose honest
-  path requires an override trains the override into a reflex, and then it signals nothing, which costs
-  more than the gate was ever worth.
-
-- **Capability-evidence obligation — SALVAGED onto `salvage/capability-evidence` (green, 2026-07-20);
-  landing gate = R3-3 (high).** A pool with no capability evidence must be pinned down — by LLM judgment
-  or by asking the operator — never silently routed around. The old `wip/capability-evidence` was 64
-  commits stale (merging raw would revert shipped identity + metering) and bundled the obligation with a
-  now-superseded R3-4 cooldown/rpm rework; the obligation was extracted onto `salvage/capability-evidence`
-  off current main — `check` + full suite green, the derive-each-enumeration fixes below are landed and
-  covered by `tests/shared/capability-evidence.test.mjs` + `confirmation-carry-forward.test.mjs` (205/205).
-  Salvage record: [`docs/reviews/capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md);
-  round-2 detail: [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
-  **Landing gate UNMET (do NOT merge to main):** (1) **R3-3 — headless promotion via LLM ranker** (the
-  blocker: without it a headless run with unranked pools WEDGES instead of fail-opening, a regression vs
-  main; owner-settled = LLM ranker); (2) a `marshal.ts` rank-stamping test; (3) producer-seam tests; (4)
-  a 4th independent review + loop-core attestation. The SPEC below is the design the salvage IMPLEMENTS —
-  keep it as the completeness bar for R3-3.
-  **SPEC — the open defects are ONE defect, and must be fixed as one.** Every blocking issue is a
-  HAND-MAINTAINED ENUMERATION that drifted from its source of truth. The parser reconstructs the
-  confirmation field-by-field, so a field nobody listed is silently dropped — its own comment states
-  the hazard as if it were the mitigation ("any future field needs a line here"), which is precisely the
-  host-must-remember pattern this project forbids. The prompt's JSON example is authored separately from
-  the shape the parser accepts, so the two drift. A capability-rank parameter is optional, so the
-  compiler never enumerates its call sites and one draw silently fails open. Fixing the current CONTENTS
-  of these lists is what rounds 1–4 each did; each fix closed the named instance and its siblings
-  reappeared elsewhere.
-  **Fix by DERIVING each enumeration, so omission becomes impossible:**
-  (1) drive the parser from a single field-descriptor table (name + validator) rather than field-by-field
-  reconstruction, so adding a field to the type forces a table entry instead of relying on a comment;
-  (2) INVERT the write path — merge the submission into the persisted confirmation instead of rebuilding
-  the artifact from the submission. Then a field nobody enumerated is carried by construction, and
-  answering one question can no longer destroy the answer to a different one;
-  (3) GENERATE the prompt's JSON example from that same descriptor table, so it cannot omit a required
-  field or lack a field the operator is being asked to fill;
-  (4) make the capability-rank parameter REQUIRED at every wave-scheduling entry point, so the compiler
-  enumerates the sites. ⚠ Required-ness only sweeps production callers while the test tree is
-  untypechecked, so pair it with a runtime guard or the enforcement is half-real;
-  (5) an operator must be able to REPOSITION an already-ranked model without restating the entire roster.
-  Anchored insertion treats every previously-ranked id as a fixed anchor, so models can be added anywhere
-  but one already ranked can never be demoted — the likeliest follow-up action, since the point of
-  operator ranking is that judgment improves with use. Distinguish a TOOL-OFFERED anchor (a genuine fixed
-  reference point) from any other previously-ranked model the operator chose to mention; the latter gets
-  the same interpolation new models get. Needs no new field;
-  (6) the delta computation whose failure mode is a LIVELOCK must be reachable by a test. The
-  model-less-pool skip — the property preventing an unpinnable pool from wedging the first obligation
-  forever — is module-private in a CLI command and untested, and the one test claiming to cover
-  convergence is tautological. It belongs in shared beside the other confirmation readers.
-  ⚠ Verify the defect list against the branch before budgeting: the explicit-empty-roster case appears
-  already fixed there (an explicit empty roster survives the parser), so the record may overstate what
-  is open.
-  ⚠ The generalizable lesson: fixing the named instance is not fixing the defect class — especially for a
-  fail-open mechanism, where an unwired site is indistinguishable from a working one.
-
-- **Unranked + free compose badly: hard packets structurally prefer the least-known models
-  (2026-07-18, medium-high, from the LiteLLM live-validation lap).** Retiring repair-proxy also retired
-  the only source of automated capability data (it collected arena rankings + agentic/tool-use
-  benchmarks). audit-tools has no automated capability signal today — only operator-declared
-  `capability_rank` and the static provider-name tier switch (`providerConfirmation.ts:62-80`);
-  models.dev supplies price + context only (`ModelStatics` has no quality field). Live-observed: the
-  proxy-expanded `claude-worker:*` sources carry NO `capability_rank`. Unranked hits the fail-open branch
-  (`admissionLoop.ts:307,324-333`) → eligible for EVERY floor incl. `deep`; `cost_per_mtok: 0` → ranked
-  first under cost-first. **Property to hold:** a pool with no capability evidence must not be
-  preferentially selected for the packets that most need capability. Each half is a deliberate decision
-  (fail-open = 2026-07-17 owner call; the models really are free) — it's the COMPOSITION that regressed.
-  NOT yet observed in a real wave — mechanism verified by reading, prediction unconfirmed; the
-  re-dogfood is the test. **Note the seam already exists:** `proxyCatalog.ts:159` ingests
-  `capability_rank` from `/model/info` and `:352` rides it to the floor, and LiteLLM permits arbitrary
-  `model_info` keys — so a ranker can feed this today with zero audit-tools code change. That reduces
-  Track 2 from "design the contract" to "decide what produces the numbers" (owner call).
-  **Source survey DONE 2026-07-18** → [`docs/model-capability-ranking-sources.md`](model-capability-ranking-sources.md).
-  Leading shape: OpenRouter `/api/v1/models` carries `benchmarks.artificial_analysis.agentic_index`
-  (verified live: 9/9 of the NIM roster covered, joined by exact `id` else `hugging_face_id` — no fuzzy
-  matching), fetched at RUNTIME by the ranker and written into LiteLLM `model_info`, which
-  `proxyCatalog.ts:159` already ingests. **Nobody redistributes anything** — it becomes the operator's own
-  local proxy config — which sidesteps the one hard blocker (the scores are Artificial Analysis data;
-  AA's free tier forbids redistribution, so the models.dev vendoring pattern does NOT transfer).
-  Two implementation traps: (1) **sign convention is inverted** — `proxyCatalog.ts:350` documents
-  `capability_rank` as LOWER = better, `agentic_index` is HIGHER = better; getting this backwards
-  silently inverts routing, so it needs a test; (2) `agentic_index` is undocumented in OpenRouter's
-  schema and present on only 104/344 models → must degrade cleanly to the fail-open path on absence.
-  Epoch AI (CC-BY, updated daily) is the vendorable fallback layer if a legally-clean local snapshot is
-  wanted. Still an owner call: which layers to build, and whether to fix the unranked+free composition
-  independently of any ranker ever landing.
-  **PLAN WRITTEN + ADVERSARIALLY REVIEWED 2026-07-18** →
-  [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
-  (v2; the review refuted three v1 claims — read v2, not a summary). Owner decisions taken: fix the
-  composition BEFORE re-dogfooding; no-capability-evidence must be PINNED DOWN (LLM judgment or operator
-  ask), never silently routed around; ranker via OpenRouter. **UNBLOCKED 2026-07-18 — implement it.** The scope question is withdrawn: because the gate
-  FORCES pinning, there is no unranked pool at dispatch time, and with all pools scored
-  `FLOOR_MAX_BAND.standard = 1` excludes the bottom tercile from `standard` as well as `deep` — a weak
-  pool drops to `small` work by ELIGIBILITY, no ordering change needed. **Deferred residue:** banding is
-  RELATIVE (`band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand)`), so if every pool is weak,
-  `deep` still routes to the least-weak one. Forcing rankings guarantees the ordering, not that anyone
-  is good enough — whether an ABSOLUTE floor is wanted needs live data from a ranked run first.
-  **RANKER PRODUCER NOW EXISTS (2026-07-19), zero audit-tools code change** — the predicted pattern was
-  built and validated live: NIM `/v1/models` (119 models) joined to OpenRouter `agentic_index`
-  (21 covered, exact `id` else `hugging_face_id`) → written into LiteLLM `model_info.capability_rank`
-  → ingested at `proxyCatalog.ts:159`, sign inverted at `:564`. **The documented sign trap is already
-  handled correctly in HEAD** — verified live, the populate now selects `glm-5.2` (rank 1) rather than
-  the alphabetical head. Nothing is redistributed (scores land in the operator's own proxy config), so
-  the AA licensing blocker is sidestepped. Still open: the ranker is a hand-run generation step, not a
-  refreshed pipeline. Record:
-  [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
-  **The symptom had THREE mechanisms:** (1) unranked ⇒ fail-open ⇒ `deep`
-  eligible [the plan]; (2) `cost_per_mtok: 0` sorts first among eligible [by design; largely obviated once every pool is ranked];
-  (3) `top_k` truncates alphabetically [resolved by the ranker, nothing to sort by today].
+- **Unranked + free composition — MECHANICALLY CLOSED (R3-3 shipped `c0cf7e9b` 2026-07-21); live
+  confirmation + one residue open.** The obligation now pins every unevidenced pool (operator ask on
+  attended runs; host-LLM ranker step on autonomous ones — sanitized to `capability_order`, reach
+  never LLM-confirmable, provenance in `policy.capability_order_llm_ranked`), and the external ranker
+  producer feeds `model_info.capability_rank` with the sign trap verified handled. What remains:
+  (a) **⬇ Live-run watch (re-dogfood):** the original composition prediction (free+unranked pools
+  preferentially drawing `deep` packets) was never observed in a real wave — watch that every pool
+  arrives ranked at Gate-0 and that `deep` routes by band, and that the autonomous ranker step
+  round-trips in a real headless lap; (b) **deferred residue:** banding is RELATIVE
+  (`band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand)`) — if every pool is weak, `deep` still
+  routes to the least-weak; whether an ABSOLUTE floor is wanted needs live data from a ranked run
+  first; (c) ranker freshness is Track 2's cache-age rule (hand-run generation, ages silently).
+  History/records: [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md)
+  (landing gate MET section carries the full mechanism),
+  [`capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md),
+  [`nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
 - **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
   from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
   discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap
@@ -1248,6 +1115,37 @@ followed" is otherwise indistinguishable from a bug.
   dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
 
 ## Durable traps (environment / tooling reference)
+
+- **`agy -p` headless auto-denies its own tool permissions (2026-07-21).** A read-only review
+  prompt died instantly: "a tool required the read_file permission that headless mode cannot prompt
+  for". Its suggested fixes are an allow-rule in its settings.json or `--dangerously-skip-permissions`
+  (which auto-approves WRITES too — unacceptable on a tree with uncommitted work). Before using agy
+  as a headless worker: add read-only allow-rules (read_file, grep, shell-read) to its settings, and
+  test a trivial prompt from the same spawn context first.
+
+- **`codex exec --full-auto` from a non-interactive spawn can hang forever with ZERO output
+  (2026-07-21).** Dispatched as a background task (stdin not a TTY, output piped), it produced no
+  session file under `~/.codex/sessions` and no stdout for 90 minutes — likely a first-run
+  trust/approval prompt that `--full-auto` does not cover, invisible because output was buffered.
+  Before relying on codex as a headless worker again: verify a trivial `codex exec` completes from
+  the same spawn context first, and never pipe through `tail` (it hides the hang — stream to a file
+  instead so partial output is inspectable).
+
+- **Red-green source mutation on an UNCOMMITTED tree: restore by INVERTING the mutation, never
+  `git checkout --` (2026-07-21, learned the hard way).** Validating a new test by temporarily
+  mutating source is fine — but on a tree carrying uncommitted work, `git checkout -- <file>` as the
+  "restore" nukes the whole file to HEAD, destroying every uncommitted change in it (cost: a full
+  agent re-apply cycle for a 187-line diff this lap). Invert the mutation with a second targeted
+  edit, or `git stash push` ONLY the mutation first. If it happens anyway: a fresh `npm run build`
+  means `dist/` holds the compiled lost code, and a still-resumable implementation agent can
+  re-apply its own diff from context — both recovery paths worked.
+
+- **The pre-commit gate scans the WHOLE command string — including commit-message text — for the
+  hooksPath/no-verify bypass tokens (2026-07-21).** A commit whose message names the literal tokens
+  (e.g. a fix commit describing the bypass) is rejected as if it were the bypass. This is deliberate:
+  quoted text cannot be safely excluded, because a genuinely quoted flag still reaches git
+  (`git commit "--no-verify"` works), so stripping quotes would reopen the hole. Reword the message
+  (drop the `core.` prefix / the double-dash) rather than weakening the gate.
 
 - **A new `docs/reviews/` file fails release CI that no preflight step catches (2026-07-20, low).**
   `check:doc-manifest` requires every tracked doc to be registered in the routing table in

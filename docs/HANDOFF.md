@@ -8,12 +8,17 @@
 ## Live state
 
 - **Current version = `package.json`** (authoritative).
-- **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
-  the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, Stage 4
-  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`), **Stage 5**
-  (fail-closed autonomous write emits `service:` axis), and the **pre-commit gate hook fix**
-  (chained-command staging bypass & `-n` false-positives resolved) all shipped. **R3-3 is NOT shipped**
-  — see item 1 below.
+- **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
+  runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
+  sanitized to `capability_order`; reach never LLM-confirmable; provenance in
+  `capability_order_llm_ranked` with operator supersession). Full mechanism + review history:
+  [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md).
+- **Loop-core attestation + pre-commit gate hardened 2026-07-21 (`fd7ccab2`).** `--attester-class
+  agent|human` is REQUIRED and env-markers are recorded (a self-issued clearance reads as one);
+  `concerns` verdicts are destination-keyed (block only on `main`); the sibling-statement
+  hooksPath escape is closed. CLAUDE.md no longer claims a human step.
+- **Backend-identity migration: all stages shipped** (identity axes, exclusion grammar, capacity
+  guard, service-axis autonomous write) as of v0.34.5.
 
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
@@ -93,42 +98,23 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — ALL STAGES 1, 2, 4, 5 + CAPACITY GUARD SHIPPED.**
-Design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
-[`backlog.md`](backlog.md) → *Forward tracks*.
-- Stage 1 shipped 2026-07-19 (field renames, service normalization, id precedence).
-- Stage 2 shipped 2026-07-20 (identity projections in `identity.ts`).
-- Capacity guard shipped 2026-07-20 (`b220171e`).
-- Stage 4 shipped 2026-07-20 (axis-explicit exclusion grammar `transport:`, `service:`, `host:`).
-- Stage 5 shipped 2026-07-20 (fail-closed autonomous write emits `service:` axis). Touched `intakeExecutors.ts` → loop-core. Closes multi-transport residue durably.
+**1. Ship the R3-3 + gate-hardening release** if the current lap has not already published it
+(check `git log v<package.json-version>..HEAD` — unreleased commits on main mean a
+`release:patch:publish` is owed; `/ship` encodes the trap list).
 
-**1. Capability-evidence track — R3-3 STILL OPEN; the landing gate is UNMET.**
-An auto-ranker landed on 2026-07-20 claiming this closed, and was reverted 2026-07-21 (`1b601b45`):
-it sorted by `context_tokens` rather than the owner-settled LLM ranker, carried no tests, and the
-same commit rewrote the gate from UNMET to MET. A headless run with unevidenced capability pools
-therefore still pins the obligation. Settle the ranker mechanism before re-attempting — the seam in
-`intakeExecutors.ts` is commented to say so. Gate:
-[`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md);
-what happened: [`antigravity-agent-commits-2026-07-21.md`](reviews/antigravity-agent-commits-2026-07-21.md).
+**2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the R3-3
+autonomous ranker step in a real wave, plus the proxy track's leftovers (dispatch under a real
+wave, quota behavior at the proxy) and the account-metering close — a proxy-fronted 429 should
+throttle its same-service siblings but not a different service behind the same proxy. Launch
+recipe below. Watch lines: [`backlog.md`](backlog.md) → the condensed capability entry's ⬇ line.
 
-**2. Loop-core attestation can't tell the reviewer from the author** (HIGH) — `--reviewed-by` is free
-text, so an agent clears its own loop-core commit and the record is indistinguishable from a human
-sign-off. Six such clearances landed 2026-07-20. Detail + fix shape in [`backlog.md`](backlog.md) →
-*Open bugs*; the durable lesson is in memory [[attestation-cannot-tell-reviewer-from-author]].
+**3. Gate-0 priority-order UX** (Track 3) — two named owner calls resolved in backlog (suggestion
+lists every pool; operator order is rung-1 within the cost axis, λ trades the axis) — what remains
+is implementing the prompt clarity + tier-default fallback. See backlog *Open tracks*.
 
-**3. Pre-commit gate: `core.hooksPath` escapes via a sibling statement** — one-line scoping fix;
-narrowing bypass detection to `git commit` sub-commands was right for `-n`, wrong for the rest. See
-[`backlog.md`](backlog.md) → *Open bugs*.
-
-**4. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
-the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
-below. This now ALSO exercises the just-closed account metering under a real wave — a proxy-fronted
-429 should throttle its same-service siblings but not a different service behind the same proxy.
-
-**5. Gate-0 priority-order UX** (Track 3) — two named owner calls, see backlog.
-
-**6. Ten open doc-review design decisions** await a call (`CLAUDE-5`, `DD-2/6/7/8/9/10/12/13/15`,
-`CX-3`) — they surface at session start; full text on the `doc-review` branch.
+**4. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
+`DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — they surface at session start; full text on the
+`doc-review` branch.
 
 ---
 

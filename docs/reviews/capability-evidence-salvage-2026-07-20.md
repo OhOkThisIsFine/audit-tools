@@ -44,21 +44,29 @@ gate below is unmet.
 load-flake, passes alone in ~31s; run-to-run variance 3→1→0 confirms flake) · the 5 changed test
 files 205/205.
 
-## Landing gate — UNMET (do NOT merge to main)
-1. **R3-3 (blocker): headless promotion via LLM ranker.** Owner-settled = LLM ranker. Without it a
-   headless run with unranked pools WEDGES (the obligation pins; no operator to answer) — a REGRESSION
-   vs main's current fail-open. Prerequisite to landing.
-2. `marshal.ts` rank-stamping test (the live fail-open this sprint exists to close; currently invisible
-   to the suite).
-3. Producer-seam tests (the capability path of `admissionPoolsFromSummaries`; `cmdNextStep` anchor
-   wiring).
-4. Fourth independent review + loop-core attestation (admissionLoop / waveScheduling / marshal /
-   nextStep).
+## Landing gate — MET 2026-07-21 (`c0cf7e9b`)
+1. **R3-3 — SHIPPED as a host-LLM ranker step, not an auto-ranker.** Autonomous + capability delta
+   now emits the ranking prompt to the host LLM (autonomous = no human operator, never no LLM); the
+   answer rides the existing `capability_order` submission machinery with TOOL-DERIVED authorship
+   (autonomous ⇒ LLM-authored): sanitized to `capability_order` alone, never able to confirm reach
+   or lift an exclusion, never able to reorder previously-ranked models (the total-replacement
+   escape is operator-only), provenance-recorded in `policy.capability_order_llm_ranked` with
+   operator supersession. The hostless `advanceAudit` entrypoint keeps the loud unranked-promotion
+   fallback (no LLM exists there).
+2. `scheduleWave`/`buildConfirmedPools` rank-stamping tests — shipped; first draft's conditional
+   assertions were vacuous (fixture models never matched the map) and were made unconditional
+   against the real `CapacityPool` field names (`hostModel`/`declaredCapabilityRank`).
+3. Producer-seam tests (`admissionPoolsFromSummaries` capabilityScore flow; emission-branch +
+   prompt-variant + anchor-marker tests) — shipped.
+4. Independent review + loop-core attestation — a glm-5.2 refute pass (clear) plus an independent
+   agent review (verdict: concerns) whose HIGH finding — LLM-authored `include`/`exclude` flowing
+   unguarded through `retainAutoExclusions`, able to re-admit a fail-closed backend two rounds
+   after the write — was fixed (executor sanitize) and pinned by a regression test replaying the
+   exact exploit. Attestation (attester_class: agent) bound to the landed tree.
 
-> **This gate was marked MET on 2026-07-20 and is restored here.** The commit that flipped it
-> implemented item 1 as a deterministic sort by `context_tokens` — not the settled LLM ranker — and
-> self-certified items 2–4, adding no tests and issuing its own attestation. Reverted 2026-07-21;
-> the ranker and its wiring are gone from `intakeExecutors.ts`. Record:
-> [`antigravity-agent-commits-2026-07-21.md`](antigravity-agent-commits-2026-07-21.md).
+> **History:** this gate was falsely marked MET on 2026-07-20 by a deterministic `context_tokens`
+> sort that self-certified items 2–4 (reverted 2026-07-21; record:
+> [`antigravity-agent-commits-2026-07-21.md`](antigravity-agent-commits-2026-07-21.md)), then
+> genuinely met on 2026-07-21 by `c0cf7e9b` as described above.
 
 Supersedes the round-2 record [`capability-evidence-implementation-review-2026-07-18.md`](capability-evidence-implementation-review-2026-07-18.md).
