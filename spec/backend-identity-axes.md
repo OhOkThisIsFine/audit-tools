@@ -187,10 +187,10 @@ Three properties follow, and each retires a known defect:
    multi-transport residue is gone, and gone *durably* — a snapshot of today's transports would have
    decayed the moment proxy expansion added a route.
 
-The autonomous fail-closed write is planned to emit the **service** axis (stage 5, not yet shipped —
-see `docs/HANDOFF.md` → IMMEDIATE NEXT), because that is the axis that does not decay. The shipped
-stage-4 writer (`exclusionPattern` in `src/shared/providers/identity.ts`) still emits the `transport:`
-axis today.
+The autonomous fail-closed write emits the **service** axis, because that is the axis that does not
+decay. The interactive confirmation prompt still renders the narrower `transport:` pattern beside
+each backend — an operator deciding one reachable backend is ruling out the lane in front of them,
+not every future transport reaching that vendor.
 
 ### Three conditions this change must satisfy — it is NOT "strictly better" without them
 
