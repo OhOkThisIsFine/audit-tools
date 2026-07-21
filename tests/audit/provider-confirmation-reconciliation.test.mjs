@@ -150,24 +150,25 @@ describe("autonomous fail-closed exclusion", () => {
   const autonomousGate = () => ({
     newlyReachable: [
       {
-        key: "brand-new-model",
+        key: "openai-compatible:brand-new-model",
         provider: "openai-compatible",
-        exclusion_pattern: "openai-compatible:brand-new-model",
+        service: "openai-compatible",
+        exclusion_pattern: "transport:openai-compatible/brand-new-model",
+        service_exclusion_pattern: "service:openai-compatible/brand-new-model",
       },
     ],
     autonomous: true,
   });
 
-  test("a newly-reachable backend is EXCLUDED, not silently dispatched", async () => {
+  test("a newly-reachable backend is EXCLUDED via service axis, not silently dispatched", async () => {
     await withTempRoot(async (root, artifactsDir) => {
       await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, autonomousGate());
 
       const read = await readSharedProviderConfirmation(root);
       expect(
         read.policy?.exclude,
-        "the unconfirmed backend is ruled out on the operator's behalf — at MODEL " +
-          "granularity (A″), so the backend's sibling models stay routable",
-      ).toEqual(["openai-compatible:brand-new-model"]);
+        "the unconfirmed backend is ruled out on the operator's behalf via the service axis",
+      ).toEqual(["service:openai-compatible/brand-new-model"]);
     });
   });
 
@@ -234,7 +235,34 @@ describe("autonomous fail-closed exclusion", () => {
       expect(
         read.policy?.exclude,
         "no operator decision covers it ⇒ it must not become dispatchable",
-      ).toContain("openai-compatible:brand-new-model");
+      ).toContain("service:openai-compatible/brand-new-model");
+    });
+  });
+
+  test("fail-closed write emits service: axis pattern to close multi-transport residue durably", async () => {
+    await withTempRoot(async (root, artifactsDir) => {
+      const gate = {
+        newlyReachable: [
+          {
+            key: "nim:z-ai/glm-5.2",
+            provider: "claude-worker",
+            service: "nim",
+            exclusion_pattern: "transport:claude-worker/z-ai/glm-5.2",
+            service_exclusion_pattern: "service:nim/z-ai/glm-5.2",
+          },
+        ],
+        autonomous: true,
+      };
+      await runProviderConfirmationAutoComplete({}, root, artifactsDir, {}, gate);
+
+      const read = await readSharedProviderConfirmation(root);
+      expect(read.policy?.exclude).toEqual(["service:nim/z-ai/glm-5.2"]);
+
+      // Verify that resolveDispatchExclusion blocks both claude-worker and direct openai-compatible transports reaching nim
+      const { resolveDispatchExclusion } = await import("audit-tools/shared");
+      const exclusion = resolveDispatchExclusion(read.policy);
+      expect(exclusion.excludes({ transport: "claude-worker", service: "nim", model: "z-ai/glm-5.2" })).toBe(true);
+      expect(exclusion.excludes({ transport: "openai-compatible", service: "nim", model: "z-ai/glm-5.2" })).toBe(true);
     });
   });
 

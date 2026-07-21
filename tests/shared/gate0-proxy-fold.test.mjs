@@ -184,6 +184,9 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     expect(delta.map((b) => b.exclusion_pattern).sort()).toEqual(
       EXPANDED.map((s) => `transport:claude-worker/${s.model}`).sort(),
     );
+    expect(delta.map((b) => b.service_exclusion_pattern).sort()).toEqual(
+      EXPANDED.map((s) => `service:${s.service}/${s.model}`).sort(),
+    );
   });
 
   it("a proxied lane and a direct lane to the same backend model are ONE backend to the gate", () => {
@@ -206,9 +209,9 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     // half a transport-qualified key would get WRONG (it would split them).
     expect(delta).toHaveLength(1);
     expect(delta[0].key).toBe("nim:z-ai/glm-5.2");
-    // ...and the RULE stays transport-qualified, because `ruleMatches` compares the
-    // transport provider — a `nim:` rule would match nothing at dispatch.
+    // ...and the transport rule stays transport-qualified, while the service rule is service-qualified.
     expect(delta[0].exclusion_pattern).toBe("transport:claude-worker/z-ai/glm-5.2");
+    expect(delta[0].service_exclusion_pattern).toBe("service:nim/z-ai/glm-5.2");
   });
 
   it("two DIFFERENT services sharing a model string are TWO backends (gate-bypass regression)", () => {

@@ -9,8 +9,10 @@
 
 - **Current version = `package.json`** (authoritative).
 - **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
-  the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, and Stage 4
-  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`) all shipped.
+  the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, Stage 4
+  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`), and **Stage 5**
+  (fail-closed autonomous write emits `service:` axis) all shipped.
+
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
   Both now key on ONE service-scoped `CapacityPool.accountKey`; `deriveLocalAccountId` is deleted.
@@ -89,18 +91,15 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — STAGES 1, 2, 4 + CAPACITY GUARD SHIPPED; Stage 5 is next.**
+**0. Backend-identity migration — STAGES 1, 2, 4, 5 + CAPACITY GUARD SHIPPED.**
 Design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
 [`backlog.md`](backlog.md) → *Forward tracks*.
 - Stage 1 shipped 2026-07-19 (field renames, service normalization, id precedence).
 - Stage 2 shipped 2026-07-20 (identity projections in `identity.ts`).
 - Capacity guard shipped 2026-07-20 (`b220171e`).
-- **Stage 4 shipped 2026-07-20** (axis-explicit exclusion grammar `transport:`, `service:`, `host:`,
-  matcher update with `ExcludableBackend.service`, `exclusionPattern` prefixing, invalid-axis parse
-  errors, and read-time pattern migration helper). Resolves DD-14.
+- **Stage 4 shipped 2026-07-20** (axis-explicit exclusion grammar `transport:`, `service:`, `host:`).
+- **Stage 5 shipped 2026-07-20** (fail-closed autonomous write emits `service:` axis). Touched `intakeExecutors.ts` → loop-core. Closes multi-transport residue durably.
 
-**Next is stage 5** (fail-closed autonomous write emits `service:` axis). Touches `intakeExecutors.ts` →
-loop-core, attestation required. Closes multi-transport residue durably.
 
 **0b. Or: the capability-evidence track** — now salvaged onto `salvage/capability-evidence` (green); its
 one remaining build is **R3-3** (see item 1). Independent of 0.

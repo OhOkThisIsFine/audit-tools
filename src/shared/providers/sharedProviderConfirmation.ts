@@ -55,7 +55,12 @@ import {
   representativeModelId,
   type CapabilityTier,
 } from "./providerConfirmation.js";
-import { backendIdentity, sourceService, exclusionPattern } from "./identity.js";
+import {
+  backendIdentity,
+  sourceService,
+  exclusionPattern,
+  serviceExclusionPattern,
+} from "./identity.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
@@ -510,16 +515,20 @@ export interface NewlyReachableBackend {
   /** The backend's provider name. Display only — the prompt names it beside `key`. */
   provider: ResolvedProviderName;
   /**
-   * The {@link DispatchExclusionPattern} that rules out **exactly this backend**,
-   * built HERE beside the key it was compared on so the rule the gate persists
-   * cannot drift from the identity the gate diffed.
-   *
-   * DELIBERATELY not the same string as {@link key} for a proxied lane: the key is
-   * backend-qualified (`nim:model`) and this is transport-qualified
-   * (`claude-worker:model`), because those are the two different questions named on
-   * {@link backendIdentity}. A rule carrying the backend name would match nothing.
+   * The backend's serving vendor / service name (`service ?? transport`).
+   */
+  service?: string;
+  /**
+   * The transport-qualified {@link DispatchExclusionPattern} that rules out
+   * **exactly this transport route**, built HERE beside the key it was compared on.
    */
   exclusion_pattern: DispatchExclusionPattern;
+  /**
+   * The service-qualified {@link DispatchExclusionPattern} (`service:vendor/model` or `service:vendor`)
+   * that rules out **every transport reaching this vendor/service**. Emitted by autonomous fail-closed
+   * writes so unconfirmed backends stay excluded across transport/proxy changes.
+   */
+  service_exclusion_pattern?: DispatchExclusionPattern;
 }
 
 /**
@@ -565,7 +574,8 @@ export function computeNewlyReachableBackends(
     provider: ResolvedProviderName,
     backendProvider?: string,
   ): void => {
-    const identity = backendIdentity(modelId, backendProvider ?? provider);
+    const service = backendProvider ?? provider;
+    const identity = backendIdentity(modelId, service);
     // First writer wins: when a proxied lane and a direct lane resolve to the SAME
     // backend identity, they are one backend reached two ways, and the rule kept is
     // the one that rules out the lane already recorded.
@@ -573,7 +583,9 @@ export function computeNewlyReachableBackends(
     reachNow.set(identity, {
       key: identity,
       provider,
+      service,
       exclusion_pattern: exclusionPattern(modelId, provider),
+      service_exclusion_pattern: serviceExclusionPattern(modelId, service),
     });
   };
   for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {

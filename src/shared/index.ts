@@ -1094,7 +1094,13 @@ export {
   parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
 } from "./quota/scheduler.js";
-export { quotaPoolKey } from "./providers/identity.js";
+export {
+  backendIdentity,
+  sourceService,
+  exclusionPattern,
+  serviceExclusionPattern,
+  quotaPoolKey,
+} from "./providers/identity.js";
 export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,

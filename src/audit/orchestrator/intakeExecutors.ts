@@ -206,11 +206,13 @@ export async function runProviderConfirmationAutoComplete(
   // one new model of a multi-model backend no longer drops that backend's other
   // sources. The pattern is built by the gate beside the key it compared, never
   // re-derived here, so the rule persisted cannot drift from the delta detected.
+  // Stage 5: the autonomous fail-closed write emits the `service:` axis, because that
+  // is the axis that does not decay and closes multi-transport residue durably.
   const failClosed = input === null ? [...(gate?.newlyReachable ?? [])] : [];
   const exclude = [
     ...new Set([
       ...(input?.exclude ?? []),
-      ...failClosed.map((b) => b.exclusion_pattern),
+      ...failClosed.map((b) => b.service_exclusion_pattern ?? b.exclusion_pattern),
     ]),
   ];
   const confirmation = confirmProviders(

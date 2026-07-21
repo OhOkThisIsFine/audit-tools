@@ -127,3 +127,18 @@ export function exclusionPattern(
     ? `transport:${transportProvider}/${modelId}`
     : `transport:${transportProvider}`;
 }
+
+/**
+ * **"What pattern rules this service/vendor out durably?"** → **service** + model.
+ *
+ * The axis-explicit exclusion pattern that rules out a backend at the service
+ * (vendor) axis — prefixed with `service:`. Emitted by autonomous fail-closed
+ * writes so unconfirmed backends stay excluded across transport/proxy changes.
+ */
+export function serviceExclusionPattern(
+  modelId: string | undefined,
+  serviceName: string,
+): DispatchExclusionPattern {
+  return modelId ? `service:${serviceName}/${modelId}` : `service:${serviceName}`;
+}
+
