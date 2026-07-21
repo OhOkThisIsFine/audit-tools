@@ -1246,6 +1246,26 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Durable traps (environment / tooling reference)
 
+- **The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable
+  (2026-07-20, medium).** `~/.claude/llm-call.mjs` inlines each file as raw text. An adversarial
+  review prompt that asks the worker to verify cited `file:line` then cannot be honoured: `glm-5.2`
+  answered "NOT VERIFIABLE — the file numbering isn't displayed" to eight consecutive citation checks,
+  refuted nothing, and still returned a `premise_false` verdict — an incoherent result that reads as
+  model incapacity and is purely a caller defect. Number every inlined line (`N<TAB>source`) and say so
+  in the system prompt; a smoke check ("what is on line 166?") confirms the worker can see them.
+
+- **`~/.claude/llm-call.mjs` sets no `max_tokens` and `strict: true` — both of the failure modes the
+  lane's own guidance warns about (2026-07-20, medium).** The missing cap truncated a 12-item
+  doc-review digest mid-item on the first call; `strict: true` degrades reasoning on exactly the
+  analytical work the lane is used for. Until the shared script is fixed, an analytical dispatch should
+  POST directly with a task-shaped schema, `strict: false`, and an explicit `max_tokens`.
+
+- **Global `fetch` cannot outlast a long reasoning call — undici's 300s `headersTimeout` is not
+  configurable without the standalone `undici` package (2026-07-20, low).** A multi-file adversarial
+  dispatch to `deepseek-v4-pro` died at ~5min with `[TypeError: fetch failed] / UND_ERR_HEADERS_TIMEOUT`,
+  which reads like a dead proxy and is not. `import("undici")` is NOT resolvable from a standalone
+  script. Use `node:http` with an explicit `req.setTimeout` for any long offload-lane call.
+
 - **`rtk npm run <script>` fails with "program not found" from the Bash (Git Bash) tool
   (2026-07-20, inefficient-feeding, low).** `rtk npm run build` / `rtk npm run check` both die with
   `Error: Failed to run npm run / Caused by: program not found`; rtk cannot resolve the `npm` shim

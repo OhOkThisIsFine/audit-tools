@@ -12,6 +12,7 @@ import {
   resolveSessionConfig,
   ambientAuditorDescriptor,
   captureNewlyReachableBackendFriction,
+  PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
   type SessionConfig,
   type NewlyReachableBackend,
   type ProviderConfirmationInput,
@@ -39,7 +40,6 @@ interface PackageJsonShape {
  * discriminator} — a stable constant here means the real discriminator (the backend
  * key) does the distinguishing, so a re-derive never double-logs the same backend.
  */
-const PROVIDER_CONFIRMATION_FRICTION_RUN_KEY = "provider-confirmation";
 
 /**
  * Detect signals that the resolved audit root may be the *wrong* directory.

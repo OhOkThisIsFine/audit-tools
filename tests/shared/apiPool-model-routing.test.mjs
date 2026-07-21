@@ -110,7 +110,7 @@ test("buildSourcePools: a cooldown recorded under one same-account source's key 
       consecutive_429_count: 3,
     },
   };
-  const pools = await buildSourcePools({
+  const { pools } = await buildSourcePools({
     sessionConfig,
     primaryProviderName: "claude-code",
     quotaSource: STUB_QUOTA,
@@ -152,7 +152,7 @@ test("buildSourcePools: sources with DIFFERENT api_key_env do not fold cooldowns
       last_429_at: null,
     },
   };
-  const pools = await buildSourcePools({
+  const { pools } = await buildSourcePools({
     sessionConfig,
     primaryProviderName: "claude-code",
     quotaSource: STUB_QUOTA,

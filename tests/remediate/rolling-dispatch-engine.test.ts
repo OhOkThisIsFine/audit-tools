@@ -133,7 +133,7 @@ describe("single shared tier-rank authority", () => {
 
 describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   it("buildConfirmedPools produces one quota-keyed pool per roster rank", async () => {
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: { provider: "claude-code", quota: {} },
       hostModels: [
         { rank: "small", context_tokens: 32_000, output_tokens: 4_096 },
@@ -149,7 +149,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   });
 
   it("computeDispatchCapacity over the confirmed pools sizes slots from the window, not a fixed flag", async () => {
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: { provider: "claude-code", quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 8_192,
@@ -166,7 +166,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   });
 
   it("appends a configured openai-compatible pool alongside the primary (INV-QD-14 spill target)", async () => {
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "claude-code",
         quota: {},
@@ -188,7 +188,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     // H2+H4 collapse: the primary folds in UNCONDITIONALLY as ONE source pool
     // alongside the conversation-host pool (attended member-pool semantics) —
     // never two openai-compatible pools.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "openai-compatible",
         quota: {},
@@ -202,7 +202,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
 
   it("attended + in-process primary: host pool keys to claude-code + the codex primary is ALWAYS a member source pool", async () => {
     // Red-green (a) at pool level: no demote flag exists — the fold is unconditional.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
         quota: {},
@@ -223,7 +223,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   it("attended + agy primary: the agy pool is synthesized as a member source (D4)", async () => {
     // Red on HEAD twice over: agy was missing from the demotable set AND had no
     // synthesis case — an attended agy run had no pool at all.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "agy",
         quota: {},
@@ -238,7 +238,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   it("attended + command-shaped primary (remediate policy): a pool, not a monopoly (D3)", async () => {
     // Red on HEAD: subprocess-template self-drove even attended (row-5 asymmetry);
     // now it fans out as a member source pool alongside the host.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "subprocess-template",
         quota: {},
@@ -254,7 +254,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     // fold is unconditional and the collision resolves at pool assembly — the
     // SOURCE/engine pool survives (it carries its `source`, so the engine drives
     // that single account) and no second codex pool double-books the meter.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
         host_provider: "codex",
@@ -270,7 +270,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
 
   it("headless (hostCanDispatch:false): no host pool in the set — codex is the single driver pool", async () => {
     // Red-green (b) at pool level: attendance is pool-set membership, not a branch.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
         quota: {},

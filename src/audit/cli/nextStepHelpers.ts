@@ -170,6 +170,8 @@ import {
   addSettledPool,
   readConfirmedDispatchPolicy,
   resolveDispatchExclusion,
+  captureZeroCapacityFriction,
+  PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
 } from "audit-tools/shared";
 import { resolveHostDispatchCapability } from "./args.js";
 
@@ -1754,7 +1756,7 @@ async function runHostDelegationObligation(
   const auditExcludedBackends = resolveDispatchExclusion(
     await readConfirmedDispatchPolicy(ctx.params.root),
   );
-  const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
+  const { pools: auditSourcePools, zeroedByExclusion } = await buildAuditSourcePools(hybridCfg, {
     excludedBackends: auditExcludedBackends,
     // D1 cross-class collision rule: an attended host identity colliding with a
     // folded source keeps exactly one pool (the in-process source survives — the
@@ -1763,6 +1765,20 @@ async function runHostDelegationObligation(
       ? { attendedHostProviderName: resolveHostDispatchProviderName(hybridCfg) }
       : {}),
   });
+
+  // Loud, not silent: the operator's own exclusion policy removed every reachable
+  // source, so this run has no in-process capacity and the headless branch below is
+  // unreachable. Emitted under the stable provider-confirmation key rather than a run
+  // id — the source-pool build happens BEFORE the review run is materialized, so no
+  // run id exists yet (the same reason Gate-0's fail-closed capture uses that key).
+  if (zeroedByExclusion) {
+    await captureZeroCapacityFriction(
+      ctx.params.artifactsDir,
+      PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
+      zeroedByExclusion,
+      "audit-code",
+    );
+  }
 
   // Headless whole-frontier drive — the old in-process monopoly branch, now a
   // degeneracy of the one fan-out (no attended host in the eligible set): the engine

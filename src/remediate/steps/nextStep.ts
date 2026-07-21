@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1187,9 +1187,9 @@ export async function driveRollingImplementDispatch(
 
   // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
   // A partition-scoped caller supplies its coordinator's already-built set instead.
-  const confirmedPools =
-    options.poolsOverride ??
-    (await buildConfirmedPools({
+  const builtPools = options.poolsOverride
+    ? null
+    : await buildConfirmedPools({
       sessionConfig: options.sessionConfig,
       hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
       hostContextTokens: options.waveOptions?.hostContextTokens,
@@ -1201,10 +1201,22 @@ export async function driveRollingImplementDispatch(
       // gathered reach. Read here because this layer owns `root`; self-spawn-blocked is
       // recomputed against THIS process's env rather than inherited from the auditor
       // that wrote the confirmation.
-      excludedBackends: resolveDispatchExclusion(
-        await readConfirmedDispatchPolicy(options.root),
-      ),
-    }));
+        excludedBackends: resolveDispatchExclusion(
+          await readConfirmedDispatchPolicy(options.root),
+        ),
+      });
+  const confirmedPools = options.poolsOverride ?? builtPools!.pools;
+  // The operator's own policy left this dispatch with no capacity at all. Loud, not
+  // silent — a `poolsOverride` caller supplied its own set, so there is no zeroing of
+  // OURS to report.
+  if (builtPools?.zeroedByExclusion) {
+    await captureZeroCapacityFriction(
+      options.artifactsDir,
+      options.runId,
+      builtPools.zeroedByExclusion,
+      "remediate-code",
+    );
+  }
 
   // The live per-node worker: the configured provider, launched with the node's
   // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
@@ -1874,7 +1886,7 @@ async function buildImplementDispatchStep(ctx: {
       const hybridHostSession = new HostSessionQuotaSource({
         providerModelKey: hybridHostSessionModelKey,
       });
-      const confirmedPools = await buildConfirmedPools({
+      const { pools: confirmedPools, zeroedByExclusion } = await buildConfirmedPools({
         sessionConfig: sessionConfigImpl ?? null,
         hostMaxConcurrent: resolvedHostMaxConcurrent,
         hostContextTokens: resolvedHostContextTokens,
@@ -1890,6 +1902,11 @@ async function buildImplementDispatchStep(ctx: {
           await readConfirmedDispatchPolicy(root),
         ),
       });
+      // Loud, not silent: on the headless branch below there is no host pool to fall
+      // back to, so a policy-zeroed set means this dispatch does nothing at all.
+      if (zeroedByExclusion) {
+        await captureZeroCapacityFriction(artifactsDir, runId, zeroedByExclusion, "remediate-code");
+      }
       const backendPools = confirmedPools.filter(isInProcessPool);
 
       if (!canDispatchImpl) {

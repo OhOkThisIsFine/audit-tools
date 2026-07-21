@@ -275,14 +275,18 @@ const MULTI_SOURCE_CONFIG = {
   ],
 };
 
-async function poolIdsExcluding(patterns) {
-  const pools = await buildSourcePools({
+async function buildExcluding(patterns) {
+  return await buildSourcePools({
     sessionConfig: MULTI_SOURCE_CONFIG,
     primaryProviderName: "claude-code",
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
     ...(patterns ? { excludedBackends: resolveDispatchExclusion({ exclude: patterns }, {}) } : {}),
   });
+}
+
+async function poolIdsExcluding(patterns) {
+  const { pools } = await buildExcluding(patterns);
   return pools.map((p) => p.id);
 }
 
@@ -615,6 +619,57 @@ describe("B+D — reach is UNREPRESENTABLE on the persisted type, not merely omi
       expect(persisted, `PersistedPoolEntry must brand "${field}" as never`).toContain(
         `${field}?: never;`,
       );
+    }
+  });
+});
+
+describe("the capacity guard: a policy that zeroes ALL reach must not be silent", () => {
+  test("rules removing every source report the zeroing AND name the culprit patterns", async () => {
+    // The whole defect: before the guard this returned [] and said nothing, so a run
+    // dispatched to nothing and no artifact recorded that a POLICY caused it.
+    const { pools, zeroedByExclusion } = await buildExcluding([
+      "openai-compatible",
+      "opencode",
+    ]);
+    expect(pools).toEqual([]);
+    expect(zeroedByExclusion).not.toBeNull();
+    expect(zeroedByExclusion.gatheredCount).toBe(3);
+    // Deduplicated + sorted: two of the three sources matched the SAME pattern, and a
+    // re-derive must produce a byte-identical discriminator.
+    expect(zeroedByExclusion.patterns).toEqual(["openai-compatible", "opencode"]);
+  });
+
+  test("a PARTIAL exclusion is normal operation and reports nothing", async () => {
+    const { pools, zeroedByExclusion } = await buildExcluding(["opencode"]);
+    expect(pools.length).toBeGreaterThan(0);
+    expect(zeroedByExclusion).toBeNull();
+  });
+
+  test("no exclusion policy at all reports nothing", async () => {
+    const { zeroedByExclusion } = await buildExcluding(undefined);
+    expect(zeroedByExclusion).toBeNull();
+  });
+
+  test("a rule matching NOTHING leaves reach intact and reports nothing", async () => {
+    const { pools, zeroedByExclusion } = await buildExcluding(["nonexistent.invalid"]);
+    expect(pools.length).toBe(3);
+    expect(zeroedByExclusion).toBeNull();
+  });
+
+  test("excludedBy names the pattern responsible, and never disagrees with excludes", async () => {
+    const exclusion = resolveDispatchExclusion(
+      { exclude: ["openai-compatible:model-a", "opencode"] },
+      {},
+    );
+    const nimA = { transport: "openai-compatible", model: "model-a" };
+    const nimB = { transport: "openai-compatible", model: "model-b" };
+    const ocA = { transport: "opencode", model: "model-b" };
+    expect(exclusion.excludedBy(nimA)).toBe("openai-compatible:model-a");
+    expect(exclusion.excludedBy(ocA)).toBe("opencode");
+    expect(exclusion.excludedBy(nimB)).toBeNull();
+    // Derived, not a parallel implementation — the two verdicts cannot drift.
+    for (const backend of [nimA, nimB, ocA]) {
+      expect(exclusion.excludes(backend)).toBe(exclusion.excludedBy(backend) !== null);
     }
   });
 });

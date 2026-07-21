@@ -23,6 +23,7 @@ import {
   ClaimRegistry,
   isInProcessWorkerProvider,
   buildSourcePools,
+  type SourcePoolBuild,
   buildQuotaSource,
   dedupHostAndSourcePools,
   readQuotaStateOrDegrade,
@@ -65,7 +66,7 @@ export async function buildAuditSourcePools(
      */
     attendedHostProviderName?: ResolvedProviderName | null;
   },
-): Promise<CapacityPool[]> {
+): Promise<SourcePoolBuild> {
   const primaryProviderName =
     (sessionConfig as { provider?: string }).provider ?? "claude-code";
   const quotaEntries: Record<string, QuotaStateEntry> = (
@@ -75,18 +76,23 @@ export async function buildAuditSourcePools(
   // H2+H4 collapse: the configured primary in-process backend is ALWAYS folded in as
   // a source pool (no demote flag) — audit's draw policy admits only the non-command
   // in-process workers (a read-only review packet carries no per-worker command).
-  const sourcePools = await buildSourcePools({
+  const { pools: sourcePools, zeroedByExclusion } = await buildSourcePools({
     sessionConfig,
     primaryProviderName,
     quotaSource,
     quotaEntries,
     excludedBackends: options?.excludedBackends,
   });
-  return dedupHostAndSourcePools({
-    hostPools: [],
-    sourcePools,
-    hostProviderName: options?.attendedHostProviderName ?? null,
-  }).sourcePools;
+  return {
+    pools: dedupHostAndSourcePools({
+      hostPools: [],
+      sourcePools,
+      hostProviderName: options?.attendedHostProviderName ?? null,
+    }).sourcePools,
+    // Carried through UNCHANGED: the dedup below can only remove a colliding pool, it
+    // can never cause the zeroing, so re-deriving the fact here would misattribute it.
+    zeroedByExclusion,
+  };
 }
 
 /**

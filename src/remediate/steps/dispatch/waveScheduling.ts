@@ -21,6 +21,7 @@ import type { DispatchModelTier } from "audit-tools/shared";
 import {
   buildHostPoolPreamble,
   buildSourcePools,
+  type SourcePoolBuild,
   dedupHostAndSourcePools,
   resolveHostProviderName,
   resolveHostDispatchProviderName,
@@ -208,7 +209,7 @@ export async function buildConfirmedPools(input: {
   hostCanDispatch?: boolean;
   /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
   excludedBackends?: DispatchExclusion;
-}): Promise<CapacityPool[]> {
+}): Promise<SourcePoolBuild> {
   // The ACTUAL configured backend (the primary the fold synthesizes a source for) vs
   // the HOST-pool identity. When the primary is a headless in-process backend it is a
   // WORKER, never the driver: the host pools key to the CONVERSATION HOST (D5,
@@ -243,7 +244,7 @@ export async function buildConfirmedPools(input: {
   // the IDENTICAL pool shapes — the spill topology can't drift. `primaryProviderName`
   // is the ACTUAL configured backend so the unconditional primary fold builds the
   // source for the real provider; remediate's draw admits command-shaped primaries.
-  const sourcePools = await buildSourcePools({
+  const { pools: sourcePools, zeroedByExclusion } = await buildSourcePools({
     sessionConfig,
     primaryProviderName: actualProviderName,
     quotaSource,
@@ -253,7 +254,9 @@ export async function buildConfirmedPools(input: {
   });
 
   // Headless: no host pool in the eligible set — the engine drives the source pools.
-  if (input.hostCanDispatch === false) return sourcePools;
+  // This is the branch where a zeroing is FATAL rather than degrading (there is no
+  // host to fall back to), so the fact must survive the early return.
+  if (input.hostCanDispatch === false) return { pools: sourcePools, zeroedByExclusion };
 
   // D1 cross-class dedup: a folded source colliding with the host's pool identity
   // (same provider+account — attended provider=codex=host) keeps exactly ONE pool.
@@ -263,7 +266,7 @@ export async function buildConfirmedPools(input: {
     // Remediate policy: command-shaped workers are engine-drivable here (H3).
     commandWorkers: true,
   });
-  return [...dedup.hostPools, ...dedup.sourcePools];
+  return { pools: [...dedup.hostPools, ...dedup.sourcePools], zeroedByExclusion };
 }
 
 export async function buildDispatchQuota(

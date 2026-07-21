@@ -166,6 +166,16 @@ export interface ExcludableBackend {
 export interface DispatchExclusion {
   /** True ⇒ this backend is ruled out and must not become a dispatch pool. */
   excludes(backend: ExcludableBackend): boolean;
+  /**
+   * The first pattern that rules this backend out, or null when none does.
+   *
+   * Attribution for the capacity guard: when the rule set removes EVERY gathered
+   * source, "zero capacity" alone sends the operator hunting through their whole
+   * policy — the guard has to be able to name the rules that did it. `excludes` is
+   * derived from this (`excludedBy(b) !== null`), so the boolean verdict and the
+   * attributed pattern can never disagree.
+   */
+  excludedBy(backend: ExcludableBackend): DispatchExclusionPattern | null;
 }
 
 export interface SharedProviderConfirmation {
@@ -618,8 +628,14 @@ export function resolveDispatchExclusion(
 function buildExclusion(
   patterns: readonly DispatchExclusionPattern[],
 ): DispatchExclusion {
-  const rules = patterns.map(parseExclusionRule);
-  return { excludes: (backend) => rules.some((rule) => ruleMatches(rule, backend)) };
+  // Keep each rule beside the pattern it came from: the capacity guard reports the
+  // operator's ORIGINAL text, not a re-rendering of the parsed rule (a round-trip
+  // through `ExclusionRule` would show them a string they never wrote).
+  const rules = patterns.map((pattern) => ({ pattern, rule: parseExclusionRule(pattern) }));
+  const excludedBy = (backend: ExcludableBackend): DispatchExclusionPattern | null =>
+    rules.find(({ rule }) => ruleMatches(rule, backend))?.pattern ?? null;
+  // `excludes` is DERIVED, never a parallel implementation — the two verdicts cannot drift.
+  return { excludes: (backend) => excludedBy(backend) !== null, excludedBy };
 }
 
 /**

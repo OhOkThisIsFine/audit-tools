@@ -644,6 +644,8 @@ export {
   captureModelUnavailableFriction,
   capturePacketTooLargeFriction,
   captureNewlyReachableBackendFriction,
+  captureZeroCapacityFriction,
+  PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
 } from "./friction/stepBoundaryCapture.js";
 export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
 
@@ -1127,6 +1129,7 @@ export { DispatchCapacityPoolSummarySchema } from "./quota/capacity.js";
 // Generic dispatchable-source pools — the single-sourced backend-pool shape both
 // orchestrators spill into (any non-IDE source: API endpoint or CLI), each with its
 // own endpoint/parameters/quota. Generalizes the former openai-compatible-only path.
+export type { SourcePoolBuild, ExclusionZeroing } from "./quota/apiPool.js";
 export {
   buildSourcePools,
   buildSourcePool,

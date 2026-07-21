@@ -172,7 +172,7 @@ describe("INV-2 buildConfirmedPools wiring (hermetic)", () => {
     // Under vitest the default-fetch proactive sources skip the network and the
     // isolated learned state has no entry → every probe is not_applicable, so no
     // pool should be FALSELY marked degraded.
-    const pools = await buildConfirmedPools({
+    const { pools } = await buildConfirmedPools({
       sessionConfig: { quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 32_000,

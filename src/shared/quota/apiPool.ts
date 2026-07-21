@@ -20,7 +20,10 @@ import {
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { resolveModelStatics } from "./modelStatics.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../tokens.js";
-import type { DispatchExclusion } from "../providers/sharedProviderConfirmation.js";
+import type {
+  DispatchExclusion,
+  DispatchExclusionPattern,
+} from "../providers/sharedProviderConfirmation.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import {
   isHeadlessPrimaryProvider,
@@ -583,6 +586,33 @@ export async function gatherDispatchableSources(
 }
 
 /**
+ * A rules-zeroed dispatch capacity: reach EXISTED and the operator's exclusion rules
+ * removed all of it. Distinct from a legitimately empty build (nothing configured),
+ * which is normal operation and carries no fact.
+ */
+export interface ExclusionZeroing {
+  /** How many sources were gathered before the rules were applied. */
+  gatheredCount: number;
+  /** The operator patterns that did it, deduplicated and sorted. */
+  patterns: DispatchExclusionPattern[];
+}
+
+/**
+ * The result of a source-pool build.
+ *
+ * A RETURN VALUE rather than an optional `onZeroed` hook — deliberately, and unlike
+ * the reactive `onCostDrift` / `onCreditExhausted` / `onModelUnavailable` hooks the
+ * rolling engine uses. Those may be omitted to leave an event silent; here silence IS
+ * the defect being fixed, so the fact must be impossible to drop by forgetting. A
+ * required field on the return type cannot be omitted, only ignored deliberately.
+ */
+export interface SourcePoolBuild {
+  pools: CapacityPool[];
+  /** Non-null ONLY when exclusion rules zeroed a non-empty gathered set. */
+  zeroedByExclusion: ExclusionZeroing | null;
+}
+
+/**
  * Build the CapacityPool for every configured dispatchable backend source (the
  * generalization of the former openai-compatible-only `buildConfiguredApiPool`): one
  * pool per source, the IDENTICAL shape across audit + remediate, so the spill topology
@@ -614,7 +644,7 @@ export async function buildSourcePools(params: {
    * no confirmation to read behaves exactly as before.
    */
   excludedBackends?: DispatchExclusion;
-}): Promise<CapacityPool[]> {
+}): Promise<SourcePoolBuild> {
   const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     commandWorkers: params.commandWorkers,
   });
@@ -627,7 +657,26 @@ export async function buildSourcePools(params: {
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),
     ),
   );
-  return foldAccountCooldownAcrossPools(pools);
+  return {
+    pools: foldAccountCooldownAcrossPools(pools),
+    // Computed HERE because one line later the pre-filter population is gone: this is
+    // the only point in the program that can tell "the operator ruled everything out"
+    // apart from "nothing was configured".
+    zeroedByExclusion:
+      excluded && gathered.length > 0 && sources.length === 0
+        ? {
+            gatheredCount: gathered.length,
+            patterns: sortStrings(
+              gathered.map((source) => excluded.excludedBy(source)).filter((p): p is string => p !== null),
+            ),
+          }
+        : null,
+  };
+}
+
+/** Deduplicated + sorted, so a re-derive of the same zeroing yields the same discriminator. */
+function sortStrings(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
 }
 
 /**

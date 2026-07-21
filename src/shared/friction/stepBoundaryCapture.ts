@@ -87,6 +87,7 @@ export type StepBoundaryEventType =
   | "packet_too_large"
   | "quota_unclassified"
   | "newly_reachable_backend"
+  | "exclusion_zeroed_capacity"
   | (string & {});
 
 /**
@@ -138,6 +139,11 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // human to ask, fail-closed-excluded it. Same "operator must reconcile" shape as
   // a cost drift: only they can say whether that backend should route.
   newly_reachable_backend: "tool_should_decide",
+  // The operator's own exclusion rules removed EVERY reachable lane, so the run has
+  // no source capacity at all. Only they can say whether that was intended — same
+  // "operator must reconcile" shape, and the one case where the tool would otherwise
+  // dispatch nothing and say nothing.
+  exclusion_zeroed_capacity: "tool_should_decide",
 };
 
 /**
@@ -325,6 +331,60 @@ export async function captureNewlyReachableBackendFriction(
       source,
     );
   }
+}
+
+/**
+ * The stable synthetic run key for facts about the operator's confirmed dispatch
+ * POLICY. Such facts can arise before any run id exists — Gate-0 predates a run
+ * entirely, and a source-pool build happens before the review run is materialized —
+ * so they are discriminated by their own content under this fixed key instead.
+ * Single-sourced here because both the Gate-0 fail-closed capture and the capacity
+ * guard need the SAME key, or the same operator problem would split across two runs.
+ */
+export const PROVIDER_CONFIRMATION_FRICTION_RUN_KEY = "provider-confirmation";
+
+/**
+ * Route a rules-zeroed dispatch capacity (the operator's exclusion policy removed
+ * EVERY gathered source, so the run has no source pool at all) through the
+ * step-boundary chokepoint as an `exclusion_zeroed_capacity` fact.
+ *
+ * This is the capacity guard's emission half. Without it the zeroing is completely
+ * silent: `buildSourcePools` returns `[]`, the driver finds nothing to dispatch to,
+ * and no artifact anywhere records that a POLICY — rather than a missing config —
+ * caused it. The fact names the patterns responsible so the operator can find the
+ * rule instead of re-deriving their whole policy.
+ *
+ * AWAITED, for the same reason {@link captureNewlyReachableBackendFriction} is: this
+ * fires on a path where the CLI can emit its step and exit immediately, and a dropped
+ * write would mean the zeroing stayed silent — precisely the failure the guard exists
+ * to prevent. Awaiting is safe: `captureFrictionEvent` swallows every failure
+ * internally, so it can never break the in-flight obligation (INV-O1-5).
+ *
+ * Discriminated by the joined pattern set, so a re-derive of the SAME zeroing folds
+ * into one fact rather than accumulating a duplicate per step.
+ */
+export async function captureZeroCapacityFriction(
+  artifactsDir: string,
+  runId: string,
+  info: { gatheredCount: number; patterns: readonly string[] },
+  source: FrictionCaptureArtifact["tool"],
+): Promise<void> {
+  await captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "exclusion_zeroed_capacity",
+      discriminator: info.patterns.join(","),
+      note:
+        `every reachable dispatch source (${info.gatheredCount}) was removed by the ` +
+        `confirmed exclusion policy — this run has NO source capacity. Rules ` +
+        `responsible: ${info.patterns.map((p) => `"${p}"`).join(", ")}. Re-include a ` +
+        `backend at the next attended provider-confirmation gate, or narrow the rule.`,
+      severity: "high",
+      area: "dispatch/provider-confirmation",
+    },
+    source,
+  );
 }
 
 /** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */
