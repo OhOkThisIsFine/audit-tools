@@ -86,23 +86,24 @@ outside the block, after it.
   doc's description of the explain record be updated now to state this partiality, or is that deferred
   until the tracked backlog follow-up (making it a key array) actually lands, so the doc is just
   describing a known interim gap?
-- [DD-14] `spec/backend-identity-axes.md` ("The exclusion grammar: axis-explicit" section, ~lines 166-220)
-  — presents `transport:`/`service:`/`host:` prefixed exclusion rules as shipped, present-tense behavior.
-  Verified: the live parser (`parseExclusionRule`/`ruleMatches` in
-  `src/shared/providers/sharedProviderConfirmation.ts`) implements only the old
-  `{provider, provider_model, endpoint}` grammar — no axis-prefix parsing exists at all; an unrecognized
-  head token silently falls through to the `endpoint` kind. The doc's own later subsection ("Three
-  conditions this change must satisfy... Ship a one-shot migration") reveals in its own words that this is
-  an unshipped proposal, contradicting the present-tense framing above it. Do you want this section
-  explicitly re-framed as "PROPOSED — NOT YET IMPLEMENTED" (a `> Status:` preamble is permitted for
-  `spec/` docs) so a reader doesn't write an inert `service:` rule that silently matches nothing? Or is
-  implementation imminent enough that the doc should stay as-is?
 - [DD-15] `spec/backend-identity-axes.md` ~lines 23,35 — two version-pinned references ("fixed in
   v0.33.11", "Service-qualifying the gate key (v0.33.11) turned that same collision into a LIVELOCK") are
   factually accurate but match the guidelines' status-noise smell (a pinned version string in a prose doc
   is not a factual claim to bump). De-status these (drop the version number / restate as "an earlier fix"),
   or is the pin intentionally kept as a durable historical anchor tied to a specific defect narrative
   (bypass → livelock) rather than "current state"?
+- [DD-16] `docs/HANDOFF.md` (IMMEDIATE NEXT item 1, "Record:" link) and `docs/backlog.md` (the
+  "Capability-evidence obligation" entry, "Salvage record:" link) both link to
+  `reviews/capability-evidence-salvage-2026-07-20.md`, relative to `docs/`. Verified: this file does not
+  exist on `main` (`git ls-tree -r origin/main --name-only | grep capability-evidence-salvage` → zero
+  hits) — it exists only on the unmerged `salvage/capability-evidence` branch (confirmed real content
+  there via `git show origin/salvage/capability-evidence:docs/reviews/capability-evidence-salvage-2026-07-20.md`).
+  Both links 404 when followed from `main` (e.g. on GitHub), though the surrounding prose at both sites
+  already discloses the record lives "off current main" / on that branch, so a reader isn't misled about
+  *where* it is, only the hyperlink doesn't resolve. Several fixes are defensible (branch-qualified
+  absolute URL; de-hyperlink to a plain filename citation; leave as-is since the prose already discloses
+  the branch, and land the real fix by merging the file when the branch lands) — which one you want isn't
+  mechanical, so this is a design-decision rather than an auto-apply.
 
 ### Doc-set condensation
 - [CX-3] `README.md`'s "## Philosophy" section (~lines 22-33) restates `docs/project-philosophy.md`'s A2
@@ -117,41 +118,37 @@ outside the block, after it.
 
 ## FYI — what was auto-applied this run (stale-factual-fix, code-anchored, green-gated)
 
-Full three-tier gate ran this run (checkpoint `612d588` → `fe77ef0`, 43 files changed since the last
-checkpoint — the account-scoped/window-scoped quota-metering rework: new `src/shared/quota/windowConstraints.ts`,
-heavy changes to `accountId.ts`/`apiPool.ts`/`capacity.ts`/`reservationLedger.ts`/`scheduler.ts`, and the
-admission/dispatch loop). 7 reviewer agents each examined every in-scope item in their doc cluster against
-live code (backlog.md+HANDOFF.md; the quota/dispatch spec cluster; the `spec/audit/*` cluster; the
-remaining `spec/*` cluster; `docs/audit-pkg/*`+README.md; the 6 design/concept docs; instruction files +
-meta-tooling + package READMEs + generated host assets), then 3 independent adversary agents re-verified
-every candidate finding from scratch (not trusting the reviewer's stated evidence) plus the 6 still-open
-items carried from last night's escalation. Result: 24/24 candidate findings confirmed, 0 refuted, 0
-contested — so no judge pass was needed this run. One carried-forward item (DD-1, capability-evidence
-round status) turned out to already be resolved on `main` since last night (both `backlog.md` and
-`HANDOFF.md` were independently rewritten to the current round count with an explicit unmerged-branch
-caveat) and was dropped from tonight's escalation.
+Checkpoint `fe77ef0` → `4c18315`: 24 commits landed since last night, shipping Stage 4 of the
+backend-identity migration (axis-explicit exclusion grammar) and the capacity-guard prerequisite.
+Of the doc-review-in-scope files, only 4 changed in that window: `docs/HANDOFF.md`, `docs/backlog.md`,
+`docs/quota-dispatch-design.md`, `spec/backend-identity-axes.md` (plus 3 excluded `docs/reviews/*.md`
+dated artifacts and `docs/doc-review-guidelines.md`, which is excluded from its own review). Every other
+in-scope doc's evidence window (`git diff fe77ef0..HEAD`) was empty, so no new invalidation was possible
+there this run; their existing dispositions stand unchanged (ledger re-stamped at the new commit).
+Reviewer examined the 4 changed docs and produced 6 candidate dispositions; an independent adversary
+agent re-verified all 6 from scratch (re-reading the actual code, not trusting reviewer evidence) plus
+independently re-scanned the same 4 docs for anything missed, surfacing 2 further findings. All 8 were
+confirmed, 0 refuted, 0 contested — no judge pass needed. One previously-open item, DD-14 (the
+exclusion-grammar section's parser/matcher claims), turned out to already be resolved: Stage 4 shipped
+exactly what it was waiting on. The one remaining inaccurate sentence in that section (about the
+autonomous-write side, which is Stage 5 and still unshipped) is fixed below and is a narrower, different
+claim than what DD-14 originally flagged.
 
 Applied:
-- `docs/backlog.md`: deleted 2 shipped/duplicate `INV-shared-core-14` bullets (the fix — stubbing
-  `createCodexProvider`/`createAgyProvider` — shipped in commit `71f81f4`, test now passes) and a shipped
-  "backend identity is ONE function" SPEC bullet (shipped in `f3c9e66`+`b194c10`; its narrower surviving
-  residual is already tracked separately at the "RESIDUE ONLY" bullet); fixed 2 stale line-number
-  citations (`admissionLoop.ts:307-319`→`535-549`, `dispatch.ts:679`→`754`, both moved by the quota
-  rework's diff); corrected a test-baseline count/parenthetical that cited the now-fixed
-  `INV-shared-core-14` as a persistent main failure.
-- `spec/audit/dispatch-admission-control.md`: the admission-explain `reason` enum was missing 2 of the 6
-  real values (`packet_oversized`, `window_uncalibrated`) added by the quota rework.
-- `spec/audit-workflow-design.md`: task-affinity edge-kind ordering didn't match the live `KIND_WEIGHT`
-  priority in `taskAffinityGraph.ts` (also conflated two distinct weighted kinds into one phrase).
-- `spec/unified-dispatch-worker-model.md`: `opencode` was misclassified as a single-shot API backend
-  (kind-3, no tool loop); it's actually a spawned CLI agentic harness (kind-2) per `opencodeProvider.ts`'s
-  own docblock.
-- `docs/doc-review-routine-prompt.md`: the green gate step omitted the non-negotiable `npm test` step
-  (conflicted with `doc-review-guidelines.md`, which wins per this file's own conflict-resolution rule);
-  named two `AGENTS.audit.md`/`AGENTS.remediate.md` files that never existed in this repo's git history.
-- `docs/backlog-remediation-design.md`: named a nonexistent `frictionCapture.ts`; the real file is
-  `src/shared/friction/captureFrictionEvent.ts`.
+- `docs/backlog.md`: deleted the "green gate referenced a dead workspace" entry outright — fully shipped
+  (the fix commit predates `fe77ef0` by ~2.5h, and `fe77ef0` itself is proof the gate now applies fixes
+  correctly) with its residue-check concern self-verified by that same fact.
+- `docs/backlog.md`: marked the "Axis-explicit exclusion grammar" migration stage (item 4 of the
+  backend-identity staged plan) ✅ SHIPPED `a6adc9b` — it still described pre-shipment parser/matcher
+  state ("must change", "no `service` field") that the commit already landed.
+- `docs/backlog.md` + `spec/backend-identity-axes.md`: fixed two references to `transportRoute`, which
+  Stage 4 renamed to `exclusionPattern`.
+- `spec/backend-identity-axes.md`: reworded the present-tense claim that the autonomous write "emits the
+  service axis" — that's Stage 5, not yet shipped; the current writer still emits `transport:`.
+- `spec/backend-identity-axes.md`: reworded a pricing-defect reference from "a live defect" to match
+  `docs/backlog.md`'s own record — fixed 2026-07-19, and per the vendored price snapshot actually inert
+  at HEAD the whole time.
 
 Full green gate (`npm run build && npm run check && npm test`) passed before push — 511 passed | 5 skipped
-test files, 6858 passed | 13 skipped tests, exit 0, no failures. One discrete commit (`doc-review: nightly
-pass — 11 stale-factual-fixes applied, 12 items escalated`), pushed to `main`.
+test files, 6870 passed | 12 skipped tests, exit 0, no failures. One discrete commit (`doc-review: nightly
+pass — 6 stale-factual-fixes applied, 1 item escalated`), pushed to `main`.
