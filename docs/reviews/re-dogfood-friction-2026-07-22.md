@@ -137,3 +137,16 @@ staleness cascade on every next-step. Flush at run completion / lap close.
 4d. agy gemini-3.6-flash second 0-finding packet (tests-tiny-files maint/tests, 8 entries) — 0-for-2 across lens classes vs 5-10 avg on codex/sonnet/fable; benched from audit packets for the rest of the run. Confirms the lens-aware-routing lead; also suggests capability_rank alone is not a quality proxy for FINDING-lens work.
 10. Codex env trap: codex config carries a headroom/headroom_compress MCP server; mid-packet the worker invoked it and codex's own safety layer interrupted the turn as data exfiltration (exit 1, no result). Either remove headroom from codex's MCP config or expect sporadic interrupted workers. (durable trap)
 11. Codex lane exhausted mid-grind (usage limit, resets Jul 28) after ~12 packets. Note: my MANUAL lane substitution bypassed the tool's cross-provider quota signals (Codex live quota endpoint exists in the matrix) — an engine-driven codex lane would have seen the wall coming and paced/demoted. Manual substitution trades quota-awareness for control; one more argument for the engine owning CLI lanes (worker-kind agentic CLIs as engine-drivable pools, per the strand diagnosis in #0).
+
+12. **Worker self-reported "valid, verified" on a malformed-JSON result file (haiku,
+    tests-remediate packet).** The merge correctly rejected it ("missing or invalid"), but the
+    failure surfaced as an unexplained same-packet re-grant. Property: result validity is checked
+    mechanically at result-write or pre-merge (parse + AuditResult contract), never trusted from
+    the worker's own claim; the merge's "missing or invalid" should name WHICH (file absent vs
+    parse error vs contract mismatch) per task. (tool_should_decide)
+
+13. **Completion cleanup removes the friction dir before the friction stop-gate's close-out walk
+    can run against it.** After present_report, .audit-tools/audit/ was cleaned to steps/ only;
+    the session stop-gate then demanded the walk and the record had to be recreated by hand.
+    Ordering property: the close-out walk is part of run completion — cleanup must preserve (or
+    the close step must complete) the friction record before archiving. (tool_should_decide)
