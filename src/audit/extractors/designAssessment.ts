@@ -314,8 +314,8 @@ function detectHiddenCoupling(
   // bucket, so this is purely import/call/reference connectivity.
   const structural = new Set<string>();
   for (const edge of allGraphEdges(graphBundle)) {
-    structural.add(`${edge.from} ${edge.to}`);
-    structural.add(`${edge.to} ${edge.from}`);
+    structural.add(`${edge.from}\u0000${edge.to}`);
+    structural.add(`${edge.to}\u0000${edge.from}`);
   }
 
   const hidden = coChange
@@ -324,7 +324,7 @@ function detectHiddenCoupling(
         typeof edge.from === "string" &&
         typeof edge.to === "string" &&
         (edge.confidence ?? 0) >= HIDDEN_COUPLING_CONFIDENCE_FLOOR &&
-        !structural.has(`${edge.from} ${edge.to}`),
+        !structural.has(`${edge.from}\u0000${edge.to}`),
     )
     // Strongest coupling first; ties broken by endpoints so id assignment is
     // reproducible.

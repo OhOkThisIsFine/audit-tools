@@ -256,7 +256,7 @@ export function deriveFrictionObservations(
   const groups = new Map<string, CapturedFrictionItem[]>();
   for (const item of frictions) {
     if (!isFrictionCategory(item.frictionCategory)) continue;
-    const key = `${item.frictionCategory} ${aggregationKey(item)}`;
+    const key = `${item.frictionCategory}\u0000${aggregationKey(item)}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(item);
     else groups.set(key, [item]);
@@ -264,7 +264,7 @@ export function deriveFrictionObservations(
 
   const derived: DerivedFrictionObservation[] = [];
   for (const [key, items] of groups) {
-    const sep = key.indexOf(" ");
+    const sep = key.indexOf("\u0000");
     const category = key.slice(0, sep) as FrictionCategory;
     const artifact = key.slice(sep + 1);
     const cost = measureFrictionCost(items);

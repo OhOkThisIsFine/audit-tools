@@ -597,7 +597,6 @@ followed" is otherwise indistinguishable from a bug.
   settled-pool `poolsOverride` filter into the same harness. (b) The env-DETECTED same-agent path
   (`CODEX_THREAD_ID` → `resolveConversationHostProvider` → dedup) lost its end-to-end pin when
   `demote-same-agent-guard.test.mjs` died; the new D1 tests use explicit `host_provider` only.
-- **A delegated implementer embedded a RAW 0x00 byte in source (H2+H4 lap 2026-07-18, tool-should-decide, low-medium).** A subagent writing `rollingDispatch.ts` used a literal NUL character as a template-literal dedup-key separator — tsc compiles it happily, but the file turns BINARY to grep/Grep/rg (silently zero search results — a wiring-pass grep returned "no matches" on code that existed, initially reading as unwired enforcement). Fixed by replacing with the `backslash-u0000` escape. Property to hold: a post-write guard (hook or check) rejects raw control bytes (< 0x20 except \t\n\r) in source files; same family as the CRLF-rewrite trap. Cheap mitigation until then: when a grep over a just-edited file returns nothing or "binary file matches", scan for control bytes before concluding anything.
 - **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
 
@@ -1678,8 +1677,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   treated it as **binary** (`git diff` shows `Bin`/`- -`, grep-hostile) even though tsc/vitest read it fine. Same
   for an in-comment control char. Detect with `python -c "print(open(p,'rb').read().count(0))"`; fix by using a
   text-safe escape that stays a source escape (`U+001F` unit separator) or a printable delimiter. Never embed a
-  raw control byte in source — prefer a `\uXXXX` escape the compiler resolves at runtime. (Bit once 2026-07-05:
-  `src/shared/decompose/consensus.ts` pairKey.)
+  raw control byte in source — prefer a `\uXXXX` escape the compiler resolves at runtime. (Bit 2026-07-05
+  `src/shared/decompose/consensus.ts` pairKey; again 2026-07-18 `rollingDispatch.ts`; again by 2026-07-22
+  `friction/triage.ts` + `designAssessment.ts`.) Now mechanically gated: `npm run check:control-bytes`
+  (`scripts/check-control-bytes.mjs`, wired into `verify:checks`) fails the release gate on any raw byte
+  < 0x20 except tab/LF/CR in tracked source.
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
