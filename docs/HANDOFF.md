@@ -98,21 +98,17 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Ship the R3-3 + gate-hardening release** if the current lap has not already published it
-(check `git log v<package.json-version>..HEAD` — unreleased commits on main mean a
-`release:patch:publish` is owed; `/ship` encodes the trap list).
-
-**2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the R3-3
+**1. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the R3-3
 autonomous ranker step in a real wave, plus the proxy track's leftovers (dispatch under a real
 wave, quota behavior at the proxy) and the account-metering close — a proxy-fronted 429 should
 throttle its same-service siblings but not a different service behind the same proxy. Launch
 recipe below. Watch lines: [`backlog.md`](backlog.md) → the condensed capability entry's ⬇ line.
 
-**3. Gate-0 priority-order UX** (Track 3) — two named owner calls resolved in backlog (suggestion
+**2. Gate-0 priority-order UX** (Track 3) — two named owner calls resolved in backlog (suggestion
 lists every pool; operator order is rung-1 within the cost axis, λ trades the axis) — what remains
 is implementing the prompt clarity + tier-default fallback. See backlog *Open tracks*.
 
-**4. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
+**3. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
 `DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — they surface at session start; full text on the
 `doc-review` branch.
 
