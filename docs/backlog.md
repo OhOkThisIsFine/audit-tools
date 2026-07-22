@@ -74,6 +74,120 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **⬇ LIVE (re-dogfood 2026-07-22, HIGH, reproduced 3×): the charter consume path writes
+  charter_register.json WITHOUT restamping artifact_metadata → charter_extraction LIVELOCK.**
+  Submission consumed → register rewritten on disk (content hash + generated_at advanced) →
+  artifact_metadata entry NOT updated (stale rev/hash/dependency_revisions) → staleness sees the
+  register permanently stale → charter_extraction re-emits every drain, forever — each cycle
+  consuming a fresh submission and burning a full charter re-authoring (12 LLM calls) with zero
+  convergence. Confirmed root cause (the canonical hash of the consumed content matched the prior
+  rev): the consume produced CANONICALLY IDENTICAL register content, so this is precisely "a no-op
+  refresh does not restamp dependency_revisions". Escaped only by operator metadata surgery
+  ([[artifact-metadata-surgery-uses-tool-hasher]] — a raw-bytes sha256 restamp poisons the
+  comparator; use dist's `hashArtifactValue`). Property: EVERY artifact write goes through the
+  metadata-stamping writer — a consume/merge path writing an artifact file directly is the same
+  class as extractor-array-ordering churn, in the livelock direction — and a no-op refresh still
+  restamps dependency_revisions. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #7/#9.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, HIGH): a sandboxed CLI worker SWITCHED THE CHECKOUT to main
+  mid-run — worker dispatch needs MECHANICAL per-worker write-scope enforcement.** A codex worker
+  under `-s workspace-write` ran `git checkout main` (reflog-verified; the agy lane ran with
+  `--dangerously-skip-permissions`); prompt-level "treat repo files as read-only" did not prevent
+  it. All workers for the next ~1h audited the wrong tree (blast radius verified small), and the
+  running tool stayed on the lap-branch build only because `dist/` is gitignored. Property:
+  CLI-lane workers get mechanical write-scope enforcement — per-worker sandbox denying `.git`
+  mutation, or worktree isolation for CLI lanes — same family as the audit-worker write-scope
+  enforcement in the dispatch design; prompt text is host discretion and already failed live.
+  [[enforce-robustness-in-tooling-not-host-discretion]] Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #8.
+
+- **⬇ LIVE (re-dogfood endgame 2026-07-22, HIGH): claim release is merge-only + a zero-granted
+  dispatch round doesn't pause the drain → completion livelock at the wall.** With every NIM
+  worker 429-failing, claims from a failed round sat live for the full 20-min lease
+  (`AUDIT_TASK_CLAIM_LEASE_MS`, dispatch.ts:135; release happens only in
+  mergeAndIngestCommand.ts:833); every interleaved next-step then saw all pending tasks
+  peer-claimed → dispatch plan `[]` → obligation unsatisfied → drain re-selected it to
+  `maxTransitions(100)`, exit 1, one empty run dir per ~10s (571 accumulated). Properties: a
+  zero-granted round pauses the drain (a wall is a pause, not a spin), and claims release on
+  worker failure, not only at merge. Captured as findings FLW-COR-003 / COR-6ba55c63. Record:
+  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
+
+- **⬇ LIVE (re-dogfood 2026-07-22, medium, false-signal family): abnormal next-step exits emit NO
+  step contract, leaving a stale current-step.json that reads as a live instruction.** Observed
+  twice with different causes: exit 1 at the quota wall left the previous gate step on disk
+  (mtime an hour old — reads as "gate re-armed" when actually "no step emitted"), and the
+  `advance: exceeded maxTransitions (100)` abort dies step-less the same way. Property: every
+  terminal exit path emits a blocked-step contract naming the cause (wall, cycling obligation) —
+  a consumer must never be able to read a stale step as current. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #0/#9.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, medium): NIM's burst limiter is structurally incompatible with
+  agentic tool-loop workers — route NIM lanes as single-shot only.** The claude-worker (agentic)
+  lane proxied onto glm-5.2 stormed it to 136→143 consecutive 429s: a tool-loop worker's many
+  rapid calls per task trip the per-model burst limit a single-shot packet never would, and the
+  429s then cool the pool for every other consumer. Two-part lead: (a) routing — agentic
+  worker-kinds should not ride a burst-limited NIM lane (single-shot openai-compatible packets
+  only), a worker-kind × pool-class compatibility rule for dispatch; (b) roster-level fallback
+  belongs in the LiteLLM config (it reported "Available Model Group Fallbacks=None"), not in each
+  caller's retry loop — declare same-tier fallbacks so single-model throttling doesn't kill the
+  lane. Record: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md)
+  #2/#4b.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD): agy gemini-3.6-flash returned success-shaped
+  EMPTY results on finding-lens packets — lens class belongs in the routing decision.** 0-for-2:
+  an 11-task 6-lens security packet and an 8-entry maintainability/tests packet both came back
+  contract-valid with 0 findings, where comparable fable/codex/sonnet packets on adjacent scope
+  yielded 5-10. Benched from audit packets mid-run by hand — which is host discretion, the thing
+  routing should own. Two implications: (a) capability_rank alone is not a quality proxy for
+  FINDING-lens work — the capability floor may need a lens-class axis; (b) the 19 zero-finding
+  entries were ingested and COUNT as covered — if flash under-reported, that coverage is
+  false-clean; consider targeted re-review of those packets in deepening. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, medium): charter re-extraction re-fired over a byte-identical
+  subsystem set — DAG staleness keys on whole-artifact content hash, not the semantic slice the
+  downstream step consumes.** Mid-run ingests staled charter_register via the DAG, and the
+  re-emitted charter_extraction step listed exactly the same 4 subsystems with identical file
+  sets — the 8 files defining the charters never changed. Same phantom-staleness family as the
+  repo-manifest ordering churn; cheap on a $0 NIM lane, real cost on a paid one. Property:
+  charter staleness keys on the charter-relevant slice (subsystem membership + member file
+  hashes), not the whole upstream artifact. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #6.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
+  malformed-JSON result file — result validity must be checked mechanically, never trusted from
+  the worker's claim.** The merge correctly rejected it, but the failure surfaced only as an
+  unexplained same-packet re-grant. Properties: (a) results are parse- and
+  AuditResult-contract-checked at result-write or pre-merge; (b) the merge's "missing or invalid"
+  names WHICH per task (file absent vs parse error vs contract mismatch). Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #12.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from
+  weaker models when the true answer is empty.** Two of four delta-mining calls (minimax-m3)
+  emitted a "delta" whose summary literally said "genuinely agrees — surfaced to document the
+  negative finding", despite an explicit skip instruction; pruned host-side before submit (host
+  discretion). Delta ingest routes deltas as WORK, so a filler row becomes a dispatched no-op.
+  Candidates: an explicit `no_deltas: true` escape hatch in the submission shape (a schema-legal
+  way to say "none"), or a cheap negative-finding lint at ingest. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4.
+
+- **⬇ LIVE (re-dogfood 2026-07-22, low): completion cleanup removes the friction dir before the
+  session stop-gate's close-out walk runs against it.** After present_report,
+  `.audit-tools/audit/` was cleaned to steps/ only; the stop-gate then demanded the walk and the
+  record had to be recreated by hand. Ordering property: the close-out walk is part of run
+  completion — cleanup preserves (or the close step completes) the friction record before
+  archiving. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #13.
+
+- **LEAD (re-dogfood 2026-07-22, low): NIM roster latency is bimodal — minimax-m3/nemotron-550b
+  can exceed undici's default headers timeout on ~8k-token structured calls, presenting as a
+  network failure rather than a slow success.** A standalone-script call died with
+  `UND_ERR_HEADERS_TIMEOUT` (same trap as the offload-lane fetch entry under Durable traps).
+  Verify what timeout the openai-compatible provider lane sets before logging as a bug — if it
+  shares undici defaults, a slow NIM model reads as a dead lane. Record:
+  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #5.
+
 - **⬇ LIVE-CONFIRMED (re-dogfood 2026-07-21): the proxy-lane drop reason names an internal function,
   and no populate command exists (medium, friction: tool-should-decide).** First `next-step` of the
   v0.34.6 self-audit dropped the proxy lane with "run the populate (populateProxyCatalog)" — not a
@@ -106,13 +220,24 @@ followed" is otherwise indistinguishable from a bug.
   quarantine defects above. Property: one canonical object envelope on every submission the tool
   ingests. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
-- **⬇ LIVE (re-dogfood): zero-spill lead — with the cheap pool cooling, prepare-dispatch built a
-  HOST-ONLY pool set while opencode-free/codex/agy sat healthy (2026-07-21, medium, LEAD — needs
-  mechanism).** The host pool then got 0 grants and the step wall-blocked; the next round correctly
-  fell back to host-dispatch. Whether source absence was capability-floor eligibility (deepseek
-  rank 3 → bottom tercile → small-only) or a broken spill path (INV-QD-14 class) is undiagnosed —
-  no drop reasons were printed, which is itself the capacity-guard gap. Diagnose from the run's
-  dispatch-quota artifacts + pool-build code. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
+- **⬇ LIVE-CONFIRMED with mechanism evidence (re-dogfood run 20260722T005925355Z): ZERO-SPILL —
+  the wave never attempts healthy sibling pools; the gap is in wave pool-build/fit logic, NOT
+  confirmation (2026-07-22, HIGH — upgraded from the 2026-07-21 LEAD).** Gate-0 promotion
+  correctly wrote ALL 6 source pools into the shared confirmation (artifact verified on disk: glm
+  cost_order 5, agy 9, codex 10, deepseek 11, minimax 12). The wave then granted 144 packets,
+  launched exactly 2 (both claude-worker/glm-5.2); glm 429-stormed →
+  `rolling_dispatch_requeue_rate_limited` → pool exhausted →
+  `rolling_dispatch_stranded_no_fitting_pool` for ~140 packets TWICE — with no launch ever
+  attempted on deepseek-v4-pro / minimax-m3 (same service, healthy, $0, confirmed) nor
+  codex/agy/opencode-free. So the spill gap is not missing confirmation and not missing pool
+  entries — it is the "fitting" check or engine-lane selection in wave pool-build; diagnose there.
+  Two adjacent facts from the same evidence: (a) that run's dispatch-quota.json shows 144 granted
+  with leases/explains EMPTY — a legibility gap of its own; (b) the manual lane substitution used
+  to recover bypassed the tool's cross-provider quota signals (Codex's live quota endpoint would
+  have seen its wall coming — it exhausted mid-grind, resets Jul 28) — one more argument for the
+  engine owning agentic-CLI lanes as drivable pools rather than the host hand-driving them.
+  Records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #0/#11,
+  [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
 - **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure (2026-07-21,
   medium).** First call ingested the granted results ("Ingested 18 entries", progress_made:true)
@@ -120,6 +245,10 @@ followed" is otherwise indistinguishable from a bug.
   and exited 1. Partial-wave merge is the NORMAL rolling case; it must exit 0 with a deferred-count
   summary, reserving all-missing language for zero results. False-red family (inverse of the vitest
   false-green). Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
+  Same family, confirmed 2026-07-22 endgame: an idempotent REPLAY of a completed merge flips the
+  exit code (`mergeAndIngestCommand.ts:602` `has_failures:false` on replay) — operator guidance
+  during the run became "judge by the 'Ingested N entries' line, exit code lies" (finding
+  FLW-COR-002).
 
 - **⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply
   (2026-07-21, low).** The dispatch prompt wants per-result `{input_tokens, output_tokens}`; Claude
@@ -140,12 +269,20 @@ followed" is otherwise indistinguishable from a bug.
   Property: the guard must distinguish a file cmdQuota WROTE (e.g. mtime/absence delta across the
   command, or run cmdQuota under a temp cwd) from one that pre-existed. Until fixed, this test is
   red on any checkout with dogfood artifacts; CI's fresh clone is the real signal.
+  **Upgraded by the 2026-07-22 endgame: this defect polluted a live audit.** The runtime_validation
+  phase ran `npm test` in the live-audited working copy, this one assertion failed → ALL 39 runtime
+  units marked not_confirmed → 29 reconcile deepening tasks spawned for one hermeticity bug
+  (captured as finding RTV-TST-001). Cost is no longer "a red on dogfood checkouts" — it fans out
+  into real dispatched work. Record:
+  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
 
 - **Staleness event spam: the first `next-step` of a fresh run printed the identical
   `{"kind":"staleness",...}` JSON line ~26 times (2026-07-21, low, friction: inefficient-feeding).**
   One line per drain iteration over an all-stale artifact set, identical content each time — pure
   noise that buries the real signals (the dropped-source warnings above it). De-duplicate per
-  invocation or print once with a count.
+  invocation or print once with a count. Second + third observations 2026-07-22: reproduced on the
+  resume drain (identical lines every ~100ms, dozens) and again as stderr spam through the endgame
+  — it also buries the wall/abort diagnostics.
 
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
 - **The nightly doc-review verifies against remote `main` only, so unpushed local work makes it revert CORRECT docs to stale ones (2026-07-21, VERIFIED by instance, medium, friction: tool-should-decide).** The 2026-07-21 run (`4c18315`) rewrote a true present-tense claim in `spec/backend-identity-axes.md` — "the autonomous fail-closed write emits the **service** axis" — into "planned (stage 5, not yet shipped)", because remote `main` stopped at stage 4 while stage 5 (`e7cda25`) sat in five unpushed local commits. Every doc claim the routine "re-verified against HEAD" carries the same exposure: its HEAD is the remote tip, and a doc can be *ahead* of that tip as legitimately as behind it. The routine already stamps its baseline range in the commit body, so the tool-side fix is a check at reconcile/push time: if a `doc-review:` commit's stated baseline is not the current tip's ancestor-with-nothing-in-between, its stale-factual-fixes need re-verification against the real tip before they land. "Push before the nightly runs" is host discipline, not a fix. Corrected in `0bf36e7`.
@@ -327,6 +464,13 @@ followed" is otherwise indistinguishable from a bug.
   an action EXIST — today no populate/refresh command is reachable from the CLI at all, so the reason has
   nothing true to name. Fix the missing command first; the reason text is downstream of it.
   Same family as the `dropped[]`-not-surfaced entry below.
+  **Live-reconfirmed 2026-07-22 (00:4x):** the cache sat 3.5h past its 10-min TTL and was served
+  stale on every pool build (1 source, glm-5.2 only); an operator `top_k` change had zero effect
+  until `populateProxyCatalog` was hand-imported from dist with `force:true` — (a)+(b) verbatim.
+  New data point: this stale-read path is what recreated the zero-spill state (host-only pools
+  while glm cooled) — the two entries share a mechanism. Also observed on the same call: the
+  engine's drain re-stormed cooling glm to 143 consecutive 429s, so wave-3 pre-wall pacing from
+  learned limits is still not happening on a single-model pool.
 
 - **`top_k` truncates ALPHABETICALLY when nothing is ranked, silently dropping the frontier tier
   (2026-07-19, medium, now mitigable).** With all `score` undefined, `expandSources`
@@ -920,7 +1064,7 @@ followed" is otherwise indistinguishable from a bug.
   5. **Fail-closed autonomous write emits the `service` axis.** Closes the multi-transport residue durably: a transport snapshot decays the moment proxy expansion adds a route, a service rule does not. Touches `intakeExecutors.ts` → loop-core, attestation required.
   **Property to hold:** a new consumer PICKS an axis from the spec's table; it never invents an identity. ⚠ Do NOT collapse the keyspaces — that instinct is what produced both the bypass and the fail-open proposal.
 
-- **One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).** Audit's intent is `<root>/.audit-tools/audit/session-config.json` (`src/audit/supervisor/sessionConfig.ts:16` + `auditArtifactsDir`); remediate's is `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` (`src/remediate/steps/sessionConfigLoad.ts:63-67`, called from `nextStep.ts:1779-1783`); a stale guard-message in `claudeCodeProvider.ts:15`/`agyProvider.ts:9` still points operators at a third path, `.audit-tools/remediation/session-config.json`, that nothing reads — the wrapper itself no longer seeds it (`wrapper/remediate-code-wrapper-install-hosts.mjs:665-667` deliberately creates the config empty on demand). They are DISJOINT — audit never writes a file remediate reads as intent — which is precisely why the root-scoped `provider-confirmation.json` exists as the only cross-tool decision channel (`sharedProviderConfirmation.ts:4-9`). Two draws of one concept with three homes and no shared store. Unifying the path is a prerequisite for ever collapsing the Gate-0 artifact into the intent (a G3 draft proposed exactly that and was refuted on this). Too large to ride G3.
+- **One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).** Audit's intent is `<root>/.audit-tools/audit/session-config.json` (`src/audit/supervisor/sessionConfig.ts:16` + `auditArtifactsDir`); remediate's is `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` (`src/remediate/steps/sessionConfigLoad.ts:63-67`, called from `nextStep.ts:1779-1783`); a stale guard-message in `claudeCodeProvider.ts:15`/`agyProvider.ts:9` still points operators at a third path, `.audit-tools/remediation/session-config.json`, that nothing reads — the wrapper itself no longer seeds it (`wrapper/remediate-code-wrapper-install-hosts.mjs:665-667` deliberately creates the config empty on demand). They are DISJOINT — audit never writes a file remediate reads as intent — which is precisely why the root-scoped `provider-confirmation.json` exists as the only cross-tool decision channel (`sharedProviderConfirmation.ts:4-9`). Two draws of one concept with three homes and no shared store. Unifying the path is a prerequisite for ever collapsing the Gate-0 artifact into the intent (a G3 draft proposed exactly that and was refuted on this). Too large to ride G3. One more live instance of the split-artifact cost (re-dogfood 2026-07-22): the per-tool `.audit-tools/audit/provider_confirmation.json` (4 legacy providers, no source fields) read as "sources dropped" and cost 20 min of misdiagnosis before the real decision at `.audit-tools/provider-confirmation.json` was checked.
   **SPEC — one canonical intent path for both draws, and make the migration LOUD rather than silent.**
   The intent is one concept and belongs in one place; two draws reading different files is the fork this
   project's "one core, two draws" rule exists to prevent, and the third path is already dead — nothing
@@ -1169,6 +1313,13 @@ followed" is otherwise indistinguishable from a bug.
   dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
 
 ## Durable traps (environment / tooling reference)
+
+- **LiteLLM proxy dead on arrival — pydantic/pydantic-core version drift (2026-07-21).** `litellm`
+  crashed at import: installed pydantic-core 2.47.0 vs pydantic requiring 2.46.4 ("make sure you
+  haven't upgraded pydantic-core manually" — something did, between Jul 19 and 21). Fix:
+  `python -m pip install pydantic-core==2.46.4`. Same env-rot family as prior site-packages
+  breakage. Candidate: a proxy-start preflight (or start script) that checks/pins the pair — the
+  offload lane has no fallback when the proxy won't start.
 
 - **`agy -p` headless auto-denies its own tool permissions (2026-07-21).** A read-only review
   prompt died instantly: "a tool required the read_file permission that headless mode cannot prompt
@@ -1487,20 +1638,5 @@ Standing gotchas worth keeping for any agent (strong or weak):
   `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
   `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
-
-- **⬇ LIVE (re-dogfood COMPLETED 2026-07-22): eleven new friction/defect entries from the completed
-  self-audit — full per-item detail in
-  [`docs/reviews/re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md)
-  (mechanism-grade: zero-spill reproduced with pool-build evidence; charter-consume writes
-  charter_register without metadata restamp → extraction livelock; CLI workers can mutate git state
-  (checkout-to-main incident, reflog-verified) → per-worker write-scope enforcement; claim release is
-  merge-only + zero-grant rounds don't pause the drain → completion livelock (endgame record:
-  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md)); NIM burst-limiter
-  is structurally incompatible with agentic tool-loop workers (single-shot only); proxy-catalog
-  populate gap re-confirmed; agy-flash success-shaped-empty results → lens-aware routing lead;
-  maxTransitions abort emits no step contract (false-signal); manual lane substitution bypasses
-  cross-provider quota signals). Each needs triage into its own entry or fold into existing ones
-  (zero-spill, populate-gap, false-red merge entries already exist above — these upgrades supersede
-  their LEAD status).**
 
 - **check:doc-manifest only runs in verify:checks, so a doc-carrying merge commit can be transiently red on plain `ci` (2026-07-22, low, friction: tool-should-decide).** Seen on all three merge commits of the v0.34.7 queue (stray-doc failures until the docs were registered in 0c6a5a6d). Either run the doc-manifest check in the `ci` workflow too, or pre-merge-gate doc-carrying branches with it locally.

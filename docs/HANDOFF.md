@@ -7,7 +7,10 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative).
+- **Current version = `package.json`** (authoritative). v0.34.7 (2026-07-22) landed the re-dogfood
+  merge queue (vitest false-green gate, admission-explain Infinity round-trip, quarantine-loudly)
+  and the promoted self-audit deliverables; the 2026-07-22 friction record is triaged into
+  per-item backlog entries.
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
@@ -98,21 +101,19 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. TRIAGE the completed re-dogfood audit + MERGE QUEUE.** The self-audit COMPLETED 2026-07-22 (present_report): deliverables at `.audit-tools/audit-findings.json` (1480 findings, 78 high, 10 themes) + `.audit-tools/audit-report.md`. Friction/defect record (11 mechanism-grade entries): [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md); completion-blocker forensics: [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md). Next: (a) merge queue below is now UNBLOCKED (run complete); (b) triage the backlog pointer entry into per-item entries; (c) hand-label findings into corpus/ for the A2 oracle; (d) top product fixes from the run: claim-release/zero-grant drain livelock, charter-consume metadata restamp, per-worker git write-scope enforcement, NIM single-shot-only routing.
+**1. Top product fixes from the completed re-dogfood run** — the 2026-07-22 friction/defect record
+is fully triaged into per-item backlog entries (2026-07-22; the merge queue landed and v0.34.7
+released the same day, so both former blockers are done). The run's deliverables live at
+`.audit-tools/audit-findings.json` (1480 findings, 78 high, 10 themes) + `.audit-tools/audit-report.md`;
+records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
+[`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md). The three HIGH
+entries now at the top of backlog *Open bugs*: claim-release-is-merge-only + zero-grant drain
+livelock; charter-consume metadata restamp livelock; per-worker git write-scope enforcement. Next
+tier (also entered): zero-spill wave pool-build/fit gap (upgraded to mechanism-confirmed), NIM
+single-shot-only routing, abnormal-exit no-step-contract false signal.
 
-**2. MERGE QUEUE — two ready worktree branches, HELD to protect the running audit** (merge only
-at run completion, or accept a replan):
-- `worktree-agent-a656590719d7f8343` (`d1cc1b5e`) — vitest false-green gate (ledger outcomes +
-  token handshake + gate script; CI workflows touched — review those hunks).
-- `worktree-agent-a22494cc1a9cb610d` (`f8b7ee71`) — admission-explain Infinity round-trip
-  (loop-core: needs fresh clear attestation at merge).
-Already folded into the primary branch (`claude/awesome-poincare-399ae8`, this checkout):
-`7906c518` (design-review quarantine-loudly, fast-forwarded) and the edge-reasoning +
-analyzer-decisions quarantine follow-up (task_cd0c73da, reconciled onto the same
-`consumeArrayIncoming`/`quarantineIncomingFile` core as required — one helper set). The primary
-branch itself still awaits merge to `main` + release at run completion.
-Each branch carries red-green-validated tests; re-review + attest on main at merge (worktree
-`concerns` attestations do not carry).
+**2. Hand-label the run's findings into `corpus/<run-id>.labels.json`** — one labeled run is the
+only thing blocking the A2 finding-quality oracle (backlog *Deferred / waiting*).
 
 **3. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
 `DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — NIM-drafted rewrite proposals for the two big ones (DD-2,
