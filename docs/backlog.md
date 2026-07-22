@@ -1525,3 +1525,5 @@ Standing gotchas worth keeping for any agent (strong or weak):
   cross-provider quota signals). Each needs triage into its own entry or fold into existing ones
   (zero-spill, populate-gap, false-red merge entries already exist above — these upgrades supersede
   their LEAD status).**
+
+- **check:doc-manifest only runs in verify:checks, so a doc-carrying merge commit can be transiently red on plain `ci` (2026-07-22, low, friction: tool-should-decide).** Seen on all three merge commits of the v0.34.7 queue (stray-doc failures until the docs were registered in 0c6a5a6d). Either run the doc-manifest check in the `ci` workflow too, or pre-merge-gate doc-carrying branches with it locally.
