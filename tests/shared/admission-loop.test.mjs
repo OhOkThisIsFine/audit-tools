@@ -176,7 +176,13 @@ test("grants persist as ledger leases and the artifact shape validates", async (
     leases: res.granted,
     explains: res.explains,
   };
-  expect(() => DispatchAdmissionSchema.parse(admission)).not.toThrow();
+  // The artifact is written via JSON.stringify and read back via JSON.parse —
+  // validating the in-memory object proves nothing about what survives that
+  // round trip (e.g. a cold-start `budget: Infinity` produces
+  // `headroom_before: Infinity` in memory, which JSON.stringify collapses to
+  // `null`). Exercise the real round trip, not the pre-serialization shape.
+  const roundTripped = JSON.parse(JSON.stringify(admission));
+  expect(() => DispatchAdmissionSchema.parse(roundTripped)).not.toThrow();
 });
 
 // ── Cold-start calibration clamp (host-path over-grant fix, token-aware sizing) ──

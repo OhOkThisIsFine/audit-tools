@@ -241,8 +241,18 @@ export const AdmissionExplainSchema = z
       // would be a false report of a wall that does not exist.
       "window_uncalibrated",
     ]),
-    /** Present on an admit attempt against a real pool (budget headroom before it). */
-    headroom_before: z.number().optional(),
+    /**
+     * Present on an admit attempt against a real pool (budget headroom before
+     * it). `null` means UNBOUNDED, not unknown — a cold-start pool with no real
+     * ceiling yet computes `headroomBefore = +Infinity`, which `JSON.stringify`
+     * (the artifact's actual emit path) collapses to `null`; `.number()` alone
+     * rejects that on read-back even though it happily accepts `Infinity` in
+     * memory, so the round trip a real reader performs was silently unparseable.
+     * `null` is the honest, back-compat-safe encoding: it matches the literal
+     * bytes already on disk in pre-existing artifacts (e.g.
+     * `.audit-tools/audit/fanout-quota/design_review/dispatch-quota.json`).
+     */
+    headroom_before: z.number().nullable().optional(),
     outstanding_before: z.number().optional(),
     cost: z.number(),
   })
@@ -686,7 +696,14 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
           reason: "admitted",
           ...(decision.binding
             ? {
-                headroom_before: decision.binding.headroomBefore,
+                // Non-finite (cold-start, no ceiling yet) is genuinely
+                // unbounded — normalize to `null` explicitly here rather than
+                // leaving `Infinity` for `JSON.stringify` to collapse
+                // implicitly; the schema field's type must match what the
+                // artifact actually contains on disk.
+                headroom_before: Number.isFinite(decision.binding.headroomBefore)
+                  ? decision.binding.headroomBefore
+                  : null,
                 outstanding_before: decision.binding.outstandingBefore,
               }
             : {}),
