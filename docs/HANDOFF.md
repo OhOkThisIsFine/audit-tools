@@ -116,8 +116,10 @@ together). Run records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood
 [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
 `.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
 
-**2. Hand-label the run's findings into `corpus/<run-id>.labels.json`** — one labeled run is the
-only thing blocking the A2 finding-quality oracle (backlog *Deferred / waiting*).
+**2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
+full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
+inventories give durable labels and measurable RECALL, and turn `score-audit` into a per-release
+gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-target calibration.
 
 **3. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
 (The doc-review queue is EMPTY — all 11 items were owner-decided, applied, and ledger-resolved
@@ -198,8 +200,8 @@ authoritative pass/fail.
 `deepening:*` tasks, a silently-skipped analyzer, or a missing friction event → one line under backlog
 *Open bugs* before moving on.
 
-**After the run:** hand-label the findings into `corpus/<run-id>.labels.json` — one labeled run is the
-only thing blocking the A2 finding-quality oracle.
+**After the run:** findings may optionally be hand-labeled as large-target calibration data — the
+A2 oracle corpus itself is pinned public repos (see backlog *Deferred / waiting*), not labeled runs.
 
 **What this run canNOT cover:** clippy/rubocop live spawn (needs a Rust/Ruby repo + toolchain — none on
 this box); Copilot/Antigravity quota endpoints (need those IDEs running); the gated e2es (creds + env

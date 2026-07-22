@@ -22,8 +22,9 @@ or to catch it failing. Pick a run config from this matrix; watch the items it l
 **General fail-signals to log on ANY live run** (add a line under *Open bugs* if you hit one): a run
 that wedges and needs `force-synthesis` to finish · orphaned pending `deepening:*` tasks · a *crash*
 (not a graceful pause) when a rate limit is hit · an analyzer that silently skipped when it should have
-spawned · knip dead-code leads that never reach the per-file lens. After a run, its findings are the
-corpus to hand-label for the A2 oracle (see Deferred / waiting).
+spawned · knip dead-code leads that never reach the per-file lens. (The A2 oracle corpus is now
+pinned public repos, not labeled live runs — a run's findings are at most optional calibration
+data; see Deferred / waiting.)
 
 ---
 
@@ -1319,11 +1320,28 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Deferred / waiting
 
-- **A2 finding-quality oracle** — the `score-audit` scorer is built; needs operator-authored
-  `corpus/<run-id>.labels.json` (hand-labeled real audit runs) before it can score precision/recall.
-  - **⬇ To close (after any live audit):** take that run's findings, hand-label each true-positive /
-    false-positive into `corpus/<run-id>.labels.json`, then run `score-audit` → precision/recall. The
-    labeling is ground-truth human judgment (can't be automated); one solid labeled run unblocks the oracle.
+- **A2 finding-quality oracle — REDIRECTED (owner 2026-07-22): base the corpus on SMALL, PUBLIC,
+  PINNED git repos, not on labeled self-audit runs.** The `score-audit` scorer is built; the prior
+  plan (hand-label a live run's findings into `corpus/<run-id>.labels.json`) has two structural
+  flaws the redirect fixes: (a) labels against our own moving tree ROT — findings reference
+  file:lines that drift within days, so a labeled run is a one-shot number, never a regression
+  gate; (b) labeling only what the tool FOUND measures precision only — misses are invisible, so
+  recall is unmeasurable without ground truth the tool didn't author.
+  **SPEC:** `corpus/` becomes a manifest of pinned public repos — `{repo_url, commit_sha,
+  labels[]}`, each label a ground-truth defect (file, region, kind, evidence — ideally the upstream
+  FIX commit that proves it). Ground truth comes from someone-else-maintained inventories where
+  possible (bugs fixed in later upstream commits; CVE-tagged pre-fix versions; suites like
+  Defects4J / BugsInPy) per the synced-not-forked table principle; hand-authored labels are a
+  bounded one-time cost per repo and never rot (the SHA is pinned). `score-audit` gains a
+  corpus-repo mode: clone at the pinned SHA (hermetic state via `AUDIT_CODE_STATE_DIR`), run the
+  audit ($0 NIM lanes make this per-release cheap), match findings against labels → precision AND
+  recall as a repeatable release-time gate. Prefer small-but-REAL repos (real libraries at pre-fix
+  commits) over purely synthetic bug suites — synthetic-only corpora overestimate transfer. Rust /
+  Ruby pins double as clippy/rubocop analyzer targets (toolchain availability still gates the live
+  spawn). **Scope honesty:** this measures finding QUALITY; pipeline-at-scale behavior (charters
+  over 1000+ components, quota walls, deepening) stays validated by dogfood runs. The re-dogfood
+  run's 1480-finding hand-label is DEMOTED from oracle-blocker to optional large-target
+  calibration.
 - **A7 multi-host validation** — `npm run verify:hosts` (automated, in `verify:release`) is built and
   green; the provider-matrix e2e is gated behind `RUN_PROVIDER_MATRIX_E2E=1`. **Remaining:** the
   release-time manual GUI checklist ([`host-validation.md`](../spec/host-validation.md)) for GUI-only
