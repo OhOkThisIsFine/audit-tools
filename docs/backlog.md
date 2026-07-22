@@ -217,6 +217,10 @@ followed" is otherwise indistinguishable from a bug.
   Verify what timeout the openai-compatible provider lane sets before logging as a bug — if it
   shares undici defaults, a slow NIM model reads as a dead lane. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #5.
+  Second live observation (2026-07-22 review dispatch): a minimax-m3 structured 8k-token call ran
+  >12 minutes and then returned an empty/error body while nemotron answered the identical prompt in
+  ~2 min — and glm-5.2/deepseek-v4-pro were hard-429'd at the same moment (third observation for
+  the roster-fallback entry above).
 
 - **⬇ LIVE-CONFIRMED (re-dogfood 2026-07-21): the proxy-lane drop reason names an internal function,
   and no populate command exists (medium, friction: tool-should-decide).** First `next-step` of the
@@ -1366,6 +1370,11 @@ followed" is otherwise indistinguishable from a bug.
   `python -m pip install pydantic-core==2.46.4`. Same env-rot family as prior site-packages
   breakage. Candidate: a proxy-start preflight (or start script) that checks/pins the pair — the
   offload lane has no fallback when the proxy won't start.
+
+- **`agy -p` does NOT read stdin — piped input is silently ignored (2026-07-22).** `cat doc | agy -p
+  "review the following"` returns "No document provided": the prompt must carry the document in the
+  argument itself (`-p "$(cat doc)…"`, subject to argv size limits) or via a workspace read the
+  headless permission model actually allows. Cost one wasted dispatch round.
 
 - **`agy -p` headless auto-denies its own tool permissions (2026-07-21).** A read-only review
   prompt died instantly: "a tool required the read_file permission that headless mode cannot prompt

@@ -7,10 +7,11 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.7 (2026-07-22) landed the re-dogfood
-  merge queue (vitest false-green gate, admission-explain Infinity round-trip, quarantine-loudly)
-  and the promoted self-audit deliverables; the 2026-07-22 friction record is triaged into
-  per-item backlog entries.
+- **Current version = `package.json`** (authoritative). v0.34.8 (2026-07-22) shipped the
+  completion-livelock fix (owner-scoped claim release + no_progress rounds). v0.34.7 (same day)
+  landed the re-dogfood merge queue (vitest false-green gate, admission-explain Infinity
+  round-trip, quarantine-loudly) and the promoted self-audit deliverables; the 2026-07-22 friction
+  record is triaged into per-item backlog entries.
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
@@ -101,30 +102,26 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Top product fixes from the completed re-dogfood run** — the 2026-07-22 friction/defect record
-is fully triaged into per-item backlog entries (2026-07-22; the merge queue landed and v0.34.7
-released the same day, so both former blockers are done). The run's deliverables live at
-`.audit-tools/audit-findings.json` (1480 findings, 78 high, 10 themes) + `.audit-tools/audit-report.md`;
-records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
-[`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md). The three HIGH
-entries now at the top of backlog *Open bugs*: claim-release-is-merge-only + zero-grant drain
-livelock; charter-consume metadata restamp livelock; per-worker git write-scope enforcement. Next
-tier (also entered): zero-spill wave pool-build/fit gap (upgraded to mechanism-confirmed), NIM
-single-shot-only routing, abnormal-exit no-step-contract false signal, and the dispatch-legibility
-mechanistic trace (constraint-outcome array on every explain + no-empty-explains invariant — the
-owner-set goal; pairs with the zero-spill diagnosis, which needs that trace), and the
-intent-checkpoint semantic-equivalence gate wiring (owner-decided from DD-9; specced in backlog,
-same staleness family as the charter phantom-staleness entry).
+**1. Remaining HIGH product fixes from the re-dogfood run.** The claim-release/zero-grant
+completion livelock is FIXED and released in v0.34.8 (`681df1f5`: `releaseOwned` owner-scoped claim
+release at drive end; `no_progress` empty-round status + salvage fold; attested, free-lane
+reviewed). Still open, top of backlog *Open bugs*: **charter-consume metadata restamp livelock**
+(HIGH) and **per-worker git write-scope enforcement** (HIGH). Next tier (also entered): zero-spill
+wave pool-build/fit gap (mechanism-confirmed), NIM single-shot-only routing, abnormal-exit
+no-step-contract false signal, the dispatch-legibility mechanistic trace (constraint-outcome array
+on every explain + no-empty-explains invariant — the owner-set goal; pairs with the zero-spill
+diagnosis), and the intent-checkpoint semantic-equivalence gate wiring (owner-decided from DD-9;
+specced in backlog, same staleness family as the charter phantom-staleness entry — design the two
+together). Run records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
+[`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
+`.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
 
 **2. Hand-label the run's findings into `corpus/<run-id>.labels.json`** — one labeled run is the
 only thing blocking the A2 finding-quality oracle (backlog *Deferred / waiting*).
 
-**3. Eleven open doc-review design decisions** await an owner call (`CLAUDE-5`,
-`DD-2/6/7/8/9/10/12/13/15`, `CX-3`) — NIM-drafted rewrite proposals for the two big ones (DD-2,
-DD-12) are in the session scratchpad (`dd2-draft.json` / `dd12-draft.json` under the 2026-07-21
-session's scratch dir) — regenerate freely if that dir is gone; the drafts cost nothing.
-
-**4. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
+**3. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
+(The doc-review queue is EMPTY — all 11 items were owner-decided, applied, and ledger-resolved
+2026-07-22; the DD-9 decision became the intent-checkpoint gate-wiring work item above.)
 
 ---
 
