@@ -10,8 +10,10 @@ import {
   extractOpenText,
   parseOpenItems,
   renderOpenItemsMarkdown,
+  buildSurfaceOutput,
   collectOpenItems,
   SUMMARY_MAX,
+  INLINE_BUDGET_BYTES,
   FILE,
   BRANCH,
 } from './docReviewFindings.mjs';
@@ -66,6 +68,48 @@ test('parseOpenItems truncates an over-long summary', () => {
   const [it] = parseOpenItems(`- [D-9] ${long}`);
   assert.equal(it.summary.length, SUMMARY_MAX);
   assert.ok(it.summary.endsWith('…'));
+});
+
+test('renderOpenItemsMarkdown bodyCap clips cells with an ellipsis, leaves short ones alone', () => {
+  const items = parseOpenItems('## S\n- [D-1] short\n- [D-2] ' + 'y'.repeat(400));
+  const md = renderOpenItemsMarkdown(items, 100);
+  assert.ok(md.includes('| D-1 | short |')); // untouched
+  const row = md.split('\n').find((l) => l.startsWith('| D-2 |'));
+  assert.ok(row.length < 120);
+  assert.ok(row.includes('…'));
+  // default (no cap) renders the full body
+  assert.ok(renderOpenItemsMarkdown(items).includes('y'.repeat(400)));
+});
+
+test('buildSurfaceOutput: small items → full text inline, no clip note', () => {
+  const items = parseOpenItems('## S\n- [D-1] alpha\n- [D-2] beta');
+  const got = buildSurfaceOutput(items, { fallbackRelPath: 'fb.md', sourceNote: 'src.' });
+  assert.equal(got.clipped, false);
+  assert.equal(got.output, got.fullOutput);
+  assert.ok(got.output.includes('full text — no need to open'));
+  assert.ok(!got.output.includes('clipped to fit'));
+  assert.ok(Buffer.byteLength(got.output, 'utf8') <= INLINE_BUDGET_BYTES);
+});
+
+test('buildSurfaceOutput: oversized items → fits budget, keeps every ID, announces the clip', () => {
+  const bullets = Array.from({ length: 12 }, (_, i) => `- [DD-${i}] ${'z'.repeat(1500)}`);
+  const items = parseOpenItems('## Design decisions\n' + bullets.join('\n'));
+  const got = buildSurfaceOutput(items, { fallbackRelPath: 'fb.md' });
+  assert.equal(got.clipped, true);
+  assert.ok(Buffer.byteLength(got.output, 'utf8') <= INLINE_BUDGET_BYTES);
+  for (let i = 0; i < 12; i++) assert.ok(got.output.includes(`| DD-${i} |`)); // no item dropped
+  assert.ok(got.output.includes('clipped to fit the inline size budget'));
+  assert.ok(got.output.includes('`fb.md`'));
+  // the fallback copy stays uncapped
+  assert.ok(got.fullOutput.includes('z'.repeat(1500)));
+  assert.ok(Buffer.byteLength(got.fullOutput, 'utf8') > INLINE_BUDGET_BYTES);
+});
+
+test('buildSurfaceOutput: custom budget forces clipping of a mid-size set', () => {
+  const items = parseOpenItems('## S\n- [D-1] ' + 'a'.repeat(600) + '\n- [D-2] ' + 'b'.repeat(600));
+  const got = buildSurfaceOutput(items, { fallbackRelPath: 'fb.md', budgetBytes: 900 });
+  assert.equal(got.clipped, true);
+  assert.ok(got.output.length < got.fullOutput.length);
 });
 
 // A fake git bound to a canned findings body on the audit-tools remote ref.

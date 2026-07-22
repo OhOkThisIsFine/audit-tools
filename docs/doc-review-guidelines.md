@@ -299,6 +299,17 @@ conversation. Keep the FYI ("what I auto-applied") outside the block.
 
 If there is nothing open, the block is present but empty (hook stays silent).
 
+**Inline size budget.** The harness inlines hook stdout only up to ~10KB; a larger
+render is persisted to a side file and the session sees a one-line preview — which
+defeats the surfacing entirely. The surface hook therefore emits the largest
+rendering that fits `INLINE_BUDGET_BYTES` (9,000 bytes, `docReviewFindings.mjs`):
+full item text when it fits, otherwise per-item bodies are clipped with an
+ellipsis (items and IDs are never dropped) and the header announces the clip. The
+full, uncapped tables are always written to `.audit-tools/doc-review-open.md`
+(gitignored), so a clipped item is one Read away. Consequence for authors: the
+longer each open item's prose, the less of it surfaces inline — front-load the
+decision question.
+
 ### Clear-on-apply (between nightly runs)
 
 The nightly is the *primary* clearing mechanism: run N+1 re-scans `main`, sees a

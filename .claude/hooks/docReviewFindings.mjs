@@ -145,7 +145,9 @@ export function parseOpenItems(openText) {
 // any future consumer (e.g. a `--table` flag on the resolve command) cannot drift.
 // Table cells cannot hold raw pipes or newlines: pipes are escaped and bodies are
 // already single-line by the parse's continuation fold.
-export function renderOpenItemsMarkdown(items) {
+// `bodyCap` (chars) clips each item's cell text with an ellipsis — the budgeted
+// surface path uses it; the default renders full bodies (fallback-file form).
+export function renderOpenItemsMarkdown(items, bodyCap = Infinity) {
   const sections = [];
   for (const it of items) {
     let section = sections.find((s) => s.title === it.section);
@@ -161,11 +163,71 @@ export function renderOpenItemsMarkdown(items) {
     out.push('', `### ${section.title} (${section.items.length})`, '');
     out.push('| ID | Item |', '| --- | --- |');
     for (const it of section.items) {
-      const cell = (it.body || it.summary || '').replace(/\|/g, '\\|');
+      const cell = clipText(it.body || it.summary || '', bodyCap).replace(/\|/g, '\\|');
       out.push(`| ${it.id} | ${cell} |`);
     }
   }
   return out.join('\n');
+}
+
+function clipText(text, cap) {
+  if (!Number.isFinite(cap) || text.length <= cap) return text;
+  return text.slice(0, Math.max(1, cap - 1)).trimEnd() + '…';
+}
+
+// The harness inlines hook stdout only up to ~10KB; anything larger is persisted
+// to a side file and the session sees a one-line preview instead of the tables
+// (observed at 10.1KB; the older regression clipped at 13.8KB). Staying safely
+// under the threshold is therefore part of the output contract: a render that
+// exceeds it is INVISIBLE, which defeats the zero-roundtrip purpose entirely.
+export const INLINE_BUDGET_BYTES = 9_000;
+
+// Per-item body caps tried in order until the whole output fits the budget.
+// Infinity first: when everything fits, full text surfaces (the ideal case).
+const BODY_CAPS = [Infinity, 1600, 1200, 900, 700, 500, 350, 250, 180, 120];
+
+// Build the surface hook's stdout: the largest rendering of the decision tables
+// that fits `budgetBytes`, degrading per-item body text (never dropping items or
+// IDs) and announcing the clip + where the full text lives. Returns
+// { output, fullOutput, clipped, bodyCap } — `fullOutput` is the uncapped form
+// for the on-disk fallback copy.
+export function buildSurfaceOutput(items, {
+  fallbackRelPath,
+  sourceNote = '',
+  budgetBytes = INLINE_BUDGET_BYTES,
+} = {}) {
+  const headerFor = (clipNote) =>
+    `# Open doc-review items (nightly routine) — ${items.length} open\n\n` +
+    'Decide each item from the tables below' +
+    (clipNote ? '' : ' (full text — no need to open the findings file)') +
+    '. Once each is applied/rejected, have me run ' +
+    '`node .claude/hooks/doc-review-resolve.mjs <ID>...` so it stops re-surfacing.' +
+    (clipNote ? ` ${clipNote}` : '') +
+    (sourceNote ? ` ${sourceNote}` : '') +
+    '\n';
+  const assemble = (cap, clipNote) =>
+    headerFor(clipNote) + renderOpenItemsMarkdown(items, cap) + '\n';
+
+  const fullOutput = assemble(Infinity, '');
+  let last = fullOutput;
+  for (const cap of BODY_CAPS) {
+    const clippedCount = Number.isFinite(cap)
+      ? items.filter((it) => (it.body || it.summary || '').length > cap).length
+      : 0;
+    const clipNote =
+      clippedCount > 0
+        ? `⚠ ${clippedCount} of ${items.length} item texts are clipped to fit the inline size budget — ` +
+          `the full tables are in \`${fallbackRelPath}\` (Read it before deciding a clipped item).`
+        : '';
+    const output = assemble(cap, clipNote);
+    last = output;
+    if (Buffer.byteLength(output, 'utf8') <= budgetBytes) {
+      return { output, fullOutput, clipped: clippedCount > 0, bodyCap: cap };
+    }
+  }
+  // Even the tightest cap is over budget (pathological item count) — emit it
+  // anyway; a partially-inlined table still beats silence.
+  return { output: last, fullOutput, clipped: true, bodyCap: BODY_CAPS[BODY_CAPS.length - 1] };
 }
 
 // Convenience: discover remotes, read findings (NO fetch — the surface hook already

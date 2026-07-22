@@ -28,7 +28,7 @@ import {
   readFindings,
   extractOpenText,
   parseOpenItems,
-  renderOpenItemsMarkdown,
+  buildSurfaceOutput,
   BRANCH,
   FILE,
 } from './docReviewFindings.mjs';
@@ -60,29 +60,25 @@ try {
   const items = parseOpenItems(openText).filter((it) => !resolved.has(it.id));
   if (items.length === 0) process.exit(0);
 
-  // Render the FULL per-section decision tables — every item's complete text, so
-  // the owner can approve/reject each item from the surfaced output alone (the
-  // owner-requested zero-roundtrip contract, 2026-07-17; this deliberately
-  // replaces the old bounded digest whose IDs-only mode forced a `git show`
-  // round-trip exactly when the backlog was largest). The truncation risk the
-  // digest guarded against is handled by the on-disk fallback copy instead: the
-  // header names it FIRST, so even a clipped preview keeps the recovery pointer.
-  const table = renderOpenItemsMarkdown(items);
-  const output =
-    `# Open doc-review items (nightly routine) — ${items.length} open\n\n` +
-    'Decide each item from the tables below (full text — no need to open the ' +
-    'findings file). Once each is applied/rejected, have me run ' +
-    '`node .claude/hooks/doc-review-resolve.mjs <ID>...` so it stops re-surfacing. ' +
-    `If the tables below appear truncated, the identical full copy is at ` +
-    `\`${FALLBACK_RELPATH}\` (source of truth: \`git show ${found.usedRef || BRANCH}:${FILE}\`).\n` +
-    table +
-    '\n';
+  // Render the LARGEST per-section decision tables that fit the harness's inline
+  // hook-output budget (the owner-requested zero-roundtrip contract, 2026-07-17):
+  // full item text when it fits; per-item clipped text (never dropped items or
+  // IDs) with a loud clip note when it doesn't. An over-budget render is worse
+  // than a clipped one — the harness persists it to a side file and the session
+  // sees only a one-line preview, which is exactly the "single unexplained line"
+  // failure this budget exists to prevent. The uncapped tables always land in
+  // the on-disk fallback copy below.
+  const { output, fullOutput } = buildSurfaceOutput(items, {
+    fallbackRelPath: FALLBACK_RELPATH,
+    sourceNote: `Source of truth: \`git show ${found.usedRef || BRANCH}:${FILE}\`.`,
+  });
 
-  // Best-effort fallback write — a failure here must never block the surface.
+  // Best-effort fallback write (always the FULL, uncapped tables) — a failure
+  // here must never block the surface.
   try {
     const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     mkdirSync(join(projectDir, '.audit-tools'), { recursive: true });
-    writeFileSync(join(projectDir, FALLBACK_RELPATH), output, 'utf8');
+    writeFileSync(join(projectDir, FALLBACK_RELPATH), fullOutput, 'utf8');
   } catch {
     /* fallback copy is optional */
   }
