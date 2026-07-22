@@ -98,16 +98,7 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. RESUME the paused re-dogfood self-audit (v0.34.6, PAUSED mid-rolling-dispatch 2026-07-21).**
-State + 15 observations: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md). It already
-validated: Gate-0 capability/provenance channels, the full charter→delta→design-review pipeline on
-free NIM workers, the 429 wall → graceful resumable pause → learned cooldown, host-dispatch
-fallback with cold-start batching, nested dispatcher subagents, and two HIGH ingest defects.
-Resume: from THIS primary checkout, `audit-code next-step` with the `--auditor` roster handshake
-(the exact command is in any `steps/*/current-step.json` `allowed_commands`; prefix
-`OPENCODE_ZEN_API_KEY=public`). Expect a staleness re-extraction (docs changed at pause,
-deliberate); a replan of the ~60 remaining packets is acceptable — ingested results survive.
-Delegating the rolling loop to a dispatcher subagent WORKS (observation 15) — use it.
+**1. TRIAGE the completed re-dogfood audit + MERGE QUEUE.** The self-audit COMPLETED 2026-07-22 (present_report): deliverables at `.audit-tools/audit-findings.json` (1480 findings, 78 high, 10 themes) + `.audit-tools/audit-report.md`. Friction/defect record (11 mechanism-grade entries): [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md); completion-blocker forensics: [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md). Next: (a) merge queue below is now UNBLOCKED (run complete); (b) triage the backlog pointer entry into per-item entries; (c) hand-label findings into corpus/ for the A2 oracle; (d) top product fixes from the run: claim-release/zero-grant drain livelock, charter-consume metadata restamp, per-worker git write-scope enforcement, NIM single-shot-only routing.
 
 **2. MERGE QUEUE — two ready worktree branches, HELD to protect the running audit** (merge only
 at run completion, or accept a replan):
