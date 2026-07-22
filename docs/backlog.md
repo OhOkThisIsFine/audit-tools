@@ -145,6 +145,28 @@ followed" is otherwise indistinguishable from a bug.
   false-clean; consider targeted re-review of those packets in deepening. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
 
+- **DECIDED (owner 2026-07-22, from doc-review DD-9): wire the semantic-equivalence gate into the
+  intent-checkpoint staleness path — investigation confirmed over-staling is REAL and total.**
+  `intent_checkpoint.json` carries host-authored free prose (`scope_summary` / `intent_summary` /
+  `free_form_intent` / `constraint_clauses[].host_answer`), so a benign rephrase changes the
+  canonical hash and re-stales the ENTIRE planning+execution cascade (charters → coverage → tasks →
+  dispatch → synthesis — effectively a full audit re-run). Worse: `confirmed_at`/`confirmed_by` are
+  NOT in `NON_SEMANTIC_FIELDS_BY_ARTIFACT` (`artifactFreshness.ts:23-40`), so even a
+  byte-identical-prose re-confirm over-stales purely on the refreshed timestamp (the headless
+  fallback stamps `new Date().toISOString()`, `intentCheckpointExecutor.ts:430`).
+  **SPEC (two layers, one lap):** (1) no-judge quick win — add
+  `intent_checkpoint.json: ["confirmed_at","confirmed_by"]` to the non-semantic strip list;
+  (2) wire `intentCheckpointGate.ts` (built + tested, zero production callers) at the
+  `intent_checkpoint.json` dependency-edge compare (`staleness.ts:131-139`) — requires persisting a
+  normalized-intent baseline + cached verdict in `artifact_metadata` (mirror `resultBaseline.ts`'s
+  store, exactly as `docs/backlog-remediation-design.md`'s seam line mandates), and WIDENING
+  `DEFAULT_NORMALIZE_CONFIG.semanticFields` beyond the four prose fields to the planning-driving
+  fields (`excluded_scope`, `must_not_touch`, `lens_selection`, `disposition_overrides`,
+  `design_review`, `filters`) — wiring without widening UNDER-stales: a lens change with unchanged
+  prose would silently judge "unchanged". Loop-core (all sites under `src/audit/orchestrator/`),
+  attestation required. Same whole-artifact-hash `dependency_revisions` mechanism as the charter
+  phantom-staleness entry below — design the two fixes together.
+
 - **⬇ LIVE (re-dogfood 2026-07-22, medium): charter re-extraction re-fired over a byte-identical
   subsystem set — DAG staleness keys on whole-artifact content hash, not the semantic slice the
   downstream step consumes.** Mid-run ingests staled charter_register via the DAG, and the
@@ -400,11 +422,27 @@ followed" is otherwise indistinguishable from a bug.
   network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
   predate the field, and refusing to load them would turn a historical gap into an outage.
 
-- **`AdmissionGrant.resource_key` becomes partial under multi-constraint (2026-07-19).** Now that
-  `reconcile(leaseId)` sweeps every key, this field has no reader — it is diagnostic provenance. Once
-  steps 3–4 supply N constraints it will record one of N while looking authoritative. **Property to
-  hold:** the artifact either records every key the lease was taken against, or does not record one
-  at all. Documented in place at `admissionLoop.ts`.
+- **Dispatch legibility: a deterministic mechanistic trace for EVERY dispatch decision (owner goal
+  2026-07-22; subsumes the 2026-07-19 `AdmissionGrant.resource_key` partiality entry).** Two defects,
+  one invariant. (a) `AdmissionGrant.resource_key` is partial under multi-constraint: one grant is
+  counted against several resource keys and the scalar field records one of N while looking
+  authoritative (no reader — `reconcile(leaseId)` sweeps every key; doc comment in
+  `admissionLoop.ts`). (b) Whole decision paths write NO explain at all: the re-dogfood run's
+  dispatch-quota.json showed 144 granted with leases/explains EMPTY, and a stranded packet's
+  per-pool why-not (`rolling_dispatch_stranded_no_fitting_pool`) exists only as a telemetry event,
+  not a record.
+  **SPEC:** the ledger already computes a per-constraint `ConstraintOutcome { resourceKey,
+  headroomBefore, … }` for every key it evaluates — so this is carry-through, not new derivation.
+  (1) Replace the scalar `resource_key` with the full constraint-outcome array on every explain
+  record (each key consulted, its headroom before, the packet's cost against it, which key refused);
+  the artifact either records every key the decision was taken against or none, never one. (2) Every
+  decision path — host grant, in-process rolling engine, refusal, strand — writes its explain; an
+  empty explains array on a non-empty decision round is a defect. (3) The trace is assembled
+  deterministically from ledger/pool-build state the tool already holds — no LLM, no sampling.
+  Target-state prose is pinned in `spec/audit/dispatch-admission-control.md` → Resolved decision 3
+  (Legibility). Loop-core (`admissionLoop.ts`, rolling engine) — attestation required. Natural
+  companion to the zero-spill pool-build diagnosis above, which needs exactly this trace to be
+  diagnosable from artifacts.
 
 - **An uncalibrated pool must reach the cold-start probe path, not be waved through (unpinned).** The
   ledger treats a non-finite budget as unbounded by design — an optimistic start that the reactive 429

@@ -232,11 +232,26 @@ ledger is layered on top of it, never in place of it.
    remains correct regardless. The ledger reduces co-located overshoot; it never
    claims to be the meter. It must not be presented (in artifact or prompt) as a
    hard guarantee.
-3. **Legibility — the dispatch-quota artifact explains every admission.** Each
-   admission records `{ packet_id, pool_id, resource_key, admitted, reason
+3. **Legibility — every dispatch decision leaves a deterministic, mechanistic
+   trace.** Each admission records `{ packet_id, pool_id, resource_key, admitted,
+   reason
    (admitted|no_capable_pool|budget_exhausted|cap_reached|packet_oversized|window_uncalibrated), headroom_before,
    outstanding_before, cost }` so the emergent fan-out width is reconstructable
    after the fact.
+   ⚠ **Interim gap in the record's `resource_key`** (tracked in `docs/backlog.md`):
+   under multi-constraint admission one grant is counted against SEVERAL resource
+   keys at once, and the scalar field records only one of them — diagnostic
+   provenance, not the full reason (its own doc comment in `admissionLoop.ts` says
+   so). The ledger already evaluates a per-constraint outcome
+   (`ConstraintOutcome { resourceKey, headroomBefore, … }`) for every key; the
+   explain record does not yet carry that array.
+   **Target state (the plan of record, not yet the code):** every admit AND every
+   refusal/strand carries the full constraint-outcome array it was decided on —
+   which keys were consulted, each key's headroom before, the packet's cost against
+   it, and which key refused — assembled deterministically from ledger state the
+   tool already holds (no judgment, no sampling). A decision path that writes no
+   explain at all is itself a defect of this invariant (a live run observed a
+   144-packet grant whose leases/explains arrays were empty).
 4. **Cold-start — probe-then-widen only when unknown.** When the `resourceKey` has
    no learned slope, the first admission window is deliberately narrow (probe: admit
    a small N, then widen as the first completions calibrate the learned
@@ -295,12 +310,13 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
   present at once; the plan carries the top-K survivors, `granted_packet_ids` carries the
   admitted subset of those.
 
-- **The per-pool budget the ledger admits against comes from the pool's live quota
-  snapshot, not a new source.** `resolvePoolBudget(pool.id)` returns the live remaining
-  TOKENS for the resourceKey: `remaining_pct × learned tokens_per_pct` for the binding
-  window (MIN across the pool's windows), using the slope `rollingDispatch.ts` already
-  learns (`recordTokensPerPctObservation`) and the snapshot the quota source already
-  supplies. Cold start (no learned slope for the resourceKey) → probe-then-widen
+- **The constraints the ledger admits against come from the pool's live quota
+  snapshot, not a new source.** `windowConstraintsFor` (next section) turns the pool's
+  window allowances into one ledger constraint per window — `remaining_pct × learned
+  tokens_per_pct` per window where the provider reports only percent — using the slope
+  `rollingDispatch.ts` already learns (`recordTokensPerPctObservation`) and the
+  snapshot the quota source already supplies. Cold start (no learned slope for a window's
+  resourceKey) → probe-then-widen
   (Resolved decision 4): a deliberately narrow first grant, widening as the first
   completions calibrate the slope. **On the claude-code host path the slope learns from
   host-reported `token_usage`** when the host stamps it (`recordHostTokenUsageObservation`,
@@ -312,40 +328,62 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
   tracked in `docs/backlog.md` (quota-aware dispatch). See
   [[claude-usage-endpoint-body-shape]] / [[cross-provider-quota-matrix]].
 
-## Deriving the per-pool token budget (the substrate the ledger admits against)
+## Deriving the per-pool admission constraints (the substrate the ledger admits against)
 
-Admission compares each task's cost against a pool's `remaining_token_budget`. That
-budget is derived from the pool's live quota snapshot — the provider-neutral substrate
-below, single-sourced in `src/shared/quota` and consumed identically by audit +
-remediate (this is `resolvePoolBudget`'s input; see [[claude-usage-endpoint-body-shape]]
-/ [[cross-provider-quota-matrix]]).
+Admission does not compare a task's cost against one collapsed number. Each active
+quota window on a pool becomes its **own ledger constraint**, and a packet is admitted
+only when **every** constraint clears simultaneously — all-or-nothing at the ledger.
+The derivation is single-sourced in `windowConstraintsFor`
+(`src/shared/quota/windowConstraints.ts`), the one seam both admission paths go
+through — the host grant (`admissionLoop`) and the in-process rolling engine — and is
+consumed identically by audit + remediate. A MIN-collapsed scalar budget is the
+rejected model: collapsing loses *which* window binds (illegible refusals) and cannot
+meter an account-shared window separately from a per-model one (see
+[[claude-usage-endpoint-body-shape]] / [[cross-provider-quota-matrix]]).
 
 - **Provider-neutral snapshot.** Every quota source normalizes to
   `QuotaUsageSnapshot { remaining_pct (0–1), reset_at, requests_remaining,
-  tokens_remaining, windows[] }`. The budget derivation reads only this shape, so a
-  Claude pool, a Codex pool, and a NIM pool run through identical code.
+  tokens_remaining, windows[] }`. Each `windows[]` entry is
+  `{ label, scope, remaining_pct, reset_at, tokens_remaining? }` — and `scope` is
+  REQUIRED (`'account' | 'model'`, no default): it declares which partition the
+  allowance belongs to, decided by the PRODUCER (the quota source / source
+  declaration) and only carried downstream, never re-derived at a consumer. The
+  derivation reads only this shape, so a Claude pool, a Codex pool, and a NIM pool
+  run through identical code.
 - **`openai_compatible` converges onto the same source-pool shape.** A legacy
-  `openai_compatible` config block now carries its own `quota` (the same
+  `openai_compatible` config block carries its own `quota` (the same
   `QuotaModelLimits` shape a `sources[]` entry carries) — it converges onto identical
-  budget derivation rather than falling to the generic default-token floor a
-  quota-less legacy block used to hit.
-- **Per-window slopes — never one collapsed slope.** A provider exposes several
-  concurrent limit windows, each with its own denominator (Claude: 5-hour `session` +
-  7-day `weekly`; Codex: primary-5h + secondary-weekly). The same N tokens is a large
-  percent of the small window but a tiny percent of the big one, so the tokens→percent
-  slope differs per window. The snapshot carries a generic `windows[]` breakdown (each
-  `{label, remaining_pct, reset_at}`, provider-agnostic labels), and the budget learns a
-  slope keyed on `(pool-key, window-label)`. The top-level `remaining_pct` stays the min
-  (binding) window for other consumers, but the budget works per-window.
-- **Budget per window, then the min.** For each active window, in priority order:
-  (1) an **absolute** `tokens_remaining` if the provider gives one; (2) a **learned
-  slope** — most subscription endpoints expose only percent-utilization, so learn
-  `tokens_per_pct[window-label]` per pool key from observed Δutilization vs
-  tokens-dispatched, budget = `remaining_pct × 100 × tokens_per_pct[label]`; (3) **cold
-  start** (no absolute, no learned slope) — calibrate, don't invent a cap: dispatch a
-  small bounded first batch, observe the per-window Δutilization to seed each slope, then
-  widen (a measurement bootstrap, per-(pool, window)). `remaining_token_budget = min over
-  active windows`.
+  constraint derivation rather than falling to a generic default-token floor.
+- **Scope decides the ledger key** (`windowResourceKey`). An `account`-scoped window
+  meters as `acct:<accountKey>::<label>` — one allowance shared by every model on
+  the credential (`accountKey` travels from `CapacityPool.accountKey`, stamped at the
+  producer). A `model`-scoped window meters as `pool:<poolId>::<label>` — this model
+  alone, so siblings the limit does not cover are never falsely throttled. The
+  namespaces are deliberate: without them the two keyspaces collide exactly on the
+  unattributable-source fallback (`accountKey === poolId`), and an account window
+  sharing a label with a model window would silently meter as one allowance.
+- **Per-window budgets in per-window units — never one collapsed slope.** A
+  `WindowBudget` carries its remaining allowance in its own unit: absolute `tokens`,
+  or `percent` with a learned `tokensPerPct` slope. A provider exposes several
+  concurrent windows with different denominators (Claude: 5-hour `session` + 7-day
+  `weekly`; Codex: primary-5h + secondary-weekly); the same N tokens is a large
+  percent of the small window and a tiny percent of the big one, so slopes are
+  learned per `(pool-key, window-label)`. The top-level `remaining_pct` stays the min
+  (binding) window for other consumers; admission itself is per-window.
+- **A window that cannot price the draw refuses the pool.** A `percent` window with
+  no learned slope cannot convert the packet's tokens into its unit. Such windows are
+  returned separately (`unpriced`; non-empty means REFUSE) and the caller routes the
+  pool through the cold-start clamp instead of admitting against the partial
+  constraint set — silently omitting an unpriceable window would meter the packet
+  against fewer allowances than actually bind it, which is the fail-open direction.
+- **No windows at all** (no live signal, or the cooldown path that skips derivation)
+  → one pool-keyed fallback constraint carrying the pool's own scalar budget —
+  deliberately never `+Infinity`, so a caller still holding a finite
+  `remaining_token_budget` keeps its ceiling instead of silently over-admitting.
+- **Cold start — calibrate, don't invent a cap.** No absolute and no learned slope →
+  dispatch a small bounded first batch, observe the per-window Δutilization to seed
+  each slope, then widen (a measurement bootstrap, per-(pool, window); Resolved
+  decision 4).
 - **Learning wiring.** The rolling engine samples the pool's snapshot around dispatch and
   attributes spend: `slope_sample = Δtokens_dispatched / Δutilization_percent`, folded
   into a per-key EWMA in `quota-state.json` (the same learned-limits machinery as RPM/TPM
@@ -359,7 +397,7 @@ remediate (this is `resolvePoolBudget`'s input; see [[claude-usage-endpoint-body
 admitted set; `reset_at` bounds how long a fully-spent pool stays parked before it
 refills. On the claude-code host path the slope learns from host-reported `token_usage`
 when the host stamps it, and degrades to percent-only (no actual-usage number) otherwise,
-so there the operative budget is the declared-cap output envelope
+so there the operative constraint set is the declared-cap output envelope
 and the reactive 429 floor — the ledger prevents co-located double-counting but never
 gates on an absolute token ceiling (see *Host-path admission shape*).
 

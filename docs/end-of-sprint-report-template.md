@@ -38,10 +38,13 @@ so a silent omission can't masquerade as "nothing to report".
 - <durable how-to> → `CLAUDE.md`
 
 ### Friction this sprint
-> Named prompts are seeds, NOT an exhaustive schema — always include the open-ended line.
-- Gate / tool re-loops: <… | none>
-- Integration-guard / cross-cutting failures caught late: <… | none>
-- Re-scopes / surprises / out-of-band manual interventions: <… | none>
+> Categories are the single-sourced friction vocabulary (`FRICTION_CATEGORIES`,
+> `src/shared/friction/frictionRecord.ts`) — one taxonomy for sprint retros and the
+> product's mechanical capture. Named prompts are seeds, NOT an exhaustive schema —
+> always include the open-ended line.
+- ambiguous_direction (instructions/docs/specs pointed the wrong way, or contradicted each other): <… | none>
+- tool_should_decide (a human/agent had to remember, notice, or decide something the tool should enforce): <… | none>
+- inefficient_feeding (context/tokens wasted moving information in or out — re-derivation, dumps, re-loops): <… | none>
 - **Open-ended (anything else that caused friction, fit no category above):** <… | none>
 - Logged to: <docs/backlog.md entry | friction record | none warranted>
 ```

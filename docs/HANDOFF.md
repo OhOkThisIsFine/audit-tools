@@ -110,7 +110,11 @@ records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-
 entries now at the top of backlog *Open bugs*: claim-release-is-merge-only + zero-grant drain
 livelock; charter-consume metadata restamp livelock; per-worker git write-scope enforcement. Next
 tier (also entered): zero-spill wave pool-build/fit gap (upgraded to mechanism-confirmed), NIM
-single-shot-only routing, abnormal-exit no-step-contract false signal.
+single-shot-only routing, abnormal-exit no-step-contract false signal, and the dispatch-legibility
+mechanistic trace (constraint-outcome array on every explain + no-empty-explains invariant — the
+owner-set goal; pairs with the zero-spill diagnosis, which needs that trace), and the
+intent-checkpoint semantic-equivalence gate wiring (owner-decided from DD-9; specced in backlog,
+same staleness family as the charter phantom-staleness entry).
 
 **2. Hand-label the run's findings into `corpus/<run-id>.labels.json`** — one labeled run is the
 only thing blocking the A2 finding-quality oracle (backlog *Deferred / waiting*).
