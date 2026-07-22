@@ -73,6 +73,16 @@ export function remediationArtifactsDir(root: string): string {
 }
 
 /**
+ * `<root>/.audit-tools/worktrees` — the gitignored home for tool-created git
+ * worktrees (remediate's per-node implement worktrees; audit's disposable
+ * review snapshots). Single-sourced so every worktree producer/sweeper agrees
+ * on the one location.
+ */
+export function auditToolsWorktreesDir(root: string): string {
+  return join(auditToolsDir(root), "worktrees");
+}
+
+/**
  * `<artifactsDir>/steps` — where each orchestrator writes `current-step.json`
  * and `current-prompt.md`. Takes an already-resolved artifacts dir (audit or
  * remediation), not a root, because both halves share this child name.

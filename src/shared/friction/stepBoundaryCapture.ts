@@ -84,6 +84,7 @@ export type StepBoundaryEventType =
   | "declared_cost_drift"
   | "credit_exhausted"
   | "model_unavailable"
+  | "write_scope_degraded"
   | "packet_too_large"
   | "quota_unclassified"
   | "newly_reachable_backend"
@@ -128,6 +129,10 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // A model-unavailable (404) pool is not served by this provider — operator must
   // either remove it from declared backends or investigate provider availability.
   model_unavailable: "tool_should_decide",
+  // The disposable review-snapshot worktree could not be created, so spawned CLI
+  // review workers ran against the REAL checkout with prompt-only write scope —
+  // the mechanical boundary the snapshot exists to provide was absent this run.
+  write_scope_degraded: "tool_should_decide",
   // A packet-too-large (413) fault is a per-packet sizing issue (this packet/pool pair).
   // Operator should investigate packet content size or pool limits.
   packet_too_large: "tool_should_decide",

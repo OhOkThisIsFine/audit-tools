@@ -102,17 +102,20 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Remaining HIGH product fixes from the re-dogfood run.** The claim-release/zero-grant
-completion livelock is FIXED and released in v0.34.8 (`681df1f5`: `releaseOwned` owner-scoped claim
-release at drive end; `no_progress` empty-round status + salvage fold; attested, free-lane
-reviewed). Still open, top of backlog *Open bugs*: **charter-consume metadata restamp livelock**
-(HIGH) and **per-worker git write-scope enforcement** (HIGH). Next tier (also entered): zero-spill
-wave pool-build/fit gap (mechanism-confirmed), NIM single-shot-only routing, abnormal-exit
-no-step-contract false signal, the dispatch-legibility mechanistic trace (constraint-outcome array
-on every explain + no-empty-explains invariant — the owner-set goal; pairs with the zero-spill
-diagnosis), and the intent-checkpoint semantic-equivalence gate wiring (owner-decided from DD-9;
-specced in backlog, same staleness family as the charter phantom-staleness entry — design the two
-together). Run records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
+**1. Launch the `/remediate-code` dogfood on the audit findings — all three HIGH re-dogfood fixes
+are SHIPPED.** v0.34.8: claim-release/zero-grant completion livelock (`releaseOwned` + `no_progress`
+rounds + salvage fold). v0.34.9: charter provenance churn + content-verified metadata
+carry-forward (the entry's stated mechanism was refuted; the real defects fixed). v0.34.10:
+CLI-worker write-scope via the disposable review-snapshot worktree (residuals documented in the
+backlog entry). The remediate dogfood was the gate behind write-scope: run it from the primary
+`main` checkout with current global bins, scoped to a diagnosable slice (the 78 high-severity
+findings, or one theme) rather than all 1480; the planning gates (review-necessity tiering,
+ambiguity batching) are themselves under test, and stale findings (the fixed livelock family) are
+deliberate verification bait. Next tier after that (all specced in backlog *Open bugs*):
+zero-spill wave pool-build/fit gap, dispatch-legibility mechanistic trace (owner-set goal; pairs
+with zero-spill), intent-checkpoint gate wiring + charter phantom-staleness (design together), NIM
+single-shot-only routing, abnormal-exit no-step-contract. Run records:
+[`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
 [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
 `.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
 

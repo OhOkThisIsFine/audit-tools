@@ -833,6 +833,8 @@ export {
 
 // Provider command runner (single source of truth for both orchestrators)
 export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
+export { createReviewSnapshot, removeReviewSnapshot } from "./providers/reviewSnapshot.js";
+export type { ReviewSnapshotResult } from "./providers/reviewSnapshot.js";
 export type { SpawnLoggedCommandOptions } from "./providers/spawnLoggedCommand.js";
 
 // Provider launch helpers (shared so both orchestrators stay in lockstep)

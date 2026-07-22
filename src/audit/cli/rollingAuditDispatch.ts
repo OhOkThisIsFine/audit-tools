@@ -13,9 +13,12 @@
  *
  * KEY DIFFERENCE FROM REMEDIATE: audit dispatch is READ-ONLY review (packet →
  * AuditResult[]), not worktree edits. So there is NO per-node worktree, NO commit,
- * NO cherry-pick merge — every worker is launched with `repoRoot` = the actual
- * repo root and writes only its result file. The merge step is result ingestion,
- * not a git merge.
+ * NO cherry-pick merge — the merge step is result ingestion, not a git merge.
+ * Workers are launched against ONE shared, disposable, detached review-snapshot
+ * worktree of HEAD (per drive, created lazily on first spawn) rather than the
+ * real checkout: the snapshot is the MECHANICAL write-scope boundary for spawned
+ * CLI lanes — see `makeAuditProviderPacketDispatcher`'s docblock. Each worker
+ * writes only its result file, into the real artifacts dir.
  */
 
 import { dirname, join } from "node:path";
@@ -42,6 +45,8 @@ import {
   captureModelUnavailableFriction,
   capturePacketTooLargeFriction,
   resolveRollingEngineFlag,
+  createReviewSnapshot,
+  removeReviewSnapshot,
 } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -208,10 +213,24 @@ function packetComplexityScore(entry: DispatchPlanEntry): number {
  * Build the live, provider-backed per-packet dispatcher — the programmatic worker
  * the rolling engine drives. It resolves the `FreshSessionProvider` the scheduler
  * SELECTED for the slot (falling back to the configured provider) and launches it
- * with the packet's self-contained review prompt, `repoRoot` = the actual repo
- * (read-only review — no worktree), and the packet's result path. The worker reads
- * the cited files and writes its `AuditResult[]` to the result file; the
- * deterministic `mergeAndIngest` downstream is the authority on the contents.
+ * with the packet's self-contained review prompt and the packet's result path.
+ * The worker reads the cited files and writes its `AuditResult[]` to the result
+ * file; the deterministic `mergeAndIngest` downstream is the authority on the
+ * contents.
+ *
+ * WRITE SCOPE (mechanical, not prompt text): `repoRoot` for every spawned worker
+ * is a DISPOSABLE detached review-snapshot worktree of HEAD, created lazily on
+ * the first launch and shared by all packets — a worker-side `git checkout` /
+ * reset / stray write mutates the throwaway copy, never the operator's real
+ * checkout. Prompt-level "treat repo files as read-only" already failed live
+ * (codex `workspace-write` roots the WRITABLE sandbox at the repo; agy has no
+ * sandbox at all), and per-CLI flags cannot cover every lane — the launch root
+ * is the one chokepoint that covers them uniformly
+ * ([[enforce-robustness-in-tooling-not-host-discretion]]). Result/prompt/sidecar
+ * paths stay absolute into the REAL artifacts dir. A failed snapshot creation
+ * (non-git root) degrades loudly to the real root with a `write_scope_degraded`
+ * friction record — a run is never blocked on the boundary, only un-shielded
+ * with a visible reason. The drive removes the snapshot at its end.
  */
 export function makeAuditProviderPacketDispatcher(params: {
   root: string;
@@ -231,6 +250,38 @@ export function makeAuditProviderPacketDispatcher(params: {
    */
   sourceByPoolId?: Map<string, DispatchableSource>;
 }): AuditPacketDispatcher {
+  // Lazy per-dispatcher review snapshot, memoized as a promise so concurrent
+  // first launches create exactly one. Resolves to the snapshot path, or to the
+  // real root (loud degrade) when the snapshot cannot be created.
+  let reviewRootPromise: Promise<string> | null = null;
+  const resolveReviewRoot = (): Promise<string> => {
+    reviewRootPromise ??= (async () => {
+      const snapshot = await createReviewSnapshot(params.root, params.runId);
+      if (snapshot.path !== null) return snapshot.path;
+      process.stderr.write(
+        `[rollingAuditDispatch] review-snapshot creation failed (${snapshot.reason}); ` +
+          "spawned review workers DEGRADE to the real checkout — write-scope is prompt-only this run\n",
+      );
+      // Awaited (not fire-and-forget): the degrade is rare and cold, and an
+      // unawaited write here races the caller's teardown.
+      await captureStepBoundaryFriction(
+        params.artifactsDir,
+        params.runId,
+        {
+          eventType: "write_scope_degraded",
+          discriminator: params.runId,
+          note: `review-snapshot creation failed: ${snapshot.reason}`,
+          severity: "high",
+          category: "trap",
+          area: "dispatch/write-scope",
+        },
+        "audit-code",
+      );
+      return params.root;
+    })();
+    return reviewRootPromise;
+  };
+
   return async (packet, slot) => {
     const entry = packet.payload;
     const resolveProvider = params.createProvider ?? createFreshSessionProvider;
@@ -269,9 +320,10 @@ export function makeAuditProviderPacketDispatcher(params: {
 
     try {
       const launch = await provider.launch({
-        // Read-only review: the actual repo root, NOT an isolated worktree. The
-        // worker reads the cited files and emits findings; it must not edit source.
-        repoRoot: params.root,
+        // Read-only review against the disposable snapshot worktree (real root
+        // only on loud degrade) — see the dispatcher docblock. The worker reads
+        // the cited files there and emits findings into the REAL artifacts dir.
+        repoRoot: await resolveReviewRoot(),
         runId: task.run_id,
         obligationId: task.obligation_id,
         promptPath: entry.prompt_path,
@@ -492,7 +544,9 @@ export async function driveRollingAuditDispatch(params: {
       sourceByPoolId: sourceByPoolId(dispatch.pools as CapacityPool[]),
     });
 
-  const run = await runRollingDispatch<DispatchPlanEntry>(
+  let run: Awaited<ReturnType<typeof runRollingDispatch<DispatchPlanEntry>>>;
+  try {
+    run = await runRollingDispatch<DispatchPlanEntry>(
     packets,
     dispatch.pools as CapacityPool[],
     sessionConfig,
@@ -549,7 +603,14 @@ export async function driveRollingAuditDispatch(params: {
       },
     },
     dispatchPacket,
-  );
+    );
+  } finally {
+    // Best-effort removal of the disposable review-snapshot worktree the
+    // dispatcher lazily created (no-op when no spawned launch happened, when an
+    // injected test dispatcher ran, or on a non-git root). A straggler-held cwd
+    // that defeats removal is swept by the next drive's pre-create pass.
+    await removeReviewSnapshot(root, runId);
+  }
 
   // Stranded packets (the engine's in-pass spill + reactive re-route already failed
   // — a FULL strand): rather than immediately stranding to a partial-completion

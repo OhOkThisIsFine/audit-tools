@@ -405,6 +405,111 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
   expect(result.exhausted_pool_ids.length > 0, "the rate-limit-exhausted pool is named in exhausted_pool_ids").toBeTruthy();
 });
 
+// ── 3a. Write scope: spawned workers launch against a disposable snapshot ─────
+
+test("write-scope: in a git repo, spawned review workers launch against a disposable snapshot worktree, never the real checkout", async () => {
+  const { execFileSyncHidden } = await import("../helpers/spawn.mjs");
+  const gitRun = (cwd, ...args) =>
+    execFileSyncHidden("git", args, { cwd, encoding: "utf8" });
+  const { artifactsDir, runDir } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  // Make the test root a real git repo (the incident's precondition — a repo
+  // whose .git a worker could mutate).
+  gitRun(artifactsDir, "init");
+  gitRun(artifactsDir, "config", "user.email", "t@t");
+  gitRun(artifactsDir, "config", "user.name", "t");
+  await writeFile(join(artifactsDir, "committed.txt"), "at HEAD\n", "utf8");
+  gitRun(artifactsDir, "add", "committed.txt");
+  gitRun(artifactsDir, "commit", "-m", "init");
+
+  await mkdir(join(runDir, "task-results"), { recursive: true });
+  const captured = [];
+  const dispatcher = makeAuditProviderPacketDispatcher({
+    root: artifactsDir,
+    artifactsDir,
+    runId: RUN_ID,
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    createProvider: () => ({
+      name: "fake",
+      async launch(input) {
+        captured.push(input);
+        await writeFile(input.resultPath, JSON.stringify([]), "utf8");
+        return { accepted: true };
+      },
+    }),
+  });
+  const packet = {
+    id: "pkt-ws",
+    payload: {
+      packet_id: "pkt-ws",
+      prompt_path: join(runDir, "task-results", "pkt-ws-prompt.md"),
+      result_path: join(runDir, "task-results", "pkt-ws-inline-result.json"),
+      access: { read_paths: [], write_paths: [], forbidden_patterns: [] },
+      complexity: { estimated_tokens: 100, priority: "medium" },
+    },
+    estimatedTokens: 100,
+    complexity: 0.5,
+  };
+  const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
+  expect(outcome.outcome).toBe("success");
+  const launchRoot = captured[0].repoRoot;
+  expect(launchRoot, "a git root must never be handed to the worker directly").not.toBe(artifactsDir);
+  // The snapshot is a real checkout of HEAD the worker can read (line-ending
+  // normalized: autocrlf may rewrite the checkout on Windows).
+  const committed = (await readFile(join(launchRoot, "committed.txt"), "utf8")).replace(/\r\n/g, "\n");
+  expect(committed).toBe("at HEAD\n");
+  // And it is disposable — mutating it leaves the real checkout untouched.
+  await writeFile(join(launchRoot, "committed.txt"), "vandalized\n", "utf8");
+  expect((await readFile(join(artifactsDir, "committed.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("at HEAD\n");
+  // Result file landed at the REAL artifacts path, not inside the snapshot.
+  expect(await readFile(packet.payload.result_path, "utf8")).toBe("[]");
+  // Cleanup the worktree registration for the temp repo.
+  const { removeReviewSnapshot } = await import("../../src/shared/providers/reviewSnapshot.ts");
+  await removeReviewSnapshot(artifactsDir, RUN_ID);
+});
+
+test("write-scope: a non-git root degrades LOUDLY — real root + a write_scope_degraded friction record", async () => {
+  const { artifactsDir, runDir } = await makeRun(); // plain temp dir, not a git repo
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  await mkdir(join(runDir, "task-results"), { recursive: true });
+  const captured = [];
+  const dispatcher = makeAuditProviderPacketDispatcher({
+    root: artifactsDir,
+    artifactsDir,
+    runId: RUN_ID,
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    createProvider: () => ({
+      name: "fake",
+      async launch(input) {
+        captured.push(input);
+        await writeFile(input.resultPath, JSON.stringify([]), "utf8");
+        return { accepted: true };
+      },
+    }),
+  });
+  const packet = {
+    id: "pkt-degrade",
+    payload: {
+      packet_id: "pkt-degrade",
+      prompt_path: join(runDir, "task-results", "pkt-degrade-prompt.md"),
+      result_path: join(runDir, "task-results", "pkt-degrade-inline-result.json"),
+      access: { read_paths: [], write_paths: [], forbidden_patterns: [] },
+      complexity: { estimated_tokens: 100, priority: "medium" },
+    },
+    estimatedTokens: 100,
+    complexity: 0.5,
+  };
+  const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
+  expect(outcome.outcome, "the degrade must never block the run").toBe("success");
+  expect(captured[0].repoRoot, "non-git root degrades to the real root").toBe(artifactsDir);
+  // The degrade is LOUD: a write_scope_degraded friction record exists.
+  const frictionFile = join(artifactsDir, "friction", `${RUN_ID}.json`);
+  const friction = await readFile(frictionFile, "utf8");
+  expect(friction).toContain("write_scope_degraded");
+});
+
 // ── 3b. Claim-release / zero-grant livelock (re-dogfood endgame 2026-07-22) ───
 // The completion livelock: every next-step mints a NEW runId; a failed round's
 // claims sat live for the full 20-min lease (release was merge-only), so each

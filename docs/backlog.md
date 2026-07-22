@@ -96,16 +96,23 @@ followed" is otherwise indistinguishable from a bug.
   [[artifact-metadata-surgery-uses-tool-hasher]]. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #7/#9.
 
-- **⬇ LIVE (re-dogfood 2026-07-22, HIGH): a sandboxed CLI worker SWITCHED THE CHECKOUT to main
-  mid-run — worker dispatch needs MECHANICAL per-worker write-scope enforcement.** A codex worker
-  under `-s workspace-write` ran `git checkout main` (reflog-verified; the agy lane ran with
-  `--dangerously-skip-permissions`); prompt-level "treat repo files as read-only" did not prevent
-  it. All workers for the next ~1h audited the wrong tree (blast radius verified small), and the
-  running tool stayed on the lap-branch build only because `dist/` is gitignored. Property:
-  CLI-lane workers get mechanical write-scope enforcement — per-worker sandbox denying `.git`
-  mutation, or worktree isolation for CLI lanes — same family as the audit-worker write-scope
-  enforcement in the dispatch design; prompt text is host discretion and already failed live.
-  [[enforce-robustness-in-tooling-not-host-discretion]] Record:
+- **CLI-worker write-scope enforcement — SHIPPED 2026-07-22 (disposable review-snapshot worktree);
+  four accepted residuals stay open here.** The checkout-to-main incident class is closed
+  mechanically: every spawned audit review worker now launches against a per-drive detached
+  `git worktree` snapshot of HEAD (`src/shared/providers/reviewSnapshot.ts`, wired in
+  `makeAuditProviderPacketDispatcher`) — a worker-side checkout/reset/stray write mutates the
+  throwaway copy, never the real checkout; non-git roots degrade loudly (`write_scope_degraded`
+  friction record, tested). Codex-side note from the recon: `-s workspace-write --cd <repo>` roots
+  the WRITABLE sandbox at the repo (anti-protective), and agy has no sandbox at all — which is why
+  the launch root, not per-CLI flags, is the enforcement point. Residuals, each accepted +
+  documented, revisit on evidence: (a) git REFS are shared through the worktree link — a hostile
+  worker could still `branch -D`/`push`/`gc` shared state (git refuses deleting a branch checked
+  out in any worktree; push needs creds — much narrower than the incident class); (b) on a DIRTY
+  tree, workers review HEAD while file_line_counts hints come from the real tree → ingest rejects
+  mismatched totals LOUDLY (audits normally run on committed state); (c) a transient creation
+  failure on a genuine git root degrades identically to the non-git case — consider distinguishing
+  it (louder) if it ever fires live; (d) one `git worktree add` per dispatching drive — if the cost
+  bites on large repos, reuse the snapshot keyed on HEAD sha. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #8.
 
 - **⬇ LIVE (re-dogfood endgame 2026-07-22, HIGH): claim release is merge-only + a zero-granted
