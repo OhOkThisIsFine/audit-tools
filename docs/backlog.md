@@ -1528,3 +1528,18 @@ Standing gotchas worth keeping for any agent (strong or weak):
   `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
   `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
+
+- **⬇ LIVE (re-dogfood COMPLETED 2026-07-22): eleven new friction/defect entries from the completed
+  self-audit — full per-item detail in
+  [`docs/reviews/re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md)
+  (mechanism-grade: zero-spill reproduced with pool-build evidence; charter-consume writes
+  charter_register without metadata restamp → extraction livelock; CLI workers can mutate git state
+  (checkout-to-main incident, reflog-verified) → per-worker write-scope enforcement; claim release is
+  merge-only + zero-grant rounds don't pause the drain → completion livelock (endgame record:
+  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md)); NIM burst-limiter
+  is structurally incompatible with agentic tool-loop workers (single-shot only); proxy-catalog
+  populate gap re-confirmed; agy-flash success-shaped-empty results → lens-aware routing lead;
+  maxTransitions abort emits no step contract (false-signal); manual lane substitution bypasses
+  cross-provider quota signals). Each needs triage into its own entry or fold into existing ones
+  (zero-spill, populate-gap, false-red merge entries already exist above — these upgrades supersede
+  their LEAD status).**
