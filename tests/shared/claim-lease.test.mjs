@@ -21,6 +21,22 @@ async function tempRegistry() {
   return { dir, registry, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
+test("releaseOwned releases only the caller's own claims, never a peer's", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    await registry.claimMany(["a", "b"], "mine");
+    await registry.claimMany(["c"], "peer");
+    const released = await registry.releaseOwned(["a", "b", "c", "absent"], "mine");
+    expect(released.sort()).toEqual(["a", "b"]);
+    const claims = await registry.listClaims();
+    expect(claims["a"], "own claim released").toBeUndefined();
+    expect(claims["b"], "own claim released").toBeUndefined();
+    expect(claims["c"]?.poolId, "a peer's live claim is untouchable").toBe("peer");
+  } finally {
+    await cleanup();
+  }
+});
+
 test("claimWithBackoff acquires an unheld node on the first attempt", async () => {
   const { registry, cleanup } = await tempRegistry();
   try {

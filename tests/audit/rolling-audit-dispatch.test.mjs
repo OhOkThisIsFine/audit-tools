@@ -23,8 +23,10 @@ const {
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
 } = await import("../../src/audit/cli/rollingAuditDispatch.ts");
-const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/cli/dispatch.ts");
+const { ACTIVE_DISPATCH_FILENAME, AUDIT_TASK_CLAIM_LEASE_MS } = await import("../../src/audit/cli/dispatch.ts");
 const { primaryInProcessSource } = await import("../../src/shared/quota/apiPool.ts");
+const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.ts");
+const { taskClaimsPath } = await import("../../src/shared/index.ts");
 
 // ── 0. Routing policy ─────────────────────────────────────────────────────────
 // H2+H4 collapse: the old `resolvesToInProcessDispatchProvider` branch predicate is
@@ -401,6 +403,117 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
   // non-complete drive ⇒ settle every source pool" (the 2026-07-17 frontier collapse).
   expect(Array.isArray(result.exhausted_pool_ids), "exhausted_pool_ids must ride the drive result").toBe(true);
   expect(result.exhausted_pool_ids.length > 0, "the rate-limit-exhausted pool is named in exhausted_pool_ids").toBeTruthy();
+});
+
+// ── 3b. Claim-release / zero-grant livelock (re-dogfood endgame 2026-07-22) ───
+// The completion livelock: every next-step mints a NEW runId; a failed round's
+// claims sat live for the full 20-min lease (release was merge-only), so each
+// interleaved invocation saw all pending tasks peer-claimed → empty plan → the
+// drive reported status:"complete" with a trivially-successful ingest → the
+// obligation stayed unsatisfied → the drain re-selected it to maxTransitions(100).
+
+test("claims: a round where every pending task is held by a live peer reports NO PROGRESS, never complete", async () => {
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // A live PEER (different poolId than this drive's runId) holds every task.
+  const registry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  await registry.claimMany(taskList.map((t) => t.task_id), "peer-run");
+
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    dispatchPacket: async () => {
+      throw new Error("must not dispatch — nothing was granted");
+    },
+    // The salvage fold may attempt an ingest, but a zero-accepted fold (an
+    // idempotent replay / nothing landed) must NOT masquerade as progress.
+    ingest: async () => ({ summary: { run_id: RUN_ID, accepted_count: 0 }, has_failures: false }),
+  });
+
+  expect(result.status, "pending-but-unplannable is not completion").toBe("no_progress");
+  expect(result.no_progress_cause).toBe("pending_tasks_unavailable");
+  expect(result.ingest, "a zero-accepted salvage fold may not masquerade as progress").toBe(null);
+  // stranded_ids stays empty so the caller's existing no-progress convergence
+  // guard (blocked emit, not transition) is the path this result routes to.
+  expect(result.stranded_ids.length).toBe(0);
+  // The peer's claims are untouched — they were never ours to release.
+  const claims = await registry.listClaims();
+  expect(Object.keys(claims).length).toBe(taskList.length);
+});
+
+test("claims: a peer-claimed round still SALVAGES a prior pass's landed-but-unmerged results (fold = progress)", async () => {
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const registry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  await registry.claimMany(taskList.map((t) => t.task_id), "peer-run");
+
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    dispatchPacket: async () => {
+      throw new Error("must not dispatch — nothing was granted");
+    },
+    // A prior pass of THIS run landed results whose ingest then failed; the
+    // salvage fold now accepts them — that IS progress and must transition.
+    ingest: async () => ({ summary: { run_id: RUN_ID, accepted_count: 2 }, has_failures: false }),
+  });
+  expect(result.status, "a genuine salvage fold reports the round complete").toBe("complete");
+  expect(result.ingest?.summary?.accepted_count).toBe(2);
+});
+
+test("claims: a genuinely-empty pending set still completes (ingest folds whatever landed)", async () => {
+  const { artifactsDir, runDir } = await makeRun([]);
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  let ingestCalls = 0;
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    dispatchPacket: async () => {
+      throw new Error("must not dispatch — nothing pending");
+    },
+    ingest: async () => {
+      ingestCalls++;
+      return { summary: { run_id: RUN_ID, accepted_count: 0 }, has_failures: false };
+    },
+  });
+  expect(result.status).toBe("complete");
+  expect(ingestCalls, "the nothing-pending round still folds landed results").toBe(1);
+});
+
+test("claims: a full strand releases this run's task claims so the next invocation need not wait out the lease", async () => {
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const stranding = async (packet) => ({ packet, outcome: "rate_limited" });
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible", quota: {} },
+    timeoutMs: 1000,
+    dispatchPacket: stranding,
+    ingest: async () => {
+      throw new Error("ingestion must be skipped on a full strand");
+    },
+  });
+  expect(result.status).toBe("paused");
+
+  const registry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  const claims = await registry.listClaims();
+  const held = taskList.map((t) => t.task_id).filter((id) => claims[id]);
+  expect(held, "no-result tasks' claims release at drive end, not at lease expiry").toEqual([]);
 });
 
 // ── 4. Regressions found by the live NIM e2e ──────────────────────────────────

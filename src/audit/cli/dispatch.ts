@@ -135,6 +135,28 @@ export {
 export const AUDIT_TASK_CLAIM_LEASE_MS = 20 * 60_000;
 
 /**
+ * Release THIS run's still-held task claims (owner-scoped — a peer's live claim
+ * is untouchable). The completion-livelock fix: claim release used to be
+ * merge-only, so a round whose workers all failed (pool-wide 429, full strand,
+ * zero-fit) left its claims live for the whole 20-min lease while every
+ * interleaved `next-step` — each under a NEW runId — saw the tasks peer-claimed,
+ * planned nothing, and spun the drain to maxTransitions. The rolling driver
+ * calls this at drive end for every granted-but-unfinished task; terminal
+ * (ingested) tasks were already cleared by merge, so the sweep is idempotent.
+ * Single-sourced here so the registry path + lease window stay identical to the
+ * claim site above.
+ */
+export async function releaseOwnedTaskClaims(
+  artifactsDir: string,
+  taskIds: readonly string[],
+  runId: string,
+): Promise<string[]> {
+  if (taskIds.length === 0) return [];
+  const registry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  return registry.releaseOwned(taskIds, runId);
+}
+
+/**
  * Packer budget for the pool-override (in-process hybrid) path — consistent with
  * the ENGINE's fit test (unified-routing step G). The rolling engine admits a
  * packet to a capped pool only when
@@ -803,6 +825,12 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
+    // Claim-round facts (completion-livelock fix): how many tasks were ELIGIBLE
+    // this round vs which this run actually claimed. `plan.length === 0` alone is
+    // ambiguous — the caller must distinguish "nothing pending" (complete) from
+    // "pending but unplannable: peer-claimed / unfit" (no-progress, must pause).
+    candidate_task_count: candidateTasks.length,
+    granted_task_ids: grantedTaskIds,
     host_pause: hostPause,
     granted_count: admission.granted_packet_ids.length,
     declared_cap: admission.declared_cap,

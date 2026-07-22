@@ -55,7 +55,7 @@ import {
 } from "./dispatch/pausePersist.js";
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
-import { prepareDispatchArtifacts, loadDispatchResultMap, type DispatchPlanEntry } from "./dispatch.js";
+import { prepareDispatchArtifacts, loadDispatchResultMap, releaseOwnedTaskClaims, type DispatchPlanEntry } from "./dispatch.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
@@ -134,8 +134,20 @@ export interface DriveRollingAuditDispatchResult {
    *                failed (a full strand), so spill is always tried first.
    * - `partial`  — terminal: the pause limit was reached (livelock) and the
    *                stranded packets are yielded to synthesis on partial coverage.
+   * - `no_progress` — pending tasks exist but NONE could be planned this round
+   *                (every one claimed by a live peer run, or fit no eligible
+   *                pool). Deliberately NOT `complete`: reporting completion here
+   *                (with a trivially-successful zero-result ingest) is what let
+   *                the drain re-select the same obligation to maxTransitions —
+   *                the observed completion livelock. `ingest` is null and
+   *                `stranded_ids` empty so the caller's no-progress convergence
+   *                guard emits a resumable block instead of transitioning.
    */
-  status: "complete" | "paused" | "partial";
+  status: "complete" | "paused" | "partial" | "no_progress";
+  /** Why a `no_progress` round planned nothing (absent otherwise). */
+  no_progress_cause?: "pending_tasks_unavailable";
+  /** Pending (candidate) tasks this round — carried so the caller can render an honest no-progress reason. */
+  pending_task_count?: number;
   /** Number of packets dispatched this pass (0 = nothing eligible). */
   packet_count: number;
   /** Packet ids stranded when status === "partial", or held while `paused`. */
@@ -397,15 +409,62 @@ export async function driveRollingAuditDispatch(params: {
     },
   });
 
-  // Nothing eligible this pass (every task already answered / budget-capped):
-  // ingest whatever landed and let the loop re-derive state.
   if (dispatch.plan.length === 0) {
+    // Genuinely nothing eligible (every task already answered): ingest whatever
+    // landed and let the loop re-derive state — this IS completion of the round.
+    if (dispatch.candidate_task_count === 0) {
+      return {
+        status: "complete",
+        packet_count: 0,
+        stranded_ids: [],
+        exhausted_pool_ids: [],
+        ingest: await ingest({ runId, artifactsDir }),
+      };
+    }
+    // Pending tasks exist but NONE could be planned — every candidate is claimed
+    // by a live peer run, or the granted remainder fit no pool. Reporting
+    // "complete" here (with a trivially-successful ingest) is the completion
+    // livelock: the obligation stays unsatisfied, the drain re-selects it, and
+    // each pass spins toward maxTransitions while the peer's claims run out
+    // their 20-min lease. Release any claims we DID take this round
+    // (granted-but-unfit) so a peer — or the next invocation under a new runId —
+    // can plan them immediately.
+    await releaseOwnedTaskClaims(artifactsDir, dispatch.granted_task_ids, runId);
+    // SALVAGE FOLD (keeps the one useful thing the old empty-plan ingest did): a
+    // prior pass of THIS run may have landed result files whose ingest then
+    // threw — those tasks are excluded from `candidate_task_count` (prior-result
+    // filter), so without a fold here they'd sit un-ingested for the rest of the
+    // run. Try the fold; a run with nothing to fold throws ("all assigned
+    // results missing") and that is exactly the no-progress case. Genuine
+    // salvage (accepted > 0) IS progress and reports as a completed round so the
+    // caller transitions; an idempotent replay (merge succeeds, 0 accepted) must
+    // NOT count as progress or the fold would loop forever on its own replay.
+    let salvage: MergeAndIngestResult | null = null;
+    try {
+      salvage = await ingest({ runId, artifactsDir });
+    } catch {
+      salvage = null;
+    }
+    const salvageAccepted = salvage?.summary?.["accepted_count"];
+    if (typeof salvageAccepted === "number" && salvageAccepted > 0) {
+      return {
+        status: "complete",
+        packet_count: 0,
+        stranded_ids: [],
+        exhausted_pool_ids: [],
+        ingest: salvage,
+      };
+    }
+    // Report NO PROGRESS (ingest null, nothing stranded) so the caller's
+    // convergence guard emits a resumable block instead of transitioning.
     return {
-      status: "complete",
+      status: "no_progress",
+      no_progress_cause: "pending_tasks_unavailable",
+      pending_task_count: dispatch.candidate_task_count,
       packet_count: 0,
       stranded_ids: [],
       exhausted_pool_ids: [],
-      ingest: await ingest({ runId, artifactsDir }),
+      ingest: null,
     };
   }
 
@@ -539,6 +598,14 @@ export async function driveRollingAuditDispatch(params: {
       );
     }
   }
+  // Release THIS run's still-held task claims (owner-scoped; terminal tasks were
+  // already cleared by the inline merge). Whatever produced no ingested result —
+  // stranded packets, provider errors, ingestion-invalid results — must not stay
+  // claimed for the rest of the 20-min lease: every later `next-step` runs under
+  // a NEW runId, so an unreleased claim reads as a live peer and starves the
+  // whole frontier (the observed completion livelock's other half).
+  await releaseOwnedTaskClaims(artifactsDir, dispatch.granted_task_ids, runId);
+
   // A resumable pause is its own status so the caller renders a "waiting for
   // provider" handoff rather than a terminal partial. The terminal (livelock)
   // strand keeps `run.status` ("partial") — `advanceRollingPause` already stamped

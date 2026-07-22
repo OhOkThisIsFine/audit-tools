@@ -67,6 +67,15 @@ export interface PrepareDispatchResult {
   task_count: number;
   skipped_task_count: number;
   /**
+   * Tasks ELIGIBLE this round (pending minus prior-result). Distinguishes a
+   * `plan.length === 0` round that is genuinely done (0 candidates) from one that
+   * is pending-but-unplannable (candidates > 0, everything peer-claimed or unfit)
+   * — the completion-livelock case, which must pause rather than report complete.
+   */
+  candidate_task_count: number;
+  /** Task ids THIS run claimed (poolId = runId). The driver releases the unfinished remainder at drive end. */
+  granted_task_ids: string[];
+  /**
    * Present ONLY on the host-dispatch path when admission hit the wall (zero grant or an
    * active cooldown) — the resumable pause was recorded on `active-dispatch.json` and the
    * emitter must render a resumable pause step instead of a dispatch step (Increment B).

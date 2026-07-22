@@ -202,6 +202,14 @@ followed" is otherwise indistinguishable from a bug.
   archiving. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #13.
 
+- **LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release
+  defect the audit side just fixed?** Audit's completion livelock (claims released only at merge →
+  failed rounds starve every later runId for the 20-min lease) is fixed by `releaseOwned` at drive
+  end. Remediate claims implement nodes through its own registry (`rollingSession.ts`,
+  `acceptNode.ts`) with ONE release site visible (`rollingSession.ts:494`); verify whether a failed
+  or stranded implement node's claim is released at round end or leaks until lease expiry — one
+  core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
+
 - **LEAD (re-dogfood 2026-07-22, low): NIM roster latency is bimodal — minimax-m3/nemotron-550b
   can exceed undici's default headers timeout on ~8k-token structured calls, presenting as a
   network failure rather than a slow success.** A standalone-script call died with

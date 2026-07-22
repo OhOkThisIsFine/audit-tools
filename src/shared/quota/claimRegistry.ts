@@ -198,6 +198,32 @@ export class ClaimRegistry {
   }
 
   /**
+   * Release every claim in `nodeIds` still held by `poolId`, in ONE lock-held
+   * sweep — the owner-scoped analogue of `clear`, for a driver relinquishing its
+   * own UNFINISHED grant (worker failure / full strand / zero-fit round) so a
+   * peer can take the work immediately instead of waiting out the lease TTL.
+   * A record held by a DIFFERENT pool is left intact, so this can never drop a
+   * peer's live claim (unlike `clear`, which is unconditional and reserved for
+   * authoritative points where the work is known terminal). Returns the released
+   * nodeIds.
+   */
+  async releaseOwned(nodeIds: readonly string[], poolId: string): Promise<string[]> {
+    return withFileLock(this.lockPath, async () => {
+      const claims = await readClaimMap(this.registryPath);
+      const released: string[] = [];
+      for (const nodeId of nodeIds) {
+        const existing = claims[nodeId];
+        if (existing && existing.poolId === poolId) {
+          delete claims[nodeId];
+          released.push(nodeId);
+        }
+      }
+      if (released.length > 0) await writeClaimMap(this.registryPath, claims);
+      return released;
+    });
+  }
+
+  /**
    * Refresh the heartbeat on a claim we still hold. Token-checked: a no-op if the
    * node is unclaimed or held under a different token. Returns whether the
    * heartbeat was applied. This is how a long-running owner stays "live" and so

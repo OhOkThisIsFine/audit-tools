@@ -2226,24 +2226,33 @@ async function runHostDelegationObligation(
       };
     }
     // Convergence guard: a pass that ingested NO new results and stranded nothing
-    // (every packet errored at the provider) made no net progress, and
-    // re-dispatching the same unchanged state would loop to the maxTransitions
-    // backstop. Emit the block rather than spin. Progress (ingest ran, or a strand
-    // terminal was recorded) `transition`s so the fold re-derives normally.
+    // made no net progress, and re-dispatching the same unchanged state would loop
+    // to the maxTransitions backstop. Emit the block rather than spin. Progress
+    // (ingest ran, or a strand terminal was recorded) `transition`s so the fold
+    // re-derives normally. Two distinct no-progress causes, honestly named:
+    // pending-tasks-unavailable (peer-claimed / unfit — the completion-livelock
+    // fix) vs provider-errored-on-every-packet.
     if (!driven.ingest && driven.stranded_ids.length === 0) {
+      const reason =
+        driven.status === "no_progress" && driven.no_progress_cause === "pending_tasks_unavailable"
+          ? `In-process rolling dispatch found ${driven.pending_task_count ?? "several"} pending review ` +
+            "task(s) but could plan none this round: every one is either claimed by a live peer run " +
+            "(that run's results will arrive via the shared ledger; a failed run's claims release at its " +
+            "drive end, or expire with the 20-minute lease) or fits no eligible pool. Stopping to avoid " +
+            "a no-progress loop — re-run next-step to retry once the peer finishes or capacity returns."
+          : `In-process rolling dispatch produced no results for ${driven.packet_count} ` +
+            `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet, and a ` +
+            "bounded auto-retry did not recover); stopping to avoid a no-progress loop. " +
+            "Recovery: once the backend is healthy, re-run next-step to re-dispatch; or hand the review " +
+            "results in directly with `audit-code ingest-results --results <file>` (or drop AuditResult[] " +
+            "files into the run's task-results/ dir, matched by task_id).";
       return {
         kind: "emit",
         step: {
           kind: "blocked",
           state,
           bundle,
-          reason:
-            `In-process rolling dispatch produced no results for ${driven.packet_count} ` +
-            `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet, and a ` +
-            "bounded auto-retry did not recover); stopping to avoid a no-progress loop. " +
-            "Recovery: once the backend is healthy, re-run next-step to re-dispatch; or hand the review " +
-            "results in directly with `audit-code ingest-results --results <file>` (or drop AuditResult[] " +
-            "files into the run's task-results/ dir, matched by task_id).",
+          reason,
         },
       };
     }
