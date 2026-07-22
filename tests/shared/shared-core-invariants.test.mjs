@@ -665,7 +665,10 @@ test("INV-shared-core-15b: ci.yml runs a single-package build + verify gate (no 
   const suitePath = resolve(REPO_ROOT, ".github/workflows/audit-code-test-suite.yml");
   expect(existsSync(suitePath), `audit-code-test-suite.yml not found at ${suitePath}`).toBeTruthy();
   const suiteContent = readFileSync(suitePath, "utf8");
-  expect(/vitest run --shard=/.test(suiteContent), "audit-code-test-suite.yml must run the sharded vitest test matrix — CRIT-single-package").toBeTruthy();
+  // The sharded invocation goes through run-vitest-gate.mjs (the false-green gate,
+  // docs/backlog.md "false-green"), not a bare `vitest run` — match either form so
+  // this invariant tracks the shard-matrix property, not the exact wrapper command.
+  expect(/(?:vitest run|run-vitest-gate\.mjs) --shard=/.test(suiteContent), "audit-code-test-suite.yml must run the sharded vitest test matrix — CRIT-single-package").toBeTruthy();
   expect(!content.includes("--workspaces") && !content.includes("packages/shared"), "ci.yml must not reference workspaces or packages/shared after the single-package collapse — CRIT-single-package").toBeTruthy();
 });
 
