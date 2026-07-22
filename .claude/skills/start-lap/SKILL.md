@@ -46,7 +46,7 @@ re-read them in step 3 from the updated tree.
 ## 3. Read the roadmap (post-sync, verbatim)
 
 Read [`docs/HANDOFF.md`](../../docs/HANDOFF.md) and [`docs/backlog.md`](../../docs/backlog.md) with the
-Read tool (not `rtk read` — these must be verbatim). HANDOFF's **Live state** + **Suggested ordering**
+Read tool (these must be verbatim). HANDOFF's **Live state** + **Suggested ordering**
 give the immediate next item; backlog carries per-item detail + line-refs.
 
 ## 4. Reconstruct "what shipped since" (the gap HANDOFF leaves)

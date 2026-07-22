@@ -7,7 +7,6 @@
       "Bash(npm run build *)",
       "Bash(npm test)",
       "Bash(env -u CLAUDECODE npm*)",
-      "Bash(rtk git *)",
       "Bash(git fetch *)",
       "Bash(git show *)",
       "Bash(git diff *)",

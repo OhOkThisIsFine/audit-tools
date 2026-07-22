@@ -147,7 +147,6 @@ followed" is otherwise indistinguishable from a bug.
   noise that buries the real signals (the dropped-source warnings above it). De-duplicate per
   invocation or print once with a count.
 
-- **`rtk vitest run <path>` fails with "program not found" — the documented RTK test wrapper is unusable (2026-07-20, low, friction: tool-should-decide).** `CLAUDE.md`'s RTK section lists `rtk vitest run` as the token-saving test runner, but `rtk vitest run tests/shared` errors `Failed to run vitest / Caused by: program not found` in this checkout — RTK does not resolve the local `node_modules/.bin/vitest` the way `npx vitest` does. Fell back to `npx vitest run … | grep -E "Test Files|Tests |FAIL"` for a compact summary. Either fix RTK's vitest resolution or drop `rtk vitest` from the documented command set so it stops being reached for.
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
 - **The nightly doc-review verifies against remote `main` only, so unpushed local work makes it revert CORRECT docs to stale ones (2026-07-21, VERIFIED by instance, medium, friction: tool-should-decide).** The 2026-07-21 run (`4c18315`) rewrote a true present-tense claim in `spec/backend-identity-axes.md` — "the autonomous fail-closed write emits the **service** axis" — into "planned (stage 5, not yet shipped)", because remote `main` stopped at stage 4 while stage 5 (`e7cda25`) sat in five unpushed local commits. Every doc claim the routine "re-verified against HEAD" carries the same exposure: its HEAD is the remote tip, and a doc can be *ahead* of that tip as legitimately as behind it. The routine already stamps its baseline range in the commit body, so the tool-side fix is a check at reconcile/push time: if a `doc-review:` commit's stated baseline is not the current tip's ancestor-with-nothing-in-between, its stale-factual-fixes need re-verification against the real tip before they land. "Push before the nightly runs" is host discipline, not a fix. Corrected in `0bf36e7`.
 - **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.
@@ -1231,13 +1230,6 @@ followed" is otherwise indistinguishable from a bug.
   which reads like a dead proxy and is not. `import("undici")` is NOT resolvable from a standalone
   script. Use `node:http` with an explicit `req.setTimeout` for any long offload-lane call.
 
-- **`rtk npm run <script>` fails with "program not found" from the Bash (Git Bash) tool
-  (2026-07-20, inefficient-feeding, low).** `rtk npm run build` / `rtk npm run check` both die with
-  `Error: Failed to run npm run / Caused by: program not found`; rtk cannot resolve the `npm` shim
-  under Git Bash. Plain `npm run …` works fine from the same shell. So the global "always prefix with
-  rtk" rule silently costs a round-trip on every build/check unless you already know this. Workaround:
-  use plain `npm run …` from Bash, or route rtk-wrapped npm through the PowerShell tool instead.
-
 - **An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right
   (2026-07-20, medium).** A NIM (`glm-5.2`) call to verify an axis claim returned an accurate
   per-call-site breakdown that correctly refuted the claim — but attributed sentences to
@@ -1257,9 +1249,6 @@ followed" is otherwise indistinguishable from a bug.
   run it began executing `audit-code.mjs next-step` against the live repo unprompted (no tracked file
   changed, but it was one step from mutating `.audit-tools/` state). **Use:** prefer codex or the NIM
   lane for repo analysis; if agy is required, do not combine a substantive prompt with that flag.
-- **`rtk` is NOT installed on this box** — every `rtk <cmd>` fails `program not found`, including inside
-  `&&` chains, which kills the whole chain. The global CLAUDE.md says to always prefix with `rtk`; that
-  instruction is unrunnable here. Drop the prefix (or install rtk) rather than retrying.
 - **`codex exec` hangs forever waiting on stdin — always redirect `< /dev/null`.** A backgrounded
   `codex exec --sandbox read-only "<prompt>"` printed `Reading additional input from stdin...` and
   sat at 39 bytes of output indefinitely, looking exactly like a slow model. It is not: codex reads
@@ -1366,7 +1355,7 @@ Standing gotchas worth keeping for any agent (strong or weak):
   session branched 4 commits behind and **re-implemented a full commit (admission-control 2a) already on
   main**, plus built 2b blind to a pinned design section it lacked — then had to `git reset --hard
   audit-tools/main` + cherry-pick + reconcile. First action of every lap:
-  `rtk git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
+  `git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
   rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].) **Mitigation
   (not a hard gate):** `.claude/skills/start-lap/SKILL.md` operationalizes this sync-first step as an
   agent instruction — it is agent-instruction-driven, so it reduces the risk but does not mechanically
@@ -1483,18 +1472,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   For a broad mechanical sweep over a shared file set, run it as ONE serial agent (or partition by
   NON-overlapping files), never an uncoordinated fan-out; and never hand-edit the same files while a
   background agent is live on them.
-- **`rtk` cannot resolve `npm` — every `rtk npm run <script>` dies "program not found",** from both the
-  Bash tool and PowerShell. So the token-saving wrapper is unusable for the most-run command class in
-  this repo (`build` / `check` / `test` / `check:deadcode`) and every verify falls back to raw `npm`,
-  forfeiting the filtering on exactly the noisiest output. Presumably `rtk` resolves `npm` as an exe
-  rather than through the Windows shim (`npm.cmd`) — same class as `resolveWindowsShimSpawnCommand`.
-- **`rtk` compresses files you need verbatim.** When reading the `audit-code` skill body or `docs/backlog.md`
-  through `rtk read`, content gets partially summarized with retrieval hashes → not exact. For any file you must
-  act on verbatim, use raw `Get-Content -Raw` (or the Read tool), not `rtk read`.
-- **`rtk proxy` runs executables, not PowerShell cmdlets.** `rtk proxy Get-Content` / `rtk proxy Get-ChildItem`
-  fail (cmdlets aren't standalone exes). Working form: `rtk proxy powershell -NoProfile -Command "..."`.
-- **`rtk proxy rg` fails with `Access is denied`** (Codex/win32). Fallback: PowerShell `Select-String` (or the
-  Grep tool).
 - **Never pass `isolation: "worktree"` to the Agent tool when dispatching a remediate-code/audit-code implement
   node.** The tool's own dispatch plan already creates and names the node's worktree; adding the Agent tool's
   OWN `isolation: "worktree"` spawns a second, unrelated git worktree and the subagent edits source files there
