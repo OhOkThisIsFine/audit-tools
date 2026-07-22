@@ -20,7 +20,7 @@ needed. They did not all get it right:
   key on transport or host identity. The inconsistency is wider than the defect that exposed it;
 - the **Gate-0 confirmation gate** keyed on `model_id ?? provider`, dropping the vendor entirely —
   a confirmation BYPASS (confirming one vendor's model approved another vendor's identically-named
-  model), fixed in v0.33.11;
+  model), since fixed;
 - the **exclusion matcher** keyed on the transport, which is correct for its own question but was
   briefly proposed as the single unified identity — which would have been fail-OPEN;
 - the **Gate-0 source fold** deduped on the bare model id, dropping any source that merely shared a
@@ -32,7 +32,7 @@ actively pointed the wrong way.
 
 **The fold is the clearest lesson in this document, so do not skip it.** While the gate key was
 bare-model, the fold's collision was invisible — it silently *matched*, which WAS the bypass.
-Service-qualifying the gate key (v0.33.11) turned that same collision into a LIVELOCK: the source was
+Service-qualifying the gate key turned that same collision into a LIVELOCK: the source was
 dropped from the confirmed record, so it deltaed, the operator confirmed it, the fold dropped it again,
 forever. One defect, two faces — fail-open from one side, wedged-shut from the other. Fixing an
 identity WITHOUT fixing every filter that feeds it converts a silent bypass into a visible wedge. When

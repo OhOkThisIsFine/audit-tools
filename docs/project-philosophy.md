@@ -7,6 +7,10 @@ authoritative statement lives where the doc-philosophy routes it — `CLAUDE.md`
 (cross-session facts). This map states each conviction in one line and points at its home; when this map
 and a home ever disagree, **the home wins**.
 
+`README.md`'s "Philosophy" section deliberately carries a condensed, public-facing restatement of a
+few of these convictions (plain register, no internal citations) — when editing a conviction here,
+check whether the README summary needs the same edit.
+
 > **Two kinds of philosophy — kept separate on purpose.**
 >
 > **PART A — governs the PRODUCT ITSELF.** What audit-tools *is* and how it behaves as a tool: architecture,

@@ -338,6 +338,11 @@ a run. On resume the remediator reads persisted item state and continues
 from the last non-complete step of each item. User-answered clarifications
 and triage decisions are persisted so resume does not re-prompt.
 
+A provider quota wall is a first-class retryable pause, not a failure: the
+tool emits a `quota_paused` step and resume re-enters the paused dispatch
+once the window resets. Mechanism detail lives in
+[`spec/remediation-workflow-design.md`](../remediation-workflow-design.md).
+
 ## Parallelism
 
 Optional. Default sequential. Enabled per-run via configuration. When

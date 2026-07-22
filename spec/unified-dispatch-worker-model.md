@@ -1,9 +1,11 @@
 # Unified dispatch worker model
 
 Design of record for how dispatch reaches a model. Supersedes the retired
-`repair-proxy-dispatch-integration.md`, which modelled repair-proxy as a cost-ranked
-openai-compatible *source pool* — the wrong abstraction (repair-proxy is a tool-repair
-**transport**, not a backend).
+`repair-proxy-dispatch-integration.md` and the repair-proxy transport it described: the
+tool-call-repair function no longer exists, and its successor — the generic **proxy overlay**
+described here — is a plain launch transport with no repair semantics and no named
+implementation. A declared `repair_proxy` key is rejected at parse; the declaration is a
+`proxy` block.
 
 **Scope note.** This is a concept doc: the durable model, its invariants, and the constraints
 that are easy to get wrong. It carries no build sequence, no per-commit status, and no dated
@@ -23,67 +25,77 @@ cost-ranks. Dispatch inventory is resolved **per-auditor at dispatch time**, ext
 
 ## The worker taxonomy
 
-| Kind | Reaches a model via | Tools / file access | Backend diversity via | repair-proxy |
+| Kind | Reaches a model via | Tools / file access | Backend diversity via | proxy overlay |
 |---|---|---|---|---|
 | **Claude-harness agentic** — the host and its `claude` subagents (host fan-out); `claude -p` when headless, shipped as the `claude-worker` provider (`CLAUDE_WORKER_PROVIDER_NAME`) | the Anthropic `/v1/messages` wire protocol, redirectable by `ANTHROPIC_BASE_URL` | full (Read/Edit/Bash) | pointing the harness at a proxy → backend | ✅ **its lane** |
 | **CLI agentic** — codex, agy, opencode (spawned subprocess harnesses) | the CLI's own model provider (OpenAI / Gemini), its own config | full | *being a different agent* | ❌ own harness/backend |
-| **Single-shot API** — NIM / vLLM direct | a direct `POST /chat/completions`, one shot | **none** (no tool loop) | *is* the backend | ❌ nothing to repair |
+| **Single-shot API** — NIM / vLLM direct | a direct `POST /chat/completions`, one shot | **none** (no tool loop) | *is* the backend | ❌ a proxy is just another endpoint to it |
 
 The kinds are not interchangeable per node: a node needing file access (all of remediate implement;
 any audit review packet whose granted files exceed the inline caps) requires an **agentic** worker
 (kind 1 or 2). Single-shot workers (kind 3) can only take self-contained packets that inline within
 the caps — that is their permanent ceiling, not a bug to fix.
 
-## repair-proxy — the kind-1 launch transport
+## The proxy overlay — the kind-1 launch transport
 
-repair-proxy is a **loopback base-URL-redirect proxy for the Anthropic `/v1/messages` wire
-protocol** whose core function is **validating/repairing a model's tool calls** so a weaker backend
-can drive the Claude Code harness. It also exposes an OpenAI `/chat/completions` front (passthrough
-+ translate, **no repair**) and a `GET /registry`.
+The proxy overlay is a **base-URL redirect**: a declared `proxy` block names a reachable proxy
+endpoint fronting a roster of backends, and a kind-1 worker is launched with `ANTHROPIC_BASE_URL`
+pointed at it, so the Claude harness's `/v1/messages` traffic lands on a non-Claude backend.
 
-Its value is realized only when a **tool-using (agentic) Claude-harness worker** runs on a non-Claude
-backend through it — the tool-repair keeps the backend's malformed tool calls from corrupting the
-work. Therefore:
+**The declaration is implementation-agnostic by contract.** The `proxy` block is machine-level and
+operator-owned (`{endpoint, api_key_env?, top_k?, cost_per_mtok?}`); *any* proxy that answers the
+discovery contract qualifies — `GET /v1/models` for the roster, `GET /model/info` for cost/context
+enrichment (degrading gracefully when absent). The tool names no proxy product anywhere in code or
+contract; which implementation is listening at the endpoint is invisible to dispatch, and swapping
+it changes zero tool source.
 
-- **remediate implement is the case that justifies repair-proxy** — those workers Read/Edit/Bash/run
-  tests, so a weaker backend's tool calls are exactly what repair-proxy fixes. The concrete class that
-  runs this lane is the `claude-worker` provider: it spawns `claude -p` with a required
-  `ANTHROPIC_BASE_URL` overlay onto repair-proxy and a `<backend_provider>/<model>` routing namespace,
-  so a proxied `claude-worker` is a full agentic worker on a free backend (a host-subagent-equivalent,
-  off Anthropic quota). Its pool/quota identity keys on the real `backend_provider[#account]/model`, never
-  on `claude-worker` itself — the transport never enters the quota key (see
+**There is no repair function.** The retired transport validated/repaired a weak backend's tool
+calls; nothing does that now. Whether a backend can drive the harness's tool loop is a
+capability/quality fact, handled where such facts live: capability ranking and the capability floor
+decide routing, and the reactive lane quarantine catches a backend that lies reachably. A transport
+must not carry correctness semantics.
+
+- **remediate implement is the case that needs this lane** — those workers Read/Edit/Bash/run
+  tests, so a node needing file access on a non-Claude backend requires an agentic worker reached
+  through the proxy overlay. The concrete class is the `claude-worker` provider: it spawns
+  `claude -p` with a required `ANTHROPIC_BASE_URL` overlay onto the declared proxy and a
+  `<backend_provider>/<model>` routing namespace, so a proxied `claude-worker` is a full agentic
+  worker on a free backend (a host-subagent-equivalent, off Anthropic quota). Its pool/quota
+  identity keys on the real `backend_provider[#account]/model`, never on `claude-worker` itself —
+  the transport never enters the quota key (see
   [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md)).
-- **audit review host-fanout** uses the same lane (agentic claude subagents reading source + emitting
-  findings); the repair value is dormant only because audit review *can* also be done single-shot,
-  where there are no tool calls.
+- **audit review host-fanout** uses the same lane (agentic claude subagents reading source +
+  emitting findings); audit review *can* also be done single-shot, where no overlay is involved.
 - Same mechanism, two owner uses: (a) continue working past a usage wall by invisibly routing to a
   backend until quota resets; (b) dispatch — proxy the dispatched claude subagents. Both are kind-1.
 
-**What it cannot serve, and why that is structural.** Routing **kind-3** workers through the OpenAI
-front bypasses repair entirely (JSON emitters make no tool calls; that front does no repair) — it adds
-nothing over talking to the backend directly. It cannot serve **kind-2 (CLI)** workers either: codex
-speaks OpenAI on its own config, agy speaks Gemini and repair-proxy has no Gemini front. They are their
-own harnesses with their own backends — orthogonal. The boundary is the wire protocol: repair-proxy
-serves `/v1/messages`, `/v1/chat/completions`, `/registry`; codex/agy are spawned as subprocesses via
-`spawnLoggedCommand` and never redirected.
+**What it cannot serve, and why that is structural.** **Kind-3** workers gain nothing from an
+overlay: they already POST to whatever OpenAI-compatible endpoint they are given — a proxy endpoint
+is just one more backend to a kind-3 worker, a *source*, not a transport. **Kind-2 (CLI)** workers
+cannot use it: codex speaks OpenAI on its own config, agy speaks Gemini — they are their own
+harnesses with their own backends, spawned as subprocesses via `spawnLoggedCommand` and never
+redirected. The overlay exists only where a harness honors a redirected `/v1/messages` base URL —
+kind 1.
 
 ### Graceful degradation — OPTIONAL, never required
 
-repair-proxy is an *enhancement* to kind-1 workers, not a dependency. It is **auto-detected per
-auditor** (conversation-first — no manual flag), and its absence degrades cleanly to **direct
-dispatch**:
+**Dispatch works whether or not a proxy is installed — any proxy, or none.** The overlay is an
+*enhancement* to kind-1 workers, not a dependency. The declared endpoint is reach-verified per
+auditor like every other declared lane (conversation-first — no manual flag), and its absence
+degrades cleanly to **direct dispatch**:
 
-- **No proxy on the machine** → kind-1 workers run directly on Claude (the normal host fan-out). The
-  run proceeds unchanged; it forgoes backend diversity via the proxy.
+- **No proxy declared or none listening** → kind-1 workers run directly on Claude (the normal host
+  fan-out). The run proceeds unchanged; it forgoes backend diversity via the proxy.
 - **Incompatible host** — only harnesses that honor `ANTHROPIC_BASE_URL` for the workers they spawn
-  (Claude Desktop, the `claude` CLI with an isolated `CLAUDE_CONFIG_DIR`) can use the proxy transport.
-  A host that spawns its subagents on Claude directly reports no proxy-transport capability in the
-  handshake → direct dispatch.
+  (Claude Desktop, the `claude` CLI with an isolated `CLAUDE_CONFIG_DIR`) can use the proxy
+  transport. A host that spawns its subagents on Claude directly reports no proxy-transport
+  capability in the handshake → direct dispatch.
 
-The dispatch core NEVER assumes repair-proxy exists, NEVER requires a compatible IDE, and NEVER fails
-a run for its absence. Whether the auditor can proxy its workers is one more per-auditor handshake
-capability, present or absent, resolved at dispatch — exactly like every other environment-discovered
-capability ([[enforce-robustness-in-tooling-not-host-discretion]]).
+The dispatch core NEVER assumes a proxy exists, NEVER requires a compatible IDE, NEVER depends on a
+particular proxy implementation, and NEVER fails a run for the lane's absence. Whether the auditor
+can proxy its workers is one more per-auditor capability, present or absent, resolved at dispatch —
+exactly like every other environment-discovered capability
+([[enforce-robustness-in-tooling-not-host-discretion]]).
 
 ## The one cut — INTENT vs CAPABILITY vs EFFECTIVE
 
@@ -114,8 +126,9 @@ single-shot kind-3). The catalog is not a handful of config scalars; it is a cap
   cross-contaminates. This is the coupling the whole model exists to kill.
 - **NOT env vars.** A live model/capability/quota/cost catalog is too rich for flat scalars.
 - **Per-auditor**, built by querying what THIS auditor can reach, reusing existing machinery: the
-  `models.dev` snapshot (windows/price), live quota sources (headroom), CLI detection, and
-  repair-proxy's `/registry` as a per-auditor *discovery feeder* — never a repo source-pool.
+  `models.dev` snapshot (windows/price), live quota sources (headroom), CLI detection, and the
+  declared proxy's `/v1/models` + `/model/info` as a per-auditor *discovery feeder* — never a repo
+  source-pool.
 
 ### The descriptor splits along ENVIRONMENT vs SELF
 
@@ -289,13 +302,15 @@ one transport's pattern, so an autonomous fail-closed exclusion drops only that 
 
 - Backend diversity is a property of the **worker kind + the current auditor's environment**, never a
   repo-stored cost-ranked "provider pool."
-- repair-proxy serves **only kind-1** (agentic claude-harness workers); its value is tool-call repair,
-  so a worker that makes no tool calls (kind 3) gains nothing, and a worker on a foreign wire protocol
-  (kind 2) cannot use it.
+- The proxy overlay serves **only kind-1** (agentic claude-harness workers): a kind-3 worker reaches
+  an endpoint directly — a proxy is just another endpoint to it, not a transport — and a kind-2
+  worker is its own harness on a foreign wire protocol.
 - Dispatch inventory is resolved **per-auditor per-invocation**; the repo session-config holds intent
   only.
-- **repair-proxy is optional and auto-detected**; its absence degrades cleanly to direct dispatch.
-  Never a hard dependency, never a required flag, never a run failure.
+- **A proxy is optional, declared, and reach-verified per auditor**; its absence degrades cleanly to
+  direct dispatch. Never a hard dependency, never a required flag, never a run failure, never a named
+  implementation — dispatch works with no proxy installed, and any endpoint answering the discovery
+  contract qualifies.
 - **Pool ASSEMBLY is one shared function with per-mode policy hooks**, not two mirrored copies. The
   engine (drive loop, capacity, admission, scheduling, token estimation) is single-sourced; assembly is
   too. Legitimately per-mode = a genuinely different INPUT draw or the terminal/result-routing adapter —

@@ -274,8 +274,8 @@ to adjust lens weighting and task priority signals before tasks are built.
 **Planning's persisted output is a provider-neutral task-affinity graph** (not a
 packet list). Nodes = tasks (unit × lens), each carrying a deterministic
 byte-based **token estimate** and a **risk estimate** (lens sensitivity,
-critical-flow membership, analyzer signal, blast radius), both frozen after one
-always-on LLM estimate review. Edges = soft, weighted **affinity** (`kind` +
+critical-flow membership, analyzer signal, blast radius), both frozen once
+derived. Edges = soft, weighted **affinity** (`kind` +
 `weight`, descending: shared file → cross-lens-same-file → critical-flow (same
 flow) → same unit → call adjacency → same directory, plus an additive same-lens
 bonus), deterministically derived (LLM-tunable), never frozen — they are the
