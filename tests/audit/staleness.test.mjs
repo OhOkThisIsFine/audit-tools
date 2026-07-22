@@ -164,6 +164,65 @@ test("artifact freshness helpers normalize deterministic metadata hashes", () =>
     }));
 });
 
+test("charter-family artifacts strip generated_at provenance from the content hash", () => {
+  // charter_register / charter_clarification / systemic_challenge all stamp
+  // `generated_at = new Date()` on every run; if that rides the content hash,
+  // every semantically-identical rebuild bumps the revision and perpetually
+  // re-stales the DAG downstreams (charter_clarification, systemic_challenge,
+  // audit-report.md) — the finalization-oscillation hazard the strip list
+  // exists to prevent (live-observed churn, re-dogfood 2026-07-22).
+  for (const name of [
+    "charter_register.json",
+    "charter_clarification.json",
+    "systemic_challenge.json",
+  ]) {
+    expect(
+      hashArtifactValue(name, { generated_at: "a", subsystems: [] }),
+      `${name} must hash identically across generated_at stamps`,
+    ).toBe(hashArtifactValue(name, { generated_at: "b", subsystems: [] }));
+  }
+});
+
+test("a mutated-but-unlisted artifact is restamped, never carried frozen (write/stamp coupling)", () => {
+  // writeCoreArtifacts persists EVERY present bundle artifact, while the
+  // metadata carry-forward used to trust each executor's hand-maintained
+  // artifacts_written list — so an executor mutating an artifact it forgot to
+  // list advanced the file on disk with its metadata entry frozen at the old
+  // revision/hash/deps (the live incident's exact shape: file advanced, entry
+  // at rev N-1, deps one upstream revision behind, staleness livelocked).
+  // The carry-forward must verify content before carrying.
+  const bundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(bundle);
+  const before = metadata.artifacts["repo_manifest.json"];
+
+  const mutated = {
+    ...bundle,
+    repo_manifest: {
+      ...bundle.repo_manifest,
+      files: [
+        ...bundle.repo_manifest.files,
+        { path: "src/lib/unlisted-mutation.ts", language: "ts", size_bytes: 10 },
+      ],
+    },
+  };
+  // Deliberately NOT listed in updatedArtifacts — the forgotten-list case.
+  const next = computeArtifactMetadata(mutated, metadata, []);
+  const after = next.artifacts["repo_manifest.json"];
+  expect(after.content_hash, "mutated content must restamp the hash").not.toBe(before.content_hash);
+  expect(after.revision, "mutated content must bump the revision").toBe(before.revision + 1);
+  // The unlisted restamp must PRESERVE the previous dependency_revisions — a
+  // deps refresh here would silently clear a legitimately-pending
+  // dep-staleness without the re-derivation it demands. Only a LISTED
+  // (declared) re-derive refreshes deps.
+  expect(after.dependency_revisions, "unlisted restamp preserves deps").toEqual(before.dependency_revisions);
+
+  // The flip side is load-bearing and must NOT change: an UNCHANGED unlisted
+  // artifact keeps its carried entry verbatim (old dependency_revisions
+  // included) — staleness relies on the stale deps to demand a re-derivation.
+  const carried = computeArtifactMetadata(bundle, metadata, []);
+  expect(carried.artifacts["repo_manifest.json"]).toEqual(before);
+});
+
 test("dependency revision changes mark downstream artifacts stale under the new audit-report model", () => {
   const initialBundle = makeBaseBundle();
 

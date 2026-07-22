@@ -75,20 +75,25 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **⬇ LIVE (re-dogfood 2026-07-22, HIGH, reproduced 3×): the charter consume path writes
-  charter_register.json WITHOUT restamping artifact_metadata → charter_extraction LIVELOCK.**
-  Submission consumed → register rewritten on disk (content hash + generated_at advanced) →
-  artifact_metadata entry NOT updated (stale rev/hash/dependency_revisions) → staleness sees the
-  register permanently stale → charter_extraction re-emits every drain, forever — each cycle
-  consuming a fresh submission and burning a full charter re-authoring (12 LLM calls) with zero
-  convergence. Confirmed root cause (the canonical hash of the consumed content matched the prior
-  rev): the consume produced CANONICALLY IDENTICAL register content, so this is precisely "a no-op
-  refresh does not restamp dependency_revisions". Escaped only by operator metadata surgery
-  ([[artifact-metadata-surgery-uses-tool-hasher]] — a raw-bytes sha256 restamp poisons the
-  comparator; use dist's `hashArtifactValue`). Property: EVERY artifact write goes through the
-  metadata-stamping writer — a consume/merge path writing an artifact file directly is the same
-  class as extractor-array-ordering churn, in the livelock direction — and a no-op refresh still
-  restamps dependency_revisions. Record:
+- **Charter-extraction livelock (was HIGH, re-dogfood 2026-07-22) — stated mechanism REFUTED at
+  HEAD; the two real defects found in its place are FIXED, the remaining driver is the
+  phantom-staleness entry below.** Code-trace verdict: the consume path DOES restamp — every
+  charter executor lists the register in `artifacts_written`, which routes through
+  `computeArtifactMetadata`, and that stamper always rebuilds `dependency_revisions` even on
+  byte-identical content. What was actually wrong, both shipped 2026-07-22: (a) the charter family
+  (`charter_register` / `charter_clarification` / `systemic_challenge`) stamped
+  `generated_at = new Date()` INSIDE the content hash (missing from
+  `NON_SEMANTIC_FIELDS_BY_ARTIFACT`) — every semantically-identical rebuild bumped the revision and
+  re-staled the DAG downstreams each cycle; (b) the write/stamp coupling gap that produces the
+  incident's exact shape: `writeCoreArtifacts` persists EVERY present artifact while metadata
+  carry-forward trusted each executor's hand-maintained `artifacts_written`, so a mutated-but-
+  unlisted artifact advanced on disk with its record frozen → permanent staleness. Carry-forward is
+  now CONTENT-VERIFIED (a hash mismatch restamps hash+revision; deps refresh only on a LISTED
+  re-derive, so a pending dep-staleness is never silently cleared) — the frozen-record class is
+  unrepresentable regardless of which executor forgets its listing. Still open, tracked in the
+  charter phantom-staleness entry below: DAG staleness keying on whole-artifact upstream hashes
+  (the actual re-extraction re-fire driver). Operator-recovery trap stands:
+  [[artifact-metadata-surgery-uses-tool-hasher]]. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #7/#9.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, HIGH): a sandboxed CLI worker SWITCHED THE CHECKOUT to main

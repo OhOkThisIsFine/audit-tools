@@ -37,6 +37,14 @@ const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
   // can't churn intra-run today, but stripping it keeps provenance out of the
   // semantic content hash defensively (mirrors the `generated_at` strips above).
   "access_memory.json": ["run_id"],
+  // The charter family all stamp `generated_at = new Date()` on every run
+  // (extraction, delta merge, clarification, challenge). Unstripped, every
+  // semantically-identical rebuild bumped the artifact revision and re-staled
+  // the DAG downstreams (charter_clarification, systemic_challenge,
+  // audit-report.md) each cycle — live-observed churn, re-dogfood 2026-07-22.
+  "charter_register.json": ["generated_at"],
+  "charter_clarification.json": ["generated_at"],
+  "systemic_challenge.json": ["generated_at"],
 };
 
 function stripFields(

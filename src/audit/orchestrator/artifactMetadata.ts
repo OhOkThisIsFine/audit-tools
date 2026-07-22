@@ -103,23 +103,44 @@ export function computeArtifactMetadata(
     if (value === undefined || value === null) continue;
 
     const previousEntry = usablePrevious?.artifacts[artifactName];
-    if (previousEntry && !updated.has(artifactName)) {
+    const isUpdated = updated.has(artifactName);
+    const contentHash = hashArtifactValue(artifactName, value);
+    // Carry-forward is CONTENT-VERIFIED, never trusted from the executor's
+    // hand-maintained `artifacts_written` list alone: `writeCoreArtifacts`
+    // persists EVERY present bundle artifact, so an executor that mutates an
+    // artifact it forgot to list would otherwise advance the file on disk while
+    // its metadata entry stays frozen at the old revision/hash/deps — a
+    // permanent-staleness livelock for the artifact's obligation (the file can
+    // never catch up to its own stale record). A hash mismatch therefore
+    // restamps the hash and bumps the revision below. An UNCHANGED unlisted
+    // artifact still carries its entry verbatim.
+    if (previousEntry && !isUpdated && previousEntry.content_hash === contentHash) {
       artifacts[artifactName] = previousEntry;
       continue;
     }
-
-    const contentHash = hashArtifactValue(artifactName, value);
-    const dependencyRevisions = Object.fromEntries(
-      (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
-        .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
-        .sort()
-        .map((dependencyName) => [
-          dependencyName,
-          artifacts[dependencyName]?.revision ??
-            usablePrevious?.artifacts[dependencyName]?.revision ??
-            0,
-        ]),
-    );
+    // dependency_revisions refresh ONLY on a LISTED (declared) re-derivation.
+    // An UNLISTED mismatch-restamp preserves the previous deps: refreshing them
+    // here would silently clear a legitimately-pending dep-staleness without
+    // the re-derivation it demands (e.g. the one-time hash-scheme migration
+    // when the non-semantic strip list changes, or an executor's forgotten
+    // listing). With deps preserved, a dep-stale artifact stays stale, its
+    // obligation re-fires, and the proper listed re-derive restamps fully —
+    // that is what converges; the frozen-record livelock cannot recur because
+    // the hash/revision always advance with the file.
+    const dependencyRevisions =
+      !isUpdated && previousEntry
+        ? previousEntry.dependency_revisions
+        : Object.fromEntries(
+            (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
+              .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
+              .sort()
+              .map((dependencyName) => [
+                dependencyName,
+                artifacts[dependencyName]?.revision ??
+                  usablePrevious?.artifacts[dependencyName]?.revision ??
+                  0,
+              ]),
+          );
 
     const sameContent = previousEntry?.content_hash === contentHash;
     const sameDependencies =
