@@ -42,21 +42,37 @@ export interface SeamSignal {
  */
 export interface GraphSignals {
   /**
-   * Deduplicated directed cycles. Each entry is the node sequence of one cycle
-   * (the cycle closes from the last node back to the first); rotations of the
-   * same directed cycle are collapsed, distinct directed cycles over the same
-   * node set are kept apart.
+   * Deduplicated directed cycles over the structural load-order projection
+   * ({@link structuralImportEdges}: the `imports` + `calls` buckets ONLY —
+   * `references` prose mentions and `heuristics` edges can never fabricate a
+   * cycle). Each entry is the node sequence of one cycle (the cycle closes from
+   * the last node back to the first); rotations of the same directed cycle are
+   * collapsed, distinct directed cycles over the same node set are kept apart.
    */
   cycles: string[][];
-  /** Per-node incoming edge count (number of edges whose `to` is the node). */
+  /**
+   * Per-node incoming edge count (number of edges whose `to` is the node),
+   * over the merged edge set ({@link allGraphEdges}).
+   */
   fanIn: Map<string, number>;
-  /** Per-node outgoing edge count (number of edges whose `from` is the node). */
+  /**
+   * Per-node outgoing edge count (number of edges whose `from` is the node),
+   * over the merged edge set ({@link allGraphEdges}).
+   */
   fanOut: Map<string, number>;
-  /** Every node that participates in at least one cycle. */
+  /** Every node that participates in at least one (load-order) cycle. */
   nodesInCycles: Set<string>;
-  /** Hub nodes: `fanIn >= hubThreshold && fanOut >= hubThreshold`. */
+  /**
+   * Hub nodes: structural load-order fan-in AND fan-out both at least
+   * {@link hubThreshold}. Derived from {@link structuralImportEdges} degrees,
+   * NOT the published merged-set `fanIn`/`fanOut` maps, so reference/heuristic
+   * edges cannot inflate a node into hub status.
+   */
   hubs: Set<string>;
-  /** The fan-in/fan-out threshold a node must meet on both sides to be a hub. */
+  /**
+   * The structural fan-in/fan-out threshold a node must meet on both sides to
+   * be a hub (scaled by the load-order connected-set size).
+   */
   hubThreshold: number;
   /**
    * Deletion-test candidates (the ralph-architecture-sweep heuristic): nodes that
@@ -106,6 +122,41 @@ export function allGraphEdges(graphBundle: GraphBundle): GraphEdge[] {
     if (key === "routes" || key === GIT_CO_CHANGE_CATEGORY || !Array.isArray(value)) {
       continue;
     }
+    for (const edge of value) {
+      if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
+        edges.push(edge);
+      }
+    }
+  }
+  return edges;
+}
+
+/**
+ * The buckets whose edges represent structural load-order dependencies: a real
+ * import/require/call relationship the module loader (or call graph) actually
+ * follows. Selection is by declared BUCKET, never by edge-kind name, so every
+ * analyzer contribution merged into these buckets (`python-import`,
+ * `dynamic-import`, `re-export`, …) participates identically — the
+ * language-neutral contract is preserved.
+ */
+const STRUCTURAL_EDGE_BUCKETS = ["imports", "calls"] as const;
+
+/**
+ * Select ONLY the structural load-order edges (the `imports` + `calls`
+ * buckets) of a graph bundle. Cycle detection and hub derivation consume THIS
+ * selection, never {@link allGraphEdges}: a `references` edge (a prose/path
+ * mention) or a low-confidence `heuristics` edge closing a would-be loop must
+ * not fabricate a phantom cycle that corrupts `member_of_cycle` risk signals.
+ * The `routes` / co-change exclusions of {@link allGraphEdges} are a floor,
+ * not a ceiling — this selector additionally excludes every non-load-order
+ * bucket. Malformed entries (missing string endpoints) are dropped so a bad
+ * analyzer output can never throw here.
+ */
+export function structuralImportEdges(graphBundle: GraphBundle): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  for (const bucket of STRUCTURAL_EDGE_BUCKETS) {
+    const value = graphBundle.graphs[bucket];
+    if (!Array.isArray(value)) continue;
     for (const edge of value) {
       if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
         edges.push(edge);
@@ -333,35 +384,65 @@ function deriveSeams(edges: GraphEdge[]): SeamSignal[] {
 export function deriveGraphSignals(graphBundle: GraphBundle): GraphSignals {
   const edges = allGraphEdges(graphBundle);
 
-  const adjacency = new Map<string, Set<string>>();
+  // Merged-set degrees: fanIn/fanOut/connected count EVERY structural-or-better
+  // edge kind (imports/calls/references/heuristics). They feed the published
+  // maps, deletion candidacy (a references mention legitimately disqualifies a
+  // "nothing points at it" deletion suspect), and seam derivation.
   const fanIn = new Map<string, number>();
   const fanOut = new Map<string, number>();
   const connected = new Set<string>();
 
   for (const edge of edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, new Set());
-    adjacency.get(edge.from)!.add(edge.to);
     fanOut.set(edge.from, (fanOut.get(edge.from) ?? 0) + 1);
     fanIn.set(edge.to, (fanIn.get(edge.to) ?? 0) + 1);
     connected.add(edge.from);
     connected.add(edge.to);
   }
 
-  const cycles = deduplicateCycles(detectCycles(adjacency));
+  // Load-order-only projection: cycle detection and hub derivation consume
+  // ONLY the structural imports/calls buckets ({@link structuralImportEdges}),
+  // so a prose/path `references` mention or a low-confidence heuristic edge can
+  // never fabricate a phantom cycle (corrupting `member_of_cycle`) or inflate
+  // hub degrees.
+  const structuralEdges = structuralImportEdges(graphBundle);
+  const structuralAdjacency = new Map<string, Set<string>>();
+  const structuralFanIn = new Map<string, number>();
+  const structuralFanOut = new Map<string, number>();
+  const structuralConnected = new Set<string>();
+
+  for (const edge of structuralEdges) {
+    if (!structuralAdjacency.has(edge.from)) {
+      structuralAdjacency.set(edge.from, new Set());
+    }
+    structuralAdjacency.get(edge.from)!.add(edge.to);
+    structuralFanOut.set(edge.from, (structuralFanOut.get(edge.from) ?? 0) + 1);
+    structuralFanIn.set(edge.to, (structuralFanIn.get(edge.to) ?? 0) + 1);
+    structuralConnected.add(edge.from);
+    structuralConnected.add(edge.to);
+  }
+
+  const cycles = deduplicateCycles(detectCycles(structuralAdjacency));
   const nodesInCycles = new Set<string>();
   for (const cycle of cycles) {
     for (const node of cycle) nodesInCycles.add(node);
   }
 
-  const hubThreshold = Math.max(8, Math.ceil(connected.size * 0.15));
+  // Hub derivation is fully structural: both the threshold's graph-size input
+  // and the per-node degrees come from the load-order projection.
+  const hubThreshold = Math.max(8, Math.ceil(structuralConnected.size * 0.15));
   const hubs = new Set<string>();
+  for (const node of structuralConnected) {
+    const inCount = structuralFanIn.get(node) ?? 0;
+    const outCount = structuralFanOut.get(node) ?? 0;
+    if (inCount >= hubThreshold && outCount >= hubThreshold) {
+      hubs.add(node);
+    }
+  }
+
   const deletionCandidates = new Set<string>();
   for (const node of connected) {
     const inCount = fanIn.get(node) ?? 0;
     const outCount = fanOut.get(node) ?? 0;
-    if (inCount >= hubThreshold && outCount >= hubThreshold) {
-      hubs.add(node);
-    }
     if (inCount === 0 && outCount > 0) {
       deletionCandidates.add(node);
     }

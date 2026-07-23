@@ -172,6 +172,59 @@ test("appended detectors do not renumber existing DA-### ids", () => {
   expect(Number(complexityFinding.id.slice(3)) > cycleOrdinal, "appended complexity finding id must be greater than the existing cycle id").toBeTruthy();
 });
 
+test("phantom-cycle members (cycle closed only by a references edge) lose member_of_cycle", () => {
+  // a.ts -> b.ts is a real import; b.ts -> a.ts is only a prose/path reference.
+  // Load-order-only cycle detection must not fabricate a cycle here, so neither
+  // unit may carry member_of_cycle (or its risk_score contribution).
+  const bundle = {
+    graphs: {
+      imports: [{ from: "a.ts", to: "b.ts" }],
+      references: [{ from: "b.ts", to: "a.ts", kind: "path-reference" }],
+    },
+  };
+  const register = buildRiskRegister(
+    {
+      units: [
+        { unit_id: "u-a", files: ["a.ts"], required_lenses: [] },
+        { unit_id: "u-b", files: ["b.ts"], required_lenses: [] },
+      ],
+    },
+    undefined,
+    undefined,
+    deriveGraphSignals(bundle),
+  );
+  for (const item of register.items) {
+    expect(
+      item.signals.includes("member_of_cycle"),
+      `${item.unit_id} must not carry member_of_cycle from a references-closed phantom cycle`,
+    ).toBe(false);
+  }
+});
+
+test("genuine imports/calls cycle members still carry member_of_cycle", () => {
+  const bundle = {
+    graphs: {
+      imports: [{ from: "a.ts", to: "b.ts" }],
+      calls: [{ from: "b.ts", to: "a.ts" }],
+    },
+  };
+  const register = buildRiskRegister(
+    {
+      units: [
+        { unit_id: "u-a", files: ["a.ts"], required_lenses: [] },
+      ],
+    },
+    undefined,
+    undefined,
+    deriveGraphSignals(bundle),
+  );
+  const item = register.items.find((i) => i.unit_id === "u-a");
+  expect(
+    item.signals.includes("member_of_cycle"),
+    "a genuine load-order cycle must still flag member_of_cycle",
+  ).toBe(true);
+});
+
 test("correlated cycle+hub+seam family cannot alone drive risk_score to 10", () => {
   // Build a graph where one node is simultaneously in a cycle, a hub, AND a seam
   // endpoint — the maximally-correlated structural case — with NO other risk
