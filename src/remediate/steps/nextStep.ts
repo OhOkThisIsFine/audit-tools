@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -288,6 +288,40 @@ export function resolveHostCapabilities(
   if (exp.models !== undefined) toPersist.models = exp.models;
 
   return { resolved, toPersist };
+}
+
+/**
+ * Structural-refusal detection for an empty rolling frontier (defect (b) of the
+ * 2026-07-22 implement-dispatch cluster). An empty frontier means EITHER
+ * "everything eligible is done/contested" (fold to merge) OR "admission refused
+ * every pending packet as `no_capable_pool`" (a structural fit mismatch — pause
+ * honestly; merging would terminal-block every planned node on a result it was
+ * never allowed to produce, and triage would re-prepare the same refusal
+ * forever). Pure over the parsed dispatch-quota body so the discriminator is
+ * directly testable; the caller owns lease reconciliation + the pause terminal.
+ */
+export function detectStructuralRefusalPause(quota: unknown): {
+  pause: boolean;
+  refusedIds: string[];
+} {
+  const admission = isRecord(quota) && isRecord(quota.admission) ? quota.admission : undefined;
+  const explains = Array.isArray(admission?.explains)
+    ? (admission.explains as Array<{ packet_id?: string; reason?: string; admitted?: boolean }>)
+    : [];
+  const granted = Array.isArray(admission?.granted_packet_ids)
+    ? admission.granted_packet_ids.length
+    : 0;
+  const refusedIds = explains
+    .filter((e) => e.admitted !== true)
+    .map((e) => e.packet_id)
+    .filter((id): id is string => typeof id === "string");
+  return {
+    pause:
+      granted === 0 &&
+      refusedIds.length > 0 &&
+      classifyEmptyGrantCause(explains) === "no_capable_pool",
+    refusedIds,
+  };
 }
 
 function randomRunId(prefix = "RUN"): string {
@@ -1807,31 +1841,23 @@ async function buildImplementDispatchStep(ctx: {
     });
 
     // C1: merge the explicitly-supplied host-* options with the persisted
-    // handshake (per-field `explicit ?? persisted ?? floor`), persist ONLY the
-    // explicitly-supplied delta (never clobbering omitted fields), and feed the
-    // resolved values into downstream dispatch sizing. A later call that omits a
-    // flag reuses the persisted value rather than re-flooring.
-    const { resolved: resolvedHostCaps, toPersist: hostCapsDelta } =
-      resolveHostCapabilities(
-        {
-          can_dispatch_subagents: options.hostCanDispatchSubagents,
-          max_concurrent: options.hostMaxConcurrent,
-          context_tokens: options.hostContextTokens,
-          output_tokens: options.hostOutputTokens,
-          model_id: options.hostModelId,
-          models: options.hostModels ?? undefined,
-        },
-        state.host_capabilities,
-      );
-    if (Object.keys(hostCapsDelta).length > 0) {
-      await store.mutate(async (current) => ({
-        ...(current ?? state),
-        host_capabilities: {
-          ...(current?.host_capabilities ?? state.host_capabilities ?? {}),
-          ...hostCapsDelta,
-        },
-      }));
-    }
+    // handshake (per-field `explicit ?? persisted ?? floor`) and feed the
+    // resolved values into downstream dispatch sizing. PERSISTENCE of the
+    // explicit delta happens once at the decideNextStepLoop seam (before
+    // obligation selection), so by the time this branch runs the persisted
+    // handshake already includes this call's flags — this is resolution only,
+    // and the single state writer stays the seam.
+    const { resolved: resolvedHostCaps } = resolveHostCapabilities(
+      {
+        can_dispatch_subagents: options.hostCanDispatchSubagents,
+        max_concurrent: options.hostMaxConcurrent,
+        context_tokens: options.hostContextTokens,
+        output_tokens: options.hostOutputTokens,
+        model_id: options.hostModelId,
+        models: options.hostModels ?? undefined,
+      },
+      state.host_capabilities,
+    );
     const resolvedHostMaxConcurrent = resolvedHostCaps.max_concurrent;
     const resolvedHostContextTokens = resolvedHostCaps.context_tokens ?? null;
     const resolvedHostOutputTokens = resolvedHostCaps.output_tokens ?? null;
@@ -2122,14 +2148,40 @@ async function buildImplementDispatchStep(ctx: {
           paused.partial_completion_terminal = buildQuotaPausedTerminal(
             rolling.wall.strandedBlockIds,
             rolling.wall.detected.earliestResetAt,
+            rolling.wall.detected.emptyGrantCause,
           );
           await store.saveState(paused);
         }
         return { kind: "transition", state: paused };
       }
-      // Everything eligible may already be done/skipped — fold straight to merge
-      // rather than emitting a dispatch step with zero nodes.
+      // A zero-node frontier is NOT always "everything done": admission may have
+      // REFUSED every pending packet (`no_capable_pool` — a structural fit
+      // mismatch, cf. the 2026-07-22 dogfood wall where one 92.7k packet vs a 32k
+      // floor walled the whole run). Folding that case to merge terminal-blocks
+      // every planned node on a missing result it was never allowed to produce,
+      // and triage then re-prepares the same refusal forever. Detect it from the
+      // freshly-written admission record and pause honestly instead: the nodes
+      // stay PENDING, and the quota_paused step renders the fit-mismatch cause
+      // ("free a larger pool or split the node"), never "wait for a reset".
       if (rolling.session.frontier.length === 0) {
+        const structuralRefusal = detectStructuralRefusalPause(
+          await readOptionalJsonFile(rolling.quotaPath),
+        );
+        if (structuralRefusal.pause) {
+          await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+          const paused = await store.loadState();
+          if (paused) {
+            paused.partial_completion_terminal = buildQuotaPausedTerminal(
+              structuralRefusal.refusedIds,
+              null,
+              "no_capable_pool",
+            );
+            await store.saveState(paused);
+          }
+          return { kind: "transition", state: paused };
+        }
+        // Everything eligible really is done/skipped — fold straight to merge
+        // rather than emitting a dispatch step with zero nodes.
         await mergeImplementResults({ root, artifactsDir }, runId);
         return { kind: "transition", state: await store.loadState() };
       }
@@ -5076,6 +5128,36 @@ async function decideNextStepLoop(
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
   let state = await store.loadState();
+  // C1 handshake persistence happens at THIS seam, not inside any one branch:
+  // fold explicitly-supplied --host-* capability fields into
+  // state.host_capabilities on EVERY invocation, before obligation selection.
+  // When the fold ran only inside the implement-dispatch step builder, a
+  // next-step call carrying the flags that landed on any other obligation (a
+  // triage re-drive — the 2026-07-22 dogfood wall) silently dropped them and
+  // dispatch capability stayed at the conservative floor.
+  if (state) {
+    const { toPersist } = resolveHostCapabilities(
+      {
+        can_dispatch_subagents: options.hostCanDispatchSubagents,
+        max_concurrent: options.hostMaxConcurrent,
+        context_tokens: options.hostContextTokens,
+        output_tokens: options.hostOutputTokens,
+        model_id: options.hostModelId,
+        models: options.hostModels ?? undefined,
+      },
+      state.host_capabilities,
+    );
+    if (Object.keys(toPersist).length > 0) {
+      const seeded = state;
+      state = await store.mutate(async (current) => ({
+        ...(current ?? seeded),
+        host_capabilities: {
+          ...(current?.host_capabilities ?? seeded.host_capabilities ?? {}),
+          ...toPersist,
+        },
+      }));
+    }
+  }
   runLogger.event({
     phase: "next-step",
     kind: "state",

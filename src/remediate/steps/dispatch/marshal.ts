@@ -368,13 +368,24 @@ export async function prepareImplementDispatch(
   const estimatedSlotTokens = itemReadFileLists.map((files) =>
     estimateImplementSlotTokens(files, options.root),
   );
+  // The persisted host handshake (state.host_capabilities, written at the
+  // decideNextStep seam) is the fallback for every capability field the wave
+  // scheduler reads: a caller that passes no waveOptions — the bare
+  // `prepare-implement-dispatch` CLI, a triage re-drive — still sizes pools to
+  // the host's real windows instead of the conservative floor. Explicit
+  // waveOptions (the next-step branch, which already folded persisted values)
+  // win per field.
+  const persistedCaps = state.host_capabilities;
   const schedule = await scheduleWave({
-    hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
+    hostMaxConcurrent: waveOptions?.hostMaxConcurrent ?? persistedCaps?.max_concurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
-    hostContextTokens: waveOptions?.hostContextTokens,
-    hostOutputTokens: waveOptions?.hostOutputTokens,
-    hostModels: waveOptions?.hostModels,
-    hostModelId: waveOptions?.hostModelId,
+    hostContextTokens: waveOptions?.hostContextTokens ?? persistedCaps?.context_tokens ?? null,
+    hostOutputTokens: waveOptions?.hostOutputTokens ?? persistedCaps?.output_tokens ?? null,
+    hostModels:
+      waveOptions?.hostModels ??
+      (persistedCaps?.models as HostModelRosterEntry[] | undefined) ??
+      null,
+    hostModelId: waveOptions?.hostModelId ?? persistedCaps?.model_id ?? null,
     itemCount: items.length,
     estimatedSlotTokens,
     // The capability floor bands against THESE pools (this schedule's `capacity_pools`
@@ -524,11 +535,40 @@ export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
 ): Promise<RemediationState> {
+  const quotaFilePath = join(
+    runDir(options.artifactsDir, runId, "implement"),
+    "dispatch-quota.json",
+  );
   // Free the grant's reservation-ledger leases now that the host has reported the
   // granted set's results — returns the reserved budget for the next grant.
-  await reconcileAdmissionLeasesFromQuotaFile(
-    join(runDir(options.artifactsDir, runId, "implement"), "dispatch-quota.json"),
-  );
+  await reconcileAdmissionLeasesFromQuotaFile(quotaFilePath);
+
+  // The admission record for this wave: a node with no result file because
+  // admission REFUSED its packet must carry that refusal in its disposition —
+  // the refusal reason otherwise sits unread in explains[] while the merge
+  // misattributes the strand to "a rolling-engine plan-vs-drive eligibility
+  // inconsistency" (the 2026-07-22 dogfood false-signal).
+  const waveQuota = await readOptionalJsonFile<{
+    resolved_limits?: { context_tokens?: number | null };
+    admission?: {
+      explains?: Array<{
+        packet_id?: string;
+        reason?: string;
+        admitted?: boolean;
+        cost?: number;
+      }>;
+    };
+  }>(quotaFilePath);
+  const admissionRefusals = new Map<string, { reason: string; cost?: number }>();
+  for (const explain of waveQuota?.admission?.explains ?? []) {
+    if (explain.admitted !== true && typeof explain.packet_id === "string" && explain.reason) {
+      admissionRefusals.set(explain.packet_id, {
+        reason: explain.reason,
+        ...(typeof explain.cost === "number" ? { cost: explain.cost } : {}),
+      });
+    }
+  }
+  const capabilityFloor = waveQuota?.resolved_limits?.context_tokens ?? null;
 
   const plan = await readJsonFile<RemediationDispatchPlan>(
     dispatchPlanPath(options.artifactsDir, runId, "implement"),
@@ -561,7 +601,10 @@ export async function mergeImplementResults(
       throw new Error("Cannot merge implement results without items.");
     }
 
-    return mergeImplementResultsIntoState(options, runId, plan, state);
+    return mergeImplementResultsIntoState(options, runId, plan, state, {
+      admissionRefusals,
+      capabilityFloor,
+    });
   });
 }
 
@@ -577,6 +620,12 @@ async function mergeImplementResultsIntoState(
   runId: string,
   plan: RemediationDispatchPlan,
   state: RemediationState,
+  admissionEvidence?: {
+    /** block_id → this wave's admission refusal, from dispatch-quota explains[]. */
+    admissionRefusals: ReadonlyMap<string, { reason: string; cost?: number }>;
+    /** The wave's resolved capability window, for the refusal's honest message. */
+    capabilityFloor: number | null;
+  },
 ): Promise<RemediationState> {
   if (!state.items) {
     throw new Error("Cannot merge implement results without items.");
@@ -689,6 +738,23 @@ async function mergeImplementResultsIntoState(
       // is what made a one-node strand cascade-blocking the whole DAG impossible to
       // root-cause after the fact.
       const cause = await diagnoseMissingResultCause(dir, item.block_id);
+      // A never-dispatched node with an admission refusal on record was refused
+      // DELIBERATELY — carry the admission reason instead of misreporting an
+      // engine plan-vs-drive inconsistency (false-signal family).
+      const refusal =
+        !cause.dispatched && item.block_id
+          ? admissionEvidence?.admissionRefusals.get(item.block_id)
+          : undefined;
+      if (refusal) {
+        const floor = admissionEvidence?.capabilityFloor;
+        cause.reasonDetail =
+          ` Root cause: admission refused the packet (${refusal.reason}` +
+          (refusal.cost != null ? `; packet cost ${refusal.cost} tokens` : "") +
+          (floor != null ? ` vs resolved capability window ${floor} tokens` : "") +
+          `) — the worker was never launched, by design. Supply host capability ` +
+          `(--host-context-tokens/--host-models), free a larger pool, or split the node.`;
+        cause.logSuffix = `admission refused the packet (${refusal.reason}) — never dispatched, by design.`;
+      }
       console.warn(
         `Missing implement worker result: ${item.result_path} — ${cause.logSuffix}`,
       );
