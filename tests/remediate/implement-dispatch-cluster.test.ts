@@ -269,4 +269,70 @@ describe("FIX-A-MERGE — never-dispatched disposition carries the admission ref
     expect(item.failure_reason).toMatch(/plan-vs-drive eligibility inconsistency/);
     expect(item.failure_reason).not.toMatch(/admission refused/);
   });
+
+  it("a TRANSIENT refusal (cap_reached) leaves the item PENDING with a bounded attempt counter", async () => {
+    await saveState(makeNodeState());
+    const merged = await mergeWithMissingResult([
+      { packet_id: "CP-BLOCK-N-x", admitted: false, reason: "cap_reached" },
+    ]);
+
+    const item = merged.items!["N-x"]!;
+    expect(item.status).toBe("pending");
+    expect(item.undispatched_attempts).toBe(1);
+    expect(item.failure_reason).toBeUndefined();
+  });
+
+  it("the transient retry budget is bounded: the item blocks with a named reason once exhausted", async () => {
+    const state = makeNodeState();
+    // Already refused 3 waves running; this merge is the 4th.
+    state.items!["N-x"]!.undispatched_attempts = 3;
+    await saveState(state);
+    const merged = await mergeWithMissingResult([
+      { packet_id: "CP-BLOCK-N-x", admitted: false, reason: "budget_exhausted" },
+    ]);
+
+    const item = merged.items!["N-x"]!;
+    expect(item.status).toBe("blocked");
+    expect(item.undispatched_attempts).toBe(4);
+    expect(item.failure_reason).toMatch(/Transient non-dispatch retry budget exhausted/);
+    expect(item.failure_reason).toContain("budget_exhausted");
+  });
+});
+
+describe("Empty-scope dispatch-boundary guard (anti-cascade spec)", () => {
+  it("refuses an empty-scope block at the boundary: never enqueued, items blocked with a named reason", async () => {
+    const state = makeNodeState();
+    // No declared surface anywhere: block touched_files empty, finding cites no files.
+    state.plan!.findings[0]!.affected_files = [];
+    state.plan!.blocks[0]!.touched_files = [];
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      "PLAN-1",
+    );
+
+    expect(plan.items).toHaveLength(0);
+    const reloaded = await new StateStore(ARTIFACTS_DIR).loadState();
+    const item = reloaded!.items!["N-x"]!;
+    expect(item.status).toBe("blocked");
+    expect(item.failure_reason).toMatch(/Empty dispatch scope/);
+    expect(item.failure_reason).toMatch(/dispatch boundary/);
+  });
+
+  it("a block with a declared surface but file-less findings still dispatches (not empty scope)", async () => {
+    const state = makeNodeState();
+    state.plan!.findings[0]!.affected_files = [];
+    state.plan!.blocks[0]!.touched_files = ["src/x.ts"];
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      "PLAN-1",
+    );
+
+    expect(plan.items).toHaveLength(1);
+    const reloaded = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(reloaded!.items!["N-x"]!.status).toBe("pending");
+  });
 });

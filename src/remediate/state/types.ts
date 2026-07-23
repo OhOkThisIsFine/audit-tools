@@ -402,4 +402,14 @@ export interface RemediationItemState {
    * the cap is hit) instead of re-dispatching the same worker indefinitely.
    */
   incomplete_coverage_attempts?: number;
+  /**
+   * Times this item's block was planned but refused admission for a TRANSIENT
+   * reason (budget/cap/uncalibrated — conditions that change between waves), so
+   * the merge left it PENDING for the next grant instead of terminal-blocking it.
+   * Bounds the transient class (anti-cascade retry spec): once the cap is hit
+   * the item blocks with a named reason, so a misclassified reason can never
+   * livelock the run. Structural refusals (`no_capable_pool`) never touch this —
+   * they block (or pause the wave) immediately.
+   */
+  undispatched_attempts?: number;
 }

@@ -59,7 +59,7 @@ describe("detectRepoConventions cached once per root", () => {
             affected_files: [],
           },
         ],
-        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true }],
+        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: ["src/x.js"] }],
         themes: [],
       },
       items: {
@@ -139,7 +139,7 @@ describe("detectRepoConventions cached once per root", () => {
             affected_files: [],
           },
         ],
-        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true }],
+        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: ["src/x.js"] }],
         themes: [],
       },
       items: {

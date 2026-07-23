@@ -883,6 +883,7 @@ followed" is otherwise indistinguishable from a bug.
   is retried against a condition that cannot change. The scope-less guard belongs at the dispatch
   boundary for the same reason — refusing an empty-scope node there makes the structural case impossible
   to enqueue rather than merely detectable afterwards.
+- **`tests/audit/linux-cycle-regression.test.mjs` + `tests/shared/quota-state.test.mjs` fail under full parallel suite load, pass alone AND co-run with unrelated new tests (2026-07-22, tool-should-decide, low).** Same class as the rollingDispatch flake below — load-dependent hermeticity/timing, observed once on the implement-dispatch-cluster lap (7066 passed alongside). De-flake per test-failure protocol when they recur; until then a full-suite "2 failed" naming exactly these two files is the known baseline.
 - **`tests/shared/rollingDispatch.test.mjs` is a genuine timing flake (2026-07-12, tool-should-decide, medium).**
   "second dispatch should start after first completes: expected 1 to be 2" — a wall-clock/ordering assertion
   that flakes under full parallel load; passes in isolation. It flaked the v0.32.62 publish CI (shard 2/4;

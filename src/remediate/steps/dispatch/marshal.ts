@@ -203,6 +203,24 @@ async function archiveIncompleteImplementResult(resultPath: string): Promise<voi
   await withFsRetry(() => rename(resultPath, archivedPath));
 }
 
+/**
+ * Admission refusal reasons that are TRANSIENT — the condition can change
+ * between waves (a budget resets, a concurrent wave's ledger hold frees, a
+ * window calibrates), so a refused-but-never-dispatched node stays PENDING for
+ * the next grant instead of terminal-blocking its subtree. `no_capable_pool` is
+ * deliberately absent: it is structural (the packet fits no pool at all —
+ * waiting changes nothing), per `classifyEmptyGrantCause` in
+ * audit-tools/shared hostDispatchWall.
+ */
+const TRANSIENT_REFUSAL_REASONS = new Set([
+  "budget_exhausted",
+  "cap_reached",
+  "window_uncalibrated",
+]);
+
+/** Waves a transiently-refused node may sit undispatched before it blocks. */
+const MAX_UNDISPATCHED_TRANSIENT_ATTEMPTS = 3;
+
 async function loadStateOrThrow(
   artifactsDir: string,
 ): Promise<RemediationState> {
@@ -254,7 +272,7 @@ export async function prepareImplementDispatch(
   const conventions = getCachedConventions(options.root);
 
   const seenBlockIds = new Set<string>();
-  const candidateBlocks = state.plan.blocks.filter((block) => {
+  const eligibleBlocks = state.plan.blocks.filter((block) => {
     if (onlyBlockId && block.block_id !== onlyBlockId) return false;
     if (seenBlockIds.has(block.block_id)) return false;
     // Rolling eligibility (INV-RS-01): a dependent node is dispatched only once
@@ -273,6 +291,48 @@ export async function prepareImplementDispatch(
     }
     return false;
   });
+
+  // Dispatch-boundary empty-scope guard (anti-cascade retry spec): a node with
+  // no declared surface AND no finding-cited files has nothing a worker may
+  // write — dispatching it wastes a slot, and silently excluding it would leave
+  // its items pending forever (a livelock). Refuse it HERE, terminally and
+  // loudly, so the structural case is impossible to enqueue rather than merely
+  // detectable afterwards.
+  const emptyScopeBlocks = eligibleBlocks.filter(
+    (block) =>
+      (block.touched_files ?? []).length === 0 &&
+      block.items.every(
+        (findingId) =>
+          (state.plan?.findings.find((f) => f.id === findingId)?.affected_files ?? [])
+            .length === 0,
+      ),
+  );
+  if (emptyScopeBlocks.length > 0) {
+    const store = new StateStore(options.artifactsDir);
+    await store.mutate(async (current) => {
+      const s = current ?? state;
+      for (const block of emptyScopeBlocks) {
+        for (const findingId of block.items) {
+          const stateItem = s.items?.[findingId];
+          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Empty dispatch scope: block ${block.block_id} declares no touched_files ` +
+            `and its finding(s) cite no affected_files — there is nothing a worker ` +
+            `could be scoped to write, so the node was refused at the dispatch ` +
+            `boundary (structural, never retried).`;
+        }
+        process.stderr.write(
+          `[remediate-code] dispatch: refusing empty-scope block ${block.block_id} ` +
+            `at the dispatch boundary (no touched_files, no affected_files).\n`,
+        );
+      }
+      return s;
+    });
+  }
+  const emptyScopeIds = new Set(emptyScopeBlocks.map((b) => b.block_id));
+  const candidateBlocks = eligibleBlocks.filter((b) => !emptyScopeIds.has(b.block_id));
 
   // Before any node is dispatched (and therefore before any accepted commit is
   // cherry-picked into the main tree), switch the main checkout onto the dedicated
@@ -745,6 +805,39 @@ async function mergeImplementResultsIntoState(
         !cause.dispatched && item.block_id
           ? admissionEvidence?.admissionRefusals.get(item.block_id)
           : undefined;
+      // Transient-vs-structural non-dispatch (anti-cascade retry spec): a node
+      // refused because no pool had capacity AT THAT MOMENT is retryable —
+      // conditions change between waves — so leave its items PENDING for the
+      // next grant, bounded by `undispatched_attempts` so a misclassified
+      // reason can never livelock the run. Only structural refusals
+      // (`no_capable_pool`: fits no pool at all — waiting changes nothing) fall
+      // through to the terminal-blocking path below.
+      if (refusal && TRANSIENT_REFUSAL_REASONS.has(refusal.reason)) {
+        const block = item.block_id
+          ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
+          : undefined;
+        let exhausted = false;
+        for (const findingId of block?.items ?? []) {
+          const stateItem = state.items[findingId];
+          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+          const attempts = (stateItem.undispatched_attempts ?? 0) + 1;
+          stateItem.undispatched_attempts = attempts;
+          if (attempts <= MAX_UNDISPATCHED_TRANSIENT_ATTEMPTS) continue;
+          exhausted = true;
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Transient non-dispatch retry budget exhausted: admission refused this ` +
+            `block ${attempts} wave(s) running (${refusal.reason}) without a worker ` +
+            `ever launching. The condition was classified retryable but is not ` +
+            `clearing — treat as structural (free capacity, or split/shrink the node).`;
+        }
+        console.warn(
+          `Missing implement worker result: ${item.result_path} — admission refused ` +
+            `transiently (${refusal.reason}); ${exhausted ? "retry budget exhausted, blocking." : "items left PENDING for the next grant."}`,
+        );
+        continue;
+      }
       if (refusal) {
         const floor = admissionEvidence?.capabilityFloor;
         cause.reasonDetail =
