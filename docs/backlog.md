@@ -1412,6 +1412,15 @@ rather than restated — the guard names the trap and the fix at the moment it f
 copy here would decay independently. Read the hook source for the rule; see *Conventions &
 invariants* in `CLAUDE.md` for the set.
 
+- **Concurrent agent sessions can share the ONE primary checkout (2026-07-23).** Two live
+  sessions worked `C:\Code\audit-tools` simultaneously: files changed under each other mid-turn,
+  and one session's staged WIP was committed + pushed by the sibling (correctly). Foreign
+  mid-session edits/commits are NOT corruption — `git log --oneline -5` + authorship first, never
+  a "recovery"; re-read files before editing; before opening a big item check whether the sibling
+  is mid-flight on it. Full protocol: memory [[concurrent-sessions-share-the-checkout]]. No
+  tooling fix proposed yet; if a collision ever loses work, the mechanical form is a session
+  lease/marker in `.claude/hooks/.state/`.
+
 - **`litellm` crashes at import on a pydantic-core version skew (2026-07-23).** Installed
   pydantic-core 2.47.0 vs pydantic requiring 2.46.4 ("make sure you haven't upgraded pydantic-core
   manually" — something did, between Jul 19 and 21). Fix:

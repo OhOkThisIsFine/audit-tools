@@ -7,19 +7,24 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.19 (2026-07-23) shipped the
-  node-context clobber tier — deny-by-default node-worktree CLI guard + writer asserts,
-  dist-dependent verify partition (defer-to-close), standing worker rules in `implementPrompt`
-  (mechanism record: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`). v0.34.18
-  (2026-07-23) shipped the accept-latch family fix (failed accepts record `accept_failed`, never
-  latch accepted; no-change closures ancestry-adjudicated; mechanism record:
-  `docs/reviews/accept-latch-family-mechanisms-2026-07-23.md`; the v0.34.17 tag was burned on a
-  doc-manifest gate miss and deleted). v0.34.16 (2026-07-23) landed the COMPLETE remediate dogfood
-  run — 8/8 nodes of the 78-finding high slice, every fix red-green validated; 7,076/0 on the
-  merged tree. v0.34.13–15 (2026-07-22, same lap) shipped the implement-dispatch defect cluster +
-  anti-cascade retry, the agentic slot-cost model, and the worktree un-landed-work guard. **The
-  full audit→remediate pipeline has now executed end-to-end on a real 78-finding slice** — the
-  "redesign before scheduled autonomy" gate has its first complete evidence run (completion
+- **Current version = `package.json`** (authoritative). v0.34.20 (2026-07-23) shipped the
+  **zero-spill capability-floor fix** — the floor's "most capable band available" now tracks LIVE
+  pool availability instead of a build-time snapshot, so an exhausted best pool no longer strands
+  packets while healthy confirmed siblings sit idle (mechanism record:
+  `docs/reviews/zero-spill-capability-floor-2026-07-23.md`; independent review codex + NIM/deepseek;
+  paused-pool wait-tick residual logged as a backlog LEAD). The same day shipped the **trap-guard
+  hook layer** (shell-trap-guard / tool-input-guard / session-start-guards + shared shell-split)
+  and a pre-commit-gate hardening pass: subcommand-positional commit detection on quote-collapsed
+  text (a substring false-positive ran tree-rewriting round-trips on read-only commands and
+  clobbered the live index), round-trip crash journaling + locking, chained-`add && commit`
+  gating against the tree that actually lands, and committed-tree-membership for the
+  hook-tracking check. ⚠ **Two agent sessions worked this checkout concurrently on 2026-07-23**
+  — see memory [[concurrent-sessions-share-the-checkout]] before "recovering" foreign edits.
+  v0.34.19 (2026-07-23) shipped the node-context clobber tier
+  (`docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`); v0.34.18 the accept-latch family
+  fix (`docs/reviews/accept-latch-family-mechanisms-2026-07-23.md`). v0.34.16 (2026-07-23) landed
+  the COMPLETE remediate dogfood run — 8/8 nodes of the 78-finding high slice. **The full
+  audit→remediate pipeline has executed end-to-end on a real 78-finding slice** (completion
   record: `docs/reviews/remediate-dogfood-completion-2026-07-23.md`).
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
@@ -119,18 +124,14 @@
 ## ▶ IMMEDIATE NEXT
 
 **1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
-nodes, v0.34.16 (completion record:
-[`remediate-dogfood-completion-2026-07-23.md`](reviews/remediate-dogfood-completion-2026-07-23.md)).
-The **accept-latch family shipped 2026-07-23** (mechanism record:
-[`accept-latch-family-mechanisms-2026-07-23.md`](reviews/accept-latch-family-mechanisms-2026-07-23.md)),
-and the **node-context clobber tier shipped 2026-07-23** — the HIGH shared-state clobber (deny-by-
-default node-worktree CLI guard + writer asserts), the dist-dependent verify partition, and the
-standing worker rules in `implementPrompt` (mechanism record:
-[`node-worktree-guard-mechanisms-2026-07-23.md`](reviews/node-worktree-guard-mechanisms-2026-07-23.md)).
-Remaining in the tier (older, still open): **zero-spill wave pool-build/fit gap** (HIGH — the wave
-never attempts healthy sibling pools; diagnose the fitting/lane selection in wave pool-build),
-dispatch-legibility mechanistic trace, intent-checkpoint gate wiring + charter phantom-staleness
-(design together), NIM single-shot-only routing, abnormal-exit no-step-contract.
+nodes, v0.34.16. Shipped from the tier so far (all 2026-07-23): the accept-latch family, the
+node-context clobber tier, and the **zero-spill capability-floor HIGH** (v0.34.20 — mechanism
+record: [`zero-spill-capability-floor-2026-07-23.md`](reviews/zero-spill-capability-floor-2026-07-23.md)).
+Remaining in the tier (older, still open): **intent-checkpoint gate wiring + charter
+phantom-staleness** (DECIDED spec in backlog — design the two together; loop-core, attestation),
+dispatch-legibility mechanistic trace, NIM single-shot-only routing (worker-kind × pool-class
+compatibility), abnormal-exit no-step-contract, and the new paused-pool wait-tick LEAD the
+zero-spill fix surfaced.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
