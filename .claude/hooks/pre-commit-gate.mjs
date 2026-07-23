@@ -31,7 +31,7 @@ import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { stripQuoted, splitShellStatements } from './shell-split.mjs';
+import { stripQuoted, collapseQuoted, splitShellStatements } from './shell-split.mjs';
 
 // ── Loop-core adversarial-review gate ────────────────────────────────────────
 // Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
@@ -194,7 +194,11 @@ const subCmds = splitShellStatements(cmd);
 function gitSubcommandRe(name) {
   return new RegExp(String.raw`\bgit\b(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*\s+${name}\b`);
 }
-const commitSubCmds = subCmds.filter((s) => gitSubcommandRe('commit').test(s));
+// Detection runs on the QUOTE-COLLAPSED statement: `echo "git commit"` is text
+// (collapses to `echo ""` — no match), while `git -C "path with spaces" commit`
+// collapses to `git -C "" commit` so the option-value hop can span it.
+const isGitSubcommand = (name) => (s) => gitSubcommandRe(name).test(collapseQuoted(s));
+const commitSubCmds = subCmds.filter(isGitSubcommand('commit'));
 
 // Exit early if no `git commit` invocation exists in any shell statement.
 if (commitSubCmds.length === 0) process.exit(0);
@@ -231,10 +235,11 @@ if (
 // so chained commands cannot bypass loop-core / doc-contract gates before staging occurs.
 // Raw-matched (not stripQuoted): a quoted `"-a"` still stages, and the cost of
 // a message-text false positive here is only a WIDER inspection set — the safe
-// direction.
+// direction. The short-flag form matches inside a CLUSTER too (`git commit -am`
+// stages exactly like `-a -m`; missing the cluster form was a bypass).
 const hasStageCommand =
-  subCmds.some((s) => gitSubcommandRe('add').test(s)) ||
-  commitSubCmds.some((s) => /(?:^|\s)-(?:a|A|-all)\b/.test(s));
+  subCmds.some(isGitSubcommand('add')) ||
+  commitSubCmds.some((s) => /(?:^|\s)(?:-(?!-)[a-zA-Z]*a[a-zA-Z]*|--all)(?=\s|$)/.test(s));
 
 // ── git helper: run a git subcommand, capturing status/stdout/stderr. ────────
 // Never throws — callers branch on `.ok`. Used for the snapshot orchestration so
@@ -313,7 +318,9 @@ function checkoutTreeExact(scratchIndex, tree, presentPaths) {
 // whatever is currently in the working tree. Returns { blocked, message }.
 // `blocked` true => a gate RESULT failed (fail-closed). Infra faults inside are
 // NOT treated as blocking (return blocked:false) so the caller can fail open.
-function runGate() {
+// `committedPaths` is the full path listing of the tree the commit will carry
+// (null on an infra fault — path-membership checks then skip, fail-open).
+function runGate(committedPaths) {
   // 1. Typecheck the (materialized) snapshot.
   try {
     execSync('npm run check', {
@@ -426,19 +433,18 @@ function runGate() {
   // the (tracked) settings.json references it, main points at a hook that is not
   // there. Bit once (friction-stop-gate.mjs).
   //
-  // Asserted against the MATERIALIZED STAGED SNAPSHOT, which is what makes this
-  // exact rather than approximate: a file the commit would not carry simply does
-  // not exist here, whether it is untracked, gitignored, or merely unstaged. So
-  // plain existence in this tree IS the question "will main have this hook?"
-  // (An `ls-files` tracked-check would answer a different, weaker question and
-  // misses the unstaged case entirely.) If settings.json itself is absent from
-  // the snapshot there is nothing to assert.
-  try {
+  // Asserted against the COMMITTED PATH SET — the listing of the exact tree the
+  // commit will carry — never the filesystem: an ignored-but-present hook file
+  // passes an existsSync check while the commit silently drops it, which is the
+  // precise trap this check exists to close. If settings.json is unreadable
+  // there is nothing to assert; if the path set could not be computed
+  // (committedPaths null) this skips, fail-open on infra.
+  if (committedPaths) try {
     const settingsText = readFileSync(join(root, '.claude', 'settings.json'), 'utf8');
     const referenced = [
       ...new Set([...settingsText.matchAll(/\.claude\/hooks\/([\w.-]+)/g)].map((m) => `.claude/hooks/${m[1]}`)),
     ];
-    const missing = referenced.filter((p) => !existsSync(join(root, p)));
+    const missing = referenced.filter((p) => !committedPaths.has(p));
     if (missing.length > 0) {
       return {
         blocked: true,

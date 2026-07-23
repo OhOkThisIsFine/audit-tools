@@ -10,17 +10,56 @@
 
 // Blank out single/double-quoted span CONTENT (the quote characters remain,
 // and length is preserved) so shell-syntax reasoning is not fooled by quoted
-// text. Naive about backslash-escaped quotes on purpose — the payloads are
-// tool commands, not adversarial input, and FAIL-OPEN callers tolerate a
-// mis-strip.
+// text. Bash-shaped escape handling: inside DOUBLE quotes a backslash escapes
+// the next char (so an embedded `\"` does not close the span and split the
+// prompt); inside single quotes there are no escapes; OUTSIDE quotes a
+// backslash-escaped char is literal (so `\"` does not OPEN a span).
+// PowerShell backtick escapes are not modeled — callers fail open, and
+// over-blanking is the safe direction.
 export function stripQuoted(s) {
   let out = '';
   let quote = null;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    if (quote) {
+    if (quote === '"' && c === '\\' && i + 1 < s.length) {
+      out += '  '; // escaped char inside a double-quoted span — still content
+      i++;
+    } else if (quote) {
       out += c === quote ? c : ' ';
       if (c === quote) quote = null;
+    } else if (c === '\\' && i + 1 < s.length) {
+      out += c + s[i + 1]; // escaped literal outside quotes — never opens a span
+      i++;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      out += c;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+// Like stripQuoted, but REMOVES quoted span content entirely (quote chars kept
+// — NOT length-preserving). For detecting whether a command sits in executable
+// position: `echo "git commit"` collapses to `echo ""` (no match), while
+// `git -C "path with spaces" commit` collapses to `git -C "" commit` so an
+// option-value regex can span the quoted value.
+export function collapseQuoted(s) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === '"' && c === '\\' && i + 1 < s.length) {
+      i++; // escaped char inside double quotes — dropped with the span content
+    } else if (quote) {
+      if (c === quote) {
+        out += c;
+        quote = null;
+      }
+    } else if (c === '\\' && i + 1 < s.length) {
+      out += c + s[i + 1];
+      i++;
     } else if (c === "'" || c === '"') {
       quote = c;
       out += c;
@@ -63,19 +102,24 @@ export function stripHeredocBodies(cmd) {
 }
 
 // Split a command into shell statements on `&&`, `||`, `;`, and newlines that
-// occur OUTSIDE quoted spans. stripQuoted is length-preserving, so separator
+// occur OUTSIDE quoted spans. Line CONTINUATIONS are joined first — `\` +
+// newline (POSIX) and backtick + newline (PowerShell) continue the same
+// statement, so `git \<newline>commit` is ONE statement and a subcommand
+// detector sees "git … commit" (newline-splitting a continuation was a gate
+// bypass). stripQuoted is length-preserving over the joined text, so separator
 // positions found on the stripped text index directly into the raw text —
 // each returned statement keeps its original quoted content intact.
 export function splitShellStatements(cmd) {
-  const stripped = stripQuoted(cmd);
+  const joined = cmd.replace(/\\\r?\n/g, ' ').replace(/`\r?\n/g, ' ');
+  const stripped = stripQuoted(joined);
   const parts = [];
   let start = 0;
   const sep = /&&|\|\||;|\n/g;
   let m;
   while ((m = sep.exec(stripped)) !== null) {
-    parts.push(cmd.slice(start, m.index));
+    parts.push(joined.slice(start, m.index));
     start = m.index + m[0].length;
   }
-  parts.push(cmd.slice(start));
+  parts.push(joined.slice(start));
   return parts.map((s) => s.trim()).filter(Boolean);
 }

@@ -79,9 +79,13 @@ function git(args) {
 // returned nothing. Logged three times (2026-07-19 / -21 / -23), each costing a
 // wasted background run.
 for (const sub of subCmds) {
-  if (!/\bcodex\b/.test(sub) || !/\bexec\b/.test(sub)) continue;
   const stripped = stripQuoted(sub);
-  const redirectsStdin = /<\s*(\/dev\/null|NUL\b|nul\b|\$null)/i.test(stripped);
+  // Matched on the STRIPPED statement: `rg "codex exec" docs` is a textual
+  // mention inside quotes, not an invocation, and must not fire.
+  if (!/\bcodex(\.\w+)?\b/.test(stripped) || !/\bexec\b/.test(stripped)) continue;
+  // ANY stdin redirect closes stdin — `< /dev/null` is the canonical form, but
+  // `< prompt.txt` (prompt ON stdin) and a heredoc equally prevent the hang.
+  const redirectsStdin = /<\s*\S/.test(stripped);
   // Something piped INTO codex also satisfies stdin (the prompt-on-stdin form).
   const pipedInto = /\|[^|]*\bcodex\b/.test(stripped);
   if (!redirectsStdin && !pipedInto) {
@@ -128,7 +132,9 @@ function restoreTargets(sub) {
 }
 
 for (const sub of subCmds) {
-  const targets = restoreTargets(sub);
+  // Shell-quoted targets reach git WITHOUT their quotes — strip them here too,
+  // or a quoted path never matches the pathspec and the rule silently misses.
+  const targets = restoreTargets(sub)?.map((t) => t.replace(/^['"]|['"]$/g, ''));
   if (!targets || targets.length === 0) continue;
   if (process.env.AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE === '1') continue;
   const st = git(['status', '--porcelain', '--', ...targets]);
@@ -189,11 +195,13 @@ for (const sub of subCmds) {
 // ── Rule: Bash-tool syntax traps (Git Bash on Windows) ───────────────────────
 if (isBash) {
   const stripped = stripQuoted(cmd);
-  // Unquoted `C:\path` — bash eats the backslashes (`C:\a\b` -> `C:ab`).
-  if (/[A-Za-z]:\\/.test(stripped)) {
+  // Unquoted Windows backslash path — bash eats the backslashes (`C:\a\b` ->
+  // `C:ab`). Drive-letter (`C:\x`), relative (`.\x` / `..\x`), and UNC
+  // (`\\server\share`) forms all mangle the same way.
+  if (/[A-Za-z]:\\|(?:^|\s)\.{1,2}\\\S|(?:^|\s)\\\\[A-Za-z0-9]/.test(stripped)) {
     denials.push(
       'unquoted Windows backslash path in a Bash-tool command — bash strips the backslashes ' +
-        '(`C:\\Code\\x` becomes `C:Codex`).\n' +
+        '(`C:\\Code\\x` becomes `C:Codex`; same for `.\\x` and `\\\\server\\share`).\n' +
         '  fix: use forward slashes (`C:/Code/x`), or run the command through the PowerShell tool.',
     );
   }
@@ -209,7 +217,10 @@ if (isBash) {
   }
   // `mktemp -d` yields an msys `/tmp/...` path that native tools (node, the
   // packaged CLI, --root) resolve against the Windows CWD and cannot find.
-  if (/\bmktemp\b/.test(stripped)) {
+  // Command-position only: `rg mktemp docs` SEARCHES for the word, it doesn't
+  // run it — fire on statement start, after a pipe, or inside `$(`/backtick
+  // substitution.
+  if (subCmds.some((s) => /(?:^|\||\$\(|`)\s*mktemp\b/.test(stripQuoted(s)))) {
     denials.push(
       '`mktemp` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that node / the packaged CLI ' +
         'cannot resolve — it is re-rooted at the Windows CWD.\n' +
