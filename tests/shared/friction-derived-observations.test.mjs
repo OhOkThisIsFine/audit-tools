@@ -142,28 +142,32 @@ test("stepBoundaryFrictionCategory maps every named fact to a REAL category and 
 
 test("decideFrictionTriage pre-populates a category from N same-artifact mechanical events", async () => {
   const dir = await mkdtemp(join(tmpdir(), "friction-derive-"));
+  // PATH-HANDLING (TST-c0e7b3b3): a run id sanitizeRunId actually CHANGES, so the
+  // capture→triage→read pipeline is proven to sanitize CONSISTENTLY at every hop
+  // (an idempotent id like "run-1" exercises none of the encoding).
+  const runId = "run/1:derive";
   try {
     // Two backend facts on the SAME artifact (node-6) → one inefficient_feeding aggregate.
     await captureStepBoundaryFriction(
       dir,
-      "run-1",
+      runId,
       { eventType: "phase_reemit", discriminator: "d1", note: "re-emit", artifact: "node-6" },
       "remediate-code",
     );
     await captureStepBoundaryFriction(
       dir,
-      "run-1",
+      runId,
       { eventType: "repair_round", discriminator: "d2", note: "repair", artifact: "node-6" },
       "remediate-code",
     );
 
-    const decision = await decideFrictionTriage(dir, "run-1", "remediate-code");
+    const decision = await decideFrictionTriage(dir, runId, "remediate-code");
     // inefficient_feeding arrives PRE-COVERED; the other two are still owed.
     expect(decision.missing_categories).toEqual(["ambiguous_direction", "tool_should_decide"]);
 
     // The pre-populated entry is persisted in the open_observations[] shape the
     // close-out (and the Stop-hook backstop) read: real category, never 'trap'.
-    const record = await readRecord(dir, "run-1");
+    const record = await readRecord(dir, runId);
     const derivedObs = (record.open_observations ?? []).filter((o) => o.derived);
     expect(derivedObs.length).toBe(1);
     expect(derivedObs[0].category).toBe("inefficient_feeding");

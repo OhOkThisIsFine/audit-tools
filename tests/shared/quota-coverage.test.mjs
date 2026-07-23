@@ -41,9 +41,33 @@ test("classifyQuotaCoverage: covered → established", () => {
 });
 
 test("classifyQuotaCoverage: uncovered reactive-only provider → reactive_only (not a gap)", () => {
+  // Non-vacuity guard (TST-1594bda6): an emptied REACTIVE_ONLY_PROVIDERS set
+  // would make the loop below assert nothing while staying green. The contract
+  // members below are load-bearing (openai-compatible / worker-command have no
+  // proactive endpoint BY NATURE); pin them so the walk is provably non-empty.
+  expect(REACTIVE_ONLY_PROVIDERS.size).toBeGreaterThan(0);
+  expect(REACTIVE_ONLY_PROVIDERS.has("openai-compatible")).toBe(true);
+  expect(REACTIVE_ONLY_PROVIDERS.has("worker-command")).toBe(true);
   for (const p of REACTIVE_ONLY_PROVIDERS) {
     expect(classifyQuotaCoverage(p, false)).toBe("reactive_only");
   }
+});
+
+test("COMPOSED: classifyQuotaCoverage over the composite source's real coversProvider verdicts", () => {
+  // TST-1594bda6: classify (hand-fed booleans) and coversProvider were only
+  // tested separately — the composition classify(p, composite.coversProvider(p))
+  // is the contract the orchestrators actually run. Compose them end-to-end.
+  const composite = buildQuotaSource();
+  const classifyVia = (provider) =>
+    classifyQuotaCoverage(provider, composite.coversProvider(provider));
+  expect(classifyVia("claude-code"), "proactively covered → established").toBe("established");
+  expect(classifyVia("codex"), "proactively covered → established").toBe("established");
+  expect(classifyVia("openai-compatible"), "no proactive surface by nature → reactive_only").toBe(
+    "reactive_only",
+  );
+  expect(classifyVia("some-future-ide"), "unknown provider → unestablished (nudge)").toBe(
+    "unestablished",
+  );
 });
 
 test("classifyQuotaCoverage: uncovered unknown provider → unestablished", () => {

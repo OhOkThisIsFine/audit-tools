@@ -92,6 +92,58 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     expect(out.findings).toHaveLength(1);
   });
 
+  // ESCALATED PRODUCTION DEFECT (dedupe finding-loss) — expected-fail until the
+  // owning node fixes src/shared/findings/dedupe.ts. With N>=3 duplicates in
+  // clone mode, the second merge re-clones: `cloneOf` is keyed by the ORIGINAL
+  // survivor, but after the first merge the group slot holds the CLONE, so
+  // `cloneOf.get(clone)` misses, a second clone is minted from the first, and the
+  // result map (`cloneOf.get(original)`) still returns the STALE first clone —
+  // the third duplicate's evidence (ev-C here) is silently dropped. `it.fails`
+  // flips loudly (fails as "expected to fail but passed") the moment the fix
+  // lands; remove the marker then.
+  it.fails("REPEATED SURVIVOR (clone mode, N>=3): successive merges accumulate on ONE clone; originals never mutated", () => {
+    // TST-286008a5: with 3+ duplicates the survivor is absorbed into REPEATEDLY.
+    // In clone mode the second merge must land on the SAME clone as the first —
+    // a re-clone from the original would silently drop B's already-absorbed
+    // evidence (finding-loss).
+    const mk = () => [
+      makeFinding({ id: "A", title: "Timeout not enforced", lens: "reliability", category: "net", severity: "high", evidence: ["ev-A"] }),
+      makeFinding({ id: "B", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "low", evidence: ["ev-B"] }),
+      makeFinding({ id: "C", title: "Timeout not enforced", lens: "security", category: "net", severity: "low", evidence: ["ev-C"] }),
+    ];
+    const input = mk();
+    const out = crossLensDedupe(input, REMEDIATE_POLICY);
+
+    expect(out.findings).toHaveLength(1);
+    const survivor = out.findings[0];
+    expect(survivor.id).toBe("A");
+    // BOTH absorbed findings' evidence accumulated on the one clone.
+    expect(survivor.evidence).toContain("ev-A");
+    expect(survivor.evidence, "first merge's evidence must survive the second merge").toContain("ev-B");
+    expect(survivor.evidence).toContain("ev-C");
+    // Every merge is recorded against the same survivor id.
+    expect(out.mergeMap.get("B")).toBe("A");
+    expect(out.mergeMap.get("C")).toBe("A");
+    // Clone mode: the caller's ORIGINALS are untouched after repeated merges.
+    expect(survivor).not.toBe(input[0]);
+    expect(input[0].evidence).toEqual(["ev-A"]);
+    expect(input[1].evidence).toEqual(["ev-B"]);
+    expect(input[2].evidence).toEqual(["ev-C"]);
+  });
+
+  it("REPEATED SURVIVOR (mutate mode, N>=3): the one original survivor absorbs every duplicate", () => {
+    const input = [
+      makeFinding({ id: "A", title: "Timeout not enforced", lens: "reliability", category: "net", severity: "high", evidence: ["ev-A"] }),
+      makeFinding({ id: "B", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "low", evidence: ["ev-B"] }),
+      makeFinding({ id: "C", title: "Timeout not enforced", lens: "security", category: "net", severity: "low", evidence: ["ev-C"] }),
+    ];
+    const out = crossLensDedupe(input, AUDIT_POLICY);
+    expect(out.findings).toHaveLength(1);
+    // Mutate mode: the survivor IS the caller's original object.
+    expect(out.findings[0]).toBe(input[0]);
+    expect(input[0].evidence).toEqual(expect.arrayContaining(["ev-A", "ev-B", "ev-C"]));
+  });
+
   it("never merges same-lens pairs (that is the same-lens pass' job)", () => {
     const out = crossLensDedupe(
       [

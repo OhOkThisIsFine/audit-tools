@@ -39,6 +39,42 @@ test("adds a new host flow and re-derives fallback_required over the merged set"
   expect(merged.fallback_required).toBe(true);
 });
 
+test("ORACLE: fallback_required is RECOMPUTED over the merged set, not carried over (false → true flip)", () => {
+  // TST-f7fad96c: the true→true case above cannot distinguish recompute from
+  // carry-over. Start from an all-high-confidence base (fallback_required:false)
+  // and add a LOW-confidence host flow — only a genuine recompute over the
+  // MERGED flows flips the bar back to true.
+  const merged = mergeCriticalFlowFallback(
+    { flows: [flow({ id: "flow:host:solid" })], fallback_required: false },
+    { flows: [flow({ id: "flow:host:shaky", confidence: "low" })] },
+  );
+  expect(merged.flows).toHaveLength(2);
+  expect(
+    merged.fallback_required,
+    "a low-confidence addition must re-trip the bar — recompute, never carry-over",
+  ).toBe(true);
+});
+
+test("repeated same-id host submissions collapse to ONE flow (last wins) and the merge is idempotent", () => {
+  // Merge-family repeated-survivor coverage: the same id upgraded N>=3 times in
+  // one submission converges on a single flow carrying the LAST version, and
+  // re-applying the same submission to the merged manifest is a no-op.
+  const submission = {
+    flows: [
+      flow({ id: "flow:host:hot", confidence: "low", paths: ["src/a.ts"] }),
+      flow({ id: "flow:host:hot", confidence: "high", paths: ["src/a.ts", "src/b.ts"] }),
+      flow({ id: "flow:host:hot", confidence: "high", paths: ["src/final.ts"] }),
+    ],
+  };
+  const merged = mergeCriticalFlowFallback({ flows: [], fallback_required: true }, submission);
+  expect(merged.flows).toHaveLength(1);
+  expect(merged.flows[0].paths).toEqual(["src/final.ts"]);
+  expect(merged.fallback_required).toBe(false);
+
+  const remerged = mergeCriticalFlowFallback(merged, submission);
+  expect(remerged, "re-applying the same submission must be a no-op (idempotent)").toEqual(merged);
+});
+
 test("upgrades an existing flow when the host reuses its exact id", () => {
   const merged = mergeCriticalFlowFallback(deterministicManifest(), {
     flows: [

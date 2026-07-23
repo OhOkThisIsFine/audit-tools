@@ -1,19 +1,64 @@
 import { test, expect } from "vitest";
+import assert from "node:assert/strict";
 
 const { resolveFreshSessionProviderName } =
   await import("../../src/audit/providers/index.ts");
+const { assertHostProviderName } = await import("audit-tools/shared");
 
 test("omitted provider defaults to worker-command even when external CLIs are available", () => {
-  const provider = resolveFreshSessionProviderName(
-    undefined,
-    {},
-    {
-      commandExists: () => true,
-      env: {},
-    },
+  const deps = {
+    commandExists: () => true,
+    env: {},
+  };
+  expect(resolveFreshSessionProviderName(undefined, {}, deps)).toBe("worker-command");
+  // Contrast oracle (TST-da398332): the SAME environment under explicit "auto"
+  // resolves to a detected CLI — proving the omitted-provider case above is the
+  // deliberate no-detection default, not detection that happened to find nothing.
+  expect(resolveFreshSessionProviderName(undefined, { provider: "auto" }, deps)).toBe(
+    "claude-code",
   );
+});
 
-  expect(provider).toBe("worker-command");
+test("COMPOSED selection+rejection: every auto-resolved provider is host-admissible (never claude-worker)", () => {
+  // TST-da398332: the selection contract (auto-resolution) and the rejection
+  // contract (assertHostProviderName refuses `claude-worker` as a host) were
+  // only tested separately, which leaves their COMPOSITION unwitnessed: no
+  // environment may auto-resolve to a name the host gate then rejects. Walk a
+  // matrix spanning every priority rung and compose the two contracts.
+  const contexts = [
+    { config: {}, opts: { commandExists: () => false, env: {} } },
+    { config: { provider: "auto" }, opts: { commandExists: () => false, env: {} } },
+    { config: { provider: "auto" }, opts: { commandExists: () => true, env: {} } },
+    { config: { provider: "auto" }, opts: { commandExists: () => false, env: { OPENCODE: "1" } } },
+    { config: { provider: "auto" }, opts: { commandExists: () => false, env: { CODEX: "1" } } },
+    {
+      config: { provider: "auto", vscode_task: { command_template: ["pwsh", "-c", "{workerCommandShell}"] } },
+      opts: { commandExists: () => false, env: { TERM_PROGRAM: "vscode" } },
+    },
+    {
+      config: { provider: "auto", subprocess_template: { command_template: ["bash", "-lc", "{workerCommandShell}"] } },
+      opts: { commandExists: () => false, env: {} },
+    },
+    {
+      config: { provider: "auto", opencode: { command: "opencode" } },
+      opts: { commandExists: (c) => c === "opencode", env: {} },
+    },
+    {
+      config: { provider: "auto", openai_compatible: { base_url: "https://nim.test/v1", model: "m" } },
+      opts: { commandExists: () => false, env: { CLAUDECODE: "1" } },
+    },
+    { config: { provider: "auto" }, opts: { commandExists: (c) => c === "claude", env: { CLAUDECODE: "1" } } },
+    { config: { provider: "auto" }, opts: { commandExists: (c) => c === "codex", env: {} } },
+    { config: { provider: "auto" }, opts: { commandExists: (c) => c === "agy", env: {} } },
+  ];
+  for (const { config, opts } of contexts) {
+    const resolved = resolveFreshSessionProviderName(undefined, config, opts);
+    expect(resolved, "auto-resolution must never select the source-pool-only claude-worker").not.toBe("claude-worker");
+    assert.doesNotThrow(
+      () => assertHostProviderName(resolved),
+      `auto-resolved provider "${resolved}" (config=${JSON.stringify(config)}) must be accepted as a host provider`,
+    );
+  }
 });
 
 test("provider auto falls back to worker-command when no configured bridge or external provider is available", () => {

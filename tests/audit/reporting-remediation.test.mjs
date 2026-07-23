@@ -285,32 +285,10 @@ test("renderAuditReportMarkdown renders the standardized per-finding block", () 
 });
 
 // ── Cross-lens dedup ────────────────────────────────────────────────────────
+// makeFinding / wrapResult are single-sourced in tests/audit/fixtures/reporting.mjs
+// (TST-7b2d18c9 / MNT-7b2d18c9: never drift-test two copies).
 
-function makeFinding(overrides) {
-  return {
-    id: "F-001",
-    title: "Example finding",
-    category: "General",
-    severity: "medium",
-    confidence: "medium",
-    lens: "correctness",
-    summary: "Example summary.",
-    affected_files: [{ path: "src/foo.ts", line_start: 1, line_end: 10 }],
-    evidence: ["ev-1"],
-    ...overrides,
-  };
-}
-
-function wrapResult(findings) {
-  return {
-    task_id: "t-1",
-    unit_id: "u-1",
-    pass_id: "pass:x",
-    lens: "correctness",
-    file_coverage: [{ path: "src/foo.ts", total_lines: 100 }],
-    findings,
-  };
-}
+import { makeFinding, wrapResult } from "./fixtures/reporting.mjs";
 
 test("cross-lens dedup merges findings with same title and file from different lenses", () => {
   const merged = mergeFindings([

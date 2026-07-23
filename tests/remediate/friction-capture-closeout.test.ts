@@ -14,6 +14,7 @@ import {
   appendFrictionUnderLock,
   captureStepBoundaryFriction,
   stepBoundaryEventId,
+  sanitizeRunId,
   AGENT_FEEDBACK_FILENAME,
   type FrictionCaptureArtifact,
   type TriagedFrictionArtifact,
@@ -306,6 +307,66 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     );
     const after = await readArtifact(frictionCapturePath(artifactsDir, runId));
     expect(after.frictions.filter((f) => (f as { id: string }).id === expectedId)).toHaveLength(1);
+  });
+
+  it("PATH-HANDLING: a run id that sanitizeRunId actually CHANGES stays on the canonical capture path", async () => {
+    // TST-c0e7b3b3: every other test uses run ids that sanitize to themselves,
+    // so the sanitization path was never exercised (idempotent inputs prove
+    // nothing). This id carries a path separator, a colon, a space, and an
+    // underscore — all characters the encoder must transform.
+    const artifactsDir = join(TEST_DIR, "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const runId = "AUDIT/RUN:2026 07_22";
+
+    // Premise: the input is genuinely non-idempotent, and the token is filename-safe.
+    const token = sanitizeRunId(runId);
+    expect(token).not.toBe(runId);
+    expect(token).toMatch(/^[A-Za-z0-9._-]+$/);
+    // Injectivity spot-pin: a naive many-to-one collapse would fuse these.
+    expect(sanitizeRunId("a/b")).not.toBe(sanitizeRunId("a-b"));
+
+    // Capture writes to the canonical sanitized path, inside the friction dir.
+    await captureFrictionEvent(artifactsDir, runId, { id: "evt-x", note: "n" }, "audit-code");
+    const expectedPath = frictionCapturePath(artifactsDir, runId);
+    expect(existsSync(expectedPath)).toBe(true);
+    expect(expectedPath).toContain(token);
+    expect(existsSync(join(artifactsDir, "friction", "AUDIT")), "the raw path separator must not create a nested dir").toBe(false);
+
+    // Disposition joins the same record file, and the artifact carries the
+    // ORIGINAL run id (the token is a filename encoding, not an identity rewrite).
+    await recordFrictionDisposition(
+      artifactsDir,
+      runId,
+      { target_id: "evt-x", disposition: "keep" },
+      "audit-code",
+    );
+    const record = await readArtifact(expectedPath);
+    expect(record.run_id).toBe(runId);
+    expect(record.frictions.some((f) => (f as { id: string }).id === "evt-x")).toBe(true);
+  });
+
+  // ESCALATED PRODUCTION DEFECT (friction close-out double-sanitize) —
+  // expected-fail until the owning node fixes src/shared/friction/triage.ts
+  // (lines ~391 and ~446 at v0.34.10): `frictionCapturePath(artifactsDir,
+  // sanitizeRunId(runId))` sanitizes an input that frictionCapturePath ALREADY
+  // sanitizes. Because the encoding escapes `_`, double-encoding yields a
+  // DIFFERENT filename (`/` → `_2f` → `_5f2f`), so for any run id the encoder
+  // actually changes, the triage/close-out reads-writes a DIFFERENT record file
+  // than capture — captured events are invisible to the close-out (false-clean
+  // walk). Invisible on ids that sanitize to themselves, which is what every
+  // pre-existing test used. `it.fails` flips loudly when the fix lands; remove
+  // the marker then.
+  it.fails("PATH-HANDLING: the close-out decider joins the SAME record file capture wrote (non-idempotent run id)", async () => {
+    const artifactsDir = join(TEST_DIR, "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const runId = "AUDIT/RUN:2026 07_22";
+    await captureFrictionEvent(artifactsDir, runId, { id: "evt-x", note: "n" }, "audit-code");
+
+    const pending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    // Same file as the canonical capture path...
+    expect(pending.recordPath).toBe(frictionCapturePath(artifactsDir, runId));
+    // ...and the captured event is therefore VISIBLE to the close-out walk.
+    expect(pending.pending.map((s) => s.id)).toContain("evt-x");
   });
 
   it("PARITY: both halves use the SAME single-sourced triage decider (only `tool` differs)", async () => {

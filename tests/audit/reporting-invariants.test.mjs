@@ -21,33 +21,10 @@ const {
 const { renderSynthesisNarrativePrompt } = await import("../../src/audit/reporting/synthesisNarrativePrompt.ts");
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+// makeFinding / wrapResult are single-sourced in tests/audit/fixtures/reporting.mjs
+// (TST-1bfd0034 / MNT-1bfd0034: never drift-test two copies).
 
-function makeFinding(overrides = {}) {
-  return {
-    id: "F-001",
-    title: "Example finding",
-    category: "General",
-    severity: "medium",
-    confidence: "medium",
-    lens: "correctness",
-    summary: "Example summary.",
-    affected_files: [{ path: "src/foo.ts", line_start: 1, line_end: 10 }],
-    evidence: ["ev-1"],
-    ...overrides,
-  };
-}
-
-function wrapResult(findings, overrides = {}) {
-  return {
-    task_id: "t-1",
-    unit_id: "u-1",
-    pass_id: "pass:correctness",
-    lens: "correctness",
-    file_coverage: [{ path: "src/foo.ts", total_lines: 100 }],
-    findings,
-    ...overrides,
-  };
-}
+import { makeFinding, wrapResult } from "./fixtures/reporting.mjs";
 
 function baseReport() {
   const model = buildAuditReportModel({

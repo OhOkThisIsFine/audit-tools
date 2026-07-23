@@ -199,11 +199,33 @@ async function main() {
 // otherwise the network fetch would fire at import time.
 export { flatten, stableStringify, blendedPrice, BY_PROVIDER_KEY };
 
+const USAGE = `Usage: node scripts/shared/update-models.mjs [--help]
+
+Refresh the vendored models.dev static-metadata snapshot
+(src/shared/data/model-statics.generated.json). Fetches ${SOURCE_URL}
+and rewrites the snapshot; run with no arguments (\`npm run update-models\`).
+
+  -h, --help   print this usage and exit (no fetch, no write)
+`;
+
 const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  // Invocation guard (REL-eb3aeddf): the networked refresh + snapshot write must
+  // only run on an explicit no-argument invocation. `--help` prints usage; any
+  // other argument is an operator mistake and must fail loudly rather than
+  // silently firing a live fetch that rewrites the vendored snapshot.
+  const args = process.argv.slice(2);
+  if (args.some((a) => a === "--help" || a === "-h")) {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  } else if (args.length > 0) {
+    process.stderr.write(`update-models: unknown argument(s): ${args.join(" ")}\n${USAGE}`);
+    process.exit(2);
+  } else {
+    main().catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+  }
 }

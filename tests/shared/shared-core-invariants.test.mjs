@@ -17,27 +17,43 @@ const AUDIT_CODE_SCHEMAS = resolve(REPO_ROOT, "schemas");
 
 // ── INV-shared-core-01: Schema drift detection ───────────────────────────────
 
-test("INV-shared-core-01: finding.schema.json required keys match Finding TS type", () => {
+test("INV-shared-core-01: finding.schema.json stays consistent with the zod Finding contract (mechanically derived, no hand list)", async () => {
+  // TST-ccdc83a0: the old guard compared schema.required against a HAND-COPIED
+  // test-local field list — a drift guard that could itself drift (a field
+  // dropped from the contract stayed in the list; a field added to the contract
+  // was never checked). Both sides are now derived mechanically: the base
+  // contract from the zod FindingSchema shape at runtime, the worker schema from
+  // the committed JSON. The worker schema is a deliberate STRICTER-or-relaxed
+  // projection (evidence strengthened to required; lens relaxed — defaulted from
+  // AuditResult.lens), so the invariants are structural consistency, not
+  // required-set equality:
+  //   1. every schema-required key is a real base-contract property;
+  //   2. every schema property is a real base-contract property (no orphans);
+  //   3. every base-contract REQUIRED key appears in the schema's properties.
+  const { FindingSchema } = await import("../../src/shared/types/finding.ts");
   const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
   expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
 
-  // The required fields from finding.schema.json must all be present on the
-  // TS Finding interface. We verify by checking the schema's "required" array
-  // against the known Finding fields. A missing key here means schema/TS drift.
+  const zodShape = FindingSchema.shape;
+  const baseKeys = new Set(Object.keys(zodShape));
+  const baseRequired = Object.keys(zodShape).filter((k) => !zodShape[k].isOptional());
   const schemaRequired = schema.required ?? [];
+  const schemaProperties = new Set(Object.keys(schema.properties ?? {}));
 
-  // Known canonical Finding fields from types/finding.ts (required + commonly required by schema).
-  const findingFields = new Set([
-    "id", "title", "category", "severity", "confidence",
-    "lens", "summary", "affected_files", "evidence",
-    // optional: impact, likelihood, reproduction, systemic,
-    // related_findings, theme_id, evidence_grounded, contract_goal_id,
-    // contract_obligation_ids, verification_obligation_ids, targeted_commands
-  ]);
+  // Non-vacuity: both derived sides must be non-empty for the walks to assert anything.
+  expect(baseRequired.length).toBeGreaterThan(0);
+  expect(schemaRequired.length).toBeGreaterThan(0);
+  expect(schemaProperties.size).toBeGreaterThan(0);
 
   for (const key of schemaRequired) {
-    expect(findingFields.has(key), `Schema required field "${key}" is missing from the TS Finding type — schema/TS drift detected`).toBeTruthy();
+    expect(baseKeys.has(key), `finding.schema.json requires "${key}" but the zod FindingSchema has no such property — schema/contract drift`).toBeTruthy();
+  }
+  for (const key of schemaProperties) {
+    expect(baseKeys.has(key), `finding.schema.json property "${key}" does not exist on the zod FindingSchema — schema/contract drift`).toBeTruthy();
+  }
+  for (const key of baseRequired) {
+    expect(schemaProperties.has(key), `zod FindingSchema requires "${key}" but finding.schema.json has no such property — schema/contract drift`).toBeTruthy();
   }
 });
 

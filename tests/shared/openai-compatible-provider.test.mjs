@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
@@ -6,6 +6,7 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
+  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +18,24 @@ const {
   createFreshSessionProvider,
 } = await import("audit-tools/shared");
 
+// Cleanup terminates and releases handles: every mkdtemp dir is tracked and
+// removed after each test (pop-before-remove, so a failing rm can never loop).
+const tmpCtxDirs = [];
+afterEach(() => {
+  while (tmpCtxDirs.length) {
+    const dir = tmpCtxDirs.pop();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+});
+
 // Fresh isolated worktree + launch input per test (hermeticity).
 function makeCtx(promptText) {
   const dir = mkdtempSync(join(tmpdir(), "oai-prov-"));
+  tmpCtxDirs.push(dir);
   const repoRoot = join(dir, "repo");
   mkdirSync(repoRoot, { recursive: true });
   const promptPath = join(dir, "prompt.txt");
@@ -129,20 +145,31 @@ test("launch degrades cleanly when the API key env var is unset", async () => {
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/API key/);
   expect(fetchFn._calls, "must not call the endpoint without a key").toBe(0);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
-test("launch requires both base_url and model", async () => {
+test("launch requires both base_url and model — and the rejection has NO side effects", async () => {
+  // TST-17059259: a rejection test must also assert the ABSENCE of side effects —
+  // no endpoint POST, no result artifact. A config-invalid launch that still
+  // fired the network or wrote a result would be silently half-executed.
   const { input } = makeCtx();
+  const noBaseFetch = fakeFetchReturning("{}");
   const noBase = new OpenAiCompatibleProvider(
     { model: "m", api_key: "k" },
-    { fetchFn: fakeFetchReturning("{}") },
+    { fetchFn: noBaseFetch },
   );
   expect((await noBase.launch(input)).accepted).toBe(false);
+  expect(noBaseFetch._calls, "missing base_url must reject before any POST").toBe(0);
+  expect(existsSync(input.resultPath), "missing base_url must not write a result artifact").toBe(false);
+
+  const noModelFetch = fakeFetchReturning("{}");
   const noModel = new OpenAiCompatibleProvider(
     { base_url: "https://x/v1", api_key: "k" },
-    { fetchFn: fakeFetchReturning("{}") },
+    { fetchFn: noModelFetch },
   );
   expect((await noModel.launch(input)).accepted).toBe(false);
+  expect(noModelFetch._calls, "missing model must reject before any POST").toBe(0);
+  expect(existsSync(input.resultPath), "missing model must not write a result artifact").toBe(false);
 });
 
 test("launch fails immediately on a terminal (non-transient) non-2xx HTTP response", async () => {
@@ -164,6 +191,7 @@ test("launch fails when the completion is not parseable JSON", async () => {
   const res = await provider.launch(input);
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/parseable JSON/);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
 test("launch rejects a file path escaping the worktree", async () => {
@@ -178,6 +206,7 @@ test("launch rejects a file path escaping the worktree", async () => {
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/outside the worktree/);
   expect(existsSync(join(repoRoot, "..", "escape.txt"))).toBe(false);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
 test("launch fails when the model returns files but omits the result", async () => {
@@ -188,6 +217,11 @@ test("launch fails when the model returns files but omits the result", async () 
   const res = await provider.launch(input);
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/result/);
+  // Side-effect absence on the RESULT channel: the worktree is disposable (file
+  // application before the result check is documented behavior; merge-side scope
+  // enforcement is the guard there), but a rejected launch must NEVER emit a
+  // result artifact the merge could ingest.
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
 test("launch skips control-plane (.audit-tools) paths echoed into files[]", async () => {
