@@ -7,14 +7,15 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.13 (2026-07-22) shipped the
-  implement-dispatch defect cluster + anti-cascade retry (handshake persisted at the
-  decideNextStep seam; structural-refusal honest pause; refusal-carrying dispositions;
-  single-finding FILE-partition split; transient bounded retry + empty-scope boundary guard —
-  mechanisms record: `docs/reviews/implement-dispatch-cluster-mechanisms-2026-07-22.md`; the
-  v0.34.12 tag was deleted after its CI caught two unregistered-doc/id-glossary misses, fixed and
-  forward-bumped). v0.34.8–v0.34.11 (same day) shipped the completion-livelock fix, charter
-  provenance churn fix, CLI-worker write-scope snapshot, and the control-byte release gate.
+- **Current version = `package.json`** (authoritative). v0.34.16 (2026-07-23) landed the COMPLETE
+  remediate dogfood run — 8/8 nodes of the 78-finding high slice, every fix red-green validated,
+  merged with both mid-run main-side fixes preserved; 7,076/0 on the merged tree. v0.34.13–15
+  (2026-07-22, same lap) shipped the implement-dispatch defect cluster + anti-cascade retry
+  (mechanisms: `docs/reviews/implement-dispatch-cluster-mechanisms-2026-07-22.md`), the agentic
+  slot-cost model, and the worktree un-landed-work guard. **The full audit→remediate pipeline has
+  now executed end-to-end on a real 78-finding slice** — the "redesign before scheduled autonomy"
+  gate has its first complete evidence run (completion record:
+  `docs/reviews/remediate-dogfood-completion-2026-07-23.md`).
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
@@ -105,20 +106,20 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. DRIVE the resumed dogfood run to completion.** The implement-dispatch cluster is FIXED and
-SHIPPED (v0.34.13, 2026-07-22) and the paused run was RESUMED the same session: triage retry of
-all 8 nodes processed, capability now resolves to the host's real window
-(`claude-fable-5`/200k, was 32k/`model:null`), and CP-BLOCK-CP-NODE-7 (the wall node) was
-ADMITTED (152.6k packet) and dispatched to a host worker subagent. Every backlog live-run watch
-item for the cluster passed at re-dispatch. Remaining: drive the rolling loop (accept-node per
-completion → merge → next-step; INV-RS-01 unlocks the 7 dependents as CP-NODE-7 lands), then
-close/report. The run record (`remediate-dogfood-2026-07-22.md`) carries the resume protocol.
-Next tier (specced in backlog *Open bugs*): zero-spill wave pool-build/fit gap,
-dispatch-legibility mechanistic trace, intent-checkpoint gate wiring + charter phantom-staleness
-(design together), NIM single-shot-only routing, abnormal-exit no-step-contract. Audit-run
-records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
-[`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
-`.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
+**1. Fix the dogfood-resume defect tier (backlog *Open bugs*, all evidence-complete).** The
+dogfood run is DONE — 8/8 nodes resolved, merged to main (`a663bac6`), released v0.34.16
+(completion record: [`remediate-dogfood-completion-2026-07-23.md`](reviews/remediate-dogfood-completion-2026-07-23.md)).
+The resume surfaced five new defects; two shipped same-session (v0.34.14 agentic slot-cost model,
+v0.34.15 worktree un-landed-work guard). The remaining three are specced with live evidence:
+**accept-latch + rollback family** (HIGH — failed accept latches accepted; rollback drops sibling
+commits + empties the worktree; post-rollback merge mislabels `resolved_no_change`);
+**shared-state clobber from node context** (HIGH — state-mutating CLIs must be refused from a
+node-worktree CWD / owner-token the session writers); **build-free accept vs dist-importing
+verify commands** (medium — classify at plan time, build-first or refuse) + the worker-prompt
+rules that belong in `implementPrompt`'s template. Older tier still open: zero-spill wave
+pool-build/fit gap, dispatch-legibility mechanistic trace, intent-checkpoint gate wiring +
+charter phantom-staleness (design together), NIM single-shot-only routing, abnormal-exit
+no-step-contract.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
@@ -126,8 +127,7 @@ inventories give durable labels and measurable RECALL, and turn `score-audit` in
 gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-target calibration.
 
 **3. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
-(The doc-review queue is EMPTY — all 11 items were owner-decided, applied, and ledger-resolved
-2026-07-22; the DD-9 decision became the intent-checkpoint gate-wiring work item above.)
+(The doc-review queue is EMPTY as of 2026-07-22.)
 
 ---
 
