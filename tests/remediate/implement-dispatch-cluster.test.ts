@@ -419,6 +419,39 @@ describe("FIX-C-SPLIT — oversized single-finding block splits by file partitio
   });
 });
 
+describe("Worktree un-landed-work guard — a re-prepare never destroys worker output", () => {
+  it("discriminates: nonexistent → false; clean-at-base → false; uncommitted edits → true", async () => {
+    const { worktreeHoldsUnlandedWork } = await import(
+      "../../src/remediate/steps/rollingSession.js"
+    );
+    const { execSync } = await import("node:child_process");
+    const gitRepo = join(TEST_DIR, "wt-guard-repo");
+    await mkdir(gitRepo, { recursive: true });
+    execSync("git init -q -b main", { cwd: gitRepo });
+    execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base', {
+      cwd: gitRepo,
+    });
+
+    expect(worktreeHoldsUnlandedWork(join(TEST_DIR, "no-such-worktree"), gitRepo)).toBe(false);
+    // Clean tree at the base: nothing un-landed (base = the repo's own HEAD).
+    expect(worktreeHoldsUnlandedWork(gitRepo, gitRepo)).toBe(false);
+    // Uncommitted edit: un-landed work — a reset here would destroy it.
+    await writeFile(join(gitRepo, "wip.ts"), "edited");
+    expect(worktreeHoldsUnlandedWork(gitRepo, gitRepo)).toBe(true);
+    // Committed-but-not-landed: a linked node worktree whose branch is ahead of
+    // the primary tree's HEAD (the real shape — shared object store).
+    await rm(join(gitRepo, "wip.ts"), { force: true });
+    const linked = join(TEST_DIR, "wt-guard-linked");
+    execSync(`git worktree add -q -b node-branch "${linked}"`, { cwd: gitRepo });
+    execSync(
+      'git -c user.email=t@t -c user.name=t commit -q --allow-empty -m worker-output',
+      { cwd: linked },
+    );
+    expect(worktreeHoldsUnlandedWork(linked, gitRepo)).toBe(true);
+    execSync(`git worktree remove --force "${linked}"`, { cwd: gitRepo });
+  });
+});
+
 describe("Agentic slot-cost model — access set is a manifest, not inlined content", () => {
   it("many referencing files inflate the estimate by listing overhead only, never by their byte-sum", async () => {
     // One large source file + many referencing tests. Under the content-inlining

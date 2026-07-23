@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden, detectHostDispatchWall, type HostDispatchWall } from "audit-tools/shared";
 // Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
@@ -138,7 +139,60 @@ export function nodeSettledPoolsPath(artifactsDir: string, runId: string): strin
  */
 const HOST_SUBAGENT_CLAIM_POOL = "host-subagent";
 
-/** Remove any stale worktree, then create a fresh isolated one with node_modules linked. */
+/**
+ * True when the node's existing worktree holds UN-LANDED work: uncommitted
+ * edits, or commits on its branch that accept-node has not yet merged. A
+ * re-prepare (retry, session rebuild, concurrent driver) must NEVER destroy
+ * such a worktree — the 2026-07-22 dogfood resume lost a completed worker's
+ * entire uncommitted output when a triage-retry re-prepare reset the worktree
+ * it was documented to preserve.
+ */
+export function worktreeHoldsUnlandedWork(wt: string, root: string): boolean {
+  if (!existsSync(wt)) return false;
+  const status = spawnSyncHidden("git", ["status", "--porcelain"], {
+    cwd: wt,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (!status.error && status.status === 0 && (status.stdout ?? "").trim().length > 0) {
+    return true;
+  }
+  // Commits ahead of the primary tree's HEAD: worker output that accept-node has
+  // not merged. Landing cherry-picks (new shas), so a landed node's worktree can
+  // still read as "ahead" — that over-match is the SAFE direction (a loud reuse
+  // of a stale worktree is recoverable; resetting an un-landed one destroys
+  // work). The deliberate post-quarantine reset path clears failed attempts.
+  const rootHead = spawnSyncHidden("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  const base = (rootHead.stdout ?? "").trim();
+  if (rootHead.error || rootHead.status !== 0 || base.length === 0) {
+    // Cannot establish the base — fail SAFE (treat as un-landed; never reset).
+    return true;
+  }
+  const ahead = spawnSyncHidden("git", ["rev-list", "--count", "HEAD", `^${base}`], {
+    cwd: wt,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (!ahead.error && ahead.status === 0) {
+    const n = Number.parseInt((ahead.stdout ?? "0").trim(), 10);
+    if (Number.isFinite(n) && n > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Remove any stale worktree, then create a fresh isolated one with node_modules
+ * linked — UNLESS the existing worktree holds un-landed work (uncommitted edits
+ * or unaccepted commits), in which case it is REUSED as-is: resetting it would
+ * silently destroy a completed worker's output on the retry / session-rebuild
+ * path (the "preserved worktree" contract Piece D promises). Reuse also skips
+ * untracked-target seeding — the seed copies main-tree versions over paths the
+ * worker may have edited.
+ */
 function createNodeWorktree(
   root: string,
   blockId: string,
@@ -147,6 +201,13 @@ function createNodeWorktree(
 ): void {
   const wt = worktreePath(root, blockId, runId);
   const branch = worktreeBranchForBlock(blockId, runId);
+  if (worktreeHoldsUnlandedWork(wt, root)) {
+    process.stderr.write(
+      `[remediate-code] rolling: reusing existing worktree for ${blockId} — it holds ` +
+        `un-landed work (uncommitted edits or unaccepted commits); a reset here would destroy it.\n`,
+    );
+    return;
+  }
   // Fully reset (worktree dir + pruned admin entries + force-deleted branch) so a
   // re-dispatch after a prior blocked/triaged attempt starts clean from HEAD — a
   // bare removeWorktree leaves the branch behind and `git worktree add -b` then
