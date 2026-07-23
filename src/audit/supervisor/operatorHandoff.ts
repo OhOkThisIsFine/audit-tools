@@ -228,27 +228,31 @@ function buildInteractiveProviderHint(
 // absent ones read. renderMarkdown and file_map both source paths from the
 // artifact path model (AuditCodeHandoffArtifactPaths), so adding or renaming a
 // handoff artifact is one edit here instead of coordinated edits across sites.
-const ARTIFACT_PATH_RENDER_FIELDS: ReadonlyArray<{
-  label: string;
-  key: keyof AuditCodeHandoffArtifactPaths;
-  fallback?: string;
-}> = [
-  { label: "operator handoff json", key: "operator_handoff_json" },
-  { label: "operator handoff markdown", key: "operator_handoff_markdown" },
-  { label: "incoming dir", key: "incoming_dir" },
-  { label: "session config", key: "session_config" },
-  { label: "run ledger", key: "run_ledger" },
-  { label: "current task", key: "current_task", fallback: "not available" },
-  { label: "current prompt", key: "current_prompt", fallback: "not available" },
-  { label: "current tasks", key: "current_tasks", fallback: "not available" },
-  { label: "audit tasks", key: "audit_tasks", fallback: "not available yet" },
-  {
+// Drift guard: the mapped type is exhaustive over AuditCodeHandoffArtifactPaths
+// by construction — adding, renaming, or removing a model field without updating
+// this registry fails `npm run check` (a missing key is a TS2741, an extra or
+// stale key is a TS2353). Render order is the authored insertion order below.
+const ARTIFACT_PATH_RENDER_FIELDS: {
+  readonly [K in keyof AuditCodeHandoffArtifactPaths]: {
+    readonly label: string;
+    readonly fallback?: string;
+  };
+} = {
+  operator_handoff_json: { label: "operator handoff json" },
+  operator_handoff_markdown: { label: "operator handoff markdown" },
+  incoming_dir: { label: "incoming dir" },
+  session_config: { label: "session config" },
+  run_ledger: { label: "run ledger" },
+  current_task: { label: "current task", fallback: "not available" },
+  current_prompt: { label: "current prompt", fallback: "not available" },
+  current_tasks: { label: "current tasks", fallback: "not available" },
+  audit_tasks: { label: "audit tasks", fallback: "not available yet" },
+  runtime_validation_tasks: {
     label: "runtime validation tasks",
-    key: "runtime_validation_tasks",
     fallback: "not available yet",
   },
-  { label: "friction record", key: "friction_record" },
-];
+  friction_record: { label: "friction record" },
+};
 
 function renderMarkdown(handoff: AuditCodeHandoff): string {
   const lines: string[] = [
@@ -273,8 +277,13 @@ function renderMarkdown(handoff: AuditCodeHandoff): string {
   }
 
   lines.push("", "Useful artifact paths:");
-  for (const field of ARTIFACT_PATH_RENDER_FIELDS) {
-    const value = handoff.artifact_paths[field.key];
+  for (const [key, field] of Object.entries(ARTIFACT_PATH_RENDER_FIELDS) as Array<
+    [
+      keyof AuditCodeHandoffArtifactPaths,
+      { label: string; fallback?: string },
+    ]
+  >) {
+    const value = handoff.artifact_paths[key];
     lines.push(`- ${field.label}: ${value ?? field.fallback ?? "not available"}`);
   }
 

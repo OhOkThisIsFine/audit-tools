@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
@@ -6,6 +6,7 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
+  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +18,24 @@ const {
   createFreshSessionProvider,
 } = await import("audit-tools/shared");
 
+// Cleanup terminates and releases handles: every mkdtemp dir is tracked and
+// removed after each test (pop-before-remove, so a failing rm can never loop).
+const tmpCtxDirs = [];
+afterEach(() => {
+  while (tmpCtxDirs.length) {
+    const dir = tmpCtxDirs.pop();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+});
+
 // Fresh isolated worktree + launch input per test (hermeticity).
 function makeCtx(promptText) {
   const dir = mkdtempSync(join(tmpdir(), "oai-prov-"));
+  tmpCtxDirs.push(dir);
   const repoRoot = join(dir, "repo");
   mkdirSync(repoRoot, { recursive: true });
   const promptPath = join(dir, "prompt.txt");
@@ -129,20 +145,31 @@ test("launch degrades cleanly when the API key env var is unset", async () => {
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/API key/);
   expect(fetchFn._calls, "must not call the endpoint without a key").toBe(0);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
-test("launch requires both base_url and model", async () => {
+test("launch requires both base_url and model — and the rejection has NO side effects", async () => {
+  // TST-17059259: a rejection test must also assert the ABSENCE of side effects —
+  // no endpoint POST, no result artifact. A config-invalid launch that still
+  // fired the network or wrote a result would be silently half-executed.
   const { input } = makeCtx();
+  const noBaseFetch = fakeFetchReturning("{}");
   const noBase = new OpenAiCompatibleProvider(
     { model: "m", api_key: "k" },
-    { fetchFn: fakeFetchReturning("{}") },
+    { fetchFn: noBaseFetch },
   );
   expect((await noBase.launch(input)).accepted).toBe(false);
+  expect(noBaseFetch._calls, "missing base_url must reject before any POST").toBe(0);
+  expect(existsSync(input.resultPath), "missing base_url must not write a result artifact").toBe(false);
+
+  const noModelFetch = fakeFetchReturning("{}");
   const noModel = new OpenAiCompatibleProvider(
     { base_url: "https://x/v1", api_key: "k" },
-    { fetchFn: fakeFetchReturning("{}") },
+    { fetchFn: noModelFetch },
   );
   expect((await noModel.launch(input)).accepted).toBe(false);
+  expect(noModelFetch._calls, "missing model must reject before any POST").toBe(0);
+  expect(existsSync(input.resultPath), "missing model must not write a result artifact").toBe(false);
 });
 
 test("launch fails immediately on a terminal (non-transient) non-2xx HTTP response", async () => {
@@ -164,6 +191,7 @@ test("launch fails when the completion is not parseable JSON", async () => {
   const res = await provider.launch(input);
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/parseable JSON/);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
 test("launch rejects a file path escaping the worktree", async () => {
@@ -178,16 +206,89 @@ test("launch rejects a file path escaping the worktree", async () => {
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/outside the worktree/);
   expect(existsSync(join(repoRoot, "..", "escape.txt"))).toBe(false);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
 });
 
-test("launch fails when the model returns files but omits the result", async () => {
-  const { input } = makeCtx();
+test("launch fails when the model returns files but omits the result — and applies NO files (INV-SCC-10)", async () => {
+  const { repoRoot, input } = makeCtx();
   const content = JSON.stringify({ files: [{ path: "a.txt", content: "hi" }] });
   const fetchFn = fakeFetchReturning(content);
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/result/);
+  // INV-SCC-10 (TST-17059259): a rejected launch is ATOMIC — the complete
+  // response is validated (files AND result) before anything is committed, so
+  // accepted:false leaves the node worktree byte-identical AND emits no result
+  // artifact the merge could ingest.
+  expect(existsSync(join(repoRoot, "a.txt")), "a rejected launch must not apply files").toBe(false);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
+});
+
+// INV-SCC-10 (TST-17059259): valid-then-invalid multi-file responses must not
+// leave partial edits — the worktree stays byte-identical on EVERY rejection.
+test("a valid file followed by an escaping path rejects with ZERO partial writes (worktree byte-identical)", async () => {
+  const { repoRoot, input } = makeCtx();
+  const content = JSON.stringify({
+    files: [
+      { path: "src/good.ts", content: "export const ok = 1;" },
+      { path: "../escape.txt", content: "x" },
+    ],
+    result: { ok: true },
+  });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/outside the worktree/);
+  expect(existsSync(join(repoRoot, "src/good.ts")), "the earlier valid file must not be committed").toBe(false);
+  expect(existsSync(join(repoRoot, "src")), "no partial directory structure may be left behind").toBe(false);
+  expect(existsSync(join(repoRoot, "..", "escape.txt"))).toBe(false);
+  expect(existsSync(input.resultPath)).toBe(false);
+});
+
+test("a valid file followed by a malformed files[] entry rejects with ZERO partial writes", async () => {
+  const { repoRoot, input } = makeCtx();
+  const content = JSON.stringify({
+    files: [
+      { path: "kept.txt", content: "would be written" },
+      { path: 42, content: "bad shape" },
+    ],
+    result: { ok: true },
+  });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/files\[\]/);
+  expect(existsSync(join(repoRoot, "kept.txt")), "the earlier valid file must not be committed").toBe(false);
+  expect(existsSync(input.resultPath)).toBe(false);
+});
+
+test("a pre-existing file overwritten mid-apply is restored when a later write fails (rollback)", async () => {
+  // Force the RESULT write to fail (resultPath's parent is occupied by a FILE),
+  // after the worktree files were already applied — the provider must roll the
+  // worktree back to its pre-launch bytes.
+  const { dir, repoRoot, input } = makeCtx();
+  writeFileSync(join(repoRoot, "existing.txt"), "original bytes");
+  const blockedResultDir = join(dir, "result-blocked");
+  writeFileSync(blockedResultDir, "a file, not a dir");
+  const content = JSON.stringify({
+    files: [
+      { path: "existing.txt", content: "overwritten" },
+      { path: "fresh.txt", content: "new file" },
+    ],
+    result: { ok: true },
+  });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch({
+    ...input,
+    resultPath: join(blockedResultDir, "nested", "result.json"),
+  });
+  expect(res.accepted).toBe(false);
+  expect(readFileSync(join(repoRoot, "existing.txt"), "utf8"), "an overwritten file must be rolled back to its prior bytes").toBe("original bytes");
+  expect(existsSync(join(repoRoot, "fresh.txt")), "a created file must be rolled back (removed)").toBe(false);
 });
 
 test("launch skips control-plane (.audit-tools) paths echoed into files[]", async () => {

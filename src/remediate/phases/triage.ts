@@ -9,6 +9,13 @@ import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 import { verifyNodeInWorktree, implementResultPath } from "../steps/dispatch.js";
 
 interface TriageResolution {
+  /**
+   * The plan this resolution answers (INV-RSM-RESOLUTION-CORRELATE). Optional
+   * for host-leniency: an absent plan_id is accepted, but a PRESENT one that
+   * does not match the live plan marks the file as a stale leftover from an
+   * earlier run — it is archived and treated as absent, never applied.
+   */
+  plan_id?: string;
   items: {
     finding_id: string;
     action: "retry" | "ignore" | "halt";
@@ -22,6 +29,9 @@ interface TriageResolution {
  * this phase (its only producer); the wire contract is the `TriageBatch` type below.
  */
 interface TriageBatch {
+  /** The live plan the batch was written for — echoed back on the resolution
+   * so INV-RSM-RESOLUTION-CORRELATE can reject a stale cross-run answer. */
+  plan_id?: string;
   items: {
     finding_id: string;
     failure_reason: string;
@@ -206,8 +216,25 @@ export async function runTriagePhase(
 
   if (blockedItems.length > 0) {
     const resolutionPath = join(options.artifactsDir, "triage_resolution.json");
-    const resolution =
+    let resolution: TriageResolution | null | undefined =
       await readOptionalJsonFile<TriageResolution>(resolutionPath);
+
+    // INV-RSM-RESOLUTION-CORRELATE (COR-227a02ae class): a resolution written
+    // for a DIFFERENT plan (a leftover from an earlier run in the same
+    // artifacts dir) must never be applied to this run's items. Archive it as
+    // stale and proceed as if no resolution exists. Absent plan_id = lenient.
+    if (
+      resolution &&
+      typeof resolution.plan_id === "string" &&
+      state.plan?.plan_id !== undefined &&
+      resolution.plan_id !== state.plan.plan_id
+    ) {
+      console.error(
+        `[triage] triage_resolution.json plan_id "${resolution.plan_id}" does not match the live plan "${state.plan.plan_id}" — archiving the stale resolution.`,
+      );
+      await archiveIfPresent(resolutionPath, "stale");
+      resolution = undefined;
+    }
 
     if (resolution) {
       const triageIssues = validateTriageResolution(resolution);
@@ -232,7 +259,13 @@ export async function runTriagePhase(
             join(options.artifactsDir, "triage-outcome.json"),
             { resolved_at: new Date().toISOString(), items: triageOutcome },
           );
-          return { ...state, status: "closing", closing_context: "user_halted" };
+          return {
+            ...state,
+            status: "closing",
+            closing_context: "user_halted",
+            // INV-RSM-STATE-COMPLETE: a closing state must persist a closing_plan.
+            closing_plan: state.closing_plan ?? { action: "none" },
+          };
         }
 
         const item = state.items[res.finding_id];
@@ -265,6 +298,32 @@ export async function runTriagePhase(
       if (requiresRetry) {
         await archiveImplementResultsForRetries(state, options, retryFindingIds);
         return { ...state, status: "implementing" };
+      }
+
+      // Post-resolution still-blocked guard (COR-87f78167): a resolution that
+      // covered only SOME of the blocked items must NOT fall through to closing
+      // — closing would force-close the undecided remainder as blocked without
+      // any human decision. Re-batch the still-blocked items and wait.
+      const stillBlockedAfterResolution = Object.values(state.items).filter(
+        (item) => item.status === "blocked",
+      );
+      if (stillBlockedAfterResolution.length > 0) {
+        const rebatch: TriageBatch = {
+          ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
+          items: stillBlockedAfterResolution.map((item) => ({
+            finding_id: item.finding_id,
+            failure_reason: item.failure_reason ?? "Unknown error",
+            last_successful_step: item.last_successful_step ?? "Unknown step",
+          })),
+        };
+        await writeJsonFile(join(options.artifactsDir, "triage_batch.json"), rebatch);
+        console.error(
+          `\nTriage resolution left ${stillBlockedAfterResolution.length} blocked item(s) undecided. Re-wrote triage_batch.json.`,
+        );
+        console.error(
+          `Please write triage_resolution.json covering them and run again to continue.`,
+        );
+        return { ...state, status: "waiting_for_triage" };
       }
     } else {
       // No triage resolution yet: auto-retry each blocked item within its
@@ -332,10 +391,15 @@ export async function runTriagePhase(
         console.log(
           "All blocked items already satisfied in the working tree — closing the reconciled run.",
         );
-        return { ...state, status: "closing" };
+        return {
+          ...state,
+          status: "closing",
+          closing_plan: state.closing_plan ?? { action: "none" },
+        };
       }
 
       const triageBatch: TriageBatch = {
+        ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
         items: stillBlocked.map((item) => ({
           finding_id: item.finding_id,
           failure_reason: item.failure_reason ?? "Unknown error",
@@ -360,6 +424,11 @@ export async function runTriagePhase(
     console.log("No blocked items found. Proceeding to close.");
   }
 
-  // "closing" status triggers runClosePhase in the orchestrator switch
-  return { ...state, status: "closing" };
+  // "closing" status triggers runClosePhase in the orchestrator switch.
+  // INV-RSM-STATE-COMPLETE: every closing transition persists a closing_plan.
+  return {
+    ...state,
+    status: "closing",
+    closing_plan: state.closing_plan ?? { action: "none" },
+  };
 }

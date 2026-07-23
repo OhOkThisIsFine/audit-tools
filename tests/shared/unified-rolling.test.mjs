@@ -183,6 +183,88 @@ describe("driveRolling — unified in-process rolling driver", () => {
     expect(drifts[0]).toEqual({ poolId: "free/*", observedCostUsd: 0.02, declaredCostPerMtok: 0 });
   });
 
+  it("NEGATIVE TERMINAL MERGE: quota_paused is preferred over empty_pool; stranded ids union; earliest reset kept", { timeout: 20_000 }, async () => {
+    // TST-37d441fa / TST-caab6d8f: construct BOTH partial-terminal reasons in one
+    // drive — a bare-429 empty_pool from the first sub-wave and a retryable
+    // session-limit pause (parseable "Resets in …") from the second — and assert
+    // the merged terminal keeps the retryable quota_paused shape with the union
+    // of stranded ids. The two packets share a write path, so ONE level splits
+    // into TWO sequential sub-waves (each with its own dispatcher + terminal);
+    // same-level sub-waves are peers, so a terminal from the first must NOT stop
+    // the second (only LEVEL advance halts on a terminal — INV-SCC-06), which is
+    // exactly what keeps this cross-dispatcher merge reachable.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-terminal-")));
+    const run = await driveRolling({
+      levels: [[{ id: "E1", f: "src/shared.ts" }, { id: "P1", f: "src/shared.ts" }]],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [it.f] }),
+      toPacket: packetFor,
+      dispatchPacket: async (packet) =>
+        packet.id === "P1"
+          ? {
+              packet,
+              outcome: "rate_limited",
+              // Session-limit sentinel with a parseable duration → the pool is
+              // PAUSED until the reset (retryable), not permanently exhausted.
+              rateLimit: {
+                channel: "error",
+                text: "You've hit your session limit · Resets in 2h30m",
+              },
+            }
+          : { packet, outcome: "rate_limited" }, // bare 429 → exhaust → empty_pool
+    });
+    expect(run.terminal, "a partially-completed run must surface a terminal").toBeTruthy();
+    expect(run.terminal.reason, "quota_paused (retryable) must win the merge over empty_pool").toBe(
+      "quota_paused",
+    );
+    expect([...run.terminal.stranded_ids].sort(), "no stranded id may be lost across waves").toEqual([
+      "E1",
+      "P1",
+    ]);
+    expect(typeof run.terminal.earliest_reset_at, "the retryable pause must carry its reset").toBe(
+      "string",
+    );
+    expect(Number.isNaN(Date.parse(run.terminal.earliest_reset_at))).toBe(false);
+    // No packet ever completed.
+    expect(run.allResults).toHaveLength(0);
+  });
+
+  // COR-74f8e4cd / INV-SCC-06 regression pin: the level loop in `driveRolling`
+  // must consult the merged partial terminal at every level boundary. After
+  // level 1 strands (quota_paused OR empty_pool) the driver must NOT run
+  // `rebuildBetweenLevels` and must NOT dispatch later levels — those depend on
+  // level-1 outputs that never landed, and dispatching them burns attempts on a
+  // known-dead/paused pool. Undispatched later-level items are folded into the
+  // terminal's stranded_ids so no node is silently dropped.
+  it("NEGATIVE TRANSITION: after a level-1 partial terminal, driveRolling must NOT advance to later levels", { timeout: 20_000 }, async () => {
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-noadvance-")));
+    const dispatched = [];
+    let rebuilds = 0;
+    const run = await driveRolling({
+      levels: [[{ id: "L1a" }], [{ id: "L2a" }]],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+      toPacket: packetFor,
+      dispatchPacket: async (packet) => {
+        dispatched.push(packet.id);
+        return { packet, outcome: "rate_limited" }; // bare 429 → level-1 empty_pool terminal
+      },
+      rebuildBetweenLevels: async () => {
+        rebuilds += 1;
+      },
+    });
+    expect(run.terminal?.reason).toBe("empty_pool");
+    // The negative transition: a stranded level must HALT the drive.
+    expect(dispatched, "level-2 packets must not be dispatched after a level-1 terminal").toEqual([
+      "L1a",
+    ]);
+    expect(rebuilds, "no inter-level rebuild after a terminal").toBe(0);
+    // The undispatched level-2 item is stranded on the terminal, not dropped.
+    expect(run.terminal.stranded_ids).toContain("L2a");
+  });
+
   it("rebuilds once between dependency levels (single-flight)", async () => {
     const track = { inFlight: 0, peak: 0, results: 0 };
     let rebuilds = 0;

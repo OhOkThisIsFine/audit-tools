@@ -166,6 +166,8 @@ async function makeMinimalState(
   const state = {
     status: "implementing",
     plan: {
+      // INV-RSM-STATE-COMPLETE: an implementing state persists plan identity.
+      plan_id: "PLAN-INFRA-TEST",
       findings: [finding],
       blocks: [
         {
@@ -177,6 +179,8 @@ async function makeMinimalState(
     },
     items: {
       [finding.id]: {
+        finding_id: finding.id,
+        block_id: "TEST-BLOCK-001",
         status: "pending",
         item_spec: {
           finding_id: finding.id,

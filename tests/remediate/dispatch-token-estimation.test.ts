@@ -50,6 +50,8 @@ describe("byte-based token estimation — implement dispatch", () => {
     const state = makeState({
       status: "implementing",
       plan: {
+        // INV-RSM-STATE-COMPLETE: an implementing state persists plan identity.
+        plan_id: "PLAN-TOK-IMPL",
         findings: [
           {
             id: findingId,
@@ -73,6 +75,8 @@ describe("byte-based token estimation — implement dispatch", () => {
       },
       items: {
         [findingId]: {
+          finding_id: findingId,
+          block_id: blockId,
           status: "pending",
           item_spec: {
             finding_id: findingId,

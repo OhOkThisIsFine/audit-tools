@@ -151,7 +151,9 @@ describe("populateProxyCatalog — discovery contract", () => {
       service: "openai",
       model: "gpt-4", // Alias VERBATIM (plan §e, regression pin i)
       worker_kind: "agentic",
-      cost_per_mtok: (3e-05 + 6e-05) / 2, // cost blend = mean
+      // Cost blend = mean of the per-TOKEN adverts, converted to $/Mtok
+      // (×1e6, INV-SCC-03): (3e-05 + 6e-05)/2 per token = $45/Mtok.
+      cost_per_mtok: ((3e-05 + 6e-05) / 2) * 1_000_000,
       quota: { context_tokens: 8192 },
     });
     expect(byAlias["claude-sonnet-4-6"]).toMatchObject({
@@ -257,8 +259,12 @@ describe("populateProxyCatalog — discovery contract", () => {
     ]);
   });
 
-  it("cost blend: mean of input/output when both present", async () => {
-    // The plan's resolved decision: cost = (input + output) / 2
+  it("cost blend: mean of input/output when both present — CONVERTED per-token → per-Mtok (INV-SCC-03 / COR-6c1ad0ba)", async () => {
+    // The plan's resolved decision: cost = (input + output) / 2 — but the advert
+    // fields (`input_cost_per_token` / `output_cost_per_token`, the LiteLLM
+    // /model/info convention) are USD per TOKEN, while `cost_per_mtok`'s contract
+    // is USD per MILLION tokens. The blend must multiply by 1e6, or every priced
+    // proxy lane is underpriced 1,000,000x and dominates cost-first routing.
     const modelInfo = [
       {
         model_name: "both-prices",
@@ -307,9 +313,10 @@ describe("populateProxyCatalog — discovery contract", () => {
     const byAlias = Object.fromEntries(
       result.sources.map((s) => [s.model, s.cost_per_mtok]),
     );
-    expect(byAlias["both-prices"]).toBe((2e-05 + 4e-05) / 2);
-    expect(byAlias["input-only"]).toBe(1e-05);
-    expect(byAlias["output-only"]).toBe(5e-05);
+    // Per-token adverts × 1e6 = $/Mtok: (2e-05 → $20/Mtok, 4e-05 → $40/Mtok).
+    expect(byAlias["both-prices"]).toBeCloseTo(((2e-05 + 4e-05) / 2) * 1_000_000, 10);
+    expect(byAlias["input-only"]).toBeCloseTo(1e-05 * 1_000_000, 10);
+    expect(byAlias["output-only"]).toBeCloseTo(5e-05 * 1_000_000, 10);
     expect(byAlias["no-price"]).toBeUndefined();
   });
 

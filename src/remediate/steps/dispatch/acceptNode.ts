@@ -236,6 +236,90 @@ export async function acceptNodeWorktree(
   );
 }
 
+/**
+ * Roll the MAIN checkout back to `baseOid` bit-identically and VERIFY it landed
+ * (COR-586b493e): the reset and the scoped clean each have their exit status
+ * checked, and HEAD is re-read and compared to `baseOid` afterwards. A blind
+ * `git reset --hard` that fails (lock contention, object corruption, a
+ * concurrent writer) would otherwise leave the shared base BROKEN — the
+ * cherry-picked-but-red state every sibling node then builds on — while the
+ * caller reports only the original check failure. Returns `{ok:false}` with a
+ * diagnostic so callers append a loud ROLLBACK FAILED marker instead of
+ * silently trusting the rollback.
+ */
+export function rollbackBaseToOid(
+  root: string,
+  baseOid: string,
+  filesToClean?: Iterable<string>,
+): { ok: boolean; detail?: string } {
+  const reset = spawnSyncHidden("git", ["reset", "--hard", baseOid], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (reset.error || reset.status !== 0) {
+    return {
+      ok: false,
+      detail: `git reset --hard ${baseOid} failed: ${
+        reset.error ? reset.error.message : (reset.stderr ?? "").toString().trim()
+      }`,
+    };
+  }
+  // Scoped clean: remove only the pick/check-emitted untracked files under the
+  // touched paths — never a blanket `git clean`.
+  const files = [...(filesToClean ?? [])];
+  if (files.length > 0) {
+    const clean = spawnSyncHidden("git", ["clean", "-fdq", "--", ...files], {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (clean.error || clean.status !== 0) {
+      return {
+        ok: false,
+        detail: `git clean after rollback failed: ${
+          clean.error ? clean.error.message : (clean.stderr ?? "").toString().trim()
+        }`,
+      };
+    }
+  }
+  // Verify the rollback actually landed: HEAD must BE the captured base OID.
+  const head = spawnSyncHidden("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (head.error || head.status !== 0) {
+    return {
+      ok: false,
+      detail: `could not re-read HEAD after rollback: ${
+        head.error ? head.error.message : (head.stderr ?? "").toString().trim()
+      }`,
+    };
+  }
+  const headOid = head.stdout.trim();
+  if (headOid !== baseOid) {
+    return {
+      ok: false,
+      detail: `rollback did not land: HEAD is ${headOid}, expected ${baseOid}`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Append the loud rollback-failure marker to a red-gate diagnostic. */
+function withRollbackDiagnostic(
+  diagnostic: string,
+  rollback: { ok: boolean; detail?: string },
+): string {
+  if (rollback.ok) return diagnostic;
+  return (
+    `${diagnostic}\nROLLBACK FAILED: the main checkout could NOT be restored to its ` +
+    `pre-merge state (${rollback.detail}). The base may be left with this node's ` +
+    `red cherry-pick applied — restore it manually before accepting sibling nodes.`
+  );
+}
+
 /** The accept-node body, run while the per-node worktree lock (INV-WTS-8) is held. */
 async function acceptNodeWorktreeLocked(
   params: AcceptNodeWorktreeParams,
@@ -348,7 +432,11 @@ async function acceptNodeWorktreeLocked(
     if (!rebase.ok) {
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
-      return { outcome: "error", verifyPassed, merged, diagnostic: rebase.error };
+      // INV-WTS-7: every post-commit failure return carries the captured
+      // committed OID — the node DID commit, so the sidecar must record it
+      // (a merged:false sidecar with a committed_oid is exactly the stale
+      // record the accept reconciliation adjudicates, CE-201).
+      return { outcome: "error", verifyPassed, merged, committedOid, diagnostic: rebase.error };
     }
 
     // Pre-flight: a dirty tracked file in the MAIN checkout that collides with a
@@ -368,6 +456,7 @@ async function acceptNodeWorktreeLocked(
         outcome: "error",
         verifyPassed,
         merged,
+        committedOid,
         diagnostic:
           `main tree has uncommitted changes to ${paths} — commit or stash ${it} ` +
           `before merging this node (the cherry-pick would otherwise abort with ` +
@@ -424,7 +513,9 @@ async function acceptNodeWorktreeLocked(
       // command + output so triage isn't blind on outcome:error.
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
-      return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
+      // INV-WTS-7: carry the committed OID — realizes CE-201's
+      // merged:false-sidecar-with-committed_oid premise for a verify-failed node.
+      return { outcome: "error", verifyPassed, merged, committedOid, diagnostic: verify.output };
     }
 
     // Write-scope gate (OBL-DS-06), BEFORE the cherry-pick: an out-of-scope or
@@ -444,7 +535,7 @@ async function acceptNodeWorktreeLocked(
       // Scope-blocked but the node committed real work — preserve it for recovery.
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
-      return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
+      return { outcome: "error", verifyPassed, merged: false, committedOid, diagnostic: decision.reason };
     }
 
     // Capture the base HEAD OID BEFORE the cherry-pick so a RED merged-base check can
@@ -461,6 +552,7 @@ async function acceptNodeWorktreeLocked(
         outcome: "error",
         verifyPassed,
         merged,
+        committedOid,
         diagnostic: `could not capture base HEAD before merge: ${
           (baseHeadBefore.stderr ?? baseHeadBefore.error?.message ?? "").toString().trim()
         }`,
@@ -490,6 +582,7 @@ async function acceptNodeWorktreeLocked(
           outcome: "error",
           verifyPassed,
           merged: false,
+          committedOid,
           diagnostic:
             `ownership gate: claim lease for ${blockId} reclaimed by a peer before ` +
             `merge; refusing to land.`,
@@ -504,7 +597,7 @@ async function acceptNodeWorktreeLocked(
     if (!mergeRes.success) {
       // Cherry-pick conflict: the committed work would otherwise be orphaned — preserve it.
       quarantineFailedNodeCommit(root, branch, runId, blockId);
-      return { outcome: "error", verifyPassed, merged, diagnostic: mergeRes.error };
+      return { outcome: "error", verifyPassed, merged, committedOid, diagnostic: mergeRes.error };
     }
 
     // Merged-base-green (INV-2): the cherry-pick landed in the MAIN checkout, where
@@ -526,29 +619,29 @@ async function acceptNodeWorktreeLocked(
         const detail = check.error
           ? check.error.message
           : [check.stdout ?? "", check.stderr ?? ""].filter(Boolean).join("\n");
-        // Roll the base back to its pre-pick OID, bit-identical.
-        spawnSyncHidden("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
-        // Scoped clean: remove only the cherry-pick / check-emitted untracked files
-        // under the paths the pick touched — never a blanket `git clean` that could
-        // nuke unrelated untracked state. Driven off the PRE-merge snapshot
-        // (`nodeEditedFiles`, captured at :458), NOT a post-pick re-probe: after the
-        // pick the `HEAD...branch` diff reads EMPTY whenever the pick reproduced an
-        // identical SHA (same-second commit+pick → merge-base == branch tip), which
-        // made a post-pick re-probe non-deterministically inert → an untracked-file
-        // leak on the rollback path. This mirrors the loop-core guard clean below.
-        if (nodeEditedFiles.available && nodeEditedFiles.files.size > 0) {
-          spawnSyncHidden(
-            "git",
-            ["clean", "-fdq", "--", ...[...nodeEditedFiles.files]],
-            { cwd: root, shell: false },
-          );
-        }
+        // Roll the base back to its pre-pick OID, bit-identical, VERIFIED
+        // (COR-586b493e — a silently-failed reset leaves the base broken).
+        // Scoped clean is driven off the PRE-merge snapshot (`nodeEditedFiles`,
+        // captured above), NOT a post-pick re-probe: after the pick the
+        // `HEAD...branch` diff reads EMPTY whenever the pick reproduced an
+        // identical SHA (same-second commit+pick → merge-base == branch tip),
+        // which made a post-pick re-probe non-deterministically inert → an
+        // untracked-file leak on the rollback path.
+        const rollback = rollbackBaseToOid(
+          root,
+          baseOid,
+          nodeEditedFiles.available ? nodeEditedFiles.files : [],
+        );
         quarantineFailedNodeCommit(root, branch, runId, blockId);
         return {
           outcome: "error",
           verifyPassed,
           merged: false,
-          diagnostic: `$ ${checkArgv.join(" ")}\n${detail}`,
+          committedOid,
+          diagnostic: withRollbackDiagnostic(
+            `$ ${checkArgv.join(" ")}\n${detail}`,
+            rollback,
+          ),
         };
       }
     }
@@ -575,23 +668,24 @@ async function acceptNodeWorktreeLocked(
           const detail = res.error
             ? res.error.message
             : [res.stdout ?? "", res.stderr ?? ""].filter(Boolean).join("\n");
-          // Roll the base back to its pre-pick OID, bit-identical.
-          spawnSyncHidden("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
-          // Scoped clean: remove only the pick / guard-emitted untracked files under the
-          // paths the pick touched — never a blanket `git clean`.
-          if (guardEdited.available && guardEdited.files.size > 0) {
-            spawnSyncHidden(
-              "git",
-              ["clean", "-fdq", "--", ...[...guardEdited.files]],
-              { cwd: root, shell: false },
-            );
-          }
+          // Roll the base back to its pre-pick OID, bit-identical, VERIFIED
+          // (COR-586b493e) — scoped clean of only the pick/guard-emitted
+          // untracked files under the paths the pick touched.
+          const rollback = rollbackBaseToOid(
+            root,
+            baseOid,
+            guardEdited.available ? guardEdited.files : [],
+          );
           quarantineFailedNodeCommit(root, branch, runId, blockId);
           return {
             outcome: "error",
             verifyPassed,
             merged: false,
-            diagnostic: `$ ${guardArgv.join(" ")}\n${detail}`,
+            committedOid,
+            diagnostic: withRollbackDiagnostic(
+              `$ ${guardArgv.join(" ")}\n${detail}`,
+              rollback,
+            ),
           };
         }
       }

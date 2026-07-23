@@ -1,4 +1,4 @@
-import { writeFile, unlink, stat, readFile, mkdir } from "node:fs/promises";
+import { writeFile, unlink, stat, readFile, mkdir, utimes } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { RunLogger } from "../observability/runLog.js";
 
@@ -126,10 +126,55 @@ async function stealStaleLock(lockPath: string, staleToken: string, now: Clock):
   }
 }
 
-/** Optional seams for the lock — currently just the injectable {@link Clock}. */
+/** Optional seams for the lock: the injectable {@link Clock} + heartbeat cadence. */
 export interface LockOptions {
   /** Clock used for all time reads in this acquisition. Defaults to {@link Date.now}. */
   now?: Clock;
+  /**
+   * Cadence at which {@link withFileLock} refreshes the HELD lock's mtime (see
+   * the heartbeat rationale on {@link withFileLock}). Defaults to a third of
+   * {@link STALE_LOCK_MS}; tests inject a short interval to exercise the
+   * refresh without waiting tens of seconds.
+   */
+  heartbeatIntervalMs?: number;
+}
+
+// Refresh the held lock's mtime at a third of the staleness window, so even two
+// consecutive missed beats (event-loop stall, slow FS) leave the lock fresh.
+const HEARTBEAT_INTERVAL_MS = STALE_LOCK_MS / 3;
+
+/**
+ * INV-SCC-08 (REL-d3d6f01b-3): staleness is judged purely off the lock file's
+ * mtime, so a LIVE holder whose critical section legitimately outlives
+ * STALE_LOCK_MS (a network token refresh persisted under the lock, slow or
+ * contended Windows FS, a GC pause) would otherwise be classified stale and
+ * stolen mid-flight — two holders then mutate the guarded file concurrently.
+ * While the lock is held, this heartbeat re-stamps the mtime from the SAME
+ * injected clock the staleness comparison reads. Each beat is token-checked
+ * (touch only while the file still carries OUR token) and best-effort — a
+ * failed beat merely leaves the previous mtime, and the read→touch race is
+ * benign (worst case it refreshes a successor's already-fresh lock once).
+ * The timer is unref'd so a held lock never keeps the process alive.
+ */
+function startLockHeartbeat(
+  lockPath: string,
+  ownerToken: string,
+  now: Clock,
+  intervalMs: number,
+): () => void {
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        if ((await readFile(lockPath, "utf8")) !== ownerToken) return;
+        const stamp = new Date(now());
+        await utimes(lockPath, stamp, stamp);
+      } catch {
+        // best-effort: lock briefly contended or already released
+      }
+    })();
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 export async function acquireLock(
@@ -219,6 +264,15 @@ export async function withFileLock<T>(
   options: LockOptions = {},
 ): Promise<T> {
   const token = await acquireLock(lockPath, timeoutMs, logger, options);
+  // Keep a LIVE holder's lock fresh for the whole critical section (INV-SCC-08):
+  // without the heartbeat, any fn() outliving STALE_LOCK_MS has its lock stolen
+  // while still executing. Stopped (synchronously) before release.
+  const stopHeartbeat = startLockHeartbeat(
+    lockPath,
+    token,
+    options.now ?? defaultClock,
+    options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+  );
   let hasFnError = false;
   try {
     return await fn();
@@ -226,6 +280,7 @@ export async function withFileLock<T>(
     hasFnError = true;
     throw err;
   } finally {
+    stopHeartbeat();
     try {
       await releaseLock(lockPath, token);
     } catch (releaseErr) {

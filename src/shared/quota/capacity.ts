@@ -622,6 +622,20 @@ export function computeDispatchCapacity(
     }
   }
 
+  // INV-SCC-02 (COR-9a7a9790): the U2 fit-gate can leave the allocation list
+  // EMPTY even though pools[] and the pending set are both non-empty (every
+  // packet + agentic harness overhead exceeds every pool's context cap, or the
+  // global host budget is already zero). The capacity contract must still hold
+  // structurally — a defined `primary`, total_slots >= 1, and a binding-cap
+  // attribution — because callers dereference `.primary.schedule` unguarded.
+  // Degrade to the same empty-work allocation the zero-pending branch uses (the
+  // first pool scheduled over no items); the oversized packets then surface
+  // reactively at dispatch as packet_too_large per-pool skips, never as an
+  // empty-array reduce crash here.
+  if (allocations.length === 0) {
+    allocations.push(schedulePool(input.pools[0]!, input.sessionConfig, []));
+  }
+
   const total = allocations.reduce((sum, a) => sum + a.slots, 0);
   // When a global host budget was in effect, ensure the aggregate total never
   // exceeds it (the loop above already enforces this, but guard defensively).

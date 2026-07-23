@@ -23,19 +23,32 @@ import { gitEditedFilesForBranch } from "./common.js";
  *  - `node --test <path>`
  */
 export function isBuildFreeVerifyCommand(cmd: string): boolean {
-  const c = cmd.trim().toLowerCase().replace(/\s+/g, " ");
-  if (c.length === 0) return false;
-  // Any explicit build step is forbidden.
-  if (/\bnpm\s+run\s+build\b/.test(c)) return false;
-  if (/\btsc\b.*(-b\b|--build\b)/.test(c)) return false;
-  if (/(^|\s)tsc(\s|$)/.test(c) && !/--noemit\b/.test(c)) {
-    // A bare `tsc` (or `tsc -p ...`) emits unless --noEmit is set.
-    return false;
+  if (cmd.trim().length === 0) return false;
+  // INV-RSM-VERIFY-01 (COR-8c497987): judge each shell-chained INVOCATION on its
+  // own flags, never the whole string — `tsc --noEmit && tsc -p build` must not
+  // pass because a `--noEmit` appears SOMEWHERE in the command. Split on the
+  // shell chain separators (&&, ||, ;, |, newline) first, then validate every
+  // segment independently; one emitting segment forbids the whole command.
+  const segments = cmd
+    .replace(/\r\n/g, "\n")
+    .split(/&&|\|\||[;|\n]/)
+    .map((s) => s.trim().toLowerCase().replace(/\s+/g, " "))
+    .filter((s) => s.length > 0);
+  if (segments.length === 0) return false;
+  for (const c of segments) {
+    // Any explicit build step is forbidden.
+    if (/\bnpm\s+run\s+build\b/.test(c)) return false;
+    if (/\btsc\b.*(-b\b|--build\b)/.test(c)) return false;
+    if (/(^|\s)tsc(\s|$)/.test(c) && !/--noemit\b/.test(c)) {
+      // A bare `tsc` (or `tsc -p ...`) emits unless --noEmit is set — judged
+      // per invocation, so a sibling segment's --noEmit cannot vouch for it.
+      return false;
+    }
+    // A build-prepending `npm test` / `npm t` / `npm run test` is forbidden; the
+    // build-free runner (vitest run / node --test) must be invoked directly.
+    if (/\bnpm\s+(test|t)\b/.test(c)) return false;
+    if (/\bnpm\s+run\s+test\b/.test(c)) return false;
   }
-  // A build-prepending `npm test` / `npm t` / `npm run test` is forbidden; the
-  // build-free runner (vitest run / node --test) must be invoked directly.
-  if (/\bnpm\s+(test|t)\b/.test(c)) return false;
-  if (/\bnpm\s+run\s+test\b/.test(c)) return false;
   return true;
 }
 

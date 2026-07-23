@@ -8,6 +8,7 @@ import {
   withTempDir,
   tmpLockPath,
   makeCapturingLogger,
+  makeClock,
 } from "./fileLockTestSupport.mjs";
 
 const { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } =
@@ -585,5 +586,71 @@ test("concurrent acquirers racing a stale lock keep strict mutual exclusion (max
     expect(maxConcurrent, "at most one holder at any instant, even through a concurrent stale-steal").toBe(1);
     expect(new Set(tokens).size, "every acquirer must obtain a distinct token").toBe(N);
     await rmFs(lockPath, { force: true }); // best-effort cleanup
+  });
+});
+
+// INV-SCC-08 (REL-d3d6f01b-3): staleness is judged off the lock file's mtime, so
+// a holder whose critical section legitimately outlives STALE_LOCK_MS (network
+// token refresh under the lock, slow/contended Windows FS, a GC pause) must
+// REFRESH that mtime while it works — otherwise a LIVE holder is classified
+// stale and stolen, and two holders mutate the guarded file concurrently.
+test("INV-SCC-08: a LIVE withFileLock holder is heartbeat-refreshed and never classified stale/stolen", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    // The holder's injected clock reads FAR in the future, so a lock whose mtime
+    // were left at real wall time would look unambiguously stale to any
+    // same-clock contender. The heartbeat must stamp mtime from THIS clock.
+    const fut = makeClock(Date.now() + STALE_LOCK_MS * 10);
+    const futBase = fut();
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    const held = withFileLock(
+      lockPath,
+      async () => {
+        await gate;
+        return "done";
+      },
+      60_000,
+      undefined,
+      { now: fut, heartbeatIntervalMs: 25 },
+    );
+
+    // Wait until at least one heartbeat has stamped the held lock's mtime from
+    // the holder's clock (bounded poll — no fixed sleep).
+    const pollDeadline = Date.now() + 5_000;
+    let refreshed = false;
+    while (Date.now() < pollDeadline) {
+      try {
+        const info = await stat(lockPath);
+        if (info.mtimeMs >= futBase - STALE_LOCK_MS) {
+          refreshed = true;
+          break;
+        }
+      } catch {
+        // lock not created yet — keep polling
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(refreshed, "the heartbeat must refresh the held lock's mtime").toBe(true);
+
+    // A contender on the same far-future clock must NOT steal the live holder's
+    // lock: its staleness probe sees a fresh mtime, so it times out instead.
+    const contender = makeClock(fut());
+    const attempt = acquireLock(lockPath, 2_000, undefined, { now: contender }).then(
+      () => "acquired",
+      (err) => err,
+    );
+    const tick = setInterval(() => contender.advance(500), 5);
+    const outcome = await attempt;
+    clearInterval(tick);
+    expect(
+      outcome instanceof FileLockTimeoutError,
+      "a LIVE holder must never be classified stale (contender must time out, not steal)",
+    ).toBe(true);
+
+    release();
+    expect(await held).toBe("done");
   });
 });

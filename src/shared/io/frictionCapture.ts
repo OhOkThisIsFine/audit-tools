@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { readOptionalJsonFile, writeJsonFile } from "./json.js";
 
 /**
@@ -87,7 +88,39 @@ export function frictionCapturePath(artifactsDir: string, runId: string): string
  * The empty run id encodes to the reserved sentinel `_` (which no non-empty id
  * can produce, since a non-empty id always emits at least one char and a bare
  * `_` would have been escaped to `_5f`), preserving a non-empty filename stem.
+ *
+ * PORTABLE-FILENAME HARDENING (INV-SCC-05 / COR-11e0ff4c) — two further rules:
+ *
+ *  - RESERVED DEVICE STEMS: Windows reserves `CON`, `PRN`, `AUX`, `NUL`,
+ *    `COM1`-`COM9`, `LPT1`-`LPT9` (case-insensitively, keyed off the component
+ *    stem BEFORE the first dot — `CON.json` is the CON device). A run id whose
+ *    encoded form would be such a stem gets its FIRST character byte-escaped
+ *    (`CON` → `_43ON`), which stays injective: normal encoding never emits an
+ *    escape for a safe char, and any id literally containing `_` has it escaped
+ *    to `_5f...`, so no other id can produce the escaped spelling.
+ *
+ *  - COMPONENT LENGTH BOUND: filesystems cap a path component at 255 bytes. An
+ *    encoded token longer than {@link MAX_RUN_ID_TOKEN_LENGTH} is truncated and
+ *    disambiguated with `_` + UPPERCASE-hex SHA-256 of the RAW run id.
+ *    Injectivity here is cryptographic (collision-resistant digest) rather than
+ *    structural; the uppercase marker cannot collide with any normal encoding,
+ *    because normal escapes always emit lowercase hex after `_`.
  */
+
+/** Longest encoded run-id token emitted; `<token>.json` stays well under 255. */
+const MAX_RUN_ID_TOKEN_LENGTH = 180;
+/** Truncation marker + digest: `_` + 32 uppercase hex chars (128 bits). */
+const TRUNCATION_DIGEST_HEX_CHARS = 32;
+const WINDOWS_RESERVED_STEM = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i;
+
+function escapeCharBytes(ch: string): string {
+  let out = "";
+  for (const byte of Buffer.from(ch, "utf8")) {
+    out += "_" + byte.toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
 export function sanitizeRunId(runId: string): string {
   if (runId.length === 0) {
     return "_";
@@ -98,9 +131,24 @@ export function sanitizeRunId(runId: string): string {
       out += ch;
       continue;
     }
-    for (const byte of Buffer.from(ch, "utf8")) {
-      out += "_" + byte.toString(16).padStart(2, "0");
-    }
+    out += escapeCharBytes(ch);
+  }
+  // Reserved-device-stem escape: the token becomes `<token>.json`, and Windows
+  // keys the reservation off the stem before the first dot, so test the token's
+  // own leading stem. Escaping the first character removes the reserved spelling
+  // while keeping the mapping one-to-one (see the doc comment).
+  if (WINDOWS_RESERVED_STEM.test(out)) {
+    out = escapeCharBytes(out[0]!) + out.slice(1);
+  }
+  // Length bound: truncate + digest-disambiguate (uppercase hex marker — a form
+  // no normal encoding can emit, so bounded and unbounded tokens never collide).
+  if (out.length > MAX_RUN_ID_TOKEN_LENGTH) {
+    const digest = createHash("sha256")
+      .update(runId, "utf8")
+      .digest("hex")
+      .slice(0, TRUNCATION_DIGEST_HEX_CHARS)
+      .toUpperCase();
+    out = out.slice(0, MAX_RUN_ID_TOKEN_LENGTH - 1 - TRUNCATION_DIGEST_HEX_CHARS) + "_" + digest;
   }
   return out;
 }

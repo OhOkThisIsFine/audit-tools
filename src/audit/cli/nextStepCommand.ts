@@ -470,7 +470,13 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       stepKind: "present_report",
       status: frictionPending ? "ready" : "complete",
       runId: null,
-      allowedCommands: [],
+      // INV-READY-STEP-CONTINUATION (COR-f6a36670): a ready step whose
+      // stop_condition instructs calling next-step again must carry the
+      // executable continuation command — never leave the host to reconstruct
+      // the invocation from prose.
+      allowedCommands: frictionPending
+        ? [nextStepCommand(root, artifactsDir, hostDescriptor)]
+        : [],
       stopCondition: frictionPending
         ? "Complete friction triage (write open_observations and any dispositions), then call next-step again."
         : "Present the final audit report and stop.",

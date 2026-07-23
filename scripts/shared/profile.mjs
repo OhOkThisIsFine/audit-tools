@@ -57,26 +57,40 @@ export function npmCommand() {
  *
  * @param {string} profileName  ledger basename, e.g. "verify-checks"
  * @param {Array<{label:string, command:string, args:string[]}>} commands
- * @param {{ meta?: object }} [opts]
+ * @param {{ meta?: object, spawnImpl?: typeof spawnSync }} [opts]
+ *   `spawnImpl` is a test seam (defaults to node's spawnSync) so failure
+ *   classification — spawn error, non-zero status, signal termination — is
+ *   unit-testable without arranging real child-process deaths.
  * @returns {Promise<Array<{label:string, ms:number, status:number}>>}
  */
 export async function runProfiledCommands(profileName, commands, opts = {}) {
+  const spawnImpl = opts.spawnImpl ?? spawnSync;
   const entries = [];
   let failure = null;
   for (const { label, command, args } of commands) {
     const resolved = resolveSpawn(command, args);
     const start = performance.now();
-    const result = spawnSync(resolved.command, resolved.args, {
+    const result = spawnImpl(resolved.command, resolved.args, {
       cwd: repoRoot,
       stdio: "inherit",
       windowsHide: true,
     });
     const ms = performance.now() - start;
-    const status = result.status ?? (result.error ? 1 : 0);
+    // Non-success classification (COR-85a995a0): spawn error, signal termination
+    // (spawnSync reports status:null + signal for a killed child), and non-zero
+    // exit are ALL failures. The old `status ?? (error ? 1 : 0)` mapping let a
+    // signal-killed step read as status 0 — success.
+    const status = result.status ?? (result.error || result.signal ? 1 : 0);
     entries.push({ label, ms, status });
     console.log(`[profile:${profileName}] ${label}: ${toSeconds(ms)}s`);
     if (result.error) {
       failure = new Error(`profiled step '${label}' failed to spawn: ${result.error.message}`);
+      break;
+    }
+    if (result.status === null && result.signal) {
+      failure = new Error(
+        `profiled step '${label}' was terminated by signal ${result.signal}.`,
+      );
       break;
     }
     if (status !== 0) {

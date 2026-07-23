@@ -411,6 +411,23 @@ function minimalValidResult(taskId) {
   };
 }
 
+/** The pending-manifest task a minimalValidResult is assigned to (CP-NODE-2). */
+function obsManifestTask(taskId) {
+  return {
+    task_id: taskId,
+    unit_id: "src/utils/helper.ts",
+    pass_id: "pass-1",
+    lens: "correctness",
+    file_paths: ["src/utils/helper.ts"],
+  };
+}
+
+function writeObsManifest(artifactsDir, runId, tasks) {
+  const runDir = join(artifactsDir, "runs", runId);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, "pending-audit-tasks.json"), JSON.stringify(tasks, null, 2), "utf8");
+}
+
 test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary line on stdout before the plain text line", async () => {
   const artifactsDir = mkdtempSync(join(tmpdir(), "audit-merge-obs-"));
   try {
@@ -419,6 +436,7 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
     mkdirSync(taskResultsDir, { recursive: true });
 
     const goodId = "task-obs-good";
+    writeObsManifest(artifactsDir, runId, [obsManifestTask(goodId)]);
     writeFileSync(
       join(taskResultsDir, `${goodId}.json`),
       JSON.stringify(minimalValidResult(goodId), null, 2),
@@ -468,7 +486,13 @@ test("FND-OBS-bf5c7331: merge-results.mjs JSON summary includes failed_tasks_pat
     const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
     mkdirSync(taskResultsDir, { recursive: true });
 
-    writeFileSync(join(taskResultsDir, "bad.json"), "{ not valid json", "utf8");
+    // Parseable but INVALID against the assigned task (lens mismatch).
+    const failId = "task-obs-fail";
+    writeObsManifest(artifactsDir, runId, [obsManifestTask(failId)]);
+    const badResult = minimalValidResult(failId);
+    badResult.lens = "security";
+    badResult.pass_id = "pass-other";
+    writeFileSync(join(taskResultsDir, `${failId}.json`), JSON.stringify(badResult, null, 2), "utf8");
 
     const result = runScript([
       "--run-id", runId,

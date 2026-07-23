@@ -66,6 +66,40 @@ export function interpretFreeFormIntent(text: string): Lens[] {
   return [...boosts];
 }
 
+/**
+ * The requeue fold's COVERAGE-based dedupe (INV-PLAN-PERSIST-COMPLETE half 1).
+ * A pending requeue task duplicates existing work whenever some audit task with
+ * the SAME lens already covers every one of its file paths — on a fresh plan the
+ * requeue payload mirrors the entire pending coverage set under `requeue:*` ids,
+ * so a task_id-only dedupe never matches and the fold would double-audit
+ * everything. Only a genuinely-uncovered gap survives. An operator-limited lens
+ * set also gates the fold: a lens the operator excluded must not re-enter
+ * dispatch through requeue.
+ */
+export function selectUncoveredRequeueTasks(
+  requeueTasks: AuditTask[],
+  auditTasks: AuditTask[],
+  effectiveLenses?: string[],
+): AuditTask[] {
+  const coveredPathsByLens = new Map<string, Set<string>>();
+  for (const task of auditTasks) {
+    const covered = coveredPathsByLens.get(task.lens) ?? new Set<string>();
+    for (const path of task.file_paths) covered.add(path);
+    coveredPathsByLens.set(task.lens, covered);
+  }
+  const allowedLenses =
+    effectiveLenses === undefined ? null : new Set(effectiveLenses);
+  return requeueTasks.filter((task) => {
+    if (task.status !== "pending") return false;
+    if (allowedLenses !== null && !allowedLenses.has(task.lens)) return false;
+    const covered = coveredPathsByLens.get(task.lens);
+    const fullyCovered =
+      covered !== undefined &&
+      task.file_paths.every((path) => covered.has(path));
+    return !fullyCovered;
+  });
+}
+
 export async function runPlanningExecutor(
   bundle: ArtifactBundle,
   root: string,
@@ -228,21 +262,24 @@ export async function runPlanningExecutor(
     externalAnalyzerResults,
   );
   // Fold pending requeue tasks into the dispatch task list so mandatory coverage
-  // gaps produce actual dispatch packets. Enrich with line-count hints from the
-  // index and dedupe against existing audit tasks by task_id so each task
-  // appears exactly once in the merged list.
-  const existingTaskIds = new Set(taggedAuditTasks.map((t) => t.task_id));
-  const pendingRequeueTasks = requeuePayload.tasks
-    .filter((t) => t.status === "pending")
-    .filter((t) => !existingTaskIds.has(t.task_id))
-    .map((t) => ({
-      ...t,
-      file_line_counts: Object.fromEntries(
-        t.file_paths
-          .filter((p) => lineIndex[p] != null)
-          .map((p) => [p, lineIndex[p]]),
-      ),
-    }));
+  // gaps produce actual dispatch packets. Dedupe is COVERAGE-based
+  // (`selectUncoveredRequeueTasks`): a requeue task whose (path × lens) an
+  // existing audit task already covers is a duplicate of planned work (the fresh
+  // -plan requeue payload mirrors the whole pending set under different ids), so
+  // only genuinely-uncovered gaps survive — and those ARE persisted below
+  // (INV-PLAN-PERSIST-COMPLETE). Enrich survivors with line-count hints.
+  const pendingRequeueTasks = selectUncoveredRequeueTasks(
+    requeuePayload.tasks,
+    taggedAuditTasks,
+    effectiveLenses,
+  ).map((t) => ({
+    ...t,
+    file_line_counts: Object.fromEntries(
+      t.file_paths
+        .filter((p) => lineIndex[p] != null)
+        .map((p) => [p, lineIndex[p]]),
+    ),
+  }));
   // Freeze provider-neutral estimates on every dispatch task: a byte-based
   // token estimate and a deterministic risk seed. These persist on the task and
   // become the authoritative inputs to just-in-time dispatch packetization /
@@ -286,7 +323,12 @@ export async function runPlanningExecutor(
       flow_coverage: flowCoverage,
       runtime_validation_tasks: runtimeValidationTasks,
       runtime_validation_report: runtimeValidationReport,
-      audit_tasks: enrichedAuditTasks,
+      // INV-PLAN-PERSIST-COMPLETE: the PERSISTED dispatch set is the whole
+      // merged list — dispatch derives its pending set from audit_tasks
+      // (buildPendingAuditTasks), so an unpersisted merged task would be a
+      // phantom the affinity graph / metrics describe but no packet ever
+      // reviews. Estimates on every entry are frozen (INV-PLAN-FROZEN-ESTIMATES).
+      audit_tasks: allDispatchTasks,
       audit_plan_metrics: auditPlanMetrics,
       task_affinity_graph: taskAffinityGraph,
       requeue_tasks: requeuePayload.tasks,

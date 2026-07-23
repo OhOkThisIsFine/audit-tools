@@ -123,10 +123,20 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
       reason: "empty_pool",
       stranded_ids: ["T1", "T2"],
     };
+    // INV-RSM-STATE-COMPLETE: an `implementing` state must persist plan + items,
+    // so the round-trip fixture carries a minimal pair rather than a bare status.
     const state: RemediationState = {
       status: "implementing",
+      plan: {
+        plan_id: "PLAN-RT",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      },
+      items: {},
       partial_completion_terminal: terminal,
-    };
+    } as unknown as RemediationState;
     await store.saveState(state);
     const loaded = await store.loadState();
     expect(loaded?.partial_completion_terminal).toEqual(terminal);

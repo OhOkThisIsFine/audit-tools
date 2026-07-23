@@ -142,28 +142,32 @@ test("stepBoundaryFrictionCategory maps every named fact to a REAL category and 
 
 test("decideFrictionTriage pre-populates a category from N same-artifact mechanical events", async () => {
   const dir = await mkdtemp(join(tmpdir(), "friction-derive-"));
+  // PATH-HANDLING (TST-c0e7b3b3): a run id sanitizeRunId actually CHANGES, so the
+  // capture→triage→read pipeline is proven to sanitize CONSISTENTLY at every hop
+  // (an idempotent id like "run-1" exercises none of the encoding).
+  const runId = "run/1:derive";
   try {
     // Two backend facts on the SAME artifact (node-6) → one inefficient_feeding aggregate.
     await captureStepBoundaryFriction(
       dir,
-      "run-1",
+      runId,
       { eventType: "phase_reemit", discriminator: "d1", note: "re-emit", artifact: "node-6" },
       "remediate-code",
     );
     await captureStepBoundaryFriction(
       dir,
-      "run-1",
+      runId,
       { eventType: "repair_round", discriminator: "d2", note: "repair", artifact: "node-6" },
       "remediate-code",
     );
 
-    const decision = await decideFrictionTriage(dir, "run-1", "remediate-code");
+    const decision = await decideFrictionTriage(dir, runId, "remediate-code");
     // inefficient_feeding arrives PRE-COVERED; the other two are still owed.
     expect(decision.missing_categories).toEqual(["ambiguous_direction", "tool_should_decide"]);
 
     // The pre-populated entry is persisted in the open_observations[] shape the
     // close-out (and the Stop-hook backstop) read: real category, never 'trap'.
-    const record = await readRecord(dir, "run-1");
+    const record = await readRecord(dir, runId);
     const derivedObs = (record.open_observations ?? []).filter((o) => o.derived);
     expect(derivedObs.length).toBe(1);
     expect(derivedObs[0].category).toBe("inefficient_feeding");
@@ -243,4 +247,45 @@ test("friction-stop-gate hook FRICTION_CATEGORIES stays in parity with the sourc
   expect(hookCategories, "hook list must equal the single-sourced categories").toEqual([
     ...FRICTION_CATEGORIES,
   ]);
+});
+
+// ── INV-SCC-04 / COR-6fd1702f / TST-c0e7b3b3: single-encoding path derivation ──
+
+test("capture→triage round trip with an underscore-bearing run id: pending events and recordPath use the SINGLE canonical file", async () => {
+  // `frictionCapturePath` already sanitizes its run-id argument. Triage must
+  // therefore pass the RAW run id — pre-sanitizing double-encodes any id that
+  // sanitizeRunId actually changes (underscores are escaped, so `run_1` →
+  // `run_5f1` → double → `run_5f5f1`): captured events vanish from the triage
+  // subject set and the host is directed at a record the locked mutation path
+  // never reads, so close-out cannot converge. Real audit run ids carry
+  // underscores, so the round trip is pinned on one.
+  const dir = await mkdtemp(join(tmpdir(), "friction-single-encode-"));
+  const runId = "run_1";
+  try {
+    await captureStepBoundaryFriction(
+      dir,
+      runId,
+      { eventType: "phase_reemit", discriminator: "d1", note: "re-emit", artifact: "node-1" },
+      "remediate-code",
+    );
+
+    const decision = await decideFrictionTriage(dir, runId, "remediate-code");
+
+    // The captured mechanical event must surface as a PENDING triage subject —
+    // a double-encoded read path silently drops it (empty pending set).
+    expect(
+      decision.pending.some((s) => s.source === "event"),
+      "the captured event must appear in the pending triage subjects",
+    ).toBe(true);
+
+    // The host must be pointed at the SAME canonical record file the capture
+    // path wrote — one single-encoded derivation, never a re-encoded spelling.
+    expect(decision.recordPath).toBe(frictionCapturePath(dir, runId));
+
+    // And that canonical record actually carries the captured event.
+    const record = await readRecord(dir, runId);
+    expect((record.frictions ?? []).length).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

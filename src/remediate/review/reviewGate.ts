@@ -135,12 +135,34 @@ export function buildReviewRequest(
 }
 
 /**
+ * Whether `resolution` answers THIS `request` (INV-RSM-RESOLUTION-CORRELATE).
+ * An absent resolution or an absent `plan_id` correlates (host-lenient: the
+ * single-run common case writes no plan_id); a PRESENT plan_id that differs
+ * from the request's marks a stale leftover from another run — the caller must
+ * archive it and re-halt rather than apply a cross-run answer.
+ */
+export function isResolutionForRequest(
+  request: ReviewRequest,
+  resolution: ReviewResolution | null | undefined,
+): boolean {
+  const resolutionPlanId = resolution?.plan_id;
+  if (resolutionPlanId === undefined) return true;
+  return resolutionPlanId === request.plan_id;
+}
+
+/**
  * Apply the user's resolution to a request: every item is either approved (act
  * on it) or declined (recorded terminal disposition with a reason). An item is
  * declined if its id is in `disapproved_findings` OR its tier is in
  * `disapproved_tiers`. Everything else is approved — the default is to act,
  * because the gate's job is to let the user REMOVE items, not to require
  * opting every item in. An absent/empty resolution approves everything.
+ *
+ * A resolution carrying a MISMATCHED `plan_id` is rejected (throws): applying a
+ * stale cross-run answer would approve/decline the wrong finding set
+ * (INV-RSM-RESOLUTION-CORRELATE, COR-0b906e37). Callers pre-screen with
+ * {@link isResolutionForRequest} to archive-and-re-halt instead of crashing;
+ * the throw here is the mechanical backstop, not the primary UX.
  *
  * Crucially, declined items are returned with an explicit reason so the caller
  * records a terminal disposition (e.g. `ignored`) rather than silently closing
@@ -150,6 +172,11 @@ export function applyReviewResolution(
   request: ReviewRequest,
   resolution: ReviewResolution | null | undefined,
 ): ReviewDecision {
+  if (!isResolutionForRequest(request, resolution)) {
+    throw new Error(
+      `review resolution plan_id "${resolution?.plan_id}" does not answer review request plan_id "${request.plan_id}" — stale cross-run resolution rejected (INV-RSM-RESOLUTION-CORRELATE).`,
+    );
+  }
   const disapprovedIds = new Set(resolution?.disapproved_findings ?? []);
   const disapprovedTiers = new Set<ReviewNecessity>(resolution?.disapproved_tiers ?? []);
   const approved_ids: string[] = [];

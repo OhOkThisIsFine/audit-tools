@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { withTempDir } from "./helpers/withTempDir.mjs";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
-const { cmdMergeAndIngest } = await import("../../src/audit/cli/mergeAndIngestCommand.ts");
+const { cmdMergeAndIngest, validateAndCollectResults } = await import("../../src/audit/cli/mergeAndIngestCommand.ts");
 
 const RUN_ID = "run-merge-test";
 
@@ -146,5 +146,145 @@ test("cmdMergeAndIngest requires --run-id", async () => {
       () => cmdMergeAndIngest(["--artifacts-dir", artifactsDir]),
       /requires --run-id/,
     );
+  });
+});
+
+// ── CP-NODE-2 pinning regression tests (invariants already fixed at HEAD) ────
+
+test("cmdMergeAndIngest discards a STALE completion marker when a pending task has an un-ingested on-disk result (staleness self-heal), and re-processes", async () => {
+  await withTempDir("merge-ingest-cmd-", async (artifactsDir) => {
+    const repoRoot = artifactsDir;
+    const { taskResultsDir, mergeCompletePath, failedTasksPath } = await scaffoldRun(artifactsDir, repoRoot, {
+      entries: [],
+      // Selective deepening re-listed this task as pending on the SAME run-id
+      // after the marker was written.
+      pendingTasks: [
+        { task_id: "u9:security", unit_id: "u9", pass_id: "p", lens: "security", file_paths: ["src/x.ts"] },
+      ],
+    });
+
+    await writeJson(mergeCompletePath, {
+      run_id: RUN_ID,
+      status: "completed",
+      accepted_count: 1,
+      rejected_count: 0,
+      finding_count: 0,
+    });
+
+    // The pending task's answer is on disk — the marker is now stale. The
+    // answer is deliberately INVALID (lens mismatch) so re-processing blocks
+    // before runAuditStep, keeping the test bundle-free; what matters is that
+    // the run RE-PROCESSES (throws) instead of replaying the stale summary.
+    await writeJson(join(taskResultsDir, "u9.json"), {
+      task_id: "u9:security",
+      unit_id: "u9",
+      pass_id: "p",
+      lens: "correctness",
+      file_coverage: [{ path: "src/x.ts", total_lines: 5 }],
+      findings: [],
+    });
+
+    await assert.rejects(
+      () =>
+        captureConsole(() =>
+          cmdMergeAndIngest(["--artifacts-dir", artifactsDir, "--run-id", RUN_ID]),
+        ),
+      /blocked before ingestion/i,
+      "a stale marker must be discarded and the run re-processed, not replayed",
+    );
+
+    // The stale marker was removed (self-heal), not replayed.
+    await assert.rejects(
+      () => readFile(mergeCompletePath, "utf8"),
+      "the stale completion marker must be deleted",
+    );
+    const failed = JSON.parse(await readFile(failedTasksPath, "utf8"));
+    expect(failed.map((f) => f.task_id)).toEqual(["u9:security"]);
+  });
+});
+
+test("cmdMergeAndIngest exit-code contract: a round where every pending task was held back (notDispatched) exits 0, preserves run-results.json, writes no marker, and never counts schema pointer files spurious", async () => {
+  await withTempDir("merge-ingest-cmd-", async (artifactsDir) => {
+    const repoRoot = artifactsDir;
+    const { runDir, taskResultsDir, mergeCompletePath } = await scaffoldRun(artifactsDir, repoRoot, {
+      // No dispatch entries: the pending task was never dispatched this round
+      // (budget-capped / planning-deferred) — NOT a failure.
+      entries: [],
+      pendingTasks: [
+        { task_id: "u1:security", unit_id: "u1", pass_id: "p", lens: "security", file_paths: ["src/a.ts"] },
+      ],
+    });
+
+    // Schema pointer support artifacts prepare-dispatch copies into
+    // task-results/ — expected, never spurious, never results.
+    await writeJson(join(taskResultsDir, "audit_result.schema.json"), { $schema: "stub" });
+
+    // A prior successful round's run-results.json must survive this no-op
+    // round untouched (no destructive truncation).
+    const runResultsPath = join(runDir, "run-results.json");
+    const prior = [{ task_id: "prior-task" }];
+    await writeJson(runResultsPath, prior);
+
+    const { code, stdout } = await captureConsole(() =>
+      cmdMergeAndIngest(["--artifacts-dir", artifactsDir, "--run-id", RUN_ID]),
+    );
+
+    expect(code, "notDispatched > 0 with zero failures must exit 0").toBe(0);
+    const payload = JSON.parse(stdout.trim());
+    expect(payload.status).toBe("partial");
+    expect(payload.not_dispatched_count).toBe(1);
+    expect(payload.rejected_count).toBe(0);
+    expect(payload.accepted_count).toBe(0);
+    expect(payload.spurious_file_count, "schema pointer files are support artifacts, not spurious").toBe(0);
+
+    const preserved = JSON.parse(await readFile(runResultsPath, "utf8"));
+    expect(preserved, "run-results.json must not be truncated by a held-back round").toEqual(prior);
+
+    let markerExists = true;
+    try {
+      await readFile(mergeCompletePath, "utf8");
+    } catch {
+      markerExists = false;
+    }
+    expect(markerExists, "a held-back round must not write the completion marker").toBe(false);
+  });
+});
+
+test("validateAndCollectResults rejects a duplicate task_id at ingest (dedup via seenTaskIds) instead of double-ingesting", async () => {
+  await withTempDir("merge-ingest-cmd-", async (dir) => {
+    const t1 = { task_id: "t1", unit_id: "u", pass_id: "p", lens: "security", file_paths: ["src/a.ts"] };
+    const t2 = { task_id: "t2", unit_id: "u2", pass_id: "p", lens: "security", file_paths: ["src/b.ts"] };
+    const mk = (tid, unit, path) => ({
+      task_id: tid,
+      unit_id: unit,
+      pass_id: "p",
+      lens: "security",
+      file_coverage: [{ path, total_lines: 3 }],
+      findings: [],
+    });
+    const r1Path = join(dir, "r1.json");
+    const r2Path = join(dir, "r2.json");
+    await writeJson(r1Path, mk("t1", "u", "src/a.ts"));
+    // t2's assigned result file contains a SECOND copy of t1's result.
+    await writeJson(r2Path, mk("t1", "u", "src/a.ts"));
+
+    const entryByTaskId = new Map([
+      ["t1", { result_path: r1Path, task_id: "t1", packet_id: "pkt" }],
+      ["t2", { result_path: r2Path, task_id: "t2", packet_id: "pkt" }],
+    ]);
+
+    const { passing, failing } = await validateAndCollectResults(
+      [t1, t2],
+      entryByTaskId,
+      new Map(),
+      new Map(),
+    );
+
+    expect(passing.map((r) => r.task_id), "exactly one copy may ingest").toEqual(["t1"]);
+    expect(failing.length).toBe(1);
+    expect(
+      failing[0].errors.some((e) => /duplicate audit result/i.test(e)),
+      `expected a duplicate-task_id rejection, got: ${JSON.stringify(failing[0].errors)}`,
+    ).toBeTruthy();
   });
 });

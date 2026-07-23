@@ -78,6 +78,7 @@ import {
 import {
   buildReviewRequest,
   applyReviewResolution,
+  isResolutionForRequest,
   type ReviewRequest,
   type ReviewResolution,
 } from "../review/reviewGate.js";
@@ -2719,8 +2720,12 @@ async function handlePendingExtractedPlan(
 // mirroring the intake-clarification gate rather than waiting_for_clarification.
 
 const REVIEW_DECISION_SCHEMA_VERSION = "remediate-code-review-decision/v1" as const;
-/** Stable, informational plan id for the pre-plan review request/decision pair. */
-const REVIEW_GATE_PLAN_ID = "path-a-review";
+// The review request/decision plan id is RUN-UNIQUE (INV-RSM-RESOLUTION-
+// CORRELATE, COR-0b906e37): Path A mints `randomRunId("path-a-review")` per
+// request, Path B uses the live plan's own plan_id. The former stable
+// constants ("path-a-review"/"path-b-review") are retired — with a constant id
+// a resolution left over from ANOTHER run in the same artifacts dir always
+// correlated, so a stale cross-run answer was silently applied.
 
 interface ReviewDecisionRecord {
   schema_version: typeof REVIEW_DECISION_SCHEMA_VERSION;
@@ -2830,11 +2835,12 @@ async function runReviewApprovalGate(
   if (gateOpen && autonomous) {
     const auto = buildAutonomousReviewDecision(survivors);
     const approvedSet = new Set(auto.approved_ids);
-    // Leftovers stay LIVE: declined is EMPTY (no durable rejection). The split
-    // below excludes nothing, so every leftover remains a live finding.
+    // Leftovers stay LIVE: declined is EMPTY (no durable rejection). The
+    // decision REPLAY keys on approved_ids (COR-227a02ae), so on later calls
+    // exactly the approved subset — never the live leftovers — re-enters.
     const record: ReviewDecisionRecord = {
       schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-      plan_id: REVIEW_GATE_PLAN_ID,
+      plan_id: randomRunId("path-a-review"),
       approved_ids: auto.approved_ids,
       declined: [],
       created_at: new Date().toISOString(),
@@ -2857,7 +2863,9 @@ async function runReviewApprovalGate(
     const requestPath = reviewRequestPath(artifactsDir);
     if (!existsSync(resolutionPath)) {
       // Halt: present the tiered survivors and wait for the user's decision.
-      const request = buildReviewRequest(survivors, REVIEW_GATE_PLAN_ID);
+      // The request's plan id is minted RUN-UNIQUE so a stale resolution from
+      // another run can never correlate against it (COR-0b906e37).
+      const request = buildReviewRequest(survivors, randomRunId("path-a-review"));
       await writeJsonFile(requestPath, request);
       return {
         kind: "halt",
@@ -2867,12 +2875,24 @@ async function runReviewApprovalGate(
     // Consume the resolution into a durable, reasoned decision record.
     const request =
       (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
-      buildReviewRequest(survivors, REVIEW_GATE_PLAN_ID);
+      buildReviewRequest(survivors, randomRunId("path-a-review"));
     const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
+    if (!isResolutionForRequest(request, resolution)) {
+      // Stale cross-run resolution (plan_id mismatch): archive it and RE-HALT
+      // with the live request rather than applying another run's answer.
+      await withFsRetry(() =>
+        rename(resolutionPath, `${resolutionPath}.stale-${Date.now()}`),
+      );
+      await writeJsonFile(requestPath, request);
+      return {
+        kind: "halt",
+        step: await handleWaitingForReviewApproval(root, artifactsDir, request),
+      };
+    }
     const decision = applyReviewResolution(request, resolution);
     const record: ReviewDecisionRecord = {
       schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-      plan_id: REVIEW_GATE_PLAN_ID,
+      plan_id: request.plan_id,
       approved_ids: decision.approved_ids,
       declined: decision.declined,
       created_at: new Date().toISOString(),
@@ -2886,13 +2906,21 @@ async function runReviewApprovalGate(
     }
   }
 
-  // Decision recorded (now or on a prior call): split the survivors.
+  // Decision recorded (now or on a prior call): split the survivors. The
+  // replay honours the recorded approved_ids (COR-227a02ae) — an autonomous
+  // decision approves a SUBSET with declined EMPTY (leftovers live but not
+  // approved), so keying the replay on the declined set alone would silently
+  // re-approve every leftover on the next call.
   const decision = await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath);
   const declined = decision?.declined ?? [];
   const declinedIds = new Set(declined.map((d) => d.finding_id));
+  const approvedIds = decision ? new Set(decision.approved_ids ?? []) : undefined;
   return {
     kind: "proceed",
-    approved: survivors.filter((f) => !declinedIds.has(f.id)),
+    approved:
+      approvedIds !== undefined
+        ? survivors.filter((f) => approvedIds.has(f.id))
+        : survivors.filter((f) => !declinedIds.has(f.id)),
     declined,
   };
 }
@@ -3163,6 +3191,18 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
+  // The effective session config is loaded BEFORE the review gate
+  // (COR-5f8fb354): the gate's attended-vs-autonomous resolution must see the
+  // PERSISTED session-config.json (`autonomous_mode`), not only a programmatic
+  // override — resolving from the bare CLI options meant a nightly unattended
+  // run halted for a human at the review gate. The same loaded config feeds
+  // the dispatch-capability resolution further down (single load).
+  const sessionConfigForDispatch = await loadRemediateSessionConfig({
+    root,
+    override: options?.sessionConfig,
+    artifactsFirst: true,
+  });
+
   // Path A: run the single filter pass over the ORIGINAL findings, present the
   // SURVIVORS at the review gate (deduped / evidence-bearing / path-grounded /
   // checkpoint-kept, tiered by review-necessity), then seed the pipeline with the
@@ -3195,7 +3235,9 @@ async function handleReadyIntakeContractPipeline(
           root,
           artifactsDir,
           filter.survivors,
-          resolveAutonomousMode(options ?? {}),
+          // Autonomy resolves from the PERSISTED session config (hoisted load
+          // above) → env → attended default, never from the bare CLI options.
+          resolveAutonomousMode({ sessionConfig: sessionConfigForDispatch }),
         );
         if (gate.kind === "halt") {
           return gate.step;
@@ -3335,12 +3377,8 @@ async function handleReadyIntakeContractPipeline(
   // (`resolveHostDispatchCapability`) implement dispatch uses — never a manual
   // flag. Threaded into the contract pipeline so the adversarial 'critique' /
   // 'critic' prompts MANDATE an independent sub-agent reviewer when the host can
-  // dispatch one (fail-safe: mandate by default).
-  const sessionConfigForDispatch = await loadRemediateSessionConfig({
-    root,
-    override: options?.sessionConfig,
-    artifactsFirst: true,
-  });
+  // dispatch one (fail-safe: mandate by default). The config itself was loaded
+  // once, above the review gate (COR-5f8fb354).
   const hostCanDispatchSubagents = resolveHostDispatchCapability({
     hostCanDispatchSubagents: options?.hostCanDispatchSubagents,
     sessionConfig: sessionConfigForDispatch,
@@ -3658,9 +3696,6 @@ async function handleWaitingForTriage(
   });
 }
 
-/** Stable, informational plan id for the Path-B (planning-point) review pair. */
-const REVIEW_GATE_PLAN_ID_PATH_B = "path-b-review";
-
 /**
  * Path-B (document / conversation) review-necessity gate, fired at the PLANNING
  * point over the deduped/grounded node findings. Path A records its review
@@ -3690,9 +3725,14 @@ async function runPlanningReviewGate(
   const resolutionPath = reviewResolutionPath(artifactsDir);
   const decisionPath = reviewDecisionPath(artifactsDir);
 
+  // Path B correlates on the LIVE plan's own id (INV-RSM-RESOLUTION-CORRELATE):
+  // the plan exists at the planning point, so its plan_id is the natural
+  // run-unique key — a stale resolution from an earlier plan can never match.
+  const reviewPlanId = state.plan?.plan_id ?? randomRunId("path-b-review");
+
   if (!existsSync(resolutionPath)) {
     // Halt: present the tiered node findings and wait for the user's decision.
-    const request = buildReviewRequest(findings, REVIEW_GATE_PLAN_ID_PATH_B);
+    const request = buildReviewRequest(findings, reviewPlanId);
     await writeJsonFile(requestPath, request);
     return handleWaitingForReviewApproval(root, artifactsDir, request);
   }
@@ -3700,12 +3740,20 @@ async function runPlanningReviewGate(
   // Resolution present: consume it into a durable, reasoned decision record.
   const request =
     (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
-    buildReviewRequest(findings, REVIEW_GATE_PLAN_ID_PATH_B);
+    buildReviewRequest(findings, reviewPlanId);
   const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
+  if (!isResolutionForRequest(request, resolution)) {
+    // Stale cross-run resolution: archive it and re-halt with the live request.
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.stale-${Date.now()}`),
+    );
+    await writeJsonFile(requestPath, request);
+    return handleWaitingForReviewApproval(root, artifactsDir, request);
+  }
   const decision = applyReviewResolution(request, resolution);
   const record: ReviewDecisionRecord = {
     schema_version: REVIEW_DECISION_SCHEMA_VERSION,
-    plan_id: REVIEW_GATE_PLAN_ID_PATH_B,
+    plan_id: request.plan_id,
     approved_ids: decision.approved_ids,
     declined: decision.declined,
     created_at: new Date().toISOString(),

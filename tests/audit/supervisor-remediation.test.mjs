@@ -6,6 +6,7 @@ import { join } from "node:path";
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import("../../src/audit/supervisor/operatorHandoff.ts");
 const { loadRunLedger } = await import("../../src/audit/supervisor/runLedger.ts");
 const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = await import("../../src/audit/supervisor/sessionConfig.ts");
+const { frictionCapturePath } = await import("../../src/shared/io/frictionCapture.ts");
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
@@ -26,6 +27,7 @@ function makeHandoffArtifactPaths(artifactsDir, incomingDir) {
     current_tasks: join(artifactsDir, "dispatch", "current-tasks.json"),
     audit_tasks: null,
     runtime_validation_tasks: null,
+    friction_record: frictionCapturePath(artifactsDir, "run"),
   };
 }
 
@@ -239,6 +241,175 @@ test("buildAuditCodeHandoff points active review runs at next-step", () => {
   // location that actually exists mid-run — not the not-yet-created root path.
   expect(handoff.file_map?.final_report).toBe(join(artifactsDir, "audit-report.md"));
   expect(handoff.active_review_run?.run_id).toBe("run-7");
+});
+
+// ── CP-NODE-8 / COR-b019d3b9 pinning tests: blocked-status rendering and
+// artifact-path invariants of buildAuditCodeHandoff. The blocked branch is
+// live at HEAD (buildBlockedAuditState in envelope.ts feeds this consumer via
+// the review-run path); these pin the consumer contract so it cannot regress.
+
+test("blocked handoff renders the dispatch path trio and pending obligations in obligation order", () => {
+  const artifactsDir = join("tmp", "audit artifacts");
+  const handoff = buildAuditCodeHandoff({
+    root: "repo-root",
+    artifactsDir,
+    state: {
+      status: "blocked",
+      obligations: [
+        { id: "provider_confirmation", state: "present" },
+        { id: "repo_manifest", state: "satisfied" },
+        { id: "module_graph", state: "stale" },
+        { id: "audit_tasks_completed", state: "blocked" },
+        { id: "audit_results_ingested", state: "missing" },
+      ],
+    },
+    bundle: {},
+    progressSummary: "manual review required",
+  });
+
+  // POSITIVE: current_task/current_prompt/current_tasks are non-null exactly
+  // when status is blocked.
+  expect(handoff.artifact_paths.current_task).toBe(
+    join(artifactsDir, "dispatch", "current-task.json"),
+  );
+  expect(handoff.artifact_paths.current_prompt).toBe(
+    join(artifactsDir, "dispatch", "current-prompt.md"),
+  );
+  expect(handoff.artifact_paths.current_tasks).toBe(
+    join(artifactsDir, "dispatch", "current-tasks.json"),
+  );
+  // pending_obligations is exactly the ids outside {present, satisfied}, in
+  // state.obligations order (deterministic, content-derived).
+  expect(handoff.pending_obligations).toEqual([
+    "module_graph",
+    "audit_tasks_completed",
+    "audit_results_ingested",
+  ]);
+});
+
+test("non-blocked statuses keep dispatch paths null and emit no blocked-mode outputs", () => {
+  const artifactsDir = join("tmp", "audit artifacts");
+  for (const status of ["not_started", "active", "complete"]) {
+    // activeReviewRun is included deliberately: the file_map non-null
+    // assertions on the dispatch trio must never fire off-blocked, even when a
+    // review run is present.
+    const handoff = buildAuditCodeHandoff({
+      root: "repo-root",
+      artifactsDir,
+      state: {
+        status,
+        obligations: [{ id: "synthesis_current", state: "missing" }],
+      },
+      bundle: {},
+      progressSummary: "in progress",
+      activeReviewRun: {
+        run_id: "run-3",
+        task_path: join(artifactsDir, "runs", "run-3", "task.json"),
+        prompt_path: join(artifactsDir, "runs", "run-3", "prompt.md"),
+        audit_results_path: join(artifactsDir, "runs", "run-3", "run-results.json"),
+        worker_command: ["node", "worker.js"],
+      },
+    });
+
+    expect(handoff.artifact_paths.current_task).toBe(null);
+    expect(handoff.artifact_paths.current_prompt).toBe(null);
+    expect(handoff.artifact_paths.current_tasks).toBe(null);
+    expect(handoff.suggested_inputs).toEqual([]);
+    expect(handoff.suggested_commands).toEqual([]);
+    expect(handoff.quick_start).toBe(undefined);
+    expect(handoff.file_map).toBe(undefined);
+  }
+});
+
+test("friction_record is single-sourced from frictionCapturePath for default and explicit run ids", () => {
+  const artifactsDir = join("tmp", "audit artifacts");
+  const state = {
+    status: "blocked",
+    obligations: [{ id: "audit_tasks_completed", state: "blocked" }],
+  };
+
+  const withDefault = buildAuditCodeHandoff({
+    root: "repo-root",
+    artifactsDir,
+    state,
+    bundle: {},
+    progressSummary: "manual review required",
+  });
+  expect(withDefault.artifact_paths.friction_record).toBe(
+    frictionCapturePath(artifactsDir, "run"),
+  );
+
+  const withRunId = buildAuditCodeHandoff({
+    root: "repo-root",
+    artifactsDir,
+    state,
+    bundle: {},
+    progressSummary: "manual review required",
+    runId: "run 42/x",
+  });
+  expect(withRunId.artifact_paths.friction_record).toBe(
+    frictionCapturePath(artifactsDir, "run 42/x"),
+  );
+});
+
+test("operator-handoff.json and .md serialize the same in-memory handoff and the markdown renders every artifact path", async () => {
+  await withTempDir("audit-code-handoff-same-value-", async (artifactsDir) => {
+    const handoff = buildAuditCodeHandoff({
+      root: "repo-root",
+      artifactsDir,
+      state: {
+        status: "blocked",
+        obligations: [{ id: "audit_tasks_completed", state: "blocked" }],
+      },
+      // Truthy audit_tasks / runtime_validation_tasks so every artifact_paths
+      // field is non-null and must therefore appear in the markdown render.
+      bundle: {
+        audit_tasks: [{ task_id: "T1" }],
+        runtime_validation_tasks: { tasks: [] },
+      },
+      progressSummary: "manual review required",
+      runId: "run-13",
+      activeReviewRun: {
+        run_id: "run-13",
+        task_path: join(artifactsDir, "runs", "run-13", "task.json"),
+        prompt_path: join(artifactsDir, "runs", "run-13", "prompt.md"),
+        audit_results_path: join(artifactsDir, "runs", "run-13", "run-results.json"),
+        worker_command: ["node", "worker.js"],
+      },
+    });
+
+    await writeAuditCodeHandoffArtifacts(handoff);
+
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"),
+    );
+    const markdown = await readFile(
+      join(artifactsDir, "operator-handoff.md"), "utf8",
+    );
+
+    // Both artifacts come from the SAME in-memory handoff value — the JSON is
+    // a straight serialization, never a divergent re-derivation.
+    expect(persisted.artifact_paths).toEqual(handoff.artifact_paths);
+    expect(persisted.file_map).toEqual(handoff.file_map);
+    expect(persisted.pending_obligations).toEqual(handoff.pending_obligations);
+
+    // Runtime complement of the compile-time registry drift guard: the
+    // markdown renders every artifact_paths field of the model.
+    for (const value of Object.values(handoff.artifact_paths)) {
+      expect(markdown).toContain(value);
+    }
+
+    // The advertised deliverable is the mid-run artifacts-dir location, never
+    // the repo-root render that only exists after completion promotes it.
+    expect(handoff.file_map?.final_report).toBe(
+      join(artifactsDir, "audit-report.md"),
+    );
+    const repoRootReport = join("repo-root", "audit-report.md");
+    for (const value of Object.values(persisted.file_map)) {
+      expect(value).not.toBe(repoRootReport);
+    }
+    expect(markdown).not.toContain(repoRootReport);
+  });
 });
 
 test("buildAuditCodeHandoff suppresses evidence inputs and shows config-repair hint when isConfigError is true", () => {

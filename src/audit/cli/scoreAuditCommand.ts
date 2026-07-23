@@ -87,7 +87,12 @@ export async function cmdScoreAudit(argv: string[]): Promise<void> {
   const scorecard = scoreAudit(findings, labels);
   await writeJsonFile(outPath, scorecard);
   const summary = renderScorecardMarkdown(scorecard);
-  const summaryPath = outPath.replace(/\.json$/, ".md");
+  // Sibling markdown path, derived safely (COR-27f0f33c): for a non-".json"
+  // --out the extension replace would be a no-op, making summaryPath === outPath
+  // and silently overwriting the just-written JSON scorecard with markdown.
+  const summaryPath = /\.json$/.test(outPath)
+    ? outPath.replace(/\.json$/, ".md")
+    : `${outPath}.md`;
   await writeTextFile(summaryPath, summary);
 
   process.stdout.write(summary);
