@@ -425,8 +425,10 @@ export async function prepareImplementDispatch(
   };
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);
 
-  const estimatedSlotTokens = itemReadFileLists.map((files) =>
-    estimateImplementSlotTokens(files, options.root),
+  const estimatedSlotTokens = itemReadFileLists.map((files, i) =>
+    estimateImplementSlotTokens(files, options.root, {
+      promptPath: items[i]?.prompt_path,
+    }),
   );
   // The persisted host handshake (state.host_capabilities, written at the
   // decideNextStep seam) is the fallback for every capability field the wave

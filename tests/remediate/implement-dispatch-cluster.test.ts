@@ -31,6 +31,10 @@ import {
   detectStructuralRefusalPause,
 } from "../../src/remediate/steps/nextStep.js";
 import { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
+import {
+  estimateImplementSlotTokens,
+  PROMPT_OVERHEAD_TOKENS,
+} from "../../src/remediate/steps/dispatch/common.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-implement-cluster");
@@ -412,6 +416,39 @@ describe("FIX-C-SPLIT — oversized single-finding block splits by file partitio
     expect(subBlocks.length).toBeGreaterThanOrEqual(2);
     const hugeSub = subBlocks.find((b) => b.touched_files.includes("src/huge.ts"))!;
     expect(hugeSub.touched_files).toEqual(["src/huge.ts"]);
+  });
+});
+
+describe("Agentic slot-cost model — access set is a manifest, not inlined content", () => {
+  it("many referencing files inflate the estimate by listing overhead only, never by their byte-sum", async () => {
+    // One large source file + many referencing tests. Under the content-inlining
+    // byte-sum model this exploded (the dogfood's CP-NODE-1: 182 tests → 943k
+    // tokens for a 14.5KB prompt); the agentic model bounds it by the LARGEST
+    // single file + per-file listing overhead.
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await mkdir(join(REPO_DIR, "tests"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "big.ts"), "x".repeat(200_000));
+    const files = ["src/big.ts"];
+    for (let i = 0; i < 60; i++) {
+      const name = `tests/ref-${i}.test.ts`;
+      await writeFile(join(REPO_DIR, name), "y".repeat(40_000));
+      files.push(name);
+    }
+    const estimate = estimateImplementSlotTokens(files, REPO_DIR);
+    // Byte-sum would be ≈ (200k + 60×40k)/4 = 650k tokens. The agentic model:
+    // overhead + largest file (~50k) + 61 listing lines — well under 100k.
+    expect(estimate).toBeLessThan(100_000);
+    expect(estimate).toBeGreaterThan(PROMPT_OVERHEAD_TOKENS + 50_000 - 1);
+  });
+
+  it("the rendered prompt's own bytes ride in the estimate", async () => {
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "a.ts"), "x".repeat(4_000));
+    const promptPath = join(REPO_DIR, "prompt.md");
+    await writeFile(promptPath, "p".repeat(40_000));
+    const without = estimateImplementSlotTokens(["src/a.ts"], REPO_DIR);
+    const withPrompt = estimateImplementSlotTokens(["src/a.ts"], REPO_DIR, { promptPath });
+    expect(withPrompt - without).toBe(10_000); // 40k bytes ≈ 10k tokens
   });
 });
 

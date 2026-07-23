@@ -316,13 +316,54 @@ function sumFileSizes(filePaths: string[]): number {
   return total;
 }
 
-/** Estimate slot tokens for an implement dispatch slot from readFiles byte sizes. */
-export function estimateImplementSlotTokens(readFiles: string[], root: string): number {
+/**
+ * Per-file listing overhead: the path line each read file contributes to the
+ * worker's access manifest (not its content — agentic workers read on demand).
+ */
+export const FILE_LISTING_OVERHEAD_TOKENS = 8;
+
+/**
+ * Estimate slot tokens for an implement dispatch slot the way an AGENTIC worker
+ * (host subagent / CLI worker with read tools) actually consumes context: the
+ * dispatch packet is the rendered prompt plus a file MANIFEST; the worker opens
+ * files itself, incrementally, inside its own session. The honest fit question
+ * is therefore "prompt + the largest single artifact the worker must hold at
+ * once + the manifest", NOT the byte-sum of the whole access set.
+ *
+ * The previous unconditional byte-sum applied the content-INLINING cost model
+ * (correct only for single-shot workers, whose packing lives with the
+ * openai-compatible provider) to every class — so a node whose scope is
+ * referenced by many tests exploded quadratically: the 2026-07-22 dogfood's
+ * CP-NODE-1 pulled 182 referencing tests into a 943k "cost" for a 14.5KB
+ * prompt, which no pool on earth admits (`no_capable_pool` on a node an
+ * agentic worker handles comfortably).
+ */
+export function estimateImplementSlotTokens(
+  readFiles: string[],
+  root: string,
+  opts?: {
+    /** The rendered per-node prompt file — the packet's actual body. */
+    promptPath?: string;
+  },
+): number {
   const absPaths = readFiles.map((f) =>
     f.startsWith("/") || /^[A-Za-z]:[/\\]/.test(f) ? f : join(root, f),
   );
-  const bytes = sumFileSizes(absPaths);
-  return estimateTokensFromBytes(bytes) + PROMPT_OVERHEAD_TOKENS;
+  let maxFileBytes = 0;
+  for (const p of absPaths) {
+    try {
+      const size = statSync(p).size;
+      if (size > maxFileBytes) maxFileBytes = size;
+    } catch {
+      /* missing file → 0 bytes; not an error for estimation purposes */
+    }
+  }
+  const promptBytes = opts?.promptPath ? sumFileSizes([opts.promptPath]) : 0;
+  return (
+    PROMPT_OVERHEAD_TOKENS +
+    estimateTokensFromBytes(promptBytes + maxFileBytes) +
+    readFiles.length * FILE_LISTING_OVERHEAD_TOKENS
+  );
 }
 
 // ---------------------------------------------------------------------------
