@@ -10,6 +10,16 @@
       "cost_per_mtok": 0
     },
     {
+      "id": "nim-direct",
+      "transport": "openai-compatible",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "api_key_env": "NVIDIA_API_KEY",
+      "service": "nvidia_nim",
+      "burst_limited": true,
+      "cost_per_mtok": 0
+    },
+    {
       "transport": "claude-worker",
       "endpoint": "http://127.0.0.1:8402",
       "service": "nim",

@@ -1,7 +1,10 @@
 import { accessSync, constants, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { DispatchableSource } from "../types/sessionConfig.js";
+import {
+  type DispatchableSource,
+  laneWorkerKindConflict,
+} from "../types/sessionConfig.js";
 import { resolveAuditCodeStateDir } from "../io/stateDir.js";
 import { spawnSyncHidden } from "../tooling/exec.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
@@ -201,6 +204,14 @@ export interface ProxyDeclaration {
   top_k?: number;
   cost_per_mtok?: number;
   api_key_env?: string;
+  /**
+   * The proxy's BACKEND burst-limits per model (see
+   * `DispatchableSource.burst_limited`). Stamped onto every expanded lane at RESOLVE
+   * time — declaration-authoritative, so flipping it never requires a re-populate —
+   * where the worker-kind compatibility rule then refuses agentic expansion
+   * ({@link laneWorkerKindConflict}) with a per-lane reason.
+   */
+  burst_limited?: boolean;
 }
 
 /** `readProxyDeclaration`'s outcome: the lane, or why it is absent. */
@@ -254,7 +265,8 @@ export function readProxyDeclaration(
       reason: "proxy must be a JSON object with an endpoint — fix the declaration.",
     };
   }
-  const { endpoint, top_k, cost_per_mtok, api_key_env } = block as Record<string, unknown>;
+  const { endpoint, top_k, cost_per_mtok, api_key_env, burst_limited } =
+    block as Record<string, unknown>;
   if (typeof endpoint !== "string" || endpoint.trim().length === 0) {
     return {
       declaration: null,
@@ -278,6 +290,9 @@ export function readProxyDeclaration(
   }
   if (typeof api_key_env === "string" && api_key_env.trim().length > 0) {
     declaration.api_key_env = api_key_env.trim();
+  }
+  if (typeof burst_limited === "boolean") {
+    declaration.burst_limited = burst_limited;
   }
   return { declaration };
 }
@@ -530,7 +545,17 @@ export function resolveAmbientSources(
     else dropped.push({ id: sourceId(source), reason: reach.reason });
   }
   resolveProxyLane(deps, sources, dropped);
-  return { sources, dropped };
+  // Worker-kind × pool-class compatibility, applied ONCE over the assembled set so
+  // declared and proxy-expanded lanes are held to the same rule. Per-lane, so one
+  // incompatible lane never costs the operator the rest of the pool (unlike a
+  // validator error, which degrades the whole declaration).
+  const compatible: DispatchableSource[] = [];
+  for (const source of sources) {
+    const conflict = laneWorkerKindConflict(source);
+    if (conflict === null) compatible.push(source);
+    else dropped.push({ id: sourceId(source), reason: conflict });
+  }
+  return { sources: compatible, dropped };
 }
 
 /**
@@ -621,6 +646,15 @@ function resolveProxyLane(
       });
       continue;
     }
-    sources.push(expanded);
+    // `burst_limited` is stamped from the CURRENT declaration, not the populate
+    // cache — declaration-authoritative in BOTH directions: an explicit `false`
+    // strips a cache-carried flag just as `true` adds one, so flipping the knob
+    // takes effect on the next resolve without a re-populate (a stale cache can
+    // neither launder the flag off nor pin it on).
+    sources.push(
+      typeof declaration.burst_limited === "boolean"
+        ? { ...expanded, burst_limited: declaration.burst_limited }
+        : expanded,
+    );
   }
 }

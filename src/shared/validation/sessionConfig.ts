@@ -21,6 +21,10 @@ import {
   PROVIDER_NAMES,
   SESSION_UI_MODES,
   WORKER_KINDS,
+  fixedWorkerKindFor,
+  laneWorkerKindConflict,
+  type DispatchableTransport,
+  type WorkerKind,
   type AnalyzerSetting,
   type ProviderName,
   type RepoSessionIntent,
@@ -222,6 +226,58 @@ function validateDispatchableSources(
         `${path}.worker_kind`,
         `worker_kind must be one of: ${WORKER_KINDS.join(", ")}.`,
       );
+    }
+    // Shape check is `error`; the two SEMANTIC checks below are deliberately
+    // `warning`-severity: an error-severity issue makes readSourceDeclaration degrade
+    // the WHOLE declaration to empty, which would turn one questionable lane into a
+    // total pool loss. Enforcement is per-lane at source assembly instead
+    // (laneWorkerKindConflict via resolveAmbientSources / collectDispatchableSources);
+    // the warnings exist so static validation is not silent about it.
+    if (
+      source.burst_limited !== undefined &&
+      typeof source.burst_limited !== "boolean"
+    ) {
+      pushIssue(
+        issues,
+        `${path}.burst_limited`,
+        "burst_limited must be a boolean when provided.",
+      );
+    } else if (
+      typeof transport === "string" &&
+      VALID_DISPATCHABLE_TRANSPORTS.has(transport)
+    ) {
+      const validTransport = transport as DispatchableTransport;
+      const declaredKind =
+        typeof source.worker_kind === "string" &&
+        VALID_WORKER_KINDS.has(source.worker_kind)
+          ? (source.worker_kind as WorkerKind)
+          : undefined;
+      const fixed = fixedWorkerKindFor(validTransport);
+      if (fixed !== undefined && declaredKind !== undefined && fixed !== declaredKind) {
+        pushValidationIssue(
+          issues,
+          `${path}.worker_kind`,
+          `worker_kind "${declaredKind}" contradicts the ${validTransport} transport, ` +
+            `whose kind is fixed ("${fixed}") — the declaration is ignored; ` +
+            "worker_kind carries information only on worker-command / subprocess-template.",
+          "warning",
+        );
+      }
+      if (
+        laneWorkerKindConflict({
+          transport: validTransport,
+          worker_kind: declaredKind,
+          burst_limited: source.burst_limited === true,
+        }) !== null
+      ) {
+        pushValidationIssue(
+          issues,
+          `${path}.burst_limited`,
+          "agentic worker-kind on a burst-limited lane — this source will be refused " +
+            "at dispatch assembly (ride the backend single-shot instead).",
+          "warning",
+        );
+      }
     }
     // A claude-worker source IS the proxied spawn: without the proxy url there is
     // nothing to front the isolated `claude -p` (endpoint is a constructor invariant

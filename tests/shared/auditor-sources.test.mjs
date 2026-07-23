@@ -269,3 +269,72 @@ describe("probeReachableWithEscalation", () => {
     expect(budgets).toEqual([1000, 4000]);
   });
 });
+
+describe("worker-kind × pool-class compatibility (burst_limited)", () => {
+  const BURSTY_CW = {
+    id: "cw-nim",
+    transport: "claude-worker",
+    endpoint: "http://127.0.0.1:4000",
+    service: "nvidia_nim",
+    model: "glm-5.2",
+    burst_limited: true,
+  };
+
+  it("drops a declared agentic lane on a burst-limited backend WITH the reason", () => {
+    const result = resolveAmbientSources({
+      ...deps({ declaration: { sources: [BURSTY_CW] } }),
+      probeHttpReachable: () => true, // reach passes — the drop is the compat rule, not reach
+    });
+    expect(result.sources).toEqual([]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0].id).toBe("cw-nim");
+    expect(result.dropped[0].reason).toContain("burst-limited");
+    expect(result.dropped[0].reason).toContain("single-shot");
+  });
+
+  it("keeps a single-shot lane on the same burst-limited backend", () => {
+    const declaration = { sources: [{ ...NIM, burst_limited: true }] };
+    const result = resolveAmbientSources(
+      deps({ declaration, env: { NVIDIA_API_KEY: "k" } }),
+    );
+    expect(result.sources).toHaveLength(1);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it("a single_shot label on a claude-worker lane does NOT bypass the rule (transport is authoritative)", () => {
+    // The declaration cannot change what the transport DOES — `claude -p` is a tool
+    // loop regardless of the label, so honoring it here would reproduce the live
+    // storm through a one-word config edit (AGY review finding #1).
+    const declaration = {
+      sources: [{ ...BURSTY_CW, worker_kind: "single_shot" }],
+    };
+    const result = resolveAmbientSources({
+      ...deps({ declaration }),
+      probeHttpReachable: () => true,
+    });
+    expect(result.sources).toEqual([]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0].reason).toContain("burst-limited");
+  });
+
+  it("burst_limited: false is explicit-unrestricted (no drop)", () => {
+    const declaration = { sources: [{ ...BURSTY_CW, burst_limited: false }] };
+    const result = resolveAmbientSources({
+      ...deps({ declaration }),
+      probeHttpReachable: () => true,
+    });
+    expect(result.sources).toHaveLength(1);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it("keeps the never-silently-discarded invariant: kept + dropped = declared", () => {
+    const declaration = {
+      sources: [BURSTY_CW, { ...NIM, burst_limited: true }, { id: "cx", transport: "codex" }],
+    };
+    const result = resolveAmbientSources({
+      ...deps({ declaration, env: { NVIDIA_API_KEY: "k" } }),
+      probeHttpReachable: () => true,
+    });
+    expect(result.sources.length + result.dropped.length).toBe(3);
+  });
+});

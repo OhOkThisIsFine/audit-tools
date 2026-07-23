@@ -342,17 +342,80 @@ export const WORKER_KINDS = ["agentic", "single_shot"] as const;
 export type WorkerKind = (typeof WORKER_KINDS)[number];
 
 /**
- * Derive a source's {@link WorkerKind}. An explicit `worker_kind` on the source wins
- * (the declarable override for the genuinely-ambiguous case); otherwise the transport
- * determines it — every harness-driving backend (claude-worker / codex / agy /
- * opencode / worker-command / subprocess-template) is `agentic`; `openai-compatible`
- * is the lone `single_shot` (one `/chat/completions` round-trip, no tools).
+ * Transports whose worker kind is a FACT of the transport, not a declaration: a
+ * `claude -p` spawn / harness CLI always drives a tool loop; an `openai-compatible`
+ * POST is always one round-trip. Absent here (`worker-command` /
+ * `subprocess-template`) = genuinely ambiguous — only the operator knows what the
+ * command does, so only there does a declared `worker_kind` carry information.
+ */
+const FIXED_WORKER_KIND_BY_TRANSPORT: Partial<
+  Record<DispatchableTransport, WorkerKind>
+> = {
+  "openai-compatible": "single_shot",
+  "claude-worker": "agentic",
+  codex: "agentic",
+  agy: "agentic",
+  opencode: "agentic",
+};
+
+/**
+ * Derive a source's {@link WorkerKind}. For a fixed-kind transport the TRANSPORT is
+ * authoritative and a contradicting `worker_kind` declaration is ignored — the field
+ * was always documented as "declare it only where genuinely ambiguous", and honoring
+ * a lie here would let a declaration bypass worker-kind safety rules (e.g. labeling a
+ * `claude-worker` lane `single_shot` to sneak its tool loop onto a burst-limited
+ * backend — {@link laneWorkerKindConflict}). The declaration decides only for the
+ * genuinely-ambiguous command-shaped transports (`worker-command` /
+ * `subprocess-template`), which default to `agentic` when undeclared. A contradicting
+ * declaration on a fixed-kind transport draws a `warning` from the shared validator.
  */
 export function deriveWorkerKind(
   source: Pick<DispatchableSource, "transport" | "worker_kind">,
 ): WorkerKind {
-  if (source.worker_kind !== undefined) return source.worker_kind;
-  return source.transport === "openai-compatible" ? "single_shot" : "agentic";
+  const fixed = FIXED_WORKER_KIND_BY_TRANSPORT[source.transport];
+  if (fixed !== undefined) return fixed;
+  return source.worker_kind ?? "agentic";
+}
+
+/**
+ * The transport-authoritative kind for a fixed-kind transport, `undefined` for the
+ * genuinely-ambiguous command-shaped ones. Exposed for the shared validator's
+ * contradicting-declaration warning; routing goes through {@link deriveWorkerKind}.
+ */
+export function fixedWorkerKindFor(transport: string): WorkerKind | undefined {
+  return FIXED_WORKER_KIND_BY_TRANSPORT[transport as DispatchableTransport];
+}
+
+/**
+ * The worker-kind × pool-class compatibility rule. An `agentic` worker amplifies
+ * every dispatch grant into MANY rapid backend calls (its internal tool loop), which
+ * dispatch pacing can neither see nor throttle — on a backend the operator declared
+ * `burst_limited`, that structurally storms the per-model burst limiter and the
+ * resulting 429 cooldown punishes every other consumer of the pool (observed live:
+ * 136+ consecutive 429s from one proxied agentic worker on a NIM lane). A single-shot
+ * lane is one paced round-trip per grant, so it is the only worker kind a
+ * burst-limited backend can safely carry.
+ *
+ * `burst_limited` is DECLARED, never inferred from a service name (backend-agnostic)
+ * and never learned (the storm happens inside the spawned worker's own process,
+ * invisible to dispatch accounting). Absent ⇒ unrestricted.
+ *
+ * Returns the operator-facing refusal reason, or `null` when the lane is compatible.
+ * Enforced at BOTH assembly boundaries with this one predicate: per-lane drop in
+ * `resolveAmbientSources` (declaration file + proxy expansion) and the routing filter
+ * in `collectDispatchableSources` (descriptor-supplied sources).
+ */
+export function laneWorkerKindConflict(
+  source: Pick<DispatchableSource, "transport" | "worker_kind" | "burst_limited">,
+): string | null {
+  if (source.burst_limited !== true) return null;
+  if (deriveWorkerKind(source) !== "agentic") return null;
+  return (
+    "agentic worker-kind on a burst-limited lane — the worker's internal tool loop " +
+    "would storm the backend's burst limiter (dispatch cannot pace calls made inside " +
+    "the worker). Ride this backend single-shot (an openai-compatible source), or " +
+    "remove `burst_limited` if the backend does not burst-limit."
+  );
 }
 
 /**
@@ -393,6 +456,15 @@ export interface DispatchableSource {
    * Normally DERIVED from the transport — declare it only where genuinely ambiguous.
    */
   worker_kind?: WorkerKind;
+  /**
+   * Operator-declared: this source's backend enforces a per-model BURST limiter
+   * (rapid consecutive calls 429 even far below the per-minute allowance — the NIM
+   * lane class). An `agentic` lane on such a backend is refused at source assembly
+   * ({@link laneWorkerKindConflict}): the worker's internal tool loop would storm the
+   * limiter and cool the pool for every consumer. Single-shot lanes are unaffected.
+   * Declared, never inferred or learned; absent ⇒ unrestricted.
+   */
+  burst_limited?: boolean;
   /**
    * The BACKEND service actually serving this source when a transport fronts it
    * (`claude-worker`: the proxy transport routes to e.g. `"nim"`). The transport NEVER

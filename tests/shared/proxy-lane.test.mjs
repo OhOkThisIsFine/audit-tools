@@ -555,3 +555,60 @@ describe("REGRESSION PINS — proxy lane liveness", () => {
     });
   });
 });
+
+describe("proxy burst_limited — declaration-authoritative stamp + compat drop", () => {
+  it("parses the burst_limited knob (boolean only; junk is dropped, not fatal)", () => {
+    const on = readProxyDeclaration(
+      deps({ declaration: { proxy: { endpoint: PROXY, burst_limited: true } } }),
+    );
+    expect(on.declaration.burst_limited).toBe(true);
+    const junk = readProxyDeclaration(
+      deps({ declaration: { proxy: { endpoint: PROXY, burst_limited: "yes" } } }),
+    );
+    expect(junk.declaration.burst_limited).toBeUndefined();
+    expect(junk.declaration.endpoint).toBe(PROXY); // lane survives the bad knob
+  });
+
+  it("burst-limited proxy ⇒ expanded agentic lanes are dropped per-lane WITH the reason", () => {
+    // The cache entry does NOT carry the flag — the CURRENT declaration stamps it at
+    // resolve, so a stale populate cache cannot launder the flag off.
+    const result = resolveAmbientSources(
+      deps({
+        declaration: { proxy: { endpoint: PROXY, burst_limited: true } },
+        probe: () => true,
+        catalog: cache(),
+      }),
+    );
+    expect(result.sources).toEqual([]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0].id).toBe(EXPANDED.id);
+    expect(result.dropped[0].reason).toContain("burst-limited");
+  });
+
+  it("without the knob, expansion is unchanged (absent ⇒ unrestricted)", () => {
+    const result = resolveAmbientSources(
+      deps({
+        declaration: { proxy: { endpoint: PROXY } },
+        probe: () => true,
+        catalog: cache(),
+      }),
+    );
+    expect(result.sources).toEqual([EXPANDED]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it("explicit burst_limited: false STRIPS a cache-carried flag (declaration-authoritative both ways)", () => {
+    // A stale populate cache can neither launder the flag off (previous test) nor
+    // pin it on: the operator's current `false` un-flags the expanded lane.
+    const flagged = { ...EXPANDED, burst_limited: true };
+    const result = resolveAmbientSources(
+      deps({
+        declaration: { proxy: { endpoint: PROXY, burst_limited: false } },
+        probe: () => true,
+        catalog: cache({ sources: [flagged] }),
+      }),
+    );
+    expect(result.sources).toEqual([{ ...EXPANDED, burst_limited: false }]);
+    expect(result.dropped).toEqual([]);
+  });
+});

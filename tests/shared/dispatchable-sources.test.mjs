@@ -423,3 +423,78 @@ test("sourceByPoolId indexes only source-backed pools by id", () => {
   expect(map.size).toBe(1);
   expect(map.get("p1")).toBe(src);
 });
+
+// ---- worker-kind × pool-class compatibility (burst_limited) ----
+
+const { laneWorkerKindConflict, deriveWorkerKind } = await import(
+  "../../src/shared/types/sessionConfig.ts"
+);
+
+test("laneWorkerKindConflict: agentic × burst_limited conflicts; single-shot and unflagged never do", () => {
+  // Agentic transports (derived or explicit) on a burst-limited lane → refused.
+  expect(
+    laneWorkerKindConflict({ transport: "claude-worker", burst_limited: true }),
+  ).toContain("burst-limited");
+  expect(
+    laneWorkerKindConflict({ transport: "codex", burst_limited: true }),
+  ).toContain("burst-limited");
+  // Single-shot lane on the same backend → fine (one paced round-trip per grant).
+  expect(
+    laneWorkerKindConflict({ transport: "openai-compatible", burst_limited: true }),
+  ).toBeNull();
+  // A single_shot LABEL on a fixed-kind agentic transport is ignored — the
+  // transport is authoritative, so the label cannot bypass the safety rule.
+  expect(
+    laneWorkerKindConflict({
+      transport: "claude-worker",
+      worker_kind: "single_shot",
+      burst_limited: true,
+    }),
+  ).toContain("burst-limited");
+  // The genuinely-ambiguous command-shaped transports DO follow the declaration:
+  // only the operator knows whether their command is a one-shot script or a loop.
+  expect(
+    laneWorkerKindConflict({
+      transport: "worker-command",
+      worker_kind: "single_shot",
+      burst_limited: true,
+    }),
+  ).toBeNull();
+  expect(
+    laneWorkerKindConflict({ transport: "worker-command", burst_limited: true }),
+  ).toContain("burst-limited"); // undeclared command defaults agentic
+  // Absent or explicit-false flag ⇒ unrestricted, whatever the kind — and a
+  // backend-ish `service` name alone NEVER implies the flag (declared, not learned).
+  expect(laneWorkerKindConflict({ transport: "claude-worker" })).toBeNull();
+  expect(
+    laneWorkerKindConflict({ transport: "claude-worker", burst_limited: false }),
+  ).toBeNull();
+  expect(
+    laneWorkerKindConflict({ transport: "claude-worker", service: "nvidia_nim" }),
+  ).toBeNull();
+  expect(deriveWorkerKind({ transport: "claude-worker" })).toBe("agentic");
+});
+
+test("collectDispatchableSources: an agentic burst-limited source is filtered from routing (descriptor escape hatch cannot force it)", () => {
+  const cfg = {
+    sources: [
+      {
+        id: "cw-bursty",
+        transport: "claude-worker",
+        endpoint: "http://127.0.0.1:4000",
+        service: "nvidia_nim",
+        model: "glm-5.2",
+        burst_limited: true,
+      },
+      {
+        id: "ss-bursty",
+        transport: "openai-compatible",
+        endpoint: "http://127.0.0.1:4000",
+        model: "glm-5.2",
+        burst_limited: true,
+      },
+    ],
+  };
+  const out = collectDispatchableSources(cfg, "claude-code");
+  expect(out.map((s) => s.id)).toEqual(["ss-bursty"]);
+});

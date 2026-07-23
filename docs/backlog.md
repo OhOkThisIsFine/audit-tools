@@ -75,6 +75,16 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`verifySourceReach` demands `api_key_env` on every openai-compatible source, so a KEYLESS
+  local endpoint cannot be declared honestly (2026-07-23, low, friction: tool-should-decide).**
+  An unauthenticated local proxy (LiteLLM with no enforced master key, LM Studio, local vLLM)
+  needs no credential, but the reach check hard-drops any openai-compatible source without
+  `api_key_env` — the 2026-07-23 single-shot NIM-via-proxy lanes had to declare a semantically
+  unrelated set var (`NVIDIA_API_KEY`) just to pass. Property: keyless should be declarable
+  explicitly (e.g. `api_key_env: null` / a `no_auth: true` knob) so reach probes the endpoint
+  instead of an env var; an OMITTED key field can stay a drop (forgetting the key is the common
+  error — the explicit form is what says "deliberate").
+
 - **The remediate suite writes scratch trees INSIDE the repo (`tests/remediate/.test-*/`), so a
   `git add -A` sweeps test residue into a commit (2026-07-23, low, hermeticity).** Fake HOMEs
   (`.test-home-postinstall-contract`), temp repos and artifact dirs land under `tests/remediate/`
@@ -145,17 +155,24 @@ followed" is otherwise indistinguishable from a bug.
   a consumer must never be able to read a stale step as current. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #0/#9.
 
-- **⬇ LIVE (re-dogfood 2026-07-22, medium): NIM's burst limiter is structurally incompatible with
-  agentic tool-loop workers — route NIM lanes as single-shot only.** The claude-worker (agentic)
-  lane proxied onto glm-5.2 stormed it to 136→143 consecutive 429s: a tool-loop worker's many
-  rapid calls per task trip the per-model burst limit a single-shot packet never would, and the
-  429s then cool the pool for every other consumer. Two-part lead: (a) routing — agentic
-  worker-kinds should not ride a burst-limited NIM lane (single-shot openai-compatible packets
-  only), a worker-kind × pool-class compatibility rule for dispatch; (b) roster-level fallback
-  belongs in the LiteLLM config (it reported "Available Model Group Fallbacks=None"), not in each
-  caller's retry loop — declare same-tier fallbacks so single-model throttling doesn't kill the
-  lane. Record: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md)
-  #2/#4b.
+- **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
+  `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes
+  instead of agentic ones that all drop.** The rule itself SHIPPED 2026-07-23 (declared
+  `burst_limited` on sources + proxy block; `laneWorkerKindConflict` enforced per-lane in
+  `resolveAmbientSources` and at the `collectDispatchableSources` chokepoint; `deriveWorkerKind`
+  fixed-kind transports made override-proof; LiteLLM same-tier `router_settings.fallbacks`
+  configured — mechanism + review record:
+  [`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)).
+  What remains is the productive endpoint for the proxy lane: when the proxy declares
+  `burst_limited`, its expanded claude-worker (agentic) lanes are correctly refused with reasons —
+  so the lane yields zero capacity until the operator hand-declares single-shot
+  `openai-compatible` sources onto the same proxy (done for the live box). Populate/expansion
+  emitting single-shot lanes for a burst-limited proxy would keep the capacity in the safe class
+  with zero operator work; it is a deliberate populate-contract change, not smuggled into the rule
+  lap. Two accepted residuals in the record: `burst_limited` is not yet a scheduler pacing input
+  for single-shot lanes (declared `quota` rpm/max_concurrent covers the observed failure mode);
+  `collectDispatchableSources` filtered-lane reporting is stderr-only (ambient path carries the
+  structured `dropped[]`).
 
 - **⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD): agy gemini-3.6-flash returned success-shaped
   EMPTY results on finding-lens packets — lens class belongs in the routing decision.** 0-for-2:

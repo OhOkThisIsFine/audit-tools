@@ -1,8 +1,9 @@
 import type { CapacityPool } from "./capacity.js";
-import type {
-  DispatchableSource,
-  ResolvedProviderName,
-  SessionConfig,
+import {
+  type DispatchableSource,
+  laneWorkerKindConflict,
+  type ResolvedProviderName,
+  type SessionConfig,
 } from "../types/sessionConfig.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
@@ -620,6 +621,20 @@ export function collectDispatchableSources(
   ) {
     pushUnique(openAiCompatibleSource(sessionConfig.openai_compatible!));
   }
+  // Worker-kind × pool-class compatibility, re-checked at THIS chokepoint (not only
+  // in resolveAmbientSources) because descriptor-supplied `sources[]` reach here
+  // without ever passing ambient resolution — the escape hatch can force a lane this
+  // process cannot prove REACH for, but a structurally storm-prone lane endangers the
+  // shared pool and is refused uniformly. In the inner collect, beside the `service`
+  // normalize, for the same reason: both functions are exported, so filtering only in
+  // the wrapper would leave a bypass. Loud once per process per lane (stderr), never
+  // silent ([[silent-fail-closed-on-one-draw]] class).
+  const routable = out.filter((source) => {
+    const conflict = laneWorkerKindConflict(source);
+    if (conflict === null) return true;
+    warnIncompatibleLaneOnce(dispatchableSourceId(source), conflict);
+    return false;
+  });
   // Normalize `service` ONCE, here, as `declared ?? transport`. Downstream it is never
   // optional, so no consumer has to re-derive it (and none can derive it differently).
   //
@@ -632,7 +647,23 @@ export function collectDispatchableSources(
   // Deliberately in `collectDispatchableSources`, not in the `gatherDispatchableSources`
   // wrapper: both are publicly exported, so normalizing in the wrapper would leave the
   // inner function as a bypass of the invariant.
-  return out.map((source) => (source.service ? source : { ...source, service: source.transport }));
+  return routable.map((source) => (source.service ? source : { ...source, service: source.transport }));
+}
+
+/**
+ * One stderr line per (lane, reason) per process for a routing-filtered
+ * incompatible lane. `collectDispatchableSources` runs on every next-step (display
+ * + routing + reconciliation), so an unconditional write would spam the identical
+ * line dozens of times per drain — the staleness-event-spam class.
+ */
+const warnedIncompatibleLanes = new Set<string>();
+function warnIncompatibleLaneOnce(laneId: string, reason: string): void {
+  const key = `${laneId}::${reason}`;
+  if (warnedIncompatibleLanes.has(key)) return;
+  warnedIncompatibleLanes.add(key);
+  process.stderr.write(
+    `[audit-tools] source "${laneId}" is not routable: ${reason}\n`,
+  );
 }
 
 /**

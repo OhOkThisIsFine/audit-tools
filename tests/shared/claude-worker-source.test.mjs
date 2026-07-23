@@ -60,13 +60,30 @@ describe("deriveWorkerKind", () => {
     expect(deriveWorkerKind({ transport: "openai-compatible" })).toBe("single_shot");
   });
 
-  it("an explicit worker_kind on the source wins over the derivation", () => {
+  it("a fixed-kind transport is authoritative — a contradicting declaration is ignored", () => {
+    // The transport IS the fact: `claude -p`/a harness CLI always drives a tool loop,
+    // an openai-compatible POST is always one round-trip. Honoring a contradicting
+    // declaration would let config text bypass worker-kind safety rules (the
+    // burst-limited storm class — laneWorkerKindConflict).
     expect(
       deriveWorkerKind({ transport: "openai-compatible", worker_kind: "agentic" }),
-    ).toBe("agentic");
+    ).toBe("single_shot");
     expect(deriveWorkerKind({ transport: "codex", worker_kind: "single_shot" })).toBe(
-      "single_shot",
+      "agentic",
     );
+    expect(
+      deriveWorkerKind({ transport: "claude-worker", worker_kind: "single_shot" }),
+    ).toBe("agentic");
+  });
+
+  it("the declaration decides only for the genuinely-ambiguous command-shaped transports", () => {
+    expect(
+      deriveWorkerKind({ transport: "worker-command", worker_kind: "single_shot" }),
+    ).toBe("single_shot");
+    expect(
+      deriveWorkerKind({ transport: "subprocess-template", worker_kind: "single_shot" }),
+    ).toBe("single_shot");
+    expect(deriveWorkerKind({ transport: "worker-command" })).toBe("agentic");
   });
 
   it("WORKER_KINDS is exactly the two-kind axis", () => {
@@ -126,5 +143,47 @@ describe("validateDispatchableSources — claude-worker requirements", () => {
   it("does NOT impose endpoint/model on other providers", () => {
     // codex has a default launcher; endpoint/model stay optional there.
     expect(errorsFor([{ transport: "codex" }])).toEqual([]);
+  });
+});
+
+describe("validateDispatchableSources — burst_limited shape + semantic warnings", () => {
+  const warningsFor = (sources) =>
+    validateSessionConfig({ sources }).filter((i) => i.severity === "warning");
+
+  it("accepts a boolean and rejects a non-boolean", () => {
+    expect(errorsFor([{ ...CLAUDE_WORKER, burst_limited: true }])).toEqual([]);
+    const errors = errorsFor([{ ...CLAUDE_WORKER, burst_limited: "yes" }]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].path).toBe("sources[0].burst_limited");
+  });
+
+  // The COMPATIBILITY rule is deliberately NOT a validator error: an error-severity
+  // issue makes readSourceDeclaration degrade the WHOLE declaration to empty, which
+  // would turn one incompatible lane into a total pool loss. Per-lane enforcement
+  // lives in resolveAmbientSources / collectDispatchableSources; static validation
+  // WARNS so the conflict is visible before a run without costing the pool.
+  it("an agentic burst-limited source: zero errors, one refused-at-assembly warning", () => {
+    const src = { ...CLAUDE_WORKER, burst_limited: true };
+    expect(errorsFor([src])).toEqual([]);
+    const warnings = warningsFor([src]);
+    expect(warnings.some((i) => i.path === "sources[0].burst_limited")).toBe(true);
+  });
+
+  it("a single-shot burst-limited source draws no warning", () => {
+    const src = {
+      transport: "openai-compatible",
+      endpoint: "http://127.0.0.1:4000/v1",
+      model: "m",
+      burst_limited: true,
+    };
+    expect(errorsFor([src])).toEqual([]);
+    expect(warningsFor([src])).toEqual([]);
+  });
+
+  it("a worker_kind contradicting a fixed-kind transport draws an ignored-declaration warning", () => {
+    const src = { ...CLAUDE_WORKER, worker_kind: "single_shot" };
+    expect(errorsFor([src])).toEqual([]);
+    const warnings = warningsFor([src]);
+    expect(warnings.some((i) => i.path === "sources[0].worker_kind")).toBe(true);
   });
 });
