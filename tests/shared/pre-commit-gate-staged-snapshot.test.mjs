@@ -228,6 +228,66 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
     expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("GOOD");
   });
 
+  test("chained `git add -A && git commit` gates the WORKTREE (what actually lands)", () => {
+    // Staged GOOD, worktree BAD: the chained add will stage the BAD content, so
+    // that is what the commit carries — the gate must check the worktree and
+    // block. (The old behavior materialized the PRE-add staged snapshot: GOOD →
+    // false allow → unchecked content landed.)
+    writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
+    g("add", "sentinel.txt");
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // will be swept in by add -A
+
+    const r = runGate("git add -A && git commit -m x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+  });
+
+  test("`git commit -am x` is a stage command too (cluster flag, not just `-a`)", () => {
+    writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
+    g("add", "sentinel.txt");
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+
+    const r = runGate("git commit -am x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+  });
+
+  test('`echo "git commit -m x"` is text, not a commit — gate never engages', () => {
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "sentinel.txt");
+    writeFileSync(join(repo, "sentinel.txt"), "GOOD\n"); // divergent tree
+    const indexTreeBefore = g("write-tree").stdout.trim();
+
+    const r = runGate('echo "git commit -m x"');
+    expect(r.status, `expected no-op allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(g("write-tree").stdout.trim()).toBe(indexTreeBefore);
+  });
+
+  test("a line-continuation commit (`git \\<newline>commit`) is still detected", () => {
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "sentinel.txt");
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n"); // worktree == index, both BAD
+
+    const r = runGate("git \\\ncommit -m x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+  });
+
+  test("2c blocks a settings-referenced hook that is PRESENT on disk but gitignored", () => {
+    // The commit would not carry the hook file (ignored + untracked), yet it is
+    // physically present — an existsSync check passes here; the committed-tree
+    // membership check must block.
+    writeFileSync(join(repo, ".gitignore"), ".claude/hooks/\n");
+    mkdirSync(join(repo, ".claude", "hooks"), { recursive: true });
+    writeFileSync(
+      join(repo, ".claude", "settings.json"),
+      JSON.stringify({ hooks: { PreToolUse: [{ command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/ghost.mjs"' }] } }),
+    );
+    writeFileSync(join(repo, ".claude", "hooks", "ghost.mjs"), "// present but ignored\n");
+    g("add", "-A"); // stages settings.json + .gitignore; ghost.mjs stays ignored
+
+    const r = runGate();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("ghost.mjs");
+  });
+
   test("`-n` inside a quoted commit message is text, not the no-verify flag", () => {
     // Good staged content → the commit must be ALLOWED; a raw-text `-n` match
     // inside the -m string would false-block it as a hook bypass.

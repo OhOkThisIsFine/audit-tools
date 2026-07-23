@@ -328,11 +328,21 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
     };
     expect(runHook(INPUT_GUARD, payload).code).toBe(0);
   });
+
+  it('"Implement Node.js …" is ordinary work, not a dispatch node', () => {
+    const payload = {
+      tool_name: 'Agent',
+      tool_input: { isolation: 'worktree', prompt: 'Implement Node.js stream parsing in src/shared/io.ts.' },
+    };
+    expect(runHook(INPUT_GUARD, payload).code).toBe(0);
+  });
 });
+
+const ASYNC_TYPECHECK = join(REPO_ROOT, '.claude', 'hooks', 'async-typecheck.mjs');
 
 describe('guards fail open', () => {
   it('allows on an unparseable payload rather than wedging the session', () => {
-    for (const hook of [SHELL_GUARD, INPUT_GUARD]) {
+    for (const hook of [SHELL_GUARD, INPUT_GUARD, ASYNC_TYPECHECK]) {
       const r = spawnSyncHidden(process.execPath, [hook], {
         input: 'not json',
         encoding: 'utf8',
@@ -345,5 +355,19 @@ describe('guards fail open', () => {
 
   it('allows an empty command', () => {
     expect(runHook(SHELL_GUARD, bash('')).code).toBe(0);
+  });
+
+  // async-typecheck.mjs fail-open contract (formerly a standalone node script in
+  // .claude/hooks/, where vitest never ran it and its fixtures had gone stale).
+  it('async-typecheck: exits 0 fast on missing/empty/non-area file paths', () => {
+    const payloads = [
+      { tool_name: 'Edit', tool_input: {} },
+      { tool_name: 'Edit', tool_input: { file_path: '' } },
+      { tool_name: 'Edit', tool_input: { file_path: '/some/random/place/foo.ts' } },
+      { tool_name: 'Edit', tool_input: { file_path: join(REPO_ROOT, 'docs', 'HANDOFF.md') } },
+    ];
+    for (const p of payloads) {
+      expect(runHook(ASYNC_TYPECHECK, p).code).toBe(0);
+    }
   });
 });
