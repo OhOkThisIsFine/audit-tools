@@ -353,3 +353,64 @@ test("cmdScoreTokens: missing ledger fails cleanly with a non-zero exit", async 
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// COR-27f0f33c: score-audit sibling-markdown path derivation. The summary
+// markdown must always land NEXT TO the scorecard, never overwrite it — an
+// --out that does not end in ".json" must not make outPath.replace a no-op
+// that clobbers the just-written JSON scorecard with markdown.
+// ---------------------------------------------------------------------------
+
+const { cmdScoreAudit } = await import("../../src/audit/cli/scoreAuditCommand.ts");
+
+async function withScoreAuditFixture(fn) {
+  const dir = await mkdtemp(join(tmpdir(), "score-audit-"));
+  try {
+    const findingsPath = join(dir, "audit-findings.json");
+    const labelsPath = join(dir, "labels.json");
+    await writeFile(findingsPath, JSON.stringify({ findings: [] }) + "\n");
+    await writeFile(
+      labelsPath,
+      JSON.stringify({ schema_version: "score-audit-corpus-labels/v1", run_id: "r", labels: [] }) + "\n",
+    );
+    return await fn({ dir, findingsPath, labelsPath });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("score-audit: a .json --out gets a sibling .md summary and the scorecard JSON survives", async () => {
+  await withScoreAuditFixture(async ({ dir, findingsPath, labelsPath }) => {
+    const outPath = join(dir, "scorecard.json");
+    await cmdScoreAudit([
+      "--artifacts-dir", dir,
+      "--findings", findingsPath,
+      "--labels", labelsPath,
+      "--out", outPath,
+    ]);
+    const scorecard = JSON.parse(await readFile(outPath, "utf8"));
+    expect(scorecard.schema_version).toBe("score-audit-scorecard/v1");
+    const summary = await readFile(join(dir, "scorecard.md"), "utf8");
+    expect(summary.length > 0).toBeTruthy();
+  });
+});
+
+test("score-audit: a non-.json --out must NOT be overwritten by the markdown summary (sibling path is derived safely)", async () => {
+  await withScoreAuditFixture(async ({ dir, findingsPath, labelsPath }) => {
+    const outPath = join(dir, "scorecard.out");
+    await cmdScoreAudit([
+      "--artifacts-dir", dir,
+      "--findings", findingsPath,
+      "--labels", labelsPath,
+      "--out", outPath,
+    ]);
+    // The scorecard JSON must survive at outPath...
+    const raw = await readFile(outPath, "utf8");
+    let scorecard;
+    expect(() => { scorecard = JSON.parse(raw); }, "outPath must still contain the JSON scorecard — the markdown summary must never clobber it").not.toThrow();
+    expect(scorecard.schema_version).toBe("score-audit-scorecard/v1");
+    // ...and the markdown summary must land at a DISTINCT sibling path.
+    const summary = await readFile(`${outPath}.md`, "utf8");
+    expect(summary.length > 0, "summary markdown must be written to a distinct sibling path").toBeTruthy();
+  });
+});

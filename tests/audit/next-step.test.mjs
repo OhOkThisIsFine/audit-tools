@@ -456,3 +456,43 @@ test.concurrent("advancePastDesignReview throws on unknown pause kind", async ()
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// INV-READY-STEP-CONTINUATION (COR-f6a36670): any current-step written with
+// status "ready" whose stop_condition instructs calling next-step again must
+// carry the executable continuation command in allowed_commands — the host must
+// never have to reconstruct the invocation from prose.
+// ---------------------------------------------------------------------------
+
+test("present_report with pending friction triage is a ready step carrying the next-step continuation command", async () => {
+  // In-process (no wrapper spawn) so the check stays build-free: the wrapper
+  // path imports from dist/, which the accept gate does not build.
+  const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.ts");
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "complete", obligations: [] }, null, 2) + "\n",
+    );
+    await writeFile(
+      join(artifactsDir, "audit-report.md"),
+      "# Audit report\n\n## Work blocks\n\n- Done\n",
+    );
+    // NO pre-satisfied friction record: triage is pending, so the step must be
+    // status "ready" with a stop_condition instructing another next-step call.
+
+    await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
+    const step = JSON.parse(
+      await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
+    );
+
+    expect(step.step_kind).toBe("present_report");
+    expect(step.status).toBe("ready");
+    expect(step.stop_condition).toMatch(/next-step/i);
+    expect(
+      step.allowed_commands.some((command) => /next-step/.test(command)),
+      `a ready step whose stop_condition says to call next-step again must carry the executable continuation command; got: ${JSON.stringify(step.allowed_commands)}`,
+    ).toBeTruthy();
+  });
+});

@@ -400,3 +400,128 @@ test("free_form_intent boost does not affect unrelated lens tasks", async () => 
     expect(corrTasks[0].priority, "correctness task should stay low priority").toBe("low");
   }
 });
+
+// ---------------------------------------------------------------------------
+// INV-PLAN-PERSIST-COMPLETE (COR-58ccee39): every task in the merged dispatch
+// task list (audit tasks + folded pending requeue tasks) is persisted in
+// audit_tasks before dispatch — the task-affinity graph and plan metrics are
+// built over EXACTLY the persisted set, never over phantom tasks that dispatch
+// (buildPendingAuditTasks reads bundle.audit_tasks) can never see.
+// INV-PLAN-FROZEN-ESTIMATES: every persisted dispatch task carries frozen
+// provider-neutral token_estimate + risk_estimate.
+// ---------------------------------------------------------------------------
+
+function makeTwoFileBundle() {
+  return {
+    repo_manifest: {
+      repository: { name: "fixture" },
+      generated_at: "2026-01-01T00:00:00.000Z",
+      files: [
+        { path: "src/a.ts", lines: 100 },
+        { path: "src/b.ts", lines: 120 },
+      ],
+    },
+    file_disposition: {
+      files: [
+        { path: "src/a.ts", status: "audit" },
+        { path: "src/b.ts", status: "audit" },
+      ],
+    },
+    unit_manifest: {
+      units: [{ unit_id: "u1", name: "u1", files: ["src/a.ts", "src/b.ts"] }],
+    },
+    surface_manifest: { surfaces: [] },
+    critical_flows: { flows: [] },
+    risk_register: { items: [] },
+  };
+}
+
+test("INV-PLAN-PERSIST-COMPLETE: task_affinity_graph nodes are exactly the persisted audit_tasks", async () => {
+  const result = await runPlanningExecutor(
+    makeTwoFileBundle(),
+    nonExistentRoot,
+    { "src/a.ts": 100, "src/b.ts": 120 },
+  );
+  const persistedIds = (result.updated.audit_tasks ?? []).map((t) => t.task_id).sort();
+  const graphIds = (result.updated.task_affinity_graph?.nodes ?? []).map((n) => n.task_id).sort();
+  expect(graphIds, "affinity graph must partition exactly the persisted dispatch set — a graph node dispatch cannot see is a phantom task").toEqual(persistedIds);
+});
+
+test("INV-PLAN-PERSIST-COMPLETE: audit_plan_metrics counts exactly the persisted audit_tasks", async () => {
+  const result = await runPlanningExecutor(
+    makeTwoFileBundle(),
+    nonExistentRoot,
+    { "src/a.ts": 100, "src/b.ts": 120 },
+  );
+  const persisted = result.updated.audit_tasks ?? [];
+  expect(result.updated.audit_plan_metrics?.task_count, "plan metrics must describe the persisted dispatch set, not an unpersisted merge").toBe(persisted.length);
+});
+
+test("INV-PLAN-FROZEN-ESTIMATES: every persisted dispatch task carries frozen token_estimate and risk_estimate", async () => {
+  const result = await runPlanningExecutor(
+    makeTwoFileBundle(),
+    nonExistentRoot,
+    { "src/a.ts": 100, "src/b.ts": 120 },
+  );
+  for (const task of result.updated.audit_tasks ?? []) {
+    expect(typeof task.token_estimate, `task ${task.task_id} must freeze token_estimate at planning`).toBe("number");
+    expect(typeof task.risk_estimate, `task ${task.task_id} must freeze risk_estimate at planning`).toBe("number");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Requeue fold: dedupe is COVERAGE-based, not task_id-based. A pending requeue
+// task whose (path × lens) an existing audit task already covers is a duplicate
+// (fresh-plan requeue mirrors the whole pending set under different ids); only
+// a genuinely-uncovered gap survives the fold — and then it must be persisted.
+// ---------------------------------------------------------------------------
+
+test("requeue fold: coverage-covered pending requeue tasks are deduped; genuine gaps survive", async () => {
+  const { selectUncoveredRequeueTasks } = await import("../../src/audit/orchestrator/planningExecutors.ts");
+  expect(typeof selectUncoveredRequeueTasks, "fold helper must exist (coverage-based dedupe)").toBe("function");
+  const auditTasks = [
+    {
+      task_id: "u1:security",
+      unit_id: "u1",
+      pass_id: "p",
+      lens: "security",
+      file_paths: ["src/a.ts", "src/b.ts"],
+      rationale: "r",
+      status: "pending",
+    },
+  ];
+  const requeueTasks = [
+    // duplicate coverage (security over a.ts is covered by u1:security)
+    { task_id: "requeue:security:src/a.ts", unit_id: "requeue:src/a.ts", pass_id: "requeue:security", lens: "security", file_paths: ["src/a.ts"], rationale: "r", status: "pending" },
+    // genuine gap (correctness over a.ts has no covering audit task)
+    { task_id: "requeue:correctness:src/a.ts", unit_id: "requeue:src/a.ts", pass_id: "requeue:correctness", lens: "correctness", file_paths: ["src/a.ts"], rationale: "r", status: "pending" },
+    // non-pending never folds
+    { task_id: "requeue:tests:src/a.ts", unit_id: "requeue:src/a.ts", pass_id: "requeue:tests", lens: "tests", file_paths: ["src/a.ts"], rationale: "r", status: "complete" },
+  ];
+  const folded = selectUncoveredRequeueTasks(requeueTasks, auditTasks);
+  expect(folded.map((t) => t.task_id)).toEqual(["requeue:correctness:src/a.ts"]);
+});
+
+test("requeue fold: an operator-excluded lens never re-enters through the fold", async () => {
+  const { selectUncoveredRequeueTasks } = await import("../../src/audit/orchestrator/planningExecutors.ts");
+  const requeueTasks = [
+    { task_id: "requeue:tests:src/a.ts", unit_id: "requeue:src/a.ts", pass_id: "requeue:tests", lens: "tests", file_paths: ["src/a.ts"], rationale: "r", status: "pending" },
+    { task_id: "requeue:security:src/a.ts", unit_id: "requeue:src/a.ts", pass_id: "requeue:security", lens: "security", file_paths: ["src/a.ts"], rationale: "r", status: "pending" },
+  ];
+  const folded = selectUncoveredRequeueTasks(requeueTasks, [], ["security", "correctness"]);
+  expect(folded.map((t) => t.task_id), "a lens the operator excluded (absent from effective lenses) must not sneak back in as a requeue dispatch task").toEqual(["requeue:security:src/a.ts"]);
+});
+
+test("fresh full-coverage plan folds no requeue duplicates into the persisted dispatch set", async () => {
+  const result = await runPlanningExecutor(
+    makeTwoFileBundle(),
+    nonExistentRoot,
+    { "src/a.ts": 100, "src/b.ts": 120 },
+  );
+  const requeueIds = (result.updated.audit_tasks ?? [])
+    .map((t) => t.task_id)
+    .filter((id) => id.startsWith("requeue:"));
+  expect(requeueIds, "fresh plan: every requeue task duplicates unit-task coverage, so none may be persisted as dispatch tasks").toEqual([]);
+  // requeue_tasks.json (the full gap record) still carries the whole payload
+  expect((result.updated.requeue_tasks ?? []).length > 0, "requeue_tasks artifact keeps the full coverage-gap record").toBeTruthy();
+});

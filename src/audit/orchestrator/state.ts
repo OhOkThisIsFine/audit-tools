@@ -7,8 +7,7 @@ import type {
   ObligationState,
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
-import { computeStaleResultTaskIds } from "./resultBaseline.js";
-import { selectCurrentResults } from "./ledger.js";
+import { derivePendingTaskPartition } from "./pendingTasks.js";
 import {
   unresolvedConstraintClauses,
 } from "./intentInterpreter.js";
@@ -479,24 +478,14 @@ export function deriveAuditState(
     ),
   );
 
-  // A task whose CURRENT (supersession-resolved) result has DRIFTED from its
-  // recorded content-key baseline — the live task content moved since the result
-  // was produced — is no longer satisfied by that stale result and must
-  // re-dispatch (the consume half of the O3 staleness gate; the record + drift
-  // re-keying halves live in the ingestion executor). Resolved over
-  // `selectCurrentResults` so a superseded base record never keeps firing after
-  // its re-dispatch landed.
-  const currentResults = selectCurrentResults(bundle.audit_results ?? []);
-  const staleResultTaskIds = computeStaleResultTaskIds(
-    currentResults,
-    bundle.audit_tasks ?? [],
-    bundle.artifact_metadata?.result_baselines,
-  );
-  const completedTaskIds = new Set(
-    currentResults
-      .map((result) => result.task_id)
-      .filter((taskId) => !staleResultTaskIds.has(taskId)),
-  );
+  // The pending set is the shared partition (INV-PENDING-SINGLE-SOURCE,
+  // ./pendingTasks.ts) — the SAME derivation dispatch's buildPendingAuditTasks
+  // consumes, so the gate and dispatch can never disagree on which tasks still
+  // need work. It already folds in the consume half of the O3 staleness gate:
+  // a task whose CURRENT (supersession-resolved) result has DRIFTED from its
+  // recorded content-key baseline re-dispatches even though its stale result
+  // left it status `complete`.
+  const { pendingTasks } = derivePendingTaskPartition(bundle);
   // Tasks deferred by a budget cap (FINDING-013) will never have results, so
   // they must be excluded from the completion check — otherwise the obligation
   // loops forever under a budget. Absent active_dispatch => empty set => the
@@ -515,22 +504,43 @@ export function deriveAuditState(
     partialTerminal?.stranded_ids ?? [],
   );
 
-  const hasPendingAuditTasks =
-    bundle.audit_tasks?.some(
-      (task) =>
-        // A drifted task counts as pending even though its (stale) result left it
-        // status `complete` — it must re-dispatch. Deferred/stranded still wins.
-        (staleResultTaskIds.has(task.task_id) ||
-          (task.status !== "complete" &&
-            !completedTaskIds.has(task.task_id))) &&
-        !deferredTaskIds.has(task.task_id) &&
-        !strandedTaskIds.has(task.task_id),
-    ) ?? false;
+  const hasPendingAuditTasks = pendingTasks.some(
+    (task) =>
+      // Deferred/stranded wins over pending: a budget-deferred or
+      // terminal-stranded task must not hold the completion gate open.
+      !deferredTaskIds.has(task.task_id) &&
+      !strandedTaskIds.has(task.task_id),
+  );
 
   if (hasPendingAuditTasks) {
     obligations.push(obligation("audit_tasks_completed", "missing"));
   } else if (has(bundle.audit_tasks)) {
     obligations.push(obligation("audit_tasks_completed", "satisfied"));
+  }
+
+  // INV-STATE-PURE-AND-REACHABLE (COR-b019d3b9): the top-level "blocked" status
+  // is derivable from the BUNDLE, not only from step-write paths. A persisted
+  // DC-4 dispatch pause (`active_dispatch.paused_state`: the run is waiting on
+  // an exhausted provider pool) with work still pending is exactly that state:
+  // the run is live but cannot advance until capacity returns. The obligation is
+  // deliberately NON-ACTIONABLE ("blocked", and its id is not in the PRIORITY
+  // scan) so it never masks the resume path — `audit_tasks_completed` stays
+  // `missing` (actionable) above, and re-running next-step re-drives dispatch,
+  // which resumes or promotes the pause (`advancePausedState`). A moot pause
+  // (nothing pending) derives nothing; resume/terminal promotion clears
+  // `paused_state`, which clears this.
+  if (bundle.active_dispatch?.paused_state && hasPendingAuditTasks) {
+    const pauseCount =
+      bundle.active_dispatch.paused_state.lifecycle?.pause_count ?? 0;
+    obligations.push(
+      obligation(
+        "dispatch_capacity",
+        "blocked",
+        `Rolling dispatch is paused waiting for provider capacity (pause ${pauseCount + 1}); ` +
+          "re-run next-step once capacity returns — the run resumes automatically, or " +
+          "yields to synthesis on partial coverage after the pause limit.",
+      ),
+    );
   }
 
   obligations.push(
