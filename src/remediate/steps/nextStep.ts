@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -805,6 +805,13 @@ export interface DriveRollingDispatchOptions {
    * wires it to friction. Omit to leave the skip silent.
    */
   onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
+  /**
+   * Engine decision-record sink (legibility invariant): every per-packet engine
+   * admission decision (admit / ledger block / strand, with its constraint
+   * outcomes) is forwarded here — the caller wires `createDispatchDecisionLog`
+   * at the run dir. Omit ⇒ the engine writes the stamped records to stderr.
+   */
+  onAdmissionDecision?: EngineDecisionSink;
 }
 
 export interface DriveRollingDispatchResult {
@@ -921,6 +928,7 @@ export async function driveRollingDispatch(
     ...(options.onQuotaUnclassified ? { onQuotaUnclassified: options.onQuotaUnclassified } : {}),
     ...(options.onModelUnavailable ? { onModelUnavailable: options.onModelUnavailable } : {}),
     ...(options.onPacketTooLarge ? { onPacketTooLarge: options.onPacketTooLarge } : {}),
+    ...(options.onAdmissionDecision ? { onAdmissionDecision: options.onAdmissionDecision } : {}),
     // Single-flight (CE-001) is enforced by the unified driver.
     rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
     // Host-session escalation: feed recordLimit (write) at the rate_limited observation
@@ -1433,6 +1441,12 @@ export async function driveRollingImplementDispatch(
     onPacketTooLarge: (info) => {
       capturePacketTooLargeFriction(artifactsDir, runId, info, "remediate-code");
     },
+    // Legibility (spec Resolved decision 3): every engine dispatch decision
+    // (admit / ledger block / strand, with its full constraint-outcome data)
+    // appends to this run's dispatch-explains.jsonl beside its dispatch-quota.
+    onAdmissionDecision: createDispatchDecisionLog(
+      join(artifactsDir, "runs", runId, "implement", "dispatch-explains.jsonl"),
+    ),
   });
 
   // Partition-scoped drive (H2): run-level lifecycle belongs to the CALLER — the

@@ -764,7 +764,9 @@ test("F4: grantLeases:false filters candidates through capable and explains the 
     capable: buildCapabilityFloorCapable(pools),
   });
   // The floor-less packet still plans onto the fitting pool; the deep packet is
-  // NOT displayed as granted, and the skip is explained.
+  // NOT displayed as granted, and the skip is explained. Legibility: the granted
+  // packet writes its `planned` explain too — an empty explains array on a
+  // non-empty decision round is itself a defect (the 144-granted-empty incident).
   expect(res.granted_packet_ids).toEqual(["easy"]);
   expect(res.leases).toEqual([]); // plan-only: never leases
   expect(res.explains).toEqual([
@@ -777,10 +779,19 @@ test("F4: grantLeases:false filters candidates through capable and explains the 
       reason: "packet_oversized",
       pool_id: null,
     }),
+    expect.objectContaining({
+      packet_id: "easy",
+      admitted: true,
+      // Plan-only display grant: the engine leases per-packet at dispatch and
+      // records the real decision in its decision log — no lease here by design.
+      reason: "planned",
+      pool_id: null,
+      constraints: [],
+    }),
   ]);
 });
 
-test("F4: grantLeases:false with an EMPTY pool set grants all — absent capacity summary is not a refusal", async () => {
+test("F4: grantLeases:false with an EMPTY pool set grants all — absent capacity summary is not a refusal, and every grant still explains as planned", async () => {
   const ledger = await freshLedger();
   const res = await computeDispatchAdmission({
     packets: [{ id: "p1", inputTokens: 5000, complexity: 0.5 }],
@@ -791,7 +802,11 @@ test("F4: grantLeases:false with an EMPTY pool set grants all — absent capacit
   });
   expect(res.granted_packet_ids).toEqual(["p1"]);
   expect(res.leases).toEqual([]);
-  expect(res.explains).toEqual([]);
+  // The empty-pool-set early return was the live 144-granted-with-empty-explains
+  // path: a grant-all with NO explain at all. Now every planned grant records.
+  expect(res.explains).toEqual([
+    expect.objectContaining({ packet_id: "p1", admitted: true, reason: "planned" }),
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -1073,4 +1088,140 @@ test("capability floor: an unavailable best pool stops holding the floor (surviv
   // availability filters exclude those pools regardless.
   unavailable.add("weak");
   expect(liveFloor("weak", deepPacket)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// Legibility (spec Resolved decision 3): every explain carries the FULL
+// constraint-outcome array + the refused-consultation trail — never a one-of-N
+// scalar that looks authoritative while being partial.
+// ---------------------------------------------------------------------------
+
+test("legibility: a multi-window grant's lease records EVERY resource key, and its explain carries every constraint outcome", async () => {
+  const ledger = await freshLedger();
+  // One pool metering against TWO windows (an account-scoped session window
+  // shared with siblings + its own weekly window) — the multi-constraint case
+  // the old scalar resource_key recorded one-of-N for.
+  const p = pool("nim#acct/glm", {
+    accountKey: "nim#acct",
+    windowBudgets: [
+      { scope: "account", label: "session", budget: 100, unit: "percent", tokensPerPct: 100, reset_at: null },
+      { scope: "model", label: "weekly", budget: 50000, unit: "tokens", reset_at: null },
+    ],
+  });
+  const res = await admitBatch({ packets: [pkt("p1", 1000)], pools: [p], ledger });
+
+  expect(res.granted.length).toBe(1);
+  // The lease names EVERY key the reservation was recorded under — one per window.
+  expect(res.granted[0].resource_keys.length).toBe(2);
+
+  const explain = res.explains[0];
+  expect(explain.admitted).toBe(true);
+  expect(explain.reason).toBe("admitted");
+  // Full per-constraint evaluation: both windows, each with headroom/cost/cleared.
+  expect(explain.constraints.length).toBe(2);
+  for (const c of explain.constraints) {
+    expect(typeof c.resource_key).toBe("string");
+    expect(typeof c.outstanding_before).toBe("number");
+    expect(c.cleared).toBe(true);
+  }
+  // The binding row is one of the evaluated constraints, as a FULL outcome row.
+  expect(explain.binding).not.toBe(null);
+  expect(explain.constraints.map((c) => c.resource_key)).toContain(explain.binding.resource_key);
+  // The artifact block still schema-validates end to end.
+  const parsed = DispatchAdmissionSchema.safeParse({
+    granted_packet_ids: res.granted.map((g) => g.packet_id),
+    declared_cap: null,
+    leases: res.granted,
+    explains: res.explains,
+  });
+  expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
+});
+
+test("legibility: a grant that skipped a capped cheaper pool records the consultation in attempts", async () => {
+  const ledger = await freshLedger();
+  // Cheap pool with a declared cap of 0 in-flight... a cap of 1 with one lease
+  // already outstanding: take the cap slot with a first packet, then observe the
+  // second packet's walk.
+  const cheap = pool("cheap#a/m", { costRank: 0, declaredCap: 1 });
+  const dear = pool("dear#a/m", { costRank: 5 });
+  const res = await admitBatch({
+    packets: [pkt("p1", 100), pkt("p2", 100)],
+    pools: [cheap, dear],
+    ledger,
+  });
+  const p2 = res.explains.find((e) => e.packet_id === "p2");
+  expect(p2.admitted).toBe(true);
+  expect(p2.pool_id).toBe("dear#a/m");
+  // The walk consulted the capped cheap pool first and recorded why it refused.
+  expect(p2.attempts).toEqual([
+    expect.objectContaining({
+      pool_id: "cheap#a/m",
+      reason: "cap_reached",
+      in_flight_before: 1,
+      cap: 1,
+    }),
+  ]);
+});
+
+test("legibility: a total refusal carries the decisive pool's constraint outcomes, its binding row, and the prior attempts", async () => {
+  const ledger = await freshLedger();
+  // Two pools, both budget-exhausted for this packet: the walk consults both and
+  // refuses; the LAST pool's decision is decisive, the first lands in attempts.
+  const a = pool("a#a/m", { budget: 10, costRank: 0 });
+  const b = pool("b#b/m", { budget: 10, costRank: 5 });
+  const res = await admitBatch({ packets: [pkt("big", 1000)], pools: [a, b], ledger });
+
+  expect(res.blocked).toEqual(["big"]);
+  const explain = res.explains[0];
+  expect(explain.admitted).toBe(false);
+  expect(explain.reason).toBe("budget_exhausted");
+  expect(explain.pool_id).toBe("b#b/m");
+  // Decisive pool's full evaluation on the record itself (which key refused).
+  expect(explain.constraints.length).toBe(1);
+  expect(explain.constraints[0].cleared).toBe(false);
+  expect(explain.binding).toEqual(expect.objectContaining({ cleared: false }));
+  // The earlier pool's refused consultation is the trail, not duplicated.
+  expect(explain.attempts).toEqual([
+    expect.objectContaining({
+      pool_id: "a#a/m",
+      reason: "budget_exhausted",
+      constraints: [expect.objectContaining({ cleared: false })],
+    }),
+  ]);
+});
+
+test("legibility: a decisive cap_reached AFTER an earlier pool's ledger refusal resets the constraint payload and lifts the cap extras (host-review F4)", async () => {
+  const ledger = await freshLedger();
+  // Pool A (cheapest): tiny budget → ledger-refuses every packet here.
+  // Pool B: no budget problem but declaredCap 1 — its single slot is taken by
+  // p0, so p1's walk is: A budget_exhausted (ledger outcomes), then B
+  // cap_reached DECISIVE (ledger never reached).
+  const a = pool("a#a/m", { budget: 10, costRank: 0 });
+  const b = pool("b#b/m", { costRank: 5, declaredCap: 1 });
+  const res = await admitBatch({
+    packets: [pkt("p0", 1000), pkt("p1", 1000)],
+    pools: [a, b],
+    ledger,
+  });
+
+  expect(res.granted.map((g) => [g.packet_id, g.pool_id])).toEqual([["p0", "b#b/m"]]);
+  const p1 = res.explains.find((e) => e.packet_id === "p1");
+  expect(p1.admitted).toBe(false);
+  expect(p1.reason).toBe("cap_reached");
+  expect(p1.pool_id).toBe("b#b/m");
+  // The earlier pool's ledger outcomes must NOT bleed onto the cap_reached
+  // record — lastDecision resets on a non-ledger refusal.
+  expect(p1.constraints).toEqual([]);
+  expect(p1.binding).toBe(null);
+  // The decisive attempt's extras are lifted onto the record itself.
+  expect(p1.in_flight_before).toBe(1);
+  expect(p1.cap).toBe(1);
+  // The earlier pool's refused consultation is the trail, with its outcomes.
+  expect(p1.attempts).toEqual([
+    expect.objectContaining({
+      pool_id: "a#a/m",
+      reason: "budget_exhausted",
+      constraints: [expect.objectContaining({ cleared: false })],
+    }),
+  ]);
 });

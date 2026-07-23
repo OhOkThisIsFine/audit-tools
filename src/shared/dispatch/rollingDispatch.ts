@@ -79,7 +79,12 @@ import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { foldAccountCooldown } from "../quota/accountId.js";
 import { tierRank } from "./tierRank.js";
-import { buildCapacityPoolCapabilityFloor } from "./admissionLoop.js";
+import {
+  buildCapacityPoolCapabilityFloor,
+  toConstraintOutcomeRecords,
+  type ConstraintOutcomeRecord,
+} from "./admissionLoop.js";
+import type { EngineDecisionRecord, EngineDecisionSink } from "./dispatchDecisionLog.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 
 // ---------------------------------------------------------------------------
@@ -462,6 +467,16 @@ export interface RollingDispatchConfig<TPacket> {
     packet: RollingDispatchPacket<TPacket>,
     poolId: string,
   ) => number;
+  /**
+   * Decision-record sink (legibility invariant, spec Resolved decision 3): the
+   * engine stamps and emits EVERY per-packet admission decision (admit / ledger
+   * block / strand) through this seam. The drivers wire it to the run dir's
+   * append-only `dispatch-explains.jsonl` ({@link createDispatchDecisionLog}).
+   * OMITTED ⇒ the engine writes the same stamped records to stderr as JSON
+   * lines — a decision path that writes no explain is itself a defect, so the
+   * fallback is emission, never silence.
+   */
+  onAdmissionDecision?: EngineDecisionSink;
 }
 
 /** Options for tuning the dispatcher (intentionally minimal per INV-S05). */
@@ -815,7 +830,63 @@ export function createRollingDispatcher<TPacket>(
     reservationLedger,
     resolvePoolConstraints,
     resolveOutputReservation: resolveOutputReservationFn,
+    onAdmissionDecision,
   } = config;
+
+  // The ONE decision-emission chokepoint (legibility): stamp with a
+  // per-dispatcher monotonic seq (authoritative order) + wall-clock ts, then
+  // hand to the wired sink — or stderr when none is wired, so no decision can
+  // silently vanish. Best-effort: emission must never abort dispatch.
+  let decisionSeq = 0;
+  const emitDecision = (record: EngineDecisionRecord): void => {
+    const stamped = { ts: new Date().toISOString(), seq: decisionSeq++, ...record };
+    try {
+      if (onAdmissionDecision) {
+        // The sink contract is synchronous, but a caller-supplied async sink
+        // must not leak an unhandled rejection into the process either — the
+        // try/catch alone only guards synchronous throws (adversarial-review
+        // finding, nemotron 2026-07-23).
+        const result = onAdmissionDecision(stamped) as unknown;
+        if (
+          result != null &&
+          typeof (result as { catch?: unknown }).catch === "function"
+        ) {
+          (result as Promise<unknown>).catch(() => {
+            // Observability must never abort a run.
+          });
+        }
+      } else {
+        process.stderr.write(JSON.stringify(stamped) + "\n");
+      }
+    } catch {
+      // A throwing WIRED sink must still not silence the record ("emission,
+      // never silence" — host-review 2026-07-23): degrade to stderr, and only
+      // a stderr failure on top of that is truly swallowed.
+      try {
+        process.stderr.write(JSON.stringify(stamped) + "\n");
+      } catch {
+        // Observability must never abort a run.
+      }
+    }
+  };
+
+  // Transition-dedup for blocked records (host-review F1, 2026-07-23): a
+  // blocked-wait stall re-runs dispatchPass every 50ms, which would re-emit an
+  // identical engine_blocked per packet per tick for a peer lease's whole
+  // minutes-scale TTL. Emit each DISTINCT (pool, reason, any_outstanding,
+  // forced) block once per packet; the set clears when the packet dispatches,
+  // so a later re-block after a requeue records again.
+  const emittedBlockKeys = new Map<string, Set<string>>();
+  const emitBlockedOnce = (packetId: string, key: string, record: EngineDecisionRecord): void => {
+    let seen = emittedBlockKeys.get(packetId);
+    if (!seen) {
+      seen = new Set<string>();
+      emittedBlockKeys.set(packetId, seen);
+    }
+    if (seen.has(key)) return;
+    seen.add(key);
+    emitDecision(record);
+  };
 
   const state: RollingDispatchState<TPacket> = {
     pendingQueue: [],
@@ -950,6 +1021,9 @@ export function createRollingDispatcher<TPacket>(
   ): void {
     // Remove from pending queue.
     state.pendingQueue = state.pendingQueue.filter((p) => p.id !== packet.id);
+    // A dispatched packet's blocked-transition history resets: if it requeues
+    // and blocks again later, that is a NEW transition worth recording.
+    emittedBlockKeys.delete(packet.id);
 
     ensureBaseline(slot.poolId);
     inFlightTracker.recordDispatched(slot.poolId, packet.estimatedTokens);
@@ -1012,8 +1086,22 @@ export function createRollingDispatcher<TPacket>(
     forceUnbounded: boolean,
   ): Promise<
     | { status: "no_ledger" }
-    | { status: "admitted"; lease: { leaseId: string } }
-    | { status: "blocked"; anyOutstanding: boolean }
+    | {
+        status: "admitted";
+        lease: { leaseId: string };
+        cost: number;
+        constraints: ConstraintOutcomeRecord[];
+        binding: ConstraintOutcomeRecord | null;
+      }
+    | {
+        status: "blocked";
+        anyOutstanding: boolean;
+        reason: "budget_exhausted" | "window_uncalibrated";
+        cost: number;
+        constraints: ConstraintOutcomeRecord[];
+        binding: ConstraintOutcomeRecord | null;
+        unpricedWindows?: string[];
+      }
   > {
     if (!reservationLedger) return { status: "no_ledger" };
     const outputReservation = resolveOutputReservationFn?.(packet, slot.poolId) ?? 0;
@@ -1028,7 +1116,15 @@ export function createRollingDispatcher<TPacket>(
       // refuse — and report nothing outstanding is holding it, since waiting for a
       // lease to free cannot make an unpriceable window priceable. The pool re-enters
       // once a slope is learned (cold-start probe path).
-      return { status: "blocked", anyOutstanding: false };
+      return {
+        status: "blocked",
+        anyOutstanding: false,
+        reason: "window_uncalibrated",
+        cost,
+        constraints: [],
+        binding: null,
+        unpricedWindows: resolution.unpriced.map((w) => w.label),
+      };
     }
     const constraints = resolution.constraints;
     const decision = await reservationLedger.admit({
@@ -1041,10 +1137,29 @@ export function createRollingDispatcher<TPacket>(
       // double-grant window. `handleResult` reconciles it on completion.
       leaseTtlMs: DISPATCH_LEASE_TTL_MS,
     });
+    // The full per-constraint evaluation, carried for the decision record —
+    // every key consulted, its headroom before, this draw's cost, which cleared.
+    const outcomeRecords = toConstraintOutcomeRecords(decision.constraints);
+    const bindingRecord = decision.binding
+      ? toConstraintOutcomeRecords([decision.binding])[0]!
+      : null;
     if (decision.admitted && decision.leaseId !== null) {
-      return { status: "admitted", lease: { leaseId: decision.leaseId } };
+      return {
+        status: "admitted",
+        lease: { leaseId: decision.leaseId },
+        cost,
+        constraints: outcomeRecords,
+        binding: bindingRecord,
+      };
     }
-    return { status: "blocked", anyOutstanding: decision.anyOutstanding };
+    return {
+      status: "blocked",
+      anyOutstanding: decision.anyOutstanding,
+      reason: "budget_exhausted",
+      cost,
+      constraints: outcomeRecords,
+      binding: bindingRecord,
+    };
   }
 
   async function handleResult(
@@ -1173,18 +1288,11 @@ export function createRollingDispatcher<TPacket>(
       // non-escalated packet keeps the normal transient-exhaustion re-route.
       if (isPacketEscalated?.(packet.id)) {
         if (!state.completedIds.has(packet.id)) state.strandedIds.add(packet.id);
-        try {
-          process.stderr.write(
-            JSON.stringify({
-              ts: new Date().toISOString(),
-              kind: "rolling_dispatch_stranded_host_session_escalation",
-              packet_id: packet.id,
-              exhausted_pool_id: providerSlot.poolId,
-            }) + "\n",
-          );
-        } catch {
-          // Observability must never abort a run.
-        }
+        emitDecision({
+          kind: "engine_stranded_host_session_escalation",
+          packet_id: packet.id,
+          pool_id: providerSlot.poolId,
+        });
         return;
       }
       // Re-queue at the front so the displaced packet is retried before fresh
@@ -1332,18 +1440,11 @@ export function createRollingDispatcher<TPacket>(
       );
       if (!anyPoolCouldEverTake) {
         if (!state.completedIds.has(packet.id)) state.strandedIds.add(packet.id);
-        try {
-          process.stderr.write(
-            JSON.stringify({
-              ts: new Date().toISOString(),
-              kind: "rolling_dispatch_stranded_packet_too_large_all_pools",
-              packet_id: packet.id,
-              skipped_pool_ids: [...skipSet].sort(),
-            }) + "\n",
-          );
-        } catch {
-          // Observability must never abort a run.
-        }
+        emitDecision({
+          kind: "engine_stranded_packet_too_large_all_pools",
+          packet_id: packet.id,
+          skipped_pool_ids: [...skipSet].sort(),
+        });
         return;
       }
       if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
@@ -1581,12 +1682,33 @@ export function createRollingDispatcher<TPacket>(
         continue;
       }
 
-      // Reservation-ledger admission (proactive layer).
+      // Reservation-ledger admission (proactive layer). Every branch emits its
+      // decision record (legibility) — admit, block, forced admit, or unmetered.
       const admission = await admitAgainstLedger(packet, slot, false);
       let lease: { leaseId: string } | null = null;
       if (admission.status === "admitted") {
         lease = admission.lease;
+        emitDecision({
+          kind: "engine_admitted",
+          packet_id: packet.id,
+          pool_id: slot.poolId,
+          lease_id: admission.lease.leaseId,
+          cost: admission.cost,
+          constraints: admission.constraints,
+          binding: admission.binding,
+          forced: false,
+        });
       } else if (admission.status === "blocked") {
+        emitBlockedOnce(packet.id, `${slot.poolId}|${admission.reason}|${admission.anyOutstanding}`, {
+          kind: "engine_blocked",
+          packet_id: packet.id,
+          pool_id: slot.poolId,
+          reason: admission.reason,
+          constraints: admission.constraints,
+          binding: admission.binding,
+          any_outstanding: admission.anyOutstanding,
+          ...(admission.unpricedWindows ? { unpriced_windows: admission.unpricedWindows } : {}),
+        });
         if (!admission.anyOutstanding && !forcedUsed && dispatched === 0) {
           // Single packet exceeds the whole budget with nothing holding a lease →
           // force it unbounded so the run can't deadlock. Only the first per pass.
@@ -1594,14 +1716,57 @@ export function createRollingDispatcher<TPacket>(
           if (forced.status === "admitted") {
             lease = forced.lease;
             forcedUsed = true;
+            emitDecision({
+              kind: "engine_admitted",
+              packet_id: packet.id,
+              pool_id: slot.poolId,
+              lease_id: forced.lease.leaseId,
+              cost: forced.cost,
+              constraints: forced.constraints,
+              binding: forced.binding,
+              forced: true,
+            });
           } else {
+            // The anti-deadlock backstop was ATTEMPTED and refused (reachable:
+            // forceUnbounded overrides budgets only, so window_uncalibrated
+            // still refuses) — that decision must leave a trace too
+            // (host-review F3, 2026-07-23).
+            if (forced.status === "blocked") {
+              emitBlockedOnce(packet.id, `${slot.poolId}|${forced.reason}|${forced.anyOutstanding}|forced`, {
+                kind: "engine_blocked",
+                packet_id: packet.id,
+                pool_id: slot.poolId,
+                reason: forced.reason,
+                constraints: forced.constraints,
+                binding: forced.binding,
+                any_outstanding: forced.anyOutstanding,
+                forced: true,
+                ...(forced.unpricedWindows ? { unpriced_windows: forced.unpricedWindows } : {}),
+              });
+            }
             continue;
           }
         } else {
           continue; // leave pending; a later pass admits once a lease frees.
         }
+      } else {
+        // No ledger wired (unmetered pool set): the decision IS the pool
+        // selection; the reactive 429 floor is the safety. Recorded so the
+        // unmetered path is as reconstructable as the metered one. Cost uses
+        // the SAME input+output-envelope arithmetic the metered branch does —
+        // a record must not underreport just because no ledger gated it.
+        const outputReservation = resolveOutputReservationFn?.(packet, slot.poolId) ?? 0;
+        emitDecision({
+          kind: "engine_admitted",
+          packet_id: packet.id,
+          pool_id: slot.poolId,
+          lease_id: null,
+          cost: Math.max(0, packet.estimatedTokens) + Math.max(0, outputReservation),
+          constraints: [],
+          binding: null,
+          forced: false,
+        });
       }
-      // status === "no_ledger" falls through with lease === null (dispatch as before).
 
       dispatchOnePacket(packet, slot, lease);
       dispatched++;
@@ -1628,7 +1793,32 @@ export function createRollingDispatcher<TPacket>(
         // step redispatches after the reset (NO in-process multi-hour sleep). The
         // terminal reason is chosen in getTerminal(): `quota_paused` (retryable)
         // when a reset pause is the blocker, else `empty_pool`.
-        if (noPoolCanAcceptNow(Date.now())) {
+        // ONE wall-clock reading for the check AND the record — a second
+        // Date.now() could let a pause expire between them, and the record
+        // would then claim "paused" without a reset_at for a pool the check
+        // saw as paused (adversarial-review finding, AGY 2026-07-23).
+        const wallNow = Date.now();
+        if (noPoolCanAcceptNow(wallNow)) {
+          // Decision record BEFORE strandPending clears the queue: which packets
+          // strand, and each pool's blocking status (exhausted vs paused-until).
+          // By noPoolCanAcceptNow's definition at wallNow, every non-exhausted
+          // pool IS paused with a future reset, so reset_at is always present.
+          emitDecision({
+            kind: "engine_stranded_pool_wall",
+            packet_ids: state.pendingQueue.map((p) => p.id).sort(),
+            pools: confirmedPools.map((p) => {
+              const resetAt = state.pausedPoolResetAt.get(p.id);
+              return state.exhaustedPoolIds.has(p.id)
+                ? { pool_id: p.id, status: "exhausted" as const }
+                : {
+                    pool_id: p.id,
+                    status: "paused" as const,
+                    ...(resetAt != null && resetAt > wallNow
+                      ? { reset_at: new Date(resetAt).toISOString() }
+                      : {}),
+                  };
+            }),
+          });
           strandPending();
           break;
         }
@@ -1659,17 +1849,33 @@ export function createRollingDispatcher<TPacket>(
           }
           const strandedIdSet = new Set(neverDispatchable.map((p) => p.id));
           state.pendingQueue = state.pendingQueue.filter((p) => !strandedIdSet.has(p.id));
-          try {
-            process.stderr.write(
-              JSON.stringify({
-                ts: new Date().toISOString(),
-                kind: "rolling_dispatch_stranded_no_fitting_pool",
-                packet_ids: [...strandedIdSet].sort(),
-              }) + "\n",
-            );
-          } catch {
-            // Observability must never abort a run.
-          }
+          // Decision record with the per-(packet, pool) why-not — the strand's
+          // full mechanistic basis, not just the id list (the old telemetry-only
+          // event carried ids alone). `why` is the FIRST refusing condition in
+          // the same disjunction order the strand test evaluates, deterministic.
+          emitDecision({
+            kind: "engine_stranded_no_fitting_pool",
+            packets: [...neverDispatchable]
+              .sort((a, b) => a.id.localeCompare(b.id))
+              .map((p) => {
+                const skipSet = state.oversizedPacketPools.get(p.id);
+                return {
+                  packet_id: p.id,
+                  pools: confirmedPools.map((pool) => ({
+                    pool_id: pool.id,
+                    why: state.exhaustedPoolIds.has(pool.id)
+                      ? ("pool_exhausted" as const)
+                      : (skipSet?.has(pool.id) ?? false)
+                        ? ("oversized_for_pool" as const)
+                        : pool.contextCapTokens != null &&
+                            p.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS >
+                              pool.contextCapTokens
+                          ? ("context_cap" as const)
+                          : ("below_capability_floor" as const),
+                  })),
+                };
+              }),
+          });
           continue;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 50));

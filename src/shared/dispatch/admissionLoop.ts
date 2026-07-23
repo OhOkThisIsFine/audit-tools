@@ -18,7 +18,7 @@
 // change, never a re-architecture.
 
 import { z } from "zod";
-import type { ReservationLedger } from "../quota/reservationLedger.js";
+import type { ConstraintOutcome, ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
@@ -194,19 +194,74 @@ export function admissionPoolsFromSummaries(
   }));
 }
 
+/**
+ * One constraint's evaluation, serialized for the persisted explain artifact —
+ * the wire form of the ledger's {@link ConstraintOutcome} (legibility invariant,
+ * spec/audit/dispatch-admission-control.md Resolved decision 3).
+ *
+ * `headroom_before: null` means UNBOUNDED, not unknown — a cold-start pool with
+ * no real ceiling computes `headroomBefore = +Infinity`, which `JSON.stringify`
+ * (the artifact's actual emit path) collapses to `null`; `.number()` alone
+ * rejects that on read-back even though it accepts `Infinity` in memory, so
+ * `null` is the honest encoding of what the artifact actually contains on disk.
+ */
+export const ConstraintOutcomeRecordSchema = z
+  .object({
+    resource_key: z.string(),
+    headroom_before: z.number().nullable(),
+    outstanding_before: z.number(),
+    cost: z.number(),
+    /** Whether this constraint alone had room. Admission requires ALL true. */
+    cleared: z.boolean(),
+  })
+  .strict();
+export type ConstraintOutcomeRecord = z.infer<typeof ConstraintOutcomeRecordSchema>;
+
+/** Serialize ledger outcomes for the artifact (non-finite headroom → null). */
+export function toConstraintOutcomeRecords(
+  outcomes: readonly ConstraintOutcome[],
+): ConstraintOutcomeRecord[] {
+  return outcomes.map((o) => ({
+    resource_key: o.resourceKey,
+    headroom_before: Number.isFinite(o.headroomBefore) ? o.headroomBefore : null,
+    outstanding_before: o.outstandingBefore,
+    cost: o.cost,
+    cleared: o.cleared,
+  }));
+}
+
+/**
+ * One NON-decisive pool consultation during a packet's admission walk — a pool
+ * that was tried and refused before the decision landed elsewhere (the decisive
+ * pool's data lives on the explain record itself, never duplicated here). The
+ * refusal vocabulary is shared with {@link AdmissionExplain.reason} so one
+ * parser covers both.
+ */
+export const AdmissionAttemptSchema = z
+  .object({
+    pool_id: z.string(),
+    reason: z.enum(["budget_exhausted", "cap_reached", "window_uncalibrated"]),
+    /** Ledger outcomes when the attempt reached the ledger; [] otherwise. */
+    constraints: z.array(ConstraintOutcomeRecordSchema),
+    /** cap_reached only: the in-flight count and cap that refused. */
+    in_flight_before: z.number().optional(),
+    cap: z.number().optional(),
+    /** window_uncalibrated only: labels of the windows that could not price. */
+    unpriced_windows: z.array(z.string()).optional(),
+  })
+  .strict();
+export type AdmissionAttempt = z.infer<typeof AdmissionAttemptSchema>;
+
 /** A successful admission: one packet leased to one pool. */
 export interface AdmissionGrant {
   packet_id: string;
   pool_id: string;
   /**
-   * ⚠ DIAGNOSTIC PROVENANCE ONLY — not the reconcile key. `reconcile(leaseId)`
-   * sweeps every key the lease was recorded under, precisely so no caller has to
-   * know which keys those were. Once steps 3-4 supply multiple constraints this
-   * field records only ONE of N and will look authoritative while being partial
-   * ([[write-only-data-looks-authoritative]]); make it a key array or drop it then.
-   * Tracked in `docs/backlog.md`.
+   * EVERY resource key the lease was recorded under (deduped, in constraint
+   * order) — never one of N. Diagnostic provenance only: `reconcile(leaseId)`
+   * sweeps every key itself, so no caller needs this to release the lease.
    */
-  resource_key: string;
+  resource_keys: string[];
   lease_id: string;
   cost: number;
 }
@@ -215,45 +270,62 @@ export const AdmissionGrantSchema = z
   .object({
     packet_id: z.string(),
     pool_id: z.string(),
-    resource_key: z.string(),
+    resource_keys: z.array(z.string()),
     lease_id: z.string(),
     cost: z.number(),
   })
   .strict();
 
-/** Why a packet was admitted or blocked — the per-admission explain record. */
+/**
+ * Why a packet was admitted or blocked — the per-admission explain record.
+ * Carries the FULL constraint-outcome array the decision was taken against
+ * (every key consulted, its headroom before, the packet's cost against it,
+ * which key refused) plus the non-decisive walk trail — never a one-of-N
+ * scalar that looks authoritative while being partial
+ * ([[write-only-data-looks-authoritative]]).
+ */
 export const AdmissionExplainSchema = z
   .object({
     packet_id: z.string(),
-    /** null only when NO pool was capable of the packet at all. */
+    /** null when NO pool was capable, or on a plan-only (`planned`) grant. */
     pool_id: z.string().nullable(),
-    resource_key: z.string().nullable(),
     admitted: z.boolean(),
     reason: z.enum([
       "admitted",
+      // Plan-only display grant (`grantLeases: false`): the in-process rolling
+      // engine leases per-packet at dispatch time and records its decisions in
+      // the engine decision log — no lease exists for this record, by design.
+      "planned",
       "no_capable_pool",
       "budget_exhausted",
       "cap_reached",
       "packet_oversized",
       // A window that APPLIES to the packet has no learned tokens-per-percent slope,
-      // so it cannot price the draw. Distinct from : nothing ran
+      // so it cannot price the draw. Distinct from budget_exhausted: nothing ran
       // out, the pool is still calibrating — telling the operator the budget is gone
       // would be a false report of a wall that does not exist.
       "window_uncalibrated",
     ]),
     /**
-     * Present on an admit attempt against a real pool (budget headroom before
-     * it). `null` means UNBOUNDED, not unknown — a cold-start pool with no real
-     * ceiling yet computes `headroomBefore = +Infinity`, which `JSON.stringify`
-     * (the artifact's actual emit path) collapses to `null`; `.number()` alone
-     * rejects that on read-back even though it happily accepts `Infinity` in
-     * memory, so the round trip a real reader performs was silently unparseable.
-     * `null` is the honest, back-compat-safe encoding: it matches the literal
-     * bytes already on disk in pre-existing artifacts (e.g.
-     * `.audit-tools/audit/fanout-quota/design_review/dispatch-quota.json`).
+     * The DECISIVE attempt's full constraint-outcome array: on a grant, the
+     * successful admit's; on a ledger refusal, the refusing decision's. Empty
+     * when the ledger was never reached (no_capable_pool / cap_reached /
+     * window_uncalibrated / planned / packet_oversized).
      */
-    headroom_before: z.number().nullable().optional(),
-    outstanding_before: z.number().optional(),
+    constraints: z.array(ConstraintOutcomeRecordSchema),
+    /**
+     * The tightest (or refusing) constraint of the decisive attempt — the
+     * binding window a report should name, as its full outcome row. Null when
+     * the ledger was never reached.
+     */
+    binding: ConstraintOutcomeRecordSchema.nullable(),
+    /** Pools consulted and refused BEFORE the decision, in walk order. */
+    attempts: z.array(AdmissionAttemptSchema),
+    /** cap_reached refusal only: the in-flight count and cap that refused. */
+    in_flight_before: z.number().optional(),
+    cap: z.number().optional(),
+    /** window_uncalibrated refusal only: labels of the unpriceable windows. */
+    unpriced_windows: z.array(z.string()).optional(),
     cost: z.number(),
   })
   .strict();
@@ -626,9 +698,11 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
       explains.push({
         packet_id: packet.id,
         pool_id: null,
-        resource_key: null,
         admitted: false,
         reason: "no_capable_pool",
+        constraints: [],
+        binding: null,
+        attempts: [],
         cost: packet.cost,
       });
       blocked.push(packet.id);
@@ -638,6 +712,14 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
     let placed = false;
     let lastReason: AdmissionExplain["reason"] = "budget_exhausted";
     let lastPool = candidates[0]!;
+    // The refused-consultation trail (legibility): every pool the walk tried and
+    // passed over, with why — the decisive pool's data lands on the explain
+    // record itself, never duplicated here.
+    const attempts: AdmissionAttempt[] = [];
+    // The decisive ledger decision on a total refusal (the LAST pool's), so the
+    // explain carries the full constraint-outcome array it was decided on.
+    let lastDecision: { constraints: ConstraintOutcomeRecord[]; binding: ConstraintOutcomeRecord | null } | null =
+      null;
     for (const pool of candidates) {
       // Effective in-flight cap = the declared hard cap, TIGHTENED at cold start to a
       // TOKEN-AWARE calibration batch (never a flat magic count). `pool.budget` is
@@ -657,8 +739,16 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
       const effectiveCap =
         coldStartBatch != null ? Math.min(pool.declaredCap ?? coldStartBatch, coldStartBatch) : pool.declaredCap;
       if (effectiveCap != null && (countByPool.get(pool.poolId) ?? 0) >= effectiveCap) {
+        attempts.push({
+          pool_id: pool.poolId,
+          reason: "cap_reached",
+          constraints: [],
+          in_flight_before: countByPool.get(pool.poolId) ?? 0,
+          cap: effectiveCap,
+        });
         lastReason = "cap_reached";
         lastPool = pool;
+        lastDecision = null;
         continue;
       }
       // Reserve against EVERY window this pool must fit inside — the account-scoped
@@ -689,8 +779,15 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
         // for a calibrating pool it would livelock (blocked ⇒ no dispatch ⇒ no delta
         // sample ⇒ no slope ⇒ blocked), so that producer change must come with a
         // calibration escape, not a relaxation here.
+        attempts.push({
+          pool_id: pool.poolId,
+          reason: "window_uncalibrated",
+          constraints: [],
+          unpriced_windows: unpriced.map((w) => w.label),
+        });
         lastReason = "window_uncalibrated";
         lastPool = pool;
+        lastDecision = null;
         continue;
       }
       const decision = await input.ledger.admit({
@@ -698,11 +795,20 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
         poolId: pool.poolId,
         ...(input.leaseTtlMs != null ? { leaseTtlMs: input.leaseTtlMs } : {}),
       });
+      // The full per-constraint evaluation (every key consulted, its headroom,
+      // this draw's cost against it, which cleared) — carried onto the explain
+      // record whether the decision admits or refuses. Non-finite headroom is
+      // genuinely unbounded and normalizes to `null` (the schema must match the
+      // literal bytes JSON.stringify puts on disk).
+      const outcomeRecords = toConstraintOutcomeRecords(decision.constraints);
+      const bindingRecord = decision.binding
+        ? toConstraintOutcomeRecords([decision.binding])[0]!
+        : null;
       if (decision.admitted && decision.leaseId) {
         granted.push({
           packet_id: packet.id,
           pool_id: pool.poolId,
-          resource_key: pool.resourceKey,
+          resource_keys: [...new Set(decision.constraints.map((o) => o.resourceKey))],
           lease_id: decision.leaseId,
           cost: packet.cost,
         });
@@ -710,38 +816,45 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
         explains.push({
           packet_id: packet.id,
           pool_id: pool.poolId,
-          resource_key: pool.resourceKey,
           admitted: true,
           reason: "admitted",
-          ...(decision.binding
-            ? {
-                // Non-finite (cold-start, no ceiling yet) is genuinely
-                // unbounded — normalize to `null` explicitly here rather than
-                // leaving `Infinity` for `JSON.stringify` to collapse
-                // implicitly; the schema field's type must match what the
-                // artifact actually contains on disk.
-                headroom_before: Number.isFinite(decision.binding.headroomBefore)
-                  ? decision.binding.headroomBefore
-                  : null,
-                outstanding_before: decision.binding.outstandingBefore,
-              }
-            : {}),
+          constraints: outcomeRecords,
+          binding: bindingRecord,
+          attempts,
           cost: packet.cost,
         });
         placed = true;
         break;
       }
+      attempts.push({
+        pool_id: pool.poolId,
+        reason: "budget_exhausted",
+        constraints: outcomeRecords,
+      });
       lastReason = "budget_exhausted";
       lastPool = pool;
+      lastDecision = { constraints: outcomeRecords, binding: bindingRecord };
     }
 
     if (!placed) {
+      // The decisive (last) pool's refused consultation is carried on the record
+      // itself — pop it off the trail so the two never duplicate, and lift its
+      // reason-specific extras (cap counts / unpriceable labels) onto the record.
+      const decisive =
+        attempts.length > 0 && attempts[attempts.length - 1]!.pool_id === lastPool.poolId
+          ? attempts.pop()!
+          : null;
       explains.push({
         packet_id: packet.id,
         pool_id: lastPool.poolId,
-        resource_key: lastPool.resourceKey,
         admitted: false,
         reason: lastReason,
+        constraints: lastDecision?.constraints ?? [],
+        binding: lastDecision?.binding ?? null,
+        attempts,
+        ...(decisive?.in_flight_before != null ? { in_flight_before: decisive.in_flight_before } : {}),
+        ...(decisive?.cap != null ? { cap: decisive.cap } : {}),
+        ...(decisive?.unpriced_windows ? { unpriced_windows: decisive.unpriced_windows } : {}),
         cost: packet.cost,
       });
       blocked.push(packet.id);
@@ -749,6 +862,26 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
   }
 
   return { granted, explains, blocked };
+}
+
+/**
+ * The plan-only display grant's explain record: no lease exists BY DESIGN — the
+ * in-process rolling engine admits + leases per-packet at dispatch time, and its
+ * decisions land in the engine decision log. This record exists so a non-empty
+ * decision round can never present an empty explains array (the legibility
+ * invariant's "a decision path that writes no explain is itself a defect").
+ */
+function plannedExplain(candidate: AdmissionCandidate): AdmissionExplain {
+  return {
+    packet_id: candidate.id,
+    pool_id: null,
+    admitted: true,
+    reason: "planned",
+    constraints: [],
+    binding: null,
+    attempts: [],
+    cost: candidate.cost,
+  };
 }
 
 /**
@@ -792,13 +925,15 @@ export async function computeDispatchAdmission(input: {
     // display-only): the engine can still size-refuse a displayed grant onto a
     // capped pool; the packet remains dispatchable to uncapped pools.
     // An EMPTY pool set means no capacity summary reached admission, not "nothing
-    // is capable" — grant all, as before the floor existed.
+    // is capable" — grant all, as before the floor existed. Every grant still
+    // writes its `planned` explain: an empty explains array on a non-empty
+    // decision round is itself a defect (the live 144-granted-empty incident).
     if (input.pools.length === 0) {
       return {
         granted_packet_ids: candidates.map((c) => c.id),
         declared_cap: declaredCap,
         leases: [],
-        explains: [],
+        explains: candidates.map((c) => plannedExplain(c)),
       };
     }
     // Same-pool conjunction of the two per-packet engine axes: capability floor
@@ -822,13 +957,16 @@ export async function computeDispatchAdmission(input: {
       );
       if (granted) {
         grantedIds.push(candidate.id);
+        explains.push(plannedExplain(candidate));
       } else {
         explains.push({
           packet_id: candidate.id,
           pool_id: null,
-          resource_key: null,
           admitted: false,
           reason: "packet_oversized",
+          constraints: [],
+          binding: null,
+          attempts: [],
           cost: candidate.cost,
         });
       }

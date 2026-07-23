@@ -33,6 +33,7 @@ import {
   type RollingDispatchPacket,
   type RollingDispatchResult,
 } from "./rollingDispatch.js";
+import type { EngineDecisionSink } from "./dispatchDecisionLog.js";
 import { ownershipSubWaves, type OwnershipSchedulerNode } from "./ownershipScheduler.js";
 
 /**
@@ -219,6 +220,14 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
   reservationLedger?: ReservationLedger;
   resolvePoolConstraints?: (poolId: string, tokens: number) => PoolConstraintResolution;
   resolveOutputReservation?: (packet: RollingDispatchPacket<TPayload>, poolId: string) => number;
+  /**
+   * Engine decision-record sink (legibility invariant): forwarded to every
+   * sub-wave dispatcher so per-packet admits / ledger blocks / strands land in
+   * one persisted record for the whole drive (the drivers wire
+   * `createDispatchDecisionLog` at the run dir). Omitted ⇒ each dispatcher
+   * writes its stamped records to stderr — emission, never silence.
+   */
+  onAdmissionDecision?: EngineDecisionSink;
 }
 
 /** Per-level results from {@link driveRolling}. */
@@ -320,6 +329,7 @@ export async function driveRolling<TItem, TPayload>(
         ...(config.onQuotaUnclassified ? { onQuotaUnclassified: config.onQuotaUnclassified } : {}),
         ...(config.onModelUnavailable ? { onModelUnavailable: config.onModelUnavailable } : {}),
         ...(config.onPacketTooLarge ? { onPacketTooLarge: config.onPacketTooLarge } : {}),
+        ...(config.onAdmissionDecision ? { onAdmissionDecision: config.onAdmissionDecision } : {}),
         costDemotedPoolIds,
         onResult: (result) => {
           out.allResults.push(result);

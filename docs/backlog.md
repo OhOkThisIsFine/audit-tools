@@ -447,28 +447,6 @@ followed" is otherwise indistinguishable from a bug.
   network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
   predate the field, and refusing to load them would turn a historical gap into an outage.
 
-- **Dispatch legibility: a deterministic mechanistic trace for EVERY dispatch decision (owner goal
-  2026-07-22; subsumes the 2026-07-19 `AdmissionGrant.resource_key` partiality entry).** Two defects,
-  one invariant. (a) `AdmissionGrant.resource_key` is partial under multi-constraint: one grant is
-  counted against several resource keys and the scalar field records one of N while looking
-  authoritative (no reader — `reconcile(leaseId)` sweeps every key; doc comment in
-  `admissionLoop.ts`). (b) Whole decision paths write NO explain at all: the re-dogfood run's
-  dispatch-quota.json showed 144 granted with leases/explains EMPTY, and a stranded packet's
-  per-pool why-not (`rolling_dispatch_stranded_no_fitting_pool`) exists only as a telemetry event,
-  not a record.
-  **SPEC:** the ledger already computes a per-constraint `ConstraintOutcome { resourceKey,
-  headroomBefore, … }` for every key it evaluates — so this is carry-through, not new derivation.
-  (1) Replace the scalar `resource_key` with the full constraint-outcome array on every explain
-  record (each key consulted, its headroom before, the packet's cost against it, which key refused);
-  the artifact either records every key the decision was taken against or none, never one. (2) Every
-  decision path — host grant, in-process rolling engine, refusal, strand — writes its explain; an
-  empty explains array on a non-empty decision round is a defect. (3) The trace is assembled
-  deterministically from ledger/pool-build state the tool already holds — no LLM, no sampling.
-  Target-state prose is pinned in `spec/audit/dispatch-admission-control.md` → Resolved decision 3
-  (Legibility). Loop-core (`admissionLoop.ts`, rolling engine) — attestation required. Natural
-  companion to the zero-spill pool-build diagnosis above, which needs exactly this trace to be
-  diagnosable from artifacts.
-
 - **An uncalibrated pool must reach the cold-start probe path, not be waved through (unpinned).** The
   ledger treats a non-finite budget as unbounded by design — an optimistic start that the reactive 429
   floor corrects. So whether a pool that cannot price a constraint reaches dispatch at all is decided in

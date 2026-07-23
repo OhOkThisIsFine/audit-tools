@@ -9,6 +9,8 @@
  * This file ONLY declares the contract types and the version constant.
  */
 
+import type { StampedEngineDecisionRecord } from "../dispatch/dispatchDecisionLog.js";
+
 // ---------------------------------------------------------------------------
 // Version constant
 // ---------------------------------------------------------------------------
@@ -178,4 +180,13 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
    * skip silent (no friction, skip still happens).
    */
   onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
+  /**
+   * Engine decision-record sink (legibility invariant, spec Resolved decision
+   * 3): receives every stamped per-packet admission decision (admit / ledger
+   * block / strand). The consumer wires it to the run dir's append-only
+   * `dispatch-explains.jsonl` via `createDispatchDecisionLog`. Optional — omit
+   * and the engine writes the records to stderr instead (emission, never
+   * silence).
+   */
+  onAdmissionDecision?: (record: StampedEngineDecisionRecord) => void;
 }

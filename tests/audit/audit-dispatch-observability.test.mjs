@@ -358,8 +358,8 @@ test("2026-07-11 dogfooding: notDispatched log reports the REAL admission reason
           declared_cap: 1,
           leases: [],
           explains: [
-            { packet_id: "packet-1", pool_id: "host", resource_key: null, admitted: true, reason: "admitted", cost: 1 },
-            { packet_id: "packet-2", pool_id: "host", resource_key: null, admitted: false, reason: "cap_reached", cost: 1 },
+            { packet_id: "packet-1", pool_id: "host", admitted: true, reason: "admitted", constraints: [], binding: null, attempts: [], cost: 1 },
+            { packet_id: "packet-2", pool_id: "host", admitted: false, reason: "cap_reached", constraints: [], binding: null, attempts: [], cost: 1 },
           ],
         },
       });

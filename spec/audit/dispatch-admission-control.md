@@ -233,25 +233,25 @@ ledger is layered on top of it, never in place of it.
    claims to be the meter. It must not be presented (in artifact or prompt) as a
    hard guarantee.
 3. **Legibility — every dispatch decision leaves a deterministic, mechanistic
-   trace.** Each admission records `{ packet_id, pool_id, resource_key, admitted,
-   reason
-   (admitted|no_capable_pool|budget_exhausted|cap_reached|packet_oversized|window_uncalibrated), headroom_before,
-   outstanding_before, cost }` so the emergent fan-out width is reconstructable
-   after the fact.
-   ⚠ **Interim gap in the record's `resource_key`** (tracked in `docs/backlog.md`):
-   under multi-constraint admission one grant is counted against SEVERAL resource
-   keys at once, and the scalar field records only one of them — diagnostic
-   provenance, not the full reason (its own doc comment in `admissionLoop.ts` says
-   so). The ledger already evaluates a per-constraint outcome
-   (`ConstraintOutcome { resourceKey, headroomBefore, … }`) for every key; the
-   explain record does not yet carry that array.
-   **Target state (the plan of record, not yet the code):** every admit AND every
-   refusal/strand carries the full constraint-outcome array it was decided on —
-   which keys were consulted, each key's headroom before, the packet's cost against
-   it, and which key refused — assembled deterministically from ledger state the
-   tool already holds (no judgment, no sampling). A decision path that writes no
-   explain at all is itself a defect of this invariant (a live run observed a
-   144-packet grant whose leases/explains arrays were empty).
+   trace.** Every admit AND every refusal/strand carries the FULL
+   constraint-outcome array it was decided on — which keys were consulted, each
+   key's headroom before, the packet's cost against it, and which key refused —
+   assembled deterministically from ledger state the tool already holds (no
+   judgment, no sampling). A decision path that writes no explain at all is
+   itself a defect of this invariant (a live run observed a 144-packet grant
+   whose leases/explains arrays were empty — the plan-only display-grant path).
+   Concretely: the host-path explain record carries
+   `constraints: ConstraintOutcomeRecord[]` (the decisive attempt's full
+   evaluation), `binding` (the tightest/refusing key as a full outcome row, never
+   a one-of-N scalar), and `attempts` (every pool consulted and refused before
+   the decision, with cap counts / unpriceable-window labels); the lease record
+   names EVERY key it was recorded under (`resource_keys`). Plan-only display
+   grants write a `planned` explain (no lease, by design — the engine decides at
+   dispatch). The in-process engine emits every per-packet decision — admit,
+   ledger block, strand with per-pool why-not — as a stamped record through one
+   chokepoint: wired to the run dir's append-only `dispatch-explains.jsonl`
+   (`createDispatchDecisionLog`), or written to stderr when no sink is wired, so
+   the fallback is emission, never silence.
 4. **Cold-start — probe-then-widen only when unknown.** When the `resourceKey` has
    no learned slope, the first admission window is deliberately narrow (probe: admit
    a small N, then widen as the first completions calibrate the learned
@@ -288,8 +288,8 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
 - **The plan stays whole; a `granted_packet_ids` list carries the admission.** The
   dispatch plan is NOT re-emitted as a shrinking subset each step. The tool runs ledger
   admission at the dispatch step and writes the admitted ids plus the per-admission
-  explain records (`{packet_id, pool_id, resource_key, admitted, reason, headroom_before,
-  outstanding_before, cost}`, Resolved decision 3) onto the dispatch-quota artifact;
+  explain records (`{packet_id, pool_id, admitted, reason, constraints[], binding,
+  attempts[], cost}`, Resolved decision 3) onto the dispatch-quota artifact;
   the host dispatches EXACTLY `granted_packet_ids` and nothing else. This keeps the plan
   a stable content-addressed artifact (one home for the packet set), puts the granted
   set and its explain records in one place, and makes the host's rule trivial ("dispatch

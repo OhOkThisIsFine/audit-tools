@@ -1362,6 +1362,9 @@ export {
   computeDispatchAdmission,
   deriveThroughputConcurrency,
   admissionPoolsFromSummaries, buildCapabilityFloorCapable, buildObservedCapabilityFloorCapable,
+  toConstraintOutcomeRecords,
+  ConstraintOutcomeRecordSchema,
+  AdmissionAttemptSchema,
   AdmissionGrantSchema,
   AdmissionExplainSchema,
   DispatchAdmissionSchema,
@@ -1371,10 +1374,20 @@ export type {
   AdmissionPool,
   AdmissionGrant,
   AdmissionExplain,
+  AdmissionAttempt,
+  ConstraintOutcomeRecord,
   DispatchAdmission,
   AdmitBatchResult,
   AdmitBatchInput,
 } from "./dispatch/admissionLoop.js";
+// Engine decision log (legibility invariant): the in-process engine's per-packet
+// decision records + the append-only JSONL sink the drivers wire at the run dir.
+export { createDispatchDecisionLog } from "./dispatch/dispatchDecisionLog.js";
+export type {
+  EngineDecisionRecord,
+  StampedEngineDecisionRecord,
+  EngineDecisionSink,
+} from "./dispatch/dispatchDecisionLog.js";
 export { reconcileAdmissionLeasesFromQuotaFile } from "./dispatch/admissionLeaseReconcile.js";
 export { detectHostDispatchWall, renderHostWallExplanation, admissionBlockedOnBudget, classifyEmptyGrantCause } from "./dispatch/hostDispatchWall.js";
 export type { HostDispatchWall, EmptyGrantCause } from "./dispatch/hostDispatchWall.js";

@@ -337,10 +337,25 @@ test("dispatch quota accepts multi-pool capacity summaries", () => {
         granted_packet_ids: ["p1", "p2"],
         declared_cap: 2,
         leases: [
-          { packet_id: "p1", pool_id: "claude-code/*", resource_key: "claude-code/*", lease_id: "L1", cost: 1000 },
+          { packet_id: "p1", pool_id: "claude-code/*", resource_keys: ["claude-code/*"], lease_id: "L1", cost: 1000 },
         ],
         explains: [
-          { packet_id: "p1", pool_id: "claude-code/*", resource_key: "claude-code/*", admitted: true, reason: "admitted", headroom_before: 100000, outstanding_before: 0, cost: 1000 },
+          {
+            packet_id: "p1",
+            pool_id: "claude-code/*",
+            admitted: true,
+            reason: "admitted",
+            // Legibility: the decisive attempt's FULL constraint-outcome array +
+            // its binding row, plus the refused-consultation trail (attempts).
+            constraints: [
+              { resource_key: "claude-code/*", headroom_before: 100000, outstanding_before: 0, cost: 1000, cleared: true },
+            ],
+            binding: { resource_key: "claude-code/*", headroom_before: 100000, outstanding_before: 0, cost: 1000, cleared: true },
+            attempts: [
+              { pool_id: "codex/o4-mini", reason: "cap_reached", constraints: [], in_flight_before: 3, cap: 3 },
+            ],
+            cost: 1000,
+          },
         ],
       },
       cooldown_until: null,

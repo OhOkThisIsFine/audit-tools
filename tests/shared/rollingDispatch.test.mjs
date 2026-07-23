@@ -1768,3 +1768,161 @@ test("createRollingDispatcher — when the only above-floor pool exhausts, the f
   expect(terminal, "stranding surfaces via the partial-completion terminal, never a spin").not.toBe(null);
   expect(terminal.stranded_ids).toEqual(["p1"]);
 });
+
+// ---------------------------------------------------------------------------
+// Engine decision log (legibility, spec Resolved decision 3): every per-packet
+// engine decision — admit, ledger block, strand — is emitted through the
+// onAdmissionDecision seam as a stamped record. No decision path is silent.
+// ---------------------------------------------------------------------------
+
+test("decision log — an unmetered dispatch (no ledger) still records engine_admitted with lease_id null", async () => {
+  await setupTmpQuotaDir();
+  const records = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([makePacket("p1")]);
+  await dispatcher.run();
+
+  const admits = records.filter((r) => r.kind === "engine_admitted");
+  expect(admits).toEqual([
+    expect.objectContaining({
+      kind: "engine_admitted",
+      packet_id: "p1",
+      pool_id: "pool-a",
+      lease_id: null,
+      forced: false,
+      constraints: [],
+      seq: 0,
+    }),
+  ]);
+  expect(typeof admits[0].ts).toBe("string");
+});
+
+test("decision log — a ledger block records engine_blocked with the constraint outcomes, then the forced backstop admit records forced:true", async () => {
+  const quotaDir = await setupTmpQuotaDir();
+  const { ReservationLedger } = await import("../../src/shared/quota/reservationLedger.ts");
+  const ledger = new ReservationLedger(join(quotaDir, "reservations.json"));
+  const records = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+    reservationLedger: ledger,
+    // A budget far below the packet's cost, nothing outstanding anywhere → the
+    // liveness backstop force-admits the first blocked packet per pass.
+    resolvePoolConstraints: (poolId, tokens) => ({
+      constraints: [{ resourceKey: poolId, budget: 10, cost: tokens }],
+      unpriced: [],
+    }),
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([makePacket("p1", { estimatedTokens: 5000 })]);
+  await dispatcher.run();
+
+  const kinds = records.map((r) => r.kind);
+  expect(kinds).toEqual(["engine_blocked", "engine_admitted"]);
+  expect(records[0]).toEqual(
+    expect.objectContaining({
+      packet_id: "p1",
+      pool_id: "pool-a",
+      reason: "budget_exhausted",
+      any_outstanding: false,
+      constraints: [
+        expect.objectContaining({ resource_key: "pool-a", cleared: false, cost: 5000 }),
+      ],
+      binding: expect.objectContaining({ resource_key: "pool-a", cleared: false }),
+    }),
+  );
+  expect(records[1]).toEqual(
+    expect.objectContaining({
+      packet_id: "p1",
+      forced: true,
+      constraints: [expect.objectContaining({ cleared: true })],
+    }),
+  );
+  expect(records[1].lease_id).not.toBe(null);
+  // seq is per-dispatcher monotonic — the authoritative timeline order.
+  expect(records.map((r) => r.seq)).toEqual([0, 1]);
+});
+
+test("decision log — a never-dispatchable strand records the per-(packet, pool) why-not (context_cap)", async () => {
+  await setupTmpQuotaDir();
+  const records = [];
+  const dispatcher = createRollingDispatcher({
+    // Declared context cap far below the packet: fit-excluded on every pool —
+    // the per-packet never-dispatchable strand, not the pool-wall one.
+    confirmedPools: [makePool("tiny-pool", { contextCapTokens: 1000 })],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([makePacket("huge", { estimatedTokens: 500000 })]);
+  await dispatcher.run();
+
+  expect(dispatcher.getState().strandedIds.has("huge")).toBe(true);
+  const strands = records.filter((r) => r.kind === "engine_stranded_no_fitting_pool");
+  expect(strands).toEqual([
+    expect.objectContaining({
+      packets: [
+        {
+          packet_id: "huge",
+          pools: [{ pool_id: "tiny-pool", why: "context_cap" }],
+        },
+      ],
+    }),
+  ]);
+});
+
+test("decision log — identical re-blocks across passes are transition-deduped; the transition and the forced backstop still record (host-review F1/F3)", async () => {
+  const quotaDir = await setupTmpQuotaDir();
+  const { ReservationLedger } = await import("../../src/shared/quota/reservationLedger.ts");
+  const ledger = new ReservationLedger(join(quotaDir, "reservations.json"));
+  const records = [];
+  // Two slow packets hold leases; the huge packet re-blocks IDENTICALLY on the
+  // pass after the first completion (still outstanding) — that repeat must be
+  // suppressed. After the second completion the block transitions to
+  // any_outstanding:false, which records, and the forced backstop admits.
+  const resolvers = new Map();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: (packet) =>
+      packet.id === "huge"
+        ? Promise.resolve({ packet, outcome: "success" })
+        : new Promise((resolve) => resolvers.set(packet.id, () => resolve({ packet, outcome: "success" }))),
+    reservationLedger: ledger,
+    resolvePoolConstraints: (poolId, tokens) => ({
+      constraints: [{ resourceKey: poolId, budget: 100, cost: tokens }],
+      unpriced: [],
+    }),
+    onAdmissionDecision: (r) => {
+      records.push(r);
+      // Release the slow packets one per pass, AFTER the pass that re-blocks
+      // "huge" has run (each blocked/admitted record marks a pass boundary).
+      const next = [...resolvers.keys()][0];
+      if (next) {
+        resolvers.get(next)();
+        resolvers.delete(next);
+      }
+    },
+  });
+  dispatcher.enqueue([
+    makePacket("slow-1", { estimatedTokens: 40 }),
+    makePacket("slow-2", { estimatedTokens: 40 }),
+    makePacket("huge", { estimatedTokens: 200 }),
+  ]);
+  await dispatcher.run();
+
+  const hugeBlocked = records.filter((r) => r.kind === "engine_blocked" && r.packet_id === "huge");
+  // Exactly TWO blocked records for "huge": the initial any_outstanding:true
+  // (its identical repeat on the next pass suppressed) and the
+  // any_outstanding:false transition. Then the forced backstop admits.
+  expect(hugeBlocked.map((r) => r.any_outstanding)).toEqual([true, false]);
+  const hugeAdmits = records.filter((r) => r.kind === "engine_admitted" && r.packet_id === "huge");
+  expect(hugeAdmits.length).toBe(1);
+  expect(hugeAdmits[0].forced).toBe(true);
+});

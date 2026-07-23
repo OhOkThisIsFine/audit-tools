@@ -148,12 +148,16 @@
 
 **1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
 nodes, v0.34.16. Shipped from the tier so far (all 2026-07-23): the accept-latch family, the
-node-context clobber tier, the **zero-spill capability-floor HIGH** (v0.34.20), and the
+node-context clobber tier, the **zero-spill capability-floor HIGH** (v0.34.20), the
 **intent-checkpoint gate + charter slice-staleness pair** (v0.34.21 — mechanism record:
-[`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)).
-Remaining in the tier (older, still open): dispatch-legibility mechanistic trace, NIM
-single-shot-only routing (worker-kind × pool-class compatibility), abnormal-exit
-no-step-contract, and the paused-pool wait-tick LEAD the zero-spill fix surfaced.
+[`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)),
+and the **dispatch-legibility mechanistic trace** (v0.34.22 — full constraint-outcome explain
+records on every host grant/refusal, `planned` explains closing the 144-granted-empty-explains
+path, engine decision log `dispatch-explains.jsonl` with per-pool strand why-nots; mechanism
+record: [`dispatch-legibility-trace-2026-07-23.md`](reviews/dispatch-legibility-trace-2026-07-23.md)).
+Remaining in the tier (older, still open): NIM single-shot-only routing (worker-kind ×
+pool-class compatibility), abnormal-exit no-step-contract, and the paused-pool wait-tick LEAD
+the zero-spill fix surfaced.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect

@@ -47,6 +47,7 @@ import {
   resolveRollingEngineFlag,
   createReviewSnapshot,
   removeReviewSnapshot,
+  createDispatchDecisionLog,
 } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -601,6 +602,12 @@ export async function driveRollingAuditDispatch(params: {
       onPacketTooLarge: (info) => {
         capturePacketTooLargeFriction(artifactsDir, runId, info, "audit-code");
       },
+      // Legibility (spec Resolved decision 3): every engine dispatch decision
+      // (admit / ledger block / strand, with its full constraint-outcome data)
+      // appends to this run's dispatch-explains.jsonl.
+      onAdmissionDecision: createDispatchDecisionLog(
+        join(artifactsDir, "runs", runId, "dispatch-explains.jsonl"),
+      ),
     },
     dispatchPacket,
     );
