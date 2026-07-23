@@ -569,6 +569,76 @@ describe("advanceHostRolling", () => {
     const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(d.kind).toBe("done");
   });
+
+  it("a FAILED accept records accept_failed and never latches accepted (retry is not a silent no-op)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // Make the fixture's derived `npm run check` FAIL, committed into base so every
+    // worktree inherits it: a real-edit node's accept then goes RED at verify, while
+    // a no-edit node (no commit → no verify) still accepts clean.
+    const git = (...a: string[]) =>
+      spawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    writeFileSync(
+      join(repo, "package.json"),
+      JSON.stringify(
+        {
+          name: "host-roll-fixture",
+          private: true,
+          scripts: { check: 'node -e "process.exit(1)"' },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    git("add", "package.json");
+    git("commit", "-m", "failing check");
+    const artifactsDir = await seedSession(repo, ["OK1", "RED1"]);
+    // RED1: a real edit + a "resolved" (real-edit) result claim → verify runs and fails.
+    const wt = worktreePath(repo, "RED1", RID);
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "red1.ts"), 'export const x = "RED1";\n');
+    writeFileSync(
+      join(artifactsDir, "RED1.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "RED1", status: "resolved", evidence: ["ok"] }],
+      }),
+    );
+
+    const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "OK1" });
+    expect(d1.kind).toBe("wait");
+    if (d1.kind === "wait") expect(d1.accepted).toBe(1);
+
+    // RED1's accept fails at verify → terminal-with-signal, NEVER latched accepted.
+    const d2 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "RED1" });
+    expect(d2.kind).toBe("done"); // both nodes terminal → session complete
+    if (d2.kind === "done") {
+      expect(d2.accepted).toBe(1); // OK1 only — the failed node is not "accepted"
+      expect(d2.accept_failed).toEqual(["RED1"]);
+    }
+    // Session ground truth matches the directive.
+    const session = JSON.parse(
+      readFileSync(join(artifactsDir, "runs", RID, "implement", "rolling-session.json"), "utf8"),
+    );
+    expect(session.accepted).toEqual(["OK1"]);
+    expect(session.accept_failed).toEqual(["RED1"]);
+    // The sidecar recorded the true outcome for the merge gate.
+    const rec = JSON.parse(
+      readFileSync(join(artifactsDir, "runs", RID, "implement", "accept-outcome-RED1.json"), "utf8"),
+    );
+    expect(rec.outcome).toBe("error");
+    expect(rec.merged).toBe(false);
+
+    // A re-run for the failed node is idempotent (no lifecycle re-run, no double
+    // entry) but still SURFACES the failure instead of reading as accepted.
+    const again = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "RED1" });
+    expect(again.kind).toBe("done");
+    if (again.kind === "done") {
+      expect(again.accepted).toBe(1);
+      expect(again.accept_failed).toEqual(["RED1"]);
+    }
+  });
 });
 
 // ===========================================================================

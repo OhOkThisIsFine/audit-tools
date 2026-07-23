@@ -72,8 +72,19 @@ export interface RollingSession {
   frontier: RollingFrontierNode[];
   /** Block ids whose worktree was created + handed to the host (the whole granted set). */
   dispatched: string[];
-  /** Block ids whose `acceptNodeWorktree` lifecycle has run. */
+  /** Block ids whose `acceptNodeWorktree` lifecycle ran and LANDED (outcome success). */
   accepted: string[];
+  /**
+   * Block ids whose `acceptNodeWorktree` lifecycle ran and FAILED (outcome ≠ success).
+   * Terminal for this session's counts but never latched into `accepted`: the node's
+   * committed work is preserved under its quarantine ref and the designed recovery is
+   * a `reverify-node` re-drive. A re-run `accept-node` for such a node reports the
+   * recorded failure instead of re-running the lifecycle — and instead of silently
+   * reading as accepted, which made retries idempotent no-ops and forced hand-landing
+   * from the quarantine ref (dogfood 2026-07-23, accept-latch defect). Optional:
+   * sessions persisted before this field default to empty.
+   */
+  accept_failed?: string[];
   /**
    * Owner token minted by the shared `ClaimRegistry` for each dispatched node,
    * keyed by block id. Persisted so a later `accept-node` invocation (a separate
@@ -90,14 +101,17 @@ export interface RollingSession {
    * them every completion AND so they are excluded from this session's completion
    * target (the peer accepts them; `mergeImplementResults` is the run-level
    * finalizer over every driver's accept outcomes). Absent/empty in the common
-   * single-driver case, so `total` stays `frontier.length`.
+   * single-driver case, so `total` stays `frontier.length`. Invariant:
+   * `dispatched ∩ contested = ∅` — a contested node is never dispatched by this
+   * session (the completion math relies on this: `accepted`/`accept_failed` are
+   * subsets of `dispatched`, so `in_flight` can never go negative).
    */
   contested?: string[];
 }
 
 export type RollingDirective =
-  | { kind: "wait"; in_flight: number; accepted: number; total: number }
-  | { kind: "done"; accepted: number; total: number };
+  | { kind: "wait"; in_flight: number; accepted: number; accept_failed: string[]; total: number }
+  | { kind: "done"; accepted: number; accept_failed: string[]; total: number };
 
 function implementDir(artifactsDir: string, runId: string): string {
   return join(artifactsDir, "runs", runId, "implement");
@@ -378,7 +392,7 @@ export async function prepareHostRollingDispatch(
     .map((i) => i.block_id);
   if (cooldownWall.atWall && cooldownWall.reason === "cooldown" && strandedBlockIds.length > 0) {
     return {
-      session: { run_id: runId, frontier: [], dispatched: [], accepted: [], claims: {}, contested: [] },
+      session: { run_id: runId, frontier: [], dispatched: [], accepted: [], accept_failed: [], claims: {}, contested: [] },
       initial: [],
       planPath: join(dir, "dispatch-plan.json"),
       quotaPath,
@@ -433,6 +447,7 @@ export async function prepareHostRollingDispatch(
     frontier,
     dispatched: initialNodes.map((n) => n.block_id),
     accepted: [],
+    accept_failed: [],
     claims,
     contested,
   };
@@ -454,7 +469,10 @@ export async function prepareHostRollingDispatch(
  * the finished node, then JIT-dispatches the next undispatched frontier node (if
  * any). Lock-guarded so concurrent completions don't race the session's
  * read-modify-write (which would double-dispatch or lose an acceptance).
- * Idempotent on a re-run for the same node (skips the lifecycle if already accepted).
+ * Idempotent on a re-run for the same node (skips the lifecycle if the node already
+ * reached a terminal accept — accepted OR accept_failed; a failed node's re-run
+ * surfaces the recorded failure in the directive rather than re-running or silently
+ * reading as accepted).
  */
 export async function advanceHostRolling(opts: {
   root: string;
@@ -479,9 +497,14 @@ export async function advanceHostRolling(opts: {
     // Sessions persisted before claim-wiring lack `claims` — default to empty so
     // the read-modify-write is forward-only (never throws on an older session).
     session.claims ??= {};
+    // Local const so the array stays narrowed across the awaits below.
+    const acceptFailed = (session.accept_failed ??= []);
     const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
 
-    if (!session.accepted.includes(opts.blockId)) {
+    if (
+      !session.accepted.includes(opts.blockId) &&
+      !acceptFailed.includes(opts.blockId)
+    ) {
       // Contested-node fail-closed guard (OD3 layer 2, D-66/67 slice-1 §5b):
       // `prepareHostRollingDispatch` never writes `session.claims[block_id]` for a
       // CONTESTED node (a peer driver already holds its live claim) — this session
@@ -545,7 +568,15 @@ export async function advanceHostRolling(opts: {
               `resolved edit but the designated worktree has no commits beyond base.`,
         );
       }
-      session.accepted.push(opts.blockId);
+      if (accept.outcome === "success") {
+        session.accepted.push(opts.blockId);
+      } else {
+        // A FAILED accept must never latch as accepted (dogfood 2026-07-23): the
+        // node's committed work is quarantined and the designed recovery is a
+        // `reverify-node` re-drive. Record it terminal-with-signal so the directive
+        // surfaces it, while a re-run accept-node reports instead of re-running.
+        acceptFailed.push(opts.blockId);
+      }
       // Terminal accept outcome → release this node's claim through the SAME
       // registry the in-process driver shares (token-checked, so only the claim we
       // actually hold is dropped). The node is done; freeing its claim lets a stale
@@ -567,7 +598,11 @@ export async function advanceHostRolling(opts: {
     // driver owns. Empty `contested` (the common single-driver case) → the full
     // granted set, so the counts are unchanged.
     const ownTotal = session.frontier.length - session.contested.length;
-    const inFlight = session.dispatched.length - session.accepted.length;
+    // Both accept outcomes are terminal for THIS session's completion math — a
+    // failed node is no longer in flight (its recovery runs out-of-band via
+    // `reverify-node`), so it must not hold the directive at `wait` forever.
+    const terminal = session.accepted.length + acceptFailed.length;
+    const inFlight = session.dispatched.length - terminal;
 
     await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
     // Done when every node this session is responsible for has been accepted AND
@@ -576,13 +611,19 @@ export async function advanceHostRolling(opts: {
     // `mergeImplementResults` is the finalizer over both drivers' outcomes, and it
     // reconciles the grant's reservation-ledger leases so budget frees for the next
     // grant).
-    if (session.accepted.length >= ownTotal && inFlight <= 0) {
-      return { kind: "done", accepted: session.accepted.length, total: ownTotal };
+    if (terminal >= ownTotal && inFlight <= 0) {
+      return {
+        kind: "done",
+        accepted: session.accepted.length,
+        accept_failed: [...acceptFailed],
+        total: ownTotal,
+      };
     }
     return {
       kind: "wait",
       in_flight: inFlight,
       accepted: session.accepted.length,
+      accept_failed: [...acceptFailed],
       total: ownTotal,
     };
   });

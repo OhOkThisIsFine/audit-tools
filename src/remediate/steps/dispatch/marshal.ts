@@ -1092,6 +1092,37 @@ async function mergeImplementResultsIntoState(
               `contradicts the no-change claim. Routed to triage.`;
             continue;
           }
+          // A no-change closure against a sidecar that RECORDS a landing (merged:true
+          // or a landed-head OID) is adjudicated by the same ancestry probe the
+          // resolved path uses: a recorded landing still reachable from HEAD means the
+          // node's work IS in the tree (a prior attempt landed it; the worker's
+          // "already satisfied" claim is consistent) — but a recorded landing that is
+          // NOT reachable (rolled back after accept), or a merged:true with no OID to
+          // verify (committedOid capture soft-failed), contradicts the closure: the
+          // sidecar is stale — the monotonic write guard preserves merged:true past a
+          // later rolled-back attempt — or the label is wrong. The checks above miss
+          // exactly this shape (no captured OID, no live branch), which let a
+          // rolled-back node close as resolved_no_change (dogfood 2026-07-23,
+          // false-signal family).
+          const recordsLanding = acceptOutcome.merged || !!acceptOutcome.landedHeadOid;
+          const landingStillInHead =
+            !!acceptOutcome.landedHeadOid &&
+            gitCommitIsAncestor(options.root, acceptOutcome.landedHeadOid);
+          if (recordsLanding && !landingStillInHead) {
+            stateItem.status = "blocked";
+            markTerminal(stateItem);
+            stateItem.failure_reason =
+              `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+              `resolved_no_change, but its accept-outcome sidecar records a landing ` +
+              `(merged=${acceptOutcome.merged}` +
+              (acceptOutcome.landedHeadOid
+                ? `, landed head ${acceptOutcome.landedHeadOid.slice(0, 8)}`
+                : ", no landed OID to verify") +
+              `) that is not reachable from the remediation HEAD — the landing was ` +
+              `rolled back or the sidecar is stale, so the no-change closure cannot ` +
+              `be trusted. Routed to triage.`;
+            continue;
+          }
         }
         const spec = stateItem.item_spec;
         // The worker's explicit `resolved_no_change` is a no-change signal in its
@@ -1265,8 +1296,10 @@ async function mergeImplementResultsIntoState(
     // (which makes no edits by design, and is not in that set) stays exempt. This
     // covers the outcome=success/merged:false case (worker reported an actual-change
     // "resolved" but committed nothing); the hard-failure case (outcome=error|timeout)
-    // is caught earlier, in the collapsed loop's resolve branch, so a mislabeled
-    // `resolved_no_change` can't slip past this resolvedFindingIds keying.
+    // is caught in the collapsed loop's resolve branch, and a no-change closure whose
+    // sidecar nevertheless records a landing (stale merged:true) is caught by the
+    // landing-contradiction check there — so a mislabeled `resolved_no_change`
+    // cannot slip past this resolvedFindingIds keying.
     if (resolvedFindingIds.length > 0 && acceptOutcome) {
       const notLanded = !acceptOutcome.merged;
       // INV-WTS-3: node-IDENTITY ancestry reconcile. A merged:true accept is only

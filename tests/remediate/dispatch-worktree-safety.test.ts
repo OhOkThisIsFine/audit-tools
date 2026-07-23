@@ -563,6 +563,57 @@ describe("INV-WTS-7 — resolved_no_change grounded in the captured commit OID (
     expect(refExists(repo, quarantineRef(RUN, BLOCK))).toBe(true);
   });
 
+  it("NEGATIVE (stale landing sidecar): a rolled-back landing on a no-change claim → re-block", async () => {
+    const repo = initRepo("wts-nc-stalemerged-");
+    // No node branch (removed after a rollback), NO captured OID (the committedOid
+    // rev-parse soft-fail shape) — and the sidecar claims a landing whose OID is NOT
+    // reachable from HEAD (rolled back). This is the stale-merged:true shape the
+    // monotonic sidecar guard preserves after a later rolled-back attempt (dogfood
+    // 2026-07-23, false-signal family): the closure cannot be trusted.
+    git(repo, "commit", "--allow-empty", "-m", "divergent");
+    const divergent = headOid(repo);
+    git(repo, "reset", "--hard", "HEAD~1");
+    expect(gitCommitIsAncestor(repo, divergent)).toBe(false);
+    const merged = await mergeInRepo(
+      repo,
+      "resolved_no_change",
+      ["npm run check -> ok"],
+      { outcome: "success", verifyPassed: true, merged: true, landedHeadOid: divergent },
+    );
+    expect(merged.items!["N-x"].status).toBe("blocked");
+    expect(merged.items!["N-x"].failure_reason).toMatch(/not reachable|rolled back|stale/i);
+  });
+
+  it("NEGATIVE (unverifiable landing): merged:true with NO landed OID on a no-change claim → re-block", async () => {
+    const repo = initRepo("wts-nc-noloid-");
+    // merged:true but no landed-head OID to verify (committedOid/landedHeadOid capture
+    // soft-failed): the landing cannot be ancestry-checked, so the closure blocks loud.
+    const merged = await mergeInRepo(
+      repo,
+      "resolved_no_change",
+      ["npm run check -> ok"],
+      { outcome: "success", verifyPassed: true, merged: true },
+    );
+    expect(merged.items!["N-x"].status).toBe("blocked");
+    expect(merged.items!["N-x"].failure_reason).toMatch(/no landed OID|not reachable/i);
+  });
+
+  it("POSITIVE (landing still in HEAD): a stale sidecar whose landing IS an ancestor lets a genuine no-change close", async () => {
+    const repo = initRepo("wts-nc-landedok-");
+    // A prior attempt landed this node's work and it is still in HEAD; a later
+    // re-dispatch genuinely finds nothing to change ("already satisfied"). The
+    // ancestry probe disambiguates: reachable landing → the closure is consistent,
+    // never false-blocked (deepseek review finding, 2026-07-23).
+    const landed = headOid(repo); // reachable from HEAD → ancestor
+    const merged = await mergeInRepo(
+      repo,
+      "resolved_no_change",
+      ["npm run check -> ok"],
+      { outcome: "success", verifyPassed: true, merged: true, landedHeadOid: landed },
+    );
+    expect(merged.items!["N-x"].status).toBe("resolved_no_change");
+  });
+
   it("NEGATIVE (branch has edits): a worker-claimed no-change whose branch HAS edits → re-block", async () => {
     const repo = initRepo("wts-nc-hasedits-");
     // The node branch actually carries a real edit — the no-change claim is false.

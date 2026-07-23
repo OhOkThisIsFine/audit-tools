@@ -2201,6 +2201,7 @@ async function buildImplementDispatchStep(ctx: {
       const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
       const rollNext = loaderCommand("next-step");
       const acceptCmd = loaderCommand(`accept-node --id <BLOCK_ID> --run-id ${runId}`);
+      const reverifyCmd = loaderCommand(`reverify-node --id <BLOCK_ID> --run-id ${runId}`);
       const nodeLines = rolling.initial
         .map(
           (n) =>
@@ -2242,9 +2243,16 @@ As EACH subagent finishes, run (substituting the finished node's block id):
 It runs the commit -> verify -> merge lifecycle for that node and prints a JSON
 directive on stdout:
 - \`{"directive":"wait",...}\` — other granted nodes are still in flight; do not spawn more.
-- \`{"directive":"done",...}\` — every granted node has been accepted. Then run:
+- \`{"directive":"done",...}\` — every granted node reached a terminal accept. Then run:
 
 \`${rollMerge}\`
+
+If the directive's \`accept_failed\` array names any node, that node's accept FAILED:
+its committed work is preserved under a quarantine ref and nothing landed. Do NOT
+re-run \`accept-node\` for it (that only re-reports the failure). Fix the named cause,
+then re-drive it with:
+
+\`${reverifyCmd}\`
 
 Then run:
 
@@ -2258,9 +2266,9 @@ ${DISPATCH_PROMPT_HANDOFF_NOTE}
 
 ${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
 `,
-        allowedCommands: [acceptCmd, rollMerge, rollNext],
+        allowedCommands: [acceptCmd, reverifyCmd, rollMerge, rollNext],
         stopCondition:
-          "Stop after every node has been accepted (accept-node returns done), results merged, and next-step has been run.",
+          "Stop after every node has reached a terminal accept (accept-node returns done), results merged, and next-step has been run.",
         artifactPaths: { dispatch_plan: rolling.planPath, dispatch_quota: rolling.quotaPath },
       }) };
       }

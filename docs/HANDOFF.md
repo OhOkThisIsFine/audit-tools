@@ -106,18 +106,17 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Fix the dogfood-resume defect tier (backlog *Open bugs*, all evidence-complete).** The
-dogfood run is DONE — 8/8 nodes resolved, merged to main (`a663bac6`), released v0.34.16
-(completion record: [`remediate-dogfood-completion-2026-07-23.md`](reviews/remediate-dogfood-completion-2026-07-23.md)).
-The resume surfaced five new defects; two shipped same-session (v0.34.14 agentic slot-cost model,
-v0.34.15 worktree un-landed-work guard). The remaining three are specced with live evidence:
-**accept-latch + rollback family** (HIGH — failed accept latches accepted; rollback drops sibling
-commits + empties the worktree; post-rollback merge mislabels `resolved_no_change`);
-**shared-state clobber from node context** (HIGH — state-mutating CLIs must be refused from a
-node-worktree CWD / owner-token the session writers); **build-free accept vs dist-importing
-verify commands** (medium — classify at plan time, build-first or refuse) + the worker-prompt
-rules that belong in `implementPrompt`'s template. Older tier still open: zero-spill wave
-pool-build/fit gap, dispatch-legibility mechanistic trace, intent-checkpoint gate wiring +
+**1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
+nodes, v0.34.16 (completion record:
+[`remediate-dogfood-completion-2026-07-23.md`](reviews/remediate-dogfood-completion-2026-07-23.md)).
+The **accept-latch family shipped 2026-07-23** (a/c/d fixed, b refuted at HEAD — mechanism record:
+[`accept-latch-family-mechanisms-2026-07-23.md`](reviews/accept-latch-family-mechanisms-2026-07-23.md)).
+Remaining in the tier, specced with live evidence: **shared-state clobber from node context**
+(HIGH — state-mutating CLIs must be refused from a node-worktree CWD / owner-token the session
+writers; writer-surface recon is in the backlog entry + memory); **build-free accept vs
+dist-importing verify commands** (medium — classify at plan time, build-first or refuse) + the
+worker-prompt rules that belong in `implementPrompt`'s template. Older tier still open: zero-spill
+wave pool-build/fit gap, dispatch-legibility mechanistic trace, intent-checkpoint gate wiring +
 charter phantom-staleness (design together), NIM single-shot-only routing, abnormal-exit
 no-step-contract.
 
