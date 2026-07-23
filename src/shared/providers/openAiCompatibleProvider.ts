@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile, appendFile, stat } from "node:fs/promises";
+import { readFile, mkdir, writeFile, appendFile, stat, rm } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type {
   FreshSessionProvider,
@@ -353,11 +353,16 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       );
     }
 
-    // Apply the file edits into the worktree (repoRoot). The worktree branch diff
-    // is the write-scope ground truth, so out-of-scope edits are caught at merge;
-    // here we only defend against a path escaping the worktree entirely.
+    // ATOMIC APPLICATION (INV-SCC-10 / TST-17059259): a rejected launch
+    // (accepted:false) must leave the node worktree byte-identical, so the
+    // COMPLETE response is validated before anything is committed.
+    //
+    // Phase 1 — validate every files[] entry (shape, control-plane skip, path
+    // containment) AND resolve the effective result, touching nothing. The
+    // worktree branch diff is still the write-scope ground truth at merge; here
+    // we defend against a path escaping the worktree entirely.
     const files = Array.isArray(parsed.files) ? parsed.files : [];
-    let applied = 0;
+    const toApply: Array<{ abs: string; content: string; displayPath: string }> = [];
     for (const file of files) {
       if (typeof file?.path !== "string" || typeof file?.content !== "string") {
         return fail("openai-compatible response files[] entries must be { path: string, content: string }.");
@@ -374,13 +379,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       if (!abs) {
         return fail(`openai-compatible response tried to write outside the worktree: ${file.path}`);
       }
-      try {
-        await mkdir(dirname(abs), { recursive: true });
-        await writeFile(abs, file.content, "utf8");
-        applied += 1;
-      } catch (err) {
-        return fail(`openai-compatible failed writing ${file.path}: ${errText(err)}`);
-      }
+      toApply.push({ abs, content: file.content, displayPath: file.path });
     }
 
     // Tolerant result resolution: a model sometimes returns the result value
@@ -390,7 +389,8 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     // (the AuditResult[] / item-results validator is the authority at merge), so a
     // tolerant relay can never ingest garbage — it only rescues the narrow
     // "well-formed payload emitted at the top level" case. A genuine wrapper that
-    // dropped its result (files present, result absent) stays a clean failure.
+    // dropped its result (files present, result absent) stays a clean failure —
+    // detected HERE, before any file is applied, so the rejection is side-effect-free.
     // `parsed` is guaranteed an object or array here (primitives failed above), so a
     // wrapper is a non-array object carrying `files`; anything else (a bare array or a
     // bare result object) is relayed whole.
@@ -400,14 +400,49 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     if (effectiveResult === undefined) {
       return fail(
-        `openai-compatible response omitted the "result" artifact (applied ${applied} file(s) but produced no result to write to ${input.resultPath}).`,
+        `openai-compatible response omitted the "result" artifact (nothing was applied to the worktree; no result to write to ${input.resultPath}).`,
       );
     }
 
+    // Phase 2 — commit the validated writes (worktree files, then the result
+    // artifact). A filesystem failure mid-commit rolls the worktree back to its
+    // pre-launch bytes (created files removed, overwritten files restored from
+    // their snapshot) so accepted:false still means "worktree untouched".
+    // Rollback is best-effort per entry; empty directories created for a rolled-
+    // back file may remain (they carry no content and the merge diff ignores them).
+    const undo: Array<{ abs: string; prior: string | null; displayPath: string }> = [];
+    const rollback = async (): Promise<void> => {
+      for (const entry of [...undo].reverse()) {
+        try {
+          if (entry.prior === null) {
+            await rm(entry.abs, { force: true });
+          } else {
+            await writeFile(entry.abs, entry.prior, "utf8");
+          }
+        } catch {
+          // best-effort: leave what cannot be restored; the branch diff at merge
+          // still exposes any residue.
+        }
+      }
+    };
     try {
+      for (const file of toApply) {
+        let prior: string | null = null;
+        try {
+          prior = await readFile(file.abs, "utf8");
+        } catch {
+          prior = null; // did not exist — rollback removes it
+        }
+        await mkdir(dirname(file.abs), { recursive: true });
+        await writeFile(file.abs, file.content, "utf8");
+        undo.push({ abs: file.abs, prior, displayPath: file.displayPath });
+      }
       await writeJsonFile(input.resultPath, effectiveResult);
     } catch (err) {
-      return fail(`openai-compatible failed writing the result file: ${errText(err)}`);
+      await rollback();
+      return fail(
+        `openai-compatible failed committing the response (worktree rolled back): ${errText(err)}`,
+      );
     }
 
     return {

@@ -185,15 +185,20 @@ describe("driveRolling — unified in-process rolling driver", () => {
 
   it("NEGATIVE TERMINAL MERGE: quota_paused is preferred over empty_pool; stranded ids union; earliest reset kept", { timeout: 20_000 }, async () => {
     // TST-37d441fa / TST-caab6d8f: construct BOTH partial-terminal reasons in one
-    // drive — an early retryable session-limit pause (parseable "Resets in …")
-    // and a later bare-429 empty_pool — and assert the merged terminal keeps the
-    // retryable quota_paused shape with the union of stranded ids.
+    // drive — a bare-429 empty_pool from the first sub-wave and a retryable
+    // session-limit pause (parseable "Resets in …") from the second — and assert
+    // the merged terminal keeps the retryable quota_paused shape with the union
+    // of stranded ids. The two packets share a write path, so ONE level splits
+    // into TWO sequential sub-waves (each with its own dispatcher + terminal);
+    // same-level sub-waves are peers, so a terminal from the first must NOT stop
+    // the second (only LEVEL advance halts on a terminal — INV-SCC-06), which is
+    // exactly what keeps this cross-dispatcher merge reachable.
     setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-terminal-")));
     const run = await driveRolling({
-      levels: [[{ id: "P1" }], [{ id: "E1" }]],
+      levels: [[{ id: "E1", f: "src/shared.ts" }, { id: "P1", f: "src/shared.ts" }]],
       confirmedPools: [POOL],
       sessionConfig: SESSION,
-      toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+      toNode: (it) => ({ block_id: it.id, write_paths: [it.f] }),
       toPacket: packetFor,
       dispatchPacket: async (packet) =>
         packet.id === "P1"
@@ -225,17 +230,14 @@ describe("driveRolling — unified in-process rolling driver", () => {
     expect(run.allResults).toHaveLength(0);
   });
 
-  // ESCALATED PRODUCTION DEFECT (rolling level advance) — expected-fail until the
-  // owning node fixes src/shared/dispatch/unifiedRolling.ts (LOOP-CORE — needs
-  // review attestation): the level loop in `driveRolling` never consults the
-  // merged partial terminal, so after level 1 strands (quota_paused OR
-  // empty_pool) the driver still runs `rebuildBetweenLevels` and DISPATCHES
-  // later levels — burning attempts on a known-dead/paused pool and violating
-  // the dependency contract (level-2 items depend on level-1 outputs that never
-  // landed). Empirically: with a level-1 terminal, the level-2 packet is still
-  // dispatched (probe 2026-07-22). `it.fails` flips loudly when the fix lands;
-  // remove the marker then.
-  it.fails("NEGATIVE TRANSITION: after a level-1 partial terminal, driveRolling must NOT advance to later levels", { timeout: 20_000 }, async () => {
+  // COR-74f8e4cd / INV-SCC-06 regression pin: the level loop in `driveRolling`
+  // must consult the merged partial terminal at every level boundary. After
+  // level 1 strands (quota_paused OR empty_pool) the driver must NOT run
+  // `rebuildBetweenLevels` and must NOT dispatch later levels — those depend on
+  // level-1 outputs that never landed, and dispatching them burns attempts on a
+  // known-dead/paused pool. Undispatched later-level items are folded into the
+  // terminal's stranded_ids so no node is silently dropped.
+  it("NEGATIVE TRANSITION: after a level-1 partial terminal, driveRolling must NOT advance to later levels", { timeout: 20_000 }, async () => {
     setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-noadvance-")));
     const dispatched = [];
     let rebuilds = 0;

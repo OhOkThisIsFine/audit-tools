@@ -1,7 +1,6 @@
 import {
   type FrictionCaptureArtifact,
   frictionCapturePath,
-  sanitizeRunId,
 } from '../io/frictionCapture.js';
 import {
   type AgentReflection,
@@ -256,7 +255,7 @@ export function deriveFrictionObservations(
   const groups = new Map<string, CapturedFrictionItem[]>();
   for (const item of frictions) {
     if (!isFrictionCategory(item.frictionCategory)) continue;
-    const key = `${item.frictionCategory} ${aggregationKey(item)}`;
+    const key = `${item.frictionCategory}\u0000${aggregationKey(item)}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(item);
     else groups.set(key, [item]);
@@ -264,7 +263,7 @@ export function deriveFrictionObservations(
 
   const derived: DerivedFrictionObservation[] = [];
   for (const [key, items] of groups) {
-    const sep = key.indexOf(" ");
+    const sep = key.indexOf("\u0000");
     const category = key.slice(0, sep) as FrictionCategory;
     const artifact = key.slice(sep + 1);
     const cost = measureFrictionCost(items);
@@ -387,8 +386,12 @@ async function readRecord(
   artifactsDir: string,
   runId: string,
 ): Promise<TriagedFrictionArtifact | undefined> {
+  // INV-SCC-04 (COR-6fd1702f): pass the RAW run id — `frictionCapturePath`
+  // sanitizes internally, and sanitizeRunId is injective but NOT idempotent
+  // (it escapes `_`), so pre-sanitizing here double-encodes any id the encoder
+  // changes and reads a DIFFERENT file than the capture path wrote.
   return readOptionalJsonFile<TriagedFrictionArtifact>(
-    frictionCapturePath(artifactsDir, sanitizeRunId(runId)),
+    frictionCapturePath(artifactsDir, runId),
   );
 }
 
@@ -443,7 +446,10 @@ export async function decideFrictionTriage(
   runId: string,
   tool: FrictionCaptureArtifact['tool'],
 ): Promise<FrictionTriageDecision> {
-  const recordPath = frictionCapturePath(artifactsDir, sanitizeRunId(runId));
+  // Single-encoded canonical derivation (INV-SCC-04): raw run id in — the path
+  // helper owns the one sanitization pass, so this recordPath is byte-identical
+  // to the file every capture/mutation site reads and writes.
+  const recordPath = frictionCapturePath(artifactsDir, runId);
   const subjects = await collectTriageSubjects(artifactsDir, runId);
 
   // Materialize the record (so the host always appends to an existing file) AND

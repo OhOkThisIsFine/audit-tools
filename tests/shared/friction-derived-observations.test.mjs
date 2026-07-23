@@ -248,3 +248,44 @@ test("friction-stop-gate hook FRICTION_CATEGORIES stays in parity with the sourc
     ...FRICTION_CATEGORIES,
   ]);
 });
+
+// ── INV-SCC-04 / COR-6fd1702f / TST-c0e7b3b3: single-encoding path derivation ──
+
+test("capture→triage round trip with an underscore-bearing run id: pending events and recordPath use the SINGLE canonical file", async () => {
+  // `frictionCapturePath` already sanitizes its run-id argument. Triage must
+  // therefore pass the RAW run id — pre-sanitizing double-encodes any id that
+  // sanitizeRunId actually changes (underscores are escaped, so `run_1` →
+  // `run_5f1` → double → `run_5f5f1`): captured events vanish from the triage
+  // subject set and the host is directed at a record the locked mutation path
+  // never reads, so close-out cannot converge. Real audit run ids carry
+  // underscores, so the round trip is pinned on one.
+  const dir = await mkdtemp(join(tmpdir(), "friction-single-encode-"));
+  const runId = "run_1";
+  try {
+    await captureStepBoundaryFriction(
+      dir,
+      runId,
+      { eventType: "phase_reemit", discriminator: "d1", note: "re-emit", artifact: "node-1" },
+      "remediate-code",
+    );
+
+    const decision = await decideFrictionTriage(dir, runId, "remediate-code");
+
+    // The captured mechanical event must surface as a PENDING triage subject —
+    // a double-encoded read path silently drops it (empty pending set).
+    expect(
+      decision.pending.some((s) => s.source === "event"),
+      "the captured event must appear in the pending triage subjects",
+    ).toBe(true);
+
+    // The host must be pointed at the SAME canonical record file the capture
+    // path wrote — one single-encoded derivation, never a re-encoded spelling.
+    expect(decision.recordPath).toBe(frictionCapturePath(dir, runId));
+
+    // And that canonical record actually carries the captured event.
+    const record = await readRecord(dir, runId);
+    expect((record.frictions ?? []).length).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

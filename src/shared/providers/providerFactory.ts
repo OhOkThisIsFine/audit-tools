@@ -68,6 +68,15 @@ export function hasConfiguredOpenAiCompatible(
  * Captured once so `chooseAutoProvider` is a pure function of these inputs.
  */
 export interface AutoProviderContext {
+  /**
+   * The run's launch mode is headless (INV-SCC-01 / COR-849039de-2): a
+   * provider whose launch DETERMINISTICALLY rejects headless input (opencode's
+   * PB-1 guard — `opencode run` has no headless mode) must never be selected
+   * for a headless run, even when its session marker or config rung would
+   * otherwise match. False when the caller declares "visible" or declares
+   * nothing (the conversation-first default keeps existing behavior).
+   */
+  headless: boolean;
   inVSCode: boolean;
   insideOpenCode: boolean;
   insideClaudeCode: boolean;
@@ -92,6 +101,7 @@ function getAutoProviderContext(
   sessionConfig: SessionConfig,
   env: NodeJS.ProcessEnv,
   lookupCommand: (command: string) => boolean,
+  uiMode?: "visible" | "headless",
 ): AutoProviderContext {
   // Self-spawn signals come from the single-sourced guard so the auto-resolver
   // and Gate-0 discovery agree byte-for-byte on what "inside an active session"
@@ -108,6 +118,7 @@ function getAutoProviderContext(
   const insideAgy = isSelfSpawnBlocked("agy", env);
   const agyCommand = sessionConfig.agy?.command ?? "agy";
   return {
+    headless: uiMode === "headless",
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
     insideClaudeCode,
@@ -170,8 +181,11 @@ interface ProviderPriorityRule {
 const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   {
     name: "opencode",
-    comment: "Running inside an opencode session: use it directly.",
-    predicate: (ctx) => ctx.insideOpenCode,
+    comment:
+      "Running inside an opencode session: use it directly. Headless runs skip " +
+      "this rung (INV-SCC-01): OpenCodeProvider's PB-1 guard deterministically " +
+      "rejects headless launches, so selecting it would be a guaranteed throw.",
+    predicate: (ctx) => ctx.insideOpenCode && !ctx.headless,
   },
   {
     name: "codex",
@@ -217,8 +231,11 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   },
   {
     name: "opencode",
-    comment: "Config-gated: operator explicitly configured opencode and it is available.",
-    predicate: (ctx) => ctx.hasOpenCodeConfig && ctx.opencodeAvailable,
+    comment:
+      "Config-gated: operator explicitly configured opencode and it is available. " +
+      "Headless runs skip this rung too (INV-SCC-01, same PB-1 rationale) and " +
+      "fall through to a headless-capable backend or worker-command.",
+    predicate: (ctx) => ctx.hasOpenCodeConfig && ctx.opencodeAvailable && !ctx.headless,
   },
   {
     name: "codex",
@@ -288,6 +305,14 @@ export function resolveFreshSessionProviderName(
   options: {
     env?: NodeJS.ProcessEnv;
     commandExists?: (command: string) => boolean;
+    /**
+     * The launch mode the resolved provider will serve. Declaring "headless"
+     * excludes providers whose headless launch deterministically fails
+     * (opencode, PB-1) from auto-resolution (INV-SCC-01). Omitted = the
+     * conversation-first visible default; explicitly-named providers always
+     * pass through verbatim regardless.
+     */
+    uiMode?: "visible" | "headless";
   } = {},
 ): ResolvedProviderName {
   const requestedProvider =
@@ -299,7 +324,7 @@ export function resolveFreshSessionProviderName(
   const env = options.env ?? process.env;
   const lookupCommand = options.commandExists ?? commandExists;
   return chooseAutoProvider(
-    getAutoProviderContext(sessionConfig, env, lookupCommand),
+    getAutoProviderContext(sessionConfig, env, lookupCommand, options.uiMode),
   );
 }
 

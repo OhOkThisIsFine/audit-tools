@@ -164,3 +164,27 @@ test("contextCapTokens: null (unknown) is absent from allocation and summary whe
   const summaries = summarizeDispatchCapacityPools(capacity);
   expect(summaries[0].context_cap_tokens).toBeUndefined();
 });
+
+test("INV-SCC-02 (COR-9a7a9790): all-oversized pending work still yields a structural capacity (total_slots >= 1, defined primary, binding-cap attribution)", () => {
+  // Pending work is NON-empty but every packet (+ agentic harness overhead)
+  // exceeds every pool's declared context cap, so the U2 fit-gate skips every
+  // pool. The capacity contract over non-empty pools[] must still hold
+  // structurally — a defined primary allocation, total_slots >= 1, and a
+  // binding-cap attribution — never an empty-allocation crash or an undefined
+  // primary the callers (.primary.schedule dereferences) would trip over. The
+  // oversized packets then surface reactively at dispatch (packet_too_large).
+  const capacity = computeDispatchCapacity({
+    pools: [
+      hostPool("small-a", { hostConcurrencyLimit: hostLimit(4), contextCapTokens: 16000 }),
+      hostPool("small-b", { hostConcurrencyLimit: hostLimit(4), contextCapTokens: 20000 }),
+    ],
+    sessionConfig: {},
+    // 50k + 15k overhead > both caps → zero fitting items in every pool.
+    pendingItemTokens: [50000, 60000],
+  });
+  expect(capacity.total_slots).toBeGreaterThanOrEqual(1);
+  expect(capacity.pools.length).toBeGreaterThanOrEqual(1);
+  expect(capacity.primary, "primary allocation must be defined").toBeTruthy();
+  expect(capacity.primary.schedule, "primary.schedule must be dereferenceable").toBeTruthy();
+  expect(typeof capacity.binding_cap).toBe("string");
+});

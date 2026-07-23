@@ -332,6 +332,28 @@ export async function driveRolling<TItem, TPayload>(
       for (const poolId of dispatcher.getState().exhaustedPoolIds) exhausted.add(poolId);
     }
     out.levels.push({ nodeIds: nodes.map((n) => n.block_id), results: levelResults });
+
+    // INV-SCC-06 (COR-74f8e4cd): a partial terminal (quota_paused / empty_pool)
+    // from this level's sub-waves HALTS level advance. Later levels depend on this
+    // level's outputs, which never fully landed — dispatching them would violate
+    // the dependency contract and burn attempts on a known-dead/paused pool (and
+    // `rebuildBetweenLevels` must not run either). Same-level sub-waves are peers
+    // (no dependency between them), so the halt applies only at the level
+    // boundary — which is also what keeps the cross-sub-wave terminal merge
+    // meaningful. The undispatched later-level items are folded into the
+    // terminal's stranded_ids so no node is silently dropped from the resume set.
+    if (terminal) {
+      const undispatched = config.levels
+        .slice(levelIndex + 1)
+        .flatMap((laterLevel) => laterLevel.map((item) => config.toNode(item).block_id));
+      if (undispatched.length > 0) {
+        terminal = {
+          ...terminal,
+          stranded_ids: [...new Set([...terminal.stranded_ids, ...undispatched])],
+        };
+      }
+      break;
+    }
   }
 
   out.terminal = terminal;

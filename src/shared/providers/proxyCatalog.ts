@@ -26,6 +26,14 @@ export const PROXY_CATALOG_FILENAME = "catalog-cache.json";
 /** Top-K models expanded per backend provider when the operator declares no `top_k`. */
 export const DEFAULT_PROXY_TOP_K = 3;
 
+/**
+ * USD-per-token → USD-per-million-tokens conversion factor. LiteLLM
+ * `/model/info` advertises `input_cost_per_token` / `output_cost_per_token`
+ * per TOKEN; the `cost_per_mtok` source field is per MILLION tokens
+ * (INV-SCC-03 unit discipline).
+ */
+const PER_TOKEN_TO_PER_MTOK = 1_000_000;
+
 /** Timeout (ms) for populate-time model verification probes. */
 export const POPULATE_PROBE_TIMEOUT_MS = 3000;
 
@@ -568,14 +576,24 @@ export async function populateProxyCatalog(
       provider = "proxy";
     }
 
-    // Cost blend: mean of input/output $/Mtok when both present; otherwise the one present.
-    const availableCosts = [];
-    if (advert?.input_cost_per_token !== undefined) availableCosts.push(advert.input_cost_per_token);
-    if (advert?.output_cost_per_token !== undefined) availableCosts.push(advert.output_cost_per_token);
+    // Cost blend: mean of input/output when both present; otherwise the one
+    // present. UNIT DISCIPLINE (INV-SCC-03 / COR-6c1ad0ba): the advert fields
+    // (`input_cost_per_token` / `output_cost_per_token`, LiteLLM /model/info
+    // convention) are USD per TOKEN; `cost_per_mtok`'s contract is USD per
+    // MILLION tokens, so the blend converts ×1e6. Writing the per-token value
+    // straight through underprices every proxied lane 1,000,000x and lets it
+    // incorrectly dominate cost-first routing.
+    const availableCosts: number[] = [];
+    if (advert?.input_cost_per_token !== undefined) {
+      availableCosts.push(advert.input_cost_per_token * PER_TOKEN_TO_PER_MTOK);
+    }
+    if (advert?.output_cost_per_token !== undefined) {
+      availableCosts.push(advert.output_cost_per_token * PER_TOKEN_TO_PER_MTOK);
+    }
 
     let costPerMtok: number | undefined;
     if (availableCosts.length === 2) {
-      costPerMtok = (availableCosts[0] + availableCosts[1]) / 2;
+      costPerMtok = (availableCosts[0]! + availableCosts[1]!) / 2;
     } else if (availableCosts.length === 1) {
       costPerMtok = availableCosts[0];
     }
