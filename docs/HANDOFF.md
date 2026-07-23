@@ -7,7 +7,16 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.22 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.23 (2026-07-23) shipped the
+  **worker-kind × pool-class compatibility rule** — operator-declared `burst_limited` on sources +
+  the proxy block; ONE predicate (`laneWorkerKindConflict`) refuses agentic lanes on burst-limited
+  backends per-lane with reasons (`resolveAmbientSources` + the `collectDispatchableSources`
+  chokepoint); `deriveWorkerKind` fixed-kind transports are now override-proof (a `single_shot`
+  label on a `claude-worker` lane no longer bypasses safety — AGY review catch); LiteLLM config
+  gained same-tier `router_settings.fallbacks`; the live declaration now rides NIM single-shot
+  only. Mechanism + review record (AGY caught the override bypass + one-way stamp; NIM/nemotron
+  zero refutations; Codex quota-walled): `docs/reviews/worker-kind-pool-class-rule-2026-07-23.md`.
+  v0.34.22 (2026-07-23) shipped the
   **dispatch-legibility mechanistic trace** — full constraint-outcome explain records on every
   host grant/refusal (constraints + binding row + attempts trail; `resource_keys[]` on leases),
   `planned` explains on plan-only grants (closes the 144-granted-empty-explains path), and the
@@ -160,10 +169,12 @@ node-context clobber tier, the **zero-spill capability-floor HIGH** (v0.34.20), 
 and the **dispatch-legibility mechanistic trace** (v0.34.22 — full constraint-outcome explain
 records on every host grant/refusal, `planned` explains closing the 144-granted-empty-explains
 path, engine decision log `dispatch-explains.jsonl` with per-pool strand why-nots; mechanism
-record: [`dispatch-legibility-trace-2026-07-23.md`](reviews/dispatch-legibility-trace-2026-07-23.md)).
-Remaining in the tier (older, still open): NIM single-shot-only routing (worker-kind ×
-pool-class compatibility), abnormal-exit no-step-contract, and the paused-pool wait-tick LEAD
-the zero-spill fix surfaced.
+record: [`dispatch-legibility-trace-2026-07-23.md`](reviews/dispatch-legibility-trace-2026-07-23.md)),
+and the **worker-kind × pool-class rule** (v0.34.23 — agentic lanes refused on declared
+burst-limited backends; mechanism record:
+[`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)).
+Remaining in the tier (older, still open): abnormal-exit no-step-contract, and the paused-pool
+wait-tick LEAD the zero-spill fix surfaced.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
