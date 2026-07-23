@@ -1401,6 +1401,12 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Durable traps (environment / tooling reference)
 
+- **A new `docs/**/*.md` fails only in RELEASE CI — the local ship preflight omits
+  `check:doc-manifest` (2026-07-23, cost one burned release v0.34.17).** The doc-manifest gate lives
+  in `verify:checks` (CI `gate` job) but the ship skill's fast local preflight (build/check/changed
+  tests/smokes) doesn't include it, so an unregistered dated review doc rides to CI and fails the
+  publish. Fix: add `node scripts/check-doc-manifest.mjs` (0.1s) to the ship skill's preflight list —
+  it's near-free and catches the class locally.
 - **agy headless (`--print`) auto-denies its shell tool — recon prompts silently produce no output
   (2026-07-23).** `agy --sandbox --print "<recon>"` exited 0 with only "jetski: no output produced — a
   tool required the 'command' permission that headless mode cannot prompt for". Headless runs need

@@ -7,15 +7,17 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.16 (2026-07-23) landed the COMPLETE
-  remediate dogfood run — 8/8 nodes of the 78-finding high slice, every fix red-green validated,
-  merged with both mid-run main-side fixes preserved; 7,076/0 on the merged tree. v0.34.13–15
-  (2026-07-22, same lap) shipped the implement-dispatch defect cluster + anti-cascade retry
-  (mechanisms: `docs/reviews/implement-dispatch-cluster-mechanisms-2026-07-22.md`), the agentic
-  slot-cost model, and the worktree un-landed-work guard. **The full audit→remediate pipeline has
-  now executed end-to-end on a real 78-finding slice** — the "redesign before scheduled autonomy"
-  gate has its first complete evidence run (completion record:
-  `docs/reviews/remediate-dogfood-completion-2026-07-23.md`).
+- **Current version = `package.json`** (authoritative). v0.34.18 (2026-07-23) shipped the
+  accept-latch family fix (failed accepts record `accept_failed`, never latch accepted; no-change
+  closures ancestry-adjudicated; mechanism record:
+  `docs/reviews/accept-latch-family-mechanisms-2026-07-23.md`; the v0.34.17 tag was burned on a
+  doc-manifest gate miss and deleted). v0.34.16 (2026-07-23) landed the COMPLETE remediate dogfood
+  run — 8/8 nodes of the 78-finding high slice, every fix red-green validated; 7,076/0 on the
+  merged tree. v0.34.13–15 (2026-07-22, same lap) shipped the implement-dispatch defect cluster +
+  anti-cascade retry, the agentic slot-cost model, and the worktree un-landed-work guard. **The
+  full audit→remediate pipeline has now executed end-to-end on a real 78-finding slice** — the
+  "redesign before scheduled autonomy" gate has its first complete evidence run (completion
+  record: `docs/reviews/remediate-dogfood-completion-2026-07-23.md`).
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
