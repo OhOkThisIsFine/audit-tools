@@ -7,11 +7,14 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.8 (2026-07-22) shipped the
-  completion-livelock fix (owner-scoped claim release + no_progress rounds). v0.34.7 (same day)
-  landed the re-dogfood merge queue (vitest false-green gate, admission-explain Infinity
-  round-trip, quarantine-loudly) and the promoted self-audit deliverables; the 2026-07-22 friction
-  record is triaged into per-item backlog entries.
+- **Current version = `package.json`** (authoritative). v0.34.13 (2026-07-22) shipped the
+  implement-dispatch defect cluster + anti-cascade retry (handshake persisted at the
+  decideNextStep seam; structural-refusal honest pause; refusal-carrying dispositions;
+  single-finding FILE-partition split; transient bounded retry + empty-scope boundary guard —
+  mechanisms record: `docs/reviews/implement-dispatch-cluster-mechanisms-2026-07-22.md`; the
+  v0.34.12 tag was deleted after its CI caught two unregistered-doc/id-glossary misses, fixed and
+  forward-bumped). v0.34.8–v0.34.11 (same day) shipped the completion-livelock fix, charter
+  provenance churn fix, CLI-worker write-scope snapshot, and the control-byte release gate.
 - **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
   runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
@@ -102,22 +105,18 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Fix the remediate implement-dispatch defect cluster, then RESUME the paused dogfood run.**
-The `/remediate-code` dogfood RAN 2026-07-22 (record:
-[`remediate-dogfood-2026-07-22.md`](reviews/remediate-dogfood-2026-07-22.md)): the full contract
-pipeline CONVERGED on the 78-finding high slice (8 contracts through 3 critique + 2 repair
-rounds, 147/147 obligations satisfied, 139-spec test plan, validated 8-node DAG) and then hit a
-hard wall at the FIRST implement wave — the clean repro the backlog's **never-dispatched
-anti-cascade** entry was gated on, now mechanism-complete there (92.7k packet vs 32k capability
-floor → `no_capable_pool` → disposition misreport → INV-RS-01 subtree strand; handshake flags not
-threaded into the remediate implement path; oversized node never split). The run is PAUSED at
-`collect_triage`, resumable — fix the cluster, resume (retry all 8), do NOT re-launch. Earlier
-same day: v0.34.8 (claim-release livelock), v0.34.9 (charter provenance churn + content-verified
-carry-forward), v0.34.10 (CLI-worker write-scope snapshot) all shipped. Next tier (specced in
-backlog *Open bugs*): zero-spill wave pool-build/fit gap, dispatch-legibility mechanistic trace,
-intent-checkpoint gate wiring + charter phantom-staleness (design together), NIM single-shot-only
-routing, abnormal-exit no-step-contract. Audit-run records:
-[`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
+**1. DRIVE the resumed dogfood run to completion.** The implement-dispatch cluster is FIXED and
+SHIPPED (v0.34.13, 2026-07-22) and the paused run was RESUMED the same session: triage retry of
+all 8 nodes processed, capability now resolves to the host's real window
+(`claude-fable-5`/200k, was 32k/`model:null`), and CP-BLOCK-CP-NODE-7 (the wall node) was
+ADMITTED (152.6k packet) and dispatched to a host worker subagent. Every backlog live-run watch
+item for the cluster passed at re-dispatch. Remaining: drive the rolling loop (accept-node per
+completion → merge → next-step; INV-RS-01 unlocks the 7 dependents as CP-NODE-7 lands), then
+close/report. The run record (`remediate-dogfood-2026-07-22.md`) carries the resume protocol.
+Next tier (specced in backlog *Open bugs*): zero-spill wave pool-build/fit gap,
+dispatch-legibility mechanistic trace, intent-checkpoint gate wiring + charter phantom-staleness
+(design together), NIM single-shot-only routing, abnormal-exit no-step-contract. Audit-run
+records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
 [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
 `.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
 
