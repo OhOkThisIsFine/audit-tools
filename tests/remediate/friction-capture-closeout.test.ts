@@ -345,18 +345,13 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(record.frictions.some((f) => (f as { id: string }).id === "evt-x")).toBe(true);
   });
 
-  // ESCALATED PRODUCTION DEFECT (friction close-out double-sanitize) —
-  // expected-fail until the owning node fixes src/shared/friction/triage.ts
-  // (lines ~391 and ~446 at v0.34.10): `frictionCapturePath(artifactsDir,
-  // sanitizeRunId(runId))` sanitizes an input that frictionCapturePath ALREADY
-  // sanitizes. Because the encoding escapes `_`, double-encoding yields a
-  // DIFFERENT filename (`/` → `_2f` → `_5f2f`), so for any run id the encoder
-  // actually changes, the triage/close-out reads-writes a DIFFERENT record file
-  // than capture — captured events are invisible to the close-out (false-clean
-  // walk). Invisible on ids that sanitize to themselves, which is what every
-  // pre-existing test used. `it.fails` flips loudly when the fix lands; remove
-  // the marker then.
-  it.fails("PATH-HANDLING: the close-out decider joins the SAME record file capture wrote (non-idempotent run id)", async () => {
+  // INV-SCC-04 (COR-6fd1702f) regression pin: triage/close-out must pass the
+  // RAW run id — `frictionCapturePath` already sanitizes, and the encoding
+  // escapes `_`, so a pre-sanitized input double-encodes (`/` → `_2f` → `_5f2f`)
+  // and the close-out reads/writes a DIFFERENT record file than capture wrote —
+  // captured events invisible to the close-out (false-clean walk). Invisible on
+  // ids that sanitize to themselves, hence the non-idempotent id here.
+  it("PATH-HANDLING: the close-out decider joins the SAME record file capture wrote (non-idempotent run id)", async () => {
     const artifactsDir = join(TEST_DIR, "audit");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "AUDIT/RUN:2026 07_22";
