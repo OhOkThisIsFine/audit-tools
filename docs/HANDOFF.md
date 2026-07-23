@@ -102,19 +102,21 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Launch the `/remediate-code` dogfood on the audit findings — all three HIGH re-dogfood fixes
-are SHIPPED.** v0.34.8: claim-release/zero-grant completion livelock (`releaseOwned` + `no_progress`
-rounds + salvage fold). v0.34.9: charter provenance churn + content-verified metadata
-carry-forward (the entry's stated mechanism was refuted; the real defects fixed). v0.34.10:
-CLI-worker write-scope via the disposable review-snapshot worktree (residuals documented in the
-backlog entry). The remediate dogfood was the gate behind write-scope: run it from the primary
-`main` checkout with current global bins, scoped to a diagnosable slice (the 78 high-severity
-findings, or one theme) rather than all 1480; the planning gates (review-necessity tiering,
-ambiguity batching) are themselves under test, and stale findings (the fixed livelock family) are
-deliberate verification bait. Next tier after that (all specced in backlog *Open bugs*):
-zero-spill wave pool-build/fit gap, dispatch-legibility mechanistic trace (owner-set goal; pairs
-with zero-spill), intent-checkpoint gate wiring + charter phantom-staleness (design together), NIM
-single-shot-only routing, abnormal-exit no-step-contract. Run records:
+**1. Fix the remediate implement-dispatch defect cluster, then RESUME the paused dogfood run.**
+The `/remediate-code` dogfood RAN 2026-07-22 (record:
+[`remediate-dogfood-2026-07-22.md`](reviews/remediate-dogfood-2026-07-22.md)): the full contract
+pipeline CONVERGED on the 78-finding high slice (8 contracts through 3 critique + 2 repair
+rounds, 147/147 obligations satisfied, 139-spec test plan, validated 8-node DAG) and then hit a
+hard wall at the FIRST implement wave — the clean repro the backlog's **never-dispatched
+anti-cascade** entry was gated on, now mechanism-complete there (92.7k packet vs 32k capability
+floor → `no_capable_pool` → disposition misreport → INV-RS-01 subtree strand; handshake flags not
+threaded into the remediate implement path; oversized node never split). The run is PAUSED at
+`collect_triage`, resumable — fix the cluster, resume (retry all 8), do NOT re-launch. Earlier
+same day: v0.34.8 (claim-release livelock), v0.34.9 (charter provenance churn + content-verified
+carry-forward), v0.34.10 (CLI-worker write-scope snapshot) all shipped. Next tier (specced in
+backlog *Open bugs*): zero-spill wave pool-build/fit gap, dispatch-legibility mechanistic trace,
+intent-checkpoint gate wiring + charter phantom-staleness (design together), NIM single-shot-only
+routing, abnormal-exit no-step-contract. Audit-run records:
 [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md),
 [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md); deliverables at
 `.audit-tools/audit-findings.json` (1480 findings, 78 high) + `.audit-tools/audit-report.md`.
