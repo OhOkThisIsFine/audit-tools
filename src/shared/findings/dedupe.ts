@@ -135,8 +135,11 @@ export interface CrossLensDedupePolicy {
   /** Sort a survivor's affected_files after each absorb (audit). */
   sortAffectedFiles: boolean;
   /**
-   * Stop the inner scan once the i-slot finding is itself absorbed (remediate) —
-   * there is no point comparing an absorbed finding with more candidates.
+   * Stop the inner scan immediately when the i-slot finding is itself absorbed
+   * (remediate). This is an OPTIMIZATION knob only: correctness never depends on
+   * it — an absorbed finding is unconditionally excluded from every subsequent
+   * pairwise comparison in both loops (conservation: once removed, a finding can
+   * neither absorb nor be re-emitted).
    */
   breakOnAbsorbedSurvivor: boolean;
   /** Called for each merge (remediate emits a structured audit log). */
@@ -171,14 +174,19 @@ export function crossLensDedupe(
     else groups.set(key, [finding]);
   }
 
+  /**
+   * Removal and clone bookkeeping are BOTH keyed by the caller's ORIGINAL Finding
+   * objects (group slots are never rewritten): `removed` holds absorbed originals,
+   * and `cloneOf` maps each original survivor to its single canonical clone (clone
+   * mode only). Keying by originals is what guarantees conservation — the final
+   * filter over `findings` sees exactly the objects the loop marked, so a finding
+   * is emitted exactly once XOR recorded in `mergeMap`, never both, never neither.
+   */
   const removed = new Set<Finding>();
   const mergeMap = new Map<string, string>();
-  /**
-   * Maps each source survivor to its cloned merged copy (clone mode only), so the
-   * caller's original Finding objects are never mutated and repeated merges into the
-   * same survivor accumulate on one clone.
-   */
   const cloneOf = new Map<Finding, Finding>();
+  /** The accumulated view of a finding: its canonical clone when one exists. */
+  const canonical = (f: Finding): Finding => cloneOf.get(f) ?? f;
   const absorbOpts: AbsorbOptions = {
     mergeGrounding: policy.mergeGrounding,
     sortAffectedFiles: policy.sortAffectedFiles,
@@ -189,9 +197,17 @@ export function crossLensDedupe(
     for (let i = 0; i < group.length; i++) {
       if (removed.has(group[i])) continue;
       for (let j = i + 1; j < group.length; j++) {
+        // The i-slot finding may have been absorbed mid-scan (!keepA below): an
+        // absorbed finding never acts as a survivor, so every remaining (i, j)
+        // pair is dead — stop unconditionally (not policy-gated; conservation).
+        if (removed.has(group[i])) break;
         if (removed.has(group[j])) continue;
-        const a = group[i];
-        const b = group[j];
+        const originalA = group[i];
+        const originalB = group[j];
+        // Compare the CANONICAL views: in clone mode a prior merge's accumulation
+        // lives on the survivor's single clone, never on the caller's object.
+        const a = canonical(originalA);
+        const b = canonical(originalB);
         if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
 
         const catMatch = normalizeText(a.category) === normalizeText(b.category);
@@ -216,29 +232,35 @@ export function crossLensDedupe(
         const aConf = confidenceRank(a.confidence);
         const bConf = confidenceRank(b.confidence);
         const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
-        const originalSurvivor = keepA ? a : b;
+        const survivorOriginal = keepA ? originalA : originalB;
+        const absorbedOriginal = keepA ? originalB : originalA;
+        // Absorb the absorbed side's ACCUMULATED view so data it absorbed earlier
+        // travels to the new survivor instead of being stranded (no loss).
         const absorbed = keepA ? b : a;
 
         let survivor: Finding;
         if (policy.survivorMutation === "clone") {
-          survivor =
-            cloneOf.get(originalSurvivor) ?? {
-              ...originalSurvivor,
-              affected_files: [...originalSurvivor.affected_files],
-              evidence: originalSurvivor.evidence ? [...originalSurvivor.evidence] : [],
+          // Exactly ONE canonical clone per original survivor: every subsequent
+          // merge into this survivor mutates the SAME clone (a first-time survivor
+          // cannot already carry foreign data, so cloning the original is exact).
+          const existing = cloneOf.get(survivorOriginal);
+          if (existing) {
+            survivor = existing;
+          } else {
+            survivor = {
+              ...survivorOriginal,
+              affected_files: [...survivorOriginal.affected_files],
+              evidence: survivorOriginal.evidence ? [...survivorOriginal.evidence] : [],
             };
-          if (!cloneOf.has(originalSurvivor)) {
-            cloneOf.set(originalSurvivor, survivor);
-            // Point the group slot at the clone so future pairs refer to it.
-            group[keepA ? i : j] = survivor;
+            cloneOf.set(survivorOriginal, survivor);
           }
         } else {
-          survivor = originalSurvivor;
+          survivor = survivorOriginal;
         }
 
         absorbFinding(survivor, absorbed, absorbOpts);
-        removed.add(absorbed);
-        mergeMap.set(absorbed.id, survivor.id);
+        removed.add(absorbedOriginal);
+        mergeMap.set(absorbedOriginal.id, survivor.id);
         policy.onMerge?.({ absorbed, survivor });
         // If the i-slot finding was just absorbed (!keepA), stop the inner loop.
         if (policy.breakOnAbsorbedSurvivor && !keepA) break;
@@ -246,8 +268,22 @@ export function crossLensDedupe(
     }
   }
 
+  // Collapse merge chains (B→A recorded before A→C): every mergeMap value must be
+  // the id of a finding present in the returned array, so follow each chain to its
+  // final (non-absorbed) survivor. The visited guard makes a malformed id cycle
+  // (duplicate caller-supplied ids) terminate instead of spinning.
+  for (const [absorbedId, survivorId] of mergeMap) {
+    let target = survivorId;
+    const visited = new Set([absorbedId]);
+    while (mergeMap.has(target) && !visited.has(target)) {
+      visited.add(target);
+      target = mergeMap.get(target)!;
+    }
+    if (target !== survivorId) mergeMap.set(absorbedId, target);
+  }
+
   return {
-    findings: findings.filter((f) => !removed.has(f)).map((f) => cloneOf.get(f) ?? f),
+    findings: findings.filter((f) => !removed.has(f)).map((f) => canonical(f)),
     mergeMap,
   };
 }
