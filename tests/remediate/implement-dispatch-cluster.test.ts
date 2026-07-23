@@ -299,6 +299,122 @@ describe("FIX-A-MERGE — never-dispatched disposition carries the admission ref
   });
 });
 
+describe("FIX-C-SPLIT — oversized single-finding block splits by file partition (INV-RSM-SPLIT-01)", () => {
+  async function writeSizedFiles(names: string[], bytes: number): Promise<void> {
+    for (const name of names) {
+      await mkdir(dirname(join(REPO_DIR, name)), { recursive: true });
+      await writeFile(join(REPO_DIR, name), "x".repeat(bytes));
+    }
+  }
+
+  function makeOversizedBlock(): { finding: Finding; block: RemediationBlock } {
+    const finding = {
+      ...makeNodeFinding(),
+      id: "CP-NODE-7",
+      affected_files: [{ path: "src/a.ts" }, { path: "src/b.ts" }, { path: "src/c.ts" }],
+    } as Finding;
+    const block: RemediationBlock = {
+      block_id: "CP-BLOCK-CP-NODE-7",
+      items: [finding.id],
+      parallel_safe: true,
+      touched_files: ["src/a.ts", "src/b.ts", "src/c.ts"],
+      targeted_commands: ["npx vitest run src/a.ts", "npm run check"],
+      phase_ordinal: 2,
+    };
+    return { finding, block };
+  }
+
+  it("partitions the finding's files into budgeted sub-findings/sub-blocks, carrying metadata per field semantics", async () => {
+    const { splitOversizedSingleFindingBlocks } = await import(
+      "../../src/remediate/phases/plan.js"
+    );
+    // 3 files × 40k bytes ≈ 10k tokens each; budget 13k fits exactly one per group.
+    await writeSizedFiles(["src/a.ts", "src/b.ts", "src/c.ts"], 40_000);
+    const { finding, block } = makeOversizedBlock();
+    const downstream: RemediationBlock = {
+      block_id: "CP-BLOCK-DOWNSTREAM",
+      items: ["D-1"],
+      parallel_safe: false,
+      touched_files: ["src/d.ts"],
+      dependencies: ["CP-BLOCK-CP-NODE-7"],
+    };
+
+    const result = splitOversizedSingleFindingBlocks(
+      [block, downstream],
+      [finding, { ...makeNodeFinding(), id: "D-1" } as Finding],
+      REPO_DIR,
+      13_000,
+    );
+
+    const subBlocks = result.blocks.filter((b) =>
+      b.block_id.startsWith("CP-BLOCK-CP-NODE-7-f"),
+    );
+    expect(subBlocks).toHaveLength(3);
+    // The parent block and finding are replaced, not retained.
+    expect(result.blocks.some((b) => b.block_id === "CP-BLOCK-CP-NODE-7")).toBe(false);
+    expect(result.findings.some((f) => f.id === "CP-NODE-7")).toBe(false);
+    // Sub-findings partition the parent's files: disjoint, union-complete.
+    const subFindings = result.findings.filter((f) => f.id.startsWith("CP-NODE-7-f"));
+    const allPaths = subFindings.flatMap((f) => f.affected_files.map((af) => af.path));
+    expect([...allPaths].sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+    expect(new Set(allPaths).size).toBe(allPaths.length);
+    // phase_ordinal is a barrier: carried UNCHANGED onto every sub-block.
+    for (const sb of subBlocks) expect(sb.phase_ordinal).toBe(2);
+    // Command relevance: the file-specific command rides only with src/a.ts's
+    // sub-block; the generic command rides with every sub-block (no silent drop).
+    const aSub = subBlocks.find((b) => b.touched_files.includes("src/a.ts"))!;
+    expect(aSub.targeted_commands).toContain("npx vitest run src/a.ts");
+    for (const sb of subBlocks) expect(sb.targeted_commands).toContain("npm run check");
+    for (const sb of subBlocks.filter((b) => b !== aSub)) {
+      expect(sb.targeted_commands).not.toContain("npx vitest run src/a.ts");
+    }
+    // Downstream dependency remapped to ALL sub-blocks.
+    const remappedDownstream = result.blocks.find(
+      (b) => b.block_id === "CP-BLOCK-DOWNSTREAM",
+    )!;
+    expect([...(remappedDownstream.dependencies ?? [])].sort()).toEqual(
+      subBlocks.map((b) => b.block_id).sort(),
+    );
+  });
+
+  it("leaves a fitting single-finding block untouched", async () => {
+    const { splitOversizedSingleFindingBlocks } = await import(
+      "../../src/remediate/phases/plan.js"
+    );
+    await writeSizedFiles(["src/a.ts", "src/b.ts", "src/c.ts"], 1_000);
+    const { finding, block } = makeOversizedBlock();
+    const result = splitOversizedSingleFindingBlocks([block], [finding], REPO_DIR, 13_000);
+    expect(result.blocks).toEqual([block]);
+    expect(result.findings).toEqual([finding]);
+  });
+
+  it("a single file larger than the whole budget still yields its own sub-block (partition floor)", async () => {
+    const { splitOversizedSingleFindingBlocks } = await import(
+      "../../src/remediate/phases/plan.js"
+    );
+    await writeSizedFiles(["src/a.ts", "src/b.ts"], 1_000);
+    await writeSizedFiles(["src/huge.ts"], 200_000);
+    const finding = {
+      ...makeNodeFinding(),
+      id: "CP-NODE-8",
+      affected_files: [{ path: "src/a.ts" }, { path: "src/huge.ts" }, { path: "src/b.ts" }],
+    } as Finding;
+    const block: RemediationBlock = {
+      block_id: "CP-BLOCK-CP-NODE-8",
+      items: [finding.id],
+      parallel_safe: true,
+      touched_files: ["src/a.ts", "src/huge.ts", "src/b.ts"],
+    };
+    const result = splitOversizedSingleFindingBlocks([block], [finding], REPO_DIR, 13_000);
+    const subBlocks = result.blocks.filter((b) =>
+      b.block_id.startsWith("CP-BLOCK-CP-NODE-8-f"),
+    );
+    expect(subBlocks.length).toBeGreaterThanOrEqual(2);
+    const hugeSub = subBlocks.find((b) => b.touched_files.includes("src/huge.ts"))!;
+    expect(hugeSub.touched_files).toEqual(["src/huge.ts"]);
+  });
+});
+
 describe("Empty-scope dispatch-boundary guard (anti-cascade spec)", () => {
   it("refuses an empty-scope block at the boundary: never enqueued, items blocked with a named reason", async () => {
     const state = makeNodeState();

@@ -21,6 +21,7 @@ import {
   type SessionConfig,
 } from "audit-tools/shared";
 import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
+import { StateStore } from "../state/store.js";
 
 /**
  * Whether a parsed JSON value is a valid audit-findings report.
@@ -42,14 +43,6 @@ export {
   ESTIMATED_PROMPT_OVERHEAD_TOKENS as ESTIMATED_BLOCK_BASE_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS as ESTIMATED_FINDING_OVERHEAD_TOKENS,
 } from "audit-tools/shared";
-
-function resolveContextBudgetFromConfig(sessionConfig: SessionConfig | null): number {
-  const quota = sessionConfig?.block_quota ?? {};
-  return resolveContextBudget({
-    contextTokens: quota.context_tokens ?? null,
-    reservedOutputTokens: quota.reserved_output_tokens ?? null,
-  });
-}
 
 const PLAN_WALK_SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "coverage", "out", ".audit-tools",
@@ -207,6 +200,146 @@ function splitOversizedOverlapGroup(
     budget: contextBudget,
     costOf: (candidate) => estimateGroupTokens(candidate, findings, fileByteCounts, root),
   });
+}
+
+/**
+ * Split single-finding blocks whose ONE finding cites more files than fit the
+ * context budget (defect (c) of the 2026-07-22 implement-dispatch cluster).
+ *
+ * `splitBlocksByContextBudget` partitions at FINDING granularity, so a block
+ * holding a single finding is atomic to it no matter how oversized — exactly
+ * the shape the contract-pipeline promotion emits (one DAG node → one finding →
+ * one block; the dogfood wall packed 13 test-lens files ≈ 92.7k tokens into one
+ * such node). This pass runs FIRST and partitions the finding's own
+ * `affected_files` into token-budgeted sub-findings, each carried by its own
+ * sub-block, per INV-RSM-SPLIT-01 field semantics:
+ *  - `phase_ordinal` carried UNCHANGED onto every sub-block (it is a barrier);
+ *  - `targeted_commands` partitioned by relevance — a command naming one of a
+ *    sub-block's files goes to that sub-block; a command naming none of the
+ *    parent's files is generic and goes to EVERY sub-block; the union always
+ *    covers every pre-split command (no silent drop);
+ *  - downstream `dependencies` on the parent are rewritten to ALL sub-blocks;
+ *  - sub-findings inherit the parent's obligations/evidence, so obligation
+ *    joins and coverage are unaffected (ids are synthetic either way).
+ * A single file larger than the whole budget still gets its own sub-block —
+ * one file is the partition floor; admission then reports it honestly.
+ */
+export function splitOversizedSingleFindingBlocks(
+  blocks: RemediationBlock[],
+  findings: Finding[],
+  root: string,
+  contextBudget: number,
+): { blocks: RemediationBlock[]; findings: Finding[] } {
+  const findingMap = new Map(findings.map((f) => [f.id, f]));
+  const outBlocks: RemediationBlock[] = [];
+  const outFindings: Finding[] = [...findings];
+  const splitRemap = new Map<string, string[]>();
+
+  const groupCost = (
+    group: ReadonlyArray<{ path: string }>,
+    byteCounts: Map<string, number>,
+  ): number =>
+    ESTIMATED_PROMPT_OVERHEAD_TOKENS +
+    ESTIMATED_ITEM_OVERHEAD_TOKENS +
+    estimateTokensFromBytes(
+      group.reduce(
+        (sum, af) => sum + (byteCounts.get(canonicalizeFilePath(af.path, { root })) ?? 0),
+        0,
+      ),
+    );
+
+  for (const block of blocks) {
+    const finding =
+      block.items.length === 1 ? findingMap.get(block.items[0]!) : undefined;
+    const files = finding?.affected_files ?? [];
+    if (!finding || files.length <= 1) {
+      outBlocks.push(block);
+      continue;
+    }
+    const byteCounts = new Map<string, number>();
+    for (const af of files) {
+      const key = canonicalizeFilePath(af.path, { root });
+      if (!byteCounts.has(key)) byteCounts.set(key, fileSizeBytes(af.path, root));
+    }
+    if (groupCost(files, byteCounts) <= contextBudget) {
+      outBlocks.push(block);
+      continue;
+    }
+
+    const groups = chunkByBudget([...files], {
+      budget: contextBudget,
+      costOf: (candidate) => groupCost(candidate, byteCounts),
+    });
+    if (groups.length <= 1) {
+      outBlocks.push(block);
+      continue;
+    }
+
+    const parentPaths = new Set(files.map((af) => af.path));
+    const subBlockIds: string[] = [];
+    for (let i = 0; i < groups.length; i++) {
+      const suffix = `-f${String(i + 1).padStart(2, "0")}`;
+      const subFindingId = `${finding.id}${suffix}`;
+      const subBlockId = `${block.block_id}${suffix}`;
+      subBlockIds.push(subBlockId);
+
+      outFindings.push({
+        ...finding,
+        id: subFindingId,
+        title: `${finding.title} (part ${i + 1}/${groups.length})`,
+        affected_files: groups[i]!,
+      });
+
+      const groupPaths = new Set(groups[i]!.map((af) => af.path));
+      // Relevance partition: file-specific commands follow their file; commands
+      // naming NONE of the parent's files are generic → every sub-block.
+      const targetedCommands = (block.targeted_commands ?? []).filter((cmd) => {
+        const namesAny = [...parentPaths].some((p) => cmd.includes(p));
+        if (!namesAny) return true;
+        return [...groupPaths].some((p) => cmd.includes(p));
+      });
+
+      // Declared-surface partition: each sub-block keeps the parent surface
+      // entries its files cover; surface entries the finding does not cite
+      // (rare — promotion mirrors the citation set) ride on the FIRST sub-block
+      // only, so nothing is silently dropped and no path is double-declared
+      // across parallel siblings.
+      const surface = (block.touched_files ?? []).filter(
+        (p) => groupPaths.has(p) || (i === 0 && !parentPaths.has(p)),
+      );
+      outBlocks.push({
+        block_id: subBlockId,
+        items: [subFindingId],
+        parallel_safe: block.parallel_safe,
+        ...(block.dependencies !== undefined ? { dependencies: block.dependencies } : {}),
+        touched_files: surface,
+        ...(block.targeted_commands !== undefined
+          ? { targeted_commands: targetedCommands }
+          : {}),
+        ...(block.phase_ordinal !== undefined
+          ? { phase_ordinal: block.phase_ordinal }
+          : {}),
+        ...(block.cofile_parallel_safe !== undefined
+          ? { cofile_parallel_safe: block.cofile_parallel_safe }
+          : {}),
+      });
+    }
+    splitRemap.set(block.block_id, subBlockIds);
+    const idx = outFindings.findIndex((f) => f.id === finding.id);
+    if (idx >= 0) outFindings.splice(idx, 1);
+  }
+
+  // A block depending on a split block now depends on ALL its sub-blocks.
+  if (splitRemap.size > 0) {
+    for (const block of outBlocks) {
+      if (!block.dependencies || block.dependencies.length === 0) continue;
+      block.dependencies = [
+        ...new Set(block.dependencies.flatMap((dep) => splitRemap.get(dep) ?? [dep])),
+      ];
+    }
+  }
+
+  return { blocks: outBlocks, findings: outFindings };
 }
 
 export function splitBlocksByContextBudget(
@@ -527,23 +660,62 @@ export async function applyPlanPipeline(
   plan: RemediationPlan,
   options: { root: string; artifactsDir?: string },
 ): Promise<RemediationPlan> {
-  const { findings } = plan;
-  let { blocks } = plan;
+  let { findings, blocks } = plan;
 
   // Merge blocks whose findings touch a shared file.
   blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
 
-  // Split blocks that would exceed the implementation agent's context budget. The
-  // context budget derives from INTENT fields (block_quota), so the raw intent suffices.
+  // Split blocks that would exceed the implementation agent's context budget.
+  // The budget derives from INTENT fields (block_quota) first; absent those, the
+  // persisted host handshake (state.host_capabilities, written at the
+  // decideNextStep seam) supplies the real window — without it a 200k-window
+  // host would over-fragment (or, pre-fix, never split) against the blind 32k
+  // floor. The two split passes run single-finding first: an oversized
+  // single-finding block is atomic to the finding-granularity splitter, so it
+  // must be partitioned by FILE into sub-findings before the general pass runs.
   const intent = await readValidatedRepoSessionIntent(
     join(options.root, "session-config.json"),
   );
-  const contextBudget = resolveContextBudgetFromConfig(intent ?? null);
+  const contextBudget = await resolvePlanContextBudget(intent ?? null, options.artifactsDir);
+  const singleSplit = splitOversizedSingleFindingBlocks(
+    blocks,
+    findings,
+    options.root,
+    contextBudget,
+  );
+  blocks = singleSplit.blocks;
+  findings = singleSplit.findings;
   blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
 
   // Record baseline file hashes for the integrity check that runs before dispatch.
   snapshotAffectedFileHashes(options.root, findings);
 
-  return { ...plan, blocks };
+  return { ...plan, findings, blocks };
+}
+
+/**
+ * The plan-time context budget: intent `block_quota` fields first (operator
+ * intent outranks discovery), then the persisted host-capability handshake for
+ * any field the intent omits, then the shared conservative floor.
+ */
+async function resolvePlanContextBudget(
+  sessionConfig: SessionConfig | null,
+  artifactsDir?: string,
+): Promise<number> {
+  const quota = sessionConfig?.block_quota ?? {};
+  let contextTokens = quota.context_tokens ?? null;
+  let reservedOutputTokens = quota.reserved_output_tokens ?? null;
+  if ((contextTokens == null || reservedOutputTokens == null) && artifactsDir) {
+    try {
+      const caps = (await new StateStore(artifactsDir).loadState())?.host_capabilities;
+      const finite = (v: unknown): number | null =>
+        typeof v === "number" && Number.isFinite(v) ? v : null;
+      contextTokens ??= finite(caps?.context_tokens);
+      reservedOutputTokens ??= finite(caps?.output_tokens);
+    } catch {
+      /* unreadable state degrades to the floor, never throws at plan time */
+    }
+  }
+  return resolveContextBudget({ contextTokens, reservedOutputTokens });
 }
 
