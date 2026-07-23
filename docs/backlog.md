@@ -228,6 +228,11 @@ followed" is otherwise indistinguishable from a bug.
   Verify what timeout the openai-compatible provider lane sets before logging as a bug — if it
   shares undici defaults, a slow NIM model reads as a dead lane. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #5.
+  Fifth + sixth observations (2026-07-23, legibility lap): glm-5.2 died `UND_ERR_HEADERS_TIMEOUT`
+  TWICE in one session — once on a ~55KB recon payload and once on a **16KB** review payload,
+  while deepseek-v4-pro and nemotron answered comparable calls fine. The 16KB death weakens the
+  "payload size is the variable" framing: the glm-5.2 lane itself goes bimodal-slow independent of
+  size. Practical routing: on a glm headers-timeout, retry a DIFFERENT alias before trimming.
   Second live observation (2026-07-22 review dispatch): a minimax-m3 structured 8k-token call ran
   >12 minutes and then returned an empty/error body while nemotron answered the identical prompt in
   ~2 min — and glm-5.2/deepseek-v4-pro were hard-429'd at the same moment (third observation for
