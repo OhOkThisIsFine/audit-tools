@@ -829,60 +829,29 @@ followed" is otherwise indistinguishable from a bug.
 - **Provider tiering is per-provider, not per-model/effort — wrong granularity for multi-model backends (2026-07-13 audit-gate review).** The `capabilityTier` is pegged to the provider type (e.g., all claude-code → frontier, all codex → capable). A provider offering both frontier and fast models (e.g., openai-compatible with multiple models) assigns all its models the same tier. Fix: tier per `(provider, model, effort)` tuple, sourced from models.dev or declared config. [[per-model-tiering]]
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 - **Design (orchestrator-dispatch coupling): pool-agnostic claims + JIT quota reservation — spec'd, unbuilt (2026-07-13; promoted to concept spec 2026-07-16, forward-track).** Design of record: [`spec/dispatch-jit-claims.md`](../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at launch moment). Build remainder: the ClaimRegistry lock-split (drop `poolId` from claims), JIT reservation on the launch path, host-path convergence with the rolling engine. [[relax-dispatch-source-forcing]]
-- **⬇ CLEAN REPRO LANDED (remediate dogfood 2026-07-22) — the gating condition for this entry is
-  MET.** First implement wave of the high-severity-slice dogfood run
-  (`high-severity-self-audit-2026-07-22`): CP-BLOCK-CP-NODE-7 was in the dispatch plan but NO
-  worker was ever launched for it (no `CP-BLOCK-CP-NODE-7.task.json`), and INV-RS-01 then
-  terminal-blocked all seven dependent nodes — one un-dispatched node stranded the whole 8-node
-  run with "Last successful step: none" everywhere. **MECHANISM DIAGNOSED same-day from the run's
-  dispatch-quota.json explains[] (populated on the remediate path — the legibility record paying
-  off):** the packet cost 92,700 tokens against a resolved 32,000-token capability floor
-  (`model: null`, no host handshake on the bare CLI invocation) → admission refused every packet
-  (`no_capable_pool`), deterministic across retries. THREE component defects: (a) the node
-  DISPOSITION misreported the admission refusal as "worker did not produce a result file" — the
-  refusal reason sat unread in explains[] (false-signal family; the disposition writer must carry
-  the admission reason); (b) an absent host handshake degrades to the 32k floor as designed
-  ("fidelity degradation, never a block") — but an oversized node turns the floor into a hard,
-  silent BLOCK; the wall must be honest ("packet exceeds every capable window: cost X vs floor Y —
-  supply host capability or split the node"), and a floor-refused round must pause, not spin
-  triage; (c) the DAG packed all 13 test-lens files into one 92.7k node with no oversized-node
-  split at plan time ([[remediator-must-decompose-and-boundary-enforce]] — the split path
-  INV-RSM-SPLIT-01 governs exists but did not fire pre-dispatch). Retry-with-handshake
-  (`--host-context-tokens 200000` etc.) is the live workaround; the transient-vs-structural retry
-  split specced below is the durable fix, now buildable with this repro.
-  **Fourth component defect, confirmed on the handshake re-drive:** re-running next-step with the
-  full host handshake (`--host-can-dispatch-subagents --host-max-concurrent 4
-  --host-context-tokens 200000 --host-output-tokens 64000 --host-model-id claude-fable-5`) left
-  the implement wave's resolved capability UNCHANGED at the 32,000 floor (`dispatch-quota.json`
-  regenerated with the same `no_capable_pool` refusals) — the handshake flags are not threaded
-  into the remediate implement-dispatch capability resolution. Same class as the open G4 residue
-  ("descriptor capability fields reach dispatch hand-threaded through three audit CLI commands —
-  a parallel channel bypassing the one seam"): the remediate draw's implement path evidently
-  reads capability from neither the flags nor a persisted handshake. **Run left PAUSED at
-  `collect_triage` (resumable) — fix this cluster first, then resume the dogfood run rather than
-  re-launching.** (An earlier draft of this entry claimed the run dir was deleted mid-run — FALSE,
-  a stranded-shell relative-path artifact; the run dir is intact.)
-- **Never-dispatched anti-cascade retry (deferred, needs clean repro) [[synth-scopeless-nodes-doomed-run]].**
-  A planned-but-not-driven node (no `task.json` written before launch) still terminal-blocks its whole
-  downstream subtree (INV-RS-01) instead of retrying bounded-PENDING. Diagnosability (distinguishing
-  never-dispatched from dispatched-but-silent) shipped in `mergeImplementResults`; the termination-safe
-  retry did not — livelock risk needs a repro to validate before building it. Also still open: a
-  dispatch-boundary "no scope-less dispatch" guard (refuse to dispatch a node whose synth-derived scope
-  is empty, rather than relying solely on the synth-side fix that derives scope from module `file_scope`).
-  **SPEC — retry only what is TRANSIENTLY undispatchable; terminate what is STRUCTURALLY undispatchable.**
-  The livelock fear is real but it applies to exactly one of two cases, and conflating them is why the
-  retry stalled. A node that was not dispatched because no pool had capacity *at that moment* is transient
-  — conditions change, and retrying is correct. A node that fits no pool at all (its context exceeds every
-  available window, or its scope is empty so there is nothing to dispatch) is structural — conditions will
-  never change, and retrying it forever is the livelock.
-  So the retry is safe once the two are distinguished at the point of non-dispatch: record WHY a node was
-  not dispatched, retry the transient class with a bounded attempt count, and terminate the structural
-  class immediately with a named reason rather than letting it silently block its subtree. A bounded count
-  on the transient class caps the worst case even if a reason is misclassified.
-  **Property to hold:** a node never blocks its downstream subtree without a recorded reason, and no node
-  is retried against a condition that cannot change. The scope-less guard belongs at the dispatch
-  boundary for the same reason — refusing an empty-scope node there makes the structural case impossible
-  to enqueue rather than merely detectable afterwards.
+- **SHIPPED 2026-07-22 (v0.34.12, `929dfd18` + `f1c50dbc` + `842642a8`) — the implement-dispatch
+  defect cluster + anti-cascade retry.** The 2026-07-22 dogfood wall's four component defects and
+  the previously-deferred transient-vs-structural retry, all mechanism-verified against the paused
+  run's artifacts before fixing (full recon record:
+  `docs/reviews/implement-dispatch-cluster-mechanisms-2026-07-22.md`): (d) C1 handshake fold+persist
+  hoisted to the decideNextStep seam (every invocation persists `--host-*` flags into
+  `state.host_capabilities`; `prepareImplementDispatch` falls back to the persisted handshake, closing
+  the flagless parallel channel); (b) empty rolling frontier discriminates "all done" from "all
+  structurally refused" (`detectStructuralRefusalPause`) → honest `no_capable_pool` quota-paused
+  step, items stay PENDING; (a) never-dispatched dispositions carry the admission refusal (reason +
+  packet cost vs window) instead of the misattributed plan-vs-drive text; (c)
+  `splitOversizedSingleFindingBlocks` in `applyPlanPipeline` partitions an oversized single-finding
+  block's affected_files into sub-findings per INV-RSM-SPLIT-01 field semantics (single-finding
+  blocks were atomic to the finding-granularity splitter — the DAG-promotion shape), with the
+  plan-time budget consulting the persisted handshake; retry: transient refusals
+  (budget/cap/uncalibrated) leave items PENDING bounded by `undispatched_attempts` (cap 3, then a
+  named block — livelock-proof), structural refusals terminal immediately, and an empty-scope guard
+  refuses at the dispatch boundary. Property held: no node blocks its subtree without a recorded
+  reason; nothing is retried against a condition that cannot change.
+  ⬇ Live-run watch (dogfood resume, retry all 8): the re-drive resolves capability to the host's
+  real window (not 32000/`model: null`); CP-BLOCK-CP-NODE-7 either fits or splits; no triage spin
+  on a structural refusal — a `quota_paused` fit-mismatch pause instead; dispositions name
+  admission refusals if any occur.
 - **`tests/audit/linux-cycle-regression.test.mjs` + `tests/shared/quota-state.test.mjs` fail under full parallel suite load, pass alone AND co-run with unrelated new tests (2026-07-22, tool-should-decide, low).** Same class as the rollingDispatch flake below — load-dependent hermeticity/timing, observed once on the implement-dispatch-cluster lap (7066 passed alongside). De-flake per test-failure protocol when they recur; until then a full-suite "2 failed" naming exactly these two files is the known baseline.
 - **`tests/shared/rollingDispatch.test.mjs` is a genuine timing flake (2026-07-12, tool-should-decide, medium).**
   "second dispatch should start after first completes: expected 1 to be 2" — a wall-clock/ordering assertion
