@@ -378,6 +378,12 @@ async function writeMinimalState(
       findings.map((f) => [
         f.id,
         {
+          // INV-RSM-STATE-COMPLETE: persisted items carry their identity fields.
+          finding_id: f.id,
+          block_id:
+            blocks.find((b) => b.items.includes(f.id))?.block_id ??
+            blocks[0]?.block_id ??
+            "BLK-001",
           status: "pending",
           item_spec: {
             finding_id: f.id,

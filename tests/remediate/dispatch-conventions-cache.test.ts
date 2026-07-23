@@ -47,6 +47,7 @@ describe("detectRepoConventions cached once per root", () => {
     const blockId = "B-CONV-001";
     const state = makeState({
       plan: {
+        plan_id: "PLAN-CONV-001",
         findings: [
           {
             id: findingId,
@@ -127,6 +128,7 @@ describe("detectRepoConventions cached once per root", () => {
     const blockId = "B-CONV-003";
     const state = makeState({
       plan: {
+        plan_id: "PLAN-CONV-003",
         findings: [
           {
             id: findingId,

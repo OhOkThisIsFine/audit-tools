@@ -41,6 +41,8 @@ async function makeMinimalState(artifactsDir: string): Promise<void> {
   const state = {
     status: "implementing",
     plan: {
+      // INV-RSM-STATE-COMPLETE: an implementing state persists plan identity.
+      plan_id: "PLAN-INVALID-RESULT",
       findings: [finding],
       blocks: [
         {
@@ -52,6 +54,8 @@ async function makeMinimalState(artifactsDir: string): Promise<void> {
     },
     items: {
       [finding.id]: {
+        finding_id: finding.id,
+        block_id: BLOCK_ID,
         status: "pending",
         item_spec: {
           finding_id: finding.id,

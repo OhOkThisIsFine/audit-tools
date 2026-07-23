@@ -394,9 +394,12 @@ describe("Path-B planning review gate", () => {
     const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
 
     expect(step.step_kind).not.toBe("collect_review_approval");
-    // A Path-B decision record is written (distinct plan id from Path A).
+    // A Path-B decision record is written, correlated on the LIVE plan's own
+    // id (INV-RSM-RESOLUTION-CORRELATE) — the stable "path-b-review" constant
+    // was retired: with a constant id a stale cross-run resolution always
+    // correlated.
     const decision = JSON.parse(await readFile(decisionPath, "utf8"));
-    expect(decision.plan_id).toBe("path-b-review");
+    expect(decision.plan_id).toBe("PLAN-PATH-B");
     expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([ARCH_NODE]);
     // The declined node is a recorded terminal disposition, not a silent close.
     const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));

@@ -56,6 +56,7 @@ import {
   isVerifiedCompleteStatus,
   statusToDisposition,
 } from "../state/itemStatus.js";
+import { reconcileAcceptOutcomes } from "../steps/dispatch/acceptReconcile.js";
 
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
@@ -396,6 +397,23 @@ export interface ClosingResult {
   commands: ClosingCommandResult[];
   /** See `ClosingActionPreviewSchema.leftover_files` — same untouched-dirt set, at execute time. */
   leftover_files?: string[];
+}
+
+/**
+ * Whether a closing action genuinely COMPLETED (COR-fb656e3f): it succeeded, OR
+ * it was a skipped no-op (`action === "none"` — nothing was configured to do).
+ * A *skipped non-none* close did NOT complete — e.g. merge-to-base with no
+ * recorded base leaves the run unmerged and returns status "skipped"; treating
+ * that as green would pass the verification report and delete the (gitignored,
+ * unrecoverable) artifacts dir for a run that never landed. Single-sourced here
+ * so the verification trace, the report-level verdict, and the fully-green
+ * cleanup gate can never drift on the classification.
+ */
+export function closingActionCompleted(closingResult: ClosingResult): boolean {
+  return (
+    closingResult.status === "success" ||
+    (closingResult.status === "skipped" && closingResult.action === "none")
+  );
 }
 
 function trimOutput(value: unknown): string | undefined {
@@ -836,7 +854,7 @@ export function executeClosingAction(
   };
 }
 
-interface CombinedTestResult {
+export interface CombinedTestResult {
   passed: boolean;
   duration_ms: number;
   suite_name?: string;
@@ -952,7 +970,7 @@ function blockResolvedItemsOnCombinedFailure(
   return true;
 }
 
-interface E2eTestResult {
+export interface E2eTestResult {
   ran: boolean;
   passed: boolean;
   output: string;
@@ -1255,7 +1273,7 @@ function buildRemediationReportMarkdown(
  * closing action failed OR was skipped without completing (e.g. merge-to-base
  * with no recorded base) — the artifacts directory is preserved for diagnosis.
  */
-async function cleanupTempBranchesAndArtifacts(
+export async function cleanupTempBranchesAndArtifacts(
   options: OrchestratorOptions,
   completeState: RemediationState,
   combinedTest: CombinedTestResult,
@@ -1292,8 +1310,21 @@ async function cleanupTempBranchesAndArtifacts(
     const { StateStore } = await import("../state/store.js");
     const store = new StateStore(options.artifactsDir);
     await store.saveState(completeState);
-  } catch {
-    // Non-fatal — we still return complete
+  } catch (error) {
+    // Non-fatal — we still return complete. But NEVER silently (OBS-89a57cbd):
+    // a failed final-state persist means a restart resumes from the PRE-close
+    // state and re-runs closing actions (re-commit/re-push) with no operator
+    // clue why. Surface it on the console and in the structured run log.
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `Failed to persist the final remediation state — a resumed run may re-execute closing actions: ${reason}`,
+    );
+    runLogger?.event({
+      phase: "close",
+      kind: "outcome",
+      obligation: "closing",
+      note: `Final state persist FAILED (run still reported complete): ${reason}`,
+    });
   }
 
   // Only delete artifacts on a fully-green close. When any test or closing
@@ -1308,15 +1339,10 @@ async function cleanupTempBranchesAndArtifacts(
   const anyBlocked = Object.values(completeState.items ?? {}).some(
     (it) => it.status === "blocked",
   );
-  // A closing action genuinely completed only when it succeeded, OR it was a
-  // skipped no-op (`action === "none"` — nothing was configured to do). A
-  // *skipped non-none* close did NOT complete: e.g. merge-to-base with no
-  // recorded base leaves the run unmerged and returns status "skipped". Treating
-  // that as green would delete the (gitignored, unrecoverable) artifacts dir for
-  // a run that never landed. So skipped is green only for the action=none no-op.
-  const closingCompleted =
-    closingResult.status === "success" ||
-    (closingResult.status === "skipped" && closingResult.action === "none");
+  // A closing action genuinely completed only per the single-sourced
+  // classification (see closingActionCompleted): success, or the skipped
+  // action=none no-op — never a skipped non-none close.
+  const closingCompleted = closingActionCompleted(closingResult);
   const fullyGreen =
     combinedTest.passed &&
     e2eResult.passed &&
@@ -1362,7 +1388,7 @@ async function cleanupTempBranchesAndArtifacts(
  * Overall status is "passed" when combined tests passed and all resolved
  * items have at least one passing trace. "failed" otherwise.
  */
-function buildVerificationReport(
+export function buildVerificationReport(
   state: RemediationState,
   options: OrchestratorOptions,
   closingResult: ClosingResult,
@@ -1479,13 +1505,17 @@ function buildVerificationReport(
     }
 
     // Closing action trace (one per finding so the report is self-contained).
+    // Status keys on the single-sourced completion classification: a skipped
+    // NON-none closing action did not complete, so its trace is red — not
+    // "passed" merely because it didn't literally report "failed"
+    // (COR-fb656e3f-2).
     if (closingResult.action !== "none") {
       traces.push({
         trace_id: `${item.finding_id}:closing`,
         kind: "command",
         label: `closing action: ${closingResult.action}`,
         evidence: [`status=${closingResult.status}`],
-        status: closingResult.status === "failed" ? "failed" : "passed",
+        status: closingActionCompleted(closingResult) ? "passed" : "failed",
       });
     }
 
@@ -1500,9 +1530,13 @@ function buildVerificationReport(
   findings.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
 
   // Overall status: ignored/inappropriate (skipped) items do NOT contribute
-  // to failure — only resolved/non-skipped items count.
+  // to failure — only resolved/non-skipped items count. The closing action's
+  // completion is part of the verdict (COR-fb656e3f): a run whose closing
+  // action failed or silently skipped a non-none action never reports an
+  // overall "passed".
   const overallPassed =
     combinedTest.passed &&
+    closingActionCompleted(closingResult) &&
     findings
       .filter((f) => f.overall_status !== "skipped")
       .every((f) => f.overall_status === "passed");
@@ -1531,6 +1565,20 @@ export async function runClosePhase(
       "Cannot run close phase: missing plan, items, or closing_plan from state.",
     );
   }
+
+  // 0. inv-8 accept-outcome reconciliation (CE-201) — BEFORE any force-close
+  // mapping or staging-manifest read: bind git's base-reachable tool commits,
+  // the accept sidecars, and the item statuses so a block whose landing was
+  // interrupted in either kill window (pick→record, record→state-merge) is
+  // recognized as LANDED (items resolved, files in applied_edit_surface,
+  // sidecar repaired) instead of force-closed blocked. Invariant 9's blocked
+  // mapping below stays conditional on this having run and found no landed
+  // evidence for the block.
+  await reconcileAcceptOutcomes({
+    root: options.root,
+    artifactsDir: options.artifactsDir,
+    state,
+  });
 
   // 1. Check whether closing action requires user confirmation (preview).
   // When not pre-authorized and action is confirmable, generate the file list +

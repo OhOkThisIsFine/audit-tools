@@ -281,20 +281,16 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
 
   /**
    * Satisfy the Path-A review-approval gate with an approve-all decision so a
-   * structured-audit run proceeds straight into the contract pipeline. Writing
-   * `declined: []` leaves every finding included (the gate filters by the
-   * declined set), so the downstream behaves exactly as a fully-approved run.
+   * structured-audit run proceeds straight into the contract pipeline. Writes
+   * an EMPTY review_resolution.json (the attended approve-all answer) so the
+   * TOOL consumes it and records the real decision — including the actual
+   * approved_ids, which the decision REPLAY now honours (COR-227a02ae; a
+   * hand-forged decision with `approved_ids: []` would approve nothing).
    */
   async function approveReviewGate(): Promise<void> {
     await writeFile(
-      join(ARTIFACTS_DIR, "review_decision.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-review-decision/v1",
-        plan_id: "path-a-review",
-        approved_ids: [],
-        declined: [],
-        created_at: new Date().toISOString(),
-      }),
+      join(ARTIFACTS_DIR, "review_resolution.json"),
+      JSON.stringify({}),
       "utf8",
     );
   }

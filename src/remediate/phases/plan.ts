@@ -21,6 +21,7 @@ import {
   type SessionConfig,
 } from "audit-tools/shared";
 import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
+import { pathTokensInCommand } from "../steps/dispatch/verifyCommands.js";
 
 /**
  * Whether a parsed JSON value is a valid audit-findings report.
@@ -209,6 +210,59 @@ function splitOversizedOverlapGroup(
   });
 }
 
+/**
+ * Partition a split parent block's `targeted_commands` across its sub-blocks by
+ * relevance to each sub-block's cited files (INV-RSM-SPLIT-01, COR-46fff0ec):
+ *
+ *  - a PATH-LESS command (e.g. `npm run check`) applies to EVERY sub-block —
+ *    dropping it anywhere would be a vacuous pass;
+ *  - a PATHFUL command goes only to the sub-blocks whose items cite one of its
+ *    path tokens — running it on an unrelated sub-block is a false red;
+ *  - a pathful command matching NO sub-block is surfaced to stderr and carried
+ *    to ALL sub-blocks — degraded to the parent's semantics, never silently
+ *    dropped (the verification obligation must survive the split).
+ *
+ * Returns undefined when the parent declared no commands (field stays absent).
+ */
+function partitionTargetedCommands(
+  commands: string[] | undefined,
+  subBlockItems: string[][],
+  findingMap: Map<string, Finding>,
+): Array<string[]> | undefined {
+  if (!commands || commands.length === 0) return undefined;
+  const norm = (p: string): string => p.replace(/\\/g, "/");
+  const citedBySubBlock = subBlockItems.map((items) => {
+    const cited = new Set<string>();
+    for (const id of items) {
+      for (const af of findingMap.get(id)?.affected_files ?? []) {
+        cited.add(norm(af.path));
+      }
+    }
+    return cited;
+  });
+  const out: Array<string[]> = subBlockItems.map(() => []);
+  for (const cmd of commands) {
+    const tokens = pathTokensInCommand(cmd).map(norm);
+    if (tokens.length === 0) {
+      for (const list of out) list.push(cmd);
+      continue;
+    }
+    const matched: number[] = [];
+    for (let i = 0; i < citedBySubBlock.length; i++) {
+      if (tokens.some((t) => citedBySubBlock[i]!.has(t))) matched.push(i);
+    }
+    if (matched.length === 0) {
+      process.stderr.write(
+        `[remediate-code] split: targeted command "${cmd}" matches no sub-block's cited files — carrying it to every sub-block rather than dropping it.\n`,
+      );
+      for (const list of out) list.push(cmd);
+    } else {
+      for (const i of matched) out[i]!.push(cmd);
+    }
+  }
+  return out;
+}
+
 export function splitBlocksByContextBudget(
   blocks: RemediationBlock[],
   findings: Finding[],
@@ -275,19 +329,30 @@ export function splitBlocksByContextBudget(
         (_, i) => `${block.block_id}-${String(i + 1).padStart(2, "0")}`,
       );
       splitRemap.set(block.block_id, subBlockIds);
+      // INV-RSM-SPLIT-01 (COR-46fff0ec): partition the parent's verification
+      // commands by relevance to each sub-block's cited files; path-less
+      // commands go to every sub-block, and a pathful command matching no
+      // sub-block is carried to all (surfaced, never silently dropped).
+      const partitionedCommands = partitionTargetedCommands(
+        block.targeted_commands,
+        subBlocks,
+        findingMap,
+      );
       for (let i = 0; i < subBlocks.length; i++) {
+        const commands = partitionedCommands?.[i];
         result.push({
+          // Spread-carry EVERY block field (INV-RSM-SPLIT-01): a split must
+          // never erase contract metadata — phase_ordinal in particular is
+          // UNCHANGED on every sub-block (dropping it dissolves the phase
+          // barrier and dispatches consumers alongside their foundations).
+          ...block,
           block_id: subBlockIds[i]!,
-          items: subBlocks[i],
-          parallel_safe: block.parallel_safe,
-          dependencies: block.dependencies,
+          items: subBlocks[i]!,
           // Sub-blocks inherit the parent's declared surface; the per-sub-block
           // narrowing is a downstream (M1-DECOMPOSE) concern.
           touched_files: [...(block.touched_files ?? [])],
-          // A split same-file block keeps its co-file parallel
-          // eligibility — carry cofile_parallel_safe onto every sub-block.
-          ...(block.cofile_parallel_safe !== undefined
-            ? { cofile_parallel_safe: block.cofile_parallel_safe }
+          ...(commands !== undefined
+            ? { targeted_commands: commands }
             : {}),
         });
       }

@@ -123,6 +123,20 @@ const KNOWN_STATUSES = new Set<string>([
   "complete",
 ]);
 
+/**
+ * Statuses whose derived step decisions READ the plan/items — a state in one of
+ * these with those fields missing is unusable (the state machine would crash or,
+ * worse, silently mis-derive), so the load gate rejects it up front
+ * (INV-RSM-STATE-COMPLETE, DAT-017d52ff). `complete` is exempt: its only
+ * decision path presents the report, and a green close deletes state.json.
+ */
+const PLAN_REQUIRED_STATUSES = new Set<string>([
+  "implementing",
+  "triage",
+  "waiting_for_triage",
+  "closing",
+]);
+
 /** Validate that a parsed JSON value is a usable RemediationState. */
 function validateState(value: unknown): string[] {
   const errors: string[] = [];
@@ -133,10 +147,60 @@ function validateState(value: unknown): string[] {
   const obj = value as Record<string, unknown>;
   if (!("status" in obj)) {
     errors.push("Missing required field: status");
-  } else if (!KNOWN_STATUSES.has(obj["status"] as string)) {
+    return errors;
+  }
+  const status = obj["status"] as string;
+  if (!KNOWN_STATUSES.has(status)) {
     errors.push(
       `Unknown status "${String(obj["status"])}"; expected one of: ${[...KNOWN_STATUSES].join(", ")}`,
     );
+    return errors;
+  }
+
+  // Status-conditional completeness (INV-RSM-STATE-COMPLETE): every field the
+  // status's decision path reads must be present, or the load fails loudly
+  // instead of handing the state machine a partially-persisted state.
+  if (PLAN_REQUIRED_STATUSES.has(status)) {
+    const plan = obj["plan"];
+    if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+      errors.push(`status "${status}" requires a persisted plan`);
+    } else {
+      const p = plan as Record<string, unknown>;
+      if (typeof p["plan_id"] !== "string" || p["plan_id"].length === 0) {
+        errors.push(`status "${status}" requires plan.plan_id`);
+      }
+      if (!Array.isArray(p["findings"])) {
+        errors.push(`status "${status}" requires plan.findings`);
+      }
+      if (!Array.isArray(p["blocks"])) {
+        errors.push(`status "${status}" requires plan.blocks`);
+      }
+    }
+    const items = obj["items"];
+    if (!items || typeof items !== "object" || Array.isArray(items)) {
+      errors.push(`status "${status}" requires persisted items`);
+    } else {
+      for (const [key, item] of Object.entries(items as Record<string, unknown>)) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          errors.push(`items["${key}"] must be an object`);
+          continue;
+        }
+        const it = item as Record<string, unknown>;
+        // Item identity fields: triage / close / dispatch all key on these.
+        if (typeof it["finding_id"] !== "string" || it["finding_id"].length === 0) {
+          errors.push(`items["${key}"] is missing its finding_id identity field`);
+        }
+        if (typeof it["block_id"] !== "string" || it["block_id"].length === 0) {
+          errors.push(`items["${key}"] is missing its block_id identity field`);
+        }
+      }
+    }
+  }
+  if (status === "closing") {
+    const closingPlan = obj["closing_plan"];
+    if (!closingPlan || typeof closingPlan !== "object" || Array.isArray(closingPlan)) {
+      errors.push(`status "closing" requires a persisted closing_plan`);
+    }
   }
   return errors;
 }

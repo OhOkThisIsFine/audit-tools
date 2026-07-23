@@ -70,6 +70,20 @@ export interface OwnershipRegistryJson {
   contractScopes: Record<string, string[]>;
   /** nodeId → set of in-flight amendment claims (dispatched but not yet merged) */
   amendmentClaims: Record<string, string[]>;
+  /**
+   * canonical path → nodeId: the scheduling-time in-flight WRITER claims
+   * (INV-SOO-01). Serialized so a restart cannot silently drop every live
+   * writer claim — without it a resumed run admits a foreign same-file node
+   * boundary-ungated alongside the still-running writer (COR-0ad18f1a).
+   * Optional for checkpoints written before this field existed (treated empty).
+   */
+  inFlightClaims?: Record<string, string>;
+  /**
+   * The canonicalization root (INV-SOO-09). Serialized so a restored registry
+   * keys file identity the same way the live one did — dropping it made every
+   * post-restart canonical comparison use raw spellings (COR-70a46faa).
+   */
+  root?: string;
 }
 
 /**
@@ -444,20 +458,31 @@ export class OwnershipRegistry {
     for (const [nodeId, paths] of byNode) {
       amendmentClaims[nodeId] = paths;
     }
-    return { contractScopes, amendmentClaims };
+    const inFlightClaims: Record<string, string> = {};
+    for (const [key, nodeId] of this.inFlightClaims) {
+      inFlightClaims[key] = nodeId;
+    }
+    return {
+      contractScopes,
+      amendmentClaims,
+      inFlightClaims,
+      ...(this.root !== undefined ? { root: this.root } : {}),
+    };
   }
 
   /**
    * Restore an OwnershipRegistry from a serialized JSON object.
    * `knownNodeIds` is the set of node IDs in the current implementation DAG;
-   * any in-flight amendment claim for a node NOT in this set is purged (stale).
+   * any in-flight (scheduling or amendment) claim for a node NOT in this set
+   * is purged (stale). The canonicalization root round-trips from the payload
+   * (INV-SOO-09) so restored comparisons key file identity identically.
    */
   static fromJson(
     json: OwnershipRegistryJson,
     knownNodeIds: Set<string>,
     checkpointPath?: string,
   ): OwnershipRegistry {
-    const registry = new OwnershipRegistry(checkpointPath);
+    const registry = new OwnershipRegistry(checkpointPath, json.root);
 
     for (const [nodeId, paths] of Object.entries(json.contractScopes)) {
       registry.contractScopes.set(nodeId, new Set(paths));
@@ -472,6 +497,13 @@ export class OwnershipRegistry {
       for (const path of paths) {
         registry.amendmentClaims.set(path, nodeId);
       }
+    }
+
+    // Restore the scheduling-time in-flight writer claims (INV-SOO-01 restart
+    // survival); purge claims held by nodes no longer in the DAG.
+    for (const [key, nodeId] of Object.entries(json.inFlightClaims ?? {})) {
+      if (!knownNodeIds.has(nodeId)) continue;
+      registry.inFlightClaims.set(key, nodeId);
     }
 
     return registry;

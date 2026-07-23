@@ -48,16 +48,19 @@ describe("StateStore", () => {
   it("concurrent saves serialize correctly — last write wins", async () => {
     const store = new StateStore(TEST_DIR);
 
-    // Fire 10 concurrent saves with distinct statuses
+    // Fire 10 concurrent saves with distinct statuses. This exercises LOCK
+    // serialization, so the fixtures use only completeness-FREE statuses —
+    // implementing/triage/closing states now require a persisted plan/items
+    // (INV-RSM-STATE-COMPLETE) and would fail load validation as bare shells.
     const statuses: RemediationState["status"][] = [
       "pending",
       "planning",
-      "implementing",
-      "implementing",
-      "closing",
-      "triage",
       "waiting_for_clarification",
-      "waiting_for_triage",
+      "waiting_for_clarification",
+      "complete",
+      "planning",
+      "waiting_for_clarification",
+      "planning",
       "complete",
       "pending",
     ];
@@ -99,9 +102,9 @@ describe("StateStore", () => {
   it("second save succeeds after first save releases lock", async () => {
     const store = new StateStore(TEST_DIR);
     await store.saveState({ status: "planning" });
-    await store.saveState({ status: "implementing" });
+    await store.saveState({ status: "waiting_for_clarification" });
     const loaded = await store.loadState();
-    expect(loaded?.status).toBe("implementing");
+    expect(loaded?.status).toBe("waiting_for_clarification");
   });
 
   it("leaves no .tmp residue after a successful save", async () => {
@@ -160,9 +163,9 @@ describe("StateStore.loadState — INV-remediate-state-01: schema validation", (
 
   it("succeeds for a valid state", async () => {
     const store = new StateStore(TEST_DIR);
-    await store.saveState({ status: "implementing" });
+    await store.saveState({ status: "waiting_for_clarification" });
     const loaded = await store.loadState();
-    expect(loaded?.status).toBe("implementing");
+    expect(loaded?.status).toBe("waiting_for_clarification");
   });
 });
 
@@ -196,10 +199,10 @@ describe("StateStore.mutate — INV-remediate-state-02: no lost updates under co
     await store.saveState({ status: "planning" });
     await store.mutate(async (current) => {
       expect(current?.status).toBe("planning");
-      return { status: "implementing" };
+      return { status: "waiting_for_clarification" };
     });
     const loaded = await store.loadState();
-    expect(loaded?.status).toBe("implementing");
+    expect(loaded?.status).toBe("waiting_for_clarification");
   });
 
   it("sequential mutate calls each observe the prior transition's result", async () => {
@@ -211,20 +214,20 @@ describe("StateStore.mutate — INV-remediate-state-02: no lost updates under co
       return { status: "planning" };
     });
     await store.mutate(async (current) => {
-      transitions.push(`${String(current?.status)} -> implementing`);
-      return { status: "implementing" };
+      transitions.push(`${String(current?.status)} -> waiting_for_clarification`);
+      return { status: "waiting_for_clarification" };
     });
     await store.mutate(async (current) => {
-      transitions.push(`${String(current?.status)} -> closing`);
-      return { status: "closing" };
+      transitions.push(`${String(current?.status)} -> complete`);
+      return { status: "complete" };
     });
 
     expect(transitions[0]).toBe("undefined -> planning");
-    expect(transitions[1]).toBe("planning -> implementing");
-    expect(transitions[2]).toBe("implementing -> closing");
+    expect(transitions[1]).toBe("planning -> waiting_for_clarification");
+    expect(transitions[2]).toBe("waiting_for_clarification -> complete");
 
     const loaded = await store.loadState();
-    expect(loaded?.status).toBe("closing");
+    expect(loaded?.status).toBe("complete");
   });
 
   it("concurrent mutate calls serialize — second observes first's write (no lost update)", async () => {
