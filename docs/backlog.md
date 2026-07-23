@@ -829,6 +829,39 @@ followed" is otherwise indistinguishable from a bug.
 - **Provider tiering is per-provider, not per-model/effort — wrong granularity for multi-model backends (2026-07-13 audit-gate review).** The `capabilityTier` is pegged to the provider type (e.g., all claude-code → frontier, all codex → capable). A provider offering both frontier and fast models (e.g., openai-compatible with multiple models) assigns all its models the same tier. Fix: tier per `(provider, model, effort)` tuple, sourced from models.dev or declared config. [[per-model-tiering]]
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 - **Design (orchestrator-dispatch coupling): pool-agnostic claims + JIT quota reservation — spec'd, unbuilt (2026-07-13; promoted to concept spec 2026-07-16, forward-track).** Design of record: [`spec/dispatch-jit-claims.md`](../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at launch moment). Build remainder: the ClaimRegistry lock-split (drop `poolId` from claims), JIT reservation on the launch path, host-path convergence with the rolling engine. [[relax-dispatch-source-forcing]]
+- **⬇ CLEAN REPRO LANDED (remediate dogfood 2026-07-22) — the gating condition for this entry is
+  MET.** First implement wave of the high-severity-slice dogfood run
+  (`high-severity-self-audit-2026-07-22`): CP-BLOCK-CP-NODE-7 was in the dispatch plan but NO
+  worker was ever launched for it (no `CP-BLOCK-CP-NODE-7.task.json`), and INV-RS-01 then
+  terminal-blocked all seven dependent nodes — one un-dispatched node stranded the whole 8-node
+  run with "Last successful step: none" everywhere. **MECHANISM DIAGNOSED same-day from the run's
+  dispatch-quota.json explains[] (populated on the remediate path — the legibility record paying
+  off):** the packet cost 92,700 tokens against a resolved 32,000-token capability floor
+  (`model: null`, no host handshake on the bare CLI invocation) → admission refused every packet
+  (`no_capable_pool`), deterministic across retries. THREE component defects: (a) the node
+  DISPOSITION misreported the admission refusal as "worker did not produce a result file" — the
+  refusal reason sat unread in explains[] (false-signal family; the disposition writer must carry
+  the admission reason); (b) an absent host handshake degrades to the 32k floor as designed
+  ("fidelity degradation, never a block") — but an oversized node turns the floor into a hard,
+  silent BLOCK; the wall must be honest ("packet exceeds every capable window: cost X vs floor Y —
+  supply host capability or split the node"), and a floor-refused round must pause, not spin
+  triage; (c) the DAG packed all 13 test-lens files into one 92.7k node with no oversized-node
+  split at plan time ([[remediator-must-decompose-and-boundary-enforce]] — the split path
+  INV-RSM-SPLIT-01 governs exists but did not fire pre-dispatch). Retry-with-handshake
+  (`--host-context-tokens 200000` etc.) is the live workaround; the transient-vs-structural retry
+  split specced below is the durable fix, now buildable with this repro.
+  **Fourth component defect, confirmed on the handshake re-drive:** re-running next-step with the
+  full host handshake (`--host-can-dispatch-subagents --host-max-concurrent 4
+  --host-context-tokens 200000 --host-output-tokens 64000 --host-model-id claude-fable-5`) left
+  the implement wave's resolved capability UNCHANGED at the 32,000 floor (`dispatch-quota.json`
+  regenerated with the same `no_capable_pool` refusals) — the handshake flags are not threaded
+  into the remediate implement-dispatch capability resolution. Same class as the open G4 residue
+  ("descriptor capability fields reach dispatch hand-threaded through three audit CLI commands —
+  a parallel channel bypassing the one seam"): the remediate draw's implement path evidently
+  reads capability from neither the flags nor a persisted handshake. **Run left PAUSED at
+  `collect_triage` (resumable) — fix this cluster first, then resume the dogfood run rather than
+  re-launching.** (An earlier draft of this entry claimed the run dir was deleted mid-run — FALSE,
+  a stranded-shell relative-path artifact; the run dir is intact.)
 - **Never-dispatched anti-cascade retry (deferred, needs clean repro) [[synth-scopeless-nodes-doomed-run]].**
   A planned-but-not-driven node (no `task.json` written before launch) still terminal-blocks its whole
   downstream subtree (INV-RS-01) instead of retrying bounded-PENDING. Diagnosability (distinguishing
