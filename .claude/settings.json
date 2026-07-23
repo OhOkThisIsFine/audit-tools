@@ -50,6 +50,12 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/doc-review-surface.mjs\"",
             "timeout": 15,
             "statusMessage": "Checking for open doc-review items"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-guards.mjs\"",
+            "timeout": 45,
+            "statusMessage": "Lap guards: stale main, node_modules"
           }
         ]
       }
@@ -60,9 +66,26 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/shell-trap-guard.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Shell-trap guard"
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gate.mjs\"",
             "timeout": 300,
             "statusMessage": "Pre-commit gate: npm run check"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/tool-input-guard.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Tool-input guard"
           }
         ]
       }

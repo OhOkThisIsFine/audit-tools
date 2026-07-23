@@ -75,6 +75,16 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **The remediate suite writes scratch trees INSIDE the repo (`tests/remediate/.test-*/`), so a
+  `git add -A` sweeps test residue into a commit (2026-07-23, low, hermeticity).** Fake HOMEs
+  (`.test-home-postinstall-contract`), temp repos and artifact dirs land under `tests/remediate/`
+  and are left behind after a run; one `git add -A` staged ten such files, and some were already
+  `AD` (added, then deleted by a later run) — the exact shape that produces a phantom deletion in a
+  commit. Stopgap shipped: a `tests/remediate/.test-*/` ignore rule. Real fix: these belong in
+  `os.tmpdir()` like the rest of the suite's temp state — a test that writes into the source tree
+  makes working-tree cleanliness a function of whether tests have run
+  (same family as the `quota-command.test.mjs` real-repo-root assertion above).
+
 - **Charter-extraction livelock (was HIGH, re-dogfood 2026-07-22) — stated mechanism REFUTED at
   HEAD; the two real defects found in its place are FIXED, the remaining driver is the
   phantom-staleness entry below.** Code-trace verdict: the consume path DOES restamp — every
@@ -1402,56 +1412,25 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Durable traps (environment / tooling reference)
 
-- **`codex exec` in a background Bash call hangs forever "Reading additional input from stdin..."
-  (2026-07-23, low).** Background shells keep a never-closing stdin pipe attached; codex detects
-  piped stdin and waits to append it to the prompt. Always redirect `< /dev/null` when launching
-  `codex exec` in a background task.
-- **A new `docs/**/*.md` fails only in RELEASE CI — the local ship preflight omits
-  `check:doc-manifest` (2026-07-23, cost one burned release v0.34.17).** The doc-manifest gate lives
-  in `verify:checks` (CI `gate` job) but the ship skill's fast local preflight didn't include it, so
-  an unregistered dated review doc rode to CI and failed the publish. FIXED 2026-07-23: the ship
-  skill's preflight list now names `npm run check:doc-manifest`; kept here as the reference for why.
-- **agy headless (`--print`) auto-denies its shell tool — recon prompts silently produce no output
-  (2026-07-23).** Second variant 2026-07-23: same for `read_file` (any tool permission) — headless
-  recon needs `--dangerously-skip-permissions` (with `--sandbox`). `agy --sandbox --print "<recon>"` exited 0 with only "jetski: no output produced — a
-  tool required the 'command' permission that headless mode cannot prompt for". Headless runs need
-  either a `permissions.allow` rule (`command(<target>)`) in agy's settings.json or
-  `--dangerously-skip-permissions` (pair with `--sandbox`; diff-verify the tree after). Exit code 0
-  on the denial means a driver must check for the "jetski: no output" line, not the exit code. `litellm`
-  crashed at import: installed pydantic-core 2.47.0 vs pydantic requiring 2.46.4 ("make sure you
-  haven't upgraded pydantic-core manually" — something did, between Jul 19 and 21). Fix:
+**Hook-enforced traps are not listed here.** A trap that `.claude/hooks/shell-trap-guard.mjs` /
+`tool-input-guard.mjs` / `pre-commit-gate.mjs` now refuses mechanically is deleted from this list
+rather than restated — the guard names the trap and the fix at the moment it fires, and a second
+copy here would decay independently. Read the hook source for the rule; see *Conventions &
+invariants* in `CLAUDE.md` for the set.
+
+- **`litellm` crashes at import on a pydantic-core version skew (2026-07-23).** Installed
+  pydantic-core 2.47.0 vs pydantic requiring 2.46.4 ("make sure you haven't upgraded pydantic-core
+  manually" — something did, between Jul 19 and 21). Fix:
   `python -m pip install pydantic-core==2.46.4`. Same env-rot family as prior site-packages
   breakage. Candidate: a proxy-start preflight (or start script) that checks/pins the pair — the
   offload lane has no fallback when the proxy won't start.
 
-- **`agy -p` does NOT read stdin — piped input is silently ignored (2026-07-22).** `cat doc | agy -p
-  "review the following"` returns "No document provided": the prompt must carry the document in the
-  argument itself (`-p "$(cat doc)…"`, subject to argv size limits) or via a workspace read the
-  headless permission model actually allows. Cost one wasted dispatch round.
-
-- **`agy -p` headless auto-denies its own tool permissions (2026-07-21).** A read-only review
-  prompt died instantly: "a tool required the read_file permission that headless mode cannot prompt
-  for". Its suggested fixes are an allow-rule in its settings.json or `--dangerously-skip-permissions`
-  (which auto-approves WRITES too — unacceptable on a tree with uncommitted work). Before using agy
-  as a headless worker: add read-only allow-rules (read_file, grep, shell-read) to its settings, and
-  test a trivial prompt from the same spawn context first.
-
-- **`codex exec --full-auto` from a non-interactive spawn can hang forever with ZERO output
-  (2026-07-21).** Dispatched as a background task (stdin not a TTY, output piped), it produced no
-  session file under `~/.codex/sessions` and no stdout for 90 minutes — likely a first-run
-  trust/approval prompt that `--full-auto` does not cover, invisible because output was buffered.
-  Before relying on codex as a headless worker again: verify a trivial `codex exec` completes from
-  the same spawn context first, and never pipe through `tail` (it hides the hang — stream to a file
-  instead so partial output is inspectable).
-
-- **Red-green source mutation on an UNCOMMITTED tree: restore by INVERTING the mutation, never
-  `git checkout --` (2026-07-21, learned the hard way).** Validating a new test by temporarily
-  mutating source is fine — but on a tree carrying uncommitted work, `git checkout -- <file>` as the
-  "restore" nukes the whole file to HEAD, destroying every uncommitted change in it (cost: a full
-  agent re-apply cycle for a 187-line diff this lap). Invert the mutation with a second targeted
-  edit, or `git stash push` ONLY the mutation first. If it happens anyway: a fresh `npm run build`
-  means `dist/` holds the compiled lost code, and a still-resumable implementation agent can
-  re-apply its own diff from context — both recovery paths worked.
+- **agy headless needs read-only allow-rules in ITS OWN settings.json (2026-07-21/-23).** `-p`
+  auto-denies every tool permission it cannot prompt for (`command`, `read_file`, …) and exits 0 with
+  only "jetski: no output produced" — the shell-trap guard advises on this, but the fix lives in agy's
+  config: add read-only allow-rules (`read_file`, `grep`, shell-read), and test a trivial prompt from
+  the same spawn context before relying on agy as a worker. `--dangerously-skip-permissions` is not
+  the fix (it auto-approves WRITES, and the guard refuses it with a prompt).
 
 - **The pre-commit gate scans the WHOLE command string — including commit-message text — for the
   hooksPath/no-verify bypass tokens (2026-07-21).** A commit whose message names the literal tokens
@@ -1459,15 +1438,6 @@ followed" is otherwise indistinguishable from a bug.
   quoted text cannot be safely excluded, because a genuinely quoted flag still reaches git
   (`git commit "--no-verify"` works), so stripping quotes would reopen the hole. Reword the message
   (drop the `core.` prefix / the double-dash) rather than weakening the gate.
-
-- **A new `docs/reviews/` file fails release CI that no preflight step catches (2026-07-20, low).**
-  `check:doc-manifest` requires every tracked doc to be registered in the routing table in
-  `docs/doc-review-guidelines.md`, but it lives in `verify:checks` — which the `/ship` preflight
-  deliberately skips in favour of `vitest run --changed` + the two smokes. So writing a review doc and
-  shipping produces a green local preflight and a RED gate job, costing a full release round-trip
-  (v0.34.4 died exactly this way; recovered via `gh release delete --cleanup-tag` + forward-bump to
-  0.34.5). Whenever a lap adds a file under `docs/`, run `npm run check:doc-manifest` before releasing —
-  it takes 0.1s.
 
 - **The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable
   (2026-07-20, medium).** `~/.claude/llm-call.mjs` inlines each file as raw text. An adversarial
@@ -1500,20 +1470,6 @@ followed" is otherwise indistinguishable from a bug.
   ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
   failure — confident output with fake support.)
 
-- **`agy -p` treats its OWN CLI flags as the research topic — never pass `--dangerously-skip-permissions` with a real task.** Two consecutive dispatches of a
-  provider-confirmation analysis came back as an essay about `--dangerously-skip-permissions` itself:
-  agy grepped the repo for `"dangerously"`, then web-searched the Antigravity permissions docs, and
-  answered *that* instead of the prompt. Moving the task text into a file and passing `"$(cat file)"`
-  did NOT help — the flag is still in argv, and that is what it latches onto. Worse, in the derailed
-  run it began executing `audit-code.mjs next-step` against the live repo unprompted (no tracked file
-  changed, but it was one step from mutating `.audit-tools/` state). **Use:** prefer codex or the NIM
-  lane for repo analysis; if agy is required, do not combine a substantive prompt with that flag.
-- **`codex exec` hangs forever waiting on stdin — always redirect `< /dev/null`.** A backgrounded
-  `codex exec --sandbox read-only "<prompt>"` printed `Reading additional input from stdin...` and
-  sat at 39 bytes of output indefinitely, looking exactly like a slow model. It is not: codex reads
-  stdin even when the prompt is a positional arg. **Use:** `codex exec … "<prompt>" < /dev/null`.
-  Cost a full wasted background run during the 2026-07-19 memory pass.
-
 - **The LiteLLM/NIM offload lane rate-limits hard above ~2 concurrent requests per model.** A 10-batch
   fan-out at concurrency 10 (and again at 3) returned
   `litellm.RateLimitError … Error code: 429` on nearly every batch, and NIM has no fallback group
@@ -1525,39 +1481,12 @@ followed" is otherwise indistinguishable from a bug.
   [[offload-lane-failures-are-usually-the-caller]]: this one really is the endpoint, and
   `finish_reason` is `undefined` (not `length`) because the body is an error, not a completion.
 
-- **`git checkout -- <file>` silently destroys unstaged work when a review round is staged.** Common
-  during review-driven rework: you `git add -A` to give reviewers a stable diff, keep editing in the
-  working tree, then use `git checkout -- <file>` to undo a temporary mutation-test edit. That
-  restores from the INDEX, i.e. the pre-rework staged version — so every unstaged fix to that file is
-  gone, with no warning and a clean-looking tree. Bit once during account-metering step 2 (lost an
-  `assertWindowScopes` call + its import; caught only because a red-green mutation then behaved
-  impossibly). **Use instead:** copy the file to the scratchpad before mutating and `cp` it back, or
-  `git stash` the mutation. Never `git checkout --` a file that has unstaged work you want.
-
-- **`codex exec "<prompt>"` HANGS when stdin is a non-TTY pipe.** With a prompt passed as an argument,
-  Codex still reads stdin to append as a `<stdin>` block; under any harness that leaves stdin open
-  (background tasks, CI, most spawn wrappers) it blocks forever on "Reading additional input from
-  stdin…" and is killed by the timeout with **exit 0 and empty output**. Silent — it looks exactly like
-  a model that returned nothing. **Always `codex exec … </dev/null`**, or pass the prompt ON stdin
-  instead of as an argument. Same class as the Windows `npx.cmd` shim trap: an offload lane that fails
-  silently reads as a capability gap in the backend rather than a wiring bug on our side. Any dispatch
-  worker spawning `codex` must close its stdin explicitly at the spawn site.
-
 Standing gotchas worth keeping for any agent (strong or weak):
 
-- **`$?` after a pipe reports the FILTER's status, not the command's — masked a red gate (2026-07-18).**
-  Ran `npm run verify:checks 2>&1 | grep -iE "fail|error"; echo "exit=$?"` and read `exit=0` as "gate
-  green" — it was grep's exit code. Combined with the tracked-files trap below, that produced a confident
-  false-green that CI then caught. **Capture the exit code before filtering** (`cmd > log 2>&1; echo $?;
-  tail log`) or use `PIPESTATUS`. Generalizes [[lap-green-must-match-ci-evidence]] to the agent's own
-  verification technique: a green *reading* is not a green *run*.
-- **`check:doc-manifest` only sees TRACKED files — a new doc passes locally pre-commit, then fails CI
-  (2026-07-18).** Wrote a new `docs/reviews/*.md`, ran `npm run verify:checks` green, committed, and the
-  release run's `gate` job failed on exactly that file ("stray doc not in the canonical manifest"). The
-  checker enumerates git-tracked docs, so an untracked new doc is invisible to it — the local gate is
-  green *because* the file isn't staged yet. **`git add` the doc BEFORE running `verify:checks`**, or the
-  gate is testing a different tree than CI will. Cost one burned release tag (v0.33.8 → forward-bump).
-  Generalizes [[lap-green-must-match-ci-evidence]]: same command, different tree ⇒ different answer.
+- **A spawned worker's own dispatch code must close stdin explicitly.** The `codex exec` stdin hang is
+  refused at the tool call by the shell-trap guard, but that guard only sees commands the HOST runs —
+  any dispatch worker in `src/` that spawns `codex` has to close stdin at the spawn site itself, or it
+  reproduces the silent exit-0-empty-output failure inside the product.
 - **LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).** The proxy's
   startup banner contains non-cp1252 characters, so `show_banner()` raises
   `UnicodeEncodeError: 'charmap' codec can't encode…` and FastAPI reports only
@@ -1573,7 +1502,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   "the proxy lane is gone". There is deliberately **no back-compat alias**. After any transport-contract
   change, check the machine declaration file — the repo's tests will not catch a stale operator config.
 
-- **`mktemp -d` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that `node` cannot resolve — cost two failed repro attempts (2026-07-16).** The Bash tool is Git Bash: `mktemp -d` yields `/tmp/…`, but `node -e "require('/tmp/…/x.json')"` resolves it against the Windows CWD → `Cannot find module 'C:\…\Temp\tmp.XXXX\…'`. Any temp path handed to a **native** tool (node, the packaged CLI, `--root`) must be a Windows-shaped path. Use the session scratchpad dir (an absolute `C:/…` path) instead of `mktemp`. Instance of the OS-agnostic rule biting the agent's own tooling rather than the product's.
 - **The free offload lane is the local LiteLLM proxy — it must be RUNNING, and the model must be one of
   its aliases.** `llm-worker-tools` (`llm read`/`llm write`) is retired; requests go to
   `127.0.0.1:4000` (see `~/.claude/CLAUDE.md` → *Offload lane*). Two consequences: (a) unlike the old
@@ -1582,14 +1510,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   from `~/.audit-code/litellm-config.yaml` (`glm-5.2`, `deepseek-v4-pro`, …), not a raw NIM catalog id
   and not `haiku`. Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`),
   unrelated to the proxy.
-- **The Bash tool is POSIX sh, NOT PowerShell — for any multi-line commit/PR body, use a temp file
-  (`git commit -F <file>`), never a PowerShell here-string `@'…'@`.** `git commit -m @'…'@` in the Bash
-  tool is parsed as literal `@` characters + a bash syntax error at the first `)`, and the commit lands
-  with a mangled/truncated message or literal `@` top-and-bottom of the body (recover via
-  `git commit --amend -F <file>`). PowerShell here-strings only work in the PowerShell tool. Write the
-  message to the scratchpad and `-F` it (single-line messages via `-m "…"` are fine). Applies to every
-  native exe called from the Bash tool, not just git. (Hit 2026-07-15, twice in one lap.)
-
 - **After a process restart, `git diff` your instruction files before committing.** A background
   doc-review/hook can silently re-assert a pre-decision version of an instruction doc (e.g. CLAUDE.md,
   `project-philosophy.md`), and `git reflog` won't show it (it's a direct file edit, not a git op). Caught
@@ -1608,24 +1528,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   Global `-g` reinstall of audit-tools bins: postinstall may be blocked → run `npm install-scripts approve
   audit-tools` / re-run postinstall manually and verify `~/.claude/commands/*.md` landed
   (extends [[audit-code-global-bin-traps]]).
-
-- **Before starting ANY lap in a worktree, sync with remote main — landed work may be missing.** A worktree
-  can be branched from a *stale* local main and miss commits that already landed on `audit-tools/main`. This
-  session branched 4 commits behind and **re-implemented a full commit (admission-control 2a) already on
-  main**, plus built 2b blind to a pinned design section it lacked — then had to `git reset --hard
-  audit-tools/main` + cherry-pick + reconcile. First action of every lap:
-  `git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
-  rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].) **Mitigation
-  (not a hard gate):** `.claude/skills/start-lap/SKILL.md` operationalizes this sync-first step as an
-  agent instruction — it is agent-instruction-driven, so it reduces the risk but does not mechanically
-  enforce the fast-forward the way a git gate would.
-
-- **Background long-running command piped through `tail` hides interim progress.** Running a long command
-  in the background as `cmd 2>&1 | tail -N` (e.g. `npm run release:patch:publish 2>&1 | tail -40`) makes the
-  output file stay EMPTY until the command exits — `tail` buffers and only flushes its last N lines at EOF.
-  To watch progress on a background job, do NOT pipe through `tail`; let the harness capture full output (it
-  tails the file for you) or redirect to a file and `tail -f` that file separately. Observed 2026-07-08 during
-  a release ship — polled an empty file for minutes before realizing the pipe was the cause.
 
 - **`git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is
   NOT a rejection.** On a fast-forward push straight to `main` the remote emits that branch-protection
@@ -1671,17 +1573,18 @@ Standing gotchas worth keeping for any agent (strong or weak):
   expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
   ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
   (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.)
-- **Fresh git worktree lacks `node_modules`** → `audit-tools/shared` resolves a stale `dist/` (spurious
-  "no exported member") → run `npm install` in the worktree first.
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
   Run a single file with `npx vitest run <path>`. `node:assert/strict`
   is still permitted as an assertion lib (runs under vitest) for the control-flow assertions
   (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent; value
   assertions are `expect`. Vitest `testTimeout` is raised to 120s in `vitest.config.ts`
   because audit integration tests spawn real subprocesses.
-- **Don't mask the test exit code.** `npm test > out; echo done` reports the *trailing* command's exit, not the
-  suite's — and piping through `grep`/`rm` in the same Bash call races the output file, so a real failure reads
-  as "green." Capture the suite's own status: `npm test > out 2>&1 && echo PASS || echo "FAIL=$?"`.
+- **Don't mask the test exit code with a REDIRECT.** `npm test > out; echo done` reports the *trailing*
+  command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races the output
+  file, so a real failure reads as "green." Capture the suite's own status:
+  `npm test > out 2>&1 && echo PASS || echo "FAIL=$?"`. (The *pipe* form of this trap —
+  `npm test | grep …; echo $?`, which reports grep's status — is caught by the shell-trap guard's
+  advisory; the redirect form above is not detectable without false positives, so it stays yours.)
 - **Global `-g` install defers `postinstall`** (npm allow-scripts) → the host-integration deploy silently
   skips; finish with `npm i -g --allow-scripts=audit-tools` or `node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`.
 - **A global junction to a LIVE working tree silently shadows a registry install.** If the global
@@ -1689,23 +1592,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   does NOT replace it, and bins run your working-tree dist; invoking a bin *through* the junction path
   can also produce odd artifacts. Fix: `npm rm -g audit-tools` FIRST, then reinstall, and verify
   `(Get-Item <globaldir>).LinkType` is empty before trusting the smoke. (See [[audit-code-global-bin-traps]].)
-- **A NEW `.claude/hooks/*.mjs` needs an explicit `!.claude/hooks/<name>` re-include in `.gitignore`.**
-  `.gitignore` ignores `.claude/hooks/*` then allowlists each tracked hook by name (deliberate — never ship
-  arbitrary `.claude` files). Adding a hook and committing WITHOUT the `!` exception silently drops the file
-  from the commit; if `.claude/settings.json` (committed) references it, main now points at an untracked hook
-  = broken state. Add the `!.claude/hooks/<name>` line in the same commit as the hook + its settings.json
-  registration. (Bit once 2026-07-05: `friction-stop-gate.mjs`.)
-
-- **A `\0` in a Write-tool template literal lands as a RAW NUL byte → binary-flags the source file.** Writing
-  `` `${a}\0${b}` `` (a NUL pair-key separator) via the Write tool put a literal 0x00 in the `.ts` source, so git
-  treated it as **binary** (`git diff` shows `Bin`/`- -`, grep-hostile) even though tsc/vitest read it fine. Same
-  for an in-comment control char. Detect with `python -c "print(open(p,'rb').read().count(0))"`; fix by using a
-  text-safe escape that stays a source escape (`U+001F` unit separator) or a printable delimiter. Never embed a
-  raw control byte in source — prefer a `\uXXXX` escape the compiler resolves at runtime. (Bit 2026-07-05
-  `src/shared/decompose/consensus.ts` pairKey; again 2026-07-18 `rollingDispatch.ts`; again by 2026-07-22
-  `friction/triage.ts` + `designAssessment.ts`.) Now mechanically gated: `npm run check:control-bytes`
-  (`scripts/check-control-bytes.mjs`, wired into `verify:checks`) fails the release gate on any raw byte
-  < 0x20 except tab/LF/CR in tracked source.
+- **Authoring a control-byte character class re-trips the control-byte trap.** The backslash-u escapes needed
+  to WRITE the rule decode into real control bytes on the way through tool-call JSON, so the file enforcing
+  the rule becomes the file violating it — hit twice while writing `tool-input-guard.mjs` and then this very
+  entry (the guard refused both). Scan with a char-code loop, or build the class with `String.fromCharCode`;
+  never write a literal class. [[backslash-u-escape-decodes-in-tool-json]]
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
@@ -1734,11 +1625,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   For a broad mechanical sweep over a shared file set, run it as ONE serial agent (or partition by
   NON-overlapping files), never an uncoordinated fan-out; and never hand-edit the same files while a
   background agent is live on them.
-- **Never pass `isolation: "worktree"` to the Agent tool when dispatching a remediate-code/audit-code implement
-  node.** The tool's own dispatch plan already creates and names the node's worktree; adding the Agent tool's
-  OWN `isolation: "worktree"` spawns a second, unrelated git worktree and the subagent edits source files there
-  instead of the tool-designated one — `accept-node`'s cherry-pick then sees no diff.
-  [[no-agent-isolation-worktree-for-dispatch-nodes]]
 - **No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.** Host-side attempts to
   unblock a stuck audit (pending tasks that won't clear) do NOT work and actively corrupt gitignored
   run-state: marking `status:complete` in `audit_tasks.json` is ignored; writing
@@ -1750,4 +1636,4 @@ Standing gotchas worth keeping for any agent (strong or weak):
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
   `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
 
-- **check:doc-manifest only runs in verify:checks, so a doc-carrying merge commit can be transiently red on plain `ci` (2026-07-22, low, friction: tool-should-decide).** Seen on all three merge commits of the v0.34.7 queue (stray-doc failures until the docs were registered in 0c6a5a6d). Either run the doc-manifest check in the `ci` workflow too, or pre-merge-gate doc-carrying branches with it locally.
+- **check:doc-manifest only runs in verify:checks, so a doc-carrying MERGE commit can still be transiently red on plain `ci` (2026-07-22, low, friction: tool-should-decide).** Seen on all three merge commits of the v0.34.7 queue (stray-doc failures until the docs were registered in 0c6a5a6d). Locally-authored commits are now gated at commit time by `pre-commit-gate.mjs`, but a merge commit created outside that path is not — run the doc-manifest check in the `ci` workflow too.

@@ -26,10 +26,20 @@ dist/
 !.claude/hooks/doc-review-resolve.mjs
 !.claude/hooks/doc-review-resolve.test.mjs
 !.claude/hooks/doc-review-resolved.json
+!.claude/hooks/async-typecheck.test.mjs
+!.claude/hooks/shell-split.mjs
+!.claude/hooks/shell-trap-guard.mjs
+!.claude/hooks/tool-input-guard.mjs
+!.claude/hooks/session-start-guards.mjs
 !.claude/skills/
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/
+# Test-generated scratch trees (fake HOMEs, temp repos, artifact dirs) that the
+# remediate suite writes INSIDE tests/remediate/. Untracked residue a `git add -A`
+# would otherwise sweep into a commit — see backlog for the real fix (write them
+# outside the repo).
+tests/remediate/.test-*/
 .opencode/
 .vscode/
 .codex/

@@ -27,10 +27,11 @@
 // restore, git error) — never wedge the session; FAIL-CLOSED on gate results
 // (a real `npm run check` / doc-contract failure blocks the commit).
 import { execSync, spawnSync } from 'node:child_process';
-import { rmSync, existsSync, readFileSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { stripQuoted, splitShellStatements } from './shell-split.mjs';
 
 // ── Loop-core adversarial-review gate ────────────────────────────────────────
 // Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
@@ -86,10 +87,114 @@ try {
   process.exit(0); // unparseable payload — never wedge the session
 }
 
-// Split shell statements to isolate `git commit` commands and prevent
+const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+// ── Round-trip crash safety ──────────────────────────────────────────────────
+// The staged-snapshot round-trip REWRITES the working tree and, at restore, the
+// real index. A hook process killed mid-round-trip (harness timeout, parallel
+// tool-call interleave) used to leave that clobbered state behind with nothing
+// to heal it — observed live 2026-07-23 (the real index silently absorbed the
+// whole worktree). Mechanism: the two tree SHAs are JOURNALED before any
+// worktree mutation; every gate invocation (any Bash/PowerShell call) heals a
+// journal left behind by a crashed instance, and a mkdir-based LOCK serializes
+// concurrent round-trips (a second instance fails open rather than interleaving
+// tree surgery).
+const STATE_DIR = join(root, '.claude', 'hooks', '.state');
+const RT_JOURNAL = join(STATE_DIR, 'gate-roundtrip-journal.json');
+const RT_LOCK = join(STATE_DIR, 'gate-roundtrip.lock');
+const RT_LOCK_STALE_MS = 10 * 60_000;
+
+function roundTripLockIsLive() {
+  try {
+    return Date.now() - statSync(RT_LOCK).mtimeMs < RT_LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function acquireRoundTripLock() {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+  } catch {
+    /* fall through — the lock mkdir below will fail and we fail open */
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      mkdirSync(RT_LOCK); // atomic: EEXIST when another instance holds it
+      return true;
+    } catch {
+      if (roundTripLockIsLive()) return false;
+      try {
+        rmSync(RT_LOCK, { recursive: true, force: true }); // stale — steal once
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function releaseRoundTripLock() {
+  try {
+    rmSync(RT_LOCK, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+// Heal the tree/index left by a CRASHED round-trip. Runs before anything else
+// on every invocation; a live lock means an instance is legitimately mid-flight.
+function recoverInterruptedRoundTrip() {
+  if (!existsSync(RT_JOURNAL) || roundTripLockIsLive()) return;
+  let j = null;
+  try {
+    j = JSON.parse(readFileSync(RT_JOURNAL, 'utf8'));
+  } catch {
+    /* corrupt journal — fall through to removal */
+  }
+  if (j?.worktreeTree && j?.stagedTree) {
+    const scratch = join(tmpdir(), `audit-tools-gate-recover-${randomBytes(6).toString('hex')}`);
+    const union = new Set([...(listTreePaths(j.worktreeTree) ?? []), ...(listTreePaths(j.stagedTree) ?? [])]);
+    const restoredWt = checkoutTreeExact(scratch, j.worktreeTree, union);
+    const restoredIdx = git(['read-tree', j.stagedTree]).ok;
+    try {
+      rmSync(scratch, { force: true });
+    } catch {
+      /* ignore */
+    }
+    console.error(
+      `[pre-commit gate] recovered an INTERRUPTED staged-snapshot round-trip (a previous gate instance was ` +
+        `killed mid-flight): worktree ${restoredWt ? 'restored' : 'RESTORE FAILED'}, index ` +
+        `${restoredIdx ? 'restored' : 'RESTORE FAILED'}. Verify with \`git status\`.`,
+    );
+  }
+  try {
+    rmSync(RT_JOURNAL, { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+recoverInterruptedRoundTrip();
+
+// Split shell statements (quote-aware — a `;` inside a commit message must not
+// break the statement apart) to isolate `git commit` commands and prevent
 // false-positives from flags in preceding/succeeding sub-commands (e.g. `grep -n`).
-const subCmds = cmd.split(/&&|\|\||;|\n/).map((s) => s.trim()).filter(Boolean);
-const commitSubCmds = subCmds.filter((s) => /\bgit\b[^\n]*\bcommit\b/.test(s));
+const subCmds = splitShellStatements(cmd);
+
+// Match a git SUBCOMMAND in subcommand position: `git`, then any global options
+// (`-C <path>`, `-c <name=val>`, `--flag[=value]`, `-x`), then the subcommand
+// token. A substring test (`/\bgit\b[^\n]*\bcommit\b/`) false-positived on any
+// command merely NAMING a path that contains "commit" — e.g.
+// `git diff -- .claude/hooks/pre-commit-gate.mjs` — and ran the full
+// staged-snapshot round-trip (tree/index rewrites + `npm run check`) on
+// read-only commands; one such round-trip clobbered the real index live
+// (2026-07-23). Known accepted false-negative: a long global option with a
+// SPACE-separated value (`git --git-dir x commit`) — exotic, and the gate is a
+// footgun guard, not an adversary gate.
+function gitSubcommandRe(name) {
+  return new RegExp(String.raw`\bgit\b(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*\s+${name}\b`);
+}
+const commitSubCmds = subCmds.filter((s) => gitSubcommandRe('commit').test(s));
 
 // Exit early if no `git commit` invocation exists in any shell statement.
 if (commitSubCmds.length === 0) process.exit(0);
@@ -103,9 +208,16 @@ if (commitSubCmds.length === 0) process.exit(0);
 // to commit sub-commands is a hole. Only the short `-n` form stays scoped to
 // `git commit` sub-commands — that scoping exists for flags that are common in
 // unrelated tools (`grep -n`), which is not true of the other two vectors.
+// The `-n` check runs on stripQuoted statements: `-n` inside a quoted commit
+// MESSAGE (`git commit -m "use grep -n output"`) is text, not a flag, and must
+// not false-trip the bypass detection. The long-form vectors stay RAW-matched
+// against the whole command on purpose (fail-closed): a QUOTED flag is still a
+// real flag to the shell (`git -c "core.hooksPath=x" commit`), so blanking
+// quoted spans there would open an evasion, and a commit message that merely
+// MENTIONS `--no-verify` is rare enough to accept the false block.
 if (
   /--no-verify\b|\bcore\.hooksPath\b/.test(cmd) ||
-  commitSubCmds.some((sub) => /(?:^|\s)-n(?=\s|$)/.test(sub))
+  commitSubCmds.some((sub) => /(?:^|\s)-n(?=\s|$)/.test(stripQuoted(sub)))
 ) {
   console.error(
     'pre-commit gate: commit rejected — hook-bypass detected (`--no-verify`/`-n` or a `core.hooksPath` override anywhere in the command). ' +
@@ -117,11 +229,12 @@ if (
 // Whether the command sequence stages changes (e.g. `git add -A && git commit` or `git commit -a`).
 // When true, the gate inspects both currently staged files and pending modified/untracked files
 // so chained commands cannot bypass loop-core / doc-contract gates before staging occurs.
+// Raw-matched (not stripQuoted): a quoted `"-a"` still stages, and the cost of
+// a message-text false positive here is only a WIDER inspection set — the safe
+// direction.
 const hasStageCommand =
-  subCmds.some((s) => /\bgit\b[^\n]*\badd\b/.test(s)) ||
+  subCmds.some((s) => gitSubcommandRe('add').test(s)) ||
   commitSubCmds.some((s) => /(?:^|\s)-(?:a|A|-all)\b/.test(s));
-
-const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
 // ── git helper: run a git subcommand, capturing status/stdout/stderr. ────────
 // Never throws — callers branch on `.ok`. Used for the snapshot orchestration so
@@ -277,6 +390,70 @@ function runGate() {
     }
   }
 
+  // 2b. Doc-manifest reconciliation — only when the STAGED set carries a
+  // `docs/**/*.md`. `check:doc-manifest` lives in `verify:checks` (the CI gate
+  // job), which no local preflight runs in full, so an unregistered doc rode to
+  // CI and burned a release tag three times (v0.33.8, v0.34.4, v0.34.17). The
+  // checker enumerates GIT-TRACKED docs — which is exactly why running it here
+  // is correct and running it ad-hoc is not: this gate has materialized the
+  // staged snapshot, so `git ls-files` sees the same tree CI will, including a
+  // brand-new doc that an untracked-file check would miss.
+  if (staged.some((p) => /^docs\/.*\.md$/i.test(p.replace(/\\/g, '/')))) {
+    try {
+      execSync('npm run check:doc-manifest', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: doc-manifest check FAILED — commit blocked. A staged doc under docs/ is not ` +
+          `registered in the routing table in docs/doc-review-guidelines.md (or a row points at a deleted ` +
+          `file). This is the check that fails RELEASE CI and burns a release tag.\n` +
+          `Register the doc (type + reason) in the routing table, or delete it.\n${tail}`,
+      };
+    }
+  }
+
+  // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
+  // re-includes each hook BY NAME, so a new hook committed without its
+  // `!.claude/hooks/<name>` line is silently dropped from the commit — and if
+  // the (tracked) settings.json references it, main points at a hook that is not
+  // there. Bit once (friction-stop-gate.mjs).
+  //
+  // Asserted against the MATERIALIZED STAGED SNAPSHOT, which is what makes this
+  // exact rather than approximate: a file the commit would not carry simply does
+  // not exist here, whether it is untracked, gitignored, or merely unstaged. So
+  // plain existence in this tree IS the question "will main have this hook?"
+  // (An `ls-files` tracked-check would answer a different, weaker question and
+  // misses the unstaged case entirely.) If settings.json itself is absent from
+  // the snapshot there is nothing to assert.
+  try {
+    const settingsText = readFileSync(join(root, '.claude', 'settings.json'), 'utf8');
+    const referenced = [
+      ...new Set([...settingsText.matchAll(/\.claude\/hooks\/([\w.-]+)/g)].map((m) => `.claude/hooks/${m[1]}`)),
+    ];
+    const missing = referenced.filter((p) => !existsSync(join(root, p)));
+    if (missing.length > 0) {
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: commit blocked — .claude/settings.json references hook file(s) this commit would ` +
+          `NOT carry, so main would point at hooks that are not there:\n` +
+          missing.map((p) => `  - ${p}`).join('\n') +
+          `\n.gitignore ignores \`.claude/hooks/*\` and re-includes each hook BY NAME. In THIS commit: add the ` +
+          `matching \`!${missing[0]}\` line to .gitignore and \`git add\` the hook file.`,
+      };
+    }
+  } catch {
+    /* settings.json absent/unreadable in the snapshot — nothing to assert */
+  }
+
   // 3. Loop-core adversarial-review attestation — only when the STAGED set
   // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
   // staged-tree-hash-bound review attestation. This enforces attestation
@@ -410,6 +587,16 @@ if (!diverges) {
 // deterministic temp-index round-trip (see header). All git-plumbing goes
 // through a SCRATCH index file so the real staged index is never mutated by the
 // capture/checkout steps; the only real-index write is the final restore.
+//
+// Serialized: a second gate instance mid-round-trip means interleaved tree
+// surgery — fail OPEN instead (skip the check), never overlap.
+if (!acquireRoundTripLock()) {
+  console.error(
+    '[pre-commit gate] another staged-snapshot round-trip is in flight — skipping the staged-snapshot ' +
+      'check for this commit (fail-open; retry if you need the gate to run).',
+  );
+  process.exit(0);
+}
 // Scratch index for the staged-snapshot round-trip. It MUST NOT live under
 // `join(root, '.git', …)`: in a LINKED worktree `.git` is a FILE (a gitdir
 // pointer), so a path "under" it is unwritable and every git-with-scratch-index
@@ -424,6 +611,7 @@ const worktreeTree = captureWorktreeTree(scratchIndex);
 const stagedWt = git(['write-tree']);
 if (worktreeTree === null || !stagedWt.ok) {
   try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  releaseRoundTripLock();
   console.error(
     `[pre-commit gate] could not capture the staged snapshot (git write-tree failed) — ` +
       `skipping the staged-snapshot check for this commit. ${stagedWt.stderr}`,
@@ -439,6 +627,7 @@ const stagedPaths = listTreePaths(stagedTree);
 const worktreePaths = listTreePaths(worktreeTree);
 if (stagedPaths === null || worktreePaths === null) {
   try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  releaseRoundTripLock();
   console.error(
     `[pre-commit gate] could not enumerate the staged snapshot (git ls-tree failed) — ` +
       `skipping the staged-snapshot check for this commit.`,
@@ -447,10 +636,29 @@ if (stagedPaths === null || worktreePaths === null) {
 }
 const unionPaths = new Set([...stagedPaths, ...worktreePaths]);
 
+// Journal the round-trip BEFORE the first worktree mutation: if this process is
+// killed anywhere past this point, the next gate invocation restores both trees
+// from these SHAs (they live in the object db and survive the crash).
+try {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(RT_JOURNAL, JSON.stringify({ worktreeTree, stagedTree, at: new Date().toISOString() }, null, 2));
+} catch {
+  // Can't journal → don't take an unrecoverable risk: skip the check (fail-open).
+  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  releaseRoundTripLock();
+  console.error(
+    '[pre-commit gate] could not write the round-trip recovery journal — skipping the staged-snapshot ' +
+      'check for this commit (a crash mid-check would otherwise be unrecoverable).',
+  );
+  process.exit(0);
+}
+
 // 2. Materialize the staged tree into the worktree.
 if (!checkoutTreeExact(scratchIndex, stagedTree, unionPaths)) {
   checkoutTreeExact(scratchIndex, worktreeTree, unionPaths); // best-effort restore
   try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  try { rmSync(RT_JOURNAL, { force: true }); } catch { /* ignore */ }
+  releaseRoundTripLock();
   console.error(
     `[pre-commit gate] could not materialize the staged snapshot (git checkout-index failed) — ` +
       `skipping the staged-snapshot check for this commit.`,
@@ -474,6 +682,12 @@ try {
   const restoredWt = checkoutTreeExact(scratchIndex, worktreeTree, unionPaths);
   const restoredIdx = git(['read-tree', stagedTree]).ok;
   try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  if (restoredWt && restoredIdx) {
+    try { rmSync(RT_JOURNAL, { force: true }); } catch { /* ignore */ }
+  }
+  // On a FAILED restore the journal stays: the next invocation retries the
+  // recovery from the journaled SHAs.
+  releaseRoundTripLock();
   if (!restoredWt || !restoredIdx) {
     // Restoration hit an infra fault. Surface it loudly, but do NOT convert it
     // into a spurious commit block (fail-open on infra): keep a real gate block

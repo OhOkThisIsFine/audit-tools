@@ -26,6 +26,13 @@
   sanitized to `capability_order`; reach never LLM-confirmable; provenance in
   `capability_order_llm_ranked` with operator supersession). Full mechanism + review history:
   [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md).
+- **Trap-guard hook layer shipped 2026-07-23.** Durable traps that are detectable at a tool call are
+  now REFUSED there rather than carried as backlog prose: `shell-trap-guard.mjs` (Bash/PowerShell),
+  `tool-input-guard.mjs` (Edit/Write/Agent), `session-start-guards.mjs`, plus two new checks in
+  `pre-commit-gate.mjs` (`check:doc-manifest` on staged docs — the check that burned v0.33.8 /
+  v0.34.4 / v0.34.17 — and a settings.json→untracked-hook block). Gated entries were DELETED from
+  backlog *Durable traps*, which now states that policy at its head. Contract tests:
+  `tests/shared/hook-trap-guards.test.mjs`. [[trap-guard-hook-layer]]
 - **Loop-core attestation + pre-commit gate hardened 2026-07-21 (`fd7ccab2`).** `--attester-class
   agent|human` is REQUIRED and env-markers are recorded (a self-issued clearance reads as one);
   `concerns` verdicts are destination-keyed (block only on `main`); the sibling-statement
