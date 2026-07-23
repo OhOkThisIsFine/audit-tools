@@ -88,12 +88,18 @@ LEG 3 — RECURRING-PROBLEM SOLUTIONS
 
 OUTPUT
 16. Write .audit-tools/nightly/open-items.json — the machine contract behind the digest.
-    Each item: { id, leg (docs|backlog|solutions), subject_key, path, title, question,
-    evidence[], proposal?, patch_path? }. Compute subject_key with subjectKey(path, subject)
-    from scripts/nightly/items.mjs — key it on the SUBJECT (the prose in question), never on
-    your wording of the question, or the owner's answer will not stick. Write it via
-    writeOpenItems() so nights_open carries forward. Include `applied` (what you changed) and
-    `skipped` (any leg or scope you could NOT cover, with the reason).
+    Each item: { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
+    evidence[], proposal?, patch_path? }.
+    - `title` = the one-line summary (front-loaded, not a summary of your investigation).
+    - `eli5` = a plain-language explanation for a NON-EXPERT reader: what the doc/backlog claims,
+      what the code actually does, why they diverged, and what each possible answer would mean
+      going forward. This is what makes the item answerable without re-derivation — write it for
+      every item, in full sentences, no internal IDs or symbol-name shorthand.
+    - `question` = the specific decision; `evidence[]` = what you verified against code, and how.
+    Compute subject_key with subjectKey(path, subject) from scripts/nightly/items.mjs — key it on
+    the SUBJECT (the prose in question), never on your wording of the question, or the owner's
+    answer will not stick. Write it via writeOpenItems() so nights_open carries forward. Include
+    `applied` (what you changed) and `skipped` (any leg or scope you could NOT cover, with the reason).
 17. Render + open the digest:  node scripts/nightly/render-digest.mjs --open
 18. SILENT ON CLEAN: nothing applied and nothing open → no digest churn, no notification.
     But NEVER silent on skipped: a quiet digest must mean "all clear", never "did not look".

@@ -40,6 +40,7 @@
     "postinstall": "node scripts/postinstall.mjs",
     "build": "tsc -p tsconfig.json && node scripts/shared/copy-data-assets.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
+    "nightly:review": "node scripts/nightly/serve.mjs",
     "test:doc-contract": "node scripts/shared/run-vitest-gate.mjs tests/audit/release-contract.test.mjs tests/audit/file-lock-doc-sync.test.mjs tests/audit/host-asset-renderer-drift.test.mjs",
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",

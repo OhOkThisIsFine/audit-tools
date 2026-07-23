@@ -46,7 +46,7 @@ try {
     `nightly: ${fresh.length} new item${fresh.length === 1 ? '' : 's'} (${legs})` +
       `${open.length > fresh.length ? `, ${open.length} open total` : ''}` +
       `${stuck > 0 ? `, ${stuck} open 5+ nights` : ''}` +
-      ` → open ${DIGEST_RELPATH}, settle with \`node scripts/nightly/answer.mjs <ID> "..."\`\n`,
+      ` → review with buttons: \`npm run nightly:review\` (or read ${DIGEST_RELPATH})\n`,
   );
 
   // Announced once. Every currently-open subject is marked seen — not just the

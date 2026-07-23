@@ -22,6 +22,7 @@ import {
   recordViewed,
 } from '../../scripts/nightly/items.mjs';
 import { renderDigest } from '../../scripts/nightly/render-digest.mjs';
+import { createNightlyReviewServer } from '../../scripts/nightly/serve.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
@@ -144,9 +145,24 @@ describe('digest render', () => {
     expect(html).toMatch(/&lt;img src=x/);
   });
 
-  it('gives every item its exact answer command', () => {
+  it('points to the interactive review for buttoned answers', () => {
     const html = renderDigest({ items: [item({ id: 'BKL-7' })], applied: [], skipped: [] });
-    expect(html).toMatch(/answer\.mjs BKL-7/);
+    expect(html).toMatch(/nightly:review/);
+  });
+
+  it('renders an expandable ELI5 block when the item carries one', () => {
+    const html = renderDigest({
+      items: [item({ eli5: 'The docs say a robot double-checks the math, but no robot exists.' })],
+      applied: [],
+      skipped: [],
+    });
+    expect(html).toMatch(/In plain terms/);
+    expect(html).toMatch(/no robot exists/);
+  });
+
+  it('omits the ELI5 block when the item has none', () => {
+    const html = renderDigest({ items: [item({ eli5: undefined })], applied: [], skipped: [] });
+    expect(html).not.toMatch(/In plain terms/);
   });
 
   it('calls out items open 5+ nights instead of repeating them silently', () => {
@@ -284,6 +300,104 @@ describe('answer CLI', () => {
   it('--list prints the open ids', () => {
     const r = runAnswer(['--list']);
     expect(r.stdout).toMatch(/DOC-1/);
+  });
+});
+
+describe('interactive review server — the buttoned surface', () => {
+  let server;
+  let base;
+
+  async function start() {
+    server = createNightlyReviewServer(root);
+    await new Promise((res) => server.listen(0, '127.0.0.1', res));
+    base = `http://127.0.0.1:${server.address().port}`;
+  }
+  afterEach(async () => {
+    if (server) await new Promise((res) => server.close(res));
+    server = undefined;
+  });
+
+  it('binds to loopback only — never network-exposed', async () => {
+    writeOpenItems(root, { items: [item()] });
+    await start();
+    expect(server.address().address).toBe('127.0.0.1');
+  });
+
+  it('serves a page with a text box and Settle / Won\'t-fix buttons', async () => {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1', eli5: 'Plain explanation here.' })] });
+    await start();
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).toMatch(/<textarea/);
+    expect(html).toMatch(/data-act="settled"/);
+    expect(html).toMatch(/data-act="wontfix"/);
+    expect(html).toMatch(/In plain terms/);
+  });
+
+  it('records an answer via POST and reports the remaining open count', async () => {
+    writeOpenItems(root, {
+      items: [
+        item({ id: 'DOC-1', subject_key: subjectKey('a.md', 'one') }),
+        item({ id: 'DOC-2', subject_key: subjectKey('b.md', 'two') }),
+      ],
+    });
+    await start();
+    const r = await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'DOC-1', answer: 'keep it as is', disposition: 'settled' }),
+    });
+    expect(r.status).toBe(200);
+    const data = await r.json();
+    expect(data.open_count).toBe(1);
+    const decisions = readDecisions(root);
+    expect(Object.values(decisions)[0].answer).toBe('keep it as is');
+  });
+
+  it('rejects an empty answer — the same guard the CLI enforces', async () => {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    await start();
+    const r = await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'DOC-1', answer: '   ', disposition: 'settled' }),
+    });
+    expect(r.status).toBe(400);
+    expect(Object.keys(readDecisions(root))).toHaveLength(0);
+  });
+
+  it('rejects an unknown or already-settled id', async () => {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    await start();
+    const r = await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'NOPE', answer: 'x', disposition: 'settled' }),
+    });
+    expect(r.status).toBe(404);
+  });
+
+  it('records --wontfix as its own disposition', async () => {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    await start();
+    await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'DOC-1', answer: 'not worth it', disposition: 'wontfix' }),
+    });
+    expect(Object.values(readDecisions(root))[0].disposition).toBe('wontfix');
+  });
+
+  it('a settled subject is gone from the served page on reload', async () => {
+    const it1 = item({ id: 'DOC-1' });
+    writeOpenItems(root, { items: [it1] });
+    await start();
+    await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'DOC-1', answer: 'done', disposition: 'settled' }),
+    });
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).not.toMatch(/data-id="DOC-1"/);
   });
 });
 

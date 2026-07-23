@@ -1564,7 +1564,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   FS (Windows), a green-on-Linux / red-on-Windows or intermittent failure. When you touch the dispatch path,
   expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
   ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
-  (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.)
+  (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.) Same class:
+  `tests/shared/rollingDispatch.test.mjs` "re-dispatches immediately on result arrival" passes in
+  isolation but intermittently reads `2` for `3` under full-suite load — it is sensitive to ambient
+  scheduler/FS load, not just dispatch-path latency. `tests/shared/nightly-routine.test.mjs` spins up
+  real HTTP servers (the interactive-review contract), which adds transient load that nudges it over
+  its window; the durable fix is to widen that test's delay well past worst-case, not to thin the
+  server tests (CI's 4-way shard already lowers the per-shard load).
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
   Run a single file with `npx vitest run <path>`. `node:assert/strict`
   is still permitted as an assertion lib (runs under vitest) for the control-flow assertions

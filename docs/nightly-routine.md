@@ -68,11 +68,28 @@ is how you lose the owner's uncommitted work.
 
 ## Surfacing — the digest, not the conversation
 
-The run writes a self-contained HTML digest to `.audit-tools/nightly/latest.html`
-(rendered by `scripts/nightly/render-digest.mjs`) and opens it. That is the
-channel. A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one
-line**, and only when a subject has not been announced before, so a session that
-starts later still learns something is waiting.
+Each item carries three layers, so the reader spends only the attention the
+decision needs: a **one-line title** (the summary), an expandable **"In plain
+terms"** ELI5 the routine writes for a non-expert reader (what the doc claims,
+what the code does, why they diverged, what each answer would mean), and a
+collapsed **technical evidence** list underneath. The routine populates the
+`eli5` field for every escalated item — a decision needs the full picture, and a
+plain-language version is what makes it answerable without re-derivation.
+
+Two surfaces render those items:
+
+- **Static snapshot** — `.audit-tools/nightly/latest.html`
+  (`scripts/nightly/render-digest.mjs`), a read-only record the run writes.
+- **Interactive review** — `npm run nightly:review` (`scripts/nightly/serve.mjs`).
+  A tiny server bound to **127.0.0.1 only** that renders the same items with a
+  **text box and Settle / Won't-fix buttons**; clicking one records the answer
+  and the item collapses. A `file://` page cannot persist a click, which is why
+  answering is a served page rather than the static file — the one command
+  starts it, and everything after is buttons. Stop it with Ctrl-C.
+
+A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**,
+and only when a subject has not been announced before, pointing at
+`npm run nightly:review`.
 
 This replaced a hook that printed the full decision table into every
 conversation. It failed for reasons worth keeping written down, because they are
@@ -98,6 +115,8 @@ The fix is the **subject key**: `sha1(path :: normalized subject prose)`, comput
 in [`scripts/nightly/items.mjs`](../scripts/nightly/items.mjs). Answers are
 recorded against the subject in `.claude/nightly-decisions.json` — tracked, so it
 outlives runs, branches and machines.
+
+Answer with the buttons in `npm run nightly:review`, or from a shell:
 
 ```bash
 node scripts/nightly/answer.mjs <ID> "the answer"      # settle it
