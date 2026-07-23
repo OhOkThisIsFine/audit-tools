@@ -127,7 +127,7 @@ inventories give durable labels and measurable RECALL, and turn `score-audit` in
 gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-target calibration.
 
 **3. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
-(The doc-review queue is EMPTY as of 2026-07-22.)
+(The doc-review queue has one open item, DD-8 — see the `doc-review` branch.)
 
 ---
 
