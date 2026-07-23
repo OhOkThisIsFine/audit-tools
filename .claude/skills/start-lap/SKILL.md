@@ -65,18 +65,19 @@ git log --oneline "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD
 
 Any commits listed = un-released work sitting on main (HANDOFF's "live state" usually names why).
 
-## 5. Surface open doc-review items
+## 5. Surface open nightly items
 
-The SessionStart hook prints any open doc-review items (proposed instruction-file edits + design
-decisions) at session start. If present, list them tersely so the owner can approve/reject — they're
-applied via `node .claude/hooks/doc-review-resolve.mjs <ID>...` once actioned. Don't auto-apply
-instruction-file edits; those are the owner's call.
+Read `.audit-tools/nightly/open-items.json` (the nightly routine's output — docs, backlog and
+recurring-problem items). List anything open tersely so the owner can decide. An answer is recorded
+with `node scripts/nightly/answer.mjs <ID> "the answer"`, which settles that subject permanently —
+including "leave it as it is", which is a valid answer and the one that stops a question recurring.
+Don't auto-apply instruction-file edits or land leg-3 proposals; those are the owner's call.
 
 ## 6. Hand back — oriented + begin the next item
 
 Terse digest: current live version + released-vs-local delta, sync result (N commits
 pulled / already current / stranded on branch X), a one-line skim of what shipped since (step 4), the
-**immediate next item** from HANDOFF's roadmap with its backlog home, and any open doc-review items
+**immediate next item** from HANDOFF's roadmap with its backlog home, and any open nightly items
 awaiting the owner. Then **start on that next item** — risk-tier it first
 ([[risk-tier-loop-laps-cheap-vs-heavy]]): scale pipeline depth to the risk tier — full adversarial depth
 for loop-core / complex work, leaner for trivial mechanical clusters; it's ONE pipeline dialed by risk,

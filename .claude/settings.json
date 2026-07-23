@@ -47,9 +47,9 @@
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/doc-review-surface.mjs\"",
-            "timeout": 15,
-            "statusMessage": "Checking for open doc-review items"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/nightly-surface.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking for new nightly items"
           },
           {
             "type": "command",

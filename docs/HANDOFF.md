@@ -38,6 +38,18 @@
   v0.34.4 / v0.34.17 — and a settings.json→untracked-hook block). Gated entries were DELETED from
   backlog *Durable traps*, which now states that policy at its head. Contract tests:
   `tests/shared/hook-trap-guards.test.mjs`. [[trap-guard-hook-layer]]
+- **Nightly maintenance routine shipped 2026-07-23 — replaces the cloud doc-review routine.** One
+  LOCAL scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`, 02:00 daily), three legs:
+  docs (leg 1, the old doc-review rubric), backlog disambiguation (mechanical cleanup autonomous,
+  real disambiguation escalates), and recurring-problem solutions (memory+backlog → proposed
+  mechanisms, propose-only). Surfaces via a self-contained **HTML digest**
+  (`.audit-tools/nightly/latest.html`), not a per-conversation table dump. The re-ask loop is fixed
+  by a durable **subject-keyed decisions ledger** (`.claude/nightly-decisions.json`, tracked): an
+  answer — including "leave it as is" — settles a subject permanently. Old `doc-review-*` hooks +
+  the `doc-review` branch machinery deleted. Contract: `docs/nightly-routine.md`. Tests:
+  `tests/shared/nightly-routine.test.mjs`. [[nightly-maintenance-routine]] [[doc-review-nag-clear-on-apply]]
+  ⚠ **The 11 previously-surfaced doc-review items are not seeded** — tonight's first run regenerates
+  them (several repair-proxy-rename items may auto-resolve); DD-9 is already decided in backlog.
 - **Loop-core attestation + pre-commit gate hardened 2026-07-21 (`fd7ccab2`).** `--attester-class
   agent|human` is REQUIRED and env-markers are recorded (a self-issued clearance reads as one);
   `concerns` verdicts are destination-keyed (block only on `main`); the sibling-statement

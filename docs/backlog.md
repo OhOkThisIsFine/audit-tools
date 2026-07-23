@@ -339,7 +339,6 @@ followed" is otherwise indistinguishable from a bug.
   — it also buries the wall/abort diagnostics.
 
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
-- **The nightly doc-review verifies against remote `main` only, so unpushed local work makes it revert CORRECT docs to stale ones (2026-07-21, VERIFIED by instance, medium, friction: tool-should-decide).** The 2026-07-21 run (`4c18315`) rewrote a true present-tense claim in `spec/backend-identity-axes.md` — "the autonomous fail-closed write emits the **service** axis" — into "planned (stage 5, not yet shipped)", because remote `main` stopped at stage 4 while stage 5 (`e7cda25`) sat in five unpushed local commits. Every doc claim the routine "re-verified against HEAD" carries the same exposure: its HEAD is the remote tip, and a doc can be *ahead* of that tip as legitimately as behind it. The routine already stamps its baseline range in the commit body, so the tool-side fix is a check at reconcile/push time: if a `doc-review:` commit's stated baseline is not the current tip's ancestor-with-nothing-in-between, its stale-factual-fixes need re-verification against the real tip before they land. "Push before the nightly runs" is host discipline, not a fix. Corrected in `0bf36e7`.
 - **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.
 
 - **A proxied lane is PRICED by its transport, so cost-first routing ranks it on the wrong vendor's price (2026-07-19, VERIFIED by mechanism, medium).** `annotateConfirmedPool` prices a source with `resolveModelPrice(source.model, source.provider)` (`src/shared/providers/providerConfirmation.ts`, the `source_pool_cost_order` build) — the TRANSPORT — while `source.backend_provider` sits on the same object. `resolveModelStatics` looks the second arg up as `snapshot.byProvider[provider]`, a models.dev **vendor**-keyed table (`src/shared/quota/modelStatics.ts:142-149`); `claude-worker` is not a vendor, so the lookup misses and falls through to `lookupInTable(snapshot.default, modelId)` — the cheapest-collision default. A proxied lane is therefore priced as whichever vendor sells that model id cheapest, not as the vendor actually serving it. **It fails QUIET** — no missing-price signal, just a wrong number — and it feeds rung 2 of `costRank`, i.e. the DEFAULT cost-first operating point (λ=0), so it can mis-order which pool routes first.
@@ -961,16 +960,6 @@ followed" is otherwise indistinguishable from a bug.
   — same second-driver hazard already fixed for `design_review_parallel` (`e6b580d0`), and it has the host
   mark its own homework (vs [[delegate-adversarial-phases-to-separate-agent]]). Consider dispatching the
   contract review to an independent subagent there too.
-- **Doc-review auto-apply must reconcile against HEAD, not a stale branch snapshot (2026-07-10, tool-should-decide).**
-  **Tool fix (open):** the doc-review auto-apply must not re-propose/re-apply an item whose decision is already
-  recorded resolved (or already committed to the tracked tree) — it should reconcile against HEAD, not a stale
-  branch snapshot. Relates [[enforce-robustness-in-tooling-not-host-discretion]]. (The durable "git diff your
-  instruction files after a restart" trap this friction produced now lives under *Durable traps*.)
-- **Friction-walk lesson (lease-TTL / untracked-scope laps, recurring):** the SessionStart doc-review hook's
-  clear-on-apply ledger (`doc-review-resolved.json`) is local-only — a worktree branched before a resolution
-  commit lands on main re-surfaces already-resolved items from stale state (hit twice). Open tool fix: the
-  hook should reconcile against the fetched remote's resolved-state (or flag "worktree behind main — list may
-  be stale") before surfacing.
 
 - **Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the
   code site).** The scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`

@@ -19,18 +19,16 @@ dist/
 !.claude/hooks/attest-loop-core-review.mjs
 !.claude/hooks/async-typecheck.mjs
 !.claude/hooks/friction-stop-gate.mjs
-!.claude/hooks/doc-review-surface.mjs
-!.claude/hooks/docReviewLedger.mjs
-!.claude/hooks/docReviewFindings.mjs
-!.claude/hooks/docReviewFindings.test.mjs
-!.claude/hooks/doc-review-resolve.mjs
-!.claude/hooks/doc-review-resolve.test.mjs
-!.claude/hooks/doc-review-resolved.json
+!.claude/hooks/nightly-surface.mjs
 !.claude/hooks/shell-split.mjs
 !.claude/hooks/shell-trap-guard.mjs
 !.claude/hooks/tool-input-guard.mjs
 !.claude/hooks/session-start-guards.mjs
 !.claude/skills/
+# The nightly routine's DURABLE decisions ledger — tracked on purpose: it is the
+# record of what the owner has settled, and its whole job is to outlive runs,
+# branches and machines so a settled question is never asked again.
+!.claude/nightly-decisions.json
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/

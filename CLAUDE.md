@@ -219,7 +219,7 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
   artifacts) or the terminal/result-routing adapter, never the algorithm. Fix in one usually belongs in
   both; single-source the common core in `audit-tools/shared`, each orchestrator a thin policy-selecting
   adapter. (Realizes "One pipeline, two halves" and the dissolve-the-distinction direction.)
-- **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the doc-review routine enforces.
+- **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
 - **A needed manual flag is a bug signal.** Fix auto-resolution; don't document the flag.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
 - **Budget context before LLM dispatch.** Small obligation-specific packets; expand only when genuinely needed.
