@@ -355,6 +355,14 @@ followed" is otherwise indistinguishable from a bug.
   agy's settings schema (agy docs / `agy install`), add read-only allow rules, then delete this entry.
 
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
+- **`tests/shared/rollingDispatch.test.mjs` "re-dispatches immediately on result arrival" is
+  timing-flaky on loaded runners (2026-07-23, low, hermeticity).** First observation: CI shard 2 of
+  the v0.34.23 publish run — the 50ms `setTimeout` at rollingDispatch.test.mjs:268-269 lost the
+  race on a busy runner ("expected 2 to be 3"); passed locally alone (72/72) and in the same-day
+  full local run; CI rerun green. Same class as the linux-cycle entry below: the fix is an
+  event-driven wait (poll for `dispatchOrder.length === 3` with a generous deadline), not a fixed
+  sleep. One observation — fix if it recurs.
+
 - **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.
 
 - **A proxied lane is PRICED by its transport, so cost-first routing ranks it on the wrong vendor's price (2026-07-19, VERIFIED by mechanism, medium).** `annotateConfirmedPool` prices a source with `resolveModelPrice(source.model, source.provider)` (`src/shared/providers/providerConfirmation.ts`, the `source_pool_cost_order` build) — the TRANSPORT — while `source.backend_provider` sits on the same object. `resolveModelStatics` looks the second arg up as `snapshot.byProvider[provider]`, a models.dev **vendor**-keyed table (`src/shared/quota/modelStatics.ts:142-149`); `claude-worker` is not a vendor, so the lookup misses and falls through to `lookupInTable(snapshot.default, modelId)` — the cheapest-collision default. A proxied lane is therefore priced as whichever vendor sells that model id cheapest, not as the vendor actually serving it. **It fails QUIET** — no missing-price signal, just a wrong number — and it feeds rung 2 of `costRank`, i.e. the DEFAULT cost-first operating point (λ=0), so it can mis-order which pool routes first.
