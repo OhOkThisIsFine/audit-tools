@@ -7,7 +7,13 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.21 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.22 (2026-07-23) shipped the
+  **dispatch-legibility mechanistic trace** — full constraint-outcome explain records on every
+  host grant/refusal (constraints + binding row + attempts trail; `resource_keys[]` on leases),
+  `planned` explains on plan-only grants (closes the 144-granted-empty-explains path), and the
+  engine decision log (`dispatch-explains.jsonl`, per-pool strand why-nots, stderr fallback so no
+  decision vanishes). Mechanism + 4-lane review record:
+  `docs/reviews/dispatch-legibility-trace-2026-07-23.md`. v0.34.21 (2026-07-23) shipped the
   **DD-9 intent-equivalence gate + charter dependency-slice layer** — a provenance-only or
   judged-equivalent intent re-confirm no longer re-stales the planning cascade
   (`intent_equivalence_current` obligation; `artifact_metadata.intent_baseline` is the intent
