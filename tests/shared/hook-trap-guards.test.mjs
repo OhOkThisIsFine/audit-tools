@@ -57,6 +57,20 @@ describe('shell-trap-guard: codex stdin (backlog: logged 3x, hangs at exit 0 + e
     const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
     expect(code, `expected allow; stderr:\n${stderr}`).toBe(0);
   });
+
+  it('an ESCAPED quote inside the prompt does not break the span and false-block', () => {
+    const cmd = 'codex exec "review \\"a; b\\" carefully" < /dev/null';
+    const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+    expect(code, `expected allow; stderr:\n${stderr}`).toBe(0);
+  });
+
+  it('a QUOTED textual mention (`rg "codex exec" docs`) is not an invocation', () => {
+    expect(runHook(SHELL_GUARD, bash('rg "codex exec" docs/')).code).toBe(0);
+  });
+
+  it('a file redirect (`< prompt.txt`) also closes stdin and is allowed', () => {
+    expect(runHook(SHELL_GUARD, bash('codex exec < prompt.txt')).code).toBe(0);
+  });
 });
 
 describe('shell-trap-guard: Bash-tool syntax traps', () => {
@@ -87,6 +101,19 @@ describe('shell-trap-guard: Bash-tool syntax traps', () => {
   it('does NOT apply the bash-only syntax rules to PowerShell', () => {
     const payload = { tool_name: 'PowerShell', tool_input: { command: 'node C:\\Code\\x.mjs' } };
     expect(runHook(SHELL_GUARD, payload).code).toBe(0);
+  });
+
+  it('blocks relative (`.\\x`) and UNC (`\\\\server\\share`) backslash paths too', () => {
+    expect(runHook(SHELL_GUARD, bash('node .\\scripts\\check.mjs')).code).toBe(2);
+    expect(runHook(SHELL_GUARD, bash('node \\\\server\\share\\tool.mjs')).code).toBe(2);
+  });
+
+  it('does not fire the backslash rule on escaped-backslash text (`sed s/\\\\n//`)', () => {
+    expect(runHook(SHELL_GUARD, bash('sed s/\\\\n//g file.txt')).code).toBe(0);
+  });
+
+  it('mktemp as a SEARCH TERM (`rg mktemp docs`) is not an invocation', () => {
+    expect(runHook(SHELL_GUARD, bash('rg mktemp docs/')).code).toBe(0);
   });
 });
 
@@ -175,6 +202,17 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
     const { dir } = makeRepo();
     try {
       expect(runHook(SHELL_GUARD, bash('git checkout -- a.txt'), { root: dir }).code).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks a QUOTED at-risk target (quotes never reach git pathspecs)', () => {
+    const { dir } = makeRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const { code } = runHook(SHELL_GUARD, bash('git restore "a.txt"'), { root: dir });
+      expect(code).toBe(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

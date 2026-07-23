@@ -579,9 +579,35 @@ if (diverges === null) {
   process.exit(0);
 }
 
-if (!diverges) {
-  // Working tree == staged index. Check it directly; no materialization needed.
-  const { blocked, message } = runGate();
+// The full path listing of the tree the commit will carry, for the direct
+// (non-materialized) check paths. Null on any git fault — membership checks
+// then skip (fail-open on infra).
+function committedPathsForDirectCheck() {
+  if (hasStageCommand) {
+    // The command stages the working tree before committing — the committed
+    // tree is the worktree tree (tracked + untracked-unignored, deletions
+    // honored), captured via the scratch index.
+    const scratch = join(tmpdir(), `audit-tools-gate-paths-${randomBytes(6).toString('hex')}`);
+    const tree = captureWorktreeTree(scratch);
+    try { rmSync(scratch, { force: true }); } catch { /* ignore */ }
+    const paths = tree === null ? null : listTreePaths(tree);
+    return paths === null ? null : new Set(paths);
+  }
+  const wt = git(['write-tree']);
+  if (!wt.ok) return null;
+  const paths = listTreePaths(wt.stdout.trim());
+  return paths === null ? null : new Set(paths);
+}
+
+if (!diverges || hasStageCommand) {
+  // Working tree == staged index (nothing to materialize), OR the command
+  // itself stages the working tree before committing (`git add -A && git
+  // commit`, `git commit -a`/`-am`) — in both cases the WORKING TREE is the
+  // snapshot that lands, so check it directly. (For a PARTIAL `git add <paths>`
+  // chain the worktree is an approximation — exactness would need simulating
+  // the add — but the old behavior checked the PRE-add index, which is wrong in
+  // strictly more cases and let a chained add+commit land unchecked content.)
+  const { blocked, message } = runGate(committedPathsForDirectCheck());
   if (blocked) {
     console.error(message);
     process.exit(2);
@@ -674,8 +700,9 @@ if (!checkoutTreeExact(scratchIndex, stagedTree, unionPaths)) {
 
 let exitCode = 0;
 try {
-  // 3. Gate the materialized staged snapshot.
-  const { blocked, message } = runGate();
+  // 3. Gate the materialized staged snapshot. The committed tree here IS the
+  // staged tree, whose listing is already in hand.
+  const { blocked, message } = runGate(new Set(stagedPaths));
   if (blocked) {
     console.error(message);
     exitCode = 2;

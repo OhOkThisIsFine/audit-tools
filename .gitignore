@@ -26,7 +26,6 @@ dist/
 !.claude/hooks/doc-review-resolve.mjs
 !.claude/hooks/doc-review-resolve.test.mjs
 !.claude/hooks/doc-review-resolved.json
-!.claude/hooks/async-typecheck.test.mjs
 !.claude/hooks/shell-split.mjs
 !.claude/hooks/shell-trap-guard.mjs
 !.claude/hooks/tool-input-guard.mjs

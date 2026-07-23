@@ -54,7 +54,9 @@ if (toolName === 'Agent') {
   const prompt = String(input?.prompt ?? '');
   const dispatchShaped =
     /\b(remediate-code|audit-code|accept-node|merge-implement-results|merge-and-ingest)\b/i.test(prompt) ||
-    /\b(implement|dispatch)\s+node\b/i.test(prompt) ||
+    // `(?!\.?js)` — "Implement Node.js streams" is ordinary work, not a
+    // dispatch node.
+    /\b(implement|dispatch)\s+node\b(?!\.?js)/i.test(prompt) ||
     /\bnode[_-]?(id|worktree)\b/i.test(prompt);
   if (input?.isolation === 'worktree' && dispatchShaped) {
     block(
