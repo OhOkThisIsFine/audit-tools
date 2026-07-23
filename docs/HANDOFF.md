@@ -7,9 +7,12 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.18 (2026-07-23) shipped the
-  accept-latch family fix (failed accepts record `accept_failed`, never latch accepted; no-change
-  closures ancestry-adjudicated; mechanism record:
+- **Current version = `package.json`** (authoritative). v0.34.19 (2026-07-23) shipped the
+  node-context clobber tier — deny-by-default node-worktree CLI guard + writer asserts,
+  dist-dependent verify partition (defer-to-close), standing worker rules in `implementPrompt`
+  (mechanism record: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`). v0.34.18
+  (2026-07-23) shipped the accept-latch family fix (failed accepts record `accept_failed`, never
+  latch accepted; no-change closures ancestry-adjudicated; mechanism record:
   `docs/reviews/accept-latch-family-mechanisms-2026-07-23.md`; the v0.34.17 tag was burned on a
   doc-manifest gate miss and deleted). v0.34.16 (2026-07-23) landed the COMPLETE remediate dogfood
   run — 8/8 nodes of the 78-finding high slice, every fix red-green validated; 7,076/0 on the
