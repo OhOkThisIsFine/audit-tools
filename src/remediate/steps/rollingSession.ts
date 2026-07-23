@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden, detectHostDispatchWall, type HostDispatchWall } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden, assertNotNodeWorktreeCwd, detectHostDispatchWall, type HostDispatchWall } from "audit-tools/shared";
 // Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
 // dispatched by one driver can never be re-dispatched by the other.
@@ -121,6 +121,22 @@ function sessionPath(artifactsDir: string, runId: string): string {
 }
 function sessionLockPath(artifactsDir: string, runId: string): string {
   return join(implementDir(artifactsDir, runId), "rolling-session.lock");
+}
+/**
+ * The sole writer of `rolling-session.json`. Refuses from a node-worktree cwd
+ * (defense-in-depth behind the CLI-entry guard): a dispatched worker's stray
+ * driver-CLI invocation rewrote this exact file mid-run (live 2026-07-22,
+ * backlog "shared-state clobber from node context") — an invocation shape the
+ * CLI guard never sees (explicit `--artifacts-dir`, embedded use) still cannot
+ * clobber the session.
+ */
+async function writeSessionFile(
+  artifactsDir: string,
+  runId: string,
+  session: RollingSession,
+): Promise<void> {
+  assertNotNodeWorktreeCwd("a rolling-session write");
+  await writeJsonFile(sessionPath(artifactsDir, runId), session);
 }
 /**
  * The file-backed node-claim registry path for a run. Keyed ONLY to the run +
@@ -451,7 +467,7 @@ export async function prepareHostRollingDispatch(
     claims,
     contested,
   };
-  await writeJsonFile(sessionPath(options.artifactsDir, runId), session);
+  await writeSessionFile(options.artifactsDir, runId, session);
 
   return {
     session,
@@ -604,7 +620,7 @@ export async function advanceHostRolling(opts: {
     const terminal = session.accepted.length + acceptFailed.length;
     const inFlight = session.dispatched.length - terminal;
 
-    await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
+    await writeSessionFile(opts.artifactsDir, opts.runId, session);
     // Done when every node this session is responsible for has been accepted AND
     // nothing is still in flight — a contested node held by a peer driver does not
     // keep this session waiting forever (the peer accepts it; the run-level

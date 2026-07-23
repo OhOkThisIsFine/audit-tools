@@ -21,7 +21,10 @@ import {
 import { classifyFindingRisk } from "../stepUtils.js";
 import { isTerminalStatus } from "../../state/itemStatus.js";
 import { runDir, uniquePaths } from "./common.js";
-import { buildFreeVerifyCommands } from "./verifyCommands.js";
+import {
+  buildFreeVerifyCommands,
+  partitionDistDependentVerifyCommands,
+} from "./verifyCommands.js";
 import { nodeFieldsOf, reconciliationExpectationsOf } from "./dagNodeFields.js";
 
 const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -479,13 +482,31 @@ function perNodeVerificationSection(
   block: RemediationBlock,
   state: RemediationState,
   rootDisplay: string,
+  repoRoot: string,
 ): string {
-  const nodeCommands = uniquePaths(
-    block.items.flatMap((findingId) => {
-      const finding = state.plan?.findings.find((f) => f.id === findingId);
-      return finding ? buildFreeVerifyCommands(finding.targeted_commands) : [];
-    }),
+  // Dist-dependence partition at PROMPT time (review finding: rendering a
+  // dist-dependent command as runnable is the false-red path the accept-time
+  // partition exists to close — the prompt must not contradict it). The content
+  // scan runs against the MAIN tree (the worker's worktree does not exist yet);
+  // an auditor-targeted existing suite that spawns dist/ is exactly the
+  // observed case. Accept-time re-partitions against the worktree as authority.
+  const { kept: nodeCommands, deferred } = partitionDistDependentVerifyCommands(
+    uniquePaths(
+      block.items.flatMap((findingId) => {
+        const finding = state.plan?.findings.find((f) => f.id === findingId);
+        return finding ? buildFreeVerifyCommands(finding.targeted_commands) : [];
+      }),
+    ),
+    repoRoot,
   );
+  const deferredNote =
+    deferred.length > 0
+      ? `These targeted commands are dist-dependent and must NOT be run per-node — the
+tool defers them to the central close gate (a build-free worktree has no \`dist/\`);
+do not treat their absence as a missing check: ${deferred.join(" | ")}
+
+`
+      : "";
   const commandBlock =
     nodeCommands.length > 0
       ? `Run these node-targeted, build-free commands and record each command + result in the affected item's evidence:
@@ -506,7 +527,7 @@ The host builds the package centrally; do NOT run \`npm run build\` or \`npm tes
   (remediate-code: \`npx vitest run <your-test-file>\`; node-test packages:
   \`node --import tsx/esm --test <your-test-file>\`).
 
-${commandBlock}A node is verified-complete only when its declared outputs exist and these
+${deferredNote}${commandBlock}A node is verified-complete only when its declared outputs exist and these
 build-free checks pass; otherwise mark the item blocked with the failure in
 \`failure_reason\`.
 `;
@@ -598,6 +619,26 @@ remediation state files directly.
 Repository root: ${rootDisplay}
 Set the shell/tool workdir to the repository root when running commands; do not rely on cwd state from prior shell calls.
 
+## Standing rules (every node, every run)
+
+- **No whole-directory sweeps.** Stay within this block's declared scope: the
+  files its findings and File access section name, files those sections direct
+  you to update (e.g. existing referencing tests), and new files the change
+  calls for. If a fix seems to require a directory-wide mechanical sweep, it is
+  out of this node's scope — record that in the item's evidence instead.
+- **Never run \`remediate-code\` / \`audit-code\` CLI commands against the real
+  run state.** The shared \`.audit-tools/\` tree belongs to the driving session;
+  the tool mechanically refuses driver lifecycle commands from a worker context.
+  Your only write outside your worktree is your declared result file.
+- **New id families must be glossary-registered.** If you introduce a new id
+  prefix family (a new \`XXX-###\`-style scheme in findings, results, or docs),
+  register it in \`docs/glossary-ids.md\` and declare that edit in your result's
+  \`amended_files\` — the sanctioned channel for a needed out-of-scope file.
+- **Do not author dist-dependent per-node verify commands.** A per-node worktree
+  has no built \`dist/\`, so a verify command that imports or spawns \`dist/\`
+  cannot pass here; the tool defers such commands to the central close gate
+  automatically. Prefer source-importing tests (\`npx vitest run <file>\`).
+
 ## Block
 
 - Block ID: ${block.block_id}
@@ -624,7 +665,7 @@ ${upstreamExpectationsBullets(finding)}
 `,
   )
   .join("\n")}
-${conventions ? `\n${conventions}\n` : ""}${perNodeVerificationSection(block, state, rootDisplay)}${isInfraModifyingBlock(blockWriteFiles(block, state)) ? infraModifyingSection(repoRoot) : ""}
+${conventions ? `\n${conventions}\n` : ""}${perNodeVerificationSection(block, state, rootDisplay, repoRoot)}${isInfraModifyingBlock(blockWriteFiles(block, state)) ? infraModifyingSection(repoRoot) : ""}
 ## Verification
 ${worktreeNote}
 Run changed or newly created tests by name when possible, and record the focused

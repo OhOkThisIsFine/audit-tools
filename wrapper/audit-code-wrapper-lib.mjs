@@ -150,7 +150,14 @@ function run(command, args, options = {}) {
     const child = spawn(resolved.command, resolved.args, {
       cwd: repoRoot,
       stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-      env: options.env ?? process.env
+      // Node-worktree guard: this spawn pins cwd to the PACKAGE root, so the
+      // backend's process.cwd() carries no evidence of where the CALLER ran
+      // from. Stamp the caller's true cwd so the backend guard can refuse
+      // driver lifecycle commands invoked from inside a tool-created worktree.
+      // Literal must match AUDIT_TOOLS_CALLER_CWD_ENV in
+      // src/shared/io/nodeWorktreeGuard.ts (pinned by
+      // tests/shared/node-worktree-guard.test.mjs).
+      env: { ...(options.env ?? process.env), AUDIT_TOOLS_CALLER_CWD: process.cwd() }
     });
 
     let stdout = '';

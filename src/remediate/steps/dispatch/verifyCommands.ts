@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RemediationState } from "../../state/store.js";
 import { gitEditedFilesForBranch } from "./common.js";
@@ -116,6 +116,62 @@ export function buildFreeVerifyCommands(commands: string[] | undefined): string[
         !isWholeSuiteTestCommand(c),
     )
     .map(normalizeNodeTestCommand);
+}
+
+/**
+ * True when a verify command DEPENDS ON A BUILT `dist/` — either the command
+ * string itself references a dist path (spawning the built CLI), or, when
+ * `treeRoot` is supplied, a test FILE the command names imports/spawns dist in
+ * its content. A per-node worktree has NO dist at all (`dist/` is gitignored
+ * and only `node_modules` is junction-linked), so such a command false-reds
+ * DETERMINISTICALLY under the by-design build-free accept gate — three accepts
+ * in a row failed exactly this way (2026-07-23 dogfood, backlog "build-free
+ * accept verify false-reds dist-importing targeted commands"). A central build
+ * cannot fix it (it materializes MAIN's dist, not the worktree's), so the
+ * remedy is the same as the whole-suite / cross-node families: drop from
+ * per-node verify and defer to the central close gate, which runs on the
+ * merged tree with a fresh build.
+ *
+ * Detection is deliberately conservative-toward-deferral: a false positive
+ * (e.g. a comment mentioning `dist/`) only moves that command to the close
+ * gate — never a lost signal, never a false-red.
+ */
+export function isDistDependentVerifyCommand(cmd: string, treeRoot?: string): boolean {
+  if (/\bdist[\/\\]/.test(cmd)) return true;
+  if (treeRoot === undefined) return false;
+  for (const token of pathTokensInCommand(cmd)) {
+    if (!/\.test\.(mjs|cjs|js|ts|tsx)$/.test(token)) continue;
+    const p = join(treeRoot, token);
+    if (!existsSync(p)) continue;
+    let content: string;
+    try {
+      content = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    // `dist/`-style path (import/spawn) or a `"dist"` path-segment argument
+    // (join(root, "dist", ...) — how the wrapper e2es locate the built entry).
+    if (/\bdist[\/\\]/.test(content) || /["']dist["']/.test(content)) return true;
+  }
+  return false;
+}
+
+/**
+ * Partition verify commands into the per-node-runnable set and the
+ * dist-dependent set (deferred to the central close gate). Content-level
+ * detection: `treeRoot` should be the WORKTREE the verify would run in, so the
+ * scanned test files are the node's own post-edit versions.
+ */
+export function partitionDistDependentVerifyCommands(
+  commands: string[],
+  treeRoot: string,
+): { kept: string[]; deferred: string[] } {
+  const kept: string[] = [];
+  const deferred: string[] = [];
+  for (const c of commands) {
+    (isDistDependentVerifyCommand(c, treeRoot) ? deferred : kept).push(c);
+  }
+  return { kept, deferred };
 }
 
 /**

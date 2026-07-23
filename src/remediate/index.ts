@@ -27,6 +27,7 @@ import { intakePaths } from "./intake.js";
 import type { ValidationIssue } from "audit-tools/shared";
 import {
   applyGuidanceFile,
+  assertCliCommandAllowedFromCwd,
   setQuotaStateDir,
   resolveStateDir,
   parseHostModelRoster,
@@ -86,6 +87,32 @@ program
   .name("remediate-code")
   .description("Autonomous remediation orchestrator")
   .version(pkgVersion);
+
+/**
+ * Worker-safe subcommands: the only commands a dispatched worker may run from
+ * inside a tool-created node worktree (result-scoped validators — nothing that
+ * touches shared run state). Every OTHER command — including any future one —
+ * is refused from a node-worktree cwd by the preAction guard below: deny by
+ * default, so a new lifecycle command is never silently exposed to worker
+ * context (backlog "shared-state clobber from node context", live 2026-07-22).
+ */
+const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set([
+  "validate-artifacts",
+  "validate-artifact",
+  "validate",
+]);
+
+program.hook("preAction", (_thisCommand, actionCommand) => {
+  const opts = actionCommand.opts() as { root?: string };
+  assertCliCommandAllowedFromCwd({
+    cliName: "remediate-code",
+    commandName: actionCommand.name(),
+    workerSafeCommands: WORKER_SAFE_COMMANDS,
+    // Raw --root, pre-resolveRepoRoot: the anchoring climb erases the
+    // worktree evidence, so the guard must see the unanchored value.
+    rawRoot: opts.root,
+  });
+});
 
 program
   .command("next-step")

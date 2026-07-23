@@ -34,6 +34,7 @@ import {
   deriveVerifyCommandsFromBranch,
   selfContainedVerifyCommands,
   buildFreeVerifyCommands,
+  partitionDistDependentVerifyCommands,
 } from "./verifyCommands.js";
 import { enforceAcceptWriteScope } from "./writeScope.js";
 
@@ -195,6 +196,15 @@ export interface AcceptNodeWorktreeResult {
    * `src/remediate/phases/close.ts`), never the worker's self-reported files.
    */
   editedFiles?: string[];
+  /**
+   * Verify commands the dist-dependence partition DEFERRED out of the per-node
+   * gate (a build-free worktree has no `dist/` — they would false-red
+   * deterministically). Recorded durably here (and thus in the accept-outcome
+   * sidecar) so the deferral is auditable at close/report time rather than
+   * living only in a stderr line — the close gate's merged-tree build +
+   * full-suite run is what subsumes them. Absent when nothing was deferred.
+   */
+  deferredVerifyCommands?: string[];
 }
 
 /**
@@ -477,6 +487,7 @@ async function acceptNodeWorktreeLocked(
         ? deriveVerifyCommandsFromBranch(root, branch)
         : targetedCommands;
     let verifyCommands: string[];
+    let deferredVerifyCommands: string[] | undefined;
     if (targetedCommands === undefined) {
       // Self-contained per-node verify (2026-07-03): the derived `baseCommands` come
       // from this node's ACTUAL branch edits (self-contained by construction), but the
@@ -494,7 +505,24 @@ async function acceptNodeWorktreeLocked(
         ownPaths,
         wt,
       );
-      verifyCommands = [...new Set([...baseCommands, ...additional])];
+      // Dist-dependence partition (2026-07-23 dogfood false-red family): a
+      // command whose named test files import/spawn `dist/` deterministically
+      // false-reds in a build-free worktree (no dist exists there; a central
+      // build cannot materialize one). Defer it to the central close gate —
+      // same drop family as whole-suite and cross-node commands — and say so.
+      const partition = partitionDistDependentVerifyCommands(
+        [...new Set([...baseCommands, ...additional])],
+        wt,
+      );
+      verifyCommands = partition.kept;
+      if (partition.deferred.length > 0) {
+        deferredVerifyCommands = partition.deferred;
+        process.stderr.write(
+          `[remediate-code] ${blockId}: deferred ${partition.deferred.length} dist-dependent ` +
+            `verify command(s) to the central close gate (a build-free worktree has no dist/): ` +
+            `${partition.deferred.join(" | ")}\n`,
+        );
+      }
     } else {
       verifyCommands = baseCommands;
     }
@@ -715,6 +743,10 @@ async function acceptNodeWorktreeLocked(
       // nodeEditedFiles was captured pre-pick (above) — still valid here, the
       // pick landed the SAME diff it describes.
       ...(nodeEditedFiles.available ? { editedFiles: [...nodeEditedFiles.files].sort() } : {}),
+      // Durable record of the dist-dependence deferral (review finding: a
+      // stderr line alone is not auditable) — lands in the accept-outcome
+      // sidecar with the rest of this result.
+      ...(deferredVerifyCommands !== undefined ? { deferredVerifyCommands } : {}),
     };
   });
 }

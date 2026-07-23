@@ -310,6 +310,10 @@ export function stripClaudeCodeEnv(
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(src)) {
     if (k === "CLAUDECODE" || /^CLAUDE_CODE/u.test(k)) continue;
+    // The wrapper-propagated caller-cwd stamp (node-worktree guard) is scoped
+    // to ONE wrapper→backend hop: a dispatched worker inheriting the driver's
+    // stamp would read the driver's location as its own and bypass the guard.
+    if (k === "AUDIT_TOOLS_CALLER_CWD") continue;
     out[k] = v;
   }
   return out;

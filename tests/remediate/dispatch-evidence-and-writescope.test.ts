@@ -18,6 +18,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +41,8 @@ import {
   adjudicateWriteScope,
   verifyCommandsForEdits,
   selfContainedVerifyCommands,
+  isDistDependentVerifyCommand,
+  partitionDistDependentVerifyCommands,
   pathTokensInCommand,
   buildNodeDisposition,
   attributeSiblingRed,
@@ -152,6 +156,19 @@ describe("implement prompt renderer — exact node id + one-result-per-node", ()
     expect(prompt).toMatch(/exactly one .*item_results.* entry per node id/i);
     expect(prompt).toMatch(/Do not substitute a title, an obligation id, or a block id/i);
   });
+
+  it("renders the standing worker rules accreted from live-run failures (backlog 2026-07-23)", async () => {
+    const prompt = await renderPrompt(makeImplementingState(makeNodeFinding()));
+    const rules = sectionOf(prompt, "Standing rules (every node, every run)");
+    // (1) no whole-directory sweeps; (2) no driver CLIs against shared state;
+    // (3) new id families glossary-registered + amended_files; (4) no
+    // dist-dependent per-node verify commands.
+    expect(rules).toMatch(/No whole-directory sweeps/);
+    expect(rules).toMatch(/Never run `remediate-code` \/ `audit-code` CLI commands/);
+    expect(rules).toMatch(/docs\/glossary-ids\.md/);
+    expect(rules).toMatch(/amended_files/);
+    expect(rules).toMatch(/dist-dependent per-node verify commands/i);
+  });
 });
 
 describe("implement prompt renderer — build-free per-node verification (CE-001)", () => {
@@ -254,6 +271,65 @@ describe("isBuildFreeVerifyCommand", () => {
     expect(isBuildFreeVerifyCommand("tsc --build")).toBe(false);
     expect(isBuildFreeVerifyCommand("tsc -p tsconfig.json")).toBe(false);
     expect(isBuildFreeVerifyCommand("")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDistDependentVerifyCommand — dist-dependence partition (2026-07-23 dogfood
+// false-red family: a build-free worktree has no dist/, so a command whose
+// named test files import/spawn dist deterministically false-reds; deferred to
+// the central close gate instead).
+// ---------------------------------------------------------------------------
+
+describe("isDistDependentVerifyCommand / partitionDistDependentVerifyCommands", () => {
+  it("flags a command string that references a dist path directly", () => {
+    expect(isDistDependentVerifyCommand("node dist/audit/index.js status")).toBe(true);
+    expect(isDistDependentVerifyCommand("node dist\\remediate\\index.js validate")).toBe(true);
+  });
+
+  it("does not flag dist-free commands at the string level", () => {
+    expect(isDistDependentVerifyCommand("npm run check")).toBe(false);
+    expect(isDistDependentVerifyCommand("npx vitest run tests/foo.test.ts")).toBe(false);
+    // 'redistribute' must not match the dist token.
+    expect(isDistDependentVerifyCommand("node scripts/redistribute.mjs")).toBe(false);
+  });
+
+  it("flags a command whose named test FILE imports or spawns dist (content scan)", () => {
+    const root = mkdtempSync(join(tmpdir(), "distdep-"));
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(
+      join(root, "tests", "spawns-dist.test.mjs"),
+      `import { spawnSyncHidden } from "../helpers/spawn.mjs";\n` +
+        `const entry = new URL("../../dist/audit/index.js", import.meta.url);\n`,
+    );
+    writeFileSync(
+      join(root, "tests", "joins-dist.test.mjs"),
+      `import { join } from "node:path";\nconst entry = join(root, "dist", "audit", "index.js");\n`,
+    );
+    writeFileSync(
+      join(root, "tests", "clean.test.mjs"),
+      `import { expect, it } from "vitest";\nit("x", () => expect(1).toBe(1));\n`,
+    );
+    expect(
+      isDistDependentVerifyCommand("npx vitest run tests/spawns-dist.test.mjs", root),
+    ).toBe(true);
+    expect(
+      isDistDependentVerifyCommand("npx vitest run tests/joins-dist.test.mjs", root),
+    ).toBe(true);
+    expect(isDistDependentVerifyCommand("npx vitest run tests/clean.test.mjs", root)).toBe(false);
+    // A named file that does not exist in the tree cannot vouch either way.
+    expect(isDistDependentVerifyCommand("npx vitest run tests/absent.test.mjs", root)).toBe(false);
+
+    const partition = partitionDistDependentVerifyCommands(
+      [
+        "npm run check",
+        "npx vitest run tests/spawns-dist.test.mjs",
+        "npx vitest run tests/clean.test.mjs",
+      ],
+      root,
+    );
+    expect(partition.kept).toEqual(["npm run check", "npx vitest run tests/clean.test.mjs"]);
+    expect(partition.deferred).toEqual(["npx vitest run tests/spawns-dist.test.mjs"]);
   });
 });
 

@@ -95,6 +95,8 @@ export {
   isBuildFreeVerifyCommand,
   normalizeNodeTestCommand,
   isWholeSuiteTestCommand,
+  isDistDependentVerifyCommand,
+  partitionDistDependentVerifyCommands,
   pathTokensInCommand,
   selfContainedVerifyCommands,
   verifyCommandsForEdits,

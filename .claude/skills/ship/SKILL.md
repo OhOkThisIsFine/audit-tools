@@ -21,7 +21,9 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - `npm run build && npm run check` from repo root — zero errors.
 - Fast local checks, Bash tool:
   `npx vitest run --changed` (only tests touching your uncommitted edits) +
-  `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code`.
+  `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
+  `npm run check:doc-manifest` (0.1s — a new/renamed `docs/**/*.md` unregistered in
+  `docs/doc-review-guidelines.md` otherwise fails only in RELEASE CI; burned v0.34.17).
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`
   (= `verify:checks` + full vitest) — but the sharded CI gate re-runs it authoritatively either way.
 - Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first (the smokes

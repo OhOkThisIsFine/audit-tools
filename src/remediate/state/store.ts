@@ -4,6 +4,7 @@ import {
   type LockedJsonStore,
   createLockedJsonStore,
   LOCKED_JSON_STORE_TIMEOUT_MS,
+  assertNotNodeWorktreeCwd,
 } from "audit-tools/shared";
 import type { PartialCompletionTerminal } from "audit-tools/shared";
 import {
@@ -280,6 +281,10 @@ export class StateStore {
   async mutate(
     fn: (current: RemediationState | null) => Promise<RemediationState>,
   ): Promise<RemediationState> {
+    // Node-worktree guard (defense-in-depth behind the CLI-entry guard): a
+    // dispatched worker's process must never transition shared run state,
+    // whatever invocation shape reached this writer.
+    assertNotNodeWorktreeCwd("a remediation state.json transition");
     let next!: RemediationState;
     await this.store.mutate(async (current) => {
       next = await fn(current);
@@ -295,6 +300,9 @@ export class StateStore {
    * that no concurrent writer exists (e.g. single-agent close phase).
    */
   async saveState(state: RemediationState): Promise<void> {
+    // Same node-worktree guard as `mutate` — the unconditional-write recovery
+    // path must not be the one door a worker-context write can still use.
+    assertNotNodeWorktreeCwd("a remediation state.json write");
     await this.store.replace(state);
   }
 }

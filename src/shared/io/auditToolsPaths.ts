@@ -32,6 +32,14 @@ import { dirname, join, resolve, sep } from "node:path";
  */
 export const AUDIT_TOOLS_DIRNAME = ".audit-tools";
 
+/**
+ * The single literal directory name for tool-created git worktrees under
+ * `.audit-tools/` (remediate's per-node implement worktrees; audit's disposable
+ * review snapshots). Single-sourced so the path builder and the node-worktree
+ * context guard (`nodeWorktreeGuard.ts`) agree on the one spelling.
+ */
+export const WORKTREES_DIRNAME = "worktrees";
+
 export const AUDIT_REPORT_FILENAME = "audit-report.md";
 export const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
 export const REMEDIATION_REPORT_FILENAME = "remediation-report.md";
@@ -79,7 +87,7 @@ export function remediationArtifactsDir(root: string): string {
  * on the one location.
  */
 export function auditToolsWorktreesDir(root: string): string {
-  return join(auditToolsDir(root), "worktrees");
+  return join(auditToolsDir(root), WORKTREES_DIRNAME);
 }
 
 /**

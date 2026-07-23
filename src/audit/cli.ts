@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import {
   setQuotaStateDir,
 } from "./quota/index.js";
-import { resolveAuditCodeStateDir } from "audit-tools/shared";
+import {
+  assertCliCommandAllowedFromCwd,
+  resolveAuditCodeStateDir,
+} from "audit-tools/shared";
 
 import {
   DIRECT_CLI_DEFAULTS,
@@ -59,9 +62,37 @@ export const cliTestUtils = {
   warnIfNotGitRepo,
 };
 
+/**
+ * Worker-safe subcommands: the only commands a dispatched worker may run from
+ * inside a tool-created worktree (its own review snapshot / implement checkout)
+ * — result-scoped submission and validation, whose targets are explicit
+ * (`--task` payload, `--artifacts-dir-b64`). Every OTHER command — including
+ * the bare-invocation `sample-run` default and any future command — is refused
+ * from a node-worktree context: deny by default, never silently exposed
+ * (backlog "shared-state clobber from node context", live 2026-07-22). The
+ * packaged wrapper spawns this backend with cwd at the PACKAGE root, so the
+ * caller's true cwd arrives via AUDIT_TOOLS_CALLER_CWD (stamped by the
+ * wrapper, scrubbed from provider spawns).
+ */
+const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set([
+  "worker-run",
+  "submit-packet",
+  "validate-result",
+  "validate-results",
+  "validate",
+]);
+
 async function main(argv: string[]): Promise<void> {
   setQuotaStateDir(resolveAuditCodeStateDir());
   const command = argv[2] ?? "sample-run";
+  assertCliCommandAllowedFromCwd({
+    cliName: "audit-code",
+    commandName: command,
+    workerSafeCommands: WORKER_SAFE_COMMANDS,
+    // Raw --root, pre-resolveRepoRoot: the anchoring climb erases the
+    // worktree evidence, so the guard must see the unanchored value.
+    rawRoot: getFlag(argv, "--root"),
+  });
   switch (command) {
     case "sample-run":
       await runSample(argv);

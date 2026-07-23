@@ -111,16 +111,16 @@
 **1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
 nodes, v0.34.16 (completion record:
 [`remediate-dogfood-completion-2026-07-23.md`](reviews/remediate-dogfood-completion-2026-07-23.md)).
-The **accept-latch family shipped 2026-07-23** (a/c/d fixed, b refuted at HEAD — mechanism record:
-[`accept-latch-family-mechanisms-2026-07-23.md`](reviews/accept-latch-family-mechanisms-2026-07-23.md)).
-Remaining in the tier, specced with live evidence: **shared-state clobber from node context**
-(HIGH — state-mutating CLIs must be refused from a node-worktree CWD / owner-token the session
-writers; writer-surface recon is in the backlog entry + memory); **build-free accept vs
-dist-importing verify commands** (medium — classify at plan time, build-first or refuse) + the
-worker-prompt rules that belong in `implementPrompt`'s template. Older tier still open: zero-spill
-wave pool-build/fit gap, dispatch-legibility mechanistic trace, intent-checkpoint gate wiring +
-charter phantom-staleness (design together), NIM single-shot-only routing, abnormal-exit
-no-step-contract.
+The **accept-latch family shipped 2026-07-23** (mechanism record:
+[`accept-latch-family-mechanisms-2026-07-23.md`](reviews/accept-latch-family-mechanisms-2026-07-23.md)),
+and the **node-context clobber tier shipped 2026-07-23** — the HIGH shared-state clobber (deny-by-
+default node-worktree CLI guard + writer asserts), the dist-dependent verify partition, and the
+standing worker rules in `implementPrompt` (mechanism record:
+[`node-worktree-guard-mechanisms-2026-07-23.md`](reviews/node-worktree-guard-mechanisms-2026-07-23.md)).
+Remaining in the tier (older, still open): **zero-spill wave pool-build/fit gap** (HIGH — the wave
+never attempts healthy sibling pools; diagnose the fitting/lane selection in wave pool-build),
+dispatch-legibility mechanistic trace, intent-checkpoint gate wiring + charter phantom-staleness
+(design together), NIM single-shot-only routing, abnormal-exit no-step-contract.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect

@@ -594,6 +594,15 @@ export {
 // IO: repo-root anchoring (untrust the process cwd; never nest .audit-tools)
 export { resolveRepoRoot, climbOutOfAuditTools } from "./io/repoRoot.js";
 
+// IO: node-worktree context guard (a dispatched worker's cwd must never reach
+// the shared run state through a driver lifecycle CLI or a session writer).
+export {
+  AUDIT_TOOLS_CALLER_CWD_ENV,
+  nodeWorktreeAncestor,
+  assertCliCommandAllowedFromCwd,
+  assertNotNodeWorktreeCwd,
+} from "./io/nodeWorktreeGuard.js";
+
 // IO: tool-emitted end-of-run friction capture (single-sourced shape + persist
 // helper for BOTH orchestrators — cannot drift, never couples to any one repo's
 // backlog doc).
