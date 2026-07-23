@@ -38,9 +38,6 @@
 import { hashContent, stableStringify } from 'audit-tools/shared';
 import type { IntentCheckpoint } from 'audit-tools/shared';
 
-/** A gate verdict over a (prior, new) intent_checkpoint pair. */
-export type IntentCheckpointVerdict = 'unchanged' | 'changed';
-
 /**
  * Deterministic normalization config. Bumping any field bumps `gate_version` and
  * invalidates the persisted baseline. Kept as data (not code) so the version
