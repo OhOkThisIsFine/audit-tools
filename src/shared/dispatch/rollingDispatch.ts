@@ -639,7 +639,13 @@ export function selectProvider<TPacket>(
     packet: { id: string; requiredTier?: DispatchModelTier },
   ) => boolean,
 ): ProviderSlot | null {
-  const capableFn = capable ?? buildCapacityPoolCapabilityFloor(confirmedPools);
+  // The default floor tracks the caller's exhausted set, same as the
+  // dispatcher's once-built instance — a standalone selectProvider caller must
+  // not keep the pre-zero-spill static-snapshot behavior (an exhausted best
+  // pool holding the floor over healthy lower-band survivors).
+  const capableFn =
+    capable ??
+    buildCapacityPoolCapabilityFloor(confirmedPools, undefined, (id) => !exhaustedPoolIds.has(id));
   const complexity = scorePacketComplexity(packet);
   const highComplexity = complexity >= 0.5;
 
@@ -831,7 +837,14 @@ export function createRollingDispatcher<TPacket>(
   // Per-pool in-flight count for optional maxConcurrentPerPool cap.
   const inFlightPerPool: Map<string, number> = new Map();
 
-  // Capability floor (F4), banded ONCE per dispatcher over the confirmed pool set.
+  // Capability floor (F4): BANDS are static per dispatcher, but the floor's
+  // reference point ("the most capable band available") tracks LIVE availability
+  // — a pool the run has permanently excluded (429-exhausted, credit-exhausted,
+  // model-404) no longer holds the floor at its band, so surviving lower-band
+  // siblings stay selectable (zero-spill fix: a static snapshot stranded ~140
+  // packets as `no_fitting_pool` with 5 healthy confirmed siblings never
+  // attempted, re-dogfood 2026-07-22). Merely PAUSED pools still count — pauses
+  // reset, exclusions don't (same doctrine as the never-dispatchable strand).
   // Fail-open on unknown capability is deliberate but must be observable: each
   // (pool, packet) fail-open is noted once so low-confidence routing is never silent.
   const capabilityFailOpenSeen = new Set<string>();
@@ -843,7 +856,7 @@ export function createRollingDispatcher<TPacket>(
       `[rolling-dispatch] capability fail-open: packet ${info.packetId} (tier ` +
         `${info.requiredTier}) kept eligible on pool ${info.poolId} with unknown capability\n`,
     );
-  });
+  }, (poolId) => !state.exhaustedPoolIds.has(poolId));
 
   // Token-budget slope learning (per pool): remember the last-observed
   // remaining_pct per window label and the tokens dispatched since that reading,

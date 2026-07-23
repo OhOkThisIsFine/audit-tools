@@ -280,24 +280,18 @@ followed" is otherwise indistinguishable from a bug.
   quarantine defects above. Property: one canonical object envelope on every submission the tool
   ingests. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
-- **⬇ LIVE-CONFIRMED with mechanism evidence (re-dogfood run 20260722T005925355Z): ZERO-SPILL —
-  the wave never attempts healthy sibling pools; the gap is in wave pool-build/fit logic, NOT
-  confirmation (2026-07-22, HIGH — upgraded from the 2026-07-21 LEAD).** Gate-0 promotion
-  correctly wrote ALL 6 source pools into the shared confirmation (artifact verified on disk: glm
-  cost_order 5, agy 9, codex 10, deepseek 11, minimax 12). The wave then granted 144 packets,
-  launched exactly 2 (both claude-worker/glm-5.2); glm 429-stormed →
-  `rolling_dispatch_requeue_rate_limited` → pool exhausted →
-  `rolling_dispatch_stranded_no_fitting_pool` for ~140 packets TWICE — with no launch ever
-  attempted on deepseek-v4-pro / minimax-m3 (same service, healthy, $0, confirmed) nor
-  codex/agy/opencode-free. So the spill gap is not missing confirmation and not missing pool
-  entries — it is the "fitting" check or engine-lane selection in wave pool-build; diagnose there.
-  Two adjacent facts from the same evidence: (a) that run's dispatch-quota.json shows 144 granted
-  with leases/explains EMPTY — a legibility gap of its own; (b) the manual lane substitution used
-  to recover bypassed the tool's cross-provider quota signals (Codex's live quota endpoint would
-  have seen its wall coming — it exhausted mid-grind, resets Jul 28) — one more argument for the
-  engine owning agentic-CLI lanes as drivable pools rather than the host hand-driving them.
-  Records: [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #0/#11,
-  [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
+- **LEAD (2026-07-23, low, surfaced by the zero-spill fix): a packet whose only above-floor pool
+  is PAUSED (future reset, not exhausted) loops the in-process 50ms wait tick until the reset.**
+  `noPoolCanAcceptNow` is pool-level (a below-floor sibling "can accept", so the retryable
+  `quota_paused` strand never fires) and `neverDispatchable` correctly refuses to strand on a
+  resettable pause — so the run waits in-process, which the quota_paused terminal was built to
+  avoid for multi-hour walls. Pre-existing behavior (identical before the availability-aware
+  floor; NOT a regression), needs a per-packet analogue of the pool-level pause check. Record:
+  [`zero-spill-capability-floor-2026-07-23.md`](reviews/zero-spill-capability-floor-2026-07-23.md).
+  (The ZERO-SPILL HIGH itself — the wave never attempting healthy siblings — SHIPPED 2026-07-23:
+  the capability floor's `bestAvailableBand` was a build-time snapshot; it now tracks live
+  availability. The adjacent legibility fact — 144 granted with leases/explains empty — stays
+  carried by the dispatch-legibility entry below.)
 
 - **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure (2026-07-21,
   medium).** First call ingested the granted results ("Ingested 18 entries", progress_made:true)

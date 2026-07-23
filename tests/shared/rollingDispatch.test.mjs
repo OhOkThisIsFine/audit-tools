@@ -506,6 +506,50 @@ test("createRollingDispatcher — when every pool exhausts, the packet is strand
 });
 
 // ---------------------------------------------------------------------------
+// Zero-spill capability-floor regression (backlog HIGH, re-dogfood 2026-07-22):
+// the floor's "most capable band available" must track LIVE availability. A
+// build-time snapshot held the floor at the exhausted best pool's band, so a
+// deep-tier packet failed `capable` on every surviving lower-band sibling and
+// ~140 packets stranded as `no_fitting_pool` with 5 healthy confirmed pools
+// never attempted.
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — the capability floor RELAXES to surviving pools when the best-band pool exhausts (zero-spill fix)", async () => {
+  await setupTmpQuotaDir();
+  const attemptsByPool = { strong: 0, weak: 0 };
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      // Two SCORED pools → terciles put `strong` in band 0, `weak` in band 1.
+      // A `deep` packet's floor is band 0 while strong is available.
+      makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }),
+      makePool("weak", { rank: "small", declaredCapabilityRank: 9 }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attemptsByPool[slot.poolId] = (attemptsByPool[slot.poolId] ?? 0) + 1;
+      if (slot.poolId === "strong") {
+        return { packet, outcome: "rate_limited" }; // bare 429 → permanent exclusion
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+
+  const p = { ...makePacket("p1"), requiredTier: "deep" };
+  dispatcher.enqueue([p]);
+  const results = await dispatcher.run();
+
+  // The packet lands on the surviving lower-band pool — never stranded. Under
+  // the pre-fix static snapshot this run returned 0 results with an empty_pool
+  // terminal and `weak` was never attempted.
+  expect(results.length, "packet completes on the surviving pool").toBe(1);
+  expect(results[0].outcome).toBe("success");
+  expect(attemptsByPool.strong >= 1, "best pool attempted first").toBeTruthy();
+  expect(attemptsByPool.weak >= 1, "surviving sibling IS attempted after exhaustion").toBeTruthy();
+  expect(dispatcher.getTerminal(), "no strand terminal").toBe(null);
+});
+
+// ---------------------------------------------------------------------------
 // Credit exhaustion (Slice A2 / backlog HIGH 2026-07-11) — a deep-tier model OUT
 // OF USAGE CREDITS is distinct from a 429/rate_limited: no reset timer. The
 // engine must exclude the pool from the admissible set for the REST OF THE RUN
@@ -1026,6 +1070,28 @@ test("selectProvider — skips pools in the exhausted set and routes to a surviv
   );
   expect(slot !== null, "a surviving pool should still be selected").toBeTruthy();
   expect(slot.poolId, "exhausted deep-pool must be skipped").toBe("small-pool");
+});
+
+test("selectProvider — the DEFAULT capability floor tracks the exhausted set (standalone zero-spill)", async () => {
+  await setupTmpQuotaDir();
+  // A `deep` packet with the band-0 pool exhausted: the default (caller-built)
+  // floor must relax to the surviving band-1 pool exactly like the dispatcher's
+  // own instance — a static default floor returned null here (codex review
+  // finding, 2026-07-23).
+  const packet = { ...makePacket("p1", { complexity: 1.0 }), requiredTier: "deep" };
+  const strong = makePool("strong", { rank: "deep", declaredCapabilityRank: 1 });
+  const weak = makePool("weak", { rank: "small", declaredCapabilityRank: 9 });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(
+    packet,
+    [strong, weak],
+    tracker,
+    {},
+    unlimitedSession(),
+    new Set(["strong"]),
+  );
+  expect(slot !== null, "the surviving below-band pool must be selectable").toBeTruthy();
+  expect(slot.poolId).toBe("weak");
 });
 
 test("selectProvider — returns null when every pool is exhausted", async () => {
@@ -1673,12 +1739,14 @@ test("createRollingDispatcher — an engine drive dispatches a floor-carrying pa
   expect(seen, "the packet must be DISPATCHED to the capable pool only").toEqual(["deep-pool"]);
 });
 
-test("createRollingDispatcher — a floor-stranded packet strands (empty_pool) instead of spinning when its only capable pool exhausts (F4 liveness)", async () => {
+test("createRollingDispatcher — when the only above-floor pool exhausts, the floor relaxes to the survivor BEFORE stranding (F4 liveness + zero-spill)", async () => {
   await setupTmpQuotaDir();
-  // The deep pool rate-limits away; the surviving small pool is below the deep
-  // packet's floor (relative floor banded over the FULL confirmed set) — the
-  // packet must strand via the terminal, not spin the wait tick forever and not
-  // land on the incapable pool.
+  // The deep pool rate-limits away. Pre-zero-spill, the floor stayed banded over
+  // the FULL confirmed set, so the surviving small pool was never attempted and
+  // the packet stranded with a healthy pool idle — the exact live incident. Now
+  // the floor tracks availability: once deep exhausts, small is the most capable
+  // band AVAILABLE, gets its attempt, and only when it too exhausts does the
+  // packet strand via the terminal (never a wait-tick spin — liveness holds).
   const seen = [];
   const dispatcher = createRollingDispatcher({
     confirmedPools: [
@@ -1693,9 +1761,10 @@ test("createRollingDispatcher — a floor-stranded packet strands (empty_pool) i
   });
   dispatcher.enqueue([{ ...makePacket("p1", { complexity: 0.9 }), requiredTier: "deep" }]);
   const results = await dispatcher.run();
-  expect(seen.every((id) => id === "deep-pool"), "never dispatched to the below-floor pool").toBeTruthy();
+  expect(seen[0], "the above-floor pool is preferred while alive").toBe("deep-pool");
+  expect(seen, "the surviving pool IS attempted once the floor's holder exhausts").toContain("small-pool");
   expect(results.filter((r) => r.outcome === "success").length).toBe(0);
   const terminal = dispatcher.getTerminal();
-  expect(terminal, "the floor-stranded packet surfaces via the partial-completion terminal").not.toBe(null);
+  expect(terminal, "stranding surfaces via the partial-completion terminal, never a spin").not.toBe(null);
   expect(terminal.stranded_ids).toEqual(["p1"]);
 });

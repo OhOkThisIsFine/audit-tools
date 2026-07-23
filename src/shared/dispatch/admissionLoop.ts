@@ -377,6 +377,7 @@ export function buildObservedCapabilityFloorCapable(
 export function buildCapabilityFloorCapable(
   pools: readonly AdmissionPool[],
   onFailOpen?: (info: CapabilityFailOpenInfo) => void,
+  isAvailable?: (poolId: string) => boolean,
 ): (pool: AdmissionPool, packet: AdmissionCandidate) => boolean {
   // Tercile-band the scored pools once per batch (deterministic: score asc, poolId tiebreak).
   const scored = pools
@@ -408,9 +409,26 @@ export function buildCapabilityFloorCapable(
   // empty candidate set → a `no_capable_pool` wall that step E rightly calls
   // structural/permanent — a livelock the floor itself manufactured. The scored
   // path already behaves this way (n=1 scored pool = band 0 by construction).
-  const bands = pools.map(bandOf).filter((b): b is number => b !== null);
-  const anyBanded = bands.length > 0;
-  const bestAvailableBand = anyBanded ? Math.min(...bands) : 0;
+  //
+  // "Available" is LIVE, not a build-time snapshot (zero-spill fix, live incident
+  // 2026-07-22): when the caller supplies `isAvailable`, the best band is
+  // re-derived per evaluation over pools still available. A static snapshot kept
+  // holding the floor at a 429-exhausted pool's band, so every surviving
+  // lower-band sibling failed `capable` and ~140 packets stranded as
+  // `no_fitting_pool` without one sibling attempt. Without the callback (host
+  // admission path — pools are re-banded per batch) behavior is unchanged. If
+  // every banded pool is unavailable the floor goes inert (fail-open) — the
+  // availability filters exclude those pools regardless, and a floor with no
+  // live reference point has no signal to give.
+  const bandedPools = pools
+    .map((p) => ({ poolId: p.poolId, band: bandOf(p) }))
+    .filter((e): e is { poolId: string; band: number } => e.band !== null);
+  const anyBanded = bandedPools.length > 0;
+  const bestAvailableBand = (): number => {
+    const available = bandedPools.filter((e) => isAvailable?.(e.poolId) !== false);
+    if (available.length === 0) return anyBanded ? Number.POSITIVE_INFINITY : 0;
+    return Math.min(...available.map((e) => e.band));
+  };
   const FLOOR_MAX_BAND: Record<DispatchModelTier, number> = { deep: 0, standard: 1, small: 2 };
   return (pool, packet) => {
     if (!defaultCapable(pool, packet)) return false;
@@ -427,7 +445,7 @@ export function buildCapabilityFloorCapable(
       }
       return true;
     }
-    return band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand);
+    return band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand());
   };
 }
 
@@ -448,6 +466,7 @@ export function buildCapacityPoolCapabilityFloor(
     declaredCapabilityRank?: number | null;
   }[],
   onFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void,
+  isAvailable?: (poolId: string) => boolean,
 ): (poolId: string, packet: { id: string; requiredTier?: DispatchModelTier }) => boolean {
   // Capability-gate stubs only — these never reach `admit`, so the metering fields
   // are inert placeholders rather than a second (drifting) derivation of them.
@@ -465,7 +484,7 @@ export function buildCapacityPoolCapabilityFloor(
     capacityTokens: Number.POSITIVE_INFINITY,
   }));
   const byId = new Map(stubs.map((s) => [s.poolId, s]));
-  const floor = buildCapabilityFloorCapable(stubs, onFailOpen);
+  const floor = buildCapabilityFloorCapable(stubs, onFailOpen, isAvailable);
   return (poolId, packet) => {
     const stub = byId.get(poolId);
     if (!stub) return true; // pool outside the banded set — no signal, fail open

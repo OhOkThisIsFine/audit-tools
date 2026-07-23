@@ -3,9 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 
-const { admitBatch, admissionPoolsFromSummaries, DispatchAdmissionSchema } = await import(
-  "../../src/shared/dispatch/admissionLoop.ts"
-);
+const { admitBatch, admissionPoolsFromSummaries, DispatchAdmissionSchema, buildCapacityPoolCapabilityFloor } =
+  await import("../../src/shared/dispatch/admissionLoop.ts");
 const { ReservationLedger } = await import(
   "../../src/shared/quota/reservationLedger.ts"
 );
@@ -1042,4 +1041,36 @@ test("admissionPoolsFromSummaries: summary without capability_rank field produce
   const pools = admissionPoolsFromSummaries(summaries);
   expect(pools).toHaveLength(1);
   expect(pools[0].capabilityScore).toBe(null);
+});
+
+// ---------------------------------------------------------------------------
+// Capability floor: live availability (zero-spill fix, re-dogfood 2026-07-22).
+// The floor's reference point is "the most capable band AVAILABLE" — a pool the
+// caller reports unavailable (exhausted for the run) must stop holding the
+// floor at its band, so lower-band survivors stay capable.
+// ---------------------------------------------------------------------------
+
+test("capability floor: an unavailable best pool stops holding the floor (survivors become capable)", () => {
+  const pools = [
+    { id: "strong", rank: "deep", declaredCapabilityRank: 1 },
+    { id: "weak", rank: "small", declaredCapabilityRank: 9 },
+  ];
+  const deepPacket = { id: "p1", requiredTier: "deep" };
+
+  // Static (no availability signal): the floor sits at strong's band; weak fails.
+  const staticFloor = buildCapacityPoolCapabilityFloor(pools);
+  expect(staticFloor("strong", deepPacket)).toBe(true);
+  expect(staticFloor("weak", deepPacket)).toBe(false);
+
+  // Live availability: strong drops out → the best AVAILABLE band is weak's own.
+  const unavailable = new Set();
+  const liveFloor = buildCapacityPoolCapabilityFloor(pools, undefined, (id) => !unavailable.has(id));
+  expect(liveFloor("weak", deepPacket), "weak below the floor while strong is live").toBe(false);
+  unavailable.add("strong");
+  expect(liveFloor("weak", deepPacket), "floor relaxes when strong exhausts").toBe(true);
+
+  // Every banded pool unavailable → floor goes inert (fail-open); the
+  // availability filters exclude those pools regardless.
+  unavailable.add("weak");
+  expect(liveFloor("weak", deepPacket)).toBe(true);
 });
