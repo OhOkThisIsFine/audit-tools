@@ -35,6 +35,10 @@ export const PRIORITY: string[] = [
   "design_assessment_current",
   "structure_decomposition_current",
   "intent_checkpoint_current",
+  // DD-9: the equivalence gate sits between the checkpoint and EVERY consumer
+  // of it (charters, coverage, tasks all derive at/below the charter slot), so
+  // a pending prose judgment pauses the cascade instead of racing it.
+  "intent_equivalence_current",
   "charter_extraction_current",
   "charter_delta_current",
   "design_review_contract_completed",

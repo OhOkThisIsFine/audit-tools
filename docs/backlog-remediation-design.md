@@ -29,9 +29,16 @@ shipped-vs-open status.
   driver) — related by a documented invariant (equal `contentKey` ⟹ equal `idempotencyKey` ⟹ equal
   `identityKey`). O2's ledger re-association and F1's element-staleness gate both import all three from
   this single seam.
-- **semantic-equivalence gate (O2↔F1↔D8):** O2 exports ONE reusable gate; F1/D8 consume; `staleness.ts`
-  edit order O2→F1→D8. The verdict must be cached/persisted in `artifact_metadata` so the staleness DAG
-  stays reproducible across runs (LLM sampling otherwise flips it).
+- **semantic-equivalence gate (O2↔F1↔D8):** O2's reusable surface is the DETERMINISTIC layer —
+  `normalizeCheckpointForms` (structured/prose split) + `computeGateVersion` in
+  `intentCheckpointGate.ts`; F1/D8 consume those. The judge is NOT an in-process callback: it is a
+  bounded host STEP (conversation-first), and its verdict is MATERIALIZED into the persisted
+  `artifact_metadata.intent_baseline` (the revision authority the metadata stamper mirrors) rather
+  than cached per-pair — so the staleness DAG stays reproducible across runs without a verdict
+  cache. A D8 prose-staleness consumer follows the same shape: deterministic normal forms + a
+  host-judged step committing into a persisted baseline. (The earlier in-process
+  `intentCheckpointEquivalenceGate` + verdict-cache + lock-choreography design was superseded and
+  deleted when DD-9 wired the gate, 2026-07-23.)
 - **validator + field classification (O3↔F3):** O3 single-sources the canonical validator +
   REQUIRED/OPTIONAL + tool-owned-identity classification in `src/shared/repair`; F3 imports it. One
   schema-of-record per emit path.

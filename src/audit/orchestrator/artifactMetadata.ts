@@ -11,6 +11,8 @@ import {
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
+import { buildDependencySlices } from "./dependencySlices.js";
+import { computeGateVersion } from "./intentCheckpointGate.js";
 
 // The canonical "X depends on Y" table (ARC-cebe3421). computeArtifactMetadata
 // records each artifact's upstream dependency revisions, so it reads the
@@ -97,6 +99,27 @@ export function computeArtifactMetadata(
   );
   const orderedArtifacts = computeDependencyFirstOrder(presentArtifacts);
 
+  // DD-9 revision authority: while a GATE-CURRENT intent baseline exists, the
+  // intent entry's revision MIRRORS `baseline.revision` — the baseline (written
+  // only by the intent-equivalence executor at resolution commits) is the single
+  // thing that advances it. A provenance re-confirm or a pending prose judgment
+  // therefore never bumps the revision downstream compares see; a committed
+  // resolution (structured delta / judged-`changed` / stale gate) does, exactly
+  // once. Prefer the bundle manifest's copy (the executor commits onto
+  // `run.updated`'s manifest this same advance) over the pre-executor previous.
+  const bundleMetadata = bundle.artifact_metadata;
+  const bundleIsCurrent =
+    typeof bundleMetadata?.metadata_schema_version === "number" &&
+    bundleMetadata.metadata_schema_version >= METADATA_SCHEMA_VERSION;
+  const carriedIntentBaseline =
+    (bundleIsCurrent ? bundleMetadata?.intent_baseline : undefined) ??
+    usablePrevious?.intent_baseline;
+  const intentRevisionAuthority =
+    carriedIntentBaseline &&
+    carriedIntentBaseline.gate_version === computeGateVersion()
+      ? carriedIntentBaseline.revision
+      : undefined;
+
   for (const artifactName of orderedArtifacts) {
     if (artifactName === "artifact_metadata.json") continue;
     const value = getArtifactValue(bundle, artifactName);
@@ -127,35 +150,54 @@ export function computeArtifactMetadata(
     // obligation re-fires, and the proper listed re-derive restamps fully —
     // that is what converges; the frozen-record livelock cannot recur because
     // the hash/revision always advance with the file.
+    const dependencyNames = (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
+      .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
+      .sort();
     const dependencyRevisions =
       !isUpdated && previousEntry
         ? previousEntry.dependency_revisions
         : Object.fromEntries(
-            (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
-              .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
-              .sort()
-              .map((dependencyName) => [
-                dependencyName,
-                artifacts[dependencyName]?.revision ??
-                  usablePrevious?.artifacts[dependencyName]?.revision ??
-                  0,
-              ]),
+            dependencyNames.map((dependencyName) => [
+              dependencyName,
+              artifacts[dependencyName]?.revision ??
+                usablePrevious?.artifacts[dependencyName]?.revision ??
+                0,
+            ]),
           );
+    // dependency_slices ride EXACTLY the dependency_revisions terms: rebuilt on
+    // a LISTED re-derivation, preserved verbatim on an unlisted mismatch-restamp
+    // (rebuilding them there would silently clear a legitimately-pending
+    // slice-staleness without the re-derivation it demands).
+    const dependencySlices =
+      !isUpdated && previousEntry
+        ? previousEntry.dependency_slices
+        : buildDependencySlices(artifactName, dependencyNames, bundle);
 
     const sameContent = previousEntry?.content_hash === contentHash;
     const sameDependencies =
       previousEntry &&
       stableStringify(previousEntry.dependency_revisions) ===
         stableStringify(dependencyRevisions);
+    // DD-9: the intent entry's revision mirrors the gate-current baseline (see
+    // `intentRevisionAuthority` above); every other artifact keeps the ordinary
+    // content/deps-change bump. The mirror can never REWIND below the previous
+    // entry revision: while the mirror is active the two are always equal, so a
+    // previous revision ABOVE the authority means ordinary bumps happened while
+    // the mirror was inactive (a gate-version-stale window) — snapping back
+    // would mask them from downstream `dependency_revisions` compares.
     const revision =
-      sameContent && sameDependencies
-        ? previousEntry.revision
-        : (previousEntry?.revision ?? 0) + 1;
+      artifactName === "intent_checkpoint.json" &&
+      intentRevisionAuthority !== undefined
+        ? Math.max(intentRevisionAuthority, previousEntry?.revision ?? 0)
+        : sameContent && sameDependencies
+          ? previousEntry.revision
+          : (previousEntry?.revision ?? 0) + 1;
 
     artifacts[artifactName] = {
       revision,
       content_hash: contentHash,
       dependency_revisions: dependencyRevisions,
+      ...(dependencySlices ? { dependency_slices: dependencySlices } : {}),
     };
   }
 
@@ -170,10 +212,6 @@ export function computeArtifactMetadata(
   // baselines onto the *bundle's* manifest (run.updated), so prefer those over
   // the pre-executor `usablePrevious` — but only when the bundle manifest is
   // itself F1-current (same CE-007 gate); otherwise fall back, then drop.
-  const bundleMetadata = bundle.artifact_metadata;
-  const bundleIsCurrent =
-    typeof bundleMetadata?.metadata_schema_version === "number" &&
-    bundleMetadata.metadata_schema_version >= METADATA_SCHEMA_VERSION;
   const carriedBaselines =
     (bundleIsCurrent ? bundleMetadata?.result_baselines : undefined) ??
     usablePrevious?.result_baselines;
@@ -200,6 +238,12 @@ export function computeArtifactMetadata(
     usablePrevious?.git_history_baseline;
   if (carriedGitHistoryBaseline) {
     manifest.git_history_baseline = carriedGitHistoryBaseline;
+  }
+  // Carry the DD-9 intent-equivalence baseline on the SAME CE-007 terms (the
+  // hoisted `carriedIntentBaseline` already preferred the bundle manifest's
+  // freshly-committed copy over the pre-executor `usablePrevious`).
+  if (carriedIntentBaseline) {
+    manifest.intent_baseline = carriedIntentBaseline;
   }
   return manifest;
 }

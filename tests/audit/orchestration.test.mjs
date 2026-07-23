@@ -159,11 +159,18 @@ function createDecisionBundle(overrides = {}) {
   };
 }
 
+const { runIntentEquivalenceResolve } = await import(
+  "../../src/audit/orchestrator/intentEquivalenceExecutor.ts"
+);
+
 function withArtifactMetadata(bundle) {
-  return {
+  // DD-9: settle the intent-equivalence baseline (deterministic first-contact
+  // stamp) so intent_equivalence_current is satisfied and decisions reach the
+  // dispatch/synthesis obligations these tests target.
+  return runIntentEquivalenceResolve({
     ...bundle,
     artifact_metadata: computeArtifactMetadata(bundle),
-  };
+  }).updated;
 }
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");

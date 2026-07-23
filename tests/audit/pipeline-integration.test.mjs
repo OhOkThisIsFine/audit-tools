@@ -34,6 +34,20 @@ const {
   renderContractReviewPrompt,
   renderConceptualReviewPrompt,
 } = await import("../../src/audit/orchestrator/designReviewPrompt.ts");
+const { runIntentEquivalenceResolve } = await import("../../src/audit/orchestrator/intentEquivalenceExecutor.ts");
+const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.ts");
+
+// Settle the DD-9 intent-equivalence baseline: stamp artifact_metadata.intent_baseline
+// from the live checkpoint (deterministic first-contact arm) so
+// intent_equivalence_current — which sits directly after intent_checkpoint_current —
+// is satisfied and the decision reaches the obligation the test targets. The full
+// computeArtifactMetadata manifest (not an empty one) keeps the staleness pass clean.
+function settleIntentBaseline(bundle) {
+  return runIntentEquivalenceResolve({
+    ...bundle,
+    artifact_metadata: computeArtifactMetadata(bundle),
+  }).updated;
+}
 
 // ── Shared bundle factory helpers ─────────────────────────────────────────────
 
@@ -226,7 +240,7 @@ test("S2: planning_artifacts is missing when intent_checkpoint is absent", () =>
 });
 
 test("S2: planning_artifacts obligation advances past intent_checkpoint once the checkpoint is written", () => {
-  const bundle = makePostDesignReviewBundle();
+  const bundle = settleIntentBaseline(makePostDesignReviewBundle());
   const decision = decideNextStep(bundle);
   expect(decision.selected_obligation, "After checkpoint is written, intent_checkpoint_current must be satisfied").not.toBe("intent_checkpoint_current");
   // planning_artifacts should now be the selected obligation
@@ -381,7 +395,7 @@ test("S3: both design review obligations are present as host_delegation before e
 });
 
 test("S3: after contract review completes, conceptual review is still missing (sequential within design phase)", () => {
-  const bundle = {
+  const bundle = settleIntentBaseline({
     ...makePostDesignAssessmentBundle(),
     intent_checkpoint: makeValidCheckpoint(),
     design_assessment: {
@@ -390,7 +404,7 @@ test("S3: after contract review completes, conceptual review is still missing (s
       contract_reviewed: true,   // done
       conceptual_reviewed: false, // not yet
     },
-  };
+  });
   const decision = decideNextStep(bundle);
   expect(decision.selected_obligation, "After contract review, conceptual review should be next").toBe("design_review_conceptual_completed");
 });

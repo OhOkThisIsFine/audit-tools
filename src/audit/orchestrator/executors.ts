@@ -31,6 +31,15 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["intent_checkpoint_current"],
   },
   {
+    // DD-9 intent-equivalence gate. host_delegation: a prose-only delta emits
+    // the bounded judge step; every other arm (baseline stamp, gate-version
+    // stale, structured delta) resolves deterministically via the runner —
+    // mirroring charter_extraction's emit-vs-run gating in nextStepHelpers.
+    id: "intent_equivalence_executor",
+    kind: "host_delegation",
+    obligation_ids: ["intent_equivalence_current"],
+  },
+  {
     id: "external_analyzer_acquisition_executor",
     kind: "deterministic",
     obligation_ids: ["external_analyzers_current"],

@@ -7,7 +7,18 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.20 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.21 (2026-07-23) shipped the
+  **DD-9 intent-equivalence gate + charter dependency-slice layer** — a provenance-only or
+  judged-equivalent intent re-confirm no longer re-stales the planning cascade
+  (`intent_equivalence_current` obligation; `artifact_metadata.intent_baseline` is the intent
+  entry's revision authority), and charter extraction keys on the charter-relevant slice
+  (consensus membership + member∪doc file hashes) instead of whole upstream artifacts — including
+  blocking transitive propagation across slice-protected edges, which was the live re-fire chain.
+  Mechanism record + review history (AGY caught the baseline self-overwrite; Codex refuted two
+  slice premises; NIM traced the ordering): `docs/reviews/intent-gate-charter-slice-design-2026-07-23.md`.
+  Residuals in backlog (*RESIDUAL of the shipped DD-9…*). ⚠ **Codex CLI is quota-walled until
+  2026-07-30** — its lane errors with a usage-limit message; use NIM/AGY + host subagents for
+  independent review until then. v0.34.20 (2026-07-23) shipped the
   **zero-spill capability-floor fix** — the floor's "most capable band available" now tracks LIVE
   pool availability instead of a build-time snapshot, so an exhausted best pool no longer strands
   packets while healthy confirmed siblings sit idle (mechanism record:
@@ -137,13 +148,12 @@
 
 **1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
 nodes, v0.34.16. Shipped from the tier so far (all 2026-07-23): the accept-latch family, the
-node-context clobber tier, and the **zero-spill capability-floor HIGH** (v0.34.20 — mechanism
-record: [`zero-spill-capability-floor-2026-07-23.md`](reviews/zero-spill-capability-floor-2026-07-23.md)).
-Remaining in the tier (older, still open): **intent-checkpoint gate wiring + charter
-phantom-staleness** (DECIDED spec in backlog — design the two together; loop-core, attestation),
-dispatch-legibility mechanistic trace, NIM single-shot-only routing (worker-kind × pool-class
-compatibility), abnormal-exit no-step-contract, and the new paused-pool wait-tick LEAD the
-zero-spill fix surfaced.
+node-context clobber tier, the **zero-spill capability-floor HIGH** (v0.34.20), and the
+**intent-checkpoint gate + charter slice-staleness pair** (v0.34.21 — mechanism record:
+[`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)).
+Remaining in the tier (older, still open): dispatch-legibility mechanistic trace, NIM
+single-shot-only routing (worker-kind × pool-class compatibility), abnormal-exit
+no-step-contract, and the paused-pool wait-tick LEAD the zero-spill fix surfaced.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect

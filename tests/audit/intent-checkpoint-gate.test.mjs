@@ -1,169 +1,147 @@
+// DD-9 — the wired intent-equivalence gate's deterministic primitives: the
+// structured/prose normal-form split, provenance invisibility, and the
+// locally-resolved gate version. (The commit machinery is covered in
+// intent-equivalence-executor.test.mjs.)
 import { test, expect } from "vitest";
 
 const {
-  normalizeCheckpointValue,
+  normalizeCheckpointForms,
   computeGateVersion,
-  intentCheckpointEquivalenceGate,
-  runIntentCheckpointGate,
+  normalFormHash,
   DEFAULT_NORMALIZE_CONFIG,
+  HOST_JUDGE_ID,
 } = await import("../../src/audit/orchestrator/intentCheckpointGate.ts");
 
-function checkpoint(over = {}) {
-  return {
-    schema_version: "intent-checkpoint/v1",
-    confirmed_at: "2026-06-24T00:00:00.000Z",
-    confirmed_by: "host",
-    scope_summary: "Root: /x, files in scope: 10",
-    intent_summary: "full-audit",
-    ...over,
-  };
-}
+const baseCheckpoint = {
+  schema_version: "intent-checkpoint/v1",
+  confirmed_at: "2026-07-23T00:00:00Z",
+  confirmed_by: "host",
+  scope_summary: "Root: /repo, files in scope: 12",
+  intent_summary: "full-audit",
+};
 
-test("normalize ignores volatile fields and whitespace", () => {
-  const a = normalizeCheckpointValue(checkpoint());
-  const b = normalizeCheckpointValue(
-    checkpoint({
-      confirmed_at: "2099-01-01T00:00:00.000Z",
-      intent_summary: "  full-audit  ",
+test("provenance (confirmed_at/confirmed_by) is invisible to both normal forms", () => {
+  const a = normalizeCheckpointForms(baseCheckpoint);
+  const b = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    confirmed_at: "2026-07-24T12:34:56Z",
+    confirmed_by: "draft",
+  });
+  expect(b.structured).toBe(a.structured);
+  expect(b.prose).toBe(a.prose);
+});
+
+test("prose edge-whitespace is invisible; a real rephrase moves prose only", () => {
+  const a = normalizeCheckpointForms(baseCheckpoint);
+  const padded = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    scope_summary: "  Root: /repo, files in scope: 12  ",
+  });
+  expect(padded.prose).toBe(a.prose);
+  expect(padded.structured).toBe(a.structured);
+
+  const rephrased = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    scope_summary: "Scope root /repo (12 files)",
+  });
+  expect(rephrased.prose).not.toBe(a.prose);
+  expect(rephrased.structured).toBe(a.structured);
+});
+
+test("a structured delta (design_review ceiling) moves structured only", () => {
+  const a = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    design_review: { conceptual_depth: "shallow" },
+  });
+  const b = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    design_review: { conceptual_depth: "deep", perspectives: 5 },
+  });
+  expect(b.structured).not.toBe(a.structured);
+  expect(b.prose).toBe(a.prose);
+});
+
+test("lens_selection / excluded_scope / must_not_touch / filters / disposition_overrides / schema_version are structured", () => {
+  for (const delta of [
+    { lens_selection: { exclude: ["performance"] } },
+    { excluded_scope: [{ path: "vendor/", reason: "vendored" }] },
+    { must_not_touch: ["secrets/**"] },
+    { filters: { severity: ["high"] } },
+    {
+      disposition_overrides: [
+        { path: "dist/x.js", status: "generated", reason: "build output" },
+      ],
+    },
+    { schema_version: "intent-checkpoint/v2" },
+  ]) {
+    const a = normalizeCheckpointForms(baseCheckpoint);
+    const b = normalizeCheckpointForms({ ...baseCheckpoint, ...delta });
+    expect(b.structured, JSON.stringify(delta)).not.toBe(a.structured);
+    expect(b.prose, JSON.stringify(delta)).toBe(a.prose);
+  }
+});
+
+test("constraint_clauses ride the PROSE form (DD-9: host_answer rephrases are judgeable)", () => {
+  const a = normalizeCheckpointForms(baseCheckpoint);
+  const b = normalizeCheckpointForms({
+    ...baseCheckpoint,
+    constraint_clauses: [
+      {
+        clause_id: "c1",
+        text: "never touch the billing tables",
+        checkpoint_question: "Which tables are billing tables?",
+        host_answer: "billing_* in the primary schema",
+      },
+    ],
+  });
+  expect(b.prose).not.toBe(a.prose);
+  expect(b.structured).toBe(a.structured);
+});
+
+test("absent checkpoint normalizes to a stable marker distinct from any present one", () => {
+  const absent = normalizeCheckpointForms(undefined);
+  const again = normalizeCheckpointForms(undefined);
+  expect(absent).toEqual(again);
+  const present = normalizeCheckpointForms(baseCheckpoint);
+  expect(absent.prose).not.toBe(present.prose);
+});
+
+test("gate version is local, defaults to the host judge, and moves with each component", () => {
+  const base = computeGateVersion();
+  expect(base).toContain(`:${HOST_JUDGE_ID}:`);
+  expect(computeGateVersion({ judgeId: "host" })).toBe(base);
+  expect(computeGateVersion({ judgeId: "other" })).not.toBe(base);
+  expect(
+    computeGateVersion({ promptTemplateVersion: "intent-checkpoint-judge-prompt/v9" }),
+  ).not.toBe(base);
+  expect(
+    computeGateVersion({
+      normalizeConfig: { ...DEFAULT_NORMALIZE_CONFIG, version: "bumped/v3" },
     }),
+  ).not.toBe(base);
+});
+
+test("normalize-config field coverage is EXHAUSTIVE over the IntentCheckpoint schema (reviewer F3)", async () => {
+  // The revision mirror makes an omitted field permanently invisible to
+  // downstream staleness (forms unchanged ⇒ equivalence satisfied ⇒ revision
+  // frozen), so the union of the two lists + the stripped provenance pair must
+  // cover EVERY schema field — a new field must be classified in the same
+  // commit that adds it.
+  const { IntentCheckpointSchema } = await import(
+    "../../src/shared/types/intentCheckpoint.ts"
   );
-  expect(a, "volatile + whitespace differences normalize identically").toBe(b);
+  const covered = new Set([
+    ...DEFAULT_NORMALIZE_CONFIG.structuredFields,
+    ...DEFAULT_NORMALIZE_CONFIG.proseFields,
+    "confirmed_at",
+    "confirmed_by",
+  ]);
+  const schemaFields = Object.keys(IntentCheckpointSchema.shape).sort();
+  expect([...covered].sort()).toEqual(schemaFields);
 });
 
-test("absent vs present is a real difference", () => {
-  expect(normalizeCheckpointValue(undefined)).not.toBe(normalizeCheckpointValue(checkpoint()));
-});
-
-test("equal normal forms => unchanged without judge call", async () => {
-  let judgeCalls = 0;
-  const res = await intentCheckpointEquivalenceGate({
-    prior: checkpoint(),
-    next: checkpoint({ confirmed_at: "2099-01-01T00:00:00.000Z" }),
-    judge: () => {
-      judgeCalls += 1;
-      return true;
-    },
-    judgeId: "host",
-  });
-  expect(res.verdict).toBe("unchanged");
-  expect(res.judged).toBe(false);
-  expect(judgeCalls, "no judge call when normal forms match").toBe(0);
-});
-
-test("differing forms => judge runs; uncertain/non-boolean is fail-safe changed", async () => {
-  const res = await intentCheckpointEquivalenceGate({
-    prior: checkpoint({ intent_summary: "full-audit" }),
-    next: checkpoint({ intent_summary: "security-only" }),
-    judge: () => undefined, // non-boolean => fail-safe
-    judgeId: "host",
-  });
-  expect(res.verdict).toBe("changed");
-  expect(res.judged).toBe(true);
-});
-
-test("judge throw => fail-safe changed", async () => {
-  const res = await intentCheckpointEquivalenceGate({
-    prior: checkpoint({ intent_summary: "a" }),
-    next: checkpoint({ intent_summary: "b" }),
-    judge: () => {
-      throw new Error("boom");
-    },
-    judgeId: "host",
-  });
-  expect(res.verdict).toBe("changed");
-});
-
-test("explicit true => unchanged", async () => {
-  const res = await intentCheckpointEquivalenceGate({
-    prior: checkpoint({ intent_summary: "a" }),
-    next: checkpoint({ intent_summary: "a (reworded)" }),
-    judge: () => true,
-    judgeId: "host",
-  });
-  expect(res.verdict).toBe("unchanged");
-});
-
-test("verdict cached on (prior,new,gate_version); judge runs once", async () => {
-  let judgeCalls = 0;
-  const store = new Map();
-  const cache = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
-  const args = {
-    prior: checkpoint({ intent_summary: "a" }),
-    next: checkpoint({ intent_summary: "b" }),
-    judge: () => {
-      judgeCalls += 1;
-      return false;
-    },
-    judgeId: "host",
-    cache,
-  };
-  const r1 = await intentCheckpointEquivalenceGate(args);
-  const r2 = await intentCheckpointEquivalenceGate(args);
-  expect(r1.verdict).toBe("changed");
-  expect(r2.verdict).toBe("changed");
-  expect(judgeCalls, "second call is a cache hit").toBe(1);
-  expect(r2.judged).toBe(false);
-});
-
-test("gate_version is local (no probe) and changes with judgeId/config", () => {
-  const v1 = computeGateVersion({ judgeId: "host" });
-  const v2 = computeGateVersion({ judgeId: "other-model" });
-  expect(v1, "judge id participates").not.toBe(v2);
-  const v3 = computeGateVersion({
-    judgeId: "host",
-    normalizeConfig: { ...DEFAULT_NORMALIZE_CONFIG, version: "v2" },
-  });
-  expect(v1, "normalize config participates").not.toBe(v3);
-});
-
-test("lock interleave: clean run commits, no fallback", async () => {
-  let token = "t0";
-  const committed = [];
-  const res = await runIntentCheckpointGate({
-    withLock: (fn) => fn(),
-    readLedgerToken: () => token,
-    gate: async () => ({ verdict: "changed", gateVersion: "gv" }),
-    commit: async (v) => {
-      committed.push(v);
-      return v;
-    },
-  });
-  expect(res.verdict).toBe("changed");
-  expect(res.usedFallback).toBe(false);
-  expect(committed).toEqual(["changed"]);
-});
-
-test("lock interleave: token moves during judge => re-derive, then commit", async () => {
-  let token = "t0";
-  let gateCalls = 0;
-  const res = await runIntentCheckpointGate({
-    withLock: (fn) => fn(),
-    readLedgerToken: () => token,
-    gate: async () => {
-      gateCalls += 1;
-      // First judge run: simulate an interleaved append by moving the token,
-      // but only once so the second attempt commits cleanly.
-      if (gateCalls === 1) token = "t1";
-      return { verdict: "unchanged", gateVersion: "gv" };
-    },
-    commit: async (v) => v,
-    maxAttempts: 3,
-  });
-  expect(res.verdict).toBe("unchanged");
-  expect(res.usedFallback).toBe(false);
-  expect(gateCalls >= 2, "re-derived after interleave").toBeTruthy();
-});
-
-test("lock interleave: persistent contention => lock-across-judge fallback commits", async () => {
-  let token = 0;
-  const res = await runIntentCheckpointGate({
-    withLock: (fn) => fn(),
-    // Token moves on every read => every attempt sees an interleave.
-    readLedgerToken: () => `t${token++}`,
-    gate: async () => ({ verdict: "changed", gateVersion: "gv" }),
-    commit: async (v) => v,
-    maxAttempts: 2,
-  });
-  expect(res.usedFallback, "fell back after exhausting attempts").toBe(true);
-  expect(res.verdict).toBe("changed");
+test("normalFormHash is deterministic and content-sensitive", () => {
+  const forms = normalizeCheckpointForms(baseCheckpoint);
+  expect(normalFormHash(forms.prose)).toBe(normalFormHash(forms.prose));
+  expect(normalFormHash(forms.prose)).not.toBe(normalFormHash(forms.structured));
 });

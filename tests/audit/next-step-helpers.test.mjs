@@ -462,10 +462,11 @@ await test("tryConsumeIncoming re-throws non-ENOENT errors", async () => {
 
 // ── HOST_GATE_DESCRIPTORS coverage (Tier C2 consolidation) ────────────────────
 
-await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 8 audit host-gate kinds", () => {
+await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 9 audit host-gate kinds", () => {
   const expected = [
     "graph_enrichment",
     "critical_flow_fallback",
+    "intent_equivalence",
     "design_review",
     "synthesis_narrative",
     "charter_extraction",
@@ -476,15 +477,15 @@ await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 8 audit ho
   expect([...HOST_GATE_KINDS].sort()).toEqual([...expected].sort());
   expect(Object.keys(HOST_GATE_DESCRIPTORS).sort()).toEqual([...expected].sort());
 
-  // The 6 gates driven by the shared runOmittableGate engine vs. the 2 that
-  // keep bespoke bodies (graph_enrichment, design_review) because their shape
-  // genuinely deviates from the common one.
+  // The 6 gates driven by the shared runOmittableGate engine vs. the 3 that
+  // keep bespoke bodies (graph_enrichment, design_review, intent_equivalence)
+  // because their shape genuinely deviates from the common one.
   const generic = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "generic");
   const custom = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "custom");
   expect(generic.sort()).toEqual(
     ["critical_flow_fallback", "synthesis_narrative", "charter_extraction", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
   );
-  expect(custom.sort()).toEqual(["graph_enrichment", "design_review"].sort());
+  expect(custom.sort()).toEqual(["graph_enrichment", "design_review", "intent_equivalence"].sort());
 });
 
 // ── handleDesignReviewBranch — malformed-submission quarantine ───────────────

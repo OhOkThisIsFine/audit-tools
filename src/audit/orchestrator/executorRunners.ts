@@ -5,6 +5,7 @@ import { RunLogger, auditArtifactsDir } from "audit-tools/shared";
 import { decideAuditFrictionCloseout } from "./nextStep.js";
 import { runIntakeExecutor, runProviderConfirmationAutoComplete } from "./intakeExecutors.js";
 import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
+import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
 import {
   runStructureExecutor,
   runDesignAssessmentExecutor,
@@ -104,6 +105,12 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       requireRoot(options.root, "intent_checkpoint_executor"),
       options.since,
     ),
+  // DD-9: with a consumed judge verdict → commit it; verdict-less, every arm
+  // resolves deterministically (prose-pending → CHANGED, only reachable
+  // verdict-less in the pure-headless drain — the conversation flow emits the
+  // judge step instead of routing here).
+  intent_equivalence_executor: async (bundle, { options }) =>
+    runIntentEquivalenceResolve(bundle, options.intentEquivalenceVerdict),
   // root is intentionally optional: present → buildGraphBundleFromFs, absent →
   // manifest-only buildGraphBundle.
   external_analyzer_acquisition_executor: async (bundle, { options }) =>

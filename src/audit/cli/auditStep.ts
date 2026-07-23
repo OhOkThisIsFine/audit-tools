@@ -28,6 +28,7 @@ import type {
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { EXECUTOR_RUNNERS } from "../orchestrator/executorRunners.js";
 import { deriveAuditState } from "../orchestrator/state.js";
+import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
@@ -78,6 +79,7 @@ export interface RunAuditStepOptions {
   externalAnalyzerData?: ExternalAnalyzerResults;
   narrativeResultsPath?: string;
   criticalFlowFallbackResultsPath?: string;
+  intentEquivalenceVerdictPath?: string;
   charterSubmissionPath?: string;
   charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
@@ -387,6 +389,11 @@ async function executeAdvance(
         options.criticalFlowFallbackResultsPath,
       )
     : undefined;
+  const intentEquivalenceVerdict = options.intentEquivalenceVerdictPath
+    ? IntentEquivalenceVerdictSchema.parse(
+        await readJsonFile<unknown>(options.intentEquivalenceVerdictPath),
+      )
+    : undefined;
   const charterSubmission = options.charterSubmissionPath
     ? CharterSubmissionSchema.parse(
         await readJsonFile<unknown>(options.charterSubmissionPath),
@@ -417,6 +424,7 @@ async function executeAdvance(
     externalAnalyzerResults,
     narrativeResults,
     criticalFlowFallbackResults,
+    intentEquivalenceVerdict,
     charterSubmission,
     charterDeltaSubmission,
     clarificationAnswers,

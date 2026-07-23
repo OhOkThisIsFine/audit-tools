@@ -100,9 +100,9 @@ followed" is otherwise indistinguishable from a bug.
   unlisted artifact advanced on disk with its record frozen → permanent staleness. Carry-forward is
   now CONTENT-VERIFIED (a hash mismatch restamps hash+revision; deps refresh only on a LISTED
   re-derive, so a pending dep-staleness is never silently cleared) — the frozen-record class is
-  unrepresentable regardless of which executor forgets its listing. Still open, tracked in the
-  charter phantom-staleness entry below: DAG staleness keying on whole-artifact upstream hashes
-  (the actual re-extraction re-fire driver). Operator-recovery trap stands:
+  unrepresentable regardless of which executor forgets its listing. The remaining driver —
+  whole-artifact-hash DAG keying re-firing charter extraction — SHIPPED 2026-07-23 as the
+  charter dependency-slice layer (see the DD-9 residual entry below). Operator-recovery trap stands:
   [[artifact-metadata-surgery-uses-tool-hasher]]. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #7/#9.
 
@@ -168,37 +168,22 @@ followed" is otherwise indistinguishable from a bug.
   false-clean; consider targeted re-review of those packets in deepening. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
 
-- **DECIDED (owner 2026-07-22, from doc-review DD-9): wire the semantic-equivalence gate into the
-  intent-checkpoint staleness path — investigation confirmed over-staling is REAL and total.**
-  `intent_checkpoint.json` carries host-authored free prose (`scope_summary` / `intent_summary` /
-  `free_form_intent` / `constraint_clauses[].host_answer`), so a benign rephrase changes the
-  canonical hash and re-stales the ENTIRE planning+execution cascade (charters → coverage → tasks →
-  dispatch → synthesis — effectively a full audit re-run). Worse: `confirmed_at`/`confirmed_by` are
-  NOT in `NON_SEMANTIC_FIELDS_BY_ARTIFACT` (`artifactFreshness.ts:23-40`), so even a
-  byte-identical-prose re-confirm over-stales purely on the refreshed timestamp (the headless
-  fallback stamps `new Date().toISOString()`, `intentCheckpointExecutor.ts:430`).
-  **SPEC (two layers, one lap):** (1) no-judge quick win — add
-  `intent_checkpoint.json: ["confirmed_at","confirmed_by"]` to the non-semantic strip list;
-  (2) wire `intentCheckpointGate.ts` (built + tested, zero production callers) at the
-  `intent_checkpoint.json` dependency-edge compare (`staleness.ts:131-139`) — requires persisting a
-  normalized-intent baseline + cached verdict in `artifact_metadata` (mirror `resultBaseline.ts`'s
-  store, exactly as `docs/backlog-remediation-design.md`'s seam line mandates), and WIDENING
-  `DEFAULT_NORMALIZE_CONFIG.semanticFields` beyond the four prose fields to the planning-driving
-  fields (`excluded_scope`, `must_not_touch`, `lens_selection`, `disposition_overrides`,
-  `design_review`, `filters`) — wiring without widening UNDER-stales: a lens change with unchanged
-  prose would silently judge "unchanged". Loop-core (all sites under `src/audit/orchestrator/`),
-  attestation required. Same whole-artifact-hash `dependency_revisions` mechanism as the charter
-  phantom-staleness entry below — design the two fixes together.
-
-- **⬇ LIVE (re-dogfood 2026-07-22, medium): charter re-extraction re-fired over a byte-identical
-  subsystem set — DAG staleness keys on whole-artifact content hash, not the semantic slice the
-  downstream step consumes.** Mid-run ingests staled charter_register via the DAG, and the
-  re-emitted charter_extraction step listed exactly the same 4 subsystems with identical file
-  sets — the 8 files defining the charters never changed. Same phantom-staleness family as the
-  repo-manifest ordering churn; cheap on a $0 NIM lane, real cost on a paid one. Property:
-  charter staleness keys on the charter-relevant slice (subsystem membership + member file
-  hashes), not the whole upstream artifact. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #6.
+- **RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, over-staling
+  only — never under-staling).** The pair itself SHIPPED (intent-equivalence gate wired as the
+  `intent_equivalence_current` obligation with `artifact_metadata.intent_baseline` as the intent
+  entry's revision authority; per-edge dependency slices for `charter_register.json`; mechanism
+  record: [`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)).
+  Accepted residuals, revisit on live evidence:
+  (a) over-stale: `charter_clarification` / `systemic_challenge` keep WHOLE-ARTIFACT
+  `repo_manifest` edges — a member slice was REFUTED for challenge at HEAD (it consumes the total
+  file count and grounds against the complete path set) and clarification's consumption is
+  unverified; they still re-fire on unrelated manifest churn (cheap steps). Slicing them needs a
+  verified consumption trace first. (b) under-stale (narrow): the charter repo slice's doc set is
+  `doc_only`-classified files — a doc the Stated pass reads that is NOT classified `doc_only`
+  (e.g. spec prose living in a code-classified file) sits outside the slice, so its edit would not
+  re-fire extraction; widen the projection if a live run shows it. (c) over-cost: a revert pair
+  (intent A→B judged changed, then B→A) re-pays one judge round — verdicts are materialized into
+  the baseline, not cached per-pair.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
   malformed-JSON result file — result validity must be checked mechanically, never trusted from
@@ -337,6 +322,15 @@ followed" is otherwise indistinguishable from a bug.
   invocation or print once with a count. Second + third observations 2026-07-22: reproduced on the
   resume drain (identical lines every ~100ms, dozens) and again as stderr spam through the endgame
   — it also buries the wall/abort diagnostics.
+
+- **agy's headless lane cannot read files or run commands — no `permissions.allow` rules are
+  configured, and the settings file the denial message names could not be located (2026-07-23,
+  low, friction: tool-should-decide).** Headless `agy -p` auto-denies `read_file`/`command`
+  tools ("Add an allow-rule under permissions.allow in settings.json"); `~/.gemini/config/config.json`
+  has no permissions block and no settings.json exists under `~/.gemini`. The shell-trap guard
+  rightly blocks the `--dangerously-skip-permissions` workaround (prompt-derail trap). Until the
+  allow-rules home is found, agy headless = prompt-inlined content only (≲30KB argv). Fix: locate
+  agy's settings schema (agy docs / `agy install`), add read-only allow rules, then delete this entry.
 
 - **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
 - **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.

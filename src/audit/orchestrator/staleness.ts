@@ -11,6 +11,10 @@ import {
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
+import {
+  computeDependencySliceHash,
+  hasDependencySliceProjection,
+} from "./dependencySlices.js";
 
 function computeContentHash(
   artifactName: string,
@@ -128,6 +132,33 @@ export function computeStaleArtifacts(
           continue;
         }
 
+        // Per-edge semantic slice (dependencySlices.ts): when a projection is
+        // registered AND this entry recorded a slice for the edge, the slice
+        // compare REPLACES the whole-hash + revision disjunction — an upstream
+        // change outside the consumed slice no longer phantom-stales this
+        // artifact. A registered projection with NO recorded slice (old
+        // manifest, or the projection errored at stamp time) falls through to
+        // the conservative whole-hash compare. A projection that throws at
+        // compare time returns the error sentinel, which never equals a
+        // recorded sha256 → stale (fail-safe). The dependency-KEY-SET gate
+        // above is untouched: re-listing dependencies still stales.
+        const recordedSlice = entry.dependency_slices?.[dependencyName];
+        if (
+          recordedSlice !== undefined &&
+          hasDependencySliceProjection(artifactName, dependencyName)
+        ) {
+          const currentSlice = computeDependencySliceHash(
+            artifactName,
+            dependencyName,
+            bundle,
+          );
+          if (recordedSlice !== currentSlice) {
+            isStale = true;
+            break;
+          }
+          continue;
+        }
+
         const currentHash = computeContentHash(dependencyName, bundle);
         if (
           !currentHash ||
@@ -172,10 +203,26 @@ export function computeStaleArtifacts(
         continue;
       }
       for (const downstream of downstreamList) {
-        if (present(bundle, downstream) && !stale.has(downstream)) {
-          stale.add(downstream);
-          changed = true;
+        if (!present(bundle, downstream) || stale.has(downstream)) continue;
+        // A slice-protected edge blocks TRANSITIVE propagation too: the
+        // downstream's staleness across this edge is decided by the slice
+        // compare AFTER the upstream re-derives, not pre-emptively while the
+        // upstream is merely pending (the pre-emptive mark was the live
+        // re-fire chain: manifest churn → structure stale → charter re-fired
+        // over a byte-identical subsystem set). Safe under PRIORITY ordering:
+        // every slice-projected upstream's obligation runs before the
+        // downstream's, and staleness re-derives each drain iteration, so a
+        // slice moved by the upstream's re-derivation still fires the per-edge
+        // compare before the downstream's obligation is reached.
+        const entry = metadata?.artifacts[downstream];
+        if (
+          entry?.dependency_slices?.[upstream] !== undefined &&
+          hasDependencySliceProjection(downstream, upstream)
+        ) {
+          continue;
         }
+        stale.add(downstream);
+        changed = true;
       }
     }
   }

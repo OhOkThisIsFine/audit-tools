@@ -61,6 +61,10 @@ import {
 } from "../orchestrator/charterExtractionExecutor.js";
 import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
+import {
+  deriveIntentEquivalenceStatus,
+  IntentEquivalenceVerdictSchema,
+} from "../orchestrator/intentEquivalenceExecutor.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
 import {
@@ -308,6 +312,7 @@ export type NextStepResult =
   | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "intent_equivalence"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
@@ -1026,6 +1031,7 @@ type OmittableGateAction<TStepKind extends string> =
   | { action: "return"; result: { kind: TStepKind; state: AuditState; bundle: ArtifactBundle } };
 
 type CriticalFlowFallbackBranchResult = OmittableGateAction<"critical_flow_fallback">;
+type IntentEquivalenceBranchResult = OmittableGateAction<"intent_equivalence">;
 type SynthesisNarrativeBranchResult = OmittableGateAction<"synthesis_narrative">;
 type CharterExtractionBranchResult = OmittableGateAction<"charter_extraction">;
 type CharterDeltaBranchResult = OmittableGateAction<"charter_delta">;
@@ -1114,6 +1120,56 @@ export async function handleSynthesisNarrativeBranch(
     bundle,
     state,
   );
+}
+
+/**
+ * Handle the `intent_equivalence_executor` polling block (DD-9). Deviates from
+ * `runOmittableGate` in ONE way: the consumed verdict is SCHEMA-validated here
+ * and a mis-shaped submission is QUARANTINED with a stderr diagnostic (the
+ * quarantine-loudly property) instead of being handed to the executor to crash
+ * on. Returns:
+ *   - `continue`  → a valid verdict was consumed + committed; re-scan.
+ *   - `run_omit`  → a deterministic arm owns the resolution (baseline stamp /
+ *     gate-version-stale / structured delta) — run the executor, stay drainable.
+ *   - `return`    → a prose-only delta awaits the host judge; emit the step.
+ */
+export async function handleIntentEquivalenceBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<IntentEquivalenceBranchResult> {
+  const filename = "intent-equivalence-verdict.json";
+  const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
+  if (incoming) {
+    const parsed = IntentEquivalenceVerdictSchema.safeParse(incoming.value);
+    if (parsed.success) {
+      await runAuditStep({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        preferredExecutor: "intent_equivalence_executor",
+        intentEquivalenceVerdictPath: incoming.path,
+      });
+      await unlink(incoming.path).catch(() => {});
+      return { action: "continue" };
+    }
+    const reason = parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; ");
+    const quarantinePath = await quarantineIncomingFile(
+      params.artifactsDir,
+      incoming.path,
+      filename,
+    );
+    process.stderr.write(
+      `[audit-code] ${filename} quarantined to ${quarantinePath}: ${reason}. ` +
+        `Fix the shape and resubmit.\n`,
+    );
+    // Fall through: no valid submission — re-emit or deterministically resolve.
+  }
+  if (deriveIntentEquivalenceStatus(bundle).kind !== "prose_judgment_pending") {
+    return { action: "run_omit" };
+  }
+  return { action: "return", result: { kind: "intent_equivalence", state, bundle } };
 }
 
 /**
@@ -1352,6 +1408,7 @@ export async function handleSystemicChallengeBranch(
 export type HostGateKind =
   | "graph_enrichment"
   | "critical_flow_fallback"
+  | "intent_equivalence"
   | "design_review"
   | "synthesis_narrative"
   | "charter_extraction"
@@ -1379,6 +1436,12 @@ export const HOST_GATE_DESCRIPTORS: Record<
     driven: "generic",
     incomingFiles: ["critical-flow-fallback.json"],
   },
+  // Custom: runOmittableGate minus the plain-consume — the verdict is
+  // schema-validated + quarantined-loudly in the handler itself.
+  intent_equivalence: {
+    driven: "custom",
+    incomingFiles: ["intent-equivalence-verdict.json"],
+  },
   synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
   charter_extraction: { driven: "generic", incomingFiles: ["charter-extraction.json"] },
   charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
@@ -1389,6 +1452,7 @@ export const HOST_GATE_DESCRIPTORS: Record<
 export const HOST_GATE_KINDS: readonly HostGateKind[] = [
   "graph_enrichment",
   "critical_flow_fallback",
+  "intent_equivalence",
   "design_review",
   "synthesis_narrative",
   "charter_extraction",
@@ -1947,6 +2011,27 @@ export function buildAuditObligations(
         kind: "emit",
         step: { kind: "confirm_intent", state: deriveAuditState(bundle), bundle },
       }),
+    },
+    {
+      // DD-9 intent-equivalence gate: consume a judge verdict (validated +
+      // quarantined-loudly), resolve the deterministic arms in-fold (baseline
+      // stamp / gate-version-stale / structured delta), or emit the bounded
+      // prose-equivalence judge step. Sits between the intent checkpoint and
+      // every consumer of it, so a pending judgment pauses the cascade instead
+      // of racing it.
+      id: "intent_equivalence_current",
+      derive: deriveObligationState("intent_equivalence_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleIntentEquivalenceBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
     },
     {
       // Charter extraction (Phase C): poll the incoming submission (ingest+gate),

@@ -42,6 +42,7 @@ import {
 } from "./conceptualDispatch.js";
 import { buildDesignReReviewSection } from "../orchestrator/designReviewSnapshot.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
+import { deriveIntentEquivalenceStatus } from "../orchestrator/intentEquivalenceExecutor.js";
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { renderCriticalFlowFallbackPrompt } from "../reporting/criticalFlowFallbackPrompt.js";
@@ -1234,6 +1235,89 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       access: {
         read_paths: [],
         write_paths: [edgeReasoningResultsPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "intent_equivalence") {
+    const verdictPath = join(
+      artifactsDir,
+      "incoming",
+      "intent-equivalence-verdict.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const status = deriveIntentEquivalenceStatus(result.bundle);
+    const pending =
+      status.kind === "prose_judgment_pending" ? status : undefined;
+    const fullPrompt = [
+      "# Intent-equivalence judgment (bounded)",
+      "",
+      "The intent checkpoint's PROSE changed since the planning artifacts derived",
+      "(structured fields are identical — this is wording only). Judge whether the",
+      "two prose forms express the SAME audit intent. Judge STRICTLY: any change",
+      "in scope, emphasis, constraint, or goal — however small — is `changed`.",
+      "Only pure rephrasing (wording, ordering, formatting) is `equivalent`.",
+      "An `equivalent` verdict keeps every planning artifact fresh; `changed`",
+      "re-derives the planning cascade against the new intent.",
+      "",
+      "## Prior prose normal form (what planning derived against)",
+      "",
+      "```json",
+      pending?.prior_prose ?? "(unavailable — re-run next-step)",
+      "```",
+      "",
+      "## Current prose normal form",
+      "",
+      "```json",
+      pending?.current_prose ?? "(unavailable — re-run next-step)",
+      "```",
+      "",
+      "## Verdict contract",
+      "",
+      "Write EXACTLY this JSON object (no extra fields) to:",
+      "",
+      `  ${verdictPath}`,
+      "",
+      "```json",
+      JSON.stringify(
+        {
+          verdict: "equivalent | changed",
+          judged_pair: {
+            prior_hash: pending?.prior_hash ?? "",
+            new_hash: pending?.new_hash ?? "",
+          },
+        },
+        null,
+        2,
+      ),
+      "```",
+      "",
+      "`judged_pair` must carry the two hashes shown above verbatim — they bind",
+      "the verdict to this exact pair; a checkpoint edited again mid-judgment is",
+      "detected and re-judged.",
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "intent_equivalence",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the equivalence verdict to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        intent_equivalence_verdict: verdictPath,
+      },
+      prompt: fullPrompt,
+      access: {
+        read_paths: [],
+        write_paths: [verdictPath],
       },
     });
     console.log(JSON.stringify(step, null, 2));

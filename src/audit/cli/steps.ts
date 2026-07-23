@@ -21,6 +21,7 @@ export const StepKindSchema = z.enum([
   "charter_clarification",
   "systemic_challenge",
   "confirm_intent",
+  "intent_equivalence",
   "provider_confirmation",
   "analyzer_install",
   "edge_reasoning",

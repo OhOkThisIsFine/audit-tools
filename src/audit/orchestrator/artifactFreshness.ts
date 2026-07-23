@@ -45,6 +45,12 @@ const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
   "charter_register.json": ["generated_at"],
   "charter_clarification.json": ["generated_at"],
   "systemic_challenge.json": ["generated_at"],
+  // DD-9 layer 1: `confirmed_at`/`confirmed_by` are provenance — a re-confirm
+  // that changes only them must not move the canonical hash (unstripped, every
+  // provenance-only re-confirm re-staled the ENTIRE planning cascade purely on
+  // the timestamp). `schema_version` deliberately STAYS in the hash: a schema
+  // migration is a semantic reinterpretation, not provenance.
+  "intent_checkpoint.json": ["confirmed_at", "confirmed_by"],
 };
 
 function stripFields(

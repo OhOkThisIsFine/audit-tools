@@ -9,9 +9,23 @@ const { validateArtifactBundle } = await import("../../src/audit/validation/arti
 const { applyIntentExclusionsToCoverage } = await import("../../src/audit/orchestrator/scope.ts");
 const { renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.ts");
 const { buildPacketPrompt } = await import("../../src/audit/cli/dispatch.ts");
+const { runIntentEquivalenceResolve } = await import("../../src/audit/orchestrator/intentEquivalenceExecutor.ts");
+const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.ts");
 
 function obligationState(bundle, id) {
   return deriveAuditState(bundle).obligations.find((o) => o.id === id)?.state;
+}
+
+// Settle the DD-9 intent-equivalence baseline: stamp artifact_metadata.intent_baseline
+// from the live checkpoint (deterministic first-contact arm) so
+// intent_equivalence_current is satisfied and decisions reach the obligations these
+// tests target. The full computeArtifactMetadata manifest (not an empty one) keeps
+// the staleness pass clean and makes the stamp arm's entry-hash check consistent.
+function settleIntentBaseline(bundle) {
+  return runIntentEquivalenceResolve({
+    ...bundle,
+    artifact_metadata: computeArtifactMetadata(bundle),
+  }).updated;
 }
 
 // An omitted (shallow-ceiling) charter register — satisfies charter_extraction_current
@@ -92,7 +106,9 @@ await test("decideNextStep advances to charter_extraction once the checkpoint ex
   // Phase C: the charter-extraction pass sits between the checkpoint and the
   // design-review passes (it needs the confirmed ceiling). Once charter extraction
   // is satisfied (omitted at a shallow ceiling), design_review_contract is next.
-  const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
+  // DD-9: the intent-equivalence baseline is settled first — otherwise
+  // intent_equivalence_current (directly after the checkpoint) is selected.
+  const bundle = settleIntentBaseline({ ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() });
   expect(decideNextStep(bundle).selected_obligation).toBe("charter_extraction_current");
   const withCharters = { ...bundle, charter_register: omittedCharterRegister() };
   expect(decideNextStep(withCharters).selected_obligation).toBe("design_review_contract_completed");

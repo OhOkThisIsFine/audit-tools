@@ -7,6 +7,7 @@ import type {
   ObligationState,
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
+import { deriveIntentEquivalenceStatus } from "./intentEquivalenceExecutor.js";
 import { derivePendingTaskPartition } from "./pendingTasks.js";
 import {
   unresolvedConstraintClauses,
@@ -308,6 +309,35 @@ export function deriveAuditState(
       unresolvedClauses.length > 0
         ? `${unresolvedClauses.length} free_form_intent clause(s) could not be encoded as planning signals and need a host answer in constraint_clauses before planning proceeds.`
         : undefined,
+    ),
+  );
+
+  // DD-9 intent-equivalence gate. Derived only once the checkpoint obligation
+  // itself is settled (an unconfirmed/unresolved checkpoint owns the pause);
+  // baseline ABSENCE derives `missing` (stamp arm), a stale gate version
+  // derives `stale` (changed-resolve arm), and structured/prose deltas derive
+  // `missing` with the arm named so the drain's reason line says why.
+  const equivalenceStatus =
+    intentCheckpointBase === "satisfied" && unresolvedClauses.length === 0
+      ? deriveIntentEquivalenceStatus(bundle)
+      : ({ kind: "satisfied" } as const);
+  obligations.push(
+    obligation(
+      "intent_equivalence_current",
+      equivalenceStatus.kind === "satisfied"
+        ? "satisfied"
+        : equivalenceStatus.kind === "gate_version_stale"
+          ? "stale"
+          : "missing",
+      equivalenceStatus.kind === "satisfied"
+        ? undefined
+        : equivalenceStatus.kind === "prose_judgment_pending"
+          ? "The intent checkpoint's prose changed since downstreams derived; a bounded host equivalence judgment is pending."
+          : equivalenceStatus.kind === "structured_changed"
+            ? "Structured intent fields changed; the deterministic changed-resolution has not committed yet."
+            : equivalenceStatus.kind === "gate_version_stale"
+              ? "The persisted intent baseline predates the current normalize/judge/prompt version; resolving as changed."
+              : "No intent-equivalence baseline recorded yet; stamping from the current checkpoint.",
     ),
   );
 

@@ -20,6 +20,18 @@ import { buildStructureSources } from "./sources.js";
 import { detectNonColocalization } from "./findings.js";
 
 const DOC_EXTENSION = /\.(md|markdown|adoc|rst|txt)$/i;
+
+/**
+ * The pipeline's ONE definition of a prose/doc-intent file: `doc_only`-statused
+ * OR doc-extensioned, and not excluded/binary. Single-sourced here because two
+ * consumers must agree exactly: the decomposition's doc-group universe below,
+ * and the charter dependency-slice projection (`dependencySlices.ts`), whose
+ * doc set under-stales charter extraction if it is ever narrower than this.
+ */
+export function isDocIntentFile(path: string, status: string): boolean {
+  if (status === "excluded" || status === "binary") return false;
+  return status === "doc_only" || DOC_EXTENSION.test(path.replace(/\\/g, "/"));
+}
 /** Threshold at which an intent source's partitions collapse into boundary groups. */
 const INTENT_BOUNDARY_FRACTION = 0.5;
 
@@ -64,10 +76,8 @@ export async function buildStructureDecomposition(
   for (const item of params.disposition.files) {
     const path = toPosix(item.path);
     if (item.status === "included") universe.push(path);
-    if (item.status === "doc_only" || DOC_EXTENSION.test(path)) {
-      if (item.status !== "excluded" && item.status !== "binary") {
-        docFiles.push(path);
-      }
+    if (isDocIntentFile(path, item.status)) {
+      docFiles.push(path);
     }
   }
   const sortedUniverse = [...new Set(universe)].sort((a, b) =>
