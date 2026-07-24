@@ -9,7 +9,33 @@
 ## Open tracks
 
 
-**Track 1 — Deploy + validate proxy swap live (LiteLLM integration + end-to-end confirmation).**
+**Track 1 — LiteLLM → 9router migration. Infrastructure and decision are DONE; the CODE migration is
+0% started, and three measured API gaps re-order the plan (re-verified 2026-07-24).**
+9router 0.5.40 is live on `127.0.0.1:20128` (176 models, 21 id prefixes, `9router-autostart` task
+Ready) and LiteLLM is confirmed retirable. But `git grep -il 9router -- src/` returns NOTHING — the
+sprint was docs + external config only ([`9router-routing-sprint-handoff-2026-07-23.md`](../reviews/9router-routing-sprint-handoff-2026-07-23.md),
+design of record [`host-routed-dispatch-design-2026-07-23.md`](../reviews/host-routed-dispatch-design-2026-07-23.md)).
+Everything still RUNS on LiteLLM: `~/.claude/llm-call.mjs:73` hardcodes `:4000`, two
+`~/.audit-code/sources-declared.json` entries point at `:4000`, and `proxyCatalog.ts:163` reads
+`infoObj.litellm_provider`.
+⚠ **Three gaps measured against the live 9router that the plan does not record, and (c) is a
+PREREQUISITE for (a), not a parallel task:** (1) 9router serves **no `/model/info`** — every
+`/api/*` is 401 and `/v1/models` carries only `{id,object,owned_by,capabilities}`, so
+`adaptProxyModelInfo`'s whole input (`max_input_tokens`, `input_cost_per_token`,
+`output_cost_per_token`, `mode`, `supports_tool_calls`) has NO unauthenticated 9router equivalent.
+Cost feeds costRank rung 2 — the default λ=0 operating point — and context caps feed the fit gate, so
+"re-point `proxyCatalog` at `/v1/models`" alone silently drops both. (2) There are **21** id prefixes
+(`cc/ ag/ cx/ kr/ nvidia/ gemini/ groq/ ds/ …`), not the 3 the plan names, so the models.dev mapping
+gap is ~7× wider — and it is what would have to supply the cost/context the proxy no longer
+advertises. (3) `NineRouterQuotaSource` is blocked on provisioning a key: `/api/usage` returns 401
+and the handoff records that no API key exists yet. Non-gap: `/health/liveliness` 404s, already
+covered by the existing `/v1/models` liveness fallback.
+**Property:** starting, stopping or swapping the proxy changes zero audit-tools source — so the
+migration is a re-point plus adapters, never a fork. ⚠ Do NOT hand-maintain a prefix→price table to
+close (1): that is the banned shape; map prefixes to canonical models.dev ids instead.
+
+<details><summary>Superseded: original LiteLLM stand-up + validation scope (2026-07-18, kept for the endpoint contract it names)</summary>
+
 **(a)–(e) all VALIDATED live 2026-07-18** — LiteLLM 1.91.1 on `127.0.0.1:4000` fronting NVIDIA NIM,
 9 aliases across tiers; record: [`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](reviews/litellm-proxy-live-validation-2026-07-18.md).
 Config lives at `~/.audit-code/litellm-config.yaml`. One defect found + fixed (proxy lane never
@@ -17,6 +43,8 @@ reach-verified its own `api_key_env`). **Still open on this track:** dispatch th
 a real audit wave (packets validated only to the completion boundary), and quota/rate-limit behavior
 at the proxy — both fold into the re-dogfood step this validation unblocks.
 Original scope follows. Deployment/configuration work, not audit-tools code changes. Stand up a local LiteLLM proxy (`litellm --config config.yaml`, default port 4000, optional master_key for auth). Configure it with an openai-compatible backend (NVIDIA NIM, vLLM, LM Studio, etc.) and model roster. Point the generic `proxy` block in `~/.audit-code/sources-declared.json` at it: `{endpoint, api_key_env, top_k?, cost_per_mtok?}` (env note: `NVIDIA_API_KEY` and `LLM_BACKEND_BASE_URL` are already set on the box). Then run `/audit-code` and validate the full chain end-to-end: (a) `/v1/models` roster is discovered and merged into Gate-0 confirmed pool, (b) `/model/info` enrichment parses cost + context caps when available (graceful degrades when absent), (c) liveness via `/health/liveliness` (fallback `/v1/models` if missing), (d) auth: master_key threaded correctly + loud drop if `api_key_env` names an unset var, (e) workers receive `--model <alias>` verbatim and dispatch honors the order. Deployment guidance → `examples/`, never as code concept. ⬇ Closes the "swap never run against a live proxy" gap.
+
+</details>
 
 **Track 2 — Ranker contract. ⚠ The "design a contract" framing is SUPERSEDED — the contract already
 exists and is in use.** The original deliverable was a new machine-level ranks file for audit-tools to
