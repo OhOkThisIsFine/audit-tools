@@ -213,16 +213,12 @@ test("remediate-code resolveHostActiveSubagentLimit reads its own REMEDIATE_CODE
 test("remediate-code quota/index does not export auditor-only symbols", () => {
   const auditorOnly = [
     // These are exported by audit-code's quota/index but should NOT exist in
-    // remediate-code (they are audit-specific discovered-limits / header machinery).
+    // remediate-code (they are audit-specific discovered-limits machinery).
     "lookupDiscoveredLimits",
     "updateDiscoveredLimits",
     "mergeDiscoveredLimits",
     "readDiscoveredLimitsCache",
     "writeDiscoveredLimitsCache",
-    "extractRateLimitHeaders",
-    "GenericHeaderExtractor",
-    "ClaudeCodeHeaderExtractor",
-    "getHeaderExtractorForProvider",
     "resolveHostModel",
   ];
   for (const sym of auditorOnly) {
@@ -237,7 +233,6 @@ test("audit-code quota/index exports auditor-specific symbols absent from shared
   const auditorOnly = [
     "lookupDiscoveredLimits",
     "updateDiscoveredLimits",
-    "extractRateLimitHeaders",
   ];
   for (const sym of auditorOnly) {
     expect(sym in auditQuota, `audit-code quota/index should export auditor-specific symbol: ${sym}`).toBeTruthy();
@@ -385,10 +380,3 @@ test("getErrorParserForProvider: unknown provider key falls back to the generic 
   }
 });
 
-test("getHeaderExtractorForProvider: unknown provider key falls back to the generic extractor (audit-only axis)", async () => {
-  // The header AXIS is intentionally audit-only; we only verify the unknown-key
-  // fallback contract of its provider-keyed factory here.
-  const { getHeaderExtractorForProvider } = await import("../../src/audit/quota/headerExtractors/index.ts");
-  expect(getHeaderExtractorForProvider("claude-code").name).toBe("claude-code");
-  expect(getHeaderExtractorForProvider("totally-unknown").name).toBe("generic");
-});

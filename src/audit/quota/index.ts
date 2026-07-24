@@ -63,7 +63,7 @@ export type {
   DispatchCapacity,
 } from "audit-tools/shared";
 
-// Auditor-specific: discovered limits, header extraction
+// Auditor-specific: discovered limits
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
@@ -77,12 +77,6 @@ export {
   writeDiscoveredLimitsCache,
 } from "./discoveredLimits.js";
 export type { DiscoveredRateLimits, DiscoveredLimitsCache, DiscoveredLimitsCacheEntry } from "./discoveredLimits.js";
-
-export { extractRateLimitHeaders } from "./headerExtraction.js";
-export type { ExtractedRateLimits } from "./headerExtraction.js";
-
-export type { HeaderExtractor } from "./headerExtractors/index.js";
-export { GenericHeaderExtractor, ClaudeCodeHeaderExtractor, getHeaderExtractorForProvider } from "./headerExtractors/index.js";
 
 // H5: the dispatch-quota contract is the SHARED one (dispatchQuotaContract.ts) —
 // these are thin aliases, never a second shape. The old audit-only
