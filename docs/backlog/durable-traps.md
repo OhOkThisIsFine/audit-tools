@@ -10,6 +10,16 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **The offload lane is reliable per-ITEM and unreliable in BULK (2026-07-24, friction:
+  inefficient-feeding).** Classifying 101 backlog entries: every bulk shape failed — two whole-file
+  calls at `max_tokens: 48000` ran 28+ min with no first byte, four ~40KB chunks were killed at the
+  Bash 10-minute cap, and a 105KB three-file trace died with `ECONNRESET`. One entry per call (1–3KB,
+  ~10s) succeeded 94/101. The failure is size-correlated and looks exactly like a dead lane or a weak
+  model, which is the misdiagnosis [[offload-lane-failures-are-usually-the-caller]] warns about — it is
+  neither, it is the request shape. Split to the natural per-item unit, pool ~6-wide, retry on a
+  DIFFERENT alias, and size `max_tokens` to the per-item output (1200 truncated 7 long entries; 4000
+  cleared them). Full recipe: [[nim-offload-reliable-unit-is-one-entry]].
+
 - **The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).** A call passed
   `timeout: 1800000` for a long offload run and was killed at exactly 10m00s — the excess is
   clamped, not honoured and not warned about. Any command that can legitimately exceed 10 minutes
