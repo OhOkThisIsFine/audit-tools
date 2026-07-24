@@ -288,25 +288,6 @@ followed" is otherwise indistinguishable from a bug.
   silently and reported the whole string as an unset var — worth a shape validation (a `=` in an env
   NAME is never right).
 
-- **⬇ LIVE (re-dogfood): incoming-submission handling fails the quarantine-loudly property at the
-  two REMAINING sites (2026-07-21, HIGH).** The sweep's shipped half: design-review silent-destroy
-  (`7906c518`) and the edge-reasoning silent-destroy + analyzer-decisions linger-and-loop
-  (task_cd0c73da, reconciled onto the same `consumeArrayIncoming`/`quarantineIncomingFile` core —
-  one helper set, not two) are FIXED. Still open: (a) the systemic-challenge ingest CRASHES
-  next-step with a raw zod dump (no file named, no quarantine, exit 1) on a mis-shaped submission —
-  the "crash not graceful pause" fail-signal, observed live; (b) `synthesis-narrative.json`
-  degrades with zero diagnostic. Property: every incoming site consumes through the shared
-  validate-or-quarantine helpers (`consumeArrayIncoming`/`consumeObjectIncoming` in
-  `nextStepHelpers.ts`), naming the quarantined file + shape error in the re-emitted step.
-  Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
-
-- **⬇ LIVE (re-dogfood): packet output-envelope contracts are inconsistent across step kinds
-  (2026-07-21, medium).** Design-review packets demand a bare JSON array; systemic-challenge
-  demands `{findings:[...]}`. A `json_object`-constrained worker CANNOT emit a bare array, so every
-  single-shot lane must special-case per packet — and the mis-shape feeds directly into the
-  quarantine defects above. Property: one canonical object envelope on every submission the tool
-  ingests. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
-
 - **LEAD (2026-07-23, low, surfaced by the pause-wall recon — out-of-repo resolvers only):
   `window_uncalibrated` ledger blocks are a fixed-state 50ms-poll livelock if a custom
   `resolvePoolConstraints` emits unpriced windows.** The forced anti-deadlock retry unbounds
@@ -322,16 +303,28 @@ followed" is otherwise indistinguishable from a bug.
   legibility fact — 144 granted with leases/explains empty — stays carried by the
   dispatch-legibility entry below.)
 
-- **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure (2026-07-21,
-  medium).** First call ingested the granted results ("Ingested 18 entries", progress_made:true)
-  yet exited 2; an immediate re-run said "All 430 assigned task result(s) were missing or invalid"
-  and exited 1. Partial-wave merge is the NORMAL rolling case; it must exit 0 with a deferred-count
-  summary, reserving all-missing language for zero results. False-red family (inverse of the vitest
-  false-green). Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
-  Same family, confirmed 2026-07-22 endgame: an idempotent REPLAY of a completed merge flips the
-  exit code (`mergeAndIngestCommand.ts:602` `has_failures:false` on replay) — operator guidance
-  during the run became "judge by the 'Ingested N entries' line, exit code lies" (finding
-  FLW-COR-002).
+- **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure — STILL REAL at
+  HEAD, FOCUSED-LAP (2026-07-21, medium; re-verified 2026-07-23).** A partial wave (N results
+  present, M dispatched-but-in-flight, zero actually-invalid) exits 2, then "All N assigned task
+  result(s) were missing or invalid" / exit 1 on the immediate re-run. Mechanism confirmed at HEAD:
+  `validateAndCollectResults` has no "in-flight/deferred" bucket — a dispatched task whose result
+  file is absent lands in `failing` with "Missing audit result for assigned task."
+  (`mergeAndIngestCommand.ts:403-407`) because `prepareDispatchArtifacts` writes the result-map for
+  every dispatched task up-front; the only benign bucket is `notDispatched` (no result-map entry).
+  Exit code is `failing.length > 0 ? 2 : 0` (`:944,:956-960`), then the all-missing throw
+  (`:783-790`). Property: a partial rolling wave exits 0 with a deferred/pending count, reserving
+  "missing or invalid" for a result that ARRIVED and failed validation (or whose claim was released
+  without one). **⚠ ENTANGLED — do not rush:** distinguishing "in-flight/deferred" from "genuinely
+  missing" requires the claim-lease state at merge time, which is the same machinery as the HIGH
+  claim-release-on-worker-failure item above (FLW-COR-003, `claim release is merge-only`). Treat as
+  ONE focused claim-lifecycle lap, not a tail-end exit-code patch — this is the repo's most delicate
+  substrate ([[rolling-lifecycle-unify-full-unification-wrong]] governs). Record:
+  [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md) / `re-dogfood-endgame-2026-07-22.md`.
+  ⚠ **The companion "idempotent REPLAY of a completed merge flips the exit code" claim (FLW-COR-002)
+  is REFUTED at HEAD** — a replay returns `has_failures:false` → exit 0 (`:599-604`), and the
+  `merge-complete.json` marker is written only by a zero-failure merge that ALSO exits 0
+  (`:940-944`), so replay matches the original. The observed 2→1 instability was the partial-wave
+  re-run above, mischaracterized as a replay flip.
 
 - **⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply
   (2026-07-21, low).** The dispatch prompt wants per-result `{input_tokens, output_tokens}`; Claude
@@ -358,14 +351,6 @@ followed" is otherwise indistinguishable from a bug.
   (captured as finding RTV-TST-001). Cost is no longer "a red on dogfood checkouts" — it fans out
   into real dispatched work. Record:
   [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
-
-- **Staleness event spam: the first `next-step` of a fresh run printed the identical
-  `{"kind":"staleness",...}` JSON line ~26 times (2026-07-21, low, friction: inefficient-feeding).**
-  One line per drain iteration over an all-stale artifact set, identical content each time — pure
-  noise that buries the real signals (the dropped-source warnings above it). De-duplicate per
-  invocation or print once with a count. Second + third observations 2026-07-22: reproduced on the
-  resume drain (identical lines every ~100ms, dozens) and again as stderr spam through the endgame
-  — it also buries the wall/abort diagnostics.
 
 - **agy's headless lane cannot read files or run commands — no `permissions.allow` rules are
   configured, and the settings file the denial message names could not be located (2026-07-23,
