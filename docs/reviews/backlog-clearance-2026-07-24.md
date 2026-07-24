@@ -92,8 +92,17 @@ expectations — those encode real list prices and are what caught it.
   (`nextStep.ts:2264-2269`) assert a falsehood — it promises the work is "preserved under a quarantine
   ref" and names `reverify-node`, but a stray never committed, so no ref exists and the command returns
   `no_quarantine`. That converts a hard stop into a confidently-wrong instruction. The stray needs its own
-  terminal class carrying its diagnostic, plus a pinned intra-block order. Full correction in the workflow
-  journal.
+  terminal class carrying its diagnostic.
+  ⚠ **And the intra-block ORDER is load-bearing, in a way that is easy to get backwards.**
+  `recordNodeAcceptOutcome` must stay FIRST, exactly where it is at `:579` — one draft enumerated it last
+  (after persist and release), which trades the hang for something worse: `marshal.ts:947-951` computes
+  `acceptHardFailed` from the sidecar, so a NULL sidecar makes it `false` and, per its own comment at
+  `:939-946`, "the gates below stay inert". A sidecar write that throws after the session is already
+  persisted terminal would leave a node whose work is quarantined and never landed, with the worker's
+  self-reported `resolved` trusted through marshal and the hard-fail gate disarmed. `acceptReconcile`
+  cannot save it either — it only repairs blocks WITH landed git evidence (`acceptReconcile.ts:143-146`),
+  which a never-landed node lacks by construction. Correct order: **record sidecar → mark terminal →
+  drop token → persist session → release claim → throw last.**
 - **`withinRoot` duplication.** Six sites, not five; the entry's line numbers have drifted. Plan drew a
   FATAL objection — do not apply as designed.
 - **Keyless `openai-compatible` endpoints.** Coupled to the endpoint-probe SPEC, not independent: an

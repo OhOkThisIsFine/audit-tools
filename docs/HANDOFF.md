@@ -162,11 +162,12 @@ design in the workflow journal cited by [`backlog-clearance-2026-07-24.md`](revi
 Also still open: FLW-COR-003's second half, "a zero-granted round pauses the drain" — a SEPARATE
 property, still unverified; check it at HEAD first. Both in [`open-bugs.md`](backlog/open-bugs.md).
 
-**3. Make `open-bugs.md` a bounded read.** Now ~145KB / 95 entries against a 120KB budget (was 154KB /
-108). Confirmed empirically: closing entries is the only lever that moves it — the 14 grandfathered
-entries carry ~10KB of EXCESS between them, so condensing every one would still leave ~135KB. Keep
-closing from item 1; run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to
-ratchet the shrink-only ceiling.
+**3. Make `open-bugs.md` a bounded read — condensation is now EXHAUSTED, only closing entries moves it.**
+143KB / 96 entries against a 120KB budget (was 154KB / 108). Measured at HEAD: total excess over the
+2600-char per-entry budget is **2,989 chars across all 96** — so even condensing every oversized entry
+to budget sheds ~3KB and leaves ~140KB. The remaining 23KB has to come from CLOSING entries (item 1).
+Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
+shrink-only ceiling.
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in
 [`deferred.md`](backlog/deferred.md)) — resume once stability work is complete.
