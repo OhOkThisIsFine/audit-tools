@@ -198,7 +198,7 @@ running (`127.0.0.1:20128`, auto-start task). LiteLLM confirmed **retirable** (9
 `json_schema` to NIM). Routing redesign = audit-code categorizes / a re-pointed deterministic router
 routes / 9router transports — **design + build plan written, not built.** Full pickup:
 [`9router-routing-sprint-handoff-2026-07-23.md`](reviews/9router-routing-sprint-handoff-2026-07-23.md).
-⚠ Files from that sprint are **uncommitted** on `main`.
+(The sprint's files are all landed on `main`, including `examples/configure-9router.mjs`.)
 
 **Track 2 — Ranker contract.** A separate project, not audit-tools code. The *producer* now exists and
 is validated live (NIM roster joined to OpenRouter `agentic_index` → LiteLLM `model_info`), and the
