@@ -38,30 +38,15 @@ import { stripQuoted, collapseQuoted, splitShellStatements } from './shell-split
 // orchestrator-step substrate carry the highest blast radius and have no
 // automated adversarial-review gate; three author-green defects reached main
 // this way. Block a commit whose STAGED set touches a loop-core path unless a
-// FRESH, staged-tree-hash-bound review attestation exists. This re-declares the
-// canonical pattern list from `src/shared/loopCorePaths.ts` (the .mjs hook can't
-// import the TS module — it runs under plain node, pre-build); a parity test
-// (`tests/shared/loop-core-gate-parity.test.mjs`) pins the two byte-equal so
-// they can never drift. A "/"-terminated pattern is a directory prefix; every
-// other entry is an exact repo-relative path.
-const LOOP_CORE_PATTERNS = [
-  "src/audit/cli/dispatch.ts",
-  "src/audit/cli/dispatch/",
-  "src/audit/cli/dispatchAttempted.ts",
-  "src/audit/cli/mergeAndIngestCommand.ts",
-  "src/audit/cli/ownerTokens.ts",
-  "src/audit/cli/rollingAuditDispatch.ts",
-  "src/audit/orchestrator/",
-  "src/remediate/riskSignal.ts",
-  "src/remediate/steps/contractPipeline.ts",
-  "src/remediate/steps/dispatch/",
-  "src/remediate/steps/nextStep.ts",
-  "src/remediate/steps/rollingSession.ts",
-  "src/shared/dispatch/",
-  "src/shared/engine/",
-  "src/shared/quota/",
-  "src/shared/rolling/",
-];
+// FRESH, staged-tree-hash-bound review attestation exists. The pattern list is
+// IMPORTED from a generated sibling rather than re-declared here: this hook runs
+// under plain node pre-build and cannot import `src/shared/loopCorePaths.ts`,
+// but it can import a .mjs generated FROM it, so the list keeps exactly one
+// hand-maintained home. `npm run check:loop-core-patterns` (in verify:checks)
+// fails the build if the generated file drifts from the source of truth.
+// A "/"-terminated pattern is a directory prefix; every other entry is an exact
+// repo-relative path.
+import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
 
 // Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
 // from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a

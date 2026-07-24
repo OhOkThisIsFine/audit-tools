@@ -55,25 +55,12 @@ function fail(msg) {
   process.exit(1);
 }
 
-// ── loop-core predicate (mirrors src/shared/loopCorePaths.ts; parity-tested) ──
-const LOOP_CORE_PATTERNS = [
-  'src/audit/cli/dispatch.ts',
-  'src/audit/cli/dispatch/',
-  'src/audit/cli/dispatchAttempted.ts',
-  'src/audit/cli/mergeAndIngestCommand.ts',
-  'src/audit/cli/ownerTokens.ts',
-  'src/audit/cli/rollingAuditDispatch.ts',
-  'src/audit/orchestrator/',
-  'src/remediate/riskSignal.ts',
-  'src/remediate/steps/contractPipeline.ts',
-  'src/remediate/steps/dispatch/',
-  'src/remediate/steps/nextStep.ts',
-  'src/remediate/steps/rollingSession.ts',
-  'src/shared/dispatch/',
-  'src/shared/engine/',
-  'src/shared/quota/',
-  'src/shared/rolling/',
-];
+// ── loop-core predicate ──
+// The pattern list is IMPORTED from a generated sibling, not re-declared: this
+// runs under plain node pre-build and cannot import src/shared/loopCorePaths.ts,
+// but it can import a .mjs generated FROM it. One hand-maintained home; drift is
+// caught by `npm run check:loop-core-patterns` in verify:checks.
+import { LOOP_CORE_PATTERNS } from './loop-core-patterns.mjs';
 function pinsLoopCore(p) {
   const norm = p.replace(/\\/g, '/').replace(/^\.\//, '');
   for (const pattern of LOOP_CORE_PATTERNS) {

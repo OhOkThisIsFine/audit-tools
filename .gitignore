@@ -17,6 +17,10 @@ dist/
 !.claude/hooks/session-start.sh
 !.claude/hooks/pre-commit-gate.mjs
 !.claude/hooks/attest-loop-core-review.mjs
+# Generated from src/shared/loopCorePaths.ts; imported by both loop-core hooks so
+# the pattern list has exactly one hand-maintained home. Tracked because the hooks
+# run pre-build and cannot regenerate it themselves.
+!.claude/hooks/loop-core-patterns.mjs
 !.claude/hooks/async-typecheck.mjs
 !.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/nightly-surface.mjs
