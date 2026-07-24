@@ -1,7 +1,7 @@
 # HANDOFF — audit-tools
 
 > Rolling cross-machine handoff: current state + the **ordered roadmap** of what is open. Durable
-> how-to is in `CLAUDE.md`; per-item detail in [`docs/backlog.md`](backlog.md); durable design in
+> how-to is in `CLAUDE.md`; per-item detail in the split backlog [`docs/backlog/`](backlog/); durable design in
 > `spec/`. This is the *sequencing* view — every open item appears once, in suggested order, with a
 > pointer to its detail. **Shipped detail is `git log`, never this doc.**
 
@@ -24,151 +24,23 @@
   hitting — an entry paraphrasing its own incident until the mechanism inverts.
   **Immediate next is now item 2 below** (FLW-COR-003 is done); ~74 triaged `fix_now` items remain,
   detail in `docs/backlog/open-bugs.md`.
-- **Current version = `package.json`** (authoritative). v0.34.27 (2026-07-24) shipped the
-  **partial-wave deferral** (the runtime-loop track's DEFECT 3(a)) plus the **openai-compatible
-  declared-timeout transport**. (1) merge-and-ingest counted every planned task with no result file
-  as `failing`, so a normal rolling partial wave exited 2 and the re-run threw "All N assigned task
-  result(s) were missing or invalid" (exit 1) — live: 3 packets granted against 430 planned. A
-  run-scoped `dispatch-attempted.json` now records which packets were actually handed to a worker
-  (host = `admission.granted_packet_ids`; in-process = what the rolling engine drove, so strands stay
-  unattempted), and merge DEFERS an unattempted task instead of failing it; deferred tasks keep their
-  claims, stay out of retry-dispatch, and suppress the merge-complete marker. The record is a
-  monotonic union per run. ⚠ **The backlog's "entangled with FLW-COR-003 / in-flight work" premise was
-  WRONG** — the defect was about *planned-but-ungranted* tasks and needed no claim-lease state; claim
-  liveness was tried as the discriminator and refuted by existing tests (claims are taken at PLAN time
-  for the whole candidate set). Loop-core, independent review (its one real finding — the
-  multi-round sidecar clobber via `semanticReviewStep`'s persisted run id — fixed in-lap as the
-  union), attested, red-green validated by mutation. (2) The openai-compatible lane bounded requests
-  with an AbortController at the declared `timeoutMs` but sent them through `globalThis.fetch`, whose
-  ~5-min `headersTimeout` fired first — each launch now builds an undici `Agent` bound to the declared
-  deadline. **Next in the runtime-loop track: the HOST half of FLW-COR-003** (backlog *Open bugs*) —
-  the in-process driver releases claims at drive end, but `prepareDispatchCommand` and
-  `semanticReviewStep` claim and never sweep. **A2 oracle corpus stays PARKED.**
-  v0.34.26 (2026-07-23) shipped the first two
-  **runtime-loop stability** fixes (owner redirect: stabilize before A2). (1) **Quarantine-loudly all
-  6 `runOmittableGate` incoming submissions** — the synthesis_narrative / critical_flow_fallback /
-  charter_extraction / charter_delta / charter_clarification / systemic_challenge gates handed the raw
-  incoming file to the executor, so a mis-shaped submission either CRASHED next-step with a raw zod
-  dump (4 schema-parsed gates) or was silently accepted as an empty "reviewed, found nothing" result
-  (2 bare-cast gates). `runOmittableGate` now schema-validates at the ingest boundary and quarantines
-  loudly (shared `quarantineMisshapedIncoming`, single-sourced with `handleIntentEquivalenceBranch`);
-  `schema` is a REQUIRED descriptor field. Fixed the 6-site CLASS, not the 2 named in the backlog. Not
-  loop-core. (2) **Design-review canonical `{ findings:[...] }` object envelope** — the last bare-array
-  holdout among host-gate submissions; a json_object-constrained NIM lane physically cannot emit a
-  top-level array, so it was special-cased/skipped for design-review. All 5 render paths + 3 host-step
-  notes now instruct the object (single-sourced `findingsEnvelopeExample`); the ingest already
-  tolerantly unwraps it. Loop-core, independent review CONFIRMED + attested. Both red-green tested.
-  ⚠ **The runtime-loop track is NOT done:** DEFECT 3(a) — partial-wave merge-and-ingest exits 2/1 on
-  the NORMAL rolling case (in-flight tasks classed `failing`, no deferred bucket) — is STILL REAL and
-  is a **FOCUSED-LAP entangled with the HIGH claim-release-on-worker-failure item** (needs the
-  claim-lease state at merge; do not rush as an exit-code patch). Two other named candidates were
-  verified ALREADY FIXED (staleness spam; the "idempotent replay flips exit code" claim — refuted).
-  Backlog updated. **A2 oracle corpus is PARKED** (owner redirect) in backlog *Deferred / waiting*.
-  v0.34.25 (2026-07-23) shipped the
-  **per-packet pause wall** — the LAST open item of the dogfood-resume defect tier. A deep-tier
-  packet whose only above-floor pool is PAUSED with a future reset (not exhausted) no longer spins
-  the in-process 50ms wait tick until the reset: it strands as the retryable `quota_paused`
-  terminal. `packetPoolBlockReason` single-sources the 5-reason (packet,pool) refusal disjunction
-  for the `neverDispatchable` strand, the new wall, and both decision records
-  (`engine_stranded_packet_pause_wall` added); `wallStrandEarliestResetAtMs` captured at both wall
-  sites + cleared at `run()` start closes the getTerminal pause-expiry race and cross-run leak;
-  both walls strand-then-emit-then-continue so a decision-sink-reentrant enqueue is dispatched, not
-  swept. Review record (codex + agy-gemini-3.6-flash + nim-deepseek-v4-pro — all analytical
-  surfaces could-not-refute; codex's MEDIUM reentrancy + LOW reuse findings and NIM's
-  under-assertion note all fixed in-lap; the `UND_ERR_HEADERS_TIMEOUT` storm across three NIM
-  aliases was diagnosed as the CALLER's transport, not lane health, and the offload helper fixed):
-  `docs/reviews/pause-wall-per-packet-strand-2026-07-23.md`.
-  v0.34.24 (2026-07-23) shipped the
-  **abnormal-exit blocked-step backstop** — every fatal exit of either orchestrator's next-step
-  (quota wall, engine maxTransitions abort, parse crash) writes a blocked step naming the cause
-  before the error propagates, so a stale current-step.json can never read as a live instruction.
-  One shared core (`runWithBlockedStepBackstop` + `writeBlockedStepContract` in
-  `audit-tools/shared`), two thin draws; audit's pre-existing blocked sites re-pointed onto the
-  shared assembly. Review record (NIM zero refutations; AGY caught the pre-backstop dir-setup
-  bypass, fixed; Codex quota-walled):
-  `docs/reviews/abnormal-exit-blocked-step-backstop-2026-07-23.md`.
-  v0.34.23 (2026-07-23) shipped the
-  **worker-kind × pool-class compatibility rule** — operator-declared `burst_limited` on sources +
-  the proxy block; ONE predicate (`laneWorkerKindConflict`) refuses agentic lanes on burst-limited
-  backends per-lane with reasons (`resolveAmbientSources` + the `collectDispatchableSources`
-  chokepoint); `deriveWorkerKind` fixed-kind transports are now override-proof (a `single_shot`
-  label on a `claude-worker` lane no longer bypasses safety — AGY review catch); LiteLLM config
-  gained same-tier `router_settings.fallbacks`; the live declaration now rides NIM single-shot
-  only. Mechanism + review record (AGY caught the override bypass + one-way stamp; NIM/nemotron
-  zero refutations; Codex quota-walled): `docs/reviews/worker-kind-pool-class-rule-2026-07-23.md`.
-  v0.34.22 (2026-07-23) shipped the
-  **dispatch-legibility mechanistic trace** — full constraint-outcome explain records on every
-  host grant/refusal (constraints + binding row + attempts trail; `resource_keys[]` on leases),
-  `planned` explains on plan-only grants (closes the 144-granted-empty-explains path), and the
-  engine decision log (`dispatch-explains.jsonl`, per-pool strand why-nots, stderr fallback so no
-  decision vanishes). Mechanism + 4-lane review record:
-  `docs/reviews/dispatch-legibility-trace-2026-07-23.md`. v0.34.21 (2026-07-23) shipped the
-  **DD-9 intent-equivalence gate + charter dependency-slice layer** — a provenance-only or
-  judged-equivalent intent re-confirm no longer re-stales the planning cascade
-  (`intent_equivalence_current` obligation; `artifact_metadata.intent_baseline` is the intent
-  entry's revision authority), and charter extraction keys on the charter-relevant slice
-  (consensus membership + member∪doc file hashes) instead of whole upstream artifacts — including
-  blocking transitive propagation across slice-protected edges, which was the live re-fire chain.
-  Mechanism record + review history (AGY caught the baseline self-overwrite; Codex refuted two
-  slice premises; NIM traced the ordering): `docs/reviews/intent-gate-charter-slice-design-2026-07-23.md`.
-  Residuals in backlog (*RESIDUAL of the shipped DD-9…*). ⚠ **Codex CLI is quota-walled until
-  2026-07-30** — its lane errors with a usage-limit message; use NIM/AGY + host subagents for
-  independent review until then. v0.34.20 (2026-07-23) shipped the
-  **zero-spill capability-floor fix** — the floor's "most capable band available" now tracks LIVE
-  pool availability instead of a build-time snapshot, so an exhausted best pool no longer strands
-  packets while healthy confirmed siblings sit idle (mechanism record:
-  `docs/reviews/zero-spill-capability-floor-2026-07-23.md`; independent review codex + NIM/deepseek;
-  paused-pool wait-tick residual logged as a backlog LEAD). The same day shipped the **trap-guard
-  hook layer** (shell-trap-guard / tool-input-guard / session-start-guards + shared shell-split)
-  and a pre-commit-gate hardening pass: subcommand-positional commit detection on quote-collapsed
-  text (a substring false-positive ran tree-rewriting round-trips on read-only commands and
-  clobbered the live index), round-trip crash journaling + locking, chained-`add && commit`
-  gating against the tree that actually lands, and committed-tree-membership for the
-  hook-tracking check. ⚠ **Two agent sessions worked this checkout concurrently on 2026-07-23**
-  — see memory [[concurrent-sessions-share-the-checkout]] before "recovering" foreign edits.
-  v0.34.19 (2026-07-23) shipped the node-context clobber tier
-  (`docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`); v0.34.18 the accept-latch family
-  fix (`docs/reviews/accept-latch-family-mechanisms-2026-07-23.md`). v0.34.16 (2026-07-23) landed
-  the COMPLETE remediate dogfood run — 8/8 nodes of the 78-finding high slice. **The full
-  audit→remediate pipeline has executed end-to-end on a real 78-finding slice** (completion
-  record: `docs/reviews/remediate-dogfood-completion-2026-07-23.md`).
-- **R3-3 SHIPPED 2026-07-21 (`c0cf7e9b`) — the capability-evidence landing gate is MET.** Autonomous
-  runs now emit a host-LLM ranking step for unevidenced pools (authorship tool-derived; submission
-  sanitized to `capability_order`; reach never LLM-confirmable; provenance in
-  `capability_order_llm_ranked` with operator supersession). Full mechanism + review history:
-  [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md).
-- **Trap-guard hook layer shipped 2026-07-23.** Durable traps that are detectable at a tool call are
-  now REFUSED there rather than carried as backlog prose: `shell-trap-guard.mjs` (Bash/PowerShell),
-  `tool-input-guard.mjs` (Edit/Write/Agent), `session-start-guards.mjs`, plus two new checks in
-  `pre-commit-gate.mjs` (`check:doc-manifest` on staged docs — the check that burned v0.33.8 /
-  v0.34.4 / v0.34.17 — and a settings.json→untracked-hook block). Gated entries were DELETED from
-  backlog *Durable traps*, which now states that policy at its head. Contract tests:
-  `tests/shared/hook-trap-guards.test.mjs`. [[trap-guard-hook-layer]]
-- **Nightly maintenance routine shipped 2026-07-23 — replaces the cloud doc-review routine.** One
-  LOCAL scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`, 02:00 daily), three legs:
-  docs (leg 1, the old doc-review rubric), backlog disambiguation (mechanical cleanup autonomous,
-  real disambiguation escalates), and recurring-problem solutions (memory+backlog → proposed
-  mechanisms, propose-only). Surfaces via a self-contained **HTML digest**
-  (`.audit-tools/nightly/latest.html`), not a per-conversation table dump. The re-ask loop is fixed
-  by a durable **subject-keyed decisions ledger** (`.claude/nightly-decisions.json`, tracked): an
-  answer — including "leave it as is" — settles a subject permanently. Old `doc-review-*` hooks +
-  the `doc-review` branch machinery deleted. Contract: `docs/nightly-routine.md`. Tests:
-  `tests/shared/nightly-routine.test.mjs`. [[nightly-maintenance-routine]] [[doc-review-nag-clear-on-apply]]
-  ⚠ **The 11 previously-surfaced doc-review items are not seeded** — tonight's first run regenerates
-  them (several repair-proxy-rename items may auto-resolve); DD-9 is already decided in backlog.
-- **Loop-core attestation + pre-commit gate hardened 2026-07-21 (`fd7ccab2`).** `--attester-class
-  agent|human` is REQUIRED and env-markers are recorded (a self-issued clearance reads as one);
-  `concerns` verdicts are destination-keyed (block only on `main`); the sibling-statement
-  hooksPath escape is closed. CLAUDE.md no longer claims a human step.
-- **Backend-identity migration: all stages shipped** (identity axes, exclusion grammar, capacity
-  guard, service-axis autonomous write) as of v0.34.5.
-
-- **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
-  transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
-  Both now key on ONE service-scoped `CapacityPool.accountKey`; `deriveLocalAccountId` is deleted.
-  ⚠ The move that unified cooldown without the proxy over-merge was to service-scope
-  `deriveAccountKey`'s CREDENTIAL-DERIVED branch too (not just explicit-account) — proxied lanes share
-  one proxy credential and must stay split by service. [[account-metering-closed-producer-decides-partition]].
+- **Current version = `package.json`** (authoritative): v0.34.27. The backlog clear-out lap above is
+  UNRELEASED. **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately
+  not restated here** (this section had grown to ~107 lines of version-by-version narration, which is
+  the changelog creep this doc's own header forbids).
+- **A2 oracle corpus stays PARKED** (owner redirect 2026-07-22) — SPEC intact in
+  [`docs/backlog/deferred.md`](backlog/deferred.md), nothing lost.
+- **Shipped and settled — mechanism lives in the code + its record, not here.** Capability-evidence
+  landing gate (R3-3), the trap-guard hook layer, the nightly maintenance routine, loop-core
+  attestation + pre-commit hardening, the backend-identity migration (all stages) and the
+  account-metering whole-defect closure are all DONE. Durable design is in project memory
+  ([[trap-guard-hook-layer]], [[nightly-maintenance-routine]],
+  [[account-metering-closed-producer-decides-partition]]); contracts in `docs/nightly-routine.md`
+  and `CLAUDE.md`; per-change detail in `git log` + `docs/reviews/`.
+  ⚠ Two carry-forward cautions from that work, both still live: service-scope the CREDENTIAL-DERIVED
+  account branch too, since proxied lanes share one credential and must stay split by service; and a
+  self-issued attestation reads as one, which is why `--attester-class` is recorded rather than
+  trusted ([[attestation-cannot-tell-reviewer-from-author]]).
 - **⚠ Changing an identity means auditing every FILTER that feeds it, not just every consumer.**
   v0.33.11 service-qualified the Gate-0 key and was verified against its consumers — but the source
   fold UPSTREAM still deduped on the bare model id, so a source colliding with a host tier on another
@@ -186,11 +58,14 @@
   before starting a lap — a worktree can branch behind main and must fast-forward + re-read
   HANDOFF/backlog first.
 - **Local env:** npm 12 blocks dependency install scripts by default and can emit object-shaped
-  `npm pack --json`. Smokes are fixed, but read `docs/backlog.md` → *Durable traps* before any manual
+  `npm pack --json`. Smokes are fixed, but read [`docs/backlog/durable-traps.md`](backlog/durable-traps.md) before any manual
   `npm install -g` / packaged-install work.
 - **Offload lane changed:** `llm-worker-tools` (`llm read`/`llm write`) is RETIRED. Bulk work goes direct
   to the local LiteLLM proxy — see `~/.claude/CLAUDE.md` → *Offload lane*. The proxy must be running;
-  there is no standalone fallback. ⚠ **The lane handles judgment work, not just recon.** The standing
+  there is no standalone fallback (it was found DEAD at the start of the 2026-07-24 lap, taking the
+  whole lane down until restarted). ⚠ **LiteLLM is being RETIRED in favour of 9router** — Track 1 in
+  [`forward-tracks.md`](backlog/forward-tracks.md); infrastructure is live but ZERO code migrated, so
+  `:4000` is still load-bearing today. ⚠ **The lane handles judgment work, not just recon.** The standing
   belief that it could not was traced to unset request parameters (no `max_tokens`; a misfitting schema
   under strict decoding) — properly configured it produced review-grade analysis. Check `finish_reason`
   before concluding anything about a model ([[offload-lane-failures-are-usually-the-caller]]).
@@ -234,8 +109,11 @@
 - **Never pass `isolation: "worktree"` to the Agent tool** when dispatching a remediate-code/audit-code
   implement node — the dispatch plan already names the correct worktree; a second one strands the
   subagent's edits where `accept-node` can't see them.
-- **Loop-core** (`src/shared/dispatch/`, `src/shared/quota/`, `intakeExecutors.ts`, `dispatch.ts`,
-  `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`) → green + independent review + attestation required.
+- **Loop-core** → green + independent review + attestation required. The authoritative list is the
+  `LOOP_CORE_PATTERNS` array in `src/shared/loopCorePaths.ts` (16 entries), from which
+  `.claude/hooks/loop-core-patterns.mjs` is generated and both gate hooks import it. **Read the
+  array, never a copy** — the paraphrase that used to sit here named 7 of the 16 and included files
+  that are not canonical entries, which under-states which commits need attestation.
 
 ---
 
@@ -245,40 +123,44 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. FLW-COR-003 — SHIPPED 2026-07-24 (`fab36e0e`).** A `failing` task's claim is now released at
-CLASSIFICATION, before anything downstream can throw, so no host round can hold claims for the lease.
-⚠ Its second half — "a zero-granted round pauses the drain" — is a SEPARATE property, still unverified;
-check it at HEAD before working it (the per-packet pause wall and host-dispatch wall both landed after
-it was written). The remediate-side twin (node claims released only at merge) is the same defect class
-— one core, two draws — and is still open in `docs/backlog/open-bugs.md`.
-
-**2. Work the triaged `fix_now` queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). ~74
+**1. Work the triaged `fix_now` queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). ~74
 entries carry a verified fix sketch naming files, mechanism and how a test pins it red-green; ~24 are
 loop-core (attestation required). Highest-value clusters: the proxy-lane populate/refresh command (a
 drop reason names an internal function no operator can run), `dropped[]` reasons never rendered at
-Gate-0, the `top_k` alphabetical truncation that silently drops the frontier tier, and the remediate
-node-claim twin above. Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation
-remains).
+Gate-0, the `top_k` alphabetical truncation that silently drops the frontier tier, and the
+remediate-side node-claim twin below. Then **Gate-0 priority-order UX** (Track 3 — decisions
+resolved, implementation remains).
 
-**3. Finish making `open-bugs.md` a bounded read.** It is ~155KB; the budget lint records that as a
-shrink-only ceiling and 16 entries (~51KB) are over the per-entry budget. Condense, then
-`node scripts/check-backlog-budget.mjs --update-baseline` to lock each improvement in.
+**2. Two FLW-COR-003 residuals.** The host half SHIPPED 2026-07-24 (`fab36e0e`) — a `failing` task's
+claim now releases at CLASSIFICATION, before anything downstream can throw. Still open: (a) its second
+half, "a zero-granted round pauses the drain", is a SEPARATE property and **still unverified** — check
+it at HEAD first, since the per-packet pause wall and host-dispatch wall both landed after it was
+written; (b) the remediate-side twin, node claims released only at merge — same defect class, one
+core two draws. Both in [`open-bugs.md`](backlog/open-bugs.md).
 
-**A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in backlog
-*Deferred / waiting*) — resume once stability work is complete.
+**3. Make `open-bugs.md` a bounded read — and note condensing alone will NOT get there.** It is 152KB
+against a 120KB file budget; the 14 grandfathered entries carry only ~10KB of EXCESS between them, so
+condensing every one sheds ~10KB and leaves it ~142KB. Closing entries from item 1 is what actually
+shrinks it. The budget lint holds the ceiling shrink-only meanwhile; after any condensation run
+`node scripts/check-backlog-budget.mjs --update-baseline` to lock the improvement in.
+
+**A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in
+[`deferred.md`](backlog/deferred.md)) — resume once stability work is complete.
 
 ---
 
 ## Open tracks
 
-**Track 1 — proxy dispatch → now 9router, LiteLLM superseded.** LiteLLM was stood up 2026-07-18
-(`~/.audit-code/litellm-config.yaml`). **2026-07-23: replaced by 9router** as the harness-level
-multi-provider proxy (fronts Claude/Codex/AGY/Gemini/NIM/Kiro/… + quota failover), deployed and
-running (`127.0.0.1:20128`, auto-start task). LiteLLM confirmed **retirable** (9router passes
-`json_schema` to NIM). Routing redesign = audit-code categorizes / a re-pointed deterministic router
-routes / 9router transports — **design + build plan written, not built.** Full pickup:
-[`9router-routing-sprint-handoff-2026-07-23.md`](reviews/9router-routing-sprint-handoff-2026-07-23.md).
-(The sprint's files are all landed on `main`, including `examples/configure-9router.mjs`.)
+**Track 1 — LiteLLM → 9router migration: infrastructure DONE, code migration 0% started.** 9router is
+live (`127.0.0.1:20128`, `9router-autostart` Ready, 176 models) and LiteLLM is confirmed retirable,
+but `git grep -il 9router -- src/` returns NOTHING — that sprint was docs + external config only, and
+every live path still runs on `:4000`. Re-verified 2026-07-24, which also measured **three gaps the
+design plan does not record** — chiefly that 9router serves no `/model/info` and every `/api/*` is
+401, so cost and context caps have no unauthenticated equivalent, making the prefix→models.dev
+mapping a PREREQUISITE for the re-point rather than a parallel task. Full detail + the other two gaps:
+Track 1 in [`forward-tracks.md`](backlog/forward-tracks.md); design of record
+[`host-routed-dispatch-design-2026-07-23.md`](reviews/host-routed-dispatch-design-2026-07-23.md);
+sprint pickup [`9router-routing-sprint-handoff-2026-07-23.md`](reviews/9router-routing-sprint-handoff-2026-07-23.md).
 
 **Track 2 — Ranker contract.** A separate project, not audit-tools code. The *producer* now exists and
 is validated live (NIM roster joined to OpenRouter `agentic_index` → LiteLLM `model_info`), and the
@@ -338,7 +220,7 @@ step. That is the only live check for the lease-TTL fix ([[host-path-quota-enfor
 multi-IDE concurrent-admitter model — the second admitter must see the account's cap still held while
 the first wave is in flight. It is also the run that would show whether D-66/67 slice-3 is worth doing.
 
-**Watch:** `docs/backlog.md` → *Live-validation guide*; each item's ⬇ Live-run watch line is the
+**Watch:** [`docs/backlog.md`](backlog.md) → *Live-validation guide*; each item's ⬇ Live-run watch line is the
 authoritative pass/fail.
 
 **Fail-signal protocol:** any wedge needing `force-synthesis`, a crash at the wall, orphaned
@@ -363,9 +245,11 @@ The **loop is the meta-tool**; making it cheaper, convergent, and safe compounds
 current loop-improvement work — it gates "redesign before scheduled autonomy" advancing to the
 scheduled audit→remediate→PR capstone.
 
-Everything else open is in [`backlog.md`](backlog.md), which is the per-item detail of record:
-*Open bugs / frictions* (fixable defects), *Forward tracks* (design-level directions), *Deferred /
-waiting* (blocked on data or environment), *Durable traps* (standing environment reference).
+Everything else open is in the split backlog, which is the per-item detail of record — one file per
+section so each is a bounded read: [`open-bugs.md`](backlog/open-bugs.md) (fixable defects),
+[`forward-tracks.md`](backlog/forward-tracks.md) (design directions),
+[`deferred.md`](backlog/deferred.md) (blocked on data or environment),
+[`durable-traps.md`](backlog/durable-traps.md) (standing reference). Index: [`backlog.md`](backlog.md).
 
 **Verify a queued item's PREMISE against HEAD before opening a lap on it** — a spec's decomposition is a
 lead, not a work order ([[grep-the-writers-before-believing-inheritance]]). Backlog prose decays: a

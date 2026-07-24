@@ -13,13 +13,14 @@
   backlog by section fixed `forward-tracks` / `deferred` / `durable-traps`; this section is ~107
   entries and remains too large to read in one call, which is the condition that let ~21% of entries
   go stale unnoticed. `npm run check:backlog-budget` now records a per-file and per-entry ceiling in
-  `docs/backlog/.size-baseline.json` and enforces SHRINK-ONLY, so this cannot regrow — but the
-  ceiling is today's size, not the goal. 16 entries sit over the 2,600-char entry budget (~51KB
-  total, the largest 6,261); condensing them is the bulk of the gap. Property: every backlog file is
-  one bounded read. Mechanism is built and proven — condense an entry, re-run with
-  `--update-baseline`, and the ceiling drops permanently. ⚠ Do NOT close this by raising the budget:
-  the driver is post-mortem narrative accreting onto entries, so a budget that always passes measures
-  nothing.
+  `docs/backlog/.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the ceiling
+  is today's size, not the goal. ⚠ **Condensing alone will NOT get there:** the 14 grandfathered
+  entries carry only ~10KB of EXCESS between them (size *minus budget*, not total size — an earlier
+  draft conflated the two and overstated it as ~51KB), so condensing every one still leaves ~142KB
+  against a 120KB budget. **CLOSING entries is what shrinks it**, making this downstream of the
+  `fix_now` queue, not a separate task. Property: every backlog file is one bounded read. ⚠ Do NOT
+  close this by raising the budget — the driver is narrative accreting onto entries, so a budget that
+  always passes measures nothing.
 
 - **The offload lane's DEFAULT schema is unfit for its most common use, and every caller must
   hand-roll a replacement (2026-07-24, low, friction: inefficient-feeding).** `llm-call.mjs` enforces
@@ -236,41 +237,24 @@
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
 
-- **LEAD (re-dogfood 2026-07-22, low): NIM roster latency is bimodal — minimax-m3/nemotron-550b
-  can exceed undici's default headers timeout on ~8k-token structured calls, presenting as a
-  network failure rather than a slow success.** Fourth observation 2026-07-23: a glm-5.2
-  review call over a ~900-line diff + 3 context files died `UND_ERR_HEADERS_TIMEOUT`;
-  trimming the payload and retrying on deepseek-v4-pro succeeded — payload size, not model
-  health, was the variable. A standalone-script call died with
-  `UND_ERR_HEADERS_TIMEOUT` (same trap as the offload-lane fetch entry under Durable traps).
-  Verify what timeout the openai-compatible provider lane sets before logging as a bug — if it
-  shares undici defaults, a slow NIM model reads as a dead lane. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #5.
-  Fifth + sixth observations (2026-07-23, legibility lap): glm-5.2 died `UND_ERR_HEADERS_TIMEOUT`
-  TWICE in one session — once on a ~55KB recon payload and once on a **16KB** review payload,
-  while deepseek-v4-pro and nemotron answered comparable calls fine. The 16KB death weakens the
-  "payload size is the variable" framing: the glm-5.2 lane itself goes bimodal-slow independent of
-  size. Practical routing: on a glm headers-timeout, retry a DIFFERENT alias before trimming.
-  **ROOT CAUSE FOUND + HELPER FIXED (2026-07-23, pause-wall lap): observations 7-9 — THREE
-  different aliases (deepseek-v4-pro 37KB, nemotron-3-ultra-550b 30KB, qwen3.5-397b 26KB) died
-  identically in one session while a tiny probe answered fine — resolved to the CALLER's
-  transport, not lane bimodality: `~/.claude/llm-call.mjs` used global `fetch`, whose undici
-  default headers timeout (~5 min) fires before a big model's FIRST byte on heavyweight
-  analytical calls (no streaming). Helper now POSTs via `node:http` with a 30-min ceiling
-  (`LLM_TIMEOUT_MS`); prior glm-only observations 5-6 are likely the same cause (unproven).**
-  The in-repo half is **SHIPPED (v0.34.27, 2026-07-24)**: each launch now builds its own transport —
-  an undici `Agent` whose `headersTimeout`/`bodyTimeout` follow the declared `input.timeoutMs` — so
-  `globalThis.fetch`'s un-overridable ~5-min `headersTimeout` is no longer in play and the only
-  timeout is the declared one. (`undici` added as a runtime dep: it IS Node's fetch implementation,
-  pure JS, and transport is correctness-sensitive enough to acquire rather than own.) ⚠ A >5-min
-  time-to-first-byte is not exercisable in a unit test; what is pinned is that the launch does not
-  route through the global fetch. If a live NIM run still shows `UND_ERR_HEADERS_TIMEOUT` from the
-  in-repo lane, the remaining suspect is the roster's genuine bimodal latency, not the transport.
-  Second live observation (2026-07-22 review dispatch): a minimax-m3 structured 8k-token call ran
-  >12 minutes and then returned an empty/error body while nemotron answered the identical prompt in
-  ~2 min — and glm-5.2/deepseek-v4-pro were hard-429'd at the same moment (third observation for
-  the roster-fallback entry above).
-
+- **LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.** Root cause of
+  the observed `UND_ERR_HEADERS_TIMEOUT` storm (9 observations across glm-5.2, deepseek-v4-pro,
+  nemotron-3-ultra-550b, qwen3.5-397b) was the CALLER's transport, not lane health: global `fetch`
+  rides undici's ~5-min `headersTimeout`, which fires before a big model's FIRST byte on heavyweight
+  analytical calls (no streaming). Both halves are FIXED — `~/.claude/llm-call.mjs` POSTs via
+  `node:http` (`LLM_TIMEOUT_MS`, 30-min default), and the in-repo lane builds a per-launch undici
+  `Agent` bound to the declared `input.timeoutMs` (v0.34.27).
+  **What stays open:** a >5-min time-to-first-byte is not exercisable in a unit test — only
+  "does not route through global fetch" is pinned. If a live NIM run STILL shows
+  `UND_ERR_HEADERS_TIMEOUT` from the in-repo lane, the remaining suspect is genuine roster bimodality
+  (one unexplained case stands: minimax-m3 ran >12 min then returned an empty body while nemotron
+  answered the identical prompt in ~2 min). Practical routing: on a headers-timeout, retry a
+  DIFFERENT alias before trimming payload.
+  ⚠ **Rule out the obvious first — 2026-07-24 the proxy was simply DEAD** and 15/15 calls failed
+  behind one truncated error that looked exactly like this class. Probe `/v1/models` before
+  diagnosing a model. Records: [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #5,
+  [`pause-wall-per-packet-strand-2026-07-23.md`](../reviews/pause-wall-per-packet-strand-2026-07-23.md).
+  [[offload-lane-failures-are-usually-the-caller]]
 - **⬇ LIVE-CONFIRMED (re-dogfood 2026-07-21): the proxy-lane drop reason names an internal function,
   and no populate command exists (medium, friction: tool-should-decide).** First `next-step` of the
   v0.34.6 self-audit dropped the proxy lane with "run the populate (populateProxyCatalog)" — not a
