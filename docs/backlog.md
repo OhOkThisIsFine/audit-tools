@@ -75,6 +75,19 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object
+  envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined,
+  not unwrapped.** The design-review prompt now instructs `{ "findings": [ ... ] }`, and the ingest
+  (`consumeArrayIncoming` → `unwrapIncomingArray`, `nextStepHelpers.ts`) accepts an object with
+  EXACTLY ONE array-valued property. A chatty lane that emits `{ "findings": [...], "reasoning": "..." }`
+  (two keys) trips that rule → loud quarantine + resubmit (not silent loss), but it defeats the very
+  json_object-NIM-lane case DEFECT 2 exists to unblock. Property if it bites live: the design-review
+  ingest should prefer a named `.findings` key when present (ignoring extra sibling keys), rather than
+  requiring a sole array property. Deferred because (a) the instructed example is clean single-key so a
+  compliant worker never hits it, (b) `unwrapIncomingArray` is SHARED with edge-reasoning (`.rewrites`),
+  so a named-key preference needs a design-review-specific accessor, not a change to the shared unwrap.
+  Revisit if a live NIM design-review run shows chatty-lane quarantines.
+
 - **`verifySourceReach` demands `api_key_env` on every openai-compatible source, so a KEYLESS
   local endpoint cannot be declared honestly (2026-07-23, low, friction: tool-should-decide).**
   An unauthenticated local proxy (LiteLLM with no enforced master key, LM Studio, local vLLM)

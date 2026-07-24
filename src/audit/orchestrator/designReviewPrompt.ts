@@ -328,26 +328,50 @@ function conceptualCritiqueInstructions(): string[] {
   ];
 }
 
+/**
+ * The canonical design-review submission is a JSON OBJECT with a top-level
+ * `findings` array — `{ "findings": [ ... ] }` — NOT a bare top-level array. A
+ * bare array cannot be emitted by a `json_object`-constrained worker (a NIM
+ * single-shot lane physically cannot return a top-level array), so such a lane
+ * had to be special-cased or skipped for design-review packets; the object
+ * envelope is universally emittable and matches every other host-gate
+ * submission. The design-review ingest
+ * (`consumeArrayIncoming`) tolerantly unwraps the single `findings` array, so
+ * the shape round-trips. `categoryEnum` is the per-pass category field (the one
+ * line that differs between the contract / conceptual / combined passes).
+ */
+function findingsEnvelopeExample(categoryEnum: string): string[] {
+  return [
+    "```json",
+    "{",
+    '  "findings": [',
+    "    {",
+    '      "id": "DR-001",',
+    '      "title": "short descriptive title",',
+    `      "category": "${categoryEnum}",`,
+    '      "severity": "one of: critical, high, medium, low, info",',
+    '      "confidence": "one of: high, medium, low",',
+    '      "lens": "architecture",',
+    '      "summary": "detailed explanation of the observation and the recommended change",',
+    '      "affected_files": [{"path": "relevant/file.ts"}],',
+    '      "systemic": true',
+    "    }",
+    "  ]",
+    "}",
+    "```",
+  ];
+}
+
 /** Shared finding-output-format block for any conceptual-review prompt. */
 function conceptualOutputFormat(resultsPathNote: string): string[] {
   return [
     "## Output format",
     "",
-    "Produce a JSON array of findings. Each finding must conform to:",
+    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
     "",
-    "```json",
-    "{",
-    '  "id": "DR-001",',
-    '  "title": "short descriptive title",',
-    '  "category": "one of: fundamental_approach, core_assumption, structural_risk, architecture_pattern, design_simplification, tool_opportunity, integration, missing_capability",',
-    '  "severity": "one of: critical, high, medium, low, info",',
-    '  "confidence": "one of: high, medium, low",',
-    '  "lens": "architecture",',
-    '  "summary": "detailed explanation of the observation and the recommended change",',
-    '  "affected_files": [{"path": "relevant/file.ts"}],',
-    '  "systemic": true',
-    "}",
-    "```",
+    ...findingsEnvelopeExample(
+      "one of: fundamental_approach, core_assumption, structural_risk, architecture_pattern, design_simplification, tool_opportunity, integration, missing_capability",
+    ),
     "",
     "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.",
     "",
@@ -491,23 +515,13 @@ export function renderContractReviewPrompt(
     "",
     "## Output format",
     "",
-    "Produce a JSON array of findings. Each finding must conform to:",
+    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
     "",
-    "```json",
-    "{",
-    '  "id": "DR-001",',
-    '  "title": "short descriptive title",',
-    '  "category": "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",',
-    '  "severity": "one of: critical, high, medium, low, info",',
-    '  "confidence": "one of: high, medium, low",',
-    '  "lens": "architecture",',
-    '  "summary": "detailed explanation of the observation and the recommended change",',
-    '  "affected_files": [{"path": "relevant/file.ts"}],',
-    '  "systemic": true',
-    "}",
-    "```",
+    ...findingsEnvelopeExample(
+      "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",
+    ),
     "",
-    "Write the JSON array to the contract review results path provided below. Use finding IDs starting with DR-001.",
+    "Write the JSON object to the contract review results path provided below. Use finding IDs starting with DR-001.",
     "",
     "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
     "",
@@ -542,7 +556,7 @@ export function renderConceptualReviewPrompt(
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
-      "Write the JSON array to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
+      "Write the JSON object to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
     ),
   ].join("\n");
 }
@@ -581,7 +595,7 @@ export function renderConceptualPerspectivePrompt(
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
-      "Write the JSON array of findings *from your perspective only* to the results path provided below. Use finding IDs starting with DR-001.",
+      "Write the JSON object of findings *from your perspective only* to the results path provided below. Use finding IDs starting with DR-001.",
     ),
   ].join("\n");
 }
@@ -607,7 +621,7 @@ export function renderConceptualJudgePrompt(
     "",
     "## Perspective result files",
     "",
-    "Read each of these JSON finding arrays:",
+    "Read each of these JSON finding submissions (each a `{ \"findings\": [ ... ] }` object):",
     "",
     ...sources,
     "",
@@ -622,7 +636,7 @@ export function renderConceptualJudgePrompt(
     "- **Flag what the perspectives MISSED.** You are the final reviewer, not only a merger. If, across every perspective, a significant whole-system issue went unraised — a shared assumption none of them questioned, a structural risk no lens covered, a doubt about whether the fundamental approach is even right — add it as a finding, mark its title with `(judge-added)`, and hold it to the same evidence and grounding bar as any other finding. Add only what genuinely matters and is genuinely absent; do not pad.",
     "",
     ...conceptualOutputFormat(
-      "Write the merged, ranked JSON array to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
+      "Write the merged, ranked JSON object to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
     ),
   ].join("\n");
 }
@@ -668,23 +682,13 @@ export function renderDesignReviewPrompt(
     "",
     "## Output format",
     "",
-    "Produce a JSON array of findings. Each finding must conform to:",
+    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
     "",
-    "```json",
-    "{",
-    '  "id": "DR-001",',
-    '  "title": "short descriptive title",',
-    '  "category": "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap, tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
-    '  "severity": "one of: critical, high, medium, low, info",',
-    '  "confidence": "one of: high, medium, low",',
-    '  "lens": "architecture",',
-    '  "summary": "detailed explanation of the observation and the recommended change",',
-    '  "affected_files": [{"path": "relevant/file.ts"}],',
-    '  "systemic": true',
-    "}",
-    "```",
+    ...findingsEnvelopeExample(
+      "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap, tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",
+    ),
     "",
-    "Write the JSON array to the design review results path provided below. Use finding IDs starting with DR-001.",
+    "Write the JSON object to the design review results path provided below. Use finding IDs starting with DR-001.",
     "",
     "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
     "",

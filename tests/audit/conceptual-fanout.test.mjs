@@ -11,6 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const {
+  renderContractReviewPrompt,
+  renderConceptualReviewPrompt,
+  renderDesignReviewPrompt,
   renderConceptualPerspectivePrompt,
   renderConceptualJudgePrompt,
   renderSharedStructuralContext,
@@ -344,4 +347,34 @@ test("prepareConceptualDispatch: prepends the reuse notice to instructionLines (
     settings: { conceptual_depth: "shallow" },
   });
   expect(noNotice.instructionLines[0]).toMatch(/\*\*Conceptual review\*\*/);
+});
+
+// ── DEFECT 2: canonical object-envelope output contract ───────────────────────
+//
+// Every design-review packet must instruct the worker to emit a
+// `{ "findings": [ ... ] }` OBJECT, not a bare top-level array. A bare array is
+// unemittable by a json_object-constrained worker (a NIM single-shot lane
+// physically cannot return a top-level array), which forced per-packet
+// special-casing; the object envelope is universally emittable and matches every
+// other host-gate submission. The design-review ingest tolerantly unwraps the
+// single `findings` array, so the object shape round-trips.
+
+test("every design-review prompt instructs the { findings: [...] } object envelope, never a bare array", () => {
+  const bundle = minimalBundle();
+  const [p] = selectPerspectives(5);
+  const prompts = {
+    contract: renderContractReviewPrompt(bundle, { max_units: 5 }),
+    conceptual: renderConceptualReviewPrompt(bundle, { max_units: 5 }),
+    combined: renderDesignReviewPrompt(bundle, { max_units: 5 }),
+    perspective: renderConceptualPerspectivePrompt(bundle, p, 0, 5, { max_units: 5 }),
+    judge: renderConceptualJudgePrompt([{ name: p.name, path: "/tmp/p0.json" }]),
+  };
+  for (const [kind, prompt] of Object.entries(prompts)) {
+    // The object envelope example is present ...
+    expect(prompt, `${kind}: shows the { "findings": [ ... ] } example`).toMatch(/"findings":\s*\[/);
+    // ... and NO wording anywhere in the prompt instructs a bare array. Matching
+    // "JSON array" broadly (not just the two specific phrasings) also guards a
+    // judge/combined resultsPathNote regressing to "…ranked JSON array…".
+    expect(prompt, `${kind}: no bare-"JSON array" instruction`).not.toMatch(/JSON array/);
+  }
 });
