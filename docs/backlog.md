@@ -146,15 +146,6 @@ followed" is otherwise indistinguishable from a bug.
   worker failure, not only at merge. Captured as findings FLW-COR-003 / COR-6ba55c63. Record:
   [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
 
-- **⬇ LIVE (re-dogfood 2026-07-22, medium, false-signal family): abnormal next-step exits emit NO
-  step contract, leaving a stale current-step.json that reads as a live instruction.** Observed
-  twice with different causes: exit 1 at the quota wall left the previous gate step on disk
-  (mtime an hour old — reads as "gate re-armed" when actually "no step emitted"), and the
-  `advance: exceeded maxTransitions (100)` abort dies step-less the same way. Property: every
-  terminal exit path emits a blocked-step contract naming the cause (wall, cycling obligation) —
-  a consumer must never be able to read a stale step as current. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #0/#9.
-
 - **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
   `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes
   instead of agentic ones that all drop.** The rule itself SHIPPED 2026-07-23 (declared
@@ -514,6 +505,11 @@ followed" is otherwise indistinguishable from a bug.
   who did not re-run serially. **Property to hold:** either test fixture dirs are per-invocation
   (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
   vitest refuses to start. Same family as the other three known full-suite-only failures.
+  Same family, third observation (2026-07-23, blocked-step lap): an `npm run build` (dist rewrite)
+  DURING a background full-suite run produced 10 failures in 3 files (wrapper tests spawn dist
+  mid-rewrite; next-step collected mid-edit source); all green on serial re-run. A dist rebuild is a
+  concurrent mutator of the suite's fixture surface exactly like a second vitest — the same
+  property (per-invocation isolation or refuse-to-race) covers it.
 
 - **Nothing derives "collapse a shared-budget roster to its best member" (low).** The selection rule
   itself is settled and already falls out of the cost-first comparator: a free pool's costs all tie so

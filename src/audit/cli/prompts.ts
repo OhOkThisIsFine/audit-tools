@@ -473,15 +473,3 @@ export function renderAnalyzerInstallPrompt(params: {
   ].join("\n");
 }
 
-export function renderBlockedStepPrompt(reason: string): string {
-  return [
-    "# audit-code blocked",
-    "",
-    "The audit cannot continue automatically from this step.",
-    "",
-    "Report this blocker verbatim and stop:",
-    "",
-    reason,
-    "",
-  ].join("\n");
-}

@@ -170,11 +170,14 @@ and the **dispatch-legibility mechanistic trace** (v0.34.22 — full constraint-
 records on every host grant/refusal, `planned` explains closing the 144-granted-empty-explains
 path, engine decision log `dispatch-explains.jsonl` with per-pool strand why-nots; mechanism
 record: [`dispatch-legibility-trace-2026-07-23.md`](reviews/dispatch-legibility-trace-2026-07-23.md)),
-and the **worker-kind × pool-class rule** (v0.34.23 — agentic lanes refused on declared
+the **worker-kind × pool-class rule** (v0.34.23 — agentic lanes refused on declared
 burst-limited backends; mechanism record:
-[`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)).
-Remaining in the tier (older, still open): abnormal-exit no-step-contract, and the paused-pool
-wait-tick LEAD the zero-spill fix surfaced.
+[`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)),
+and the **abnormal-exit blocked-step backstop** (every fatal next-step exit now writes a blocked
+step naming the cause — one shared core, both orchestrator draws; mechanism + review record:
+[`abnormal-exit-blocked-step-backstop-2026-07-23.md`](reviews/abnormal-exit-blocked-step-backstop-2026-07-23.md)).
+Remaining in the tier (older, still open): the paused-pool wait-tick LEAD the zero-spill fix
+surfaced.
 
 **2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect

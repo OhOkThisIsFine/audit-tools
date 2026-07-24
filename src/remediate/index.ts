@@ -41,7 +41,9 @@ import {
   withoutOpenCodeWildcard,
   readOptionalJsonFile,
   runTracked,
+  runWithBlockedStepBackstop,
 } from "audit-tools/shared";
+import { writeBlockedStep } from "./steps/stepWriter.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -191,36 +193,47 @@ program
       options.root,
       options.artifactsDir,
     );
-    // Single-step bootstrap: fold the optional guidance file into
-    // intake/conversation-start.md in this same invocation, then decide the
-    // step — no separate write-then-call dance for the host to remember.
-    if (options.guidanceFile) {
-      applyGuidanceFile(artifactsDir, options.guidanceFile);
-    }
-    const step = await withBackendLogsOnStderr(() =>
-      decideNextStep({
-        root: options.root,
-        artifactsDir,
-        input: options.input,
-        guidanceFileSupplied: Boolean(options.guidanceFile),
-        hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-        hostMaxConcurrent: options.hostMaxConcurrent
-          ? parseInt(options.hostMaxConcurrent, 10) || undefined
-          : undefined,
-        hostContextTokens: options.hostContextTokens
-          ? parseInt(options.hostContextTokens, 10) || undefined
-          : undefined,
-        hostOutputTokens: options.hostOutputTokens
-          ? parseInt(options.hostOutputTokens, 10) || undefined
-          : undefined,
-        hostModels: options.hostModels
-          ? parseHostModelRoster(options.hostModels)
-          : undefined,
-        hostModelId: options.hostModelId || undefined,
-        hostProvider: options.hostProvider as ProviderName | undefined,
-        finalizeClosing: options.finalizeClosing === true,
-        forceReplan: options.forceReplan === true,
-      }),
+    // Terminal-exit backstop (backlog: abnormal-exit no-step-contract), the
+    // remediate DRAW of the shared mechanism audit-code's cmdNextStep uses: any
+    // throw below writes a blocked step naming the cause before propagating, so
+    // a consumer can never read the previous current-step.json as a live
+    // instruction after a fatal exit. Exit semantics unchanged.
+    const step = await runWithBlockedStepBackstop(
+      async () => {
+        // Single-step bootstrap: fold the optional guidance file into
+        // intake/conversation-start.md in this same invocation, then decide the
+        // step — no separate write-then-call dance for the host to remember.
+        if (options.guidanceFile) {
+          applyGuidanceFile(artifactsDir, options.guidanceFile);
+        }
+        return withBackendLogsOnStderr(() =>
+          decideNextStep({
+            root: options.root,
+            artifactsDir,
+            input: options.input,
+            guidanceFileSupplied: Boolean(options.guidanceFile),
+            hostCanDispatchSubagents: options.hostCanDispatchSubagents,
+            hostMaxConcurrent: options.hostMaxConcurrent
+              ? parseInt(options.hostMaxConcurrent, 10) || undefined
+              : undefined,
+            hostContextTokens: options.hostContextTokens
+              ? parseInt(options.hostContextTokens, 10) || undefined
+              : undefined,
+            hostOutputTokens: options.hostOutputTokens
+              ? parseInt(options.hostOutputTokens, 10) || undefined
+              : undefined,
+            hostModels: options.hostModels
+              ? parseHostModelRoster(options.hostModels)
+              : undefined,
+            hostModelId: options.hostModelId || undefined,
+            hostProvider: options.hostProvider as ProviderName | undefined,
+            finalizeClosing: options.finalizeClosing === true,
+            forceReplan: options.forceReplan === true,
+          }),
+        );
+      },
+      (reason) =>
+        writeBlockedStep({ root: resolve(options.root), artifactsDir, reason }),
     );
     console.log(JSON.stringify(step, null, 2));
   });

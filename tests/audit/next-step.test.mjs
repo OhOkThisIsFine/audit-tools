@@ -496,3 +496,53 @@ test("present_report with pending friction triage is a ready step carrying the n
     ).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Terminal-exit backstop (backlog: abnormal-exit no-step-contract): a fatal
+// next-step exit must overwrite current-step.json with a blocked step naming
+// the cause — a consumer must never read the PREVIOUS step as live after a
+// crash. The trigger here (a missing --guidance-file) is one arbitrary member
+// of the covered class (quota-wall abort, engine maxTransitions throw, parse
+// crash, IO error): the backstop wraps the whole command body, so any throw
+// exercises the same path.
+// ---------------------------------------------------------------------------
+
+test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", async () => {
+  const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.ts");
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    const stepsDir = join(artifactsDir, "steps");
+    await mkdir(stepsDir, { recursive: true });
+    // Seed a stale prior step — the defect was that this survived a fatal exit
+    // and read as a live instruction.
+    await writeFile(
+      join(stepsDir, "current-step.json"),
+      JSON.stringify({ step_kind: "dispatch_review", status: "ready" }, null, 2),
+    );
+
+    const missingGuidance = join(root, "no-such-guidance.md");
+    await assert.rejects(() =>
+      cmdNextStep([
+        "--root",
+        root,
+        "--artifacts-dir",
+        artifactsDir,
+        "--guidance-file",
+        missingGuidance,
+      ]),
+    );
+
+    const step = JSON.parse(
+      await readFile(join(stepsDir, "current-step.json"), "utf8"),
+    );
+    expect(step.step_kind).toBe("blocked");
+    expect(step.status).toBe("blocked");
+    // The step JSON names the cause on its own (headless consumers never read
+    // the prompt file).
+    expect(step.progress.summary).toContain("no-such-guidance.md");
+
+    const prompt = await readFile(join(stepsDir, "current-prompt.md"), "utf8");
+    expect(prompt).toContain("# audit-code blocked");
+    expect(prompt).toContain("no-such-guidance.md");
+  });
+});

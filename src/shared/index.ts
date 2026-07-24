@@ -761,6 +761,9 @@ export {
   currentStepPath,
   currentPromptPath,
   writeStepContract,
+  runWithBlockedStepBackstop,
+  renderBlockedStepPrompt,
+  writeBlockedStepContract,
 } from "./io/stepContractWriter.js";
 
 // Per-run token-usage ledger (the RECORDING half of score-tokens). Single-sourced

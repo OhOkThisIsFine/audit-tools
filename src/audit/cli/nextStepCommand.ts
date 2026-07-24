@@ -12,6 +12,8 @@ import type {
 import {
   resolveSessionConfig,
   applyGuidanceFile,
+  runWithBlockedStepBackstop,
+  writeBlockedStepContract,
   buildProviderConfirmationRender,
   deriveSourcePoolDisplayFromSources,
   gatherDispatchableSources,
@@ -71,11 +73,10 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
 import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
-import { writeCurrentStep } from "./steps.js";
+import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
   nextStepCommand,
   renderAnalyzerInstallPrompt,
-  renderBlockedStepPrompt,
   renderEdgeReasoningDispatchPrompt,
   renderEdgeReasoningStepPrompt,
   renderPresentReportPrompt,
@@ -288,9 +289,37 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
   warnIfNotGitRepo(root);
   const artifactsDir = getArtifactsDir(argv);
+  // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): ANY throw
+  // out of the body — a quota-wall abort, the engine's `exceeded maxTransitions`
+  // cycle throw, a mis-shaped-submission parse crash — writes a blocked step
+  // naming the cause before propagating, so a consumer can never read the
+  // PREVIOUS current-step.json as a live instruction after a fatal exit. Exit
+  // semantics are unchanged (cli.ts still reports the error and exits nonzero);
+  // only the on-disk step contract is guaranteed fresh.
+  await runWithBlockedStepBackstop(
+    () => cmdNextStepBody(argv, root, artifactsDir),
+    (reason) =>
+      writeBlockedStepContract({
+        tool: "audit-code",
+        contractVersion: STEP_CONTRACT_VERSION,
+        artifactsDir,
+        repoRoot: root,
+        runId: null,
+        reason,
+      }),
+  );
+}
+
+async function cmdNextStepBody(
+  argv: string[],
+  root: string,
+  artifactsDir: string,
+): Promise<void> {
+  // Inside the backstop (AGY review catch): a supervisor-dir IO failure must
+  // yield a blocked step too. The backstop's own writer needs no pre-created
+  // dirs — writeStepContract mkdirs recursively.
   await mkdir(artifactsDir, { recursive: true });
   await ensureSupervisorDirs(artifactsDir);
-
   // Single-step bootstrap: fold an optional guidance file into
   // intake/conversation-start.md in this same invocation, then decide the step —
   // no separate write-then-call dance for the host to remember.
@@ -328,21 +357,19 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactsDir,
       progressSummary: reason,
     });
-    const step = await writeCurrentStep({
+    // Shared blocked-step assembly: the step JSON says WHY on its own via
+    // progress.summary — a headless consumer (release smoke, CI) sees only this
+    // contract, not the prompt file.
+    const step = await writeBlockedStepContract({
+      tool: "audit-code",
+      contractVersion: STEP_CONTRACT_VERSION,
       artifactsDir,
-      stepKind: "blocked",
-      status: "blocked",
-      runId: null,
-      allowedCommands: [],
-      stopCondition: "Report the configuration blocker and stop.",
-      // The blocked step JSON must say WHY on its own — a headless consumer
-      // (release smoke, CI) sees only this contract, not the prompt file.
-      progress: { summary: reason },
       repoRoot: root,
+      runId: null,
+      reason,
       artifactPaths: {
         operator_handoff: join(artifactsDir, "operator-handoff.json"),
       },
-      prompt: renderBlockedStepPrompt(reason),
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -493,20 +520,17 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   }
 
   if (result.kind === "blocked") {
-    const step = await writeCurrentStep({
+    // Same diagnosability contract as the config-blocked step above.
+    const step = await writeBlockedStepContract({
+      tool: "audit-code",
+      contractVersion: STEP_CONTRACT_VERSION,
       artifactsDir,
-      stepKind: "blocked",
-      status: "blocked",
-      runId: null,
-      allowedCommands: [],
-      stopCondition: "Report the blocker and stop.",
-      // Same diagnosability contract as the config-blocked step above.
-      progress: { summary: result.reason },
       repoRoot: root,
+      runId: null,
+      reason: result.reason,
       artifactPaths: {
         operator_handoff: join(artifactsDir, "operator-handoff.json"),
       },
-      prompt: renderBlockedStepPrompt(result.reason),
     });
     console.log(JSON.stringify(step, null, 2));
     return;

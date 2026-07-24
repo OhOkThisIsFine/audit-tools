@@ -237,3 +237,88 @@ export async function writeStepContract<
   await gcStaleAgentSlots(stepsDirPath, agentId);
   return step;
 }
+
+/**
+ * Run `body` under the terminal-exit backstop both next-step CLIs share
+ * (backlog: abnormal-exit no-step-contract). If `body` throws — a quota wall,
+ * the engine's maxTransitions cycle abort, a mis-shaped-submission parse crash,
+ * an IO failure — write a blocked step contract naming the cause via
+ * `writeBlockedStep`, then rethrow the ORIGINAL error so the caller's exit
+ * semantics (stderr report + nonzero exit) are unchanged. This guarantees the
+ * step-contract property mechanically: after ANY terminal exit of a next-step
+ * invocation, `steps/current-step.json` reflects that invocation's outcome — a
+ * consumer can never read the previous step as a live instruction.
+ *
+ * `writeBlockedStep` failures are swallowed deliberately: the backstop must
+ * never mask the original failure with a secondary write error.
+ */
+export async function runWithBlockedStepBackstop<T>(
+  body: () => Promise<T>,
+  writeBlockedStep: (reason: string) => Promise<unknown>,
+): Promise<T> {
+  try {
+    return await body();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      await writeBlockedStep(reason);
+    } catch {
+      // Swallowed: the original error below is the signal; a failed blocked-step
+      // write (e.g. the same disk fault that caused it) must not replace it.
+    }
+    throw error;
+  }
+}
+
+/**
+ * Canonical blocked-step prompt. Single-sourced here (one core, two draws) so
+ * the two orchestrators' blocked prompts cannot drift; `tool` is the CLI name
+ * for the heading ("audit-code" / "remediate-code").
+ */
+export function renderBlockedStepPrompt(tool: string, reason: string): string {
+  return [
+    `# ${tool} blocked`,
+    "",
+    "The run cannot continue automatically from this step.",
+    "",
+    "Report this blocker verbatim and stop:",
+    "",
+    reason,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Single-sourced blocked-step ASSEMBLY (one core, two draws — the semantics
+ * live in `runWithBlockedStepBackstop`, the contract shape lives here). Each
+ * orchestrator's draw supplies only its genuine per-mode inputs: the contract
+ * version and its run-id convention (audit: `null`; remediate: a minted id).
+ * The step JSON always carries `progress.summary` naming the cause — a
+ * headless consumer sees only this contract, never the prompt file — and the
+ * prompt is the shared `renderBlockedStepPrompt`.
+ */
+export async function writeBlockedStepContract(params: {
+  /** CLI name for the prompt heading, e.g. "audit-code". */
+  tool: string;
+  contractVersion: string;
+  artifactsDir: string;
+  repoRoot: string;
+  runId: string | null;
+  reason: string;
+  /** Optional pointers a specific blocked path adds (e.g. operator_handoff). */
+  artifactPaths?: Record<string, string | null>;
+}): Promise<BaseStepContract> {
+  return writeStepContract<BaseStepContract>({
+    contractVersion: params.contractVersion,
+    stepKind: "blocked",
+    status: "blocked",
+    runId: params.runId,
+    allowedCommands: [],
+    stopCondition: "Report the blocker and stop.",
+    repoRoot: params.repoRoot,
+    artifactsDir: params.artifactsDir,
+    prompt: renderBlockedStepPrompt(params.tool, params.reason),
+    artifactPaths: params.artifactPaths ?? {},
+    extraFields: { progress: { summary: params.reason } },
+  });
+}

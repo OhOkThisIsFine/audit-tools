@@ -29,7 +29,11 @@ export type RemediationStepKind =
   | "present_report"
   | "input_conflict"
   | "unhandled_state"
-  | "zero_documentable_findings";
+  | "zero_documentable_findings"
+  // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): written by
+  // the CLI when next-step dies on an unhandled error, so a stale prior step can
+  // never read as a live instruction. Mirrors audit-code's "blocked" kind.
+  | "blocked";
 
 import type {
   StepStatus,
