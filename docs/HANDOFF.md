@@ -7,7 +7,21 @@
 
 ## Live state
 
-- **Backlog clear-out lap, 2026-07-24 (`d4c8e9ea`, unreleased — still v0.34.27).** All 176 entries
+- **Backlog clearance lap, 2026-07-24 (`6df9100e`, unreleased — still v0.34.27).** Whole file
+  re-triaged (one NIM call per entry — batching 27 at a time died every time), then five fixes landed
+  and **one reverted**. `open-bugs.md` is 108 → 95 entries, ~154KB → ~145KB, baseline ratcheted.
+  ⚠ **The revert is the load-bearing finding.** Regenerating the price snapshot fixes the inert
+  provider-scoped path but rewrites the flat table to the CHEAPEST price across providers, which ranks
+  `claude-opus-4-8` at $0.85 blended — **below haiku** — so cost-first routing at λ=0 would send every
+  packet to Opus. `cost-rank.test.mjs` caught it (11 failures, CI shard 1, both Node versions); the
+  stale snapshot looked right only because the pre-collision `flatten()` happened to keep anthropic's
+  prices. The backlog said to settle the service→vendor-id mismatch AFTER refreshing; that ordering was
+  wrong and the entry now says the mapping is a PREREQUISITE. Do not "fix" it by editing the cost-rank
+  expectations — they encode real list prices and are what caught it.
+  ⚠ **Adversarial review overturned two premises of the remediate claim-leak item** — see IMMEDIATE
+  NEXT item 2. Record: [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md).
+
+- **Prior backlog clear-out lap (`d4c8e9ea`).** All 176 entries
   re-verified against HEAD, then every close/rewrite verdict attacked by an independent adversary on
   a different model lane; that second pass **overturned 41 of 62** verdicts it examined, almost all
   "delete" → "rewrite" because half the entry was still live. Backlog is now **split by section**
@@ -131,18 +145,28 @@ Gate-0, the `top_k` alphabetical truncation that silently drops the frontier tie
 remediate-side node-claim twin below. Then **Gate-0 priority-order UX** (Track 3 — decisions
 resolved, implementation remains).
 
-**2. Two FLW-COR-003 residuals.** The host half SHIPPED 2026-07-24 (`fab36e0e`) — a `failing` task's
-claim now releases at CLASSIFICATION, before anything downstream can throw. Still open: (a) its second
-half, "a zero-granted round pauses the drain", is a SEPARATE property and **still unverified** — check
-it at HEAD first, since the per-packet pause wall and host-dispatch wall both landed after it was
-written; (b) the remediate-side twin, node claims released only at merge — same defect class, one
-core two draws. Both in [`open-bugs.md`](backlog/open-bugs.md).
+**2. The remediate claim-leak twin — DESIGNED, not applied; loop-core, needs attestation.** Confirmed
+at HEAD: `rollingSession.ts` claims at `:442`, releases at `:601-604`, persists at `:623`, and the
+stray-worktree `throw` at `:580` sits between the outcome record and the release, so that path frees
+nothing and never persists — `terminal` never counts the node and `inFlight` stays ≥1, a **permanent
+hang**, not a timed stall.
+⚠ Adversarial review overturned two premises that were driving the design. (a) The lease is 30s
+(`STALE_LOCK_MS`), not the audit side's 20 minutes. (b) The stated blocker — that releasing breaks the
+`reverify-node` retry via the ownership heartbeat — is FALSE: `reverifyQuarantinedNode` passes no
+`ownership` at all (`rollingSession.ts:790-792`). ⚠ And the obvious fix is also wrong: routing a stray
+into `accept_failed` makes the host directive (`nextStep.ts:2264-2269`) promise a quarantine ref that a
+never-committed stray does not have, turning a hard stop into a confidently-wrong `reverify-node`
+instruction. The stray needs its OWN terminal class carrying its diagnostic, plus a pinned intra-block
+order (record outcome → mark terminal → drop token → persist → release → throw last). Full corrected
+design in the workflow journal cited by [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md).
+Also still open: FLW-COR-003's second half, "a zero-granted round pauses the drain" — a SEPARATE
+property, still unverified; check it at HEAD first. Both in [`open-bugs.md`](backlog/open-bugs.md).
 
-**3. Make `open-bugs.md` a bounded read — and note condensing alone will NOT get there.** It is 152KB
-against a 120KB file budget; the 14 grandfathered entries carry only ~10KB of EXCESS between them, so
-condensing every one sheds ~10KB and leaves it ~142KB. Closing entries from item 1 is what actually
-shrinks it. The budget lint holds the ceiling shrink-only meanwhile; after any condensation run
-`node scripts/check-backlog-budget.mjs --update-baseline` to lock the improvement in.
+**3. Make `open-bugs.md` a bounded read.** Now ~145KB / 95 entries against a 120KB budget (was 154KB /
+108). Confirmed empirically: closing entries is the only lever that moves it — the 14 grandfathered
+entries carry ~10KB of EXCESS between them, so condensing every one would still leave ~135KB. Keep
+closing from item 1; run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to
+ratchet the shrink-only ceiling.
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in
 [`deferred.md`](backlog/deferred.md)) — resume once stability work is complete.
