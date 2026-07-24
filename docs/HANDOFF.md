@@ -7,7 +7,21 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.24 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.25 (2026-07-23) shipped the
+  **per-packet pause wall** — the LAST open item of the dogfood-resume defect tier. A deep-tier
+  packet whose only above-floor pool is PAUSED with a future reset (not exhausted) no longer spins
+  the in-process 50ms wait tick until the reset: it strands as the retryable `quota_paused`
+  terminal. `packetPoolBlockReason` single-sources the 5-reason (packet,pool) refusal disjunction
+  for the `neverDispatchable` strand, the new wall, and both decision records
+  (`engine_stranded_packet_pause_wall` added); `wallStrandEarliestResetAtMs` captured at both wall
+  sites + cleared at `run()` start closes the getTerminal pause-expiry race and cross-run leak;
+  both walls strand-then-emit-then-continue so a decision-sink-reentrant enqueue is dispatched, not
+  swept. Review record (codex + agy-gemini-3.6-flash + nim-deepseek-v4-pro — all analytical
+  surfaces could-not-refute; codex's MEDIUM reentrancy + LOW reuse findings and NIM's
+  under-assertion note all fixed in-lap; the `UND_ERR_HEADERS_TIMEOUT` storm across three NIM
+  aliases was diagnosed as the CALLER's transport, not lane health, and the offload helper fixed):
+  `docs/reviews/pause-wall-per-packet-strand-2026-07-23.md`.
+  v0.34.24 (2026-07-23) shipped the
   **abnormal-exit blocked-step backstop** — every fatal exit of either orchestrator's next-step
   (quota wall, engine maxTransitions abort, parse crash) writes a blocked step naming the cause
   before the error propagates, so a stale current-step.json can never read as a live instruction.
@@ -170,30 +184,18 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Fix the dogfood-resume defect tier (backlog *Open bugs*).** The dogfood run is DONE — 8/8
-nodes, v0.34.16. Shipped from the tier so far (all 2026-07-23): the accept-latch family, the
-node-context clobber tier, the **zero-spill capability-floor HIGH** (v0.34.20), the
-**intent-checkpoint gate + charter slice-staleness pair** (v0.34.21 — mechanism record:
-[`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)),
-and the **dispatch-legibility mechanistic trace** (v0.34.22 — full constraint-outcome explain
-records on every host grant/refusal, `planned` explains closing the 144-granted-empty-explains
-path, engine decision log `dispatch-explains.jsonl` with per-pool strand why-nots; mechanism
-record: [`dispatch-legibility-trace-2026-07-23.md`](reviews/dispatch-legibility-trace-2026-07-23.md)),
-the **worker-kind × pool-class rule** (v0.34.23 — agentic lanes refused on declared
-burst-limited backends; mechanism record:
-[`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)),
-and the **abnormal-exit blocked-step backstop** (every fatal next-step exit now writes a blocked
-step naming the cause — one shared core, both orchestrator draws; mechanism + review record:
-[`abnormal-exit-blocked-step-backstop-2026-07-23.md`](reviews/abnormal-exit-blocked-step-backstop-2026-07-23.md)).
-Remaining in the tier (older, still open): the paused-pool wait-tick LEAD the zero-spill fix
-surfaced.
-
-**2. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
+**1. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
 full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
 inventories give durable labels and measurable RECALL, and turn `score-audit` into a per-release
 gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-target calibration.
+**The dogfood-resume defect tier is now CLOSED** — every shippable item landed as v0.34.13–v0.34.25
+(the pause-wall fix, v0.34.25, was the last). What remains from that tier is not blocking code:
+two LEADs (the `window_uncalibrated` out-of-repo-resolver livelock and the openai-compatible-lane
+headers-timeout, the latter spun off to its own task) and the **live-validation-gated** items that
+only a real metered run can confirm (see the *Live-validation guide* + the ⬇ Live-run watch lines
+in backlog).
 
-**3. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
+**2. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
 (The doc-review queue has one open item, DD-8 — see the `doc-review` branch.)
 
 ---
