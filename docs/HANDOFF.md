@@ -181,7 +181,7 @@
   code rather than its own prose; ~21% were closable and several load-bearing claims were false. Items
   now carry an explicit **SPEC** paragraph stating the agreed mechanism. Treat an entry without one as
   still raw ([[backlog-prose-decays-verify-against-head]]).
-- **Project memory was consolidated 2026-07-19** (149 → 135 files; record:
+- **Project memory was consolidated 2026-07-19** (149 → 136 files; record:
   [`memory-consolidation-2026-07-19.md`](reviews/memory-consolidation-2026-07-19.md)). The single-package
   collapse had left **17 memories citing dead paths**, concentrated in the trap/recovery files whose
   procedures were runnable and wrong; three more described *reverted* directions as the current goal.
@@ -229,7 +229,7 @@
 its SPEC is intact, nothing lost).
 
 **1. FLW-COR-003 — the HOST half of claim-release-on-worker-failure.** The in-process rolling driver
-already sweeps (`releaseOwnedTaskClaims` at `rollingAuditDispatch.ts:675` / `:485`, commit `681df1f5`),
+already sweeps (`releaseOwnedTaskClaims` at `rollingAuditDispatch.ts:691` / `:490`, commit `681df1f5`),
 but the other two claimers never do: `prepareDispatchCommand.ts:36` (the CLI `prepare-dispatch`) and
 `semanticReviewStep.ts:119` claim the candidate set and rely solely on merge's terminal `clear()`, so a
 host round whose workers all die holds its claims for the full 20-min lease and every interleaved

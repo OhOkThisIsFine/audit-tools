@@ -35,7 +35,7 @@ the roster.
   peers and to audit.
 - **Audit task pool + append-safe results already exist.** `audit_tasks[]` is a pool of independently
   dispatchable tasks; `audit_results.jsonl` is append-only; merge dedups by `task_id`
-  (`src/audit/cli/reviewRun.ts`, `ledger.ts`). The data plane is ready for concurrent contributors.
+  (`src/audit/cli/reviewRun.ts`, `src/audit/orchestrator/ledger.ts`). The data plane is ready for concurrent contributors.
 
 ## The three gaps to close
 

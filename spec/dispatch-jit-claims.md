@@ -36,7 +36,7 @@ be represented cannot go stale.
 
 ## Invariants
 
-- One pool identity ⇒ one launchable source (`backend_provider[#account]/model`); the claim never
+- One pool identity ⇒ one launchable source (`service[#account]/model`); the claim never
   duplicates or overrides that identity.
 - The only legitimate holds on a runnable packet are the three from the remove-waves rule:
   a true predecessor unlock, a quota-window refresh, or rate limiting. "Planned onto a busy pool"

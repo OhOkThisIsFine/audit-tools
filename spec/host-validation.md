@@ -14,7 +14,7 @@ no-drift guard does not see that, so a human runs these rows at release. A faile
 row becomes a backlog item.
 
 Codex and `agy` are headless CLIs, so they are correctly absent from the GUI-host
-table above and their live dispatch is automated instead of listed here — see the
+table below and their live dispatch is automated instead of listed here — see the
 `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix e2e in
 `tests/audit/provider-matrix-dispatch-e2e.test.mjs` (supersedes the former
 per-provider `RUN_CODEX_E2E=1` gate). Run it at release with a live backend

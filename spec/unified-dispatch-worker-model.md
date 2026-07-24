@@ -61,7 +61,7 @@ must not carry correctness semantics.
   `claude -p` with a required `ANTHROPIC_BASE_URL` overlay onto the declared proxy and a
   `<backend_provider>/<model>` routing namespace, so a proxied `claude-worker` is a full agentic
   worker on a free backend (a host-subagent-equivalent, off Anthropic quota). Its pool/quota
-  identity keys on the real `backend_provider[#account]/model`, never on `claude-worker` itself —
+  identity keys on the real `service[#account]/model`, never on `claude-worker` itself —
   the transport never enters the quota key (see
   [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md)).
 - **audit review host-fanout** uses the same lane (agentic claude subagents reading source +

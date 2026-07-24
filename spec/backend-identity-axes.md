@@ -12,7 +12,7 @@ needed. They did not all get it right:
 
 - the **quota ledger** keys on the serving vendor in ONE branch of `dispatchableSourceId` — and
   only there. An earlier draft of this document claimed quota "already keys on service"; that is
-  **materially overstated** and was refuted. When no `backend_provider` is declared it returns an
+  **materially overstated** and was refuted. When no `service` is declared it returns an
   arbitrary explicit `source.id`, or keys on the transport; host quota pools, the `quota` CLI, and
   the remediate host-session keys all key on host/transport identity; and `quotaPoolKey`
   normalizes nothing — it embeds whatever string its caller supplies. The accurate statement is:

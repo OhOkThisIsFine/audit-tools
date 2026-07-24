@@ -14,7 +14,7 @@
 ## Agent handoff
 
 Long-term product direction lives in [`product.md`](product.md). Current state + immediate next steps are in
-the repo-root [`HANDOFF.md`](../HANDOFF.md); open work in [`backlog.md`](../backlog.md). There is no
+[`HANDOFF.md`](../HANDOFF.md); open work in [`backlog.md`](../backlog.md). There is no
 shipped-sprint archive — that history lives in git + project memory.
 
 ## Build and test
@@ -112,4 +112,3 @@ notes in [`operator-guide.md`](operator-guide.md)). If the
 final `audit-report.md` cannot be promoted from `.audit-tools/audit/` to
 `.audit-tools/audit-report.md` due to local permissions, completion still succeeds and the
 pre-promotion copy under `.audit-tools/audit/` is authoritative.
-</content>

@@ -312,7 +312,7 @@ Remediation is complete only when:
 - end-to-end tests pass (if an `e2e_command` was detected),
 - the configured closing action has either executed or been explicitly
   recorded as skipped,
-- `remediation-report.md` has been rendered at repo root,
+- `remediation-report.md` has been rendered under `.audit-tools/`,
 - `.audit-tools/remediation/` has been cleared.
 
 If any condition fails, the run is not complete and resumable state is

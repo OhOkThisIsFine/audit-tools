@@ -32,7 +32,7 @@ this matrix's.
 
 > **`claude-worker` is a transport, not an independently quota-tracked backend.** Proxied `claude-worker`
 > sources carry no first-party credential of their own; per `apiPool.ts`'s `dispatchableSourceId` ("the
-> transport NEVER enters the quota identity"), quota/pool identity keys on `backend_provider[#account]/model`,
+> transport NEVER enters the quota identity"), quota/pool identity keys on `service[#account]/model`,
 > so a `claude-worker` lane quota-tracks under whatever real backend it routes to (groq, mistral, …), never
 > under its own name. There is no `ClaudeWorkerQuotaSource` and there should not be one — building one would
 > double-count the underlying backend's window.
