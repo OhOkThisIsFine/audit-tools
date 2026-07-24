@@ -75,6 +75,31 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Adding a loop-core path takes THREE edits, and only the third is enforced (2026-07-24, low,
+  friction: tool-should-decide).** `LOOP_CORE_PATTERNS` is triplicated: the canonical
+  `src/shared/loopCorePaths.ts` plus re-declared copies in `.claude/hooks/pre-commit-gate.mjs` and
+  `.claude/hooks/attest-loop-core-review.mjs` (the `.mjs` hooks run pre-build under plain node and
+  cannot import the TS module). Adding `src/audit/cli/dispatchAttempted.ts` this lap meant editing two
+  copies, then discovering the third only when `loop-core-gate-parity.test.mjs` went red. The parity
+  tests DO hold the invariant — this is a friction, not a hole — but the discovery path is
+  "edit, get caught, edit again". Property: one edit adds a loop-core path. Mechanism candidate: a
+  tiny generated `.claude/hooks/loop-core-patterns.mjs` that both hooks import and a check regenerates
+  from the TS source, so the list has one hand-maintained home (the same "never hand-maintain a table
+  someone else could generate" rule the executor↔artifact mapping entry cites).
+
+- **The offload lane's DEFAULT schema is unfit for its most common use, and every caller must
+  hand-roll a replacement (2026-07-24, low, friction: inefficient-feeding).** `llm-call.mjs` enforces
+  `{summary, findings[], open_questions[]}`. Asked for an adversarial code review, glm/deepseek
+  returned `findings: [""]` — one empty string — under a `summary` that asserted "two concrete
+  convergence bugs and one observable consistency failure" it then never named. `finish_reason=stop`,
+  so this is the misfitting-schema failure `~/.claude/CLAUDE.md` already warns reads as model
+  incapacity. Re-running the identical prompt against a task-shaped schema (typed findings with
+  severity / location / mechanism / failing_scenario / confidence) produced 4 specific, citable
+  findings, one of which was real and shipped. The warning exists but the ergonomics push the wrong
+  way: getting a fit schema means abandoning the helper and writing a bespoke `node:http` POST per
+  call. Property: the helper accepts a `--schema <file|json>` (and keeps the generic shape as the
+  default only for recon/extraction), so a fit schema costs one flag rather than a throwaway script.
+
 - **A full vitest run can exit 1 while reporting 7400 passed / 0 failed (2026-07-24, low,
   friction: trap).** Observed twice in one lap on the full three-area run: vitest reports
   `Errors 1 error` → `[vitest-worker]: Timeout calling "onTaskUpdate"` (an internal reporter RPC
