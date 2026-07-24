@@ -687,6 +687,27 @@
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
 
+- **Friction walk (backlog clear-out lap, 2026-07-24):** (1) **ambiguous-direction (medium, two
+  instances, same class):** two entries had paraphrased their own incident until the MECHANISM
+  inverted, and each would have produced a wrong fix if worked from the entry alone — FLW-COR-003
+  prescribed "release claims on every path that claims" when the lease must SPAN out-of-process
+  workers (`dispatch.ts:129-136`), and the `analyzerDeps` entry reported a live `npm install` that
+  no test makes (stub `run`; the E404 is stub-authored text). Both were caught only by tracing
+  source. The template already says to link the primary record rather than retell it; what is still
+  missing is anything that ENFORCES it. [[backlog-prose-decays-verify-against-head]]
+  (2) **tool-should-decide (medium):** a first cut of the concurrent-suite guard refused a second
+  `vitest` outright, which broke parallel agent work within minutes — per-invocation fixture roots
+  had already removed the hazard, so the mutex was defending a defect that no longer existed. The
+  reusable shape: when isolation fixes a race at the source, a lock on top of it is not extra safety,
+  it is a new failure mode. (3) **inefficient-feeding (medium, three instances):** the Claude
+  subagent pool hit its session limit mid-run and killed 44 of 55 condense agents (11 usable, 0
+  verified — none applied); the LiteLLM proxy had silently died since session start, so the whole
+  NIM fallback failed 15/15 with one truncated error until probed directly; and a Codex recon spent
+  its full budget on file enumeration and timed out before writing conclusions. Standing lesson
+  reconfirmed: probe the lane cheaply BEFORE dispatching a batch to it
+  ([[offload-lane-failures-are-usually-the-caller]]) — all three were caller/environment, not model
+  capability.
+
 - **Friction walk (H2+H4 collapse lap, 2026-07-18):** (1) **ambiguous-direction (medium):** my own plan doc asserted "the host-vs-source dedup already exists" from a docblock's phrasing — the adversarial plan review refuted it against the writers (dedup was source-vs-source only, the new rule was new code); and the reviewer's own proposed fix for the display filter was itself a gate-that-never-fires (relative floor can't refuse every pool) — caught only by re-deriving at implementation time. Both are the standing lesson: every causal claim, including a REVIEWER's fix, gets verified against source before building. [[gate-must-be-traced-not-designed]] (2) **tool-should-decide (low):** the pre-commit loop-core gate evaluates a CHAINED `attest && commit` command before the inner attest has run, so the legitimate one-shot form is blocked — attest must be its own Bash call first; either the hook could ignore commits preceded by an attest in the same chain, or document the split as the required shape. (3) **inefficient-feeding (medium, recurrences):** NIM `llm read` lane 503-saturated ("Worker local total request limit 163/32") after ONE call in its session — recon fell back to targeted greps; and a delegated implementer died mid-task on the Claude session limit, with its partial recon unrecoverable (clean tree, redone in-context). Both argue for the standing pattern: main context implements from subagent recon it can verify, not the reverse.
 
 - **Remediate hybrid frontier still sizes with a FLAT per-node estimate (step-G remediate half, medium).** `HYBRID_NODE_TOKEN_ESTIMATE` (`src/remediate/steps/nextStep.ts:1441`) makes the claim-time fit gate blind for implement nodes (audit's half fixed 2026-07-17 with real `token_estimate`s). Property: derive per-node estimates from the node's `affected_files` sizes (`estimateTokensFromBytes`) so a chronically-413ing (node,pool) pair is pre-skipped, not re-claimed each cycle.
@@ -733,12 +754,6 @@
 
 - **claude-worker lane residuals from the 3c adversarial review (2026-07-16, each low-medium, deferred deliberately).** (a) **Account axis:** the populate expansion stamps no `account` (`expandSources`, `proxyCatalog.ts`) and the `proxy` declaration block has no hook to add one (`ProxyDeclaration` carries `endpoint` / `top_k` / `cost_per_mtok` / `api_key_env` / `burst_limited` and nothing else) — so an operator declaring `account` on a direct lane only splits `nim#X/m` vs `nim/m` into two pools to one backend, reopening the double-grant boundary for that model (the declared-wins dedup in `resolveProxyLane` covers the same-model case; the split needs a per-backend account map on the declaration). ⚠ NOT part of this any more: `buildSourcePool` handing `resolveAccountIdSafe` a TRANSPORT-shaped key while the pool keys on the backend is settled as deliberate — see `identity.ts` `quotaPoolKey`, "that value only resolves an account id; the pool's real key is `dispatchableSourceId`. Not a ledger key, so not a divergence." (b) **No READ-side TTL / no refresh command:** a populate-side freshness throttle DID ship (`POPULATE_CACHE_FRESH_TTL_MS`, 10min, same-endpoint short-circuit inside `populateProxyCatalog`), but it only skips refreshes — `readProxyCatalog` still accepts `catalog-cache.json` at any age, `populateProxyCatalogIfMissing` is still missing-only, and the "explicit refresh" the plan names still does not exist as a command. Cross-repo: the cache is machine-global (`~/.audit-code`, `resolveAuditCodeStateDir`) while audit's populate trigger is per-repo-confirmation-keyed (`nextStepCommand.ts`, `readSharedProviderConfirmation(root) === null`), so starting repo B rewrites the expansion repo A resolves mid-run (additions gate-caught; removals silent-by-design). (c) **Intra-declaration duplicates:** `collectDispatchableSources` spreads `sessionConfig.sources` verbatim and `pushUnique`s only the primary + legacy `openai_compatible` folds, so an operator hand-declaring two sources with one resolved identity still produces two same-id pools, and `sourceByPoolId`'s `map.set(pool.id, …)` then arbitrates the transport by silent clobber (the ambient path dedups declared-vs-expanded; the operator-error case remains). Property to hold: one pool identity ⇒ exactly one launchable source, everywhere.
   **SPEC — all three are one defect: identity is being decided somewhere other than where it is known.**
-  (a) the expansion stamps no account and the declaration cannot supply one, so a backend that IS one
-  account splits into two pools; (b) the cache is machine-global while the trigger that rewrites it is
-  keyed per-repository, so a run in one repo can rewrite the roster another repo is resolving mid-run;
-  (c) sources are deduplicated across declared-vs-expanded but never WITHIN one declaration, so two
-  entries naming one backend produce two pools with the same identity and whichever writes last silently
-  wins.
   **Resolution:** the producer that knows an identity stamps it and it travels on the wire — the same rule
   the account-metering work arrived at after five refused rounds. Concretely: the expansion stamps account
   identity rather than leaving a hole for a later stage to guess; deduplication happens once, over the
@@ -776,23 +791,33 @@
 
 - **Dead code: `src/audit/quota/headerExtraction.ts` + `headerExtractors/` have zero production consumers (owner question 2026-07-16, low).** Only the `index.ts` re-export + `tests/audit/header-extraction.test.mjs` reference them — the tested-but-unwired class that default-mode knip cannot catch. Delete symbol + orphaned tests per the periodic manual-audit recipe. [[knip-deadcode-gate-default-mode]]
 
-- **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (found G4 premise-check 2026-07-16, corrected same-day during implementation, medium).** `resolveHostModel` (`limits.ts:56-71`) resolves `explicit ?? block_quota.host_model ?? env`; `hostPool.ts:156` then does `quotaModelKeySegment = hostModel ?? input.hostModelId` — so the repo's `block_quota.host_model` beats the descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates [[capability-is-per-auditor-not-per-audit]]. **⚠ The rest of the original claim is REFUTED: nothing writes `quota`/`block_quota`** — they are operator-authored, and `packetFilter.ts:259` documents `quota.models` as the operator's override mechanism. So `quota.models[<model>]` is keyed BY MODEL NAME (same window for every auditor) → inheriting it is CORRECT, and `limits.ts:115` beating discovery is the intended escape hatch, **not a bug — do not "fix" it** (it only misfires because `hostModel` was mis-resolved upstream; fix the identity and it's right). `quota.default_context_tokens`/`reserved_output_tokens` and `block_quota.context_tokens`/`reserved_output_tokens` (`plan.ts:47-51`) are policy → stay on intent. **Fix = move `block_quota.host_model` → `self.model_id` only**; narrow the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`) accordingly. Also stale: G4's "may fold into G2" — G2 shipped and did not fold it. Separately real (and still open): `resolveSessionConfig.ts:86-116` maps none of the `self.*` capability fields; they reach dispatch hand-threaded through three audit CLI commands (`nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48`, `quotaCommand.ts:38`) — a parallel channel bypassing the one seam. **⚠ Correcting this entry's own earlier claim that the channel "MUST collapse in the same commit as any shared-assembly lift": that premise did NOT apply and the 2026-07-16 lift shipped without it.** The constraint assumed shared assembly would take the DESCRIPTOR and read the resolved config; `buildHostPoolPreamble` instead takes already-resolved scalars (`providerName` / `explicitHostModel` / `hostModelId` / `hostContextTokens` / …), so the channel now hand-threads into ONE function rather than two — strictly better, and not a correctness coupling. The collapse remains worth doing on its own merits (one seam, not two channels), but it does not gate the lift. **Also note the lift moved the `hostModel ?? hostModelId` precedence INTO shared (`hostPool.ts`), so if G4 IS a bug its blast radius is now both draws — which is an argument for settling the owner call, not for reverting.** Detail: `docs/reviews/g4-g5-g6-premise-check-2026-07-16.md`.
-  **SPEC — settled: it IS a bug, and the fix is to move the IDENTITY field only.** The distinction that
-  makes this decidable is what each field is keyed BY. A repo-committed host-model field is auditor
-  IDENTITY — it says which model is driving — so a second auditor working in the same repo inherits the
-  first one's identity and keys its quota to a window it does not own. That is the per-auditor rule
-  violated directly, and it now affects both draws.
-  The sibling field is different in kind and must NOT be touched: operator quota overrides are keyed BY
-  MODEL NAME, so every auditor using that model shares the window by design. Inheriting those is correct,
-  and the override beating discovery is the intended escape hatch. It only ever looked wrong because the
-  identity above it was resolved wrongly — fix the identity and the override behaves.
-  **Resolution:** the host-model identity moves onto the per-auditor descriptor and stops being readable
-  from repo-committed config; model-name-keyed operator overrides and the policy fields stay exactly
-  where they are. **Property to hold:** anything naming WHO is running belongs to the auditor and is
-  never persisted in the shared repo; anything keyed by a model name is shared config and is.
-  ⚠ Separately real and still open: the auditor descriptor's capability fields reach dispatch
-  hand-threaded through three CLI commands rather than through the one resolution seam — a parallel
-  channel worth collapsing on its own merits, but it does not gate this fix.
+- **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo,
+  and it outranks the descriptor (2026-07-16, medium).** `resolveHostModel` (`limits.ts:56-71`)
+  resolves `explicit ?? block_quota.host_model ?? env`, then `hostPool.ts:156` keys
+  `quotaModelKeySegment = hostModel ?? input.hostModelId` — so a repo-committed field beats the
+  descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates
+  [[capability-is-per-auditor-not-per-audit]], and the shared-assembly lift moved that precedence into
+  `hostPool.ts`, so it now affects both draws.
+  **SPEC — settled, and the distinction is what each field is keyed BY.** A repo-committed host-model
+  field is IDENTITY (who is driving) → a second auditor inherits the first's identity and meters a
+  window it does not own. **Fix = move `block_quota.host_model` → `self.model_id` only**, and narrow
+  the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`).
+  **Property:** anything naming WHO is running belongs to the auditor and is never persisted in the
+  shared repo; anything keyed by a model NAME is shared config and is.
+  **⚠ The rest of the original claim is REFUTED — do NOT "fix" it.** Nothing writes
+  `quota`/`block_quota`; they are operator-authored (`packetFilter.ts:259` documents `quota.models` as
+  the override mechanism). `quota.models[<model>]` is keyed by model NAME, so every auditor on that
+  model shares the window by design — inheriting is CORRECT, and `limits.ts:115` beating discovery is
+  the intended escape hatch. It only ever looked wrong because the identity above it resolved wrongly.
+  `quota.default_context_tokens` / `reserved_output_tokens` and the `block_quota` context/output fields
+  (`plan.ts:47-51`) are policy → stay on intent. Also stale: G4's "may fold into G2" — G2 shipped and
+  did not fold it.
+  **⚠ Separately real, still open, and NOT a gate on the above:** `resolveSessionConfig.ts:86-116` maps
+  none of the `self.*` capability fields; they reach dispatch hand-threaded through
+  `nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48` and `quotaCommand.ts:38` — a parallel
+  channel worth collapsing on its own merits. An earlier claim that this "MUST collapse in the same
+  commit as any shared-assembly lift" was WRONG and the 2026-07-16 lift shipped without it.
+  Detail: [`g4-g5-g6-premise-check-2026-07-16.md`](../reviews/g4-g5-g6-premise-check-2026-07-16.md).
 
 - **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
 

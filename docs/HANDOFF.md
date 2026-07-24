@@ -7,6 +7,23 @@
 
 ## Live state
 
+- **Backlog clear-out lap, 2026-07-24 (`d4c8e9ea`, unreleased — still v0.34.27).** All 176 entries
+  re-verified against HEAD, then every close/rewrite verdict attacked by an independent adversary on
+  a different model lane; that second pass **overturned 41 of 62** verdicts it examined, almost all
+  "delete" → "rewrite" because half the entry was still live. Backlog is now **split by section**
+  under `docs/backlog/` (index at `docs/backlog.md`) with a **shrink-only size budget**
+  (`check:backlog-budget`, in `verify:checks`; ceilings in `docs/backlog/.size-baseline.json`).
+  Shipped alongside: **FLW-COR-003 host half** (loop-core, attested), **fixture hermeticity**
+  (per-invocation roots + build-vs-suite guard + false-RED gate), the **generated loop-core path
+  list**, heavy-test timeouts, and 11 verified doc fixes.
+  ⚠ **Two corrections worth carrying:** (1) FLW-COR-003's backlog-prescribed fix — "release claims
+  on every path that claims" — was WRONG; the lease must span out-of-process workers
+  (`dispatch.ts:129-136`), and the real leak was merge throwing before its own release. (2) The
+  `analyzerDeps` "live npm install E404" entry was REFUTED: no test shells out to npm; it was a
+  stub-log leak manufacturing a convincing false alarm. Both are the same class the backlog keeps
+  hitting — an entry paraphrasing its own incident until the mechanism inverts.
+  **Immediate next is now item 2 below** (FLW-COR-003 is done); ~74 triaged `fix_now` items remain,
+  detail in `docs/backlog/open-bugs.md`.
 - **Current version = `package.json`** (authoritative). v0.34.27 (2026-07-24) shipped the
   **partial-wave deferral** (the runtime-loop track's DEFECT 3(a)) plus the **openai-compatible
   declared-timeout transport**. (1) merge-and-ingest counted every planned task with no result file
@@ -228,20 +245,24 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. FLW-COR-003 — the HOST half of claim-release-on-worker-failure.** The in-process rolling driver
-already sweeps (`releaseOwnedTaskClaims` at `rollingAuditDispatch.ts:691` / `:490`, commit `681df1f5`),
-but the other two claimers never do: `prepareDispatchCommand.ts:36` (the CLI `prepare-dispatch`) and
-`semanticReviewStep.ts:119` claim the candidate set and rely solely on merge's terminal `clear()`, so a
-host round whose workers all die holds its claims for the full 20-min lease and every interleaved
-next-step sees them peer-claimed. Loop-core → attestation required. Backlog *Open bugs* carries the
-mechanism (the FLW-COR-003 entry, downgraded to medium after the code trace). ⚠ Its second half — "a
-zero-granted round pauses the drain" — is a SEPARATE property; verify it at HEAD before working it, the
-per-packet pause wall and host-dispatch wall have both landed since it was written.
+**1. FLW-COR-003 — SHIPPED 2026-07-24 (`fab36e0e`).** A `failing` task's claim is now released at
+CLASSIFICATION, before anything downstream can throw, so no host round can hold claims for the lease.
+⚠ Its second half — "a zero-granted round pauses the drain" — is a SEPARATE property, still unverified;
+check it at HEAD before working it (the per-packet pause wall and host-dispatch wall both landed after
+it was written). The remediate-side twin (node claims released only at merge) is the same defect class
+— one core, two draws — and is still open in `docs/backlog/open-bugs.md`.
 
-**2. Other runtime-loop / open bugs** in backlog *Open bugs / frictions* (the two-key chatty-worker
-design-review quarantine LEAD; the vitest-exits-1-while-green trap; the remediate node-claim
-merge-only-release LEAD, which is the same defect class as item 1 — one core, two draws). Then
-**Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
+**2. Work the triaged `fix_now` queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). ~74
+entries carry a verified fix sketch naming files, mechanism and how a test pins it red-green; ~24 are
+loop-core (attestation required). Highest-value clusters: the proxy-lane populate/refresh command (a
+drop reason names an internal function no operator can run), `dropped[]` reasons never rendered at
+Gate-0, the `top_k` alphabetical truncation that silently drops the frontier tier, and the remediate
+node-claim twin above. Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation
+remains).
+
+**3. Finish making `open-bugs.md` a bounded read.** It is ~155KB; the budget lint records that as a
+shrink-only ceiling and 16 entries (~51KB) are over the per-entry budget. Condense, then
+`node scripts/check-backlog-budget.mjs --update-baseline` to lock each improvement in.
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in backlog
 *Deferred / waiting*) — resume once stability work is complete.
