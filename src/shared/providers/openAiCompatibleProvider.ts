@@ -55,8 +55,49 @@ interface ReferencedFilesResult {
 
 type FetchFn = typeof fetch;
 
+// Undici is Node's own fetch implementation; imported explicitly so the request
+// can carry a dispatcher whose header/body timeouts follow the DECLARED deadline
+// (the global fetch hardcodes ~5 min and cannot be told otherwise).
+import { Agent, fetch as undiciFetch } from "undici";
+
+/**
+ * A fetch bound to `timeoutMs` at the TRANSPORT layer, not just via AbortController.
+ *
+ * The launch already wraps the request in an AbortController set to the declared
+ * `input.timeoutMs` (30 min on the audit path), but `globalThis.fetch` rides
+ * undici's default `headersTimeout` of ~5 minutes — measured to the FIRST byte.
+ * A big model reasoning over a large packet with `stream:false` regularly exceeds
+ * that before it emits anything, so the request died `UND_ERR_HEADERS_TIMEOUT`,
+ * was classified transient, retried, and died the same way each attempt: the lane
+ * read DEAD at ~15 minutes despite a 30-minute declared budget, and the failure
+ * looked like a sick endpoint rather than a timeout we imposed on ourselves.
+ * (Same root cause, same fix, as the offload helper's `UND_ERR_HEADERS_TIMEOUT`
+ * storm — there the caller's transport was blamed on model health for weeks.)
+ *
+ * Aligning `headersTimeout`/`bodyTimeout` with the declared deadline leaves
+ * exactly ONE timeout in play: the one the caller asked for.
+ *
+ * Undici is imported rather than hand-rolling a `node:http` transport — it IS
+ * Node's fetch implementation, pure JS (no native build, so OS-agnostic), and
+ * HTTP transport is correctness-sensitive enough to acquire rather than own.
+ */
+function deadlineBoundFetch(timeoutMs: number): { fetchFn: FetchFn; dispose: () => Promise<void> } {
+  const agent = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+  const fetchFn = ((input: Parameters<FetchFn>[0], init?: Parameters<FetchFn>[1]) =>
+    undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+      ...(init as Parameters<typeof undiciFetch>[1]),
+      dispatcher: agent,
+    } as Parameters<typeof undiciFetch>[1])) as unknown as FetchFn;
+  return { fetchFn, dispose: () => agent.close() };
+}
+
 export interface OpenAiCompatibleProviderDeps {
-  /** Injectable fetch for tests; defaults to the global fetch (Node 20+). */
+  /**
+   * Injectable fetch for tests. When absent, each launch builds its own
+   * transport bound to that launch's declared `timeoutMs`
+   * (see {@link deadlineBoundFetch}) — the global fetch is NOT used, because its
+   * default headers timeout silently overrides the declared deadline.
+   */
   fetchFn?: FetchFn;
   /** Injectable env for key resolution; defaults to process.env. */
   env?: NodeJS.ProcessEnv;
@@ -104,7 +145,8 @@ const DEFAULT_RETRY_BACKOFF_MS = 500;
 export class OpenAiCompatibleProvider implements FreshSessionProvider {
   name = OPENAI_COMPATIBLE_PROVIDER_NAME;
   private readonly config: OpenAiCompatibleConfig;
-  private readonly fetchFn: FetchFn;
+  /** Test-injected transport; null ⇒ build a deadline-bound one per launch. */
+  private readonly fetchFn: FetchFn | null;
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryBackoffMs: number;
 
@@ -113,7 +155,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     deps: OpenAiCompatibleProviderDeps = {},
   ) {
     this.config = config;
-    this.fetchFn = deps.fetchFn ?? globalThis.fetch;
+    this.fetchFn = deps.fetchFn ?? null;
     this.env = deps.env ?? process.env;
     this.retryBackoffMs = positiveOr(deps.retryBackoffMs, DEFAULT_RETRY_BACKOFF_MS);
   }
@@ -142,8 +184,8 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
         `openai-compatible provider has no API key — set openai_compatible.api_key_env to a populated env var (e.g. NVIDIA_API_KEY)${this.config.api_key_env ? ` (env "${this.config.api_key_env}" is empty)` : ""}.`,
       );
     }
-    if (typeof this.fetchFn !== "function") {
-      return fail("openai-compatible provider: no fetch implementation available (Node 20+ provides a global fetch).");
+    if (this.fetchFn !== null && typeof this.fetchFn !== "function") {
+      return fail("openai-compatible provider: injected fetchFn is not callable.");
     }
 
     let messages: Array<{ role: string; content: string }>;
@@ -182,6 +224,13 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+    // Transport bound to the SAME deadline as the abort above, so the declared
+    // timeout is the only one that can fire (see `deadlineBoundFetch`). An
+    // injected fetch is used verbatim — a test fake carries no transport timeout.
+    const transport = this.fetchFn !== null
+      ? { fetchFn: this.fetchFn, dispose: async () => {} }
+      : deadlineBoundFetch(input.timeoutMs);
+    const doFetch = transport.fetchFn;
     // Emit-time constraint ladder (strongest → weakest), each degrading to the next
     // on an endpoint rejection (HTTP 400/422) so leaving the levers on is safe for
     // ANY endpoint:
@@ -243,7 +292,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       return JSON.stringify(body);
     };
     const post = (mode: ConstraintMode): ReturnType<FetchFn> =>
-      this.fetchFn(`${baseUrl}/chat/completions`, {
+      doFetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers,
         body: buildBody(mode),
@@ -329,6 +378,9 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       }
     } finally {
       clearTimeout(timer);
+      // Release the per-launch connection pool. Best-effort: a transport we could
+      // not close must never turn a completed launch into a failure.
+      await transport.dispose().catch(() => {});
     }
 
     // Persist the raw completion for run-correlated observability (parallels the

@@ -1025,3 +1025,63 @@ test("launch omits observedUsage when the endpoint reports no usage (byte-identi
   expect(res.observedUsage).toBeUndefined();
   expect("observedUsage" in res).toBe(false);
 });
+
+// ── Declared-deadline transport (UND_ERR_HEADERS_TIMEOUT, 2026-07-23). ───────
+// `globalThis.fetch` hardcodes undici's ~5-minute `headersTimeout`, measured to
+// the FIRST byte. With `stream:false`, a big model reasoning over a large packet
+// routinely exceeds that before emitting anything, so the request died
+// UND_ERR_HEADERS_TIMEOUT, was classed transient, retried, and died the same way
+// each attempt — the lane read DEAD at ~15 min against a 30-min declared budget.
+// The launch must therefore build its own transport bound to `input.timeoutMs`
+// and never route through the global. A >5-minute time-to-first-byte cannot be
+// exercised in a unit test; what IS pinned here is that the global (the thing
+// carrying the un-overridable 5-minute cap) is not the transport.
+test("launch with no injected fetchFn does NOT route through globalThis.fetch (whose headers timeout overrides the declared deadline)", async () => {
+  const { createServer } = await import("node:http");
+  const { input } = makeCtx();
+
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ files: [], result: { ok: true } }),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  // Trip-wire: if the provider still defaults to the global fetch, this fires.
+  const realFetch = globalThis.fetch;
+  let globalFetchCalls = 0;
+  globalThis.fetch = (...args) => {
+    globalFetchCalls += 1;
+    return realFetch(...args);
+  };
+
+  try {
+    const provider = new OpenAiCompatibleProvider(
+      { base_url: `http://127.0.0.1:${port}`, model: "m", api_key_env: "OAI_TEST_KEY" },
+      { env: { OAI_TEST_KEY: "k" } }, // no fetchFn => the production transport
+    );
+    const res = await provider.launch(input);
+    expect(res.accepted, "the real transport must complete a normal request").toBe(true);
+    expect(
+      globalFetchCalls,
+      "the launch must use its own deadline-bound transport, not the global fetch",
+    ).toBe(0);
+  } finally {
+    globalThis.fetch = realFetch;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
