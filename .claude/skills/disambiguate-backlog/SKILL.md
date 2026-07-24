@@ -26,7 +26,7 @@ the resolved spec is written back so the ambiguity is closed for good.
 
 Scope is two raw-signal sources, nothing else:
 
-- **`docs/backlog.md`** — every entry under *Open bugs / frictions*, *Forward
+- **`docs/backlog/`** — every entry in *open-bugs.md*, *forward-tracks.md*, *deferred.md* (was: *Open bugs / frictions*, *Forward
   tracks*, *Deferred / waiting*. (Skip *Durable traps* — it's reference, not
   work-to-spec; only touch a trap if the owner asks.)
 - **meta-audit reflections** — worker feedback: `meta-audit-log.md` if present
@@ -53,7 +53,7 @@ the interpretation the first missed. You see both, then judge.
 
 ### 1. Collect — everything, no filtering yet
 
-Read `docs/backlog.md` in full. Enumerate every item in the three in-scope
+Read every file under `docs/backlog/` in full. Enumerate every item in the three in-scope
 sections as a discrete unit (one bullet = one item; a bullet with sub-bullets is
 one item). Glob `.audit-tools/**/agent-feedback.jsonl` and read `meta-audit-log.md`
 if it exists; parse reflections, group recurring ambiguities/frictions into

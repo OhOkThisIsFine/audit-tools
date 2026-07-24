@@ -11,7 +11,7 @@ covers, what it may change on its own, and how open items reach the owner.
 | Leg | Scope | May act alone | Escalates |
 |---|---|---|---|
 | **docs** | Every in-scope doc, routed by the type table in `doc-review-guidelines.md` | Stale-factual fixes with a code anchor (never instruction files) | Design decisions, instruction-file edits, condensation proposals |
-| **backlog** | `docs/backlog.md` — *Open bugs*, *Forward tracks*, *Deferred / waiting* | Mechanical cleanup only: delete an entry whose fix verifiably shipped, strip status-noise from a live entry, correct a stale file/symbol reference | Any genuine disambiguation — turning a vague item into a spec is the owner's call |
+| **backlog** | `docs/backlog/open-bugs.md`, `docs/backlog/forward-tracks.md`, `docs/backlog/deferred.md` | Mechanical cleanup only: delete an entry whose fix verifiably shipped, strip status-noise from a live entry, correct a stale file/symbol reference | Any genuine disambiguation — turning a vague item into a spec is the owner's call |
 | **solutions** | Project + global memory, backlog *Durable traps* and *Open bugs*, friction records | **Nothing.** Proposal-only | Every proposal, with evidence and a ready-to-apply patch |
 
 The asymmetry is deliberate. A doc fix is reversible prose; a backlog rewrite can

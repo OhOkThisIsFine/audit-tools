@@ -1,0 +1,18 @@
+{
+  "forward-tracks.md::Backend-identity axes — settle transport / service / locus once (design of rec": 6261,
+  "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier (9router-inspired) — extra SOURCE P": 4153,
+  "forward-tracks.md::One repo intent, three filenames — the audit/remediate intent split is a `one ": 2775,
+  "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6": 3638,
+  "open-bugs.md::__FILE__": 154750,
+  "open-bugs.md::⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 af": 2797,
+  "open-bugs.md::A ROTATING set of heavy suite tests fails only under parallel load — hermetici": 2657,
+  "open-bugs.md::claude-worker lane residuals from the 3c adversarial review (2026-07-16, each ": 4002,
+  "open-bugs.md::Design (remove-waves track): dispatch should be gated ONLY by token-budget, ra": 3061,
+  "open-bugs.md::Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks": 3176,
+  "open-bugs.md::Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12) — item (2) ": 2894,
+  "open-bugs.md::G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY per": 4300,
+  "open-bugs.md::LEAD (re-dogfood 2026-07-22, low): NIM roster latency is bimodal — minimax-m3/": 3107,
+  "open-bugs.md::Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch": 2723,
+  "open-bugs.md::Top gate optimization lead (measured 2026-07-06, was the \"vitest collect\" item": 2633,
+  "open-bugs.md::Window-scope validation at the PRODUCER boundary — designed for step 2, deferr": 2958
+}

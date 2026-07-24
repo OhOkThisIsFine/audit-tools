@@ -46,7 +46,7 @@
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "verify:guards": "node scripts/shared/run-vitest-gate.mjs --retry=2 --exclude \"**/audit-code-completion.test.mjs\" --exclude \"**/audit-code-wrapper.test.mjs\" --exclude \"**/audit/next-step.test.mjs\" --exclude \"**/seam-host-only-next-step.test.mjs\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",
-    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:loop-core-patterns check:deadcode check:doc-manifest build verify:hosts verify:remediate-hosts smoke:packaged-audit-code smoke:packaged-remediate-code",
+    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:loop-core-patterns check:deadcode check:doc-manifest check:backlog-budget build verify:hosts verify:remediate-hosts smoke:packaged-audit-code smoke:packaged-remediate-code",
     "verify:release": "npm run verify:checks && node scripts/shared/run-vitest-gate.mjs",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "check:deadcode": "knip --no-config-hints",
@@ -69,7 +69,8 @@
     "release:major": "node scripts/release-and-publish.mjs major --bump-only",
     "prepack": "npm run build",
     "prepublishOnly": "npm run verify:release",
-    "check:loop-core-patterns": "node scripts/shared/generate-loop-core-patterns.mjs --check"
+    "check:loop-core-patterns": "node scripts/shared/generate-loop-core-patterns.mjs --check",
+    "check:backlog-budget": "node scripts/check-backlog-budget.mjs"
   },
   "engines": {
     "node": ">=20"
