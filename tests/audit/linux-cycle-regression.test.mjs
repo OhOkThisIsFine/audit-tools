@@ -30,6 +30,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 // A fresh repo with a `.ts` file but an EMPTY, pinned analyzer cache → the
 // `typescript` analyzer resolves "absent" deterministically and the pipeline
@@ -71,7 +72,7 @@ const TERMINAL_KINDS = new Set([
 
 const MAX_PAUSES = 8;
 
-test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", async () => {
+test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withFloorOnlyRepo(async (root, env) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     const incomingDir = join(artifactsDir, "incoming");

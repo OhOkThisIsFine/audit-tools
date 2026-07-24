@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 async function withTempRepo(fn) {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-next-step-"));
@@ -48,7 +49,7 @@ async function withTempRepo(fn) {
   }
 }
 
-test.concurrent("next-step emits present_report for a complete audit", async () => {
+test.concurrent("next-step emits present_report for a complete audit", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -244,7 +245,7 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
   throw new Error("next-step did not advance past structure-phase pauses");
 }
 
-test.concurrent("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
+test.concurrent("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     // The fixture has a .ts file but no local `typescript`. Pin an isolated,
     // empty analyzer cache so `typescript` resolves "absent" deterministically —
@@ -294,7 +295,7 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
   });
 });
 
-test.concurrent("next-step defaults to dispatch_review when host dispatch capability is not configured", async () => {
+test.concurrent("next-step defaults to dispatch_review when host dispatch capability is not configured", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     const currentStep = JSON.parse(
@@ -310,7 +311,7 @@ test.concurrent("next-step defaults to dispatch_review when host dispatch capabi
   });
 });
 
-test.concurrent("next-step reads host_can_dispatch_subagents from session-config", async () => {
+test.concurrent("next-step reads host_can_dispatch_subagents from session-config", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -336,7 +337,7 @@ test.concurrent("next-step reads host_can_dispatch_subagents from session-config
   });
 });
 
-test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value is set", async () => {
+test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value is set", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -348,7 +349,7 @@ test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or se
   });
 });
 
-test.concurrent("next-step true emits dispatch_review and prepares dispatch artifacts", async () => {
+test.concurrent("next-step true emits dispatch_review and prepares dispatch artifacts", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -367,7 +368,7 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
   });
 });
 
-test.concurrent("next-step false emits single_task_fallback and does not prepare dispatch", async () => {
+test.concurrent("next-step false emits single_task_fallback and does not prepare dispatch", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -384,7 +385,7 @@ test.concurrent("next-step false emits single_task_fallback and does not prepare
   });
 });
 
-test.concurrent("advancePastDesignReview throws on unknown pause kind", async () => {
+test.concurrent("advancePastDesignReview throws on unknown pause kind", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   // Stub runWrapper to return a single step with an unrecognised step_kind.
   // We call advancePastDesignReview directly by monkey-patching its dependency
   // indirectly: write a tiny wrapper that returns a fake step JSON and call the
@@ -464,7 +465,7 @@ test.concurrent("advancePastDesignReview throws on unknown pause kind", async ()
 // never have to reconstruct the invocation from prose.
 // ---------------------------------------------------------------------------
 
-test("present_report with pending friction triage is a ready step carrying the next-step continuation command", async () => {
+test("present_report with pending friction triage is a ready step carrying the next-step continuation command", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   // In-process (no wrapper spawn) so the check stays build-free: the wrapper
   // path imports from dist/, which the accept gate does not build.
   const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.ts");
@@ -507,7 +508,7 @@ test("present_report with pending friction triage is a ready step carrying the n
 // exercises the same path.
 // ---------------------------------------------------------------------------
 
-test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", async () => {
+test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.ts");
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");

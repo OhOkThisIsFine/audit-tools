@@ -4,6 +4,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, access } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { countLines } from "./helpers/countLines.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 // Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
 // `currentStepPath` is the single-sourced steps/current-step.json path builder
@@ -327,16 +328,6 @@ async function nextStepUntilPresentReport(root, extraArgs = []) {
   );
 }
 
-// The heaviest audit integration test: it drives the full multi-phase audit
-// flow in-process (no subprocess since the pump-loop rewrite), but each
-// next-step still does genuine per-step repo extraction/staleness work. That is
-// ~25-31s/test in isolation, but balloons under full-suite CPU contention — the
-// global 120s testTimeout is too tight for THIS test under max local
-// concurrency (it produced false timeout flakes → wasteful isolation reruns).
-// A generous per-test timeout reflects that this is a legitimately long
-// integration test, not a masked bug. Making it genuinely fast (the residual
-// per-step re-extraction) is tracked separately in docs/backlog.md.
-const HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000;
 
 test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   writeFixtureRepo,
   buildSyntheticResults,
@@ -63,7 +64,7 @@ async function nextStepToComplete(root, extraArgs = []) {
   throw new Error("next-step did not reach present_report:complete within 5 calls");
 }
 
-test.concurrent("next-step pauses for the synthesis narrative, then completes after it is provided", async () => {
+test.concurrent("next-step pauses for the synthesis narrative, then completes after it is provided", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -148,7 +149,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
   }
 });
 
-test.concurrent("next-step omits the narrative when synthesis.narrative is disabled", async () => {
+test.concurrent("next-step omits the narrative when synthesis.narrative is disabled", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-off-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");

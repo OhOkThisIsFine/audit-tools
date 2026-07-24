@@ -168,7 +168,7 @@ test("installToCache returns error when no version is provided", async () => {
 test("installToCache returns error when npm install exits non-zero (stderr present)", async () => {
   await withTempDir(async (cacheRoot) => {
     const run = makeRun({ status: 1, stderr: "E404 not found" });
-    const result = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("E404 not found");
   });
@@ -177,7 +177,7 @@ test("installToCache returns error when npm install exits non-zero (stderr prese
 test("installToCache returns error when npm install exits non-zero (no stderr)", async () => {
   await withTempDir(async (cacheRoot) => {
     const run = makeRun({ status: 1, stderr: "" });
-    const result = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(result.ok).toBe(false);
     expect(result.error.includes("exited with 1"), `error was: ${result.error}`).toBeTruthy();
   });
@@ -187,7 +187,7 @@ test("installToCache returns error when package directory is absent after a succ
   await withTempDir(async (cacheRoot) => {
     // run succeeds but does NOT create the package directory
     const run = makeRun({ status: 0 });
-    const result = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("package not present after install");
   });
@@ -202,7 +202,7 @@ test("installToCache returns ok:true and the package path on success", async () 
       writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }));
       return { status: 0, stdout: "", stderr: "", argv: _argv };
     };
-    const result = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(result.ok).toBe(true);
     expect(result.path, "path should be present").toBeTruthy();
     expect(result.path.includes("typescript@5.8.0"), `path was: ${result.path}`).toBeTruthy();
@@ -229,7 +229,7 @@ test("installToCache returns ok:true for a scoped package (@scope/pkg@version)",
 test("installToCache returns error when run() throws synchronously", async () => {
   await withTempDir(async (cacheRoot) => {
     const run = () => { throw new Error("spawn ENOENT"); };
-    const result = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("spawn ENOENT");
   });
@@ -245,8 +245,8 @@ test("installToCache creates and reuses a package.json manifest in the install d
       writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }));
       return { status: 0, stdout: "", stderr: "", argv: _argv };
     };
-    const result1 = installToCache("typescript@5.8.0", { cacheRoot, run });
-    const result2 = installToCache("typescript@5.8.0", { cacheRoot, run });
+    const result1 = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
+    const result2 = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
     expect(callCount, "run() called once per installToCache call").toBe(2);
     expect(result1.ok).toBe(true);
     expect(result2.ok).toBe(true);

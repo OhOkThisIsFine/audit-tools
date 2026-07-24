@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
 const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
@@ -83,7 +84,7 @@ async function persistEdgeReasoningState(root, artifactsDir, { flag, strip = fal
   );
 }
 
-test.concurrent("next-step emits a single host edge-reasoning step, then rewrites only the reason", async () => {
+test.concurrent("next-step emits a single host edge-reasoning step, then rewrites only the reason", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -153,7 +154,7 @@ test.concurrent("next-step emits a single host edge-reasoning step, then rewrite
   }
 });
 
-test.concurrent("next-step emits a dispatch task carrying the edge-reasoning prompt when the host can dispatch", async () => {
+test.concurrent("next-step emits a dispatch task carrying the edge-reasoning prompt when the host can dispatch", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-dispatch-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -191,7 +192,7 @@ test.concurrent("next-step emits a dispatch task carrying the edge-reasoning pro
   }
 });
 
-test.concurrent("next-step does not pause for edge reasoning when the flag is off (graph unchanged)", async () => {
+test.concurrent("next-step does not pause for edge reasoning when the flag is off (graph unchanged)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-off-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -222,7 +223,7 @@ test.concurrent("next-step does not pause for edge reasoning when the flag is of
   }
 });
 
-test.concurrent("next-step does not pause for edge reasoning when there are no low-confidence edges", async () => {
+test.concurrent("next-step does not pause for edge reasoning when there are no low-confidence edges", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-empty-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");

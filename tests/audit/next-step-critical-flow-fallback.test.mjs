@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
@@ -56,7 +57,7 @@ async function persistFallbackState(root, artifactsDir) {
 // descriptor rather than the persisted session-config.json (which now rejects it).
 const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
 
-test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", async () => {
+test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -112,7 +113,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
   }
 });
 
-test.concurrent("next-step does not re-ask the critical-flow fallback once a submission is present", async () => {
+test.concurrent("next-step does not re-ask the critical-flow fallback once a submission is present", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-once-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -146,7 +147,7 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
   }
 });
 
-test.concurrent("structure merges the host critical-flow submission into critical_flows in place", async () => {
+test.concurrent("structure merges the host critical-flow submission into critical_flows in place", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-merge-"));
   const root = join(tempDir, "repo");
   try {
