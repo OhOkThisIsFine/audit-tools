@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -124,7 +124,7 @@ test("malformed --auditor JSON throws loudly (not swallowed)", async () => {
 });
 
 test("no handshake flags → cached/learned preview, and nothing is written to disk", async () => {
-  const { stdout, stateDir } = await runQuotaKeepDir([]);
+  const { stdout, stateDir, repoRootBefore } = await runQuotaKeepDir([]);
   try {
     const preview = parsePreview(stdout);
     expect(preview.pools.length, "single cached/learned pool").toBe(1);
@@ -138,23 +138,41 @@ test("no handshake flags → cached/learned preview, and nothing is written to d
       "session-config default must be written under the sandbox artifacts dir",
     ).toBeTruthy();
     expect(
-      !existsSync(join(repoRoot, ".audit-tools", "audit", "session-config.json")),
-      "cmdQuota must never write session-config into the repo root",
-    ).toBeTruthy();
+      fingerprintRepoRootSessionConfig(),
+      "cmdQuota must never create or modify session-config in the repo root",
+    ).toBe(repoRootBefore);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
 });
+
+// The repo-root path cmdQuota must never write. A DOGFOOD run legitimately
+// creates this file in a working checkout, so its mere existence says nothing —
+// asserting absence made the test a function of whether a self-audit had ever
+// run here, and that false red once fanned out into 29 real dispatched tasks
+// (re-dogfood-endgame-2026-07-22, RTV-TST-001). Fingerprint it instead: what the
+// guard actually means is "cmdQuota did not CREATE or MODIFY it".
+const repoRootSessionConfig = join(repoRoot, ".audit-tools", "audit", "session-config.json");
+
+function fingerprintRepoRootSessionConfig() {
+  try {
+    const stat = statSync(repoRootSessionConfig);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return "absent";
+  }
+}
 
 // Variant of runQuota that leaves the temp dir intact so the caller can assert on
 // what (if anything) the command wrote.
 async function runQuotaKeepDir(argv) {
   const stateDir = await mkdtemp(join(tmpdir(), "quota-cmd-"));
   setQuotaStateDir(stateDir);
+  const repoRootBefore = fingerprintRepoRootSessionConfig();
   const result = await captureConsole(() =>
     cmdQuota(quotaArgv(stateDir, argv)),
   );
-  return { ...result, stateDir };
+  return { ...result, stateDir, repoRootBefore };
 }
 
 test("explicit provider is used for capacity preview pools", async () => {

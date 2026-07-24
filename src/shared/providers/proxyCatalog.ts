@@ -333,7 +333,7 @@ async function discoverModelRoster(
 function expandSources(
   discovered: DiscoveredModel[],
   options: { endpoint: string; topK: number; costPerMtok?: number; apiKeyEnv?: string },
-): DispatchableSource[] {
+): { sources: DispatchableSource[]; dropped: Array<{ id: string; reason: string }> } {
   const byProvider = new Map<string, DiscoveredModel[]>();
   // Dedup by (provider, alias): first row wins.
   const seen = new Set<string>();
@@ -346,17 +346,40 @@ function expandSources(
     byProvider.set(model.provider, bucket);
   }
   const sources: DispatchableSource[] = [];
+  const dropped: Array<{ id: string; reason: string }> = [];
   // Stable, content-derived order (provider, then score desc, then alias) so
   // re-populate over identical state emits byte-identical sources.
   for (const provider of [...byProvider.keys()].sort()) {
-    const ranked = byProvider
-      .get(provider)!
-      .sort(
-        (a, b) =>
-          (b.score ?? Number.NEGATIVE_INFINITY) - (a.score ?? Number.NEGATIVE_INFINITY) ||
-          a.alias.localeCompare(b.alias),
-      )
-      .slice(0, options.topK);
+    const bucket = byProvider.get(provider)!;
+    const ordered = bucket.sort(
+      (a, b) =>
+        (b.score ?? Number.NEGATIVE_INFINITY) - (a.score ?? Number.NEGATIVE_INFINITY) ||
+        a.alias.localeCompare(b.alias),
+    );
+    const ranked = ordered.slice(0, options.topK);
+    // Truncation is never silent. With every `score` null the comparator's first
+    // term is NaN (-Infinity - -Infinity), so the sort degenerates to
+    // `localeCompare` and `top_k` keeps the ALPHABETICALLY-first models — which
+    // once kept a *flash* model and dropped every frontier one. The order still
+    // has to be deterministic (a content-derived array order is an artifact
+    // invariant), so the fix is not a different order: it is that every model
+    // top_k discards reaches the operator through the same `dropped[]` channel
+    // as an unreachable model, and says WHICH basis chose it.
+    const rankedCount = ordered.filter((m) => m.score !== null).length;
+    const basis =
+      rankedCount === 0
+        ? `no model in this backend advertises a rank, so the cut is ALPHABETICAL, not by capability`
+        : rankedCount === ordered.length
+          ? `cut by advertised rank`
+          : `only ${rankedCount} of ${ordered.length} models advertise a rank; unranked models sort last and were cut alphabetically among themselves`;
+    for (const model of ordered.slice(options.topK)) {
+      dropped.push({
+        id: `claude-worker:${provider}/${model.alias}`,
+        reason:
+          `top_k=${options.topK} kept ${ranked.length} of ${ordered.length} models for backend ` +
+          `"${provider}" — ${basis}. Raise proxy.top_k, or advertise a rank, to keep it.`,
+      });
+    }
     for (const model of ranked) {
       // Cost precedence: operator-declared (free-to-operator axis) > advert price
       // > absent (falls through to models.dev catalog / tier downstream).
@@ -387,7 +410,7 @@ function expandSources(
       });
     }
   }
-  return sources;
+  return { sources, dropped };
 }
 
 /**
@@ -644,12 +667,16 @@ export async function populateProxyCatalog(
 
   // Filter out dropped models and expand sources.
   const toExpand = discovered.filter((m) => !droppedAliases.has(m.alias));
-  let sources = expandSources(toExpand, {
+  const expanded = expandSources(toExpand, {
     endpoint,
     topK: options.topK ?? DEFAULT_PROXY_TOP_K,
     costPerMtok: options.costPerMtok,
     apiKeyEnv: options.apiKeyEnv,
   });
+  const sources = expanded.sources;
+  // top_k truncation joins the unreachable-model drops in the ONE operator-facing
+  // channel, so "the frontier model isn't there" always carries its reason.
+  dropped.push(...expanded.dropped);
 
   const catalog: ProxyCatalog = {
     version: PROXY_CATALOG_VERSION,

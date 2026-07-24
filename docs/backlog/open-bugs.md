@@ -22,29 +22,6 @@
   close this by raising the budget — the driver is narrative accreting onto entries, so a budget that
   always passes measures nothing.
 
-- **The offload lane's DEFAULT schema is unfit for its most common use, and every caller must
-  hand-roll a replacement (2026-07-24, low, friction: inefficient-feeding).** `llm-call.mjs` enforces
-  `{summary, findings[], open_questions[]}`. Asked for an adversarial code review, glm/deepseek
-  returned `findings: [""]` — one empty string — under a `summary` that asserted "two concrete
-  convergence bugs and one observable consistency failure" it then never named. `finish_reason=stop`,
-  so this is the misfitting-schema failure `~/.claude/CLAUDE.md` already warns reads as model
-  incapacity. Re-running the identical prompt against a task-shaped schema (typed findings with
-  severity / location / mechanism / failing_scenario / confidence) produced 4 specific, citable
-  findings, one of which was real and shipped. The warning exists but the ergonomics push the wrong
-  way: getting a fit schema means abandoning the helper and writing a bespoke `node:http` POST per
-  call. Property: the helper accepts a `--schema <file|json>` (and keeps the generic shape as the
-  default only for recon/extraction), so a fit schema costs one flag rather than a throwaway script.
-
-- **A full vitest run can exit 1 while reporting 7400 passed / 0 failed (2026-07-24, low,
-  friction: trap).** Observed twice in one lap on the full three-area run: vitest reports
-  `Errors 1 error` → `[vitest-worker]: Timeout calling "onTaskUpdate"` (an internal reporter RPC
-  timeout under load), which sets a non-zero exit code even though every test passed. A green run
-  therefore reads as red by exit code alone — the exact false-signal class
-  [[lap-green-must-match-ci-evidence]] warns about, inverted. Property: distinguish a harness
-  reporting failure from a test failure before treating a non-zero vitest exit as red — check the
-  `Tests` line, not just `$?`. Fix candidate: raise the worker RPC timeout, or fail only on
-  `Tests failed > 0` in the gate wrapper.
-
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
   "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary
@@ -320,8 +297,10 @@
   a live/paused self-audit run has legitimately created that file in this checkout (exactly the
   paused re-dogfood state) — a working-tree-cleanliness dependency, not a cmdQuota behavior check.
   Property: the guard must distinguish a file cmdQuota WROTE (e.g. mtime/absence delta across the
-  command, or run cmdQuota under a temp cwd) from one that pre-existed. Until fixed, this test is
-  red on any checkout with dogfood artifacts; CI's fresh clone is the real signal.
+  command, or run cmdQuota under a temp cwd) from one that pre-existed — resolve repo-root state
+  through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo
+  path. Until fixed, this test is red on any checkout with dogfood artifacts; CI's fresh clone is
+  the real signal. Same box-dependence family as `INV-shared-core-14`.
   **Upgraded by the 2026-07-22 endgame: this defect polluted a live audit.** The runtime_validation
   phase ran `npm test` in the live-audited working copy, this one assertion failed → ALL 39 runtime
   units marked not_confirmed → 29 reconcile deepening tasks spawned for one hermeticity bug
@@ -345,8 +324,6 @@
   `shell-trap-guard.mjs` (prompt-derail trap, with the three agy headless traps). Delete this entry once
   the probe is green.
 
-- **`[analyzerDeps] npm install typescript@5.8.0 failed (exit 1): E404 not found` during `tests/shared` runs (2026-07-20, low, LEAD — check the consequence).** A shared-area test (the acquired-analyzer dep path) attempts a live `npm install typescript@5.8.0` mid-suite and 404s twice; the suite still passed (1715 green), so it degrades rather than fails. But a test reaching for the network at all is a hermeticity smell, and a pinned `typescript@5.8.0` that 404s suggests either a bad version pin or a test that should stub the install. Confirm whether the analyzer-deps path is meant to hit the network in tests; if not, stub it.
-
 - **`tests/shared/rollingDispatch.test.mjs` "re-dispatches immediately on result arrival" is
   timing-flaky on loaded runners (2026-07-23, low, hermeticity).** First observation: CI shard 2 of
   the v0.34.23 publish run — the 50ms `setTimeout` at rollingDispatch.test.mjs:268-269 lost the
@@ -354,8 +331,6 @@
   full local run; CI rerun green. Same class as the linux-cycle entry below: the fix is an
   event-driven wait (poll for `dispatchOrder.length === 3` with a generous deadline), not a fixed
   sleep. One observation — fix if it recurs.
-
-- **`tests/audit/linux-cycle-regression.test.mjs` fails under full-suite load but passes alone (2026-07-19, low, hermeticity).** ~30s alone; exceeds the 120s `testTimeout` when the whole suite runs in parallel. Per the test-failure protocol this is a hermeticity/load bug in the test, not a regression — it needs an explicit longer timeout or isolation from the parallel pool, not a code fix. Noted because a full-suite run currently reports "1 failed" and that failure is this, every time.
 
 - **The vendored price snapshot predates the collision index, so the provider-scoped price path is inert at HEAD (2026-07-19, settled 2026-07-24, low).** `src/shared/data/model-statics.generated.json` carries 2630 models and no `__by_provider` key — but that is PROVENANCE, not a signal about models.dev. The file has exactly one commit ever (`82352712`, 2026-07-05 16:35), while `__by_provider` first entered the generator two days later (`f15a85fa`, 2026-07-07 10:42): the snapshot was written by the pre-collision `flatten()` and has never been regenerated since. Both original hypotheses are refuted — `flatten()`'s collision path is unit-green on colliding input (`tests/shared/update-models-collision.test.mjs:84-115` pins a 3-provider collapse → cheapest default plus a full `byProvider` index), and `stableStringify` emits the key only when a collision populated it (`scripts/shared/update-models.mjs:167-173`), so no upstream shape change is needed to explain a key the generating run could not have written. **Consequence (real):** `resolveModelStatics(model, provider)` finds `snapshot.byProvider[provider]` empty for every provider string and falls through to the flat table (`src/shared/quota/modelStatics.ts:142-149`), so every price is the cheapest-collision default and the service-vs-transport axis fix above stays inert. **Fix:** run `npm run update-models` (live fetch of models.dev, rewrites the vendored asset) and commit the refreshed snapshot — no code change, and not red-green testable since the generator's own logic is already pinned. **Then settle the second-order mismatch before calling the path live:** `byProvider` is keyed by models.dev VENDOR ids while both pricing sites pass `sourceService(source)` — a declared `service`, else the transport name (`src/shared/providers/identity.ts:67-72`) — so a refreshed index is load-bearing only for service strings that happen to equal a models.dev provider id.
 
@@ -465,14 +440,6 @@
   **Property to hold:** a structurally invalid producer emission is always loud and never presents as a
   network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
   predate the field, and refusing to load them would turn a historical gap into an outage.
-
-- **`tests/audit/linux-cycle-regression.test.mjs` times out under full-suite parallel load
-  (2026-07-19).** Passes alone in ~29s; exceeded its 120s timeout when run as part of `vitest run`
-  over the whole suite, then passed alone immediately after. Load-sensitivity, not a regression —
-  but it makes a full-suite run non-deterministically red, which is exactly the condition that
-  trains a reader to wave at "known flaky" instead of resolving failures to names. **Property to
-  hold:** the test's cost does not scale with unrelated suite concurrency (raise its timeout, or
-  make it not contend on whatever shared resource slows it).
 
 - **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
   The idea: revert each site of a change individually and require each reversion to turn the suite red,
@@ -611,8 +578,6 @@
   settled-pool `poolsOverride` filter into the same harness. (b) The env-DETECTED same-agent path
   (`CODEX_THREAD_ID` → `resolveConversationHostProvider` → dedup) lost its end-to-end pin when
   `demote-same-agent-guard.test.mjs` died; the new D1 tests use explicit `host_provider` only.
-
-- **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
 
@@ -762,8 +727,6 @@
   during agent edits: suppressing enforcement to make editing convenient is the wrong direction and
   teaches the same workaround on every other surface.
   **Property to hold:** a file mutated underneath an agent mid-edit is announced, never silent.
-
-- **Release gate: add `check:doc-manifest` to the pre-commit hook (open remainder, medium).** The durable lesson — a lap cannot report green on evidence weaker than what CI runs; end a lap by checking CI on `main` (the per-workflow runs endpoint is the reliable one), and run `npm run verify:release` before any "this is shippable" claim — is homed in `docs/HANDOFF.md` → "Release gate — the durable lesson" + [[lap-green-must-match-ci-evidence]]. Sole open action: `.claude/hooks/pre-commit-gate.mjs` gates `npm run check` (always) plus `test:doc-contract` and loop-core attestation (each conditionally, when staged files touch the relevant paths) — but never `check:doc-manifest`, so consider adding it (~2s, and it is the check that fired on EVERY push). [[enforce-robustness-in-tooling-not-host-discretion]] **Billed once, 2026-07-18** (a new dated plan doc committed fine locally and blocked `verify:release` afterwards).
 
 - **Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).** `tests/remediate/session-config-load.test.ts` red-greens `loadRemediateSessionConfig`, and every remediate site routes through it today, but a FUTURE call site that inlines `resolveSessionConfig(intent, null)` instead of using the loader fails no test (verified by experiment: reverting a call site to `null` left both files green). Same for audit's two ambient sites. The loader makes the right thing the easy thing; it does not make the wrong thing impossible. Property to hold: a production caller cannot resolve a session config without a descriptor — e.g. make the descriptor a required parameter and give the two legitimate "resolve no pool" callers an explicit `noPoolDescriptor()`, so `null` stops being the path of least resistance.
 

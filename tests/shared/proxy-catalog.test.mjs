@@ -382,13 +382,84 @@ describe("populateProxyCatalog — discovery contract", () => {
         modelInfo,
       }),
     });
-    expect(result.dropped).toEqual([]);
     // Alphabetical providers (anthropic, openai); each has top-1 by score
     expect(result.sources.map((s) => s.model)).toEqual([
       "anthropic-high", // anthropic's best (rank 10 < 100)
       "openai-only", // openai's only one
     ]);
+    // The model top_k cut is reported, and says the cut was by advertised rank.
+    expect(result.dropped).toEqual([
+      {
+        id: "claude-worker:anthropic/anthropic-low",
+        reason: expect.stringContaining("cut by advertised rank"),
+      },
+    ]);
     expect(DEFAULT_PROXY_TOP_K).toBeGreaterThan(0);
+  });
+
+  it("top_k truncation over an UNRANKED roster is loud, not a silent alphabetical cut", async () => {
+    // The defect: with every score null the comparator's first term is NaN, so
+    // the sort degenerates to localeCompare and top_k keeps the alphabetically
+    // first models — which once kept a `flash` model and dropped every frontier
+    // one, with nothing operator-visible saying so.
+    const modelInfo = ["zeta-frontier", "alpha-flash", "beta-mid"].map((name) => ({
+      model_name: name,
+      litellm_params: { model: `nim/${name}` },
+      model_info: { litellm_provider: "nim", mode: "chat" }, // no capability_rank anywhere
+    }));
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      topK: 1,
+      fetchImpl: neutralContractFetch({
+        roster: modelInfo.map((m) => ({ id: m.model_name })),
+        modelInfo,
+      }),
+    });
+    // Order stays deterministic (a content-derived array order is an artifact
+    // invariant) — so the fix is the REPORT, not a different cut.
+    expect(result.sources.map((s) => s.model)).toEqual(["alpha-flash"]);
+    expect(result.dropped.map((d) => d.id)).toEqual([
+      "claude-worker:nim/beta-mid",
+      "claude-worker:nim/zeta-frontier",
+    ]);
+    for (const drop of result.dropped) {
+      expect(drop.reason).toContain("ALPHABETICAL, not by capability");
+      expect(drop.reason).toContain("top_k=1 kept 1 of 3");
+    }
+  });
+
+  it("a PARTIALLY ranked roster names how many models carried a rank", async () => {
+    const modelInfo = [
+      {
+        model_name: "ranked-best",
+        litellm_params: { model: "nim/ranked-best" },
+        model_info: { litellm_provider: "nim", mode: "chat", capability_rank: 5 },
+      },
+      {
+        model_name: "unranked-a",
+        litellm_params: { model: "nim/unranked-a" },
+        model_info: { litellm_provider: "nim", mode: "chat" },
+      },
+      {
+        model_name: "unranked-b",
+        litellm_params: { model: "nim/unranked-b" },
+        model_info: { litellm_provider: "nim", mode: "chat" },
+      },
+    ];
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      topK: 1,
+      fetchImpl: neutralContractFetch({
+        roster: modelInfo.map((m) => ({ id: m.model_name })),
+        modelInfo,
+      }),
+    });
+    expect(result.sources.map((s) => s.model)).toEqual(["ranked-best"]);
+    for (const drop of result.dropped) {
+      expect(drop.reason).toContain("only 1 of 3 models advertise a rank");
+    }
   });
 
   it("deduplicates by (provider, alias) — one identity, one source", async () => {
