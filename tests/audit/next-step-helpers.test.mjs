@@ -21,9 +21,16 @@ const {
 // HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS are internal to the Tier C2
 // consolidation (not re-exported through nextStepCommand.ts), so import them
 // directly from nextStepHelpers.ts.
-const { HOST_GATE_KINDS, HOST_GATE_DESCRIPTORS } = await import(
-  "../../src/audit/cli/nextStepHelpers.ts"
-);
+const {
+  HOST_GATE_KINDS,
+  HOST_GATE_DESCRIPTORS,
+  handleSynthesisNarrativeBranch,
+  handleCriticalFlowFallbackBranch,
+  handleCharterExtractionBranch,
+  handleCharterDeltaBranch,
+  handleCharterClarificationBranch,
+  handleSystemicChallengeBranch,
+} = await import("../../src/audit/cli/nextStepHelpers.ts");
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "ns-helpers-"));
@@ -979,3 +986,91 @@ await test("consumeObjectIncoming quarantines an array (never a valid id→decis
     expect(await fileExists(filePath)).toBe(true);
   });
 });
+
+// ── runOmittableGate gates — malformed-submission quarantine (all 6) ──────────
+//
+// Regression coverage for the "runtime loop defect" class: the 6 host-gate
+// ingests driven by the shared `runOmittableGate` engine used to hand the raw
+// incoming file straight to the executor. A mis-shaped submission then EITHER
+// crashed next-step with an uncaught ZodError (the 4 schema-parsed gates —
+// charter_extraction / charter_delta / charter_clarification / systemic_challenge)
+// OR was silently accepted as an empty "reviewed, found nothing" result (the 2
+// bare-cast gates — synthesis_narrative / critical_flow_fallback). The fix makes
+// `runOmittableGate` schema-validate at the ingest boundary and quarantine
+// loudly (never unlink-and-discard), matching `handleIntentEquivalenceBranch`.
+
+const OMITTABLE_GATES = [
+  {
+    kind: "synthesis_narrative",
+    filename: "synthesis-narrative.json",
+    // narrativeEnabled:true → shouldOmit false → host turn owed ("return").
+    handler: (params, bundle, state) =>
+      handleSynthesisNarrativeBranch({ ...params, narrativeEnabled: true }, bundle, state),
+  },
+  {
+    kind: "critical_flow_fallback",
+    filename: "critical-flow-fallback.json",
+    handler: (params, bundle, state) => handleCriticalFlowFallbackBranch(params, bundle, state),
+  },
+  {
+    kind: "charter_extraction",
+    filename: "charter-extraction.json",
+    handler: (params, bundle, state) => handleCharterExtractionBranch(params, bundle, state),
+  },
+  {
+    kind: "charter_delta",
+    filename: "charter-delta.json",
+    handler: (params, bundle, state) => handleCharterDeltaBranch(params, bundle, state),
+  },
+  {
+    kind: "charter_clarification",
+    filename: "charter-clarification.json",
+    handler: (params, bundle, state) => handleCharterClarificationBranch(params, bundle, state),
+  },
+  {
+    kind: "systemic_challenge",
+    filename: "systemic-challenge.json",
+    handler: (params, bundle, state) => handleSystemicChallengeBranch(params, bundle, state),
+  },
+];
+
+for (const gate of OMITTABLE_GATES) {
+  await test(`runOmittableGate quarantines a malformed ${gate.kind} submission instead of crashing or silently degrading`, async () => {
+    await withTempDir(async (artifactsDir) => {
+      await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+      const incomingPath = join(artifactsDir, "incoming", gate.filename);
+      // A bare number fails every top-level object schema ("expected object,
+      // received number") — a shape no gate could ever legitimately accept.
+      await writeFile(incomingPath, JSON.stringify(42), "utf8");
+
+      const params = { root: artifactsDir, artifactsDir };
+      const bundle = {};
+      const state = { status: "planning" };
+
+      // Mute the quarantine stderr diagnostic for a clean test log.
+      const origWrite = process.stderr.write;
+      process.stderr.write = () => true;
+      let branch;
+      try {
+        // MUST NOT throw — pre-fix, the schema-parsed gates crashed here with an
+        // uncaught ZodError as the raw file was handed to runAuditStep.
+        branch = await gate.handler(params, bundle, state);
+      } finally {
+        process.stderr.write = origWrite;
+      }
+
+      // Fell through to omit-or-return; the malformed file was NEVER applied
+      // (apply → runAuditStep is unreachable), so the action is not "continue".
+      expect(["run_omit", "return"]).toContain(branch.action);
+
+      // Moved out of incoming/ ...
+      expect(await fileExists(incomingPath)).toBe(false);
+      // ... and preserved verbatim under quarantine/ (never unlink-and-discard).
+      const quarantined = await quarantinedFiles(artifactsDir);
+      expect(quarantined.length).toBe(1);
+      expect(quarantined[0].startsWith(`${gate.filename}.`)).toBe(true);
+      const content = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
+      expect(JSON.parse(content)).toBe(42);
+    });
+  });
+}

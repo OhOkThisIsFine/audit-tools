@@ -38,6 +38,15 @@ import {
   withFileLock,
   type NewlyReachableBackend,
 } from "audit-tools/shared";
+import {
+  CharterSubmissionSchema,
+  CharterDeltaSubmissionSchema,
+  ClarificationAnswersSubmissionSchema,
+  CriticalFlowFallbackResultSchema,
+  SynthesisNarrativeSchema,
+  SystemicChallengeSubmissionSchema,
+} from "audit-tools/shared";
+import type { ZodError, ZodTypeAny } from "zod";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import type {
@@ -658,6 +667,31 @@ async function quarantineIncomingFile(
 }
 
 /**
+ * Quarantine a submission that failed zod validation: move it out of `incoming/`
+ * (never unlink-and-discard) and write a stderr diagnostic naming the quarantined
+ * file + the shape error. The single loud-quarantine path shared by every
+ * schema-validated incoming gate (`runOmittableGate` + `handleIntentEquivalenceBranch`)
+ * so the "quarantine loudly" property cannot drift between them. Returns the
+ * quarantine path.
+ */
+async function quarantineMisshapedIncoming(
+  artifactsDir: string,
+  filePath: string,
+  filename: string,
+  error: ZodError,
+): Promise<string> {
+  const reason = error.issues
+    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+    .join("; ");
+  const quarantinePath = await quarantineIncomingFile(artifactsDir, filePath, filename);
+  process.stderr.write(
+    `[audit-code] ${filename} quarantined to ${quarantinePath}: ${reason}. ` +
+      `Fix the shape and resubmit.\n`,
+  );
+  return quarantinePath;
+}
+
+/**
  * The single tolerant-unwrap rule: a bare array is accepted as-is; a top-level
  * object wrapping exactly one array-valued property is unambiguous and is
  * accepted as that array. Anything else fails with a shape description.
@@ -1043,6 +1077,16 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
   kind: TStepKind;
   /** Filename under `incoming/` this gate polls. */
   filename: string;
+  /**
+   * Schema the consumed submission MUST satisfy before it is applied. REQUIRED —
+   * the compiler enumerates every gate so a new one cannot forget it. A mis-shaped
+   * submission is quarantined loudly (moved to `quarantine/`, stderr diagnostic
+   * naming the file + shape error) and the gate falls through to shouldOmit/return;
+   * it is NEVER handed to the executor to crash on (raw `.parse()`) or silently
+   * degrade (bare cast). Single-sources the quarantine-loudly property for every
+   * incoming gate this engine drives.
+   */
+  schema: ZodTypeAny;
   /** Apply the consumed value (the executor dispatch this gate's host turn feeds). */
   apply: (
     value: TIncoming,
@@ -1072,11 +1116,23 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<OmittableGateAction<TStepKind>> {
-  const incoming = await tryConsumeIncoming<TIncoming>(params.artifactsDir, descriptor.filename);
+  const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, descriptor.filename);
   if (incoming) {
-    await descriptor.apply(incoming.value, incoming.path, params);
-    await unlink(incoming.path).catch(() => {});
-    return { action: "continue" };
+    const parsed = descriptor.schema.safeParse(incoming.value);
+    if (parsed.success) {
+      await descriptor.apply(parsed.data as TIncoming, incoming.path, params);
+      await unlink(incoming.path).catch(() => {});
+      return { action: "continue" };
+    }
+    // Mis-shaped submission: quarantine loudly and fall through to
+    // shouldOmit/return — never hand it to the executor to crash on or silently
+    // treat as an empty "reviewed, found nothing" result.
+    await quarantineMisshapedIncoming(
+      params.artifactsDir,
+      incoming.path,
+      descriptor.filename,
+      parsed.error,
+    );
   }
   if (descriptor.shouldOmit(bundle)) {
     return { action: "run_omit" };
@@ -1105,6 +1161,7 @@ export async function handleSynthesisNarrativeBranch(
     {
       kind: "synthesis_narrative",
       filename: "synthesis-narrative.json",
+      schema: SynthesisNarrativeSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1152,17 +1209,11 @@ export async function handleIntentEquivalenceBranch(
       await unlink(incoming.path).catch(() => {});
       return { action: "continue" };
     }
-    const reason = parsed.error.issues
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; ");
-    const quarantinePath = await quarantineIncomingFile(
+    await quarantineMisshapedIncoming(
       params.artifactsDir,
       incoming.path,
       filename,
-    );
-    process.stderr.write(
-      `[audit-code] ${filename} quarantined to ${quarantinePath}: ${reason}. ` +
-        `Fix the shape and resubmit.\n`,
+      parsed.error,
     );
     // Fall through: no valid submission — re-emit or deterministically resolve.
   }
@@ -1193,6 +1244,7 @@ export async function handleCriticalFlowFallbackBranch(
     {
       kind: "critical_flow_fallback",
       filename: "critical-flow-fallback.json",
+      schema: CriticalFlowFallbackResultSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1231,6 +1283,7 @@ export async function handleCharterExtractionBranch(
     {
       kind: "charter_extraction",
       filename: "charter-extraction.json",
+      schema: CharterSubmissionSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1268,6 +1321,7 @@ export async function handleCharterDeltaBranch(
     {
       kind: "charter_delta",
       filename: "charter-delta.json",
+      schema: CharterDeltaSubmissionSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1309,6 +1363,7 @@ export async function handleCharterClarificationBranch(
     {
       kind: "charter_clarification",
       filename: "charter-clarification.json",
+      schema: ClarificationAnswersSubmissionSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1363,6 +1418,7 @@ export async function handleSystemicChallengeBranch(
     {
       kind: "systemic_challenge",
       filename: "systemic-challenge.json",
+      schema: SystemicChallengeSubmissionSchema,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
