@@ -7,7 +7,16 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.23 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.24 (2026-07-23) shipped the
+  **abnormal-exit blocked-step backstop** — every fatal exit of either orchestrator's next-step
+  (quota wall, engine maxTransitions abort, parse crash) writes a blocked step naming the cause
+  before the error propagates, so a stale current-step.json can never read as a live instruction.
+  One shared core (`runWithBlockedStepBackstop` + `writeBlockedStepContract` in
+  `audit-tools/shared`), two thin draws; audit's pre-existing blocked sites re-pointed onto the
+  shared assembly. Review record (NIM zero refutations; AGY caught the pre-backstop dir-setup
+  bypass, fixed; Codex quota-walled):
+  `docs/reviews/abnormal-exit-blocked-step-backstop-2026-07-23.md`.
+  v0.34.23 (2026-07-23) shipped the
   **worker-kind × pool-class compatibility rule** — operator-declared `burst_limited` on sources +
   the proxy block; ONE predicate (`laneWorkerKindConflict`) refuses agentic lanes on burst-limited
   backends per-lane with reasons (`resolveAmbientSources` + the `collectDispatchableSources`
