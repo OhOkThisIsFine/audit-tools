@@ -49,15 +49,25 @@ describe("resolveModelStatics", () => {
 });
 
 describe("resolveModelStatics — optional provider scope (CP-NODE-9)", () => {
-  // The vendored snapshot has no cross-provider collision, so its per-provider
-  // index is empty and a provider-scoped lookup must degrade to the flat default
-  // — i.e. single-provider behaviour is byte-identical whether or not a provider
-  // is named. (The cheapest-collision collapse itself is pinned hermetically
-  // against the generator in update-models-collision.test.mjs.)
-  test("naming a provider returns the same record as the default lookup", () => {
+  // The vendored snapshot DOES carry cross-provider collisions, so the
+  // per-provider index is populated and a provider-scoped lookup resolves that
+  // provider's own record. This test previously asserted scoped === bare, which
+  // was only ever true because the shipped snapshot predated the collision index
+  // and was therefore inert — it pinned the defect rather than the contract.
+  //
+  // The distinction is load-bearing for cost-first routing: the flat default is
+  // the CHEAPEST colliding price, which for a model many gateways resell is not
+  // the price you pay on the backend you actually dispatch to. `claude-opus-4-8`
+  // collides across 17 providers; the default resolves a reseller's $0.425/Mtok
+  // input while anthropic's own is $5 — a ~12x underprice, the same class of
+  // error as the INV-SCC-03 per-token/per-Mtok unit bug.
+  test("naming a provider returns THAT provider's record, not the cheapest-collision default", () => {
     const bare = resolveModelStatics("claude-opus-4-8");
     const scoped = resolveModelStatics("claude-opus-4-8", "anthropic");
-    expect(scoped).toEqual(bare);
+    expect(scoped).toBeTruthy();
+    // Consulted the index rather than falling through — the path is live, not inert.
+    expect(scoped).not.toEqual(bare);
+    expect(scoped.price.input).toBeGreaterThan(bare.price.input);
   });
   test("an unmatched provider degrades to the default, never to undefined", () => {
     const bare = resolveModelStatics("claude-opus-4-8");

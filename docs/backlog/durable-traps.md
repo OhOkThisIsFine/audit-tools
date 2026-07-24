@@ -10,6 +10,14 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).** A call passed
+  `timeout: 1800000` for a long offload run and was killed at exactly 10m00s — the excess is
+  clamped, not honoured and not warned about. Any command that can legitimately exceed 10 minutes
+  (a big offload call, a full suite, a release wait) must use `run_in_background: true`, not a
+  larger timeout. A 10-minute kill on a call the caller believed had 30 minutes reads exactly like
+  a hung backend, which is the same misdiagnosis class as
+  [[offload-lane-failures-are-usually-the-caller]].
+
 - **Concurrent agent sessions can share the ONE primary checkout (2026-07-23).** Two live
   sessions worked `C:\Code\audit-tools` simultaneously: files changed under each other mid-turn,
   and one session's staged WIP was committed + pushed by the sibling (correctly). Foreign

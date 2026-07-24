@@ -5,6 +5,17 @@ on:
     branches:
       - main
     paths:
+      # A gate's trigger paths must cover every path the gate INSPECTS — the same
+      # rule ci.yml states. This suite inspects docs/ and spec/: staleness.test.mjs
+      # parses spec/audit/dependency-map.md and design-docs-declarative.test.mjs
+      # lints the spec design docs. Without these two globs a docs-only push skipped
+      # the suite entirely, so its doc-derived failures sat red on main until the
+      # next unrelated CODE push re-ran them (commit 016d5945, 2026-07-15).
+      # Widening the TRIGGER rather than hand-listing the doc-derived tests in the
+      # cheap chain is deliberate: a curated list decays the moment someone adds a
+      # test that reads a doc, and that decay is invisible.
+      - docs/**
+      - spec/**
       - src/**
       - tests/**
       - schemas/**
@@ -23,6 +34,17 @@ on:
     branches:
       - main
     paths:
+      # A gate's trigger paths must cover every path the gate INSPECTS — the same
+      # rule ci.yml states. This suite inspects docs/ and spec/: staleness.test.mjs
+      # parses spec/audit/dependency-map.md and design-docs-declarative.test.mjs
+      # lints the spec design docs. Without these two globs a docs-only push skipped
+      # the suite entirely, so its doc-derived failures sat red on main until the
+      # next unrelated CODE push re-ran them (commit 016d5945, 2026-07-15).
+      # Widening the TRIGGER rather than hand-listing the doc-derived tests in the
+      # cheap chain is deliberate: a curated list decays the moment someone adds a
+      # test that reads a doc, and that decay is invisible.
+      - docs/**
+      - spec/**
       - src/**
       - tests/**
       - schemas/**

@@ -3,7 +3,7 @@
   "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier (9router-inspired) — extra SOURCE P": 4153,
   "forward-tracks.md::One repo intent, three filenames — the audit/remediate intent split is a `one ": 2775,
   "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6": 3638,
-  "open-bugs.md::__FILE__": 152900,
+  "open-bugs.md::__FILE__": 143843,
   "open-bugs.md::⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 af": 2797,
   "open-bugs.md::A ROTATING set of heavy suite tests fails only under parallel load — hermetici": 2657,
   "open-bugs.md::claude-worker lane residuals from the 3c adversarial review (2026-07-16, each ": 3481,

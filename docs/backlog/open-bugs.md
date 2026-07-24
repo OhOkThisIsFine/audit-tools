@@ -214,6 +214,18 @@
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
 
+- **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
+  to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
+  returned 101 failures — every one `connect ECONNREFUSED 127.0.0.1:4000`, i.e. the proxy had died
+  mid-lap, exactly as on 2026-07-24's earlier lap. The whole pass was wasted before the cause was
+  read. The standing remedy is prose ("Probe `/v1/models` before diagnosing a model") in
+  `~/.claude/CLAUDE.md` and in the roster-latency entry below — a remember-to-be-careful rule, which
+  is the shape this project rejects. Property: any caller that fans out more than one offload
+  request probes reach ONCE up front and fails fast naming the restart command, so a dead lane costs
+  one call rather than N and can never be misread as model incapacity. The batch runner is currently
+  per-lap scratchpad code, so the durable form is a tiny shared preflight helper the offload
+  entrypoint owns, not a rule each caller re-implements. [[offload-lane-failures-are-usually-the-caller]]
+
 - **LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.** Root cause of
   the observed `UND_ERR_HEADERS_TIMEOUT` storm (9 observations across glm-5.2, deepseek-v4-pro,
   nemotron-3-ultra-550b, qwen3.5-397b) was the CALLER's transport, not lane health: global `fetch`
@@ -291,23 +303,6 @@
   earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
   [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
-- **`tests/audit/quota-command.test.mjs` "nothing is written to disk" asserts on the REAL repo
-  root, so dogfood residue turns it red (2026-07-21, low, friction: hermeticity).** The test's
-  regression guard `!existsSync(<repoRoot>/.audit-tools/audit/session-config.json)` fails whenever
-  a live/paused self-audit run has legitimately created that file in this checkout (exactly the
-  paused re-dogfood state) — a working-tree-cleanliness dependency, not a cmdQuota behavior check.
-  Property: the guard must distinguish a file cmdQuota WROTE (e.g. mtime/absence delta across the
-  command, or run cmdQuota under a temp cwd) from one that pre-existed — resolve repo-root state
-  through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo
-  path. Until fixed, this test is red on any checkout with dogfood artifacts; CI's fresh clone is
-  the real signal. Same box-dependence family as `INV-shared-core-14`.
-  **Upgraded by the 2026-07-22 endgame: this defect polluted a live audit.** The runtime_validation
-  phase ran `npm test` in the live-audited working copy, this one assertion failed → ALL 39 runtime
-  units marked not_confirmed → 29 reconcile deepening tasks spawned for one hermeticity bug
-  (captured as finding RTV-TST-001). Cost is no longer "a red on dogfood checkouts" — it fans out
-  into real dispatched work. Record:
-  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
-
 - **agy's headless lane still has no `permissions.allow` rules, so `-p` auto-denies `read_file`/`command`
   (2026-07-23, low, friction: tool-should-decide).** Headless `agy -p` denies its own tool permissions and
   exits 0 with only a "jetski: no output produced" line, so the lane is prompt-inlined content only
@@ -331,8 +326,6 @@
   full local run; CI rerun green. Same class as the linux-cycle entry below: the fix is an
   event-driven wait (poll for `dispatchOrder.length === 3` with a generous deadline), not a fixed
   sleep. One observation — fix if it recurs.
-
-- **The vendored price snapshot predates the collision index, so the provider-scoped price path is inert at HEAD (2026-07-19, settled 2026-07-24, low).** `src/shared/data/model-statics.generated.json` carries 2630 models and no `__by_provider` key — but that is PROVENANCE, not a signal about models.dev. The file has exactly one commit ever (`82352712`, 2026-07-05 16:35), while `__by_provider` first entered the generator two days later (`f15a85fa`, 2026-07-07 10:42): the snapshot was written by the pre-collision `flatten()` and has never been regenerated since. Both original hypotheses are refuted — `flatten()`'s collision path is unit-green on colliding input (`tests/shared/update-models-collision.test.mjs:84-115` pins a 3-provider collapse → cheapest default plus a full `byProvider` index), and `stableStringify` emits the key only when a collision populated it (`scripts/shared/update-models.mjs:167-173`), so no upstream shape change is needed to explain a key the generating run could not have written. **Consequence (real):** `resolveModelStatics(model, provider)` finds `snapshot.byProvider[provider]` empty for every provider string and falls through to the flat table (`src/shared/quota/modelStatics.ts:142-149`), so every price is the cheapest-collision default and the service-vs-transport axis fix above stays inert. **Fix:** run `npm run update-models` (live fetch of models.dev, rewrites the vendored asset) and commit the refreshed snapshot — no code change, and not red-green testable since the generator's own logic is already pinned. **Then settle the second-order mismatch before calling the path live:** `byProvider` is keyed by models.dev VENDOR ids while both pricing sites pass `sourceService(source)` — a declared `service`, else the transport name (`src/shared/providers/identity.ts:67-72`) — so a refreshed index is load-bearing only for service strings that happen to equal a models.dev provider id.
 
 - **CLAUDE.md overstates the `admitSpawn` consent gate (2026-07-19).** *Own-vs-acquire analyzer
   engine* states every acquired-tool spawn "routes through the single `admitSpawn` chokepoint and
@@ -507,15 +500,6 @@
   while glm cooled) — the two entries share a mechanism. Also observed on the same call: the
   engine's drain re-stormed cooling glm to 143 consecutive 429s, so wave-3 pre-wall pacing from
   learned limits is still not happening on a single-model pool.
-
-- **`top_k` truncates ALPHABETICALLY when nothing is ranked, silently dropping the frontier tier
-  (2026-07-19, medium, now mitigable).** With all `score` undefined, `expandSources`
-  (`proxyCatalog.ts:327-335`) falls through to `a.alias.localeCompare(b.alias)` — so `top_k: 3` over
-  the NIM roster kept a *flash* model and dropped every frontier one. Mechanism (3) of the
-  unranked+free composition entry, now observed directly. **Mitigated** now that
-  `model_info.capability_rank` is populated (see below), but the fallback remains
-  silently-wrong-by-default for any unranked proxy. **Property to hold:** truncating a roster with no
-  ranking signal must be loud, not alphabetical.
 
 - **A DEADLINE must drive λ from measured progress, never become a second operator knob — and nothing
   measures progress yet (blocked on an owner call, not on code).** At HEAD the dial is exactly one durable
@@ -833,8 +817,6 @@
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
 - **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12) — item (2) refuted at HEAD, item (1) restated:** **inefficient-feeding (medium):** every contract-pipeline phase that still needs judgment is authored by the HOST conversation, and there is no route to a $0 pool. `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1634`) calls `scheduleWave` for a fan-out *cap only* — the comment at `:1663` states outright that `capacity_pools` never reaches `buildDispatchQuota` from here — so the per-module drafting wave, like every other phase step, renders a prompt asking the HOST to dispatch sub-agents (`:1705`). Determinism has already trimmed the count (`obligation_ledger` `:1968`, `contract_finalization` `:2014`, the single-module `seam_reconciliation` no-op `:1984` and the no-cycles `cyclic_seam_resolution` `:2349` are tool-derived; `FRAMING_COLLAPSE_GROUP` `:164` folds goal→context→decomposition into one round-trip at the low tier), so the true figure is ~9-11 host round-trips, not the ~15 first logged — but every one of them bills host quota BEFORE the first implement dispatch, so routing fixes on the implement half never touch the planning bill. The second half is real but DELIBERATE, not accidental: a validation failure moves the host's `<name>.input.json` into `contract/history/` (`archiveContractArtifact` `:409`, archived rather than deleted so no LLM output is destroyed) and `rejectionRewriteInstruction` `:457` instructs "Write a fresh complete artifact at its original path — do NOT Edit the previous file", so a one-field schema error costs a whole re-author. **Both remaining halves are owner calls, not bounded fixes:** (a) should the planning phases become dispatchable to a non-host pool (they are the only pipeline half that cannot be), and (b) is a targeted in-place repair path worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that currently makes re-emission trivially correct? **Dropped — the implementation_dag citation-grounding claim does not describe the gate at HEAD.** `validateContractCitationGrounding` grounds `affected_files` FIRST via `groundDesignFinding` (`src/remediate/validation/contractPipelineGates.ts:1198`), then path-shaped tokens against the tracked-path set *plus* real parent directories so a not-yet-created file still grounds (`:1222`); prose tokens are the last resort, not the gate. `normalizeRepoPath` preserves a dotfile-dir leading dot by invariant (INV-B3-1, `src/shared/validation/findingGrounding.ts:46`, pinned red-green by `tests/remediate/source-grounded-citation.test.ts:87`), and `deriveNodeFiles` (`contractPipeline.ts:2947`, `c60eb73f`, landed three hours after this entry was written) gives every DAG node a file scope, so a scope-less node can no longer fall through to prose-token grounding at all. [[synth-scopeless-nodes-doomed-run]]
-
-- **CI coverage gap: a docs-only commit skips the vitest suite, so a doc-lint / staleness-parity regression lands on main UNCAUGHT (2026-07-15, tool-should-decide, medium).** `audit-code-test-suite.yml`'s release-bump/docs skip guard skipped the vitest suite for commit `016d5945` (an owner-approved doc-review resolution touching `spec/audit-workflow-design.md` + `spec/audit/dependency-map.md`), so its two deterministic failures (design-docs-declarative banned-status-language at :85; staleness F1 inv-6 dep-map parity, where a producer-table row bled into the naive `.md` edge parser) sat red on main until the next CODE push re-ran the suite. Both were cheap, deterministic, doc-derived checks. Endpoint: run the doc-lint + dep-map-parity tests (design-docs-declarative, the staleness literal-parity guards) in the cheap `ci.yml` chain which does NOT skip on docs commits — a doc commit that breaks a doc-derived invariant should fail its own push, not the next unrelated code push. (Both failures fixed in `5c9edcb2`; the skip guard itself is the open item.)
 
 - **Exact key-set leak-guards name the offending field in the diff but not in the failure headline (2026-07-15 friction walk, tool-should-decide, low).** `tests/audit/review-packets.test.mjs:1071` asserts `Object.keys(plan[0]).sort()` against a literal key list — an additive-hostile leak-guard by design, so ANY new field on `DispatchPlanEntry` (`src/audit/cli/dispatch/types.ts:144`) reds it. When it fires the headline is `expected [ 'access', 'complexity', …(6) ] to deeply equal [ 'access', 'complexity', …(5) ]` — those counts are "N more items", not key counts, and no field name appears; the key is named only in the +/- diff the default reporter prints below it (`vitest.config.ts:29` keeps `"default"` in `reporters`, so the diff is never lost). So a log tail, a job-summary line, or a truncated CI excerpt reads as an opaque count mismatch. Endpoint: a shared `expectExactKeys(actual, expected, label)` helper under `tests/helpers/` that asserts on the sorted unexpected/missing delta, putting the field name in the headline itself; low value while the diff is right there. The one concrete instance is CLOSED — `DispatchPlanEntry.file_paths` was added by an adversarial-review HIGH-fix AFTER the full-suite run, only targeted tests were re-run, release CI shard 1/4 caught it, fixed in `85593e05` (one forward-bump). Standing rule from that miss: a post-review change to a CONTRACT SHAPE (a new field on a persisted/asserted type) forces a full-suite rerun — the blast radius is every exact-shape assertion, not the changed module.
 
