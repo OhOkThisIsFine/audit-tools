@@ -14,6 +14,23 @@
 // the open property belong in the entry, the story belongs in `git log` or a
 // `docs/reviews/` record.
 //
+// UNIT: UTF-8 BYTES, deliberately — not JS string length. Two reasons, and the
+// second is why this changed.
+//   1. What is being budgeted is the TOKEN cost of reading the file, and bytes
+//      track that far better than characters do across mixed content: an ASCII
+//      run is ~4 bytes and ~4 chars per token alike, but a 3-byte glyph like ⚠
+//      or → is ONE character and roughly one token, so counting characters
+//      systematically under-prices exactly the decorated prose these entries are
+//      full of. The project already standardizes on bytes→tokens
+//      (`estimateTokensFromBytes`), so characters were also the odd unit out.
+//   2. Every ambient tool — `wc -c`, `ls -l`, an editor's status bar — reports
+//      bytes. While this counted characters, a maintainer comparing `wc -c`
+//      against a recorded ceiling read a violation that was not there (and
+//      vice versa); the two differ by ~1000 on `open-bugs.md`. A gate whose unit
+//      disagrees with every tool you would reach for is a footgun, not a guard.
+// Baselines recorded before the switch were CHARACTER counts and are not
+// comparable; they were regenerated in the same commit as the metric change.
+//
 //   node scripts/check-backlog-budget.mjs            # enforce
 //   node scripts/check-backlog-budget.mjs --report   # show the distribution
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -23,11 +40,16 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
 
-/** Max characters for one top-level `- **…` entry, including its continuation lines. */
-export const ENTRY_BUDGET_CHARS = 2600;
+/** UTF-8 byte length — the ONE measurement function, so no caller can drift to `.length`. */
+export function sizeOf(text) {
+  return Buffer.byteLength(text, "utf8");
+}
 
-/** Max characters for a whole section file — the "one bounded read" property. */
-export const FILE_BUDGET_CHARS = 120_000;
+/** Max BYTES for one top-level `- **…` entry, including its continuation lines. */
+export const ENTRY_BUDGET_BYTES = 2600;
+
+/** Max BYTES for a whole section file — the "one bounded read" property. */
+export const FILE_BUDGET_BYTES = 120_000;
 
 /** Split a backlog file into its top-level entries. */
 export function parseEntries(text) {
@@ -41,7 +63,7 @@ export function parseEntries(text) {
     const body = lines.slice(start, end).join("\n").replace(/\s+$/, "");
     return {
       line: start + 1,
-      chars: body.length,
+      bytes: sizeOf(body),
       title: lines[start].replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78),
     };
   });
@@ -82,7 +104,8 @@ for (const file of files) {
   const entries = parseEntries(text);
   totalEntries += entries.length;
 
-  if (text.length > FILE_BUDGET_CHARS) {
+  const fileBytes = sizeOf(text);
+  if (fileBytes > FILE_BUDGET_BYTES) {
     // Same ratchet as entries. `open-bugs.md` is over on the day this landed:
     // splitting by section made three of the four files a bounded read, but the
     // open-bugs section is ~107 entries and is genuinely NOT one yet. Recording
@@ -91,53 +114,53 @@ for (const file of files) {
     const key = `${file}::__FILE__`;
     const allowed = baseline[key];
     if (updateBaseline) {
-      nextBaseline[key] = text.length;
+      nextBaseline[key] = fileBytes;
     } else if (allowed === undefined) {
       violations.push(
-        `docs/backlog/${file} is ${text.length} chars (budget ${FILE_BUDGET_CHARS}) — ` +
+        `docs/backlog/${file} is ${fileBytes} bytes (budget ${FILE_BUDGET_BYTES}) — ` +
           `no longer one bounded read. Condense its largest entries, or split the section.`,
       );
-    } else if (text.length > allowed) {
+    } else if (fileBytes > allowed) {
       violations.push(
-        `docs/backlog/${file} GREW from ${allowed} to ${text.length} chars ` +
-          `(budget ${FILE_BUDGET_CHARS}) — an over-budget file may only shrink.`,
+        `docs/backlog/${file} GREW from ${allowed} to ${fileBytes} bytes ` +
+          `(budget ${FILE_BUDGET_BYTES}) — an over-budget file may only shrink.`,
       );
     } else {
       grandfathered += 1;
-      nextBaseline[key] = text.length;
+      nextBaseline[key] = fileBytes;
     }
   }
 
   for (const e of entries) {
-    if (e.chars <= ENTRY_BUDGET_CHARS) continue;
+    if (e.bytes <= ENTRY_BUDGET_BYTES) continue;
     const key = entryKey(file, e);
     const allowed = baseline[key];
     if (updateBaseline) {
-      nextBaseline[key] = e.chars;
+      nextBaseline[key] = e.bytes;
       continue;
     }
     if (allowed === undefined) {
       violations.push(
-        `docs/backlog/${file}:${e.line} — NEW entry at ${e.chars} chars (budget ${ENTRY_BUDGET_CHARS})\n` +
+        `docs/backlog/${file}:${e.line} — NEW entry at ${e.bytes} bytes (budget ${ENTRY_BUDGET_BYTES})\n` +
           `    ${e.title}`,
       );
-    } else if (e.chars > allowed) {
+    } else if (e.bytes > allowed) {
       violations.push(
-        `docs/backlog/${file}:${e.line} — GREW from ${allowed} to ${e.chars} chars ` +
-          `(budget ${ENTRY_BUDGET_CHARS}); a grandfathered entry may only shrink\n` +
+        `docs/backlog/${file}:${e.line} — GREW from ${allowed} to ${e.bytes} bytes ` +
+          `(budget ${ENTRY_BUDGET_BYTES}); a grandfathered entry may only shrink\n` +
           `    ${e.title}`,
       );
     } else {
       grandfathered += 1;
-      nextBaseline[key] = e.chars;
+      nextBaseline[key] = e.bytes;
     }
   }
 
   if (report) {
-    const sorted = [...entries].sort((a, b) => b.chars - a.chars);
+    const sorted = [...entries].sort((a, b) => b.bytes - a.bytes);
     process.stdout.write(
-      `\n${file}: ${entries.length} entries, ${text.length} chars\n` +
-        sorted.slice(0, 5).map((e) => `  ${String(e.chars).padStart(5)}  :${e.line}  ${e.title}\n`).join(""),
+      `\n${file}: ${entries.length} entries, ${fileBytes} bytes\n` +
+        sorted.slice(0, 5).map((e) => `  ${String(e.bytes).padStart(5)}  :${e.line}  ${e.title}\n`).join(""),
     );
   }
 }
@@ -147,7 +170,7 @@ if (updateBaseline) {
   writeFileSync(baselinePath, JSON.stringify(sorted, null, 2) + "\n", "utf8");
   process.stdout.write(
     `wrote ${baselinePath} — ${Object.keys(sorted).length} grandfathered entr(ies) over ` +
-      `${ENTRY_BUDGET_CHARS} chars. Each may now only shrink.\n`,
+      `${ENTRY_BUDGET_BYTES} bytes. Each may now only shrink.\n`,
   );
   process.exit(0);
 }
@@ -168,6 +191,6 @@ if (violations.length > 0) {
 
 process.stdout.write(
   `✓ backlog-budget: ${totalEntries} entries across ${files.length} file(s) within budget ` +
-    `(${ENTRY_BUDGET_CHARS} chars/entry, ${FILE_BUDGET_CHARS} chars/file)` +
+    `(${ENTRY_BUDGET_BYTES} bytes/entry, ${FILE_BUDGET_BYTES} bytes/file)` +
     (grandfathered > 0 ? `; ${grandfathered} grandfathered, shrink-only\n` : `\n`),
 );

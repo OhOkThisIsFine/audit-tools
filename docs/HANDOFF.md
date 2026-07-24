@@ -162,8 +162,9 @@ Also still open: FLW-COR-003's second half, "a zero-granted round pauses the dra
 property, still unverified; check it at HEAD first. Both in [`open-bugs.md`](backlog/open-bugs.md).
 
 **3. Make `open-bugs.md` a bounded read — condensation is now EXHAUSTED, only closing entries moves it.**
-143KB / 96 entries against a 120KB budget (was 154KB / 108). Measured at HEAD: total excess over the
-2600-char per-entry budget is **2,989 chars across all 96** — so even condensing every oversized entry
+143KB / 96 entries against a 120KB budget (was 154KB / 108). Sizes are UTF-8 BYTES — the gate switched
+from characters so it agrees with `wc -c`. Measured at HEAD: total excess over the
+2600-byte per-entry budget is only a few KB across all 96 — so even condensing every oversized entry
 to budget sheds ~3KB and leaves ~140KB. The remaining 23KB has to come from CLOSING entries (item 1).
 Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
 shrink-only ceiling.

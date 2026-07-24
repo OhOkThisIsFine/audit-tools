@@ -12,12 +12,12 @@
   (2026-07-24, medium, friction: inefficient-feeding).** Splitting the single 1,706-line backlog by
   section fixed `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read
   in one call, which is the condition that let ~21% of entries go stale unnoticed.
-  `npm run check:backlog-budget` records a per-file and per-entry ceiling in
-  `docs/backlog/.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the ceiling is
-  today's size, not the goal. ⚠ **Condensation is now EXHAUSTED as a lever — measured, not estimated:**
-  total excess over the 2600-char per-entry budget is **2,989 chars across all 96 entries**, so squeezing
-  every oversized entry to budget sheds ~3KB and leaves ~140KB. The remaining 23KB can only come from
-  **CLOSING entries**, which makes this downstream of the actionable queue, not a separate task.
+  `check:backlog-budget` records a per-file and per-entry ceiling in `.size-baseline.json` and enforces
+  SHRINK-ONLY, so it cannot regrow — but the ceiling is today's size, not the goal.
+  ⚠ **Condensation is EXHAUSTED as a lever — measured, not estimated:** total excess over the 2600-byte
+  per-entry budget is a few KB across all 96, so squeezing every oversized entry to budget still leaves
+  ~140KB. The remaining ~23KB comes only from **CLOSING entries** — downstream of the actionable queue,
+  not a separate task. (Sizes are UTF-8 BYTES; the gate agrees with `wc -c`.)
   Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
   driver is narrative accreting onto entries, so a budget that always passes measures nothing.
 
@@ -231,18 +231,18 @@
 
 - **Stale agent worktrees are never pruned, and their `dist/` pollutes every repo-wide grep
   (2026-07-24, low, friction: tool-should-decide).** Four worktrees survive under `.claude/worktrees/`
-  from prior agent runs (`git worktree list` shows them; three on old `worktree-agent-*` branches, one
-  on a detached HEAD). All four are clean and their content is in main — the detached one's commit
-  message ("deadline-safe transport for slow-first-byte NIM calls") never landed under that sha but its
-  mechanism did (`deadlineBoundFetch`, `openAiCompatibleProvider.ts:84-85`) — so they are stale
-  duplicates, not unmerged work. The cost is real anyway: verifying the header-extraction island was
-  dead, a repo-wide grep for its symbols hit `.claude/worktrees/agent-a22494cc1a9cb610d/dist/` and
-  reported the deleted code as still referenced. A stale build tree that answers greps as if it were
-  source is a false-positive generator for exactly the dead-code and residual-reference checks this
-  project runs. Property: a completed agent worktree is removed by whatever created it, or a periodic
-  prune reaps any whose HEAD is an ancestor of `main` and whose tree is clean; a repo-wide grep must
-  never see a build output. ⚠ Do not blanket-`git worktree remove` without the ancestor+clean check —
-  that is how genuinely unmerged agent work gets destroyed.
+  from prior agent runs, plus an unregistered orphan dir. **Cleared by hand 2026-07-24 — the MECHANISM is
+  still missing**, so it recurs on the next agent run. Verifying the header-extraction island was dead, a
+  repo-wide grep hit `.claude/worktrees/agent-…/dist/` and reported the deleted code as still referenced —
+  a stale build tree that answers greps as if it were source is a false-positive generator for exactly the
+  dead-code and residual-reference checks this project runs.
+  Property: a completed worktree is reaped by whatever created it, or by a periodic prune over those whose
+  HEAD is an ancestor of `main` with a clean tree; a repo-wide grep must never see a build output.
+  ⚠ **Not every stale worktree is a duplicate.** Three of four were ancestors of `main`; the fourth
+  (`9820b7e9`) was a SUPERSEDED ALTERNATIVE — the same slow-first-byte NIM fix via a `node:http` transport
+  (`nodeHttpFetch.ts` + its test, neither in main) where main uses an undici `Agent`. Tagged
+  `archive/nodehttpfetch-alternative-9820b7e9` rather than dropped. A blanket `git worktree remove`
+  without the ancestor+clean check is how that work disappears silently.
 
 - **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
   to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
