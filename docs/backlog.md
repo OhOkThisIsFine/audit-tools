@@ -241,6 +241,22 @@ followed" is otherwise indistinguishable from a bug.
   while deepseek-v4-pro and nemotron answered comparable calls fine. The 16KB death weakens the
   "payload size is the variable" framing: the glm-5.2 lane itself goes bimodal-slow independent of
   size. Practical routing: on a glm headers-timeout, retry a DIFFERENT alias before trimming.
+  **ROOT CAUSE FOUND + HELPER FIXED (2026-07-23, pause-wall lap): observations 7-9 — THREE
+  different aliases (deepseek-v4-pro 37KB, nemotron-3-ultra-550b 30KB, qwen3.5-397b 26KB) died
+  identically in one session while a tiny probe answered fine — resolved to the CALLER's
+  transport, not lane bimodality: `~/.claude/llm-call.mjs` used global `fetch`, whose undici
+  default headers timeout (~5 min) fires before a big model's FIRST byte on heavyweight
+  analytical calls (no streaming). Helper now POSTs via `node:http` with a 30-min ceiling
+  (`LLM_TIMEOUT_MS`); prior glm-only observations 5-6 are likely the same cause (unproven).**
+  What REMAINS open here for the repo — **VERIFIED by mechanism 2026-07-23, now a fixable
+  defect:** the in-repo openai-compatible lane (`openAiCompatibleProvider.ts:183-251`) bounds the
+  request with its own AbortController at `input.timeoutMs` (audit default **30 min**,
+  `src/audit/cli/args.ts:32`), but the `fetch` underneath still rides undici's ~5-min default
+  headersTimeout — so a >5-min-TTFB call dies `UND_ERR_HEADERS_TIMEOUT` (classified transient,
+  retried, dies again ×3) and the lane reads dead at ~15 min despite the 30-min declared budget.
+  Remediate's 300s default coincidentally masks it. Property: the transport's headers timeout
+  must follow the declared `timeoutMs` (protocol-aware node:http/https request, or an undici
+  Agent with `headersTimeout` aligned), so the ONLY timeout in play is the declared one.
   Second live observation (2026-07-22 review dispatch): a minimax-m3 structured 8k-token call ran
   >12 minutes and then returned an empty/error body while nemotron answered the identical prompt in
   ~2 min — and glm-5.2/deepseek-v4-pro were hard-429'd at the same moment (third observation for
@@ -278,18 +294,20 @@ followed" is otherwise indistinguishable from a bug.
   quarantine defects above. Property: one canonical object envelope on every submission the tool
   ingests. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
-- **LEAD (2026-07-23, low, surfaced by the zero-spill fix): a packet whose only above-floor pool
-  is PAUSED (future reset, not exhausted) loops the in-process 50ms wait tick until the reset.**
-  `noPoolCanAcceptNow` is pool-level (a below-floor sibling "can accept", so the retryable
-  `quota_paused` strand never fires) and `neverDispatchable` correctly refuses to strand on a
-  resettable pause — so the run waits in-process, which the quota_paused terminal was built to
-  avoid for multi-hour walls. Pre-existing behavior (identical before the availability-aware
-  floor; NOT a regression), needs a per-packet analogue of the pool-level pause check. Record:
-  [`zero-spill-capability-floor-2026-07-23.md`](reviews/zero-spill-capability-floor-2026-07-23.md).
-  (The ZERO-SPILL HIGH itself — the wave never attempting healthy siblings — SHIPPED 2026-07-23:
-  the capability floor's `bestAvailableBand` was a build-time snapshot; it now tracks live
-  availability. The adjacent legibility fact — 144 granted with leases/explains empty — stays
-  carried by the dispatch-legibility entry below.)
+- **LEAD (2026-07-23, low, surfaced by the pause-wall recon — out-of-repo resolvers only):
+  `window_uncalibrated` ledger blocks are a fixed-state 50ms-poll livelock if a custom
+  `resolvePoolConstraints` emits unpriced windows.** The forced anti-deadlock retry unbounds
+  budgets only, so an uncalibrated window refuses the forced admit too and the packet re-enters
+  the 50ms branch with nothing that can change (`rollingDispatch.ts` forced-retry path; traced by
+  Codex recon 2026-07-23 with citations). Not reachable from shipped wiring — the in-repo
+  producer omits unpriceable windows from `window_budgets` (`scheduler.ts:573,:586,:617`).
+  Property if it ever bites: an uncalibrated-window block with `anyOutstanding:false` should
+  strand loudly (or pause) rather than poll. Record:
+  [`pause-wall-per-packet-strand-2026-07-23.md`](reviews/pause-wall-per-packet-strand-2026-07-23.md).
+  (The zero-spill entry's companion pause-wall LEAD — deep packet spinning the wait tick on a
+  paused best pool — SHIPPED 2026-07-23 as the per-packet pause wall; same record. The adjacent
+  legibility fact — 144 granted with leases/explains empty — stays carried by the
+  dispatch-legibility entry below.)
 
 - **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure (2026-07-21,
   medium).** First call ingested the granted results ("Ingested 18 entries", progress_made:true)

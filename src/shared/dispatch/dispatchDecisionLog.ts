@@ -24,6 +24,20 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ConstraintOutcomeRecord } from "./admissionLoop.js";
 
+/**
+ * Per-(packet, pool) refusal reason carried by the per-packet strand records —
+ * the FIRST refusing condition in the fixed evaluation order the engine's
+ * strand predicates use (`packetPoolBlockReason` in rollingDispatch.ts), so
+ * record and predicate cannot drift. `pool_paused` is deliberately last: pause
+ * only reads as the reason when it is the load-bearing blocker.
+ */
+export type PacketPoolBlockWhy =
+  | "pool_exhausted"
+  | "oversized_for_pool"
+  | "context_cap"
+  | "below_capability_floor"
+  | "pool_paused";
+
 /** One engine dispatch decision, before stamping. */
 export type EngineDecisionRecord =
   /**
@@ -74,7 +88,25 @@ export type EngineDecisionRecord =
         packet_id: string;
         pools: {
           pool_id: string;
-          why: "pool_exhausted" | "oversized_for_pool" | "context_cap" | "below_capability_floor";
+          why: Exclude<PacketPoolBlockWhy, "pool_paused">;
+        }[];
+      }[];
+    }
+  /**
+   * Per-packet PAUSE wall: every remaining pending packet's pools all refuse,
+   * and — the permanent-only strand having come up empty — at least one refusal
+   * per packet is a resettable pause. The queue strands RETRYABLY
+   * (`quota_paused`) instead of spinning the in-process wait tick until the
+   * reset. `reset_at` is present on every `pool_paused` row.
+   */
+  | {
+      kind: "engine_stranded_packet_pause_wall";
+      packets: {
+        packet_id: string;
+        pools: {
+          pool_id: string;
+          why: PacketPoolBlockWhy;
+          reset_at?: string;
         }[];
       }[];
     }

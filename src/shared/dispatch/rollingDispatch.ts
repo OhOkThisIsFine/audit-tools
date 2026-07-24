@@ -84,7 +84,11 @@ import {
   toConstraintOutcomeRecords,
   type ConstraintOutcomeRecord,
 } from "./admissionLoop.js";
-import type { EngineDecisionRecord, EngineDecisionSink } from "./dispatchDecisionLog.js";
+import type {
+  EngineDecisionRecord,
+  EngineDecisionSink,
+  PacketPoolBlockWhy,
+} from "./dispatchDecisionLog.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 
 // ---------------------------------------------------------------------------
@@ -267,6 +271,17 @@ export interface RollingDispatchState<TPacket> {
    * PartialCompletionTerminal (INV-QD-07).
    */
   strandedIds: Set<string>;
+  /**
+   * Earliest live pause reset (epoch-ms) captured at the instant a WALL strand
+   * fired (the pool-level wall or the per-packet pause wall), or null when no
+   * wall has stranded / no pause was live at that instant. `getTerminal`
+   * re-reads the live pause map and falls back to this when every pause has
+   * already expired by the time it runs — a near-reset wall must still
+   * classify as the RETRYABLE `quota_paused` terminal (an expired reset means
+   * "retry now", never "permanent failure"; adversarial-review finding, AGY
+   * 2026-07-23).
+   */
+  wallStrandEarliestResetAtMs: number | null;
   /**
    * Pool ids demoted by reactive cost verification: a pool DECLARED free
    * (`declaredCostPerMtok === 0`) that reported a positive cost on a completion, so
@@ -633,7 +648,12 @@ function isPoolQuotaDegraded(schedule: WaveSchedule, budgetTokens: number): bool
  * confirmed pool set and fails open on unknown capability, so on its own it never
  * manufactures an empty candidate set.
  *
- * Returns null if no eligible pool currently has quota headroom.
+ * Returns null only when the eligibility filter (exhausted / paused / 413-skip /
+ * context-cap / capability-floor) empties the pool set: the scheduler floors
+ * `max_concurrent` at 1, so a pool that survives the filter always yields a
+ * slot — low quota headroom re-ORDERS (proactive spill), it never refuses.
+ * This exhaustiveness is what the per-packet strand checks in the engine's
+ * no-progress branch rely on (`packetPoolBlockReason`).
  */
 export function selectProvider<TPacket>(
   packet: RollingDispatchPacket<TPacket>,
@@ -895,6 +915,7 @@ export function createRollingDispatcher<TPacket>(
     exhaustedPoolIds: new Set(),
     pausedPoolResetAt: new Map(),
     strandedIds: new Set(),
+    wallStrandEarliestResetAtMs: null,
     // A driver-provided set (driveRolling) makes demotion span this run's sub-waves
     // + levels; a standalone dispatcher owns a fresh per-instance set.
     costDemotedPoolIds: injectedCostDemotedPoolIds ?? new Set(),
@@ -1617,6 +1638,39 @@ export function createRollingDispatcher<TPacket>(
     return earliest;
   }
 
+  /**
+   * First reason `pool` refuses `packet`, in the SAME fixed evaluation order
+   * the per-packet strand checks and their decision records use — or null when
+   * the pool could take the packet now. Single-sources the disjunction for the
+   * `neverDispatchable` strand (permanent reasons only), the per-packet pause
+   * wall (any reason, pause included), and both records' `why` fields, so
+   * predicate and record cannot drift. `pool_paused` is deliberately LAST: a
+   * pool that is, say, both below-floor and paused reads as
+   * `below_capability_floor` — pause only reads as the reason when it is the
+   * load-bearing blocker. Exhaustive for a `selectProvider` null: the
+   * scheduler's `max_concurrent` is floored at 1, so the eligibility filter
+   * (these five conditions) is the only way a packet gets no slot.
+   */
+  function packetPoolBlockReason(
+    packet: RollingDispatchPacket<TPacket>,
+    pool: CapacityPool,
+    now: number,
+  ): PacketPoolBlockWhy | null {
+    if (state.exhaustedPoolIds.has(pool.id)) return "pool_exhausted";
+    if (state.oversizedPacketPools.get(packet.id)?.has(pool.id) ?? false) {
+      return "oversized_for_pool";
+    }
+    if (
+      pool.contextCapTokens != null &&
+      packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > pool.contextCapTokens
+    ) {
+      return "context_cap";
+    }
+    if (!capable(pool.id, packet)) return "below_capability_floor";
+    if ((state.pausedPoolResetAt.get(pool.id) ?? -Infinity) > now) return "pool_paused";
+    return null;
+  }
+
   /** Move every still-pending packet into the stranded set and clear the queue. */
   function strandPending(): void {
     for (const packet of state.pendingQueue) {
@@ -1775,6 +1829,13 @@ export function createRollingDispatcher<TPacket>(
   }
 
   async function run(): Promise<RollingDispatchResult<TPacket>[]> {
+    // A fresh run classifies on its OWN wall state: without this, a reused
+    // dispatcher (public API allows enqueue → run again) inherits a prior
+    // run's captured pause reset and a later PERMANENT strand reads as
+    // retryable quota_paused (adversarial-review finding, codex 2026-07-23).
+    // Production creates one dispatcher per sub-wave, so this is lifecycle
+    // hygiene, not a live defect.
+    state.wallStrandEarliestResetAtMs = null;
     while (state.pendingQueue.length > 0 || state.inFlight.size > 0) {
       // Dispatch pass: fill quota headroom with pending packets.
       await refreshQuotaStateIfNeeded();
@@ -1799,11 +1860,12 @@ export function createRollingDispatcher<TPacket>(
         // saw as paused (adversarial-review finding, AGY 2026-07-23).
         const wallNow = Date.now();
         if (noPoolCanAcceptNow(wallNow)) {
-          // Decision record BEFORE strandPending clears the queue: which packets
-          // strand, and each pool's blocking status (exhausted vs paused-until).
-          // By noPoolCanAcceptNow's definition at wallNow, every non-exhausted
-          // pool IS paused with a future reset, so reset_at is always present.
-          emitDecision({
+          // Decision record built BEFORE strandPending clears the queue: which
+          // packets strand, and each pool's blocking status (exhausted vs
+          // paused-until). By noPoolCanAcceptNow's definition at wallNow, every
+          // non-exhausted pool IS paused with a future reset, so reset_at is
+          // always present.
+          const wallRecord: EngineDecisionRecord = {
             kind: "engine_stranded_pool_wall",
             packet_ids: state.pendingQueue.map((p) => p.id).sort(),
             pools: confirmedPools.map((p) => {
@@ -1818,9 +1880,24 @@ export function createRollingDispatcher<TPacket>(
                       : {}),
                   };
             }),
-          });
+          };
+          // Capture the reset that makes this strand retryable AT THE WALL —
+          // getTerminal re-reads the live pause map, and a near-instant reset
+          // could expire before it runs, silently degrading the classification
+          // to the non-retryable empty_pool (adversarial-review finding, AGY
+          // 2026-07-23).
+          state.wallStrandEarliestResetAtMs = earliestPausedResetMs(wallNow);
+          // Strand BEFORE the sink runs, and `continue` rather than `break`:
+          // emitDecision synchronously enters caller code, and enqueue is
+          // documented safe during run() — a packet enqueued reentrantly from
+          // the sink must be picked up by the next pass, never swept into this
+          // strand or silently abandoned by a break (adversarial-review
+          // finding, codex 2026-07-23). With no reentrant enqueue the queue is
+          // empty and the loop exits on its condition, exactly like the old
+          // break.
           strandPending();
-          break;
+          emitDecision(wallRecord);
+          continue;
         }
         // Per-packet never-dispatchable strand (U2/F1, distinct from the
         // pool-level check above): a packet is PERMANENTLY unselectable when
@@ -1830,52 +1907,88 @@ export function createRollingDispatcher<TPacket>(
         // otherwise-healthy pools spins the 50ms wait tick forever (the
         // pool-level guard never fires for a per-packet condition). A merely
         // PAUSED pool that fits still counts as future-possible — pauses reset,
-        // caps and floors don't.
-        const neverDispatchable = state.pendingQueue.filter((p) => {
-          const skipSet = state.oversizedPacketPools.get(p.id);
-          return confirmedPools.every(
-            (pool) =>
-              state.exhaustedPoolIds.has(pool.id) ||
-              (skipSet?.has(pool.id) ?? false) ||
-              (pool.contextCapTokens != null &&
-                p.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS >
-                  pool.contextCapTokens) ||
-              !capable(pool.id, p),
-          );
-        });
+        // caps and floors don't. The per-(packet, pool) `why` is collected in
+        // the same walk that decides the strand (one disjunction, one order —
+        // `packetPoolBlockReason`), so record and predicate cannot drift.
+        const neverDispatchable: {
+          packet: RollingDispatchPacket<TPacket>;
+          pools: { pool_id: string; why: Exclude<PacketPoolBlockWhy, "pool_paused"> }[];
+        }[] = [];
+        for (const p of state.pendingQueue) {
+          const pools: { pool_id: string; why: Exclude<PacketPoolBlockWhy, "pool_paused"> }[] = [];
+          let permanentlyBlockedEverywhere = true;
+          for (const pool of confirmedPools) {
+            const why = packetPoolBlockReason(p, pool, wallNow);
+            if (why == null || why === "pool_paused") {
+              permanentlyBlockedEverywhere = false;
+              break;
+            }
+            pools.push({ pool_id: pool.id, why });
+          }
+          if (permanentlyBlockedEverywhere) neverDispatchable.push({ packet: p, pools });
+        }
         if (neverDispatchable.length > 0) {
-          for (const p of neverDispatchable) {
+          for (const { packet: p } of neverDispatchable) {
             if (!state.completedIds.has(p.id)) state.strandedIds.add(p.id);
           }
-          const strandedIdSet = new Set(neverDispatchable.map((p) => p.id));
+          const strandedIdSet = new Set(neverDispatchable.map(({ packet: p }) => p.id));
           state.pendingQueue = state.pendingQueue.filter((p) => !strandedIdSet.has(p.id));
           // Decision record with the per-(packet, pool) why-not — the strand's
           // full mechanistic basis, not just the id list (the old telemetry-only
-          // event carried ids alone). `why` is the FIRST refusing condition in
-          // the same disjunction order the strand test evaluates, deterministic.
+          // event carried ids alone).
           emitDecision({
             kind: "engine_stranded_no_fitting_pool",
             packets: [...neverDispatchable]
-              .sort((a, b) => a.id.localeCompare(b.id))
-              .map((p) => {
-                const skipSet = state.oversizedPacketPools.get(p.id);
-                return {
-                  packet_id: p.id,
-                  pools: confirmedPools.map((pool) => ({
-                    pool_id: pool.id,
-                    why: state.exhaustedPoolIds.has(pool.id)
-                      ? ("pool_exhausted" as const)
-                      : (skipSet?.has(pool.id) ?? false)
-                        ? ("oversized_for_pool" as const)
-                        : pool.contextCapTokens != null &&
-                            p.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS >
-                              pool.contextCapTokens
-                          ? ("context_cap" as const)
-                          : ("below_capability_floor" as const),
-                  })),
-                };
-              }),
+              .sort((a, b) => a.packet.id.localeCompare(b.packet.id))
+              .map(({ packet: p, pools }) => ({ packet_id: p.id, pools })),
           });
+          continue;
+        }
+        // Per-packet PAUSE wall (backlog LEAD 2026-07-23, distinct from BOTH
+        // checks above): every remaining pending packet's pools all refuse, and
+        // — the permanent-only strand above having come up empty — at least one
+        // refusal per packet is a resettable pause. Waiting here would spin the
+        // 50ms tick in-process until the reset (the multi-hour-wall shape the
+        // retryable quota_paused terminal exists to avoid): the pool-level wall
+        // never fires because a below-floor/unfitting sibling "can accept", and
+        // the never-dispatchable strand rightly refuses to strand on a
+        // resettable pause. Strand RETRYABLY instead — a wall is a pause, not a
+        // spin. A paused pool deliberately still HOLDS the capability floor
+        // (zero-spill doctrine): the wall pauses the work rather than degrading
+        // a deep packet onto a below-floor pool.
+        const pauseWalled = state.pendingQueue.every((p) =>
+          confirmedPools.every((pool) => packetPoolBlockReason(p, pool, wallNow) != null),
+        );
+        if (pauseWalled) {
+          const wallRecord: EngineDecisionRecord = {
+            kind: "engine_stranded_packet_pause_wall",
+            packets: [...state.pendingQueue]
+              .sort((a, b) => a.id.localeCompare(b.id))
+              .map((p) => ({
+                packet_id: p.id,
+                pools: confirmedPools.map((pool) => {
+                  // Non-null by the wall condition just checked at the same wallNow.
+                  const why = packetPoolBlockReason(p, pool, wallNow) as PacketPoolBlockWhy;
+                  const resetAt = state.pausedPoolResetAt.get(pool.id);
+                  return {
+                    pool_id: pool.id,
+                    why,
+                    ...(why === "pool_paused" && resetAt != null
+                      ? { reset_at: new Date(resetAt).toISOString() }
+                      : {}),
+                  };
+                }),
+              })),
+          };
+          // Same near-instant-reset capture as the pool wall above (AGY R2).
+          state.wallStrandEarliestResetAtMs = earliestPausedResetMs(wallNow);
+          // Strand-before-emit + continue, same reentrancy discipline as the
+          // pool wall above (adversarial-review finding, codex 2026-07-23): a
+          // packet a sink enqueues reentrantly lands in the already-cleared
+          // queue and the next pass dispatches it — never swept into this
+          // strand, never abandoned by a break.
+          strandPending();
+          emitDecision(wallRecord);
           continue;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -1913,7 +2026,11 @@ export function createRollingDispatcher<TPacket>(
     // RETRYABLE `quota_paused` terminal carrying the earliest reset — the consumer
     // keeps the stranded items pending and a later step redispatches them clean.
     // Otherwise it is the pre-existing non-retryable `empty_pool` terminal.
-    const earliest = earliestPausedResetMs(Date.now());
+    // Fallback: a WALL strand captured the earliest live reset at the instant it
+    // fired — if every pause has expired by now, that capture still classifies
+    // the strand as retryable (an expired reset means "retry now", never
+    // "permanent failure"; adversarial-review finding, AGY 2026-07-23).
+    const earliest = earliestPausedResetMs(Date.now()) ?? state.wallStrandEarliestResetAtMs;
     if (earliest != null) {
       return buildQuotaPausedTerminal(
         [...state.strandedIds],

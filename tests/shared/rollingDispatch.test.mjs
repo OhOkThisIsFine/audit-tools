@@ -1770,6 +1770,318 @@ test("createRollingDispatcher — when the only above-floor pool exhausts, the f
 });
 
 // ---------------------------------------------------------------------------
+// Per-packet PAUSE wall (backlog LEAD 2026-07-23): a packet whose only
+// above-floor pool is PAUSED with a future reset (not exhausted) must strand as
+// the RETRYABLE quota_paused terminal — never spin the in-process 50ms wait
+// tick until the reset. Neither prior check covers this shape: the pool-level
+// wall sees a healthy below-floor sibling ("can accept"), and the
+// never-dispatchable strand rightly refuses to strand on a resettable pause.
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — a deep packet whose only above-floor pool PAUSES strands retryably (quota_paused) instead of spinning until the reset (pause wall)", async () => {
+  await setupTmpQuotaDir();
+  const records = [];
+  const seen = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      // Two SCORED pools → terciles put `strong` in band 0, `weak` in band 1.
+      // A `deep` packet's floor is band 0, and a merely PAUSED strong still
+      // HOLDS the floor (zero-spill doctrine: pauses reset, exclusions don't).
+      makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }),
+      makePool("weak", { rank: "small", declaredCapabilityRank: 9 }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      seen.push(slot.poolId);
+      if (slot.poolId === "strong") {
+        // Session-limit wall WITH a parseable reset → pool pause, not exhaustion.
+        return {
+          packet,
+          outcome: "rate_limited",
+          rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([{ ...makePacket("p1", { complexity: 0.9 }), requiredTier: "deep" }]);
+
+  // Pre-fix this run SPINS the 50ms tick until the ~2h reset — bound it so a
+  // regression fails loudly instead of hanging the suite.
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+
+  expect(seen, "the below-floor pool is never attempted for the deep packet").toEqual(["strong"]);
+  expect(results.length, "no completion — the packet stranded").toBe(0);
+  const state = dispatcher.getState();
+  expect(state.pausedPoolResetAt.has("strong"), "strong is paused, not exhausted").toBe(true);
+  expect(state.exhaustedPoolIds.has("strong")).toBe(false);
+  expect(state.strandedIds.has("p1")).toBe(true);
+
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "retryable pause strand, not empty_pool").toBe("quota_paused");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
+  expect(typeof terminal.earliest_reset_at).toBe("string");
+
+  // Mechanistic decision record: per-(packet, pool) why-not, reset_at on the
+  // pause row (legibility — the strand's full basis, not just ids).
+  const walls = records.filter((r) => r.kind === "engine_stranded_packet_pause_wall");
+  expect(walls).toEqual([
+    expect.objectContaining({
+      packets: [
+        {
+          packet_id: "p1",
+          pools: [
+            expect.objectContaining({ pool_id: "strong", why: "pool_paused", reset_at: expect.any(String) }),
+            { pool_id: "weak", why: "below_capability_floor" },
+          ],
+        },
+      ],
+    }),
+  ]);
+});
+
+test("createRollingDispatcher — pause wall strands ONLY when the whole remaining frontier is pause-blocked; dispatchable peers complete first", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }),
+      makePool("weak", { rank: "small", declaredCapabilityRank: 9 }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "strong") {
+        return {
+          packet,
+          outcome: "rate_limited",
+          rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue([
+    { ...makePacket("p-deep", { complexity: 0.9 }), requiredTier: "deep" },
+    // Low complexity → prefers the least-capable pool; no floor → weak is fine.
+    makePacket("p-small", { complexity: 0.2 }),
+  ]);
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+
+  // The dispatchable peer lands; only the pause-blocked deep packet strands.
+  expect(results.filter((r) => r.outcome === "success").map((r) => r.packet.id)).toEqual(["p-small"]);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason).toBe("quota_paused");
+  expect(terminal.stranded_ids).toEqual(["p-deep"]);
+});
+
+test("createRollingDispatcher — heterogeneous queue: a permanent strand and a pause-wall strand share ONE retryable terminal (batch classification, pinned as intended)", async () => {
+  await setupTmpQuotaDir();
+  // p-nofit exceeds every pool's context cap → permanent strand (neverDispatchable).
+  // p-deep is pause-blocked once strong pauses → pause wall. getTerminal issues
+  // ONE reason for the whole batch (pre-existing contract): any live pause →
+  // quota_paused for ALL stranded ids. The permanent packet simply re-strands on
+  // the consumer's retry (one extra hop, converging) — strictly better than the
+  // pre-wall infinite spin, and deliberately NOT split into per-packet terminals
+  // (adversarial-review surface 3a, AGY 2026-07-23 — pinned here as intended).
+  const records = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      { ...makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }), contextCapTokens: 30_000 },
+      { ...makePool("weak", { rank: "small", declaredCapabilityRank: 9 }), contextCapTokens: 30_000 },
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) =>
+      slot.poolId === "strong"
+        ? {
+            packet,
+            outcome: "rate_limited",
+            rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+          }
+        : { packet, outcome: "success" },
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([
+    { ...makePacket("p-deep", { complexity: 0.9 }), requiredTier: "deep" },
+    { ...makePacket("p-nofit"), estimatedTokens: 50_000 },
+  ]);
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+
+  expect(results.filter((r) => r.outcome === "success").length).toBe(0);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "one terminal for the batch; live pause → retryable").toBe("quota_paused");
+  expect(terminal.stranded_ids.sort()).toEqual(["p-deep", "p-nofit"]);
+
+  // The two packets strand for DIFFERENT reasons and via DIFFERENT records —
+  // the batch collapses to one terminal, but the mechanistic why is per-packet
+  // (p-nofit permanently context-capped; p-deep pause-walled). The terminal
+  // reason alone does not pin that split; the decision records do.
+  const permanent = records.filter((r) => r.kind === "engine_stranded_no_fitting_pool");
+  expect(permanent).toEqual([
+    expect.objectContaining({
+      packets: [
+        {
+          packet_id: "p-nofit",
+          pools: [
+            { pool_id: "strong", why: "context_cap" },
+            { pool_id: "weak", why: "context_cap" },
+          ],
+        },
+      ],
+    }),
+  ]);
+  const walls = records.filter((r) => r.kind === "engine_stranded_packet_pause_wall");
+  expect(walls).toEqual([
+    expect.objectContaining({
+      packets: [
+        {
+          packet_id: "p-deep",
+          pools: [
+            expect.objectContaining({ pool_id: "strong", why: "pool_paused", reset_at: expect.any(String) }),
+            { pool_id: "weak", why: "below_capability_floor" },
+          ],
+        },
+      ],
+    }),
+  ]);
+});
+
+test("getTerminal — a pause-wall strand stays RETRYABLE even when every pause has expired by the time getTerminal runs (wall-time capture, AGY R2)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }),
+      makePool("weak", { rank: "small", declaredCapabilityRank: 9 }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) =>
+      slot.poolId === "strong"
+        ? {
+            packet,
+            outcome: "rate_limited",
+            rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+          }
+        : { packet, outcome: "success" },
+  });
+  dispatcher.enqueue([{ ...makePacket("p1", { complexity: 0.9 }), requiredTier: "deep" }]);
+  await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+
+  // Simulate the clock passing the reset between run() and getTerminal(): the
+  // live pause map yields nothing, so classification must fall back to the
+  // reset captured AT THE WALL — an expired reset means "retry now", never
+  // "permanent failure" (empty_pool would drop the work as unretryable).
+  dispatcher.getState().pausedPoolResetAt.clear();
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "wall-time capture keeps the strand retryable").toBe("quota_paused");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
+});
+
+test("createRollingDispatcher — a packet enqueued REENTRANTLY from the wall's decision sink is dispatched, never swept into the strand (enqueue is safe during run())", async () => {
+  await setupTmpQuotaDir();
+  let lateEnqueued = false;
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }),
+      makePool("weak", { rank: "small", declaredCapabilityRank: 9 }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) =>
+      slot.poolId === "strong"
+        ? {
+            packet,
+            outcome: "rate_limited",
+            rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+          }
+        : { packet, outcome: "success" },
+    onAdmissionDecision: (r) => {
+      // The sink runs synchronously inside run(); enqueue is documented safe
+      // here. Pre-fix (emit before strandPending + break) this packet was
+      // swept into strandedIds — or, with a strand-first break, silently
+      // abandoned (adversarial-review finding, codex 2026-07-23).
+      if (r.kind === "engine_stranded_packet_pause_wall" && !lateEnqueued) {
+        lateEnqueued = true;
+        dispatcher.enqueue([makePacket("p-late", { complexity: 0.2 })]);
+      }
+    },
+  });
+  dispatcher.enqueue([{ ...makePacket("p-deep", { complexity: 0.9 }), requiredTier: "deep" }]);
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+
+  expect(
+    results.filter((r) => r.outcome === "success").map((r) => r.packet.id),
+    "the reentrantly enqueued packet completes on the healthy pool",
+  ).toEqual(["p-late"]);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.stranded_ids, "only the pause-blocked packet strands").toEqual(["p-deep"]);
+  expect(terminal.reason).toBe("quota_paused");
+});
+
+test("createRollingDispatcher — a REUSED dispatcher does not inherit a prior run's wall reset: a later permanent strand classifies empty_pool (lifecycle hygiene)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      { ...makePool("strong", { rank: "deep", declaredCapabilityRank: 1 }), contextCapTokens: 30_000 },
+      { ...makePool("weak", { rank: "small", declaredCapabilityRank: 9 }), contextCapTokens: 30_000 },
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) =>
+      slot.poolId === "strong"
+        ? {
+            packet,
+            outcome: "rate_limited",
+            rateLimit: { channel: "error", text: "You've hit your session limit. Resets in 2h" },
+          }
+        : { packet, outcome: "success" },
+  });
+  // Run 1: pause wall strands the deep packet and captures the wall reset.
+  dispatcher.enqueue([{ ...makePacket("p-deep", { complexity: 0.9 }), requiredTier: "deep" }]);
+  await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the pause wall did not fire")), 15_000),
+    ),
+  ]);
+  expect(dispatcher.getTerminal().reason).toBe("quota_paused");
+
+  // Run 2 on the SAME dispatcher, pauses gone, with a packet that is
+  // PERMANENTLY unfittable (context-capped everywhere). Pre-fix the stale
+  // run-1 capture leaked through getTerminal's fallback and classified this
+  // permanent strand as retryable quota_paused (adversarial-review finding,
+  // codex 2026-07-23). stranded_ids accumulate across runs by existing
+  // contract — only the REASON is under test here.
+  dispatcher.getState().pausedPoolResetAt.clear();
+  dispatcher.enqueue([{ ...makePacket("p-nofit"), estimatedTokens: 50_000 }]);
+  await dispatcher.run();
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "no live pause + no wall this run → empty_pool").toBe("empty_pool");
+  expect(terminal.stranded_ids.sort()).toEqual(["p-deep", "p-nofit"]);
+});
+
+// ---------------------------------------------------------------------------
 // Engine decision log (legibility, spec Resolved decision 3): every per-packet
 // engine decision — admit, ledger block, strand — is emitted through the
 // onAdmissionDecision seam as a stamped record. No decision path is silent.
