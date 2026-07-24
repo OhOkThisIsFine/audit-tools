@@ -8,10 +8,11 @@ All 101 entries were classified by the free NIM roster, **one entry per call**. 
 into one call failed every time (`ECONNRESET`, or 28+ minutes with no first byte); a single entry is
 1–3KB and returns in ~10s, so the reliable unit is one entry per request, pooled six-wide across
 `glm-5.2` / `deepseek-v4-pro` / `minimax-m3` / `qwen3.5-397b` / `deepseek-v4-flash` /
-`nemotron-3-super-120b` with retry across a DIFFERENT alias on failure. Runner:
-`scratchpad/nim-triage.mjs`. First pass returned 101/101 failures — the proxy had died; see the
-friction entry. Second pass: 94/101, the 7 misses all `finish_reason=length` at `max_tokens: 1200`,
-which a re-run at 4000 cleared.
+`nemotron-3-super-120b` with retry across a DIFFERENT alias on failure. First pass returned 101/101
+failures — the proxy had died; see the friction entry. Second pass: 94/101, the 7 misses all
+`finish_reason=length` at `max_tokens: 1200`, which a re-run at 4000 cleared. The reusable recipe is in
+project memory ([[nim-offload-reliable-unit-is-one-entry]]); the runner itself was per-lap scratch and is
+deliberately not referenced here — a pointer into a session temp dir is a dangling pointer next lap.
 
 Rough shape: ~44 actionable, ~24 owner-decision, ~20 accepted-residual-or-lesson, ~14 live/env-blocked.
 The classification is a LEAD, not a verdict — every entry acted on below was re-verified against HEAD
@@ -102,7 +103,21 @@ expectations — those encode real list prices and are what caught it.
   self-reported `resolved` trusted through marshal and the hard-fail gate disarmed. `acceptReconcile`
   cannot save it either — it only repairs blocks WITH landed git evidence (`acceptReconcile.ts:143-146`),
   which a never-landed node lacks by construction. Correct order: **record sidecar → mark terminal →
-  drop token → persist session → release claim → throw last.**
+  drop token → persist session → release claim → throw last.** Persist-then-release is the right way
+  round: a persist failure leaves claim and session both intact (today's behaviour, 30s window still
+  valid), whereas a release failure leaves the session terminal with the token already dropped, so
+  nothing reads a stale token and the orphan goes stale in 30s.
+  ⚠ A blanket `try/finally` is still wrong, but for a different reason than this lap first gave: a throw
+  out of `acceptNodeWorktree` itself (`:547`) is a genuinely INDETERMINATE outcome, not a terminal one, so
+  it must keep its claim. Only a *returned* outcome is terminal — `resultOutcome` is typed
+  `Promise<{outcome: "success" | "error"; …}>`, which is what makes every return from the host-subagent
+  path terminal by construction.
+  **Red-green recipe** (the whole design is unverified without it): extend the stray fixture at
+  `tests/remediate/host-rolling-dispatch.test.ts:534` and assert three things after the rejection — (i)
+  `node-claims.json` has no entry for the stray block, (ii) the persisted rolling-session lists it terminal
+  with its token dropped from `claims`, and (iii) the directive a SIBLING node's accept returns does not
+  tell the host to reverify a node that has no quarantine ref. Invert by moving the throw back above the
+  terminal block: (i) must go red while the sibling tests stay green.
 - **`withinRoot` duplication.** Six sites, not five; the entry's line numbers have drifted. Plan drew a
   FATAL objection — do not apply as designed.
 - **Keyless `openai-compatible` endpoints.** Coupled to the endpoint-probe SPEC, not independent: an
@@ -111,7 +126,9 @@ expectations — those encode real list prices and are what caught it.
 
 ## Environment
 
-- **Codex dispatch unavailable** — usage limit, resets Jul 30. Not a config problem.
+- **Codex** was quota-walled for the duration of this lap, so every adversarial lane ran on NIM/agy
+  instead. The quota has since been reset and `codex exec` is verified working — treat the lane as
+  available.
 - **agy** works headless, prompt-inlined only.
 - **NIM** is excellent per-entry, unreliable in bulk. The proxy died mid-lap and had to be restarted
   (`PYTHONIOENCODING=utf-8 litellm --config ~/.audit-code/litellm-config.yaml --port 4000`).

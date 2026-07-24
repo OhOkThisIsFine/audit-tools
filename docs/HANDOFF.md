@@ -9,7 +9,7 @@
 
 - **Backlog clearance lap, 2026-07-24 (`6df9100e`, unreleased — still v0.34.27).** Whole file
   re-triaged (one NIM call per entry — batching 27 at a time died every time), then five fixes landed
-  and **one reverted**. `open-bugs.md` is 108 → 95 entries, ~154KB → ~145KB, baseline ratcheted.
+  and **one reverted**. `open-bugs.md` is 108 → 96 entries, 154KB → 143KB, baseline ratcheted twice.
   ⚠ **The revert is the load-bearing finding.** Regenerating the price snapshot fixes the inert
   provider-scoped path but rewrites the flat table to the CHEAPEST price across providers, which ranks
   `claude-opus-4-8` at $0.85 blended — **below haiku** — so cost-first routing at λ=0 would send every
@@ -21,24 +21,15 @@
   ⚠ **Adversarial review overturned two premises of the remediate claim-leak item** — see IMMEDIATE
   NEXT item 2. Record: [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md).
 
-- **Prior backlog clear-out lap (`d4c8e9ea`).** All 176 entries
-  re-verified against HEAD, then every close/rewrite verdict attacked by an independent adversary on
-  a different model lane; that second pass **overturned 41 of 62** verdicts it examined, almost all
-  "delete" → "rewrite" because half the entry was still live. Backlog is now **split by section**
-  under `docs/backlog/` (index at `docs/backlog.md`) with a **shrink-only size budget**
-  (`check:backlog-budget`, in `verify:checks`; ceilings in `docs/backlog/.size-baseline.json`).
-  Shipped alongside: **FLW-COR-003 host half** (loop-core, attested), **fixture hermeticity**
-  (per-invocation roots + build-vs-suite guard + false-RED gate), the **generated loop-core path
-  list**, heavy-test timeouts, and 11 verified doc fixes.
-  ⚠ **Two corrections worth carrying:** (1) FLW-COR-003's backlog-prescribed fix — "release claims
-  on every path that claims" — was WRONG; the lease must span out-of-process workers
-  (`dispatch.ts:129-136`), and the real leak was merge throwing before its own release. (2) The
-  `analyzerDeps` "live npm install E404" entry was REFUTED: no test shells out to npm; it was a
-  stub-log leak manufacturing a convincing false alarm. Both are the same class the backlog keeps
-  hitting — an entry paraphrasing its own incident until the mechanism inverts.
-  **Immediate next is now item 2 below** (FLW-COR-003 is done); ~74 triaged `fix_now` items remain,
-  detail in `docs/backlog/open-bugs.md`.
-- **Current version = `package.json`** (authoritative): v0.34.27. The backlog clear-out lap above is
+- **⚠ Two corrections carried from the prior clear-out lap (`d4c8e9ea`) — both still live.**
+  (1) FLW-COR-003's backlog-prescribed fix, "release claims on every path that claims", was WRONG: the
+  lease must span out-of-process workers (`dispatch.ts:129-136`), and the real leak was merge throwing
+  before its own release. (2) The `analyzerDeps` "live npm install E404" entry was REFUTED — no test
+  shells out to npm; it was a stub-log leak manufacturing a convincing false alarm. Both are the class
+  the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
+  lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
+  it examined — and overturned two more premises this lap (see item 2).
+- **Current version = `package.json`** (authoritative): v0.34.27. Both clear-out laps are
   UNRELEASED. **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately
   not restated here** (this section had grown to ~107 lines of version-by-version narration, which is
   the changelog creep this doc's own header forbids).
@@ -137,13 +128,18 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. Work the triaged `fix_now` queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). ~74
-entries carry a verified fix sketch naming files, mechanism and how a test pins it red-green; ~24 are
-loop-core (attestation required). Highest-value clusters: the proxy-lane populate/refresh command (a
-drop reason names an internal function no operator can run), `dropped[]` reasons never rendered at
-Gate-0, the `top_k` alphabetical truncation that silently drops the frontier tier, and the
-remediate-side node-claim twin below. Then **Gate-0 priority-order UX** (Track 3 — decisions
-resolved, implementation remains).
+**1. Work the actionable queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). Re-triaged
+2026-07-24 across the 96 surviving entries: **~44 actionable, 24 owner-decision, 20
+accepted-residual-or-lesson, 14 live/env-blocked**; roughly a third of the actionable set is loop-core
+(attestation required). ⚠ Treat that classification as a LEAD — two entries it called actionable were
+verified and then rejected (one coupled to another spec, one premised on drifted line numbers).
+Remaining high-value clusters: the proxy-lane populate/refresh command (a drop reason names an internal
+function no operator can run), `dropped[]` reasons never rendered at Gate-0 (**not yet traced** — verify
+before designing), and the advance-command-in-worker-prompts defect (any delegated executor becomes a
+second driver; 10+ emit sites, two of them loop-core, so it wants its own lap). Then **Gate-0
+priority-order UX** (Track 3 — decisions resolved, implementation remains).
+The `top_k` truncation and the remediate node-claim twin that used to head this list are respectively
+DONE and designed-not-applied (item 2).
 
 **2. The remediate claim-leak twin — DESIGNED, not applied; loop-core, needs attestation.** Confirmed
 at HEAD: `rollingSession.ts` claims at `:442`, releases at `:601-604`, persists at `:623`, and the
@@ -157,8 +153,11 @@ hang**, not a timed stall.
 into `accept_failed` makes the host directive (`nextStep.ts:2264-2269`) promise a quarantine ref that a
 never-committed stray does not have, turning a hard stop into a confidently-wrong `reverify-node`
 instruction. The stray needs its OWN terminal class carrying its diagnostic, plus a pinned intra-block
-order (record outcome → mark terminal → drop token → persist → release → throw last). Full corrected
-design in the workflow journal cited by [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md).
+order (record sidecar → mark terminal → drop token → persist → release → throw last; the sidecar must
+stay FIRST because `marshal.ts` derives `acceptHardFailed` from it and a null one disarms the gate).
+**The full corrected design, including the red-green recipe, is in
+[`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md) → "Verified real, NOT
+fixed"** — that record is self-contained; do not go looking for a workflow transcript.
 Also still open: FLW-COR-003's second half, "a zero-granted round pauses the drain" — a SEPARATE
 property, still unverified; check it at HEAD first. Both in [`open-bugs.md`](backlog/open-bugs.md).
 

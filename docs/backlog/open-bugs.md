@@ -8,19 +8,18 @@
 
 
 
-- **`open-bugs.md` is still ~155KB / ~39k tokens — the split made three files a bounded read, not
-  this one (2026-07-24, medium, friction: inefficient-feeding).** Splitting the single 1,706-line
-  backlog by section fixed `forward-tracks` / `deferred` / `durable-traps`; this section is ~107
-  entries and remains too large to read in one call, which is the condition that let ~21% of entries
-  go stale unnoticed. `npm run check:backlog-budget` now records a per-file and per-entry ceiling in
-  `docs/backlog/.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the ceiling
-  is today's size, not the goal. ⚠ **Condensing alone will NOT get there:** the 14 grandfathered
-  entries carry only ~10KB of EXCESS between them (size *minus budget*, not total size — an earlier
-  draft conflated the two and overstated it as ~51KB), so condensing every one still leaves ~142KB
-  against a 120KB budget. **CLOSING entries is what shrinks it**, making this downstream of the
-  `fix_now` queue, not a separate task. Property: every backlog file is one bounded read. ⚠ Do NOT
-  close this by raising the budget — the driver is narrative accreting onto entries, so a budget that
-  always passes measures nothing.
+- **`open-bugs.md` is 143KB / 96 entries against a 120KB budget — still not one bounded read
+  (2026-07-24, medium, friction: inefficient-feeding).** Splitting the single 1,706-line backlog by
+  section fixed `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read
+  in one call, which is the condition that let ~21% of entries go stale unnoticed.
+  `npm run check:backlog-budget` records a per-file and per-entry ceiling in
+  `docs/backlog/.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the ceiling is
+  today's size, not the goal. ⚠ **Condensation is now EXHAUSTED as a lever — measured, not estimated:**
+  total excess over the 2600-char per-entry budget is **2,989 chars across all 96 entries**, so squeezing
+  every oversized entry to budget sheds ~3KB and leaves ~140KB. The remaining 23KB can only come from
+  **CLOSING entries**, which makes this downstream of the actionable queue, not a separate task.
+  Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
+  driver is narrative accreting onto entries, so a budget that always passes measures nothing.
 
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
