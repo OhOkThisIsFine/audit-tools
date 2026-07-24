@@ -229,6 +229,21 @@
   Both halves were attempted and reverted in this lap (`548380df` → restored); nothing is
   half-applied at HEAD.
 
+- **Stale agent worktrees are never pruned, and their `dist/` pollutes every repo-wide grep
+  (2026-07-24, low, friction: tool-should-decide).** Four worktrees survive under `.claude/worktrees/`
+  from prior agent runs (`git worktree list` shows them; three on old `worktree-agent-*` branches, one
+  on a detached HEAD). All four are clean and their content is in main — the detached one's commit
+  message ("deadline-safe transport for slow-first-byte NIM calls") never landed under that sha but its
+  mechanism did (`deadlineBoundFetch`, `openAiCompatibleProvider.ts:84-85`) — so they are stale
+  duplicates, not unmerged work. The cost is real anyway: verifying the header-extraction island was
+  dead, a repo-wide grep for its symbols hit `.claude/worktrees/agent-a22494cc1a9cb610d/dist/` and
+  reported the deleted code as still referenced. A stale build tree that answers greps as if it were
+  source is a false-positive generator for exactly the dead-code and residual-reference checks this
+  project runs. Property: a completed agent worktree is removed by whatever created it, or a periodic
+  prune reaps any whose HEAD is an ancestor of `main` and whose tree is clean; a repo-wide grep must
+  never see a build output. ⚠ Do not blanket-`git worktree remove` without the ancestor+clean check —
+  that is how genuinely unmerged agent work gets destroyed.
+
 - **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
   to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
   returned 101 failures — every one `connect ECONNREFUSED 127.0.0.1:4000`, i.e. the proxy had died
