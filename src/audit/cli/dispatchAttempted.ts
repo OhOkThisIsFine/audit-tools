@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { readJsonFile, writeJsonFile } from "audit-tools/shared";
 
 /** Filename of the run-scoped attempted-packets sidecar. */
-export const DISPATCH_ATTEMPTED_FILENAME = "dispatch-attempted.json";
+const DISPATCH_ATTEMPTED_FILENAME = "dispatch-attempted.json";
 
 /**
  * Record packets this round attempted, UNIONED with what the run already

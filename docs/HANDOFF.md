@@ -7,7 +7,27 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.26 (2026-07-23) shipped the first two
+- **Current version = `package.json`** (authoritative). v0.34.27 (2026-07-24) shipped the
+  **partial-wave deferral** (the runtime-loop track's DEFECT 3(a)) plus the **openai-compatible
+  declared-timeout transport**. (1) merge-and-ingest counted every planned task with no result file
+  as `failing`, so a normal rolling partial wave exited 2 and the re-run threw "All N assigned task
+  result(s) were missing or invalid" (exit 1) — live: 3 packets granted against 430 planned. A
+  run-scoped `dispatch-attempted.json` now records which packets were actually handed to a worker
+  (host = `admission.granted_packet_ids`; in-process = what the rolling engine drove, so strands stay
+  unattempted), and merge DEFERS an unattempted task instead of failing it; deferred tasks keep their
+  claims, stay out of retry-dispatch, and suppress the merge-complete marker. The record is a
+  monotonic union per run. ⚠ **The backlog's "entangled with FLW-COR-003 / in-flight work" premise was
+  WRONG** — the defect was about *planned-but-ungranted* tasks and needed no claim-lease state; claim
+  liveness was tried as the discriminator and refuted by existing tests (claims are taken at PLAN time
+  for the whole candidate set). Loop-core, independent review (its one real finding — the
+  multi-round sidecar clobber via `semanticReviewStep`'s persisted run id — fixed in-lap as the
+  union), attested, red-green validated by mutation. (2) The openai-compatible lane bounded requests
+  with an AbortController at the declared `timeoutMs` but sent them through `globalThis.fetch`, whose
+  ~5-min `headersTimeout` fired first — each launch now builds an undici `Agent` bound to the declared
+  deadline. **Next in the runtime-loop track: the HOST half of FLW-COR-003** (backlog *Open bugs*) —
+  the in-process driver releases claims at drive end, but `prepareDispatchCommand` and
+  `semanticReviewStep` claim and never sweep. **A2 oracle corpus stays PARKED.**
+  v0.34.26 (2026-07-23) shipped the first two
   **runtime-loop stability** fixes (owner redirect: stabilize before A2). (1) **Quarantine-loudly all
   6 `runOmittableGate` incoming submissions** — the synthesis_narrative / critical_flow_fallback /
   charter_extraction / charter_delta / charter_clarification / systemic_challenge gates handed the raw
@@ -208,19 +228,20 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. DEFECT 3(a) — partial-wave merge-and-ingest exit-code lie (FOCUSED-LAP, do not rush).** A normal
-rolling partial wave (N results present, M dispatched-but-in-flight, zero actually-invalid) exits 2,
-then "All N assigned task result(s) were missing or invalid" / exit 1 on re-run — because
-`validateAndCollectResults` has no deferred/in-flight bucket (`mergeAndIngestCommand.ts:403-407`,
-loop-core). **⚠ Entangled with the HIGH claim-release-on-worker-failure item (FLW-COR-003):**
-distinguishing "in-flight/deferred" from "genuinely missing" needs the claim-lease state at merge, so
-treat it as ONE focused claim-lifecycle lap, not a tail-end exit-code patch — the repo's most delicate
-substrate ([[rolling-lifecycle-unify-full-unification-wrong]] governs). Full mechanism + entanglement
-in backlog *Open bugs* (the "partial-wave merge presents success as failure — STILL REAL" entry).
+**1. FLW-COR-003 — the HOST half of claim-release-on-worker-failure.** The in-process rolling driver
+already sweeps (`releaseOwnedTaskClaims` at `rollingAuditDispatch.ts:675` / `:485`, commit `681df1f5`),
+but the other two claimers never do: `prepareDispatchCommand.ts:36` (the CLI `prepare-dispatch`) and
+`semanticReviewStep.ts:119` claim the candidate set and rely solely on merge's terminal `clear()`, so a
+host round whose workers all die holds its claims for the full 20-min lease and every interleaved
+next-step sees them peer-claimed. Loop-core → attestation required. Backlog *Open bugs* carries the
+mechanism (the FLW-COR-003 entry, downgraded to medium after the code trace). ⚠ Its second half — "a
+zero-granted round pauses the drain" — is a SEPARATE property; verify it at HEAD before working it, the
+per-packet pause wall and host-dispatch wall have both landed since it was written.
 
-**2. Other runtime-loop / open bugs** in backlog *Open bugs / frictions* (e.g. the openai-compatible
-headers-timeout — verified fixable; the two-key chatty-worker design-review quarantine LEAD just
-logged). Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
+**2. Other runtime-loop / open bugs** in backlog *Open bugs / frictions* (the two-key chatty-worker
+design-review quarantine LEAD; the vitest-exits-1-while-green trap; the remediate node-claim
+merge-only-release LEAD, which is the same defect class as item 1 — one core, two draws). Then
+**Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in backlog
 *Deferred / waiting*) — resume once stability work is complete.

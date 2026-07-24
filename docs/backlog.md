@@ -75,6 +75,26 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **A full vitest run can exit 1 while reporting 7400 passed / 0 failed (2026-07-24, low,
+  friction: trap).** Observed twice in one lap on the full three-area run: vitest reports
+  `Errors 1 error` → `[vitest-worker]: Timeout calling "onTaskUpdate"` (an internal reporter RPC
+  timeout under load), which sets a non-zero exit code even though every test passed. A green run
+  therefore reads as red by exit code alone — the exact false-signal class
+  [[lap-green-must-match-ci-evidence]] warns about, inverted. Property: distinguish a harness
+  reporting failure from a test failure before treating a non-zero vitest exit as red — check the
+  `Tests` line, not just `$?`. Fix candidate: raise the worker RPC timeout, or fail only on
+  `Tests failed > 0` in the gate wrapper.
+
+- **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
+  implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
+  "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary
+  record ([`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md) #14 + the run-state section)
+  says the tasks were **undispatched** — never granted. Reading the backlog entry first produced a
+  claim-liveness discriminator that was wrong and had to be replaced after existing tests refuted it.
+  Same family as [[backlog-prose-decays-verify-against-head]] but sharper: the decay was not staleness
+  but a paraphrase that changed the mechanism. Property: an entry that reinterprets an incident must
+  quote or link the primary record's own words for the mechanism, not restate them.
+
 - **LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object
   envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined,
   not unwrapped.** The design-review prompt now instructs `{ "findings": [ ... ] }`, and the ingest
@@ -148,15 +168,23 @@ followed" is otherwise indistinguishable from a bug.
   bites on large repos, reuse the snapshot keyed on HEAD sha. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #8.
 
-- **⬇ LIVE (re-dogfood endgame 2026-07-22, HIGH): claim release is merge-only + a zero-granted
-  dispatch round doesn't pause the drain → completion livelock at the wall.** With every NIM
-  worker 429-failing, claims from a failed round sat live for the full 20-min lease
-  (`AUDIT_TASK_CLAIM_LEASE_MS`, dispatch.ts:135; release happens only in
-  mergeAndIngestCommand.ts:833); every interleaved next-step then saw all pending tasks
-  peer-claimed → dispatch plan `[]` → obligation unsatisfied → drain re-selected it to
-  `maxTransitions(100)`, exit 1, one empty run dir per ~10s (571 accumulated). Properties: a
-  zero-granted round pauses the drain (a wall is a pause, not a spin), and claims release on
-  worker failure, not only at merge. Captured as findings FLW-COR-003 / COR-6ba55c63. Record:
+- **FLW-COR-003 claim-release livelock — the IN-PROCESS half is SHIPPED; the HOST half is what
+  remains (2026-07-22, downgraded from HIGH to medium 2026-07-24 after a code trace).** Original:
+  with every NIM worker 429-failing, claims from a failed round sat live for the full 20-min lease
+  (`AUDIT_TASK_CLAIM_LEASE_MS`, dispatch.ts:135); every interleaved next-step then saw all pending
+  tasks peer-claimed → dispatch plan `[]` → obligation unsatisfied → drain re-selected it to
+  `maxTransitions(100)`, exit 1, one empty run dir per ~10s (571 accumulated).
+  **Already fixed for the in-process rolling driver** (commit `681df1f5`): `releaseOwnedTaskClaims`
+  (dispatch.ts:149) is called at drive end (`rollingAuditDispatch.ts:675`) and on the empty-plan
+  round (`:485`), so a failed/stranded round frees its claims immediately.
+  **Still open — the HOST path never releases.** `prepareDispatchArtifacts` claims the candidate set
+  for all three callers, but only the rolling driver sweeps; `prepareDispatchCommand.ts:36` (the
+  `audit-code prepare-dispatch` CLI) and `semanticReviewStep.ts:119` claim and rely solely on merge's
+  terminal `clear()` — so a host round whose workers all die still holds its claims for the lease.
+  Property: claims release on worker failure, not only at merge, on EVERY path that claims.
+  ⚠ The "zero-granted round pauses the drain" half is a SEPARATE property from claim release — verify
+  it independently at HEAD (the per-packet pause wall and host-dispatch wall have both landed since
+  this was written). Record:
   [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
 
 - **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
@@ -261,15 +289,14 @@ followed" is otherwise indistinguishable from a bug.
   default headers timeout (~5 min) fires before a big model's FIRST byte on heavyweight
   analytical calls (no streaming). Helper now POSTs via `node:http` with a 30-min ceiling
   (`LLM_TIMEOUT_MS`); prior glm-only observations 5-6 are likely the same cause (unproven).**
-  What REMAINS open here for the repo — **VERIFIED by mechanism 2026-07-23, now a fixable
-  defect:** the in-repo openai-compatible lane (`openAiCompatibleProvider.ts:183-251`) bounds the
-  request with its own AbortController at `input.timeoutMs` (audit default **30 min**,
-  `src/audit/cli/args.ts:32`), but the `fetch` underneath still rides undici's ~5-min default
-  headersTimeout — so a >5-min-TTFB call dies `UND_ERR_HEADERS_TIMEOUT` (classified transient,
-  retried, dies again ×3) and the lane reads dead at ~15 min despite the 30-min declared budget.
-  Remediate's 300s default coincidentally masks it. Property: the transport's headers timeout
-  must follow the declared `timeoutMs` (protocol-aware node:http/https request, or an undici
-  Agent with `headersTimeout` aligned), so the ONLY timeout in play is the declared one.
+  The in-repo half is **SHIPPED (v0.34.27, 2026-07-24)**: each launch now builds its own transport —
+  an undici `Agent` whose `headersTimeout`/`bodyTimeout` follow the declared `input.timeoutMs` — so
+  `globalThis.fetch`'s un-overridable ~5-min `headersTimeout` is no longer in play and the only
+  timeout is the declared one. (`undici` added as a runtime dep: it IS Node's fetch implementation,
+  pure JS, and transport is correctness-sensitive enough to acquire rather than own.) ⚠ A >5-min
+  time-to-first-byte is not exercisable in a unit test; what is pinned is that the launch does not
+  route through the global fetch. If a live NIM run still shows `UND_ERR_HEADERS_TIMEOUT` from the
+  in-repo lane, the remaining suspect is the roster's genuine bimodal latency, not the transport.
   Second live observation (2026-07-22 review dispatch): a minimax-m3 structured 8k-token call ran
   >12 minutes and then returned an empty/error body while nemotron answered the identical prompt in
   ~2 min — and glm-5.2/deepseek-v4-pro were hard-429'd at the same moment (third observation for
@@ -303,28 +330,30 @@ followed" is otherwise indistinguishable from a bug.
   legibility fact — 144 granted with leases/explains empty — stays carried by the
   dispatch-legibility entry below.)
 
-- **⬇ LIVE (re-dogfood): partial-wave merge-and-ingest presents success as failure — STILL REAL at
-  HEAD, FOCUSED-LAP (2026-07-21, medium; re-verified 2026-07-23).** A partial wave (N results
-  present, M dispatched-but-in-flight, zero actually-invalid) exits 2, then "All N assigned task
-  result(s) were missing or invalid" / exit 1 on the immediate re-run. Mechanism confirmed at HEAD:
-  `validateAndCollectResults` has no "in-flight/deferred" bucket — a dispatched task whose result
-  file is absent lands in `failing` with "Missing audit result for assigned task."
-  (`mergeAndIngestCommand.ts:403-407`) because `prepareDispatchArtifacts` writes the result-map for
-  every dispatched task up-front; the only benign bucket is `notDispatched` (no result-map entry).
-  Exit code is `failing.length > 0 ? 2 : 0` (`:944,:956-960`), then the all-missing throw
-  (`:783-790`). Property: a partial rolling wave exits 0 with a deferred/pending count, reserving
-  "missing or invalid" for a result that ARRIVED and failed validation (or whose claim was released
-  without one). **⚠ ENTANGLED — do not rush:** distinguishing "in-flight/deferred" from "genuinely
-  missing" requires the claim-lease state at merge time, which is the same machinery as the HIGH
-  claim-release-on-worker-failure item above (FLW-COR-003, `claim release is merge-only`). Treat as
-  ONE focused claim-lifecycle lap, not a tail-end exit-code patch — this is the repo's most delicate
-  substrate ([[rolling-lifecycle-unify-full-unification-wrong]] governs). Record:
-  [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md) / `re-dogfood-endgame-2026-07-22.md`.
+- **RESIDUAL of the SHIPPED partial-wave deferral (v0.34.27, 2026-07-24, low).** The exit-code lie
+  itself is fixed: a run-scoped `dispatch-attempted.json` sidecar records which packets were actually
+  handed to a worker (host path = `admission.granted_packet_ids`; in-process = the packets the rolling
+  engine drove, so strands stay unattempted), and merge DEFERS a missing result whose packet was never
+  attempted instead of failing it. Deferred tasks are excluded from `terminalTaskIds` (claims no longer
+  cleared), from retry-dispatch, and suppress the merge-complete marker; the `passing===0 && failing>0`
+  throw no longer fires while work is deferred. The record is a monotonic UNION per run (a run id
+  outlives one round — `semanticReviewStep` prepares against a persisted `activeReviewRun.run_id`).
+  ⚠ **The entanglement premise in the old entry was WRONG and cost a wrong first implementation:** the
+  defect was never about in-flight work, so it needed no claim-lease state and was NOT entangled with
+  FLW-COR-003. The result-map is written for the WHOLE plan (`dispatch.ts:608`) BEFORE admission grants
+  a prefix (`:640`), so every *planned-but-ungranted* task carried the "dispatched" marker — the live
+  case was 3 packets granted against 430 tasks planned, and the incident record says so verbatim
+  ("~427 tasks remain **undispatched** — deferred, not dropped"). Claim liveness was tried as the
+  discriminator first and refuted by two existing wrapper tests: claims are taken at PLAN time for the
+  whole candidate set, so a live own-token claim only means "claimed within the lease".
+  Accepted residuals, revisit on live evidence: (a) with NO sidecar the pre-fix classification stands
+  (deliberate — an unrecorded round must not swallow failures), so any future third dispatch path must
+  record its attempted set or its partial waves regress; (b) the union is per-run and never pruned, so
+  a very long-lived run id accumulates packet ids (bounded by the run's plan, not unbounded).
   ⚠ **The companion "idempotent REPLAY of a completed merge flips the exit code" claim (FLW-COR-002)
-  is REFUTED at HEAD** — a replay returns `has_failures:false` → exit 0 (`:599-604`), and the
-  `merge-complete.json` marker is written only by a zero-failure merge that ALSO exits 0
-  (`:940-944`), so replay matches the original. The observed 2→1 instability was the partial-wave
-  re-run above, mischaracterized as a replay flip.
+  is REFUTED at HEAD** — a replay returns `has_failures:false` → exit 0, and the `merge-complete.json`
+  marker is written only by a zero-failure merge that ALSO exits 0, so replay matches the original. The
+  observed 2→1 instability was the partial-wave re-run above, mischaracterized as a replay flip.
 
 - **⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply
   (2026-07-21, low).** The dispatch prompt wants per-result `{input_tokens, output_tokens}`; Claude
