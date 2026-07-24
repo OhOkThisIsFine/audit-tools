@@ -21,6 +21,7 @@ import type { HostModelRosterEntry, ProviderRateLimits, QuotaBindingWindow } fro
 import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedCapabilityRanks, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
 import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
+import { recordAttemptedPackets } from "./dispatchAttempted.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -234,6 +235,15 @@ export async function prepareDispatchArtifacts(params: {
    * not double-lease. Defaults to true. See `finalizeDispatchQuota`.
    */
   grantLeases?: boolean;
+  /**
+   * Whether to record the admission grant as this round's ATTEMPTED packet set
+   * (`dispatch-attempted.json`, read by merge to tell deferred work from failed
+   * work). True for the host path, which dispatches exactly the grant. The
+   * in-process rolling driver passes `false` and records the packets its engine
+   * actually drove — the grant would over-state attempts there, and the record is
+   * a monotonic union, so an over-statement cannot be taken back. Defaults to true.
+   */
+  recordAttemptedGrant?: boolean;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -661,6 +671,22 @@ export async function prepareDispatchArtifacts(params: {
       });
     },
   });
+
+  // Record what this round will actually attempt. The result map above covers the
+  // WHOLE packetized plan, but the dispatch prompt instructs the host to run
+  // exactly `admission.granted_packet_ids` — so without this, every planned-but-
+  // ungranted task looks "dispatched with no result" at merge and is counted a
+  // failure (the partial-wave exit-code lie: 3 granted against 430 planned read
+  // as "All 430 assigned task result(s) were missing or invalid").
+  //
+  // Skipped for the in-process rolling driver, which hands the whole PLAN to an
+  // engine that admits per packet itself: there the grant is not the attempted
+  // set, and since the record is a monotonic union the driver cannot subtract a
+  // grant recorded here. It records the packets the engine actually drove
+  // instead, so a stranded packet stays correctly unattempted.
+  if (params.recordAttemptedGrant !== false) {
+    await recordAttemptedPackets(runDir, admission.granted_packet_ids);
+  }
 
   // Fail loud when self-quota monitoring is blind on the host-dispatch path (no live
   // snapshot ⇒ the fan-out is unpaced). Single-sourced with remediate so both emit the

@@ -1,6 +1,6 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile, ClaimRegistry, taskClaimsPath, reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
+import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile, ClaimRegistry, taskClaimsPath, reconcileAdmissionLeasesFromQuotaFile, type ClaimRecord } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults, defaultFindingLensFromResult, emitCoverageLineCountFriction } from "../validation/auditResults.js";
@@ -26,6 +26,7 @@ import { artifactNameForId, isCanonicalResultFilename, getArtifactsDir, getFlag 
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 import { readOwnerTokens } from "./ownerTokens.js";
+import { readAttemptedPackets } from "./dispatchAttempted.js";
 import { recordHostTokenUsageObservation } from "./dispatch/tokenUsageObservation.js";
 
 // Schema pointer files prepare-dispatch copies into task-results/ for optional
@@ -288,18 +289,18 @@ export interface UnownedTask {
  * 20-min task lease the dispatch side claims under) beneath a token that is
  * NOT ours is unambiguous evidence of a peer's reclaim.
  *
- * `registry` is narrowed to `listLiveClaims` alone so callers can inject a
- * fake in tests without standing up a real file-backed `ClaimRegistry`.
+ * Takes the live-claim map rather than the registry so ONE snapshot serves
+ * every claim-lifecycle decision in a merge (this gate and the in-flight
+ * deferral below). Two reads could observe a peer reclaim landing between them
+ * and partition the same round inconsistently.
  */
-export async function partitionByOwnership<T extends { task_id: string }>(
+export function partitionByOwnership<T extends { task_id: string }>(
   items: readonly T[],
   ownerTokens: Readonly<Record<string, string>>,
-  registry: Pick<ClaimRegistry, "listLiveClaims">,
-): Promise<{ owned: T[]; unowned: UnownedTask[] }> {
+  claims: Readonly<Record<string, ClaimRecord>>,
+): { owned: T[]; unowned: UnownedTask[] } {
   const owned: T[] = [];
   const unowned: UnownedTask[] = [];
-  const anyTokenPersisted = items.some((item) => ownerTokens[item.task_id] !== undefined);
-  const claims = anyTokenPersisted ? await registry.listLiveClaims() : {};
   for (const item of items) {
     const token = ownerTokens[item.task_id];
     if (token === undefined) {
@@ -319,6 +320,70 @@ export async function partitionByOwnership<T extends { task_id: string }>(
   return { owned, unowned };
 }
 
+/**
+ * A dispatched task that did not reach `passing` this round.
+ *
+ * `kind` is the discriminator the in-flight deferral below turns on, and it is
+ * carried explicitly rather than sniffed from the error text: `"invalid"` means
+ * a result ARRIVED and failed parse/contract validation (a real, terminal
+ * failure), while `"missing"` means no result file exists yet for a task we
+ * dispatched — which is a failure only if nobody is still working on it.
+ */
+export interface FailingTask {
+  task_id: string;
+  errors: string[];
+  kind: "missing" | "invalid";
+}
+
+/**
+ * Split the `missing` failures into work that was never attempted this round
+ * (`deferred`) and work that was attempted and produced nothing (`failing`) —
+ * the partial-wave fix (2026-07-23).
+ *
+ * The exit-code lie came from a mismatch between two sets that look alike on
+ * disk. `prepareDispatchArtifacts` writes the dispatch result-map for the WHOLE
+ * packetized plan, but admission then grants only an affordable prefix and the
+ * host is told to dispatch EXACTLY the granted set. Every non-granted task
+ * therefore carries a result-map entry — the marker `validateAndCollectResults`
+ * reads as "dispatched" — while nobody was ever asked to run it. In the live
+ * 2026-07-21 run that was 3 packets granted against 430 tasks planned: the merge
+ * ingested the 3 real results, called the other 427 "missing", exited 2, and on
+ * the immediate re-run threw "All 430 assigned task result(s) were missing or
+ * invalid" (exit 1) — a successful partial wave presented as total failure.
+ *
+ * `attemptedPacketIds` is the authority for "was this actually handed to a
+ * worker this round", written by whichever side dispatched (see
+ * `recordAttemptedPackets`). A missing result for a packet nobody attempted is
+ * deferred work; a missing result for a packet that WAS attempted is a genuine
+ * failure and stays one.
+ *
+ * A `null` attempted set means the dispatching side recorded nothing, so there
+ * is no evidence either way — defer nothing and preserve the pre-fix
+ * classification rather than silently swallowing failures.
+ *
+ * `"invalid"` never defers: a result that ARRIVED and failed validation is
+ * terminal no matter who dispatched it.
+ */
+export function partitionUnattemptedMissing(
+  failingTasks: readonly FailingTask[],
+  packetIdByTaskId: ReadonlyMap<string, string>,
+  attemptedPacketIds: ReadonlySet<string> | null,
+): { failing: FailingTask[]; deferred: string[] } {
+  if (attemptedPacketIds === null) return { failing: [...failingTasks], deferred: [] };
+  const failing: FailingTask[] = [];
+  const deferred: string[] = [];
+  for (const item of failingTasks) {
+    const packetId = packetIdByTaskId.get(item.task_id);
+    if (item.kind === "missing" && packetId !== undefined && !attemptedPacketIds.has(packetId)) {
+      deferred.push(item.task_id);
+    } else {
+      failing.push(item);
+    }
+  }
+  return { failing, deferred };
+}
+
+
 export async function validateAndCollectResults(
   allTasks: AuditTask[],
   entryByTaskId: Map<string, { result_path: string; task_id: string; packet_id: string }>,
@@ -327,12 +392,12 @@ export async function validateAndCollectResults(
   frictionContext?: { runId: string; artifactsDir: string },
 ): Promise<{
   passing: AuditResult[];
-  failing: Array<{ task_id: string; errors: string[] }>;
+  failing: FailingTask[];
   notDispatched: string[];
   recoveredCount: number;
 }> {
   const passing: AuditResult[] = [];
-  const failing: Array<{ task_id: string; errors: string[] }> = [];
+  const failing: FailingTask[] = [];
   // Pending tasks that were NOT dispatched this round. Not failures — they
   // re-enter dispatch on the next round.
   const notDispatched: string[] = [];
@@ -403,11 +468,16 @@ export async function validateAndCollectResults(
             failing.push({
               task_id: task.task_id,
               errors: ["Missing audit result for assigned task."],
+              kind: "missing",
             });
             continue;
           }
         } else {
-          failing.push({ task_id: task.task_id, errors: [`Invalid JSON: ${(e as Error).message}`] });
+          failing.push({
+            task_id: task.task_id,
+            errors: [`Invalid JSON: ${(e as Error).message}`],
+            kind: "invalid",
+          });
           continue;
         }
       }
@@ -491,7 +561,9 @@ export async function validateAndCollectResults(
     if (resultErrors.length === 0) {
       passing.push(obj as AuditResult);
     } else {
-      failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors });
+      // A result ARRIVED (from disk or a recovery fallback) and failed
+      // validation — terminal regardless of claim state.
+      failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors, kind: "invalid" });
     }
   }
 
@@ -667,13 +739,35 @@ export async function mergeAndIngest(params: {
   // 30s window would judge liveness against the wrong horizon.
   const ownerTokens = await readOwnerTokens(runDir);
   const claimRegistry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
-  const passingOwnership = await partitionByOwnership(allPassing, ownerTokens, claimRegistry);
-  const failingOwnership = await partitionByOwnership(allFailing, ownerTokens, claimRegistry);
+  // ONE claim snapshot for every claim-lifecycle decision below (ownership gate +
+  // in-flight deferral). Read lazily, preserving the pre-gate behavior that a
+  // round with no persisted owner tokens never consults the registry at all.
+  const anyTokenPersisted = [...allPassing, ...allFailing].some(
+    (item) => ownerTokens[item.task_id] !== undefined,
+  );
+  const liveClaims = anyTokenPersisted ? await claimRegistry.listLiveClaims() : {};
+  const passingOwnership = partitionByOwnership(allPassing, ownerTokens, liveClaims);
+  const failingOwnership = partitionByOwnership(allFailing, ownerTokens, liveClaims);
   const passing = passingOwnership.owned;
-  const failing = failingOwnership.owned;
+  // Partial-wave deferral: of the failures we own, the ones whose packet was
+  // never attempted this round (admission granted a prefix; the rest are planned,
+  // not dispatched) are deferred work, not failures. They keep their claims, keep
+  // the run "partial", and exit 0.
+  const { failing, deferred } = partitionUnattemptedMissing(
+    failingOwnership.owned,
+    new Map([...entryByTaskId].map(([taskId, entry]) => [taskId, entry.packet_id])),
+    await readAttemptedPackets(runDir),
+  );
   const unowned = [...passingOwnership.unowned, ...failingOwnership.unowned].sort(
     (a, b) => a.task_id.localeCompare(b.task_id),
   );
+  if (deferred.length > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] ${deferred.length} planned task(s) were not dispatched this round ` +
+        `(their packet was not in the attempted set) — deferred to a later round, not failures: ` +
+        `${deferred.join(", ")}\n`,
+    );
+  }
   const unownedTasksPath = join(runDir, "unowned-tasks.json");
   if (unowned.length > 0) {
     await writeJsonFile(unownedTasksPath, unowned);
@@ -780,11 +874,17 @@ export async function mergeAndIngest(params: {
     await writeJsonFile(failedTasksPath, failing);
   }
 
-  if (passing.length === 0 && failing.length > 0) {
-    // Nothing merged and at least one failure: a blocked no-op. Do NOT write the
-    // transient results file here — truncating it to [] reads as catastrophic
-    // data loss on a re-run when the cumulative audit_results.jsonl store is in
-    // fact intact and the first merge had simply already succeeded.
+  if (passing.length === 0 && failing.length > 0 && deferred.length === 0) {
+    // Nothing merged, at least one failure, and NOTHING still in flight: a
+    // blocked no-op. Do NOT write the transient results file here — truncating
+    // it to [] reads as catastrophic data loss on a re-run when the cumulative
+    // audit_results.jsonl store is in fact intact and the first merge had simply
+    // already succeeded.
+    //
+    // `deferred.length === 0` is load-bearing: with work still claimed and in
+    // flight this round is progressing, not blocked, and throwing here is the
+    // exit-1 half of the partial-wave lie (the straggler merge that follows
+    // would have landed those results).
     throw new Error(
       `All ${failing.length} assigned task result(s) were missing or invalid; blocked before ingestion. See ${failedTasksPath}`,
     );
@@ -820,8 +920,13 @@ export async function mergeAndIngest(params: {
   // that reached a TERMINAL outcome this round — passing (ingested; now filtered
   // from pending) and failing (will be re-dispatched, so its claim must free up).
   // `notDispatched` (budget-capped) is deliberately left claimed/unclaimed as-is:
-  // it may be a live peer's in-flight work, never ours to clear here. Cleared
-  // unconditionally (no token) since an ingested/terminal result is authoritative.
+  // it may be a live peer's in-flight work, never ours to clear here. `deferred`
+  // is likewise absent from this set BY CONSTRUCTION
+  // (`partitionUnattemptedMissing` lifted it out of `failing`): a task nobody
+  // attempted has reached no outcome at all, so marking it terminal — and
+  // writing it into retry-dispatch — asserted a failure that never happened.
+  // Cleared unconditionally (no token) since an ingested/terminal result is
+  // authoritative.
   // `passing`/`failing` are already the OWNERSHIP-GATED (owned + tokenless) sets
   // — an `unowned` task's claim is deliberately excluded here: it is the peer's
   // claim now, not ours to clear (Part A, D-66/67 slice-1).
@@ -838,11 +943,13 @@ export async function mergeAndIngest(params: {
     const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
     if (dispatch.run_id === runId) {
       // "merged" only when this round is fully drained: every dispatched task
-      // accepted AND nothing held back (budget-capped notDispatched > 0, or
-      // peer-reclaimed unowned > 0, stay "active" — a follow-up round on the
-      // same run-id still has to merge the rest).
+      // accepted AND nothing held back (budget-capped notDispatched > 0,
+      // still-in-flight deferred > 0, or peer-reclaimed unowned > 0, stay
+      // "active" — a follow-up round on the same run-id still has to merge the
+      // rest).
       dispatch.status =
-        failing.length > 0 || notDispatched.length > 0 || unowned.length > 0
+        failing.length > 0 || notDispatched.length > 0 || unowned.length > 0 ||
+        deferred.length > 0
           ? "active"
           : "merged";
       await writeJsonFile(activeDispatchPath, dispatch);
@@ -874,12 +981,14 @@ export async function mergeAndIngest(params: {
   }
 
   // "partial" whenever work remains for this run — either genuine dispatched
-  // failures (failing), tasks held back this round (notDispatched), or tasks a
-  // peer reclaimed since our dispatch (unowned). The exit code below
-  // distinguishes the two: only genuine failures exit non-zero, so a
-  // budget-capped or ownership-gated round reports status "partial" but exits
-  // 0 (progressing, not an error).
-  const status = failing.length > 0 || notDispatched.length > 0 || unowned.length > 0
+  // failures (failing), tasks held back this round (notDispatched), tasks still
+  // in flight under our own live claim (deferred), or tasks a peer reclaimed
+  // since our dispatch (unowned). The exit code below distinguishes the two:
+  // only genuine failures exit non-zero, so a budget-capped, ownership-gated or
+  // partial-wave round reports status "partial" but exits 0 (progressing, not
+  // an error).
+  const status = failing.length > 0 || notDispatched.length > 0 || unowned.length > 0 ||
+    deferred.length > 0
     ? "partial"
     : (result?.progress_made ? "completed" : "no_progress");
   // WorkerResultStatus does not have "partial"; use "blocked" when tasks failed
@@ -910,6 +1019,7 @@ export async function mergeAndIngest(params: {
     accepted_count: passing.length,
     rejected_count: failing.length,
     not_dispatched_count: notDispatched.length,
+    deferred_count: deferred.length,
     unowned_count: unowned.length,
     spurious_file_count: spuriousFiles.length,
     finding_count: findingCount,
@@ -927,17 +1037,21 @@ export async function mergeAndIngest(params: {
   // Record a completion marker for a fully-merged run so a stray re-invocation
   // replays this summary (above) instead of re-processing — and possibly
   // clobbering — terminal state. Only when this round is fully drained: genuine
-  // failures stay replayable for retry, budget-capped rounds (notDispatched > 0)
-  // and ownership-gated rounds (unowned > 0) must NOT be marked complete or a
-  // follow-up merge on the same run-id would short-circuit to an idempotent
-  // replay and silently drop deferred (or peer-reclaimed) results.
+  // failures stay replayable for retry, budget-capped rounds (notDispatched > 0),
+  // partial waves with work still in flight (deferred > 0) and ownership-gated
+  // rounds (unowned > 0) must NOT be marked complete or a follow-up merge on the
+  // same run-id would short-circuit to an idempotent replay and silently drop
+  // the straggler (or peer-reclaimed) results.
   //
   // Selective deepening appends new pending tasks to the SAME run-id; this marker
   // can therefore go stale once those tasks are later dispatched and answered. The
   // replay guard at the top detects that (a pending task with an on-disk result)
   // and re-processes, so a premature marker self-heals instead of stranding the
   // deepening answers behind an idempotent replay (the no-progress loop).
-  if (failing.length === 0 && notDispatched.length === 0 && unowned.length === 0) {
+  if (
+    failing.length === 0 && notDispatched.length === 0 && unowned.length === 0 &&
+    deferred.length === 0
+  ) {
     await writeJsonFile(mergeCompletePath, summaryPayload);
   }
 

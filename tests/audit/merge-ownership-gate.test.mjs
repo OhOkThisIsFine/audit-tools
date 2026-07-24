@@ -25,6 +25,12 @@ const RUN_ID = "run-ownership-gate";
  * what `prepareDispatchArtifacts` + a completed host round would have left on
  * disk: task.json, pending-audit-tasks.json, dispatch-result-map.json, and the
  * per-task result files.
+ *
+ * A `[task, null]` pair is a task that was DISPATCHED but whose result has not
+ * been written — the result-map entry exists (prepare-dispatch writes the map
+ * for the whole granted set up front) while the file does not. That is the
+ * partial-wave shape, and it is why "no result file" cannot by itself mean
+ * "failed".
  */
 async function scaffoldRun(artifactsDir, root, tasksAndResults) {
   const runDir = join(artifactsDir, "runs", RUN_ID);
@@ -52,7 +58,7 @@ async function scaffoldRun(artifactsDir, root, tasksAndResults) {
   const entries = [];
   for (const [t, result] of tasksAndResults) {
     const resultPath = taskResultPath(taskResultsDir, t.task_id);
-    await writeFile(resultPath, JSON.stringify(result), "utf8");
+    if (result !== null) await writeFile(resultPath, JSON.stringify(result), "utf8");
     entries.push({ packet_id: `pkt-${t.task_id}`, task_id: t.task_id, result_path: resultPath });
   }
   await writeFile(
@@ -288,6 +294,178 @@ test("mergeAndIngest ownership gate: a fresh different-token claim is judged LIV
     expect(summary.unowned_count).toBe(1);
     const unowned = JSON.parse(await readFile(join(runDir, "unowned-tasks.json"), "utf8"));
     expect(unowned.map((u) => u.task_id)).toEqual([victim.task_id]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ── Partial-wave deferral (DEFECT 3(a), 2026-07-23). ─────────────────────────
+// The dispatch result-map covers the WHOLE packetized plan, while only the
+// attempted subset is ever handed to a worker. Before the fix every planned-but-
+// unattempted task read as "dispatched, no result" => `failing`: the live
+// 2026-07-21 run ingested 3 granted packets, exited 2, then threw "All 430
+// assigned task result(s) were missing or invalid" (exit 1) on the re-run.
+
+const { recordAttemptedPackets } = await import("../../src/audit/cli/dispatchAttempted.ts");
+
+test("mergeAndIngest partial wave: a planned-but-unattempted task is DEFERRED — exit 0, claim kept, no completion marker", async () => {
+  const root = await mkdtemp(join(tmpdir(), "merge-partial-wave-"));
+  try {
+    await writeFixtureRepo(root);
+    const { planning, lineIndex } = await advanceFixtureToPlanning(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeCoreArtifacts(artifactsDir, planning.updated_bundle);
+
+    const tasks = planning.updated_bundle.audit_tasks;
+    expect(tasks.length >= 2, "fixture must produce at least 2 audit tasks").toBeTruthy();
+    const [attemptedTask, plannedTask] = tasks;
+    const [attemptedResult] = buildSyntheticResults([attemptedTask], lineIndex);
+
+    // Both are planned (both carry result-map entries); only one was attempted,
+    // and only that one wrote a result. This is the rolling wave shape.
+    const { runDir } = await scaffoldRun(artifactsDir, root, [
+      [attemptedTask, attemptedResult],
+      [plannedTask, null],
+    ]);
+    await recordAttemptedPackets(runDir, [`pkt-${attemptedTask.task_id}`]);
+
+    const registry = new ClaimRegistry(taskClaimsPath(artifactsDir));
+    const { ownerTokenByNode } = await registry.claimMany(
+      [attemptedTask.task_id, plannedTask.task_id],
+      RUN_ID,
+    );
+    await mergeOwnerTokens(runDir, ownerTokenByNode);
+
+    const { summary, has_failures } = await mergeAndIngest({ runId: RUN_ID, artifactsDir });
+
+    expect(summary.accepted_count, "the attempted packet's result ingests").toBe(1);
+    expect(summary.deferred_count, "the unattempted task is deferred").toBe(1);
+    expect(summary.rejected_count, "an unattempted task is NOT a failure").toBe(0);
+    expect(has_failures, "a normal partial wave must exit 0, not 2").toBe(false);
+    expect(summary.status).toBe("partial");
+
+    // A deferred task has reached no outcome, so it is not terminal: its claim
+    // survives and it is not queued for retry.
+    const claims = await registry.listClaims();
+    expect(claims[plannedTask.task_id], "a deferred task keeps its claim").toBeTruthy();
+    expect(claims[attemptedTask.task_id], "the ingested task's claim is cleared").toBeUndefined();
+
+    const retryRaw = await readFile(join(runDir, "retry-dispatch.json"), "utf8").catch(() => null);
+    expect(retryRaw, "an unattempted task must not be queued as a retry").toBeNull();
+
+    // No completion marker while planned work remains, or the follow-up merge
+    // would short-circuit to an idempotent replay and drop it.
+    const mergeCompleteRaw = await readFile(join(runDir, "merge-complete.json"), "utf8").catch(() => null);
+    expect(mergeCompleteRaw, "no completion marker while work remains deferred").toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("mergeAndIngest partial wave: the follow-up merge does NOT throw over deferred work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "merge-partial-rerun-"));
+  try {
+    await writeFixtureRepo(root);
+    const { planning, lineIndex } = await advanceFixtureToPlanning(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeCoreArtifacts(artifactsDir, planning.updated_bundle);
+
+    const tasks = planning.updated_bundle.audit_tasks;
+    const [attemptedTask, plannedTask] = tasks;
+    const [attemptedResult] = buildSyntheticResults([attemptedTask], lineIndex);
+    const { runDir } = await scaffoldRun(artifactsDir, root, [
+      [attemptedTask, attemptedResult],
+      [plannedTask, null],
+    ]);
+    await recordAttemptedPackets(runDir, [`pkt-${attemptedTask.task_id}`]);
+
+    const registry = new ClaimRegistry(taskClaimsPath(artifactsDir));
+    const { ownerTokenByNode } = await registry.claimMany(
+      [attemptedTask.task_id, plannedTask.task_id],
+      RUN_ID,
+    );
+    await mergeOwnerTokens(runDir, ownerTokenByNode);
+
+    await mergeAndIngest({ runId: RUN_ID, artifactsDir });
+
+    // Round 1 pruned the ingested task from pending, so the immediate re-run sees
+    // ONLY the deferred one: passing 0, and (pre-fix) failing 1 — exactly the
+    // `passing === 0 && failing > 0` throw that produced exit 1.
+    const round2 = await mergeAndIngest({ runId: RUN_ID, artifactsDir });
+    expect(round2.summary.accepted_count).toBe(0);
+    expect(round2.summary.deferred_count).toBe(1);
+    expect(round2.summary.rejected_count).toBe(0);
+    expect(round2.has_failures, "a re-run over deferred work is not a failure").toBe(false);
+    expect(round2.summary.status).toBe("partial");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("mergeAndIngest partial wave: an ATTEMPTED packet that produced no result is STILL a failure (deferral needs positive evidence)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "merge-partial-attempted-"));
+  try {
+    await writeFixtureRepo(root);
+    const { planning, lineIndex } = await advanceFixtureToPlanning(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeCoreArtifacts(artifactsDir, planning.updated_bundle);
+
+    const tasks = planning.updated_bundle.audit_tasks;
+    const [landedTask, deadWorkerTask] = tasks;
+    const [landedResult] = buildSyntheticResults([landedTask], lineIndex);
+    const { runDir } = await scaffoldRun(artifactsDir, root, [
+      [landedTask, landedResult],
+      [deadWorkerTask, null],
+    ]);
+    // BOTH were dispatched; one worker came back empty. Claims are live and ours
+    // for both — the state that made claim-liveness the wrong discriminator.
+    await recordAttemptedPackets(runDir, [
+      `pkt-${landedTask.task_id}`,
+      `pkt-${deadWorkerTask.task_id}`,
+    ]);
+
+    const registry = new ClaimRegistry(taskClaimsPath(artifactsDir));
+    const { ownerTokenByNode } = await registry.claimMany(
+      [landedTask.task_id, deadWorkerTask.task_id],
+      RUN_ID,
+    );
+    await mergeOwnerTokens(runDir, ownerTokenByNode);
+
+    const { summary, has_failures } = await mergeAndIngest({ runId: RUN_ID, artifactsDir });
+
+    expect(summary.accepted_count).toBe(1);
+    expect(summary.deferred_count, "an attempted packet must not be deferred").toBe(0);
+    expect(summary.rejected_count, "it is a genuine failure").toBe(1);
+    expect(has_failures, "genuine failures still exit non-zero").toBe(true);
+
+    const failed = JSON.parse(await readFile(join(runDir, "failed-tasks.json"), "utf8"));
+    expect(failed.map((f) => f.task_id)).toEqual([deadWorkerTask.task_id]);
+    expect(failed[0].kind).toBe("missing");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("mergeAndIngest partial wave: with NO attempted-packets sidecar the pre-fix classification stands (missing results still block)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "merge-partial-nosidecar-"));
+  try {
+    await writeFixtureRepo(root);
+    const { planning } = await advanceFixtureToPlanning(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeCoreArtifacts(artifactsDir, planning.updated_bundle);
+
+    const [onlyTask] = planning.updated_bundle.audit_tasks;
+    // Dispatched, no result, and nothing recorded what was attempted: with no
+    // evidence either way the tool must NOT swallow it as deferred.
+    await scaffoldRun(artifactsDir, root, [[onlyTask, null]]);
+
+    await expect(
+      mergeAndIngest({ runId: RUN_ID, artifactsDir }),
+    ).rejects.toThrow(/missing or invalid|blocked before ingestion/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -62,6 +62,7 @@ import {
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, loadDispatchResultMap, releaseOwnedTaskClaims, type DispatchPlanEntry } from "./dispatch.js";
+import { recordAttemptedPackets } from "./dispatchAttempted.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
@@ -440,8 +441,12 @@ export async function driveRollingAuditDispatch(params: {
     tasksOverride: params.tasksOverride,
     poolsOverride: params.poolsOverride,
     // In-process path: the rolling engine admits + leases per packet itself, so the
-    // host grant must NOT lease (no double-count of the same work).
+    // host grant must NOT lease (no double-count of the same work) — and for the
+    // same reason the grant is not this path's ATTEMPTED set: the engine gets the
+    // whole plan and decides per packet. This driver records what it actually
+    // drove, below.
     grantLeases: false,
+    recordAttemptedGrant: false,
     // Retained host-session source (audit-side parity with remediate's
     // driveRollingImplementDispatch): feeds the bounded re-limit escalation
     // chain a reviewable friction record instead of only a stderr line.
@@ -653,6 +658,17 @@ export async function driveRollingAuditDispatch(params: {
   // host-delegation fold's convergence guard emits a clean block instead of an
   // unhandled throw crashing next-step (INV enforce-in-tooling: the path must be
   // robust to ANY-strength provider).
+  // Record what the engine actually drove, before ingest. `prepareDispatchArtifacts`
+  // deliberately recorded nothing on this path (`recordAttemptedGrant: false`) —
+  // the grant is not the attempted set here, because the engine receives the whole
+  // plan and admits per packet itself. `run.results` is what reached a worker; a
+  // packet stranded on an exhausted or paused pool is absent, which is exactly what
+  // merge must see to defer its tasks instead of calling them missing.
+  await recordAttemptedPackets(
+    join(artifactsDir, "runs", runId),
+    run.results.map((r) => r.packet.id),
+  );
+
   const anySuccess = run.results.some((r) => r.outcome === "success");
   let ingestResult: MergeAndIngestResult | null = null;
   if (anySuccess) {
