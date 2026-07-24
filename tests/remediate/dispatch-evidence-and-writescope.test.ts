@@ -396,7 +396,7 @@ describe("pathTokensInCommand", () => {
 describe("selfContainedVerifyCommands", () => {
   let tmp: string;
   beforeEach(async () => {
-    tmp = join(__dirname, `.tmp-selfcontained-${process.pid}-${Math.random().toString(36).slice(2)}`);
+    tmp = scratchDir(`.tmp-selfcontained-${process.pid}-${Math.random().toString(36).slice(2)}`);
     await mkdir(join(tmp, "scripts"), { recursive: true });
     await writeFile(join(tmp, "scripts", "present.mjs"), "// present\n");
   });

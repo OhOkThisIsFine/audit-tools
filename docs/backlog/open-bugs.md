@@ -55,16 +55,6 @@
   instead of an env var; an OMITTED key field can stay a drop (forgetting the key is the common
   error — the explicit form is what says "deliberate").
 
-- **The remediate suite writes scratch trees INSIDE the repo (`tests/remediate/.test-*/`), so a
-  `git add -A` sweeps test residue into a commit (2026-07-23, low, hermeticity).** Fake HOMEs
-  (`.test-home-postinstall-contract`), temp repos and artifact dirs land under `tests/remediate/`
-  and are left behind after a run; one `git add -A` staged ten such files, and some were already
-  `AD` (added, then deleted by a later run) — the exact shape that produces a phantom deletion in a
-  commit. Stopgap shipped: a `tests/remediate/.test-*/` ignore rule. Real fix: these belong in
-  `os.tmpdir()` like the rest of the suite's temp state — a test that writes into the source tree
-  makes working-tree cleanliness a function of whether tests have run
-  (same family as the `quota-command.test.mjs` real-repo-root assertion above).
-
 - **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
   (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
   single-homed: mechanism + rationale live in `src/shared/providers/reviewSnapshot.ts`'s docblock and
@@ -457,21 +447,6 @@
   property is even reachable — expected-failing test NAMES are themselves author-supplied, so the gate
   may only relocate the claim again unless the names are derived (e.g. from a baseline coverage/ownership
   map) — and whether N full-suite runs per commit is a cost worth paying.
-
-- **⚠ Two concurrent `vitest run` invocations corrupt each other's results (2026-07-19, medium,
-  friction: inefficient-feeding).** Running a targeted suite while a full-suite run was still going in
-  the background produced 61 failures across 6 files in areas the diff never touched
-  (`inferRepairTarget`, `archiveContractArtifact`); both areas passed cleanly on a serial re-run, twice.
-  The tests share on-disk fixture dirs under `tests/remediate/.test-*`, so concurrent runs race. This
-  cost a full stash-and-baseline cycle to attribute, and would read as a damning regression to anyone
-  who did not re-run serially. **Property to hold:** either test fixture dirs are per-invocation
-  (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
-  vitest refuses to start. Same family as the other three known full-suite-only failures.
-  Same family, third observation (2026-07-23, blocked-step lap): an `npm run build` (dist rewrite)
-  DURING a background full-suite run produced 10 failures in 3 files (wrapper tests spawn dist
-  mid-rewrite; next-step collected mid-edit source); all green on serial re-run. A dist rebuild is a
-  concurrent mutator of the suite's fixture surface exactly like a second vitest — the same
-  property (per-invocation isolation or refuse-to-race) covers it.
 
 - **Nothing derives "collapse a shared-budget roster to its best member" (low).** The selection rule
   itself is settled and already falls out of the cost-first comparator: a free pool's costs all tie so

@@ -5,18 +5,19 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Finding, IntentCheckpoint } from "audit-tools/shared";
 import { runFindingFilterPass } from "../../src/remediate/findingFilter.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { scratchDir } from "../helpers/scratch.js";
 
 let ROOT: string;
 
 beforeEach(async () => {
-  ROOT = join(__dirname, `.test-finding-filter-${randomUUID()}`);
+  // Per-INVOCATION scratch root, never `__dirname` — a fixture tree written into
+  // the source tree leaves residue a `git add -A` sweeps into a commit, and makes
+  // working-tree cleanliness a function of whether tests have run.
+  ROOT = scratchDir(`.test-finding-filter-${randomUUID()}`);
   await mkdir(join(ROOT, "src"), { recursive: true });
   await writeFile(join(ROOT, "src", "a.ts"), "// a\n", "utf8");
   await writeFile(join(ROOT, "src", "b.ts"), "// b\n", "utf8");
