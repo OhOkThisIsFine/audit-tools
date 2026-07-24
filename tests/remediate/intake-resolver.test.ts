@@ -13,9 +13,10 @@ import {
   type IntakeSummary,
 } from "../../src/remediate/intake.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-intake-resolver");
+const TEST_DIR = scratchDir(".test-intake-resolver");
 
 // Stub callbacks used across tests
 function makeStubs() {

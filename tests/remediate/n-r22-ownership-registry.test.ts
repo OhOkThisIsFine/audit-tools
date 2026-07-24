@@ -23,9 +23,10 @@ import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-n-r22");
+const TEST_DIR = scratchDir(".test-n-r22");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 // ---------------------------------------------------------------------------

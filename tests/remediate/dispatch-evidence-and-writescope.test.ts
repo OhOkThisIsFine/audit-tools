@@ -50,9 +50,10 @@ import {
   type GitEditedFiles,
 } from "../../src/remediate/steps/dispatch.js";
 import { makeFinding } from "./test-helpers.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-dispatch-evidence");
+const TEST_DIR = scratchDir(".test-dispatch-evidence");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

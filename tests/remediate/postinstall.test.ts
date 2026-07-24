@@ -3,8 +3,9 @@ import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+import { scratchDir } from "../helpers/scratch.js";
 
-const TEMP_HOME = join(__dirname, ".test-home-postinstall");
+const TEMP_HOME = scratchDir(".test-home-postinstall");
 const PKG_ROOT = join(__dirname, "..", "..");
 const POSTINSTALL_SCRIPT = join(PKG_ROOT, "scripts", "postinstall.mjs");
 const PROMPT_SOURCE = join(

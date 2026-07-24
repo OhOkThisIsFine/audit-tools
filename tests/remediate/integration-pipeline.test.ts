@@ -47,9 +47,10 @@ import {
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-integration-pipeline");
+const TEST_DIR = scratchDir(".test-integration-pipeline");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 
@@ -715,7 +716,7 @@ describe("deterministic design gates: circular interface detection via validateD
 // ---------------------------------------------------------------------------
 
 describe("rolling dispatch: per-node verification before merge via mergeImplementResults", () => {
-  const MERGE_TEST_DIR = join(__dirname, ".test-integration-merge");
+  const MERGE_TEST_DIR = scratchDir(".test-integration-merge");
   const MERGE_ARTIFACTS_DIR = join(MERGE_TEST_DIR, ".audit-tools", "remediation");
   const MERGE_RUN_ID = "PLAN-MERGE";
 
@@ -934,7 +935,7 @@ describe("ownership-gated affected_files amendment", () => {
   });
 
   it("mergeImplementResults: worker result with out-of-scope amended_files blocks the item", async () => {
-    const OWNERSHIP_DIR = join(__dirname, ".test-integration-ownership");
+    const OWNERSHIP_DIR = scratchDir(".test-integration-ownership");
     const OWNERSHIP_ARTIFACTS = join(OWNERSHIP_DIR, ".audit-tools", "remediation");
     await rm(OWNERSHIP_DIR, { recursive: true, force: true });
     await mkdir(OWNERSHIP_ARTIFACTS, { recursive: true });

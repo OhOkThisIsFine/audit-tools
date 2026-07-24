@@ -55,9 +55,10 @@ import {
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
   CP_CYCLIC_SEAM_RESOLUTION_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-n-r06-universal-cp");
+const TEST_DIR = scratchDir(".test-n-r06-universal-cp");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 const STUB_AUDIT_FINDINGS = {

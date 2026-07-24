@@ -15,7 +15,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 import { dirname, join, isAbsolute } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
 import type { RemediationState } from "../../../src/remediate/state/store.js";
@@ -38,6 +37,7 @@ import {
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
   CP_CYCLIC_SEAM_RESOLUTION_VERSION,
 } from "../../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../../helpers/scratch.js";
 
 const HELPERS_DIR = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = dirname(HELPERS_DIR);
@@ -173,8 +173,12 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
   // A fixture tree under `tests/` is walked by the INV-WH raw-spawn scanner
   // (`tests/shared/shared-tests-invariants.test.mjs`); a concurrently-running
   // next-step test creating/deleting its scratch tree mid-scan raced that walk
-  // into a mid-scan ENOENT. os.tmpdir() keeps the fixtures off the scanned tree.
-  const TEST_DIR = join(tmpdir(), "audit-tools-tests", dirName);
+  // into a mid-scan ENOENT. Off-tree keeps the fixtures out of the scanned tree.
+  //
+  // Via `scratchDir`, not a fixed `tmpdir()/audit-tools-tests`: a constant root
+  // is off-tree but still SHARED, so two concurrent vitest invocations raced
+  // every one of these dirs. The root is now per-invocation.
+  const TEST_DIR = scratchDir(dirName);
   const REPO_DIR = join(TEST_DIR, "repo");
   const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

@@ -58,6 +58,7 @@ import {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 // CP_TEST_VALIDATOR_PLAN_VERSION is not exported from the validation module
 // (the source uses the shared CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION);
@@ -65,7 +66,7 @@ import {
 const CP_TEST_VALIDATOR_PLAN_VERSION = "remediate-code-contract-pipeline/test-validator-plan/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-cp-adversarial");
+const TEST_DIR = scratchDir(".test-cp-adversarial");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 

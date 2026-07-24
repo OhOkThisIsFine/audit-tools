@@ -12,6 +12,7 @@ import {
   ESTIMATED_FINDING_OVERHEAD_TOKENS,
 } from "../../src/remediate/phases/plan.js";
 import { checkAffectedFileIntegrity } from "../../src/remediate/utils/fileIntegrity.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 // Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -410,7 +411,7 @@ describe("buildCoverageLedger", () => {
 // ── MNT-1905694f: applyPlanPipeline ──────────────────────────────────────────
 
 describe("applyPlanPipeline (MNT-1905694f)", () => {
-  const PIPELINE_TEST_DIR = join(testDir, ".test-plan-pipeline");
+  const PIPELINE_TEST_DIR = scratchDir(".test-plan-pipeline");
 
   beforeEach(async () => {
     await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
@@ -550,7 +551,7 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
 // ── FINDING-014: directory path exclusion from overlap grouping ───────────────
 
 describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)", () => {
-  const DIR_TEST_DIR = join(testDir, ".test-plan-dir-exclusion");
+  const DIR_TEST_DIR = scratchDir(".test-plan-dir-exclusion");
 
   beforeEach(async () => {
     await rm(DIR_TEST_DIR, { recursive: true, force: true });

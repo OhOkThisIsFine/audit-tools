@@ -29,9 +29,10 @@ import {
 } from "../../src/remediate/intake.js";
 import { resolveIntakeStep } from "../../src/remediate/steps/intakeResolver.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-n-r04");
+const TEST_DIR = scratchDir(".test-n-r04");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 

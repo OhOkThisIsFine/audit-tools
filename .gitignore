@@ -33,10 +33,6 @@ dist/
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/
 # Test-generated scratch trees (fake HOMEs, temp repos, artifact dirs) that the
-# remediate suite writes INSIDE tests/remediate/. Untracked residue a `git add -A`
-# would otherwise sweep into a commit — see backlog for the real fix (write them
-# outside the repo).
-tests/remediate/.test-*/
 .opencode/
 .vscode/
 .codex/
@@ -67,10 +63,6 @@ tests/remediate/.test-*/
 .remediation-artifacts/
 .agents/
 skills-lock.json
-
-# Test scratch — vitest test-plan artifacts written under tests/ (dash and no-dash
-# variants; the nested `.audit-tools/` under here is scratch, never a real deliverable).
-.test-plan-artifacts*/
 
 # >>> audit-tools managed ignores >>>
 # Generated/install artifacts — always ignored (build artifacts, not source).

@@ -22,6 +22,12 @@ export default defineConfig({
     // per-worker temp dir so no test (in-process or spawned CLI) reads/writes the
     // box's live ~/.audit-code. See tests/helpers/state-dir-setup.mjs.
     setupFiles: ["tests/helpers/state-dir-setup.mjs"],
+    // Runs ONCE per invocation, before any worker forks: publishes the
+    // per-invocation fixture root (AUDIT_TOOLS_TEST_RUN_ROOT, consumed by
+    // tests/helpers/scratch.ts) and takes the checkout-scoped lock that makes a
+    // second concurrent vitest — or a dist rebuild mid-suite — fail fast instead
+    // of silently corrupting both runs' results.
+    globalSetup: ["tests/helpers/global-setup.ts"],
     // Always-on timing profile: default console reporter + the standing per-file
     // timing reporter (scripts/shared/vitest-timing-reporter.mjs) that persists a
     // ledger under .audit-tools-profile/ and a CI job-summary table. Profiling the

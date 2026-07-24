@@ -58,9 +58,10 @@ import {
   CP_SEAM_RECONCILIATION_REPORT_VERSION,
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-remediate-pipeline-inv");
+const TEST_DIR = scratchDir(".test-remediate-pipeline-inv");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const REPO_DIR = TEST_DIR;
 // The N-B3 citation gate enumerates the working tree via `git ls-files`, so the

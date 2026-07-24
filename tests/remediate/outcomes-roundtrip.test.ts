@@ -23,9 +23,10 @@ import type {
   OutcomeCoverageEntry,
   RemediationOutcomeItem,
 } from "../../src/remediate/state/types.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-outcomes-roundtrip");
+const TEST_DIR = scratchDir(".test-outcomes-roundtrip");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 const OUTCOMES_PATH = join(REPO_DIR, ".audit-tools", "remediation-outcomes.json");

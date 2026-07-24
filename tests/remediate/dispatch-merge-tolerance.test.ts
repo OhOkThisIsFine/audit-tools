@@ -31,9 +31,10 @@ import {
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
 import { frictionCapturePath, stepBoundaryEventId } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-dispatch-tolerance");
+const TEST_DIR = scratchDir(".test-dispatch-tolerance");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

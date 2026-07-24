@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import { validateArtifacts, validateImplementWorkerResult } from "../../src/remediate/validation/artifacts.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-artifact-validation");
+const TEST_DIR = scratchDir(".test-artifact-validation");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

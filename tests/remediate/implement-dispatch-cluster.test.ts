@@ -35,9 +35,10 @@ import {
   estimateImplementSlotTokens,
   PROMPT_OVERHEAD_TOKENS,
 } from "../../src/remediate/steps/dispatch/common.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-implement-cluster");
+const TEST_DIR = scratchDir(".test-implement-cluster");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

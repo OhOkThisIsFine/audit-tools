@@ -9,9 +9,10 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { PartialCompletionTerminal } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-partial-terminal");
+const TEST_DIR = scratchDir(".test-partial-terminal");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

@@ -10,9 +10,10 @@ import {
   snapshotAffectedFileHashes,
   resnapshotAffectedFileHashes,
 } from "../../src/remediate/utils/fileIntegrity.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-file-integrity");
+const TEST_DIR = scratchDir(".test-file-integrity");
 
 function mkFinding(path: string): Finding {
   return {

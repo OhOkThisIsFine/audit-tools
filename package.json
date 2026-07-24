@@ -38,6 +38,7 @@
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
+    "prebuild": "node scripts/shared/guard-no-suite-running.mjs",
     "build": "tsc -p tsconfig.json && node scripts/shared/copy-data-assets.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "nightly:review": "node scripts/nightly/serve.mjs",

@@ -47,9 +47,10 @@ import {
   type ObligationLedger,
 } from "audit-tools/shared";
 import { program } from "../../src/remediate/index.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-cp-derive-obligations");
+const TEST_DIR = scratchDir(".test-cp-derive-obligations");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 

@@ -11,9 +11,10 @@ import { RunLogger } from "audit-tools/shared";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { validateVerificationReport } from "../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_DIR = join(__dirname, ".test-close-repo");
+const REPO_DIR = scratchDir(".test-close-repo");
 const TEST_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
 
@@ -1303,7 +1304,7 @@ describe("runClosePhase", () => {
 });
 
 describe("collectStagingFiles", () => {
-  const GIT_DIR = join(__dirname, ".test-close-git");
+  const GIT_DIR = scratchDir(".test-close-git");
 
   beforeEach(async () => {
     await rm(GIT_DIR, { recursive: true, force: true });
@@ -1426,7 +1427,7 @@ describe("collectStagingFiles", () => {
 });
 
 describe("buildOutcomeCoverageLedger — review-gate declines (1c-2)", () => {
-  const OUTCOME_DIR = join(__dirname, ".test-close-outcome");
+  const OUTCOME_DIR = scratchDir(".test-close-outcome");
   const OUTCOME_ARTIFACTS = join(OUTCOME_DIR, ".audit-tools", "remediation");
   const AUDIT_PATH = join(OUTCOME_DIR, "audit-findings.json");
 

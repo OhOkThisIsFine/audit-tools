@@ -3,8 +3,9 @@ import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { ensureGlobalAssets } from "../../src/remediate/index.js";
+import { scratchDir } from "../helpers/scratch.js";
 
-const TEMP_HOME = join(__dirname, ".test-home-postinstall-contract");
+const TEMP_HOME = scratchDir(".test-home-postinstall-contract");
 const PKG_ROOT = join(__dirname, "..", "..");
 const POSTINSTALL_SCRIPT = join(PKG_ROOT, "scripts", "postinstall.mjs");
 const AUDIT_CODE_POSTINSTALL_SCRIPT = join(

@@ -15,9 +15,10 @@ import {
   readOptionalTextFile,
   isFileMissingError,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-io");
+const TEST_DIR = scratchDir(".test-io");
 
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });

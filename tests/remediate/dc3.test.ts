@@ -62,9 +62,10 @@ import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-dc3");
+const TEST_DIR = scratchDir(".test-dc3");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 

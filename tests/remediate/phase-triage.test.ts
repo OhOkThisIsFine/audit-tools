@@ -6,9 +6,10 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-triage");
+const TEST_DIR = scratchDir(".test-triage");
 
 const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
 

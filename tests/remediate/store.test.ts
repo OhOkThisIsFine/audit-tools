@@ -5,9 +5,10 @@ import { rm, mkdir, writeFile, utimes, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-artifacts");
+const TEST_DIR = scratchDir(".test-artifacts");
 
 describe("StateStore", () => {
   beforeEach(async () => {

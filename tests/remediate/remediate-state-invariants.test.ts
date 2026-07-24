@@ -14,9 +14,10 @@ import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IntakeSummary, IntakeOpenQuestion } from "../../src/remediate/intake.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-remediate-state-inv");
+const TEST_DIR = scratchDir(".test-remediate-state-inv");
 
 // ---------------------------------------------------------------------------
 // INV-remediate-state-06: blockingIntakeQuestions — blocking===true only

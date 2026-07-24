@@ -19,9 +19,10 @@ import {
   CP_MODULE_DECOMPOSITION_VERSION,
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-cp-artifact-store");
+const TEST_DIR = scratchDir(".test-cp-artifact-store");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 function makeGoalSpec(goalId = "GOAL-001") {

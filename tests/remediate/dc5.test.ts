@@ -59,6 +59,7 @@ import {
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
@@ -488,7 +489,7 @@ describe("assertionPolarity — identifier-token masking", () => {
 // ── fail-1..6 / merge: mergeImplementResults verify gate end-to-end ────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-dc5-merge");
+const TEST_DIR = scratchDir(".test-dc5-merge");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

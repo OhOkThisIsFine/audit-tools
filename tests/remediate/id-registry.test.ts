@@ -19,6 +19,7 @@ import { collapseItemResults } from "../../src/remediate/steps/dispatch.js";
 import { promoteImplementationDagToExtractedPlan } from "../../src/remediate/steps/contractPipeline.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { intakePaths } from "../../src/remediate/intake.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 describe("idRegistry (S4 single ID authority)", () => {
   it("toBlockId applies the CP-BLOCK- prefix", () => {
@@ -127,7 +128,7 @@ describe("collapseItemResults resolves block ids via the registry (S4), not the 
 // landing in `unresolved`.
 describe("INV-FID-01: a node with node.id undefined still resolves end-to-end", () => {
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const TEST_DIR = join(__dirname, ".test-inv-fid-01");
+  const TEST_DIR = scratchDir(".test-inv-fid-01");
   const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
   afterEach(async () => {

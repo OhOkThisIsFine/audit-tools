@@ -34,6 +34,7 @@ import {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "audit-tools/shared";
+import { scratchDir } from "../helpers/scratch.js";
 
 const CP_SEAM_RECONCILIATION_REPORT_VERSION =
   "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
@@ -687,7 +688,7 @@ describe("deriveNodeModelTier", () => {
 // ── Promotion gate + extracted-plan trace (integration) ───────────────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-contract-obligations");
+const TEST_DIR = scratchDir(".test-contract-obligations");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 async function seedChain(): Promise<void> {

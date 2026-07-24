@@ -15,9 +15,10 @@ import {
   contractPipelineDir,
   writeContractArtifact,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-critique-gate");
+const TEST_DIR = scratchDir(".test-critique-gate");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const CRITIQUE_VERSION =

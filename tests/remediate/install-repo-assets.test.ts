@@ -5,11 +5,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = join(__dirname, "..", "..");
-const TEST_ROOT = join(__dirname, ".test-install-root");
-const TEST_HOME = join(__dirname, ".test-install-home");
+const TEST_ROOT = scratchDir(".test-install-root");
+const TEST_HOME = scratchDir(".test-install-home");
 
 beforeEach(async () => {
   await rm(TEST_ROOT, { recursive: true, force: true });

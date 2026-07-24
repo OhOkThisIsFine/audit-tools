@@ -9,13 +9,14 @@ import {
   prepareImplementDispatch,
 } from "../../src/remediate/steps/dispatch.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 // Regression: the canonical next-step wave path must inject the
 // "match the surrounding code" house-style block into implement
 // worker prompts.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-dispatch-conventions");
+const TEST_DIR = scratchDir(".test-dispatch-conventions");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

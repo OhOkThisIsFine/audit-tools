@@ -38,6 +38,7 @@ import type { CapacityPool, ProviderSlot, SessionConfig } from "audit-tools/shar
 import { runClosePhase } from "../../src/remediate/phases/close.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // tests/ -> remediate-code/ -> packages/ -> repo root.
@@ -720,7 +721,7 @@ describe("INV-RS-09 / CE-003: coarse re-block with bounded auto-terminate", () =
 // ===========================================================================
 
 describe("CE-003: close.ts force-close guard preserves artifacts when an item is blocked", () => {
-  const GUARD_DIR = join(__dirname, ".test-rolling-close-guard");
+  const GUARD_DIR = scratchDir(".test-rolling-close-guard");
   const REPO_DIR = join(GUARD_DIR, "repo");
   const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 

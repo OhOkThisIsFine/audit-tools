@@ -36,6 +36,7 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shardSuffix } from "./vitestShard.mjs";
+import { isReporterTransportFault } from "./vitestGateVerdict.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -46,27 +47,55 @@ const vitestArgs = process.argv.slice(2);
 const token = randomUUID();
 
 const vitestEntry = require.resolve("vitest/vitest.mjs");
+// stderr is PIPED (stdout stays inherited, so progress still streams live) purely
+// so the false-RED check below can identify a harness fault by its signature. It
+// is echoed verbatim immediately after the run, so nothing is hidden.
 const result = spawnSync(process.execPath, [vitestEntry, "run", ...vitestArgs], {
   cwd: repoRoot,
-  stdio: "inherit",
+  stdio: ["inherit", "inherit", "pipe"],
+  encoding: "utf8",
+  maxBuffer: 64 * 1024 * 1024,
   windowsHide: true,
   env: { ...process.env, VITEST_GATE_TOKEN: token },
 });
+
+const stderrText = result.stderr ?? "";
+if (stderrText) process.stderr.write(stderrText);
 
 const vitestExit = result.status ?? (result.error ? 1 : 0);
 if (result.error) {
   console.error(`[vitest-gate] failed to spawn vitest: ${result.error.message}`);
 }
 
-// vitest's own exit code already fails a run with a genuine nonzero status —
-// no need to second-guess it. The ledger check below exists ONLY for the
-// false-green case: exit 0 with reported failures.
-if (vitestExit !== 0) {
-  process.exit(vitestExit);
-}
-
 const ledgerName = `vitest${shardSuffix(vitestArgs)}`;
 const ledgerPath = resolve(profileDir, `${ledgerName}-latest.json`);
+
+if (vitestExit !== 0) {
+  // vitest's own nonzero exit is normally authoritative. The ONE case it is not
+  // is a recognized reporter-transport fault over a ledger that this run
+  // provably wrote (fresh token) and that reports zero failures. The predicate
+  // is single-sourced in vitestGateVerdict.mjs so it can be tested without
+  // reproducing a real worker-RPC timeout.
+  let transportRecord = null;
+  try {
+    transportRecord = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  } catch {
+    // No readable ledger — nothing to appeal to; the nonzero exit stands.
+  }
+  if (isReporterTransportFault({ record: transportRecord, token, stderrText })) {
+    console.error(
+      `[vitest-gate] vitest exited ${vitestExit}, but this run's own ledger reports ` +
+        `${transportRecord.outcome.passed} passed / 0 failed and stderr carries a vitest-worker ` +
+        `RPC timeout — a REPORTER-TRANSPORT fault, not a test failure. Treating as PASS.`,
+    );
+    console.error(
+      "[vitest-gate] (if this becomes frequent, raise the worker RPC timeout — a suite that " +
+        "routinely reports red while green is the same false-signal class as a false green.)",
+    );
+    process.exit(0);
+  }
+  process.exit(vitestExit);
+}
 
 function failClosed(message) {
   console.error(`[vitest-gate] ${message}`);

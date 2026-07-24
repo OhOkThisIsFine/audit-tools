@@ -31,6 +31,7 @@ import { groundExtractedFindings, groundAffectedFiles, evidenceCitesRealPath } f
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
 import { makeState } from "./test-helpers.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -42,7 +43,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ---------------------------------------------------------------------------
 
 describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline applies merge before split", () => {
-  const TEST_DIR = join(__dirname, ".test-phases-inv-01");
+  const TEST_DIR = scratchDir(".test-phases-inv-01");
 
   function mkFinding(id: string, filePath: string) {
     return {
@@ -339,7 +340,7 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
 // ---------------------------------------------------------------------------
 
 describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure class", () => {
-  const TEST_DIR = join(__dirname, ".test-phases-inv-05");
+  const TEST_DIR = scratchDir(".test-phases-inv-05");
   const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
 
   beforeEach(async () => {
@@ -417,7 +418,7 @@ describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure
 // ---------------------------------------------------------------------------
 
 describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfirmed actions", () => {
-  const REPO_DIR = join(__dirname, ".test-phases-inv-06-repo");
+  const REPO_DIR = scratchDir(".test-phases-inv-06-repo");
   const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
   const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR };
 
@@ -482,7 +483,7 @@ describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfi
 // ---------------------------------------------------------------------------
 
 describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", () => {
-  const GIT_DIR = join(__dirname, ".test-phases-inv-07-git");
+  const GIT_DIR = scratchDir(".test-phases-inv-07-git");
 
   beforeEach(async () => {
     await rm(GIT_DIR, { recursive: true, force: true });
@@ -547,7 +548,7 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
 // ---------------------------------------------------------------------------
 
 describe("groundExtractedFindings — INV-remediate-phases-08: repair hook called exactly once", () => {
-  const TEST_DIR = join(__dirname, ".test-phases-inv-08");
+  const TEST_DIR = scratchDir(".test-phases-inv-08");
 
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -611,7 +612,7 @@ describe("groundExtractedFindings — INV-remediate-phases-08: repair hook calle
 // ---------------------------------------------------------------------------
 
 describe("runTriagePhase — INV-remediate-phases-09: explicit action:retry is authoritative", () => {
-  const TEST_DIR = join(__dirname, ".test-phases-inv-09");
+  const TEST_DIR = scratchDir(".test-phases-inv-09");
   const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
 
   beforeEach(async () => {
@@ -678,7 +679,7 @@ describe("runTriagePhase — INV-remediate-phases-09: explicit action:retry is a
 // ---------------------------------------------------------------------------
 
 describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has contract_version", () => {
-  const REPO_DIR = join(__dirname, ".test-phases-inv-10-repo");
+  const REPO_DIR = scratchDir(".test-phases-inv-10-repo");
   const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
   const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
   const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR };
@@ -747,7 +748,7 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
 // ---------------------------------------------------------------------------
 
 describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom-path stripping", () => {
-  const TEST_DIR = join(__dirname, ".test-grounding-d1399aa3");
+  const TEST_DIR = scratchDir(".test-grounding-d1399aa3");
 
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -833,7 +834,7 @@ describe("groundAffectedFiles — TST-d1399aa3: dedicated unit tests for phantom
 });
 
 describe("evidenceCitesRealPath — TST-d1399aa3: dedicated unit tests for evidence citation check", () => {
-  const TEST_DIR = join(__dirname, ".test-evidence-d1399aa3");
+  const TEST_DIR = scratchDir(".test-evidence-d1399aa3");
 
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });

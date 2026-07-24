@@ -20,9 +20,10 @@ import {
   FINDING_ENUMERATION_SCHEMA_VERSION,
 } from "../../src/remediate/intake.js";
 import { resolve } from "node:path";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-intake-sources-and-digest");
+const TEST_DIR = scratchDir(".test-intake-sources-and-digest");
 
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });

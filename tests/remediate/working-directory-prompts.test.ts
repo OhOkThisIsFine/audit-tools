@@ -13,9 +13,10 @@ import type { RemediationState } from "../../src/remediate/state/store.js";
 import {
   prepareImplementDispatch,
 } from "../../src/remediate/steps/dispatch.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-workdir-prompts");
+const TEST_DIR = scratchDir(".test-workdir-prompts");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 

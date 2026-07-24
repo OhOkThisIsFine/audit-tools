@@ -43,9 +43,10 @@ import {
   CP_SEAM_RECONCILIATION_REPORT_VERSION,
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
+import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(__dirname, ".test-contract-pipeline");
+const TEST_DIR = scratchDir(".test-contract-pipeline");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 async function writeJson(path: string, value: unknown): Promise<void> {
