@@ -188,11 +188,14 @@ gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-t
 
 ## Open tracks
 
-**Track 1 — LiteLLM proxy.** Stood up and validated 2026-07-18 (config at
-`~/.audit-code/litellm-config.yaml`; record in
-[`litellm-proxy-live-validation-2026-07-18.md`](reviews/litellm-proxy-live-validation-2026-07-18.md)).
-**Remaining:** dispatch through the proxy under a real audit wave, and quota/rate behavior at the
-proxy — both fold into the re-dogfood above.
+**Track 1 — proxy dispatch → now 9router, LiteLLM superseded.** LiteLLM was stood up 2026-07-18
+(`~/.audit-code/litellm-config.yaml`). **2026-07-23: replaced by 9router** as the harness-level
+multi-provider proxy (fronts Claude/Codex/AGY/Gemini/NIM/Kiro/… + quota failover), deployed and
+running (`127.0.0.1:20128`, auto-start task). LiteLLM confirmed **retirable** (9router passes
+`json_schema` to NIM). Routing redesign = audit-code categorizes / a re-pointed deterministic router
+routes / 9router transports — **design + build plan written, not built.** Full pickup:
+[`9router-routing-sprint-handoff-2026-07-23.md`](reviews/9router-routing-sprint-handoff-2026-07-23.md).
+⚠ Files from that sprint are **uncommitted** on `main`.
 
 **Track 2 — Ranker contract.** A separate project, not audit-tools code. The *producer* now exists and
 is validated live (NIM roster joined to OpenRouter `agentic_index` → LiteLLM `model_info`), and the
