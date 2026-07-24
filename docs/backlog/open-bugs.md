@@ -204,6 +204,32 @@
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
 
+- **Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the
+  service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED).**
+  `src/shared/data/model-statics.generated.json` predates `__by_provider`, so `resolveModelStatics(m, p)`
+  finds the index empty and falls through to the flat table — the known inert-path defect. Running
+  `npm run update-models` does populate it (2794 models, 2945 collisions, 146 providers) but ALSO
+  rewrites the flat table, whose entry for a colliding id is the CHEAPEST across providers by
+  construction. Measured at HEAD, blended $/Mtok:
+
+  | model | flat (no provider) | `anthropic`-scoped |
+  |---|---|---|
+  | `claude-haiku-4-5` | 2.00 | 2.00 |
+  | `claude-sonnet-5` | 2.88 | 4.00 |
+  | `claude-opus-4-8` | **0.85** | 10.00 |
+
+  So after a refresh the flat table ranks **opus as the cheapest model in the roster**, below haiku —
+  and cost-first routing (λ=0) would send every packet to it. `tests/shared/cost-rank.test.mjs` caught
+  this as 11 failures on CI shard 1 (both Node versions); the pre-collision snapshot happens to carry
+  anthropic's own prices, which is why the stale file looked correct. **The refresh is therefore
+  gated on the second-order mismatch, not merely followed by it:** `byProvider` is keyed by models.dev
+  VENDOR ids while both pricing sites pass `sourceService(source)` (`identity.ts`), so any lane whose
+  service string is not a models.dev provider id misses the index and lands on the cheapest-reseller
+  price. Fix the mapping FIRST, then refresh. ⚠ Do not "fix" this by updating the cost-rank
+  expectations — they encode real Anthropic list prices and are the thing that caught it.
+  Both halves were attempted and reverted in this lap (`548380df` → restored); nothing is
+  half-applied at HEAD.
+
 - **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
   to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
   returned 101 failures — every one `connect ECONNREFUSED 127.0.0.1:4000`, i.e. the proxy had died
