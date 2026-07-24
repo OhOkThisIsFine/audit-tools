@@ -7,7 +7,27 @@
 
 ## Live state
 
-- **Current version = `package.json`** (authoritative). v0.34.25 (2026-07-23) shipped the
+- **Current version = `package.json`** (authoritative). v0.34.26 (2026-07-23) shipped the first two
+  **runtime-loop stability** fixes (owner redirect: stabilize before A2). (1) **Quarantine-loudly all
+  6 `runOmittableGate` incoming submissions** — the synthesis_narrative / critical_flow_fallback /
+  charter_extraction / charter_delta / charter_clarification / systemic_challenge gates handed the raw
+  incoming file to the executor, so a mis-shaped submission either CRASHED next-step with a raw zod
+  dump (4 schema-parsed gates) or was silently accepted as an empty "reviewed, found nothing" result
+  (2 bare-cast gates). `runOmittableGate` now schema-validates at the ingest boundary and quarantines
+  loudly (shared `quarantineMisshapedIncoming`, single-sourced with `handleIntentEquivalenceBranch`);
+  `schema` is a REQUIRED descriptor field. Fixed the 6-site CLASS, not the 2 named in the backlog. Not
+  loop-core. (2) **Design-review canonical `{ findings:[...] }` object envelope** — the last bare-array
+  holdout among host-gate submissions; a json_object-constrained NIM lane physically cannot emit a
+  top-level array, so it was special-cased/skipped for design-review. All 5 render paths + 3 host-step
+  notes now instruct the object (single-sourced `findingsEnvelopeExample`); the ingest already
+  tolerantly unwraps it. Loop-core, independent review CONFIRMED + attested. Both red-green tested.
+  ⚠ **The runtime-loop track is NOT done:** DEFECT 3(a) — partial-wave merge-and-ingest exits 2/1 on
+  the NORMAL rolling case (in-flight tasks classed `failing`, no deferred bucket) — is STILL REAL and
+  is a **FOCUSED-LAP entangled with the HIGH claim-release-on-worker-failure item** (needs the
+  claim-lease state at merge; do not rush as an exit-code patch). Two other named candidates were
+  verified ALREADY FIXED (staleness spam; the "idempotent replay flips exit code" claim — refuted).
+  Backlog updated. **A2 oracle corpus is PARKED** (owner redirect) in backlog *Deferred / waiting*.
+  v0.34.25 (2026-07-23) shipped the
   **per-packet pause wall** — the LAST open item of the dogfood-resume defect tier. A deep-tier
   packet whose only above-floor pool is PAUSED with a future reset (not exhausted) no longer spins
   the in-process 50ms wait tick until the reset: it strands as the retryable `quota_paused`
@@ -184,19 +204,26 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**1. Build the A2 oracle corpus from small, public, PINNED repos** (owner redirect 2026-07-22 —
-full SPEC in backlog *Deferred / waiting*): pinned SHAs + someone-else-maintained defect
-inventories give durable labels and measurable RECALL, and turn `score-audit` into a per-release
-gate. Hand-labeling the re-dogfood run's findings is demoted to optional large-target calibration.
-**The dogfood-resume defect tier is now CLOSED** — every shippable item landed as v0.34.13–v0.34.25
-(the pause-wall fix, v0.34.25, was the last). What remains from that tier is not blocking code:
-two LEADs (the `window_uncalibrated` out-of-repo-resolver livelock and the openai-compatible-lane
-headers-timeout, the latter spun off to its own task) and the **live-validation-gated** items that
-only a real metered run can confirm (see the *Live-validation guide* + the ⬇ Live-run watch lines
-in backlog).
+**Owner redirect 2026-07-23: stabilize audit-tools before A2.** The active track is now
+**runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
+its SPEC is intact, nothing lost).
 
-**2. Gate-0 priority-order UX** (Track 3) — decisions resolved in backlog; implementation remains.
-(The doc-review queue has one open item, DD-8 — see the `doc-review` branch.)
+**1. DEFECT 3(a) — partial-wave merge-and-ingest exit-code lie (FOCUSED-LAP, do not rush).** A normal
+rolling partial wave (N results present, M dispatched-but-in-flight, zero actually-invalid) exits 2,
+then "All N assigned task result(s) were missing or invalid" / exit 1 on re-run — because
+`validateAndCollectResults` has no deferred/in-flight bucket (`mergeAndIngestCommand.ts:403-407`,
+loop-core). **⚠ Entangled with the HIGH claim-release-on-worker-failure item (FLW-COR-003):**
+distinguishing "in-flight/deferred" from "genuinely missing" needs the claim-lease state at merge, so
+treat it as ONE focused claim-lifecycle lap, not a tail-end exit-code patch — the repo's most delicate
+substrate ([[rolling-lifecycle-unify-full-unification-wrong]] governs). Full mechanism + entanglement
+in backlog *Open bugs* (the "partial-wave merge presents success as failure — STILL REAL" entry).
+
+**2. Other runtime-loop / open bugs** in backlog *Open bugs / frictions* (e.g. the openai-compatible
+headers-timeout — verified fixable; the two-key chatty-worker design-review quarantine LEAD just
+logged). Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
+
+**A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in backlog
+*Deferred / waiting*) — resume once stability work is complete.
 
 ---
 
