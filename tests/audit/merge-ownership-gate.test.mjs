@@ -470,3 +470,58 @@ test("mergeAndIngest partial wave: with NO attempted-packets sidecar the pre-fix
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("mergeAndIngest FLW-COR-003: a round where EVERY attempted worker died releases its claims BEFORE throwing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "merge-claim-release-"));
+  try {
+    await writeFixtureRepo(root);
+    const { planning } = await advanceFixtureToPlanning(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeCoreArtifacts(artifactsDir, planning.updated_bundle);
+
+    const [taskA, taskB] = planning.updated_bundle.audit_tasks;
+    const { runDir } = await scaffoldRun(artifactsDir, root, [
+      [taskA, null],
+      [taskB, null],
+    ]);
+    // Both packets WERE handed to a worker — so neither is deferred — and every
+    // worker died without writing a result. passing=0, failing=2, deferred=0:
+    // the blocked-no-op that throws. This is the pool-wide-429 shape.
+    await recordAttemptedPackets(runDir, [`pkt-${taskA.task_id}`, `pkt-${taskB.task_id}`]);
+
+    const registry = new ClaimRegistry(taskClaimsPath(artifactsDir));
+    const { ownerTokenByNode } = await registry.claimMany(
+      [taskA.task_id, taskB.task_id],
+      RUN_ID,
+    );
+    await mergeOwnerTokens(runDir, ownerTokenByNode);
+    // `listClaims`, not `listLiveClaims`: the live view hides a claim once it is
+    // older than the registry's staleness window, so a slow test could "pass" on
+    // lease expiry rather than on the deletion this test exists to pin.
+    expect(
+      Object.keys(await registry.listClaims()),
+      "precondition: this round owns both claims going in",
+    ).toEqual(expect.arrayContaining([taskA.task_id, taskB.task_id]));
+
+    await expect(
+      mergeAndIngest({ runId: RUN_ID, artifactsDir }),
+    ).rejects.toThrow(/missing or invalid|blocked before ingestion/i);
+
+    // FLW-COR-003, the HOST half. Merge is the ONLY claim release for the two
+    // host claimers (`cmdPrepareDispatch`, `renderSemanticReviewStep`) — the
+    // rolling driver sweeps itself, they cannot (the lease must span their
+    // out-of-process workers). That release sat AFTER this throw, so a round
+    // whose workers all died held its claims for the full
+    // AUDIT_TASK_CLAIM_LEASE_MS while every interleaved next-step — each a NEW
+    // runId — saw the tasks peer-claimed, planned nothing, and spun the drain
+    // to maxTransitions. A `failing` task is TERMINAL (it gets re-dispatched),
+    // so its claim must be free the moment the round is classified, throw or no
+    // throw.
+    const after = await registry.listClaims();
+    expect(after[taskA.task_id], "a failed task's claim must not survive the throw").toBeUndefined();
+    expect(after[taskB.task_id], "a failed task's claim must not survive the throw").toBeUndefined();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

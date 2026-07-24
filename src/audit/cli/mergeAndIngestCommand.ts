@@ -869,6 +869,45 @@ export async function mergeAndIngest(params: {
     );
   }
 
+  // Cooperative multi-agent (slice 2): release the task claims for every task
+  // that reached a TERMINAL outcome this round. The two halves are released
+  // SEPARATELY because they become terminal at different moments.
+  //
+  // `failing` is terminal the instant it is classified: it will be
+  // re-dispatched, and nothing downstream can change that. So its claim is
+  // freed HERE, before anything else can throw — that is FLW-COR-003, the HOST
+  // half. Merge is the only claim release for the two host claimers
+  // (`cmdPrepareDispatch`, `renderSemanticReviewStep`); the rolling driver
+  // sweeps itself and they cannot, because the lease must span their
+  // out-of-process workers (see AUDIT_TASK_CLAIM_LEASE_MS in dispatch.ts). That
+  // release used to sit AFTER the blocked-no-op throw below, so a round whose
+  // workers all died held its claims for the whole lease while every
+  // interleaved next-step — each a NEW runId — saw the tasks peer-claimed,
+  // planned nothing, and spun the drain to maxTransitions. Releasing at
+  // classification makes that hold unreachable from EVERY later exit, not only
+  // the one throw that was observed live (the failed-tasks write, grounding,
+  // `runAuditStep`, the line-count hints and the pending-task write can each
+  // throw too).
+  //
+  // `passing` is terminal only once its results are ingested AND the pending
+  // set has been rewritten without them; it is released after that, below.
+  // Freeing it here would let a peer re-run tasks whose results are on disk but
+  // not yet ingested.
+  //
+  // `notDispatched` (budget-capped) is deliberately left claimed/unclaimed
+  // as-is: it may be a live peer's in-flight work, never ours to clear here.
+  // `deferred` is likewise absent from both sets BY CONSTRUCTION
+  // (`partitionUnattemptedMissing` lifted it out of `failing`): a task nobody
+  // attempted has reached no outcome at all, so marking it terminal — and
+  // writing it into retry-dispatch — asserted a failure that never happened.
+  // Cleared unconditionally (no token) since a terminal result is
+  // authoritative. `passing`/`failing` are already the OWNERSHIP-GATED (owned +
+  // tokenless) sets — an `unowned` task's claim is deliberately excluded: it is
+  // the peer's claim now, not ours to clear (Part A, D-66/67 slice-1).
+  if (failing.length > 0) {
+    await claimRegistry.clear(failing.map((f) => f.task_id));
+  }
+
   const failedTasksPath = join(runDir, "failed-tasks.json");
   if (failing.length > 0) {
     await writeJsonFile(failedTasksPath, failing);
@@ -916,26 +955,10 @@ export async function mergeAndIngest(params: {
     await writeJsonFile(tasksPath, updatedPendingTasks);
   }
 
-  // Cooperative multi-agent (slice 2): release the task claims for every task
-  // that reached a TERMINAL outcome this round — passing (ingested; now filtered
-  // from pending) and failing (will be re-dispatched, so its claim must free up).
-  // `notDispatched` (budget-capped) is deliberately left claimed/unclaimed as-is:
-  // it may be a live peer's in-flight work, never ours to clear here. `deferred`
-  // is likewise absent from this set BY CONSTRUCTION
-  // (`partitionUnattemptedMissing` lifted it out of `failing`): a task nobody
-  // attempted has reached no outcome at all, so marking it terminal — and
-  // writing it into retry-dispatch — asserted a failure that never happened.
-  // Cleared unconditionally (no token) since an ingested/terminal result is
-  // authoritative.
-  // `passing`/`failing` are already the OWNERSHIP-GATED (owned + tokenless) sets
-  // — an `unowned` task's claim is deliberately excluded here: it is the peer's
-  // claim now, not ours to clear (Part A, D-66/67 slice-1).
-  const terminalTaskIds = [
-    ...passing.map((r) => r.task_id),
-    ...failing.map((f) => f.task_id),
-  ];
-  if (terminalTaskIds.length > 0) {
-    await claimRegistry.clear(terminalTaskIds);
+  // `passing` is terminal only now: its results are ingested and the pending set
+  // has been rewritten without them (see the split-release note above).
+  if (passing.length > 0) {
+    await claimRegistry.clear(passing.map((r) => r.task_id));
   }
 
   const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
