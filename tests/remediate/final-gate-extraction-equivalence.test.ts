@@ -68,7 +68,7 @@ describe("CP-NODE-1: final-gate extraction is a behaviour-preserving move", () =
     expect(viaNext.next_count).toBe(viaGate.next_count);
   });
 
-  it("applyCoarseReblock at-bound converges to terminal blocked identically via both paths", () => {
+  it("applyCoarseReblock at-bound converges to a terminal abandoned close identically via both paths", () => {
     const seed = { a: "resolved", b: "ignored" } as const;
 
     const viaNext = applyCoarseReblockNext(makeStateWithItems(seed), BOUND_NEXT, "still red");
@@ -77,7 +77,10 @@ describe("CP-NODE-1: final-gate extraction is a behaviour-preserving move", () =
     for (const decision of [viaNext, viaGate]) {
       expect(decision.action).toBe("terminal_blocked");
       expect(decision.next_count).toBe(BOUND_NEXT);
-      expect(decision.state.items!.a.status).toBe("blocked");
+      // `abandoned`, not `blocked`: the backstop must leave every item TERMINAL, or
+      // the run ends with items that reached no end state and close renders them as
+      // partial completion. (`blocked` is deliberately non-terminal — triage retries it.)
+      expect(decision.state.items!.a.status).toBe("abandoned");
       // Settled user SKIP is never overturned.
       expect(decision.state.items!.b.status).toBe("ignored");
     }

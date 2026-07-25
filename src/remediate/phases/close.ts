@@ -53,6 +53,7 @@ import {
   dispositionToOutcomeStatus,
   isInProgressStatus,
   isSkipStatus,
+  isUnsuccessfulEndStatus,
   isVerifiedCompleteStatus,
   statusToDisposition,
 } from "../state/itemStatus.js";
@@ -1330,14 +1331,16 @@ export async function cleanupTempBranchesAndArtifacts(
   // Only delete artifacts on a fully-green close. When any test or closing
   // action failed, preserve the directory for diagnosis.
   //
-  // CE-003 force-close guard: a `blocked` terminal item means the run did NOT
-  // fully succeed — the tool-owned final gate (INV-RS-10) coarse-re-blocked or
-  // the bounded backstop terminated the run as blocked. Such a run must never be
-  // "landed green" (artifacts deleted as if complete); a vacuous/unset
-  // plan.test_command (combinedTest vacuously passing) cannot mask a blocked
-  // item. Preserve the artifacts so the partial outcome is diagnosable.
-  const anyBlocked = Object.values(completeState.items ?? {}).some(
-    (it) => it.status === "blocked",
+  // CE-003 force-close guard: a `blocked` or `abandoned` item means the run did
+  // NOT fully succeed — the tool-owned final gate (INV-RS-10) coarse-re-blocked
+  // or the bounded backstop abandoned the remaining items. Such a run must never
+  // be "landed green" (artifacts deleted as if complete); a vacuous/unset
+  // plan.test_command (combinedTest vacuously passing) cannot mask it. Preserve
+  // the artifacts so the partial outcome is diagnosable. The predicate is
+  // single-sourced in itemStatus so this guard cannot drift from the seam that
+  // produces the statuses it defends against.
+  const anyBlocked = Object.values(completeState.items ?? {}).some((it) =>
+    isUnsuccessfulEndStatus(it.status),
   );
   // A closing action genuinely completed only per the single-sourced
   // classification (see closingActionCompleted): success, or the skipped

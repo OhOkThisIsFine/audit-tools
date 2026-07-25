@@ -25,9 +25,9 @@
  *   2. A remediation branch (`remediation/<run-id>`) with landed commits.
  *   3. A green closing gate (`remediation-outcomes.json` records a passing
  *      combined-test result and a non-failed closing action).
- *   4. A fully-reconciled per-finding coverage ledger — `assertLedgerComplete`
- *      returns `complete: true` with `denominator > 0`. A 0/0 vacuous green
- *      FAILS (INV-CL-05), so this also proves non-vacuity.
+ *   4. Every enumerated node reaches a TERMINAL status, over a denominator > 0,
+ *      with at least one node genuinely `resolved`. A 0/0 run and an all-abandoned
+ *      run both FAIL, so this proves non-vacuity as well as completion.
  *
  * Hermetic: a local git repo, no PR, no GitHub.
  *
@@ -62,8 +62,8 @@ const { writeCoreArtifacts, promoteFinalAuditReport } = await import(
 );
 const { advanceFixtureToPlanning } = await import('./helpers/fixture.mjs');
 const { decideNextStep } = await import('../../src/remediate/steps/nextStep.ts');
-const { buildPerFindingLedger, assertLedgerComplete } = await import(
-  '../../src/remediate/coverage/findingLedger.ts'
+const { statusToDisposition, isTerminalStatus } = await import(
+  '../../src/remediate/state/itemStatus.ts'
 );
 const { remediationBranchName } = await import(
   '../../src/remediate/steps/dispatch.ts'
@@ -668,25 +668,25 @@ test(
 
       // The denominator is the run's ACTUAL planned node set (the contract
       // pipeline extracts the implementation-DAG node id `CP-CLAMP-001`, not the
-      // promoted finding id), so the ledger reconciliation reflects real work.
-      const denominatorIds = Object.keys(completeState.items ?? {});
-      const ledger = buildPerFindingLedger({
-        denominatorKind: 'finding_enumeration',
-        denominatorIds,
-        items: completeState.items,
-      });
-      const completeness = assertLedgerComplete(ledger);
-      expect(completeness.complete, `coverage ledger must be fully reconciled; missing=${JSON.stringify(
-          completeness.missing,
-        )} duplicated=${JSON.stringify(completeness.duplicated)}`).toBeTruthy();
-      // Non-vacuity: a 0/0 ledger is INCOMPLETE by INV-CL-05 — assert a real,
-      // positive denominator so the green is never vacuous.
-      expect(ledger.denominator > 0, 'coverage ledger denominator must be > 0 (a 0/0 vacuous green FAILS)').toBeTruthy();
-      expect(ledger.covered, 'every enumerated node must reach a terminal disposition').toBe(ledger.denominator);
+      // promoted finding id), so the reconciliation reflects real work.
+      //
+      // Reconciled here against the LIVE status→disposition authority rather than a
+      // parallel ledger module: the module this once used had no production caller
+      // and counted the force-close disposition as terminal, so a run that resolved
+      // nothing would have satisfied it. These assertions are the ones that mattered.
+      const items = Object.values(completeState.items ?? {});
+      const dispositions = items.map((it) => statusToDisposition(it.status));
+
+      expect(items.length > 0, 'coverage denominator must be > 0 (a 0/0 vacuous green FAILS)').toBeTruthy();
+      // Every enumerated node reached a genuine end state.
+      const nonTerminal = items.filter((it) => !isTerminalStatus(it.status));
+      expect(nonTerminal.length, `every enumerated node must reach a terminal status; non-terminal=${JSON.stringify(
+          nonTerminal.map((it) => ({ finding_id: it.finding_id, status: it.status })),
+        )}`).toBe(0);
       // Stronger non-vacuity: the run did real remediation — at least one node
-      // genuinely RESOLVED (a ledger of only force-closed entries would still pass
-      // the terminal check, but proves no actual fix landed).
-      expect(ledger.entries.some((e) => e.disposition === 'resolved'), `at least one node must be genuinely resolved; entries=${JSON.stringify(ledger.entries)}`).toBeTruthy();
+      // genuinely RESOLVED. A run of purely abandoned entries is terminal too, and
+      // would prove no actual fix landed.
+      expect(dispositions.includes('resolved'), `at least one node must be genuinely resolved; dispositions=${JSON.stringify(dispositions)}`).toBeTruthy();
 
       // Cross-check the branch name helper matches the discovered branch's run id.
       const runId = remediationBranch.slice('remediation/'.length);

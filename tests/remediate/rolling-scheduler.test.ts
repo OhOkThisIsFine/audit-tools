@@ -32,6 +32,7 @@ import {
   type GateRunner,
 } from "../../src/remediate/steps/nextStep.js";
 import { mergedBaseCheckArgv } from "../../src/remediate/steps/gateCommands.js";
+import { isTerminalStatus } from "../../src/remediate/state/itemStatus.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationBlock, RemediationItemState } from "../../src/remediate/state/types.js";
 import type { CapacityPool, ProviderSlot, SessionConfig } from "audit-tools/shared";
@@ -683,17 +684,20 @@ describe("INV-RS-09 / CE-003: coarse re-block with bounded auto-terminate", () =
     expect(st.items!.F2.status).toBe("ignored"); // settled skip preserved
   });
 
-  it("NEGATIVE (no-human host): at the bound it converges DETERMINISTICALLY to terminal blocked — never livelock, never a triage prompt", () => {
+  it("NEGATIVE (no-human host): at the bound it converges DETERMINISTICALLY to a terminal abandoned close — never livelock, never a triage prompt", () => {
     const st = resolvedState();
     // currentCount already at the bound → terminate, do NOT re-attempt.
     const decision = applyCoarseReblock(st, COARSE_REBLOCK_BOUND, "gate still red");
     expect(decision.action).toBe("terminal_blocked");
     // Counter does not advance past the bound (no unbounded growth).
     expect(decision.next_count).toBe(COARSE_REBLOCK_BOUND);
-    // Every item is now terminal `blocked` — a no-human host run cannot livelock,
+    // Every item is now terminal `abandoned` — a no-human host run cannot livelock,
     // never reaches the human triage prompt, and is never force-closed to green.
+    // The status must be TERMINAL: `blocked` is retried by triage, so leaving items
+    // blocked here ended the run with items in no end state at all.
     for (const it of Object.values(st.items!)) {
-      expect(it.status).toBe("blocked");
+      expect(it.status).toBe("abandoned");
+      expect(isTerminalStatus(it.status)).toBe(true);
       expect(it.completed_at).toBeDefined();
     }
   });

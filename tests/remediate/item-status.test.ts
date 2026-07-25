@@ -5,6 +5,7 @@ import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
   isSkipStatus,
+  isUnsuccessfulEndStatus,
   statusToDisposition,
   dispositionToOutcomeStatus,
   type RemediationItemStatus,
@@ -13,8 +14,9 @@ import type { PerFindingDisposition } from "../../src/remediate/state/types.js";
 import type { RemediationOutcomeStatus } from "audit-tools/shared";
 
 describe("itemStatus — canonical status enum", () => {
-  it("enumerates the eleven lifecycle statuses with no duplicates", () => {
+  it("enumerates the twelve lifecycle statuses with no duplicates", () => {
     expect([...ITEM_STATUSES].sort()).toEqual([
+      "abandoned",
       "blocked",
       "deemed_inappropriate",
       "ignored",
@@ -37,21 +39,22 @@ describe("itemStatus — statusToDisposition", () => {
     resolved_no_change: "resolved_no_change",
     ignored: "ignored",
     deemed_inappropriate: "deemed_inappropriate",
-    blocked: "force_closed_unresolved",
-    needs_clarification: "force_closed_unresolved",
-    pending: "force_closed_unresolved",
-    tested: "force_closed_unresolved",
-    tested_successfully: "force_closed_unresolved",
-    refactored: "force_closed_unresolved",
-    verified: "force_closed_unresolved",
+    abandoned: "abandoned",
+    blocked: "abandoned",
+    needs_clarification: "abandoned",
+    pending: "abandoned",
+    tested: "abandoned",
+    tested_successfully: "abandoned",
+    refactored: "abandoned",
+    verified: "abandoned",
   };
   for (const status of ITEM_STATUSES) {
     it(`${status} → ${cases[status]}`, () => {
       expect(statusToDisposition(status)).toBe(cases[status]);
     });
   }
-  it("unknown status falls back to force_closed_unresolved", () => {
-    expect(statusToDisposition("not-a-status")).toBe("force_closed_unresolved");
+  it("unknown status falls back to abandoned", () => {
+    expect(statusToDisposition("not-a-status")).toBe("abandoned");
   });
 });
 
@@ -61,7 +64,7 @@ describe("itemStatus — dispositionToOutcomeStatus", () => {
     resolved_no_change: "verified_no_change",
     ignored: "ignored",
     deemed_inappropriate: "inappropriate",
-    force_closed_unresolved: "blocked",
+    abandoned: "blocked",
   };
   for (const [disposition, outcome] of Object.entries(cases)) {
     it(`${disposition} → ${outcome}`, () => {
@@ -152,7 +155,7 @@ describe("itemStatus — isSkipStatus", () => {
 // terminal is exactly verified-complete ∪ skip. Adding a status without
 // classifying it (or mis-bucketing one) fails here.
 describe("itemStatus — partition coherence", () => {
-  it("every status is in exactly one of {in-progress, verified-complete, skip, blocked, needs_clarification}", () => {
+  it("every status is in exactly one of {in-progress, verified-complete, skip, blocked, needs_clarification, abandoned}", () => {
     for (const status of ITEM_STATUSES) {
       const buckets = [
         isInProgressStatus(status),
@@ -160,16 +163,36 @@ describe("itemStatus — partition coherence", () => {
         isSkipStatus(status),
         status === "blocked",
         status === "needs_clarification",
+        status === "abandoned",
       ].filter(Boolean).length;
       expect(buckets, `status ${status} must be in exactly one bucket`).toBe(1);
     }
   });
-  it("terminal is exactly verified-complete ∪ skip", () => {
+  it("terminal is exactly verified-complete ∪ skip ∪ {abandoned}", () => {
+    // `abandoned` is terminal WITHOUT being verified-complete or a skip: the tool
+    // gave up, which ends the item but is neither a success nor a settled decision
+    // not to act. Keeping it out of the skip set is load-bearing — INV-RS-01 says a
+    // SKIP never satisfies a dependency edge, and neither may an abandoned node.
     for (const status of ITEM_STATUSES) {
       expect(isTerminalStatus(status)).toBe(
-        isVerifiedCompleteStatus(status) || isSkipStatus(status),
+        isVerifiedCompleteStatus(status) || isSkipStatus(status) || status === "abandoned",
       );
     }
+  });
+  it("abandoned is terminal but never verified-complete, never a skip, and blocks a green close", () => {
+    // The invariant the `abandoned` status exists to restore: every item ends
+    // terminal, so a run can never complete with an item that reached no end state.
+    expect(isTerminalStatus("abandoned")).toBe(true);
+    expect(isVerifiedCompleteStatus("abandoned")).toBe(false);
+    expect(isSkipStatus("abandoned")).toBe(false);
+    expect(isInProgressStatus("abandoned")).toBe(false);
+    // Both non-success endings must keep a run from landing green with its
+    // artifacts deleted; the green-close guard reads this predicate, so a force
+    // close can never be mistaken for a clean one.
+    expect(isUnsuccessfulEndStatus("abandoned")).toBe(true);
+    expect(isUnsuccessfulEndStatus("blocked")).toBe(true);
+    expect(isUnsuccessfulEndStatus("resolved")).toBe(false);
+    expect(isUnsuccessfulEndStatus("ignored")).toBe(false);
   });
 });
 
@@ -185,6 +208,10 @@ describe("itemStatus — close-phase outcome derivation (behavior lock)", () => 
     deemed_inappropriate: "inappropriate",
     ignored: "ignored",
     blocked: "blocked",
+    // The force-close seam converts non-terminal items to `abandoned`, which is
+    // terminal and renders as the `blocked` outcome — so the wire contract the
+    // close phase emits is unchanged by that seam moving.
+    abandoned: "blocked",
     // needs_clarification → force-closed (if the run ends before the answer) → blocked
     needs_clarification: "blocked",
     // in-progress → force-closed → blocked

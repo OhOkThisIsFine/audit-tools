@@ -224,16 +224,23 @@ export function applyCoarseReblock(
   const now = new Date().toISOString();
 
   if (currentCount >= bound) {
-    // Bounded auto-terminate: converge DETERMINISTICALLY to a terminal `blocked`
-    // close for a no-human host — never livelock, never a triage prompt, never green.
+    // Bounded auto-terminate: converge DETERMINISTICALLY to a terminal close for a
+    // no-human host — never livelock, never a triage prompt, never green.
+    //
+    // `abandoned`, NOT `blocked`: this is the force-close seam, and `blocked` is
+    // deliberately non-terminal (triage retries it). Leaving items non-terminal here
+    // meant the run ended with items that had reached no end state, which the close
+    // phase then rendered as a partial-completion outcome — breaking the invariant
+    // that remediation ends binary. `abandoned` is terminal and says which way it
+    // ended: the tool gave up, as distinct from a settled decision not to act.
     for (const it of Object.values(state.items ?? {})) {
       if (isSkipStatus(it.status)) continue; // settled user decision — never overturn
-      it.status = "blocked";
+      it.status = "abandoned";
       it.started_at ??= now;
       it.completed_at = now;
       it.failure_reason =
         `Tool-owned final gate failed and the coarse re-block backstop reached its ` +
-        `bound (${bound}); converging to a terminal blocked close (no-human host). ${gateSummary}`;
+        `bound (${bound}); abandoning the remaining items (no-human host). ${gateSummary}`;
     }
     return { state, action: "terminal_blocked", next_count: currentCount };
   }

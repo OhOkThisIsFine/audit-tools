@@ -20,8 +20,20 @@ import type { PerFindingDisposition } from "./types.js";
  * states (`pending`…`verified`), the success states (`resolved`,
  * `resolved_no_change`), the failure state (`blocked`), the awaiting-answer state
  * (`needs_clarification` — a worker hit scoping/judgment ambiguity mid-run and
- * paused the item for a clarification round rather than blocking it), and the
- * settled-no-act states (`deemed_inappropriate`, `ignored`).
+ * paused the item for a clarification round rather than blocking it), the
+ * settled-no-act states (`deemed_inappropriate`, `ignored`), and the
+ * tool-gave-up state (`abandoned`).
+ *
+ * `abandoned` exists so that EVERY item ends terminal. A run that exhausts its
+ * retry bound, fails its final gate, or is halted by the operator still has to
+ * end, and a no-human host must never livelock waiting for a triage that will
+ * not come. Before it existed, such items were left in a non-terminal status and
+ * the close phase rendered them as a partial-completion outcome — which silently
+ * broke the invariant that remediation ends binary. It is deliberately DISTINCT
+ * from `ignored`: `ignored` is a settled human decision not to act, `abandoned`
+ * is the tool giving up. Collapsing them would erase which one happened. WHY the
+ * run ended non-clean is recorded once, at run level, in `closing_context` —
+ * not smeared across every item.
  */
 export const ITEM_STATUSES = [
   "pending",
@@ -35,6 +47,7 @@ export const ITEM_STATUSES = [
   "needs_clarification",
   "deemed_inappropriate",
   "ignored",
+  "abandoned",
 ] as const;
 
 export type RemediationItemStatus = (typeof ITEM_STATUSES)[number];
@@ -64,15 +77,20 @@ export function isInProgressStatus(status: string): boolean {
 
 /**
  * Statuses that legitimately END a run with no further implement work: the two
- * success states plus the two settled-no-act (SKIP) states. `blocked` is
- * deliberately NOT terminal — triage retries it — so a blocked item leaves the
- * run non-terminal and routes to triage rather than closing.
+ * success states, the two settled-no-act (SKIP) states, and `abandoned` (the
+ * tool gave up — retry bound exhausted, final gate red, or operator halt).
+ * `blocked` is deliberately NOT terminal — triage retries it — so a blocked item
+ * leaves the run non-terminal and routes to triage rather than closing. The
+ * force-close backstop converts blocked→abandoned precisely so the run can end
+ * without either livelocking or leaving a non-terminal item to be rendered as a
+ * partial completion.
  */
 const TERMINAL_STATUSES = new Set<RemediationItemStatus>([
   "resolved",
   "resolved_no_change",
   "ignored",
   "deemed_inappropriate",
+  "abandoned",
 ]);
 
 /**
@@ -117,33 +135,52 @@ export function isSkipStatus(status: string): boolean {
   return SKIP_STATUSES.has(status as RemediationItemStatus);
 }
 
+/**
+ * Whether an item ended WITHOUT succeeding and without a settled decision not to
+ * act — `blocked` (triage exhausted, still non-terminal) or `abandoned` (the
+ * force-close backstop gave up). Either means the run did not fully succeed, so
+ * it must never be "landed green" with its artifacts deleted as if complete.
+ *
+ * Single-sourced because the green-close guard previously tested the `blocked`
+ * literal directly: when the force-close seam moved to `abandoned`, a literal
+ * test would have silently stopped matching and let a force-closed run land green.
+ */
+export function isUnsuccessfulEndStatus(status: string): boolean {
+  return status === "blocked" || status === "abandoned";
+}
+
 // ── Status → coverage disposition (PerFindingDisposition) ────────────────────
 
 /**
- * The one status→disposition map (INV-CL-05). Exhaustive over the status enum.
- * Non-terminal statuses map to `force_closed_unresolved` so a force-closed item
- * is surfaced in the coverage ledger rather than silently dropped.
+ * The one status→disposition map. Exhaustive over the status enum.
+ *
+ * Every status maps to a REAL disposition. There is deliberately no
+ * "force-closed" disposition: an item that the tool gave up on reaches the
+ * terminal `abandoned` status at the force-close seam, so by the time a
+ * disposition is derived the item has genuinely ended. A non-terminal status
+ * arriving here means close ran while an item was still mid-flight — a bug in
+ * the caller, not a disposition to be named — so it maps to `abandoned` and the
+ * run is reported non-clean rather than silently rendered as partial progress.
  */
 const STATUS_TO_DISPOSITION: Record<RemediationItemStatus, PerFindingDisposition> = {
   resolved: "resolved",
   resolved_no_change: "resolved_no_change",
   ignored: "ignored",
   deemed_inappropriate: "deemed_inappropriate",
-  // Non-terminal (blocked + needs_clarification + in-progress) → surfaced, not dropped.
-  blocked: "force_closed_unresolved",
-  needs_clarification: "force_closed_unresolved",
-  pending: "force_closed_unresolved",
-  tested: "force_closed_unresolved",
-  tested_successfully: "force_closed_unresolved",
-  refactored: "force_closed_unresolved",
-  verified: "force_closed_unresolved",
+  abandoned: "abandoned",
+  // Non-terminal statuses should have been converted at the force-close seam.
+  blocked: "abandoned",
+  needs_clarification: "abandoned",
+  pending: "abandoned",
+  tested: "abandoned",
+  tested_successfully: "abandoned",
+  refactored: "abandoned",
+  verified: "abandoned",
 };
 
 /** Map an item status to its per-finding coverage disposition. */
 export function statusToDisposition(status: string): PerFindingDisposition {
-  return (
-    STATUS_TO_DISPOSITION[status as RemediationItemStatus] ?? "force_closed_unresolved"
-  );
+  return STATUS_TO_DISPOSITION[status as RemediationItemStatus] ?? "abandoned";
 }
 
 // ── Coverage disposition → outcomes-contract status ──────────────────────────
@@ -159,7 +196,7 @@ const DISPOSITION_TO_OUTCOME_STATUS: Record<PerFindingDisposition, RemediationOu
   resolved_no_change: "verified_no_change",
   ignored: "ignored",
   deemed_inappropriate: "inappropriate",
-  force_closed_unresolved: "blocked",
+  abandoned: "blocked",
 };
 
 /** Map a coverage disposition to its outcomes-contract status. */
