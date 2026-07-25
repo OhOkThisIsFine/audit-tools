@@ -89,20 +89,22 @@ function finalMessageAsksAQuestion(transcriptPath) {
 
 if (isStop && !finalMessageAsksAQuestion(payload?.transcript_path ?? '')) process.exit(0);
 
-// ── Extract the philosophy (never copy it — this doc is the single home) ─────
-// PART B + the BRIDGE is the development-side material that dissolves working-style
-// questions. PART A governs the product; its section list is enough of a pointer,
-// and a product-design question should read the doc itself.
+// ── Extract THE BRIEF (never copy it — the doc is the single home) ───────────
+// The brief is the canonical short statement of the whole philosophy, both
+// halves: Product (what audit-tools is) and Working (how the work gets done). A
+// question can be about either, so both are injected — and the brief is short
+// enough that injecting it whole beats guessing which half applies. The same
+// block generates README.md's Philosophy section (scripts/check-philosophy-brief.mjs),
+// so there is exactly one place to edit a conviction.
 const DOC = 'docs/project-philosophy.md';
-let partB = '';
-let partAHeadings = [];
+let brief = '';
 try {
   const text = readFileSync(join(ROOT, DOC), 'utf8');
-  const start = text.indexOf('# PART B');
-  if (start === -1) process.exit(0); // doc restructured → fail open, never guess
-  partB = text.slice(start).trim();
-  const partA = text.slice(text.indexOf('# PART A'), start);
-  partAHeadings = partA.split(/\r?\n/).filter((l) => /^##\s/.test(l)).map((l) => l.replace(/^##\s*/, '').trim());
+  const begin = text.indexOf('<!-- BEGIN philosophy-brief');
+  const end = text.indexOf('<!-- END philosophy-brief -->');
+  if (begin === -1 || end === -1 || end < begin) process.exit(0); // restructured → fail open
+  brief = text.slice(text.indexOf('-->', begin) + 3, end).trim();
+  if (!brief) process.exit(0);
 } catch {
   process.exit(0);
 }
@@ -125,10 +127,9 @@ console.error(
     `silently*, and this gate does not override that. What it refuses is a question the philosophy already ` +
     `settles: effort/complexity is NOT a cost, ideal code over compatibility, deliverables land in a file, ` +
     `a needed manual flag is a bug signal.\n\n` +
-    `Source: ${DOC} (the home; this is extracted, not copied).\n\n` +
-    `${partB}\n\n` +
-    `── PART A (governs the PRODUCT itself) — sections, read ${DOC} if the question is about product design:\n` +
-    partAHeadings.map((h) => `  - ${h}`).join('\n') +
-    `\n\n(Bypass for this session: AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1.)`,
+    `${brief}\n\n` +
+    `Extracted from ${DOC} — the single home, where each line is argued in full. Read it if the ` +
+    `question is about the product's architecture rather than about how to proceed.\n` +
+    `(Bypass for this session: AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1.)`,
 );
 process.exit(2);

@@ -191,8 +191,8 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `index.lock`/`shallow.lock`, and offload-lane liveness so a down proxy is a known constraint at lap start
   rather than a mid-lap stall),
   `question-philosophy-gate.mjs` (PreToolUse AskUserQuestion + Stop — a question is about to reach the owner,
-  so PART B + the BRIDGE of `docs/project-philosophy.md` is EXTRACTED, never copied, and injected once per
-  session; it does not suppress asking — B1's *ask on ambiguity* still holds, and the retry goes through),
+  so THE BRIEF in `docs/project-philosophy.md` is EXTRACTED, never copied, and injected once per session; it
+  does not suppress asking — *ask on ambiguity* still holds, and the retry goes through),
   `closeout-challenge-gate.mjs` (Stop — asks "are you sure that was all taken care of, and will the handoff
   be clear for the next agent?" with the mechanical evidence attached: uncommitted work, unpushed commits, a
   HANDOFF that no longer matches the backlog, memory files missing from `MEMORY.md`; capped at 2 per session).
@@ -218,6 +218,13 @@ instead of a rewrite. Trivial mechanical edits skip it.
   artifacts) or the terminal/result-routing adapter, never the algorithm. Fix in one usually belongs in
   both; single-source the common core in `audit-tools/shared`, each orchestrator a thin policy-selecting
   adapter. (Realizes "One pipeline, two halves" and the dissolve-the-distinction direction.)
+- **One brief, two consumers — never a second copy of the philosophy.** THE BRIEF in
+  [`docs/project-philosophy.md`](docs/project-philosophy.md) is the single source for every condensed
+  restatement: `README.md`'s Philosophy section is GENERATED from its *Product* half
+  (`npm run check:philosophy-brief -- --write`, gated in `verify:release`) and the
+  `question-philosophy-gate` hook extracts the whole brief at runtime. Edit a conviction in the brief and
+  both follow. The README block was previously a hand-maintained restatement kept honest by an instruction
+  to *remember* to update it — a drift test made of memory, which is the thing this project bans.
 - **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
 - **A needed manual flag is a bug signal.** Fix auto-resolution; don't document the flag.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.

@@ -7,9 +7,12 @@ authoritative statement lives where the doc-philosophy routes it — `CLAUDE.md`
 (cross-session facts). This map states each conviction in one line and points at its home; when this map
 and a home ever disagree, **the home wins**.
 
-`README.md`'s "Philosophy" section deliberately carries a condensed, public-facing restatement of a
-few of these convictions (plain register, no internal citations) — when editing a conviction here,
-check whether the README summary needs the same edit.
+**The brief below is the single source for every condensed restatement of this philosophy.**
+`README.md`'s "Philosophy" section is GENERATED from its *Product* half (`npm run
+check:philosophy-brief -- --write`; the gate fails the build when the two drift), and the
+`question-philosophy-gate` hook injects the whole brief when a question is about to reach the owner.
+Edit a conviction here and both follow; never hand-edit the README block, and never copy these lines
+into a third place.
 
 > **Two kinds of philosophy — kept separate on purpose.**
 >
@@ -24,6 +27,62 @@ check whether the README summary needs the same edit.
 >
 > ⚑ marks convictions that are *commonly misstated* — the map records the correct form because the wrong
 > form keeps recurring.
+
+---
+
+# THE BRIEF — the whole philosophy in two dozen lines
+
+The condensed form, in plain register with no internal citations, so it can be read by someone outside
+the project and by an agent mid-decision. It is not a summary *of* the map below — it is the canonical
+short statement, and the map is where each line is argued. When the two disagree, the fuller section
+wins on nuance; the brief must then be corrected, not left as a second opinion.
+
+<!-- BEGIN philosophy-brief — the README's Philosophy section is generated from the Product half -->
+
+**Product — what audit-tools is.**
+
+- The tool must be trustworthy even when the host agent is weak. Correctness is guaranteed by the tool,
+  never by the host being careful or clever.
+- Use mechanical, deterministic tools wherever one does the job as well as or better than a model.
+- Use LLM judgment where it clearly lifts quality — bounded, scoped and recorded. The project is not
+  "100% deterministic", and it is not trying to be.
+- Whatever *can* be enforced in tooling *must* be, regardless of who does the work.
+- Don't grade your own homework: anything important or complex gets an independent adversarial check
+  that is allowed to refuse.
+- Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.
+- Batch work into logical units of reasonable size — rigor balanced against token cost, not 100 agents
+  for 100 files.
+- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: discovered at runtime or
+  abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
+  for it is how that is honored — their output is normalized into shared contracts, never forked per
+  ecosystem.
+- One pipeline, two halves: auditing produces findings, remediation consumes them and fixes. The machine
+  contract is the source of truth; the human report is its render.
+- Nothing runs to completion in a single call. Each invocation does a bounded, persisted piece of work,
+  so a run is resumable, parallelizable and failure-isolated.
+- Scale the process to the work — depth and granularity are dials on one pipeline, never a separate
+  lighter path.
+- Artifacts are continuity: staleness propagates along an explicit dependency map, never ad-hoc
+  freshness checks.
+
+**Working — how the work gets done.**
+
+- Ideal code over compatibility; delete legacy rather than carry it. Effort, complexity and refactor
+  size are NOT costs — only the endpoint matters. Correctness is the only thing that gates pace.
+- Ask on genuine ambiguity, and batch the questions. Never silently pick a default, and never quietly
+  defer a decision that is the owner's.
+- A needed manual flag, or a fix that amounts to "be careful next time", is a bug signal — move the
+  friction into the tool instead.
+- One home per fact. Single-source and extract rather than keeping two copies honest with a drift test.
+- Deliverables land in a file; chat gets the path and a short digest, never the deliverable itself.
+- Green at every commit, and every regression test is red-green validated before it is trusted.
+- End-of-sprint cleanup runs unprompted, and every remaining step is stated with the document it lives
+  in — a step that lives only in chat is lost.
+- Docs capture durable concepts, not current state. Absence of a thing is not staleness.
+- Front-load the broad prior-art search before authoring anything — narrow scope is the top churn driver.
+- Log friction the moment you hit it, in all its categories, without being asked.
+
+<!-- END philosophy-brief -->
 
 ---
 

@@ -59,12 +59,14 @@ afterAll(() => {
 });
 
 describe('question-philosophy-gate: the philosophy reaches the agent before the owner does', () => {
-  it('blocks the first AskUserQuestion and injects PART B verbatim', () => {
+  it('blocks the first AskUserQuestion and injects BOTH halves of the brief', () => {
     const { code, stderr } = runHook(QUESTION_GATE, askPayload(sid('ask')), { root: docRoot });
     expect(code).toBe(2);
     // The single highest-yield line — the one that dissolves most scope questions.
-    expect(stderr).toContain('is NOT a cost');
-    expect(stderr).toContain('PART A (governs the PRODUCT itself)');
+    expect(stderr).toContain('are NOT costs');
+    // A question can be about either half, so both must be present.
+    expect(stderr).toContain('trustworthy even when the host agent is weak');
+    expect(stderr).toContain('Ask on genuine ambiguity');
   });
 
   it('tells the agent to ask again if the question survives (B1 still says ask on ambiguity)', () => {

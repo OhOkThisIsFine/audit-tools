@@ -21,18 +21,33 @@ human-readable render (markdown):
 
 ## Philosophy
 
-- Use mechanical/deterministic tools where possible without LLM involvement.
-- Use LLM judgement when it can give a significant advantage over mechanical tools.
-- Use tightly-bound and well-defined tasks when LLMs are involved, so that the
-  performance gap between weak and strong models shrinks.
-- Don't grade your own homework - if an LLM analyzes something important or complex,
-  then it should dispatch an independent adversarial agent to check its conclusions.
-- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: these are
-  discovered at runtime or abstracted behind a contract, never baked in. Detecting the
-  repo's structure/language and pulling in useful tools for it is how that is honored —
-  the tool's output is normalized into the shared contracts, not forked per ecosystem.
-- Balance rigor with token efficiency - batch tasks into logical units of reasonable
-  size so LLMs focus on related items without dispatching 100 agents for 100 files.
+<!-- BEGIN philosophy-brief — generated from docs/project-philosophy.md; do not hand-edit -->
+
+- The tool must be trustworthy even when the host agent is weak. Correctness is guaranteed by the tool,
+  never by the host being careful or clever.
+- Use mechanical, deterministic tools wherever one does the job as well as or better than a model.
+- Use LLM judgment where it clearly lifts quality — bounded, scoped and recorded. The project is not
+  "100% deterministic", and it is not trying to be.
+- Whatever *can* be enforced in tooling *must* be, regardless of who does the work.
+- Don't grade your own homework: anything important or complex gets an independent adversarial check
+  that is allowed to refuse.
+- Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.
+- Batch work into logical units of reasonable size — rigor balanced against token cost, not 100 agents
+  for 100 files.
+- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: discovered at runtime or
+  abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
+  for it is how that is honored — their output is normalized into shared contracts, never forked per
+  ecosystem.
+- One pipeline, two halves: auditing produces findings, remediation consumes them and fixes. The machine
+  contract is the source of truth; the human report is its render.
+- Nothing runs to completion in a single call. Each invocation does a bounded, persisted piece of work,
+  so a run is resumable, parallelizable and failure-isolated.
+- Scale the process to the work — depth and granularity are dials on one pipeline, never a separate
+  lighter path.
+- Artifacts are continuity: staleness propagates along an explicit dependency map, never ad-hoc
+  freshness checks.
+
+<!-- END philosophy-brief -->
 
 ## Install
 
