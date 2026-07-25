@@ -7,6 +7,21 @@
 
 ## Live state
 
+- **Nightly-items clearance lap, 2026-07-25 — the nightly queue is worked down; four gates are new.**
+  `check:version-gates`, `check:constitutional-doc-paths`, `check:memory-citations` and the rebuilt
+  `check:doc-manifest` all run in `verify:checks`. The manifest is now DATA
+  (`scripts/doc-manifest-data.mjs`) rendered into `doc-review-guidelines.md` and byte-compared, and it
+  reaches the whole repo (117 docs, was 72). Constitutional docs are REFUSED at commit without
+  `node scripts/attest-constitutional-doc-change.mjs`.
+  ⚠ **Two gates now refuse commits that previously passed.** A commit touching `CLAUDE.md`,
+  a normative goals doc, `docs/project-philosophy.md` or `docs/doc-review-guidelines.md` needs a
+  constitutional attestation; a commit stamping a schema version into a payload read back unchecked
+  fails `check:version-gates`. Both are intended.
+  ⚠ **`verify:checks` runs the gates; the pre-commit hook does NOT run `verify:checks`.** A gate wired
+  only into `verify:checks` still fails first in RELEASE CI. Wire anything commit-critical into
+  `.claude/hooks/pre-commit-gate.mjs` as well.
+
+
 - **Still live from the earlier 2026-07-24 laps.** The price-snapshot refresh INVERTS host tier cost
   order (regenerating it ranks `claude-opus-4-8` below haiku, so cost-first routing at λ=0 sends every
   packet to Opus; `cost-rank.test.mjs` caught it, and the service→vendor-id mapping is a PREREQUISITE,
@@ -156,10 +171,11 @@ watch a real frontier: this is the first work that makes the new pause path REAC
 live evidence yet. Detail in [`open-bugs.md`](backlog/open-bugs.md).
 
 **4. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
-132.5KB / 90 entries against a 120KB budget (was 154KB / 108 four laps ago). Sizes are UTF-8 BYTES —
-the gate agrees with `wc -c`. Condensation as a lever is nearly exhausted: total excess over the
-2600-byte per-entry budget is a few KB across all 90, so the remaining ~12.5KB has to come from closing
-entries (items 1–2). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop — and
+It is over the per-file budget; run `node scripts/check-backlog-budget.mjs` for the live figures (the
+numbers are deliberately NOT restated here — a hand-carried measurement restales on every edit, and the
+tool computes it). Sizes are UTF-8 BYTES; the gate agrees with `wc -c`. Condensation as a lever is
+nearly exhausted — per-entry excess is small and spread thin — so the remaining gap has to come from
+CLOSING entries (items 1–2). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop — and
 only at the END of a lap — to ratchet the shrink-only ceiling. ⚠ Never run `--update-baseline` to make a
 GROWN file pass; that raises the ceiling, which is the one thing this gate exists to prevent. Pay for a
 new entry by condensing another — that is exactly what this lap's friction entry cost.
