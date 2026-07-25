@@ -22,7 +22,11 @@ gate this pass adds.
 | Red-green regression discipline; hermeticity rerun before calling a regression | Project memory (red-green, restore-by-inverting, test-must-reach-the-code) + the *Test failure protocol* in the global instructions |
 | "Do not pin model ids / pre-build model combos" | *Never make us hand-maintain a model/price/limit table* and *Everything-agnostic by default* in `CLAUDE.md` |
 
-## Debatable — owner's call, not implemented
+## Debatable — escalated, and DECLINED by the owner (2026-07-25)
+
+All three were put to the owner and declined; none is implemented, and none is open. The retirements
+and standing decisions they would have overturned stand as written. Do not re-open these from the
+report — the report is the stale side of each disagreement.
 
 **1. Offload retry policy.** The report proposes: *"On `UND_ERR_HEADERS_TIMEOUT`, retry once with an
 alias model, then fall back to the next lane."* This encodes a diagnosis that was disproved. The error
