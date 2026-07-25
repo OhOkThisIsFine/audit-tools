@@ -269,7 +269,7 @@ granularity is the point: excluding one model of a multi-model backend must leav
 
 | Keyspace | Shape | Account is | Used for |
 |---|---|---|---|
-| quota-ledger pool identity | `backend_provider[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
+| quota-ledger pool identity | `service[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
 | operator exclusion pattern | `provider:model` (open, 3 tiers), **transport**-qualified | irrelevant | route decisions |
 | gate compare key | `(backend_provider ?? provider):model`, **backend**-qualified | irrelevant | delta detection |
 

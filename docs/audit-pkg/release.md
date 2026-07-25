@@ -12,6 +12,10 @@ npm run verify:release
 `verify:release` covers:
 
 - TypeScript typecheck (`build`)
+- test-tree typecheck (`check:tests`)
+- raw control-byte gate (`check:control-bytes`)
+- loop-core pattern-list drift check (`check:loop-core-patterns`)
+- backlog size-budget gate (`check:backlog-budget`)
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
 - full automated test suite (`vitest run`)

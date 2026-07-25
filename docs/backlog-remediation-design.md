@@ -48,7 +48,7 @@ shipped-vs-open status.
   it at the dispatch site (reads, doesn't compute).
 - **friction sink (O1↔O3/O2/F4/F5):** ONE `captureFrictionEvent` function in
   `src/shared/friction/captureFrictionEvent.ts`; all mechanical seams call it; appends ride O2's `withFileLock`.
-- **git_history registration (F6↔F1):** F1 registers `git_history.json` in the DAG + `dep-map.md`
+- **git_history registration (F6↔F1):** F1 registers `git_history.json` in the DAG + `spec/audit/dependency-map.md`
   atomically with F6.
 - **own-vs-acquire (F5↔F6):** git-history mining is owned (F6); secret-scanning is acquired through
   F5's adapter seam (the default-run `gitleaksCandidate`), not owned.
@@ -115,7 +115,7 @@ implementation must hold.
 ## Still-gated (not landable on tooling alone)
 
 > The sole genuinely-open item from this doc (D8 prose-staleness narrowing) is tracked as open work in
-> [`backlog.md`](backlog.md) (Deferred/waiting — prose-heavy staleness narrowing); this doc is
+> [`backlog/deferred.md`](backlog/deferred.md) (prose-heavy staleness narrowing); this doc is
 > architecture-of-record, not a status tracker. The F5-consent and
 > Parity notes below are durable rationale — an implemented control and a standing preference — not open
 > backlog items.

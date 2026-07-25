@@ -9,7 +9,7 @@
 
 - **Fourth backlog clearance lap, 2026-07-24 (`5fc913a8` · `058c035d` · `be6e7c56` + the sweep).** Eight
   entries closed by a fix, two refiled to `durable-traps.md` (they were standing reference, not work),
-  one new LEAD opened by the sweep. `open-bugs.md` is 97 → 90 entries, 138.6KB → 132.8KB.
+  one new LEAD opened by the sweep. `open-bugs.md` is 97 → 90 entries, 138.6KB → 133.5KB.
   Shipped: the masked-suite-exit-code REFUSAL (was an advisory that fired and was read past), the
   chained-`attest && git commit` explanation, fail-open announcements on every pre-commit-gate infra
   bail, one single-sourced root-containment guard replacing five hand-rolled copies, the CLAUDE.md
@@ -123,7 +123,8 @@
   `gh release delete vX.Y.Z --cleanup-tag` + forward-bump. Run `npm run verify:release` locally before
   tagging — the local pre-tag gate is only `check`.
 - **End every lap by checking CI on `main`.** `ci` and `audit-code-test-suite` were red for ~a dozen
-  laps while every lap reported "green": the pre-commit hook gates only `npm run check`, and laps
+  laps while every lap reported "green": the pre-commit hook gates `npm run check` (plus
+  `test:doc-contract` / `check:doc-manifest` when the staged set touches docs), and laps
   verified with build + check + vitest — none of which include `verify:checks`
   ([[lap-green-must-match-ci-evidence]]). A local "N failed" must be resolved to NAMED files before
   being waved at as the known-flaky baseline.
@@ -183,9 +184,9 @@ watch a real frontier: this is the first work that makes the new pause path REAC
 live evidence yet. Detail in [`open-bugs.md`](backlog/open-bugs.md).
 
 **4. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
-133.6KB / 90 entries against a 120KB budget (was 154KB / 108 four laps ago). Sizes are UTF-8 BYTES —
+132.5KB / 90 entries against a 120KB budget (was 154KB / 108 four laps ago). Sizes are UTF-8 BYTES —
 the gate agrees with `wc -c`. Condensation as a lever is nearly exhausted: total excess over the
-2600-byte per-entry budget is a few KB across all 90, so the remaining ~14KB has to come from closing
+2600-byte per-entry budget is a few KB across all 90, so the remaining ~12.5KB has to come from closing
 entries (items 1–2). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop — and
 only at the END of a lap — to ratchet the shrink-only ceiling. ⚠ Never run `--update-baseline` to make a
 GROWN file pass; that raises the ceiling, which is the one thing this gate exists to prevent. Pay for a
@@ -217,9 +218,9 @@ swapping, starting, or removing the ranker changes zero audit-tools source. Stil
 refreshed pipeline.
 
 **Track 3 — Gate-0 operator-confirmed priority order.** The machinery exists end-to-end; what is
-missing is prompt clarity plus a fallback when no ranks exist. Two open owner calls: whether a
-suggested fallback order lists every pool or only the capable-and-above tiers, and how an
-operator-confirmed order composes with λ (the cost↔speed bias).
+missing is prompt clarity plus a fallback when no ranks exist. Both owner calls are RESOLVED — the
+suggested order lists EVERY pool, and operator order is authoritative WITHIN the cost axis while λ
+weighs that axis; detail in [`forward-tracks.md`](backlog/forward-tracks.md).
 
 **G-series — closed as a sequence.** Do not reopen G4/G5/G6 as laps. Two slivers survive on their own
 merits and are backlog-tracked: the **G6 read-path unification** (audit and remediate still read their

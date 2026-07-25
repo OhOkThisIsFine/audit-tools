@@ -58,7 +58,7 @@ questions at the outset so it can run autonomously for as long as possible).
 ```
 
 You'll confirm scope, depth, and which lenses to apply (security, correctness, reliability,
-data-integrity, etc.), then it runs autonomously to completion and leaves
+data_integrity, etc.), then it runs autonomously to completion and leaves
 `audit-findings.json` + `audit-report.md` in `.audit-tools/`.
 
 Every finding in the report is adversarially verified against current source by an

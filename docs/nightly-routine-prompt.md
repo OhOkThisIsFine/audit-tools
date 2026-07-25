@@ -65,10 +65,10 @@ LEG 1 — DOCS
     "uses" it — code-absence is the policy working.
 
 LEG 2 — BACKLOG
-11. Scope: docs/backlog.md → Open bugs, Forward tracks, Deferred/waiting. (Durable traps is
+11. Scope: docs/backlog/open-bugs.md, forward-tracks.md, deferred.md. (durable-traps.md is
     reference, not work.) Rubric: reuse .claude/skills/disambiguate-backlog/SKILL.md — do not
     fork it.
-12. You MAY edit backlog.md for MECHANICAL cleanup only: delete an entry whose fix verifiably
+12. You MAY edit the docs/backlog/ files for MECHANICAL cleanup only: delete an entry whose fix verifiably
     shipped (same code-anchor bar as a doc fix — a "SHIPPED" claim in the prose is a LEAD, not
     evidence), strip status-noise/shipped-narrative from a still-open entry, fix stale
     file/symbol references. Genuine disambiguation — turning a vague item into a spec —
