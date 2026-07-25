@@ -221,4 +221,94 @@ describe("A-8 planHybridDispatch", () => {
     expect(part.inProcess).toEqual([]);
     expect(part.host.length).toBeGreaterThan(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Unplaceable nodes — the discriminator that keeps an all-unfitting frontier
+  // out of the "nothing to do" merge (see HybridDispatchPartition.unplaceable).
+  // -------------------------------------------------------------------------
+
+  it("a node too large for EVERY declared cap is reported in `unplaceable`, not silently absent", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      // 90k against two 32k pools — nothing can take these.
+      frontier: nodes(3, 90_000),
+      pools: [
+        hostPool({ contextCapTokens: 32_000 }),
+        nimPool({ contextCapTokens: 32_000 }),
+      ],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // Both partitions empty — which on its own is indistinguishable from "the
+    // backend carried the batch" or "a peer holds the claims". `unplaceable` is
+    // what makes the structural case decidable by the caller.
+    expect(part.inProcess).toEqual([]);
+    expect(part.host).toEqual([]);
+    expect(part.unplaceable).toEqual(["blk-0", "blk-1", "blk-2"]);
+  });
+
+  it("a node that fits somewhere is NOT unplaceable — a cap-less pool absorbs it", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(2, 90_000),
+      pools: [
+        // The host pool declares no cap, so it stays admissible at any size.
+        hostPool(),
+        nimPool({ contextCapTokens: 32_000 }),
+      ],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    expect(part.unplaceable).toEqual([]);
+    expect(part.host.length).toBeGreaterThan(0);
+  });
+
+  it("a MIXED frontier still places what fits — so the caller's both-partitions-empty pause guard cannot fire", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: [
+        { id: "blk-huge", estimatedTokens: 90_000 },
+        { id: "blk-ok", estimatedTokens: 1_000 },
+      ],
+      pools: [nimPool({ contextCapTokens: 32_000 })],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // The oversized node is reported, but the fitting one still gets placed — so
+    // the structural-refusal pause (which requires BOTH partitions empty) is out
+    // of reach here and the run keeps making progress. `blk-huge` is simply
+    // re-offered next cycle, and only pauses once it is all that is left.
+    expect(part.unplaceable).toEqual(["blk-huge"]);
+    expect(part.inProcess.map((a) => a.nodeId)).toEqual(["blk-ok"]);
+  });
+
+  it("`unplaceable` is empty on an ordinary split — it never fires for capacity pressure", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(24),
+      pools: [hostPool(), nimPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // Nodes beyond this cycle's capacity go unassigned and are re-offered next
+    // cycle — that is NOT unplaceability, and reporting it as such would pause a
+    // perfectly healthy run.
+    expect(part.unplaceable).toEqual([]);
+  });
 });

@@ -2142,6 +2142,41 @@ async function buildImplementDispatchStep(ctx: {
             }
           }
         }
+        // STRUCTURAL REFUSAL, checked before the empty-host merge below because the
+        // two are indistinguishable from the partition sizes alone. When every node
+        // fits no pool, BOTH partitions come back empty — and folding that into the
+        // "backend carried the batch" merge terminal-blocks every node on a result it
+        // was never allowed to produce, dead for the run even after the operator frees
+        // a bigger pool (`no_capable_pool` is deliberately not transient). Pause
+        // resumably instead: the nodes stay PENDING and the step names the real cause
+        // (split the node, or declare a larger `context_tokens`) rather than
+        // `buildEmptyPoolTerminal`'s "the provider pool was exhausted", which sends the
+        // operator to quota when nothing was exhausted.
+        //
+        // Deliberately triggered by "nothing was placed AND something is unplaceable",
+        // not by "everything is unplaceable": with nothing placed, merging is wrong
+        // whatever the mix, and only the unplaceable ids go into `stranded_ids`. If
+        // capacity ALSO contributed, the pause is still the safe read — `quota_paused`
+        // keeps every node PENDING, so resuming re-runs the cycle and the merely
+        // capacity-blocked nodes place themselves then. The residual is message
+        // emphasis, not lost work; the mixed frontier that places anything at all
+        // never reaches here (pinned in tests/remediate/hybrid-dispatch.test.ts).
+        if (
+          partition.unplaceable.length > 0 &&
+          partition.inProcess.length === 0 &&
+          partition.host.length === 0
+        ) {
+          const paused = await store.loadState();
+          if (paused) {
+            paused.partial_completion_terminal = buildQuotaPausedTerminal(
+              partition.unplaceable,
+              null,
+              "no_capable_pool",
+            );
+            await store.saveState(paused);
+          }
+          return { kind: "transition", state: paused };
+        }
         // The backend carried the whole batch (or every host node was contested by a
         // peer driver) → nothing for the host this cycle; merge what landed + transition.
         if (partition.host.length === 0) {

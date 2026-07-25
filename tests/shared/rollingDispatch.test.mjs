@@ -2003,6 +2003,114 @@ test("createRollingDispatcher — heterogeneous queue: a permanent strand and a 
   ]);
 });
 
+test("getTerminal — a WHOLLY-STRUCTURAL strand is the resumable no_capable_pool pause, never the terminal empty_pool", async () => {
+  await setupTmpQuotaDir();
+  // Every packet exceeds every pool's declared cap, and NOTHING is paused or
+  // exhausted — so there is no reset to wait for and the pools are perfectly
+  // healthy. The old classification fell through to `empty_pool`, which is
+  // non-retryable and reports "the provider pool was exhausted": it blocks nodes
+  // that become runnable the moment the operator frees a bigger pool, and points
+  // at quota when quota was never involved.
+  const records = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      { ...makePool("small-a"), contextCapTokens: 30_000 },
+      { ...makePool("small-b"), contextCapTokens: 32_000 },
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+    onAdmissionDecision: (r) => records.push(r),
+  });
+  dispatcher.enqueue([
+    { ...makePacket("p-huge-1"), estimatedTokens: 90_000 },
+    { ...makePacket("p-huge-2"), estimatedTokens: 60_000 },
+  ]);
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the never-fits strand did not fire")), 15_000),
+    ),
+  ]);
+
+  expect(results.length).toBe(0);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "fits no pool ⇒ resumable pause, not a dead-pool terminal").toBe(
+    "quota_paused",
+  );
+  expect(terminal.empty_grant_cause, "names the REAL cause — a fit mismatch").toBe(
+    "no_capable_pool",
+  );
+  // A structural pause has no reset: telling the operator to wait would strand
+  // the run forever, since no reset can make a 90k packet fit a 30k pool.
+  expect(terminal.earliest_reset_at).toBeUndefined();
+  expect(terminal.stranded_ids.sort()).toEqual(["p-huge-1", "p-huge-2"]);
+  // Both stranded via the permanent-strand record, on context_cap alone.
+  expect(records.filter((r) => r.kind === "engine_stranded_no_fitting_pool").length).toBe(1);
+});
+
+test("getTerminal — a strand caused by EXHAUSTED pools keeps the empty_pool terminal (structural pause does not swallow real exhaustion)", async () => {
+  await setupTmpQuotaDir();
+  // Control for the test above: the packet fits fine, but every pool dies on a
+  // reset-less 429. That IS exhaustion, and `empty_pool` remains the honest
+  // reading — the fit-mismatch pause must not annex it.
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({
+      packet,
+      outcome: "rate_limited",
+      rateLimit: { channel: "error", text: "429 Too Many Requests" },
+    }),
+  });
+  dispatcher.enqueue([makePacket("p-fits")]);
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the exhaustion strand did not fire")), 15_000),
+    ),
+  ]);
+
+  expect(results.filter((r) => r.outcome === "success").length).toBe(0);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "pools genuinely died ⇒ empty_pool, unchanged").toBe("empty_pool");
+  expect(terminal.empty_grant_cause).toBeUndefined();
+  expect(terminal.stranded_ids).toEqual(["p-fits"]);
+});
+
+test("getTerminal — a MIXED strand (unplaceable + exhausted) keeps empty_pool: the structural pause never annexes real exhaustion", async () => {
+  await setupTmpQuotaDir();
+  // One packet fits nowhere (context_cap); the other fits fine but kills the pool
+  // on a reset-less 429. getTerminal issues ONE reason for the batch, and with a
+  // dead pool in the mix the operator's first problem is the dead pool — so the
+  // batch must keep reading `empty_pool`, not be softened to a fit-mismatch pause.
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [{ ...makePool("only"), contextCapTokens: 30_000 }],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({
+      packet,
+      outcome: "rate_limited",
+      rateLimit: { channel: "error", text: "429 Too Many Requests" },
+    }),
+  });
+  dispatcher.enqueue([
+    { ...makePacket("p-fits"), estimatedTokens: 1_000 },
+    { ...makePacket("p-huge"), estimatedTokens: 90_000 },
+  ]);
+  await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("run() hung — the mixed strand did not fire")), 15_000),
+    ),
+  ]);
+
+  const terminal = dispatcher.getTerminal();
+  expect(terminal.reason, "a dead pool in the batch ⇒ exhaustion is the honest reading").toBe(
+    "empty_pool",
+  );
+  expect(terminal.empty_grant_cause).toBeUndefined();
+  expect(terminal.stranded_ids.sort()).toEqual(["p-fits", "p-huge"]);
+});
+
 test("getTerminal — a pause-wall strand stays RETRYABLE even when every pause has expired by the time getTerminal runs (wall-time capture, AGY R2)", async () => {
   await setupTmpQuotaDir();
   const dispatcher = createRollingDispatcher({

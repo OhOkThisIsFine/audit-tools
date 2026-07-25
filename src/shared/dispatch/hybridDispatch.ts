@@ -34,6 +34,16 @@ export interface HybridDispatchPartition {
   /** Nodes handed to the conversation host's driver (its own pool). */
   host: NodeAssignment[];
   /**
+   * Node ids that fit NO active pool this pass (size vs. every declared context
+   * cap). These appear in NEITHER partition, and unlike the other reasons a node
+   * goes unassigned — capacity full, or a peer driver holding the claim — they
+   * will not become placeable by being re-offered next cycle. A caller that folds
+   * an all-unplaceable frontier into "nothing to do" merges nodes that were never
+   * allowed to run; treat a non-empty set with both partitions empty as a
+   * structural refusal to PAUSE on, naming the fit mismatch as the cause.
+   */
+  unplaceable: string[];
+  /**
    * The live coordinator, so the caller can `release` claims on terminal accept,
    * `settlePool` an exhausted pool, and consult `terminalStatus` for the sole
    * pause authorization once the cycle's work is reconciled.
@@ -92,5 +102,5 @@ export async function planHybridDispatch(input: HybridDispatchInput): Promise<Hy
   for (const a of assignments) {
     (input.isInProcess(a) ? inProcess : host).push(a);
   }
-  return { inProcess, host, coordinator };
+  return { inProcess, host, unplaceable: coordinator.unplaceableNodeIds(), coordinator };
 }

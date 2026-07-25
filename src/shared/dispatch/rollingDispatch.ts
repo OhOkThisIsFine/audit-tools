@@ -91,6 +91,23 @@ import type {
 } from "./dispatchDecisionLog.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 
+/**
+ * The block reasons that mean "this packet fits no pool that exists" rather than
+ * "the pools died". All three are properties of the (packet, pool) PAIRING —
+ * a declared context window, a 413 the pool already returned for this packet, or
+ * a capability floor the pool sits below — so no reset, credit top-up or retry
+ * clears them; only a larger/stronger pool or a smaller packet does.
+ *
+ * `pool_exhausted` is deliberately absent (a dead pool is exhaustion, which
+ * `empty_pool` already reports honestly), and `pool_paused` cannot appear in a
+ * never-dispatchable strand at all — that strand admits permanent reasons only.
+ */
+const STRUCTURAL_FIT_BLOCK_REASONS: ReadonlySet<PacketPoolBlockWhy> = new Set<PacketPoolBlockWhy>([
+  "below_capability_floor",
+  "context_cap",
+  "oversized_for_pool",
+]);
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -282,6 +299,20 @@ export interface RollingDispatchState<TPacket> {
    * 2026-07-23).
    */
   wallStrandEarliestResetAtMs: number | null;
+  /**
+   * Stranded packet ids whose blockers were ALL structural fit/capability
+   * failures (`context_cap` / `oversized_for_pool` / `below_capability_floor`) —
+   * the packet fits NO confirmed pool, as opposed to the pools having died.
+   *
+   * Classification is captured AT STRAND TIME, never re-derived in
+   * `getTerminal`: the pool set and the packet's 413 skip-set both move on, so a
+   * later re-read would misattribute the cause. A wholly-structural strand is a
+   * fit mismatch the operator clears by freeing a larger pool or splitting the
+   * work — so `getTerminal` renders it as the RESUMABLE `no_capable_pool` pause
+   * rather than the non-retryable `empty_pool` terminal, whose "the provider
+   * pool was exhausted" message sends the operator to quota when nothing was.
+   */
+  structuralStrandIds: Set<string>;
   /**
    * Pool ids demoted by reactive cost verification: a pool DECLARED free
    * (`declaredCostPerMtok === 0`) that reported a positive cost on a completion, so
@@ -916,6 +947,7 @@ export function createRollingDispatcher<TPacket>(
     pausedPoolResetAt: new Map(),
     strandedIds: new Set(),
     wallStrandEarliestResetAtMs: null,
+    structuralStrandIds: new Set(),
     // A driver-provided set (driveRolling) makes demotion span this run's sub-waves
     // + levels; a standalone dispatcher owns a fresh per-instance set.
     costDemotedPoolIds: injectedCostDemotedPoolIds ?? new Set(),
@@ -1928,8 +1960,17 @@ export function createRollingDispatcher<TPacket>(
           if (permanentlyBlockedEverywhere) neverDispatchable.push({ packet: p, pools });
         }
         if (neverDispatchable.length > 0) {
-          for (const { packet: p } of neverDispatchable) {
-            if (!state.completedIds.has(p.id)) state.strandedIds.add(p.id);
+          for (const { packet: p, pools } of neverDispatchable) {
+            if (state.completedIds.has(p.id)) continue;
+            state.strandedIds.add(p.id);
+            // Capture the CAUSE now (see `structuralStrandIds`): a packet blocked
+            // everywhere by fit/capability alone fits no pool that exists, which is
+            // an operator-clearable mismatch — not the dead-pool exhaustion the
+            // `empty_pool` terminal reports. A single `pool_exhausted` blocker means
+            // pools really did die, so the strand keeps the exhaustion reading.
+            if (pools.length > 0 && pools.every((b) => STRUCTURAL_FIT_BLOCK_REASONS.has(b.why))) {
+              state.structuralStrandIds.add(p.id);
+            }
           }
           const strandedIdSet = new Set(neverDispatchable.map(({ packet: p }) => p.id));
           state.pendingQueue = state.pendingQueue.filter((p) => !strandedIdSet.has(p.id));
@@ -2036,6 +2077,21 @@ export function createRollingDispatcher<TPacket>(
         [...state.strandedIds],
         new Date(earliest).toISOString(),
       );
+    }
+    // No reset to wait for. Before falling back to the non-retryable `empty_pool`
+    // terminal, separate the two ways that happens: pools that DIED (exhaustion —
+    // `empty_pool` is honest) from packets that fit NO pool (a structural
+    // mismatch). The latter is resumable the moment the operator frees a larger
+    // pool or splits the work, so terminal-blocking it kills nodes that are still
+    // perfectly runnable — and `empty_pool`'s "provider pool was exhausted" points
+    // at quota when nothing was exhausted. Emit the `no_capable_pool` pause, whose
+    // consumers keep the nodes PENDING and render the real cause.
+    //
+    // Whole-batch, matching getTerminal's one-reason-per-batch contract: a strand
+    // mixing exhaustion with unplaceability still reads as `empty_pool`, since the
+    // dead pools are the fact the operator must act on first.
+    if ([...state.strandedIds].every((id) => state.structuralStrandIds.has(id))) {
+      return buildQuotaPausedTerminal([...state.strandedIds], null, "no_capable_pool");
     }
     return buildEmptyPoolTerminal([...state.strandedIds]);
   }

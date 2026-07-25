@@ -144,6 +144,12 @@ export class HybridSpillCoordinator {
   private readonly claimRegistry: ClaimRegistry;
   private readonly readSettled: () => SettledExclusionSet;
   private readonly onSettle?: (poolId: string) => void | Promise<void>;
+  /**
+   * Node ids from the MOST RECENT {@link planAssignments} that fit no active pool.
+   * Read back via {@link unplaceableNodeIds}; a post-plan consult, exactly like
+   * {@link terminalStatus}.
+   */
+  private lastUnplaceableNodeIds: string[] = [];
 
   constructor(opts: HybridSpillCoordinatorOptions) {
     this.pools = opts.pools;
@@ -180,6 +186,11 @@ export class HybridSpillCoordinator {
    */
   async planAssignments(nodes: FrontierNode[]): Promise<NodeAssignment[]> {
     const active = this.activePools();
+    // Reset per plan: unplaceability is a fact about THIS pass's pool set, and a
+    // stale carry-over would pause a run whose operator has since freed a pool.
+    // With no active pools nothing is "unplaceable" — that is the all-exhausted
+    // case `terminalStatus` owns, and reporting a fit mismatch would misdirect.
+    this.lastUnplaceableNodeIds = [];
     if (active.length === 0 || nodes.length === 0) return [];
 
     // Largest-node-first so the capacity split and the claim walk agree with
@@ -247,6 +258,14 @@ export class HybridSpillCoordinator {
     const neverFits = unassigned.filter((n) =>
       active.every((p) => !nodeContextFits(n, p)),
     );
+    // Surface the same fact to the CALLER, not just to stderr (spec F1 shipped the
+    // observability half only). A caller that sees an empty partition cannot
+    // otherwise tell "every node is unplaceable" from "capacity is full this cycle"
+    // or "a peer driver holds them" — and those want opposite handling: the first
+    // is a structural refusal to pause on, the other two are re-offered next cycle.
+    // Recorded here rather than recomputed by the caller so the fit predicate
+    // (`nodeContextFits`) stays single-sourced and predicate + report cannot drift.
+    this.lastUnplaceableNodeIds = neverFits.map((n) => n.id).sort();
     if (neverFits.length > 0) {
       try {
         process.stderr.write(
@@ -290,6 +309,22 @@ export class HybridSpillCoordinator {
    */
   async release(assignment: NodeAssignment): Promise<void> {
     await this.claimRegistry.release(assignment.nodeId, assignment.ownerToken);
+  }
+
+  /**
+   * Node ids the last {@link planAssignments} could place on NO active pool —
+   * their size exceeds every pool's declared context cap. Sorted, and empty until
+   * a plan has run.
+   *
+   * A caller reading an empty partition needs this to tell a structural refusal
+   * ("nothing fits — pause and name the real cause") from the two benign empties
+   * it otherwise looks identical to: capacity full this cycle, or a peer driver
+   * holding the claims. Both of those re-offer next cycle; an unplaceable node
+   * never will, so folding it into them merges a node that was never allowed to
+   * run and terminal-blocks it.
+   */
+  unplaceableNodeIds(): string[] {
+    return [...this.lastUnplaceableNodeIds];
   }
 
   /**
