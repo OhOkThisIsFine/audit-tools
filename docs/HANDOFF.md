@@ -7,34 +7,6 @@
 
 ## Live state
 
-- **Fourth backlog clearance lap, 2026-07-24 (`5fc913a8` · `058c035d` · `be6e7c56` + the sweep).** Eight
-  entries closed by a fix, two refiled to `durable-traps.md` (they were standing reference, not work),
-  one new LEAD opened by the sweep. `open-bugs.md` is 97 → 90 entries, 138.6KB → 133.5KB.
-  Shipped: the masked-suite-exit-code REFUSAL (was an advisory that fired and was read past), the
-  chained-`attest && git commit` explanation, fail-open announcements on every pre-commit-gate infra
-  bail, one single-sourced root-containment guard replacing five hand-rolled copies, the CLAUDE.md
-  `admitSpawn` correction, a reach preflight in the offload entrypoint, and a KEYLESS openai-compatible
-  source (`no_auth: true`) whose reach is proven by the endpoint liveness probe the `claude-worker` lane
-  already used — the entry had claimed this needed a sync→async ripple; the sync probe was one `switch`
-  branch away the whole time.
-  ⚠ **Two REAL containment bugs fell out of the dedup, neither of which the entry predicted:** the
-  worktree-seeding copy omitted `isAbsolute`, so on win32 a DIFFERENT DRIVE read as contained (a
-  cross-drive `relative()` returns an absolute path), and every copy's `startsWith("..")` wrongly
-  rejected a real entry named `..cache`. Five copies of a security predicate is not a style problem.
-  ⚠ **The test tree is now TYPECHECKED** — `check:tests` (`tsconfig.test.json`, `allowJs`) is wired into
-  `verify:checks`, landed atomically with the fixture sweep that makes it pass: 197 errors across 50
-  files cleared by 8 parallel agents, plus ~20 more that TS only unmasks once a sibling error on the
-  same literal is fixed. Every fix was semantics-preserving and no banned construct (`as any`,
-  `@ts-expect-error`, optional-widening) was used. ⚠ Read item 1 before celebrating the zero — the sweep
-  bought the green partly by writing `touched_files: []` into ~50 fixtures.
-  ⚠ **Latent things the sweep exposed, all now real:** two long-lived fixtures carried keys that are not
-  fields at all (`deps`, `depends_on` — the real one is `dependencies`), and two carried `while
-  (step.step_kind === "state_transition")` loops against a kind RETIRED from `RemediationStepKind`, so
-  they never executed. Nothing had flagged either, because nothing typechecked the tree.
-  ⚠ **Ratchet the backlog baseline LAST.** `--update-baseline` mid-lap, then more deletions, turns
-  `backlog-budget-unit.test.mjs` red against the live file — it reads exactly like a code regression and
-  cost a full-suite investigation here.
-
 - **Still live from the earlier 2026-07-24 laps.** The price-snapshot refresh INVERTS host tier cost
   order (regenerating it ranks `claude-opus-4-8` below haiku, so cost-first routing at λ=0 sends every
   packet to Opus; `cost-rank.test.mjs` caught it, and the service→vendor-id mapping is a PREREQUISITE,
@@ -289,9 +261,7 @@ vars, runnable any time).
 ## Suggested ordering — rationale
 
 The **loop is the meta-tool**; making it cheaper, convergent, and safe compounds on all downstream work
-([[autonomous-pipeline-capstone-spec]]). With the code tracks closed, the live-validation run IS the
-current loop-improvement work — it gates "redesign before scheduled autonomy" advancing to the
-scheduled audit→remediate→PR capstone.
+([[autonomous-pipeline-capstone-spec]]).
 
 Everything else open is in the split backlog, which is the per-item detail of record — one file per
 section so each is a bounded read: [`open-bugs.md`](backlog/open-bugs.md) (fixable defects),

@@ -397,6 +397,36 @@ the trap and the fix when it fires.
 
 - **A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).** `dist/`, `.claude/*` and `.audit-tools/*/*` are gitignored, so `rg` and `git grep` — the project's default search tools — provably cannot see a worktree's or a build tree's output. `grep -r` and PowerShell `Select-String -Recurse` honour no ignore file, so they hit `dist/**` and report deleted code as still referenced. Verified twice by probe. When checking whether a symbol is truly dead, use the ignore-aware tool; a `grep -r` hit inside `dist/` is the compiled copy of the very code you deleted, not a caller.
 
+- **A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.**
+  Deduping five hand-rolled copies of the guard exposed two live bugs no copy and no entry had
+  predicted: the worktree-seeding copy omitted `isAbsolute`, so on win32 a path on a DIFFERENT DRIVE
+  read as contained (a cross-drive `relative()` returns an absolute path), and every copy's
+  `startsWith("..")` wrongly rejected a legitimate entry named `..cache`. Five copies of a security
+  predicate is not a style problem — deduping one is correctness work
+  ([[five-copies-of-a-guard-hid-two-bugs]]).
+
+- **A typecheck sweep's error count is not final until you re-run it.** Clearing the test tree for
+  `check:tests` (`tsconfig.test.json`, `allowJs`; wired into `verify:checks`) surfaced ~20 errors
+  beyond the initial count — TS unmasks a second error on the same object literal only once its
+  sibling is fixed, so "N remaining" falls as you fix and then rises again. Budget for the re-run, and
+  hold the line that every fix be semantics-preserving: `as any`, `@ts-expect-error` and
+  optional-widening are banned constructs here, not shortcuts.
+  ([[test-tree-typecheck-gate-and-its-cost]])
+
+- **An untypechecked fixture can sit inert for months while its suite reads green.** The `check:tests`
+  sweep found two long-lived fixtures carrying keys that are not fields at all (`deps`, `depends_on` —
+  the real one is `dependencies`), and two carrying `while (step.step_kind === "state_transition")`
+  loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
+  Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
+  fixture is not evidence.
+
+- **Ratchet the backlog baseline LAST, once, at the end of a lap.**
+  `node scripts/check-backlog-budget.mjs --update-baseline` run mid-lap and then followed by more
+  deletions leaves `tests/shared/backlog-budget-unit.test.mjs:54` asserting a recorded ceiling that no
+  longer equals the live file — it goes red and reads exactly like a code regression (it cost a
+  full-suite investigation once). ⚠ Never run `--update-baseline` to make a GROWN file pass: that
+  raises the ceiling, which is the one thing the gate exists to prevent.
+
 ## Doc-set hygiene (enforced)
 
 

@@ -8,16 +8,17 @@
 
 
 
-- **`open-bugs.md` is 134KB / 89 entries against a 120KB budget — still not one bounded read
-  (2026-07-24, medium, friction: inefficient-feeding).** Splitting the single 1,706-line backlog by
-  section fixed `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read
-  in one call, which is the condition that let ~21% of entries go stale unnoticed.
-  `check:backlog-budget` records a per-file and per-entry ceiling in `.size-baseline.json` and enforces
-  SHRINK-ONLY, so it cannot regrow — but the ceiling is today's size, not the goal.
-  ⚠ **Condensation is EXHAUSTED as a lever — measured, not estimated:** total excess over the 2600-byte
-  per-entry budget is a few KB across all 89, so squeezing every oversized entry to budget still leaves
-  ~130KB. The remaining ~14KB comes only from **CLOSING entries** — downstream of the actionable queue,
-  not a separate task. (Sizes are UTF-8 BYTES; the gate agrees with `wc -c`.)
+- **`open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
+  friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed
+  `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read in one call,
+  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records a
+  per-file and per-entry ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot
+  regrow — but the ceiling is today's size, not the goal.
+  ⚠ **Condensation is EXHAUSTED as a lever:** nearly every entry already sits inside the 2600-byte
+  per-entry budget, so squeezing the rest barely moves the file. The gap closes only by
+  **CLOSING entries** — downstream of the actionable queue, not a separate task. ⚠ Never hand-carry
+  sizes here; `node scripts/check-backlog-budget.mjs --report` has the current figures (UTF-8
+  BYTES — matches `wc -c`).
   Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
   driver is narrative accreting onto entries, so a budget that always passes measures nothing.
 
@@ -526,16 +527,17 @@
   single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
   cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
-- **`docs/backlog.md` exceeds a single-read budget, so every pass navigates it blind (friction:
-  inefficient-feeding, medium).** 1,706 lines / 203KB / ~52k tokens at HEAD — twice a 25k-token read
-  cap — so working on it means paged reads plus grep-by-anchor, and line numbers shift under every
-  edit. It is also the document most likely to be scanned by an agent with no prior context:
-  `.claude/skills/disambiguate-backlog/SKILL.md` step 1 instructs "Read `docs/backlog.md` in full",
-  which no longer executes in one call.
+- **The open-work record exceeds a single-read budget, so every pass navigates it blind (friction:
+  inefficient-feeding, medium).** It is past what one read call returns, so working on it means paged
+  reads plus grep-by-anchor, and line numbers shift under every edit. It is also the document most
+  likely to be scanned by an agent with no prior context:
+  `.claude/skills/disambiguate-backlog/SKILL.md` step 1 instructs "Read every file under
+  `docs/backlog/` in full", which no longer executes in one call.
   **Property to hold:** the open-work record is navigable in bounded reads.
-  ⚠ **Splitting along the existing `##` boundaries does NOT satisfy it** — *Open bugs / frictions* is
-  1,109 of the 1,706 lines (143KB, ~37k tokens) by itself, so the obvious split leaves the same defect
-  in the biggest piece. The open question is therefore what sub-axis divides *Open bugs* (by area? by
+  ⚠ **Splitting along the existing `##` boundaries does NOT satisfy it** — *Open bugs / frictions*
+  carries most of it by itself, so the split left the same defect in the biggest piece —
+  `open-bugs.md` is still over the per-file budget. The open question is therefore what
+  sub-axis divides *Open bugs* (by area? by
   severity? one file per entry? a generated index that makes the whole thing seekable without
   splitting), and that is an owner call for two reasons: `docs/documentation-philosophy.md` §*The
   condensation bias* says **split only when one doc genuinely carries two unrelated durable concepts*

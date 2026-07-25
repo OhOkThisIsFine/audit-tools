@@ -24,18 +24,7 @@ models burn tokens. Shrink that surface to "write one good invariant sentence / 
 both succeed — the weak model because the structure it could break is gone, the strong model
 because it stops re-emitting boilerplate.
 
-## 1. The one open item
-
-Two items remain open. **S8's "Gate it" guard**: `runDesignReviewAutoComplete`
-(`src/audit/orchestrator/structureExecutors.ts`) can mark a design-review pass
-`contract_reviewed: true` / `conceptual_reviewed: true` with an empty `contract_findings`/
-`conceptual_findings: []` and no LLM call ever having run — there is no guard distinguishing "a real
-review found nothing" from "auto-completed empty." Closing that gap (require a real, non-fallback
-finding set, or block synthesis when the pass auto-completed empty) is remaining work; see the S8
-section for the full statement. **S4's ID-authority consolidation**: `goal_id` / module / obligation
-ID minting is not yet routed through `idRegistry.ts` — see the S4 section.
-
-## 2. The judgment vs. mechanical line
+## 1. The judgment vs. mechanical line
 
 The actionable core: for each artifact, separate what only a model can decide from what a tool can
 compute. Everything in the right column should move to deterministic code.
@@ -59,7 +48,7 @@ compute. Everything in the right column should move to deterministic code.
 The four pure-judgment artifacts (critique, counterexample, judge, and the *content* of
 module_contracts) stay LLM. Everything else is mostly or fully mechanical.
 
-## 3. Strategies, prioritized
+## 2. Strategies, prioritized
 
 Ordered by (impact × determinism-feasibility). Each names the plug-in point.
 
@@ -220,7 +209,7 @@ empowered, general, well-fed judgment for the architectural (S8). The self-audit
 because the implementation did the opposite on all three axes — narrow questions, no roaming, a
 non-judging judge — not because the reviewer lacked our project's vocabulary.
 
-## 4. Why this serves all three goals
+## 3. Why this serves all three goals
 
 - **More efficient:** the model emits tiny judgment slots, not whole artifacts; three artifacts
   vanish entirely (S1); the staleness DAG re-derives only genuinely-affected downstream artifacts on
@@ -233,7 +222,7 @@ non-judging judge — not because the reviewer lacked our project's vocabulary.
   floor that makes a weak model *safe* and a strong model *fast*. The same pipeline run by a weaker
   worker degrades gracefully instead of producing green-but-malformed artifacts.
 
-## 5. Dependency structure
+## 4. Dependency structure
 
 S1, S3–S6, S8 are the remediate-code contract-authoring track; **S7 is the parallel audit-code track**
 (auditor-claim grounding), independent of the others — it needs only the audit-code result schema +
@@ -244,9 +233,9 @@ ingest, not the contract pipeline. Within the contract-authoring track the natur
 2. **S4** — ID authority. Removes the merge-trap error class at the root.
 3. **S5 + S6** — structural floor before adversarial phases; single-source schema.
 
-S2 is deliberately not pursued (see its section); S8's "Gate it" guard is the one open item (§1).
+S2 is deliberately not pursued (see its section).
 
-## 6. Non-negotiables (carry the project's invariants)
+## 5. Non-negotiables (carry the project's invariants)
 
 - Derivers and validators share one source of truth (no parallel logic).
 - Model-agnostic throughout: tiers stay relative ranks; never a model name (`deriveNodeModelTier`

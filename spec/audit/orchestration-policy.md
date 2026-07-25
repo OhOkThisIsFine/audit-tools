@@ -103,7 +103,11 @@ of named obligations is the `PRIORITY` chain in
 ### Obligation-satisfaction rules
 
 - Excluded files must not create obligations.
-- `audit_tasks_completed` is satisfied only when all auditable coverage is done.
+- `audit_tasks_completed` is satisfied when no pending audit task remains *after*
+  budget-deferred and partial-completion-stranded task ids are excluded. A run
+  that strands work under an empty-pool/livelock terminal therefore satisfies the
+  obligation without that coverage — deliberately, so the pipeline proceeds to
+  synthesis on partial coverage instead of stalling forever.
 - `runtime_validation_current` is satisfied when either no deterministic runtime
   validation was planned, or all planned runtime tasks are resolved.
 - `synthesis_current` is satisfied only when `audit-report.md` is current.

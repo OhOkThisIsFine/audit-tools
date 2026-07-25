@@ -1,8 +1,8 @@
 # Nightly maintenance routine — the scheduler prompt
 
 > The prompt text the nightly routine is invoked with, kept here so it is versioned and
-> reviewable rather than living only in the scheduler. The live copy is the local scheduled
-> task at `~/.claude/scheduled-tasks/nightly-maintenance/SKILL.md`.
+> reviewable. The local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/SKILL.md`)
+> is the entrypoint that fires the routine; the text below is the copy of record.
 >
 > [`nightly-routine.md`](nightly-routine.md) (the routine's shape) and
 > [`doc-review-guidelines.md`](doc-review-guidelines.md) (leg 1's rubric) are the sources of
@@ -42,8 +42,8 @@ OFFLOAD LANES
    - NIM via the local LiteLLM proxy at 127.0.0.1:4000 — takes a packet you assemble; no repo
      access. ONE CALL AT A TIME. POST directly with a TASK-SHAPED json_schema, strict:false,
      an explicit generous max_tokens, then CHECK finish_reason — only `stop` is an answer.
-     Do NOT use ~/.claude/llm-call.mjs (generic schema, sets neither). A poor result from this
-     lane is usually the request, not the model.
+     Do NOT use ~/.claude/llm-call.mjs. A poor result from this lane is usually the
+     request, not the model.
    - If the proxy is down the NIM lane has NO fallback. A dead lane must never shrink coverage
      — do the work in another lane or yourself, and if coverage still shrank, say so in the
      digest's skipped list.

@@ -58,11 +58,11 @@ must not carry correctness semantics.
 - **remediate implement is the case that needs this lane** — those workers Read/Edit/Bash/run
   tests, so a node needing file access on a non-Claude backend requires an agentic worker reached
   through the proxy overlay. The concrete class is the `claude-worker` provider: it spawns
-  `claude -p` with a required `ANTHROPIC_BASE_URL` overlay onto the declared proxy and a
-  `<backend_provider>/<model>` routing namespace, so a proxied `claude-worker` is a full agentic
-  worker on a free backend (a host-subagent-equivalent, off Anthropic quota). Its pool/quota
-  identity keys on the real `service[#account]/model`, never on `claude-worker` itself —
-  the transport never enters the quota key (see
+  `claude -p` with a required `ANTHROPIC_BASE_URL` overlay onto the declared proxy and the declared
+  `model` alias passed to `--model` VERBATIM (never composed from `service`/`model`), so a proxied
+  `claude-worker` is a full agentic worker on a free backend (a host-subagent-equivalent, off
+  Anthropic quota). Its pool/quota identity keys on the real `service[#account]/model`, never on
+  `claude-worker` itself — the transport never enters the quota key (see
   [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md)).
 - **audit review host-fanout** uses the same lane (agentic claude subagents reading source +
   emitting findings); audit review *can* also be done single-shot, where no overlay is involved.

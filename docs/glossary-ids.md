@@ -100,8 +100,8 @@ invariants should use the two-letter area scheme above.
 
 ## N-* plan nodes (load-bearing references in code)
 
-These are nodes from the agreed redesign / self-audit DAGs (full DAGs live in the plan artifacts under
-`docs/*-design.md` and the remediation run dirs). The ones still cross-referenced from source:
+These are nodes from the agreed redesign / self-audit DAGs. The ones still cross-referenced from
+source:
 
 | Id | What it was |
 |---|---|

@@ -34,12 +34,12 @@ Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cu
 ### `../catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
 
 **This is no longer a session-config.** Dispatch sources are per-auditor CAPABILITY, not repo intent, so
-`sources[]` was removed from the persisted session-config type (G2) and the file moved to
+`sources[]` was removed from the persisted session-config type and the file moved to
 `examples/catalog/sources-declared.json`. Copy it to `~/.audit-code/sources-declared.json` — the
 machine-level declaration of the backends you own. Every `next-step` intersects it with what the running
 process can actually reach (`declared ∩ ambient-verifiable`) and dispatches to the survivors. Two IDEs on
 one box each resolve it against their own environment, so each gets its own pool with nothing shared.
-See `spec/unified-dispatch-worker-model.md` → G2.5.
+See `spec/unified-dispatch-worker-model.md` → *Source resolution — in-process, by construction*.
 
 It shows the quota-arbitrage pattern: adding a genuinely-free backend as an extra **dispatch source pool**
 alongside the conversation host, so background work routes to it first. Pure config — no provider code —

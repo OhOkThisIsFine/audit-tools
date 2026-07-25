@@ -72,6 +72,20 @@ provenance); the merged analyzer edges themselves live in `graph_bundle.json`
 is computed dependency-first, so the marker records the post-enrichment graph
 revision (mirrors `audit-findings.json` → `synthesis-narrative.json` below).
 
+`intent_checkpoint.json` is a durable host input (a leaf, with no upstream row of
+its own), but its *revision* is not the ordinary content/deps-change bump: while a
+gate-current `artifact_metadata.intent_baseline` exists, the intent entry's
+revision MIRRORS `intent_baseline.revision` (`computeArtifactMetadata` in
+`src/audit/orchestrator/artifactMetadata.ts`). Only the intent-equivalence
+executor advances that baseline, and only at a committed resolution (structured
+delta / judged-`changed` / stale gate) — so a re-confirmed provenance or a pending
+prose judgment never re-stales the downstreams that list `intent_checkpoint.json`,
+and a committed change re-stales them exactly once. The mirror can never rewind
+below the entry's previous revision: a previous revision above the baseline means
+ordinary bumps happened while the mirror was inactive (a gate-version-stale
+window), and snapping back would hide them from downstream `dependency_revisions`
+compares.
+
 `external_analyzer_acquisition.json` is the external-analyzer acquisition marker
 (gitleaks + consent-gated eslint/semgrep/jscpd) — a run-record + staleness anchor
 with no downstream of its own; the findings it produces land in
