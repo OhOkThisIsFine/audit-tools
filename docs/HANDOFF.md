@@ -7,9 +7,20 @@
 
 ## Live state
 
-- **Backlog clearance lap, 2026-07-24 (`6df9100e`, unreleased — still v0.34.27).** Whole file
+- **Second backlog clearance lap, 2026-07-24 (`b044d070`, unreleased).** The remediate claim-leak twin
+  SHIPPED (stray worktrees now carry their own terminal class), the rollingDispatch flake is de-flaked,
+  FLW-COR-003's second half verified holding and closed, and the stale-worktree entry corrected after its
+  central claim was falsified. `open-bugs.md` is 97 → 95 entries, 143KB → 141KB, baseline ratcheted twice.
+  ⚠ **The revert is again the load-bearing finding.** A per-node `token_estimate` for the fit gates was
+  built twice and reverted: an accurate estimate makes "this node fits NO pool" REACHABLE, and both
+  consumers handle that terminally (permanent `context_cap` strand headless; early-merge terminal block
+  hybrid) rather than pausing resumably. The flat 2000 was load-bearing, not merely imprecise — every node
+  lying about fitting is what kept the mishandled branch unreachable. Fix the routing FIRST. Record:
+  [`backlog-clearance-2026-07-24b.md`](reviews/backlog-clearance-2026-07-24b.md).
+
+- **Backlog clearance lap, 2026-07-24 (`6df9100e`).** Whole file
   re-triaged (one NIM call per entry — batching 27 at a time died every time), then five fixes landed
-  and **one reverted**. `open-bugs.md` is 108 → 96 entries, 154KB → 143KB, baseline ratcheted twice.
+  and **one reverted**. `open-bugs.md` was 108 → 96 entries, 154KB → 143KB, baseline ratcheted twice.
   ⚠ **The revert is the load-bearing finding.** Regenerating the price snapshot fixes the inert
   provider-scoped path but rewrites the flat table to the CHEAPEST price across providers, which ranks
   `claude-opus-4-8` at $0.85 blended — **below haiku** — so cost-first routing at λ=0 would send every
@@ -141,33 +152,26 @@ priority-order UX** (Track 3 — decisions resolved, implementation remains).
 The `top_k` truncation and the remediate node-claim twin that used to head this list are respectively
 DONE and designed-not-applied (item 2).
 
-**2. The remediate claim-leak twin — DESIGNED, not applied; loop-core, needs attestation.** Confirmed
-at HEAD: `rollingSession.ts` claims at `:442`, releases at `:601-604`, persists at `:623`, and the
-stray-worktree `throw` at `:580` sits between the outcome record and the release, so that path frees
-nothing and never persists — `terminal` never counts the node and `inFlight` stays ≥1, a **permanent
-hang**, not a timed stall.
-⚠ Adversarial review overturned two premises that were driving the design. (a) The lease is 30s
-(`STALE_LOCK_MS`), not the audit side's 20 minutes. (b) The stated blocker — that releasing breaks the
-`reverify-node` retry via the ownership heartbeat — is FALSE: `reverifyQuarantinedNode` passes no
-`ownership` at all (`rollingSession.ts:790-792`). ⚠ And the obvious fix is also wrong: routing a stray
-into `accept_failed` makes the host directive (`nextStep.ts:2264-2269`) promise a quarantine ref that a
-never-committed stray does not have, turning a hard stop into a confidently-wrong `reverify-node`
-instruction. The stray needs its OWN terminal class carrying its diagnostic, plus a pinned intra-block
-order (record sidecar → mark terminal → drop token → persist → release → throw last; the sidecar must
-stay FIRST because `marshal.ts` derives `acceptHardFailed` from it and a null one disarms the gate).
-**The full corrected design, including the red-green recipe, is in
-[`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md) → "Verified real, NOT
-fixed"** — that record is self-contained; do not go looking for a workflow transcript.
-Also still open: FLW-COR-003's second half, "a zero-granted round pauses the drain" — a SEPARATE
-property, still unverified; check it at HEAD first. Both in [`open-bugs.md`](backlog/open-bugs.md).
+**2. Unplaceable-node routing — the prerequisite this lap uncovered (loop-core).** An implement node
+that fits NO pool is handled TERMINALLY on both paths: headless in-process returns `context_cap` for
+every pool → `neverDispatchable` → a permanent strand that blocks the rest of the run; the hybrid path
+leaves both partitions empty so the `partition.host.length === 0` early-merge runs instead of the
+`no_capable_pool` structural-refusal PAUSE, and every item is `blocked` + `markTerminal` — dead for the
+run even after the operator frees a larger pool. `buildEmptyPoolTerminal` then blames quota exhaustion,
+sending the operator entirely the wrong way. This is currently masked only because every node is sized
+at a flat 2000 and therefore always "fits". Property: an unplaceable node PAUSES resumably, naming the
+real cause. Landing it unblocks the per-node token estimate (then a two-line change). Detail in
+[`open-bugs.md`](backlog/open-bugs.md); evidence in
+[`backlog-clearance-2026-07-24b.md`](reviews/backlog-clearance-2026-07-24b.md).
+The remediate claim-leak twin that used to head this item **SHIPPED** in `b044d070`.
 
-**3. Make `open-bugs.md` a bounded read — condensation is now EXHAUSTED, only closing entries moves it.**
-143KB / 96 entries against a 120KB budget (was 154KB / 108). Sizes are UTF-8 BYTES — the gate switched
-from characters so it agrees with `wc -c`. Measured at HEAD: total excess over the
-2600-byte per-entry budget is only a few KB across all 96 — so even condensing every oversized entry
-to budget sheds ~3KB and leaves ~140KB. The remaining 23KB has to come from CLOSING entries (item 1).
-Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
-shrink-only ceiling.
+**3. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
+141KB / 95 entries against a 120KB budget (was 154KB / 108 two laps ago). Sizes are UTF-8 BYTES — the
+gate agrees with `wc -c`. Condensation as a lever is exhausted: total excess over the 2600-byte
+per-entry budget is a few KB across all 95, so the remaining ~21KB has to come from closing entries
+(item 1). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
+shrink-only ceiling. ⚠ Never run `--update-baseline` to make a GROWN file pass — that raises the ceiling,
+which is the one thing this gate exists to prevent; pay for a new entry by condensing another.
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in
 [`deferred.md`](backlog/deferred.md)) — resume once stability work is complete.
