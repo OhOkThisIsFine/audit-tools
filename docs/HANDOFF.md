@@ -59,8 +59,13 @@
   the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
   lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
   it examined — and overturned two more premises this lap (see item 2).
-- **Current version = `package.json`** (authoritative): v0.34.30, published 2026-07-25 and live on npm;
-  main is released to HEAD, nothing pending. **Per-release shipped detail is `git log` and the
+- **Current version = `package.json`** (authoritative): v0.34.31, published 2026-07-25 and live on npm;
+  main is released to HEAD, nothing pending.
+- **⚠ The per-node token estimate is WIRED (v0.34.31) and has NO live evidence yet.** It is the first
+  change that makes the `no_capable_pool` resumable pause reachable in real use. On the next real
+  frontier: an unplaceable node must reach a RESUMABLE pause naming the real cause — never `empty_pool`,
+  never a terminal strand. A large node that now refuses everywhere is the honest estimate working;
+  check the pool's declared `context_tokens` before calling it a regression. **Per-release shipped detail is `git log` and the
   `docs/reviews/` records — deliberately not restated here** (this section had grown to ~107 lines of
   version-by-version narration, which is the changelog creep this doc's own header forbids).
 - **A2 oracle corpus stays PARKED** (owner redirect 2026-07-22) — SPEC intact in
