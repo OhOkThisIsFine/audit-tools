@@ -1634,10 +1634,22 @@ export function retainAutoExclusions(
   const optedIn = input?.include ?? [];
   const addressed = (pattern: DispatchExclusionPattern): boolean => {
     if (restated.has(pattern)) return true;
-    // `provider` and `provider:model` tiers both belong to the named provider.
-    return optedIn.some(
-      (provider) => pattern === provider || pattern.startsWith(`${provider}:`),
-    );
+    // Match the opt-in against the pattern's TRANSPORT, parsed — not against its raw
+    // text. Auto-authored patterns are axis-prefixed (`transport:codex`,
+    // `transport:codex/model`), so the old raw `pattern.startsWith(provider + ":")`
+    // test stopped matching the moment the grammar became axis-explicit: an operator
+    // opting `codex` back in never cleared `transport:codex`, their explicit include
+    // was silently ignored, and no submission could ever supersede an auto-exclusion.
+    const rule = parseExclusionRule(migrateExclusionPattern(pattern));
+    const transport =
+      rule.kind === "transport"
+        ? rule.transport
+        : rule.kind === "transport_model"
+          ? rule.transport
+          : null;
+    if (transport === null) return false;
+    // Both tiers (`transport:x` and `transport:x/model`) belong to the named provider.
+    return optedIn.some((provider) => provider === transport);
   };
   return priorAuto.filter((pattern) => !addressed(pattern));
 }

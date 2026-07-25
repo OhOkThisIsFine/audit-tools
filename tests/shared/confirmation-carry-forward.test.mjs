@@ -2093,3 +2093,64 @@ describe("R3-3: an LLM-authored submission's anchor-reorder still lands in the d
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// retainAutoExclusions — an operator's explicit opt-in must clear the matching
+// auto-authored exclusion.
+//
+// The auto-authored patterns became AXIS-PREFIXED (`transport:codex`) when the
+// exclusion grammar closed, but this function still matched the opt-in against the
+// pattern's raw text (`pattern.startsWith(provider + ":")`). `"transport:codex"`
+// does not start with `"codex:"`, so the test silently stopped matching: an
+// operator opting a backend back in never cleared its auto-exclusion, and no
+// submission could ever supersede one. Fail-closed became fail-permanent.
+// ─────────────────────────────────────────────────────────────────────────────
+const { retainAutoExclusions: retainAutoExclusionsFn } = await import(
+  "../../src/shared/providers/sharedProviderConfirmation.ts"
+);
+
+describe("retainAutoExclusions — an explicit include clears the matching auto-exclusion", () => {
+  test("axis-prefixed transport exclusion is cleared by the bare provider opt-in", () => {
+    expect(
+      retainAutoExclusionsFn(["transport:codex"], { include: ["codex"] }),
+      "opting `codex` back in must clear `transport:codex`",
+    ).toEqual([]);
+  });
+
+  test("the model tier of the same transport is cleared too", () => {
+    expect(
+      retainAutoExclusionsFn(["transport:codex/model-a"], { include: ["codex"] }),
+      "both tiers belong to the named provider",
+    ).toEqual([]);
+  });
+
+  test("a DIFFERENT provider's exclusion is retained", () => {
+    expect(
+      retainAutoExclusionsFn(["transport:codex", "transport:agy"], {
+        include: ["codex"],
+      }),
+    ).toEqual(["transport:agy"]);
+  });
+
+  test("a host-axis exclusion is never cleared by a provider opt-in", () => {
+    // `include` names providers, not hosts — a host rule has no transport to match,
+    // so it must survive rather than be cleared by an unrelated name.
+    expect(
+      retainAutoExclusionsFn(["host:localhost"], { include: ["codex"] }),
+    ).toEqual(["host:localhost"]);
+  });
+
+  test("restating the exclusion still retains it, and no input retains everything", () => {
+    expect(
+      retainAutoExclusionsFn(["transport:codex"], {
+        include: ["codex"],
+        exclude: ["transport:codex"],
+      }),
+      "restating it moves the rule to the operator's own `exclude`, so it is no " +
+        "longer carried forward as an AUTO exclusion",
+    ).toEqual([]);
+    expect(retainAutoExclusionsFn(["transport:codex"], null)).toEqual([
+      "transport:codex",
+    ]);
+  });
+});

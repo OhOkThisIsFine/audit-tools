@@ -99,7 +99,6 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
   name = CLAUDE_WORKER_PROVIDER_NAME;
   private readonly config: ClaudeWorkerConfig;
   private readonly endpoint: string;
-  private readonly backendProvider: string;
   private readonly model: string;
   private readonly launchCommand: typeof spawnLoggedCommand;
   private readonly skipPermissionsDefault: boolean;
@@ -111,10 +110,10 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
   ) {
     this.config = config;
     this.endpoint = requireNonEmpty(config.endpoint, "endpoint");
-    this.backendProvider = requireNonEmpty(
-      config.service,
-      "service",
-    );
+    // Validated for the throw, not for a value: `service` must be present, but the
+    // launch passes `model` to `--model` verbatim and never composes a
+    // `<service>/<model>` namespace, so there is nothing to retain.
+    requireNonEmpty(config.service, "service");
     this.model = requireNonEmpty(config.model, "model");
     this.launchCommand = launchCommand;
     this.skipPermissionsDefault = options.skipPermissionsDefault ?? false;

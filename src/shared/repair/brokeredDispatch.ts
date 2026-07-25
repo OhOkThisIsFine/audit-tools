@@ -209,45 +209,6 @@ function cooldownActive(cooldownUntil: string | null | undefined): boolean {
   return Number.isFinite(t) && t > Date.now();
 }
 
-/**
- * Fire-and-forget durable persistence of a pool cooldown to the on-disk quota
- * state, guarded by the same shared file lock the quota subsystem uses. This is
- * intentionally NOT awaited by `broker()` so the broker keeps its synchronous
- * signature (inv-5 must not turn `broker()` into a Promise — a sibling sync test
- * reads `result.estimatedWaveTokens` synchronously). The in-memory registry below
- * is the authoritative in-process readback; this write makes the cooldown survive
- * across processes. Any failure (no state dir configured, unreadable state) is
- * swallowed: persistence is best-effort and must never reject unhandled.
- */
-function persistPoolCooldownBestEffort(poolKey: string, cooldownUntil: string): void {
-  let lockPath: string;
-  try {
-    lockPath = getQuotaStatePath() + '.lock';
-  } catch {
-    // Quota state dir not configured (e.g. unit context) → nothing to persist to.
-    return;
-  }
-  void withFileLock(lockPath, async () => {
-    const state = await readQuotaStateForUpdate("persistPoolCooldown");
-    const existing = state.entries[poolKey];
-    const entry: QuotaStateEntry = existing ?? {
-      updated_at: new Date().toISOString(),
-      cooldown_until: null,
-      last_429_at: null,
-    };
-    // Keep the later of any already-persisted cooldown and this one.
-    const prior = entry.cooldown_until ? new Date(entry.cooldown_until).getTime() : 0;
-    const next = new Date(cooldownUntil).getTime();
-    if (!Number.isFinite(prior) || next > prior) {
-      entry.cooldown_until = cooldownUntil;
-    }
-    entry.updated_at = new Date().toISOString();
-    state.entries[poolKey] = entry;
-    await writeQuotaState(state);
-  }).catch(() => {
-    // Best-effort: durability failure must not surface from a sync decision.
-  });
-}
 
 /**
  * Create the concrete broker. The single gated chokepoint: it sizes the wave
@@ -266,8 +227,7 @@ function persistPoolCooldownBestEffort(poolKey: string, cooldownUntil: string): 
  */
 export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
   // In-process, synchronous cooldown registry keyed by `provider/<model|*>`. This
-  // is the authoritative readback inside one broker instance; disk persistence is
-  // an additional best-effort durability layer (see persistPoolCooldownBestEffort).
+  // is the authoritative — and only — readback inside one broker instance.
   const cooldownRegistry = new Map<string, string>();
 
   return {
@@ -311,12 +271,17 @@ export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
         discoveredLimits: input.discoveredLimits ?? null,
       });
 
-      // inv-5: persist the cooldown surfaced by THIS decision — synchronously into
-      // the in-process registry (authoritative readback) and best-effort to disk —
-      // so a subsequent null-snapshot decision stays throttled.
+      // inv-5: record the cooldown surfaced by THIS decision in the in-process
+      // registry, so a subsequent null-snapshot decision stays throttled.
+      //
+      // There is deliberately NO disk write here. The write that used to accompany
+      // this captured its lock path synchronously but resolved the READ and WRITE
+      // targets late, and it was fired unawaited — so a `setQuotaStateDir` landing
+      // in between locked one quota-state file and rewrote a different one,
+      // corrupting whichever run owned the second. It outlived its caller, which is
+      // how it reached across a boundary its caller had already torn down.
       if (cooldownActive(schedule.cooldown_until)) {
         cooldownRegistry.set(poolKey, schedule.cooldown_until!);
-        persistPoolCooldownBestEffort(poolKey, schedule.cooldown_until!);
       }
 
       const capableHost = classifyCapableHost({
