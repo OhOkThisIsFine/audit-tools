@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
+import { expectExactKeys } from "../helpers/exactKeys.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -1068,16 +1069,25 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     expect(summary.largest_packet.packet_id).toBe(plan[0].packet_id);
     expect(summary.largest_packet.total_lines).toBe(70);
     expect(summary.largest_packet.estimated_tokens > 0).toBe(true);
-    expect(Object.keys(plan[0]).sort()).toEqual([
-      "access",
-      "complexity",
-      "description",
-      "file_paths",
-      "model_hint",
-      "packet_id",
-      "prompt_path",
-      "result_path",
-    ]);
+    // Additive-hostile by design: a new field on DispatchPlanEntry must red here
+    // until someone decides it belongs on the wire. Asserted through the shared
+    // helper so the failure HEADLINE names the leaked field — the bare
+    // `Object.keys().sort()` form put it only in the diff below, which a CI log
+    // tail truncates into an opaque count mismatch.
+    expectExactKeys(
+      plan[0],
+      [
+        "access",
+        "complexity",
+        "description",
+        "file_paths",
+        "model_hint",
+        "packet_id",
+        "prompt_path",
+        "result_path",
+      ],
+      "DispatchPlanEntry",
+    );
     expect(plan[0].complexity).toEqual({
       priority: "medium",
       task_count: 2,
