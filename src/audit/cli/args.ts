@@ -14,6 +14,7 @@ import {
   assertHostProviderName,
   validateSessionConfig,
   formatValidationIssues,
+  type HostProviderName,
   type ProviderName,
   type SessionConfig,
   type DispatchableSource,
@@ -221,7 +222,7 @@ export function getExplicitProvider(argv: string[]): string | undefined {
  * unset: the host is auto-detected from the run's own session env. Constrained to
  * a known ProviderName so a typo fails LOUDLY here rather than silently mis-keying.
  */
-export function getHostProvider(argv: string[]): ProviderName | null {
+export function getHostProvider(argv: string[]): HostProviderName | null {
   const value = getFlag(argv, "--host-provider");
   if (value === undefined) return null;
   assertHostProviderName(value);

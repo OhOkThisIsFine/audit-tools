@@ -80,5 +80,3 @@ A detected session-limit worker death pauses until `reset_at`, preserves the wor
 - Live probe: `new ClaudeOAuthQuotaSource().probeUsage("claude-code/*")` → `{status:"ok",
   remaining_pct:0.6, reset_at:"2026-07-01T01:59:59Z"}`.
 - Band logic: `src/shared/quota/scheduler.ts:325-371`.
-</content>
-</invoke>

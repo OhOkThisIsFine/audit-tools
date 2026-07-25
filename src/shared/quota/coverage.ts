@@ -79,6 +79,6 @@ export function renderUnestablishedQuotaNudge(provider: string): string {
     `     endpoint, or a third-party tool that already tracks it, then — with their`,
     `     consent — report the findings (endpoint, auth/credential location, response`,
     `     shape) so a proactive source can be added (see`,
-    `     docs/cross-provider-quota-matrix.md for the established recipes).`,
+    `     spec/cross-provider-quota-matrix.md for the established recipes).`,
   ].join("\n");
 }

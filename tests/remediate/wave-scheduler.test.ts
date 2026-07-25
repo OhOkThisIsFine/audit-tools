@@ -1100,7 +1100,18 @@ async function withCorruptQuotaState<T>(fn: () => Promise<T>): Promise<T> {
   const { setQuotaStateDir, getQuotaStatePath } = await import("audit-tools/shared");
   const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
+  const { join, dirname } = await import("node:path");
+
+  // The state dir is MODULE-GLOBAL. Capture the incumbent path so the redirect is
+  // undone on the way out: without this, every later test in the file inherits a
+  // state path pointing into the directory deleted below, and its reads resolve
+  // against a directory that no longer exists.
+  let previousStatePath: string | undefined;
+  try {
+    previousStatePath = getQuotaStatePath();
+  } catch {
+    previousStatePath = undefined; // never set — nothing to restore.
+  }
 
   const dir = await mkdtemp(join(tmpdir(), "wave-sched-corrupt-"));
   setQuotaStateDir(dir);
@@ -1109,6 +1120,7 @@ async function withCorruptQuotaState<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } finally {
+    if (previousStatePath !== undefined) setQuotaStateDir(dirname(previousStatePath));
     // Best-effort: a lock file or a late async write can still be landing in
     // `dir` on win32 (ENOTEMPTY). Temp-dir cleanup must never become the
     // test's verdict.

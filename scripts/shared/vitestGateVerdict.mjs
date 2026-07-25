@@ -26,6 +26,15 @@ export const HARNESS_FAULT = /\[vitest-worker\]:\s*Timeout calling "on[A-Za-z]+"
  *   - `record.runToken === token` proves the ledger belongs to THIS run, so a
  *     stale green ledger from a prior run can never launder a red one.
  *   - `outcome.failed === 0` — any counted failure is a real failure.
+ *   - `outcome.unfinished === 0` — every leaf REPORTED. This is the load-bearing
+ *     one for the fault this function recognizes: `HARNESS_FAULT` matches a timeout
+ *     on `onTaskUpdate`, the RPC that carries task RESULTS back from the worker. A
+ *     result lost to that timeout leaves its leaf with no state at all, so a
+ *     genuinely FAILED test would never be counted as failed and `failed === 0`
+ *     would hold vacuously. Counting unreported leaves separately from deliberate
+ *     skips is what keeps that from laundering a red into a green. A ledger
+ *     lacking the field is from an older reporter and cannot prove the absence —
+ *     it keeps the red.
  *   - the stderr signature — an unrecognized nonzero exit keeps its exit code.
  *
  * @param {{record: unknown, token: string, stderrText: string}} input
@@ -37,5 +46,6 @@ export function isReporterTransportFault({ record, token, stderrText }) {
   const outcome = record.outcome;
   if (!outcome || typeof outcome !== "object") return false;
   if (outcome.failed !== 0) return false;
+  if (outcome.unfinished !== 0) return false;
   return HARNESS_FAULT.test(stderrText ?? "");
 }

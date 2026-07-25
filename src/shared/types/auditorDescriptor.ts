@@ -3,7 +3,7 @@ import type {
   AntigravityConfig,
   ClaudeCodeConfig,
   DispatchableSource,
-  ProviderName,
+  HostProviderName,
   VSCodeTaskConfig,
 } from "./sessionConfig.js";
 
@@ -22,8 +22,14 @@ export interface AuditorSelf {
    * for THIS run (collapsed from the retired inventory's `provider` /
    * `host_provider`, which were the same identity). Absent ⇒ resolve() leaves the
    * effective provider to env auto-detection (`resolveConversationHostProvider`).
+   *
+   * Typed {@link HostProviderName} — `claude-worker` excluded by construction, the
+   * same value `assertHostProviderName` rejects at runtime: it is a proxied
+   * dispatch-worker class, never a conversation host driving a run. A field typed
+   * looser than its own validator invites callers to build a descriptor that only
+   * fails later.
    */
-  provider?: ProviderName;
+  provider?: HostProviderName;
   /** Opaque model identity (was `--host-model-id`); a quota-key segment only. */
   model_id?: string;
   /** Ordered model roster, lowest rank first (was `--host-models`). */

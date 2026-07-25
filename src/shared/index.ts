@@ -246,6 +246,7 @@ export {
 export type {
   ProviderName,
   ResolvedProviderName,
+  HostProviderName,
   SessionUiMode,
   SubprocessTemplateConfig,
   ClaudeCodeConfig,

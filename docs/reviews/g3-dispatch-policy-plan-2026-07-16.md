@@ -344,5 +344,3 @@ until **G6** unifies remediate's intent read path: today audit reads `<artifacts
 Amend `:283` to phase it: *policy persists on the confirmation artifact (the only cross-tool channel) until
 G6 unifies the intent read path; the intent-carried endpoint stands.* Draft 4 proposed striking it — that
 would have deleted an approved decision to match an implementation gap.
-</content>
-</invoke>

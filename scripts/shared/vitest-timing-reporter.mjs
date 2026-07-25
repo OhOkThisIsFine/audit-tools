@@ -41,6 +41,7 @@ function computeOutcome(files) {
   let passed = 0;
   let failed = 0;
   let skipped = 0;
+  let unfinished = 0;
   const failedFiles = new Set();
 
   for (const file of files) {
@@ -71,14 +72,28 @@ function computeOutcome(files) {
       } else if (state === "fail") {
         failed += 1;
         failedFiles.add(rel);
-      } else {
-        // skip / todo / queued / any unfinished state — none of these are a pass.
+      } else if (state === "skip" || state === "todo" || leaf.mode === "skip" || leaf.mode === "todo") {
+        // DELIBERATELY not run — the suite declared it skipped/todo.
         skipped += 1;
+      } else {
+        // NO RESULT REACHED US. Queued, still running, or — the case that matters —
+        // a leaf whose result was lost because the `onTaskUpdate` RPC carrying it
+        // timed out. A lost result is indistinguishable from a lost FAILURE, so it
+        // must never share a bucket with a deliberate skip: `isReporterTransportFault`
+        // refuses to downgrade a nonzero exit while any leaf is unfinished.
+        unfinished += 1;
       }
     }
   }
 
-  return { passed, failed, skipped, total: passed + failed + skipped, failedFiles: [...failedFiles].sort() };
+  return {
+    passed,
+    failed,
+    skipped,
+    unfinished,
+    total: passed + failed + skipped + unfinished,
+    failedFiles: [...failedFiles].sort(),
+  };
 }
 
 function fileDurations(file) {
@@ -124,7 +139,9 @@ export default class TimingReporter {
     for (const f of slowest) {
       lines.push(`     ${(f.total / 1000).toFixed(1)}s  ${f.rel} (collect ${(f.collect / 1000).toFixed(1)}s, run ${(f.run / 1000).toFixed(1)}s)`);
     }
-    lines.push(`   outcome: ${outcome.passed} passed, ${outcome.failed} failed, ${outcome.skipped} skipped (total ${outcome.total})`);
+    lines.push(
+      `   outcome: ${outcome.passed} passed, ${outcome.failed} failed, ${outcome.skipped} skipped, ${outcome.unfinished} unfinished (total ${outcome.total})`,
+    );
     if (outcome.failed > 0) {
       lines.push("   failed files (advisory console echo — the ledger's `outcome` field is the source of truth):");
       for (const f of outcome.failedFiles) lines.push(`     - ${f}`);

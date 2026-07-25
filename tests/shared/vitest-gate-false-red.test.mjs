@@ -24,7 +24,7 @@ const RPC_TIMEOUT_STDERR = `
 Error: [vitest-worker]: Timeout calling "onTaskUpdate"
  ❯ Object.onTimeoutError node_modules/vitest/dist/chunks/rpc.js:53:10
 `;
-const greenLedger = { runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4 } };
+const greenLedger = { runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4, unfinished: 0 } };
 
 test("downgrades a nonzero exit when THIS run's ledger is green and stderr shows the RPC fault", () => {
   expect(
@@ -58,6 +58,35 @@ test("keeps the red when the green ledger belongs to a DIFFERENT run", () => {
   expect(
     isReporterTransportFault({
       record: { ...greenLedger, runToken: "some-older-run" },
+      token: TOKEN,
+      stderrText: RPC_TIMEOUT_STDERR,
+    }),
+  ).toBe(false);
+});
+
+test("keeps the red when a leaf never REPORTED, even though nothing was counted as failed", () => {
+  // The hole this narrow downgrade left open. HARNESS_FAULT matches a timeout on
+  // `onTaskUpdate` — the RPC that carries task RESULTS. A result lost to that very
+  // timeout leaves its leaf with no state, so a genuinely failed test is never
+  // counted and `failed === 0` holds vacuously. Every other downgrade condition is
+  // satisfied here; only the unfinished count separates "we never heard back" from
+  // "deliberately skipped", and it is what must keep this red.
+  expect(
+    isReporterTransportFault({
+      record: { runToken: TOKEN, outcome: { passed: 7399, failed: 0, skipped: 4, unfinished: 1 } },
+      token: TOKEN,
+      stderrText: RPC_TIMEOUT_STDERR,
+    }),
+  ).toBe(false);
+});
+
+test("keeps the red when the ledger predates the unfinished counter", () => {
+  // An older reporter's ledger cannot PROVE every leaf reported, and absence of
+  // evidence must not read as evidence of absence in a gate that can pass a
+  // release. Fail closed.
+  expect(
+    isReporterTransportFault({
+      record: { runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4 } },
       token: TOKEN,
       stderrText: RPC_TIMEOUT_STDERR,
     }),

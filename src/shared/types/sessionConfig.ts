@@ -18,15 +18,27 @@ export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
 
 /**
+ * A provider that can be the conversation HOST driving a run. `claude-worker` is
+ * the proxied dispatch-worker class and is excluded by construction, so a host
+ * identity can never be typed as one — the type states what
+ * {@link assertHostProviderName} already enforces at runtime.
+ */
+export type HostProviderName = Exclude<ProviderName, "claude-worker">;
+
+/**
  * Validate a `--host-provider` CLI value against {@link PROVIDER_NAMES}, throwing
  * the same message both orchestrators surface on a typo (host_provider is a
  * quota-ATTRIBUTION key — a silently-wrong value would mis-charge dispatch fan-out
  * to the wrong account). Single-sourced so audit's `getHostProvider` and
  * remediate's `parseHostProviderOption` cannot drift.
+ *
+ * Narrows to {@link HostProviderName}, not `ProviderName`: this function rejects
+ * `claude-worker`, so asserting the wider type would hand every caller a value
+ * the validator just refused.
  */
 export function assertHostProviderName(
   value: string,
-): asserts value is ProviderName {
+): asserts value is HostProviderName {
   // claude-worker is the proxied dispatch WORKER class — it can never be the
   // conversation host driving a run, and host_provider is a quota-ATTRIBUTION
   // key, so admitting it here would mis-charge fan-out to a worker identity.
