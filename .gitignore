@@ -28,6 +28,8 @@ dist/
 !.claude/hooks/shell-trap-guard.mjs
 !.claude/hooks/tool-input-guard.mjs
 !.claude/hooks/session-start-guards.mjs
+!.claude/hooks/question-philosophy-gate.mjs
+!.claude/hooks/closeout-challenge-gate.mjs
 !.claude/skills/
 # The nightly routine's DURABLE decisions ledger — tracked on purpose: it is the
 # record of what the owner has settled, and its whole job is to outlive runs,

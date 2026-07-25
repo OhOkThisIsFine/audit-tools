@@ -88,6 +88,17 @@
             "statusMessage": "Tool-input guard"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/question-philosophy-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Project philosophy before asking"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -112,6 +123,18 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/friction-stop-gate.mjs\"",
             "timeout": 15,
             "statusMessage": "Friction close-out backstop"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/question-philosophy-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Project philosophy before asking"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/closeout-challenge-gate.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Closeout challenge"
           }
         ]
       }

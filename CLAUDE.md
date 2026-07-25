@@ -189,9 +189,16 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
   `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`, a stale git
   `index.lock`/`shallow.lock`, and offload-lane liveness so a down proxy is a known constraint at lap start
-  rather than a mid-lap stall). Contract-tested in
-  `tests/shared/hook-trap-guards.test.mjs` (under `tests/` because vitest excludes `.claude/**`, so a test
-  beside a hook never runs in CI). **Adding a hook:** register it in `.claude/settings.json` AND add the
+  rather than a mid-lap stall),
+  `question-philosophy-gate.mjs` (PreToolUse AskUserQuestion + Stop — a question is about to reach the owner,
+  so PART B + the BRIDGE of `docs/project-philosophy.md` is EXTRACTED, never copied, and injected once per
+  session; it does not suppress asking — B1's *ask on ambiguity* still holds, and the retry goes through),
+  `closeout-challenge-gate.mjs` (Stop — asks "are you sure that was all taken care of, and will the handoff
+  be clear for the next agent?" with the mechanical evidence attached: uncommitted work, unpushed commits, a
+  HANDOFF that no longer matches the backlog, memory files missing from `MEMORY.md`; capped at 2 per session).
+  Contract-tested in `tests/shared/hook-trap-guards.test.mjs` (shell traps) and
+  `tests/shared/hook-session-gates.test.mjs` (the two session-lifecycle gates) — both under `tests/` because
+  vitest excludes `.claude/**`, so a test beside a hook never runs in CI. **Adding a hook:** register it in `.claude/settings.json` AND add the
   `!.claude/hooks/<name>` line to `.gitignore` in the SAME commit — the commit gate blocks a settings.json
   that references a hook the commit would not carry.
 - **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced: PreToolUse blocks `git commit` until check is green (plus, when the staged set touches them, the doc-contract subset and `check:doc-manifest` — the check that otherwise fails only in release CI and burns a tag); async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`). A commit whose staged set touches a loop-core path (`src/shared/loopCorePaths.ts` — dispatch/quota/rolling/orchestrator substrate) is additionally blocked until a fresh, staged-tree-bound review attestation exists (`node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> --attester-class <agent|human> --checked "<...>"`); the gate enforces attestation existence+freshness+binding, not review quality. The attestation is an attributable, tree-bound audit record — it RECORDS the attester's class (agent or human; required, plus detected agent-session env markers) and the reviewing identities, it does not and cannot enforce that a human reviewed. Destination-keyed: a `concerns` verdict without an override blocks only a commit that can land on `main`; on any other branch it is accepted (WIP preservation must not train the override into a reflex).
