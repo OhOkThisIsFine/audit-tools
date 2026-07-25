@@ -27,8 +27,10 @@ human-readable render (markdown):
   performance gap between weak and strong models shrinks.
 - Don't grade your own homework - if an LLM analyzes something important or complex,
   then it should dispatch an independent adversarial agent to check its conclusions.
-- Keep everything IDE- and provider- and model- and language-agnostic where possible,
-  but detect the repo's structure/language and pull in useful tools for that case.
+- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: these are
+  discovered at runtime or abstracted behind a contract, never baked in. Detecting the
+  repo's structure/language and pulling in useful tools for it is how that is honored —
+  the tool's output is normalized into the shared contracts, not forked per ecosystem.
 - Balance rigor with token efficiency - batch tasks into logical units of reasonable
   size so LLMs focus on related items without dispatching 100 agents for 100 files.
 

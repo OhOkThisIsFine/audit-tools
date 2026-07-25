@@ -159,20 +159,22 @@ with no obligations, no seam contracts, and no traceability, cannot support
 confident parallel implementation. Routing both paths through the pipeline closes
 that gap.
 
-**Exception, superseding this section:** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
-is the newer design-of-record and specs a bounded lean fast path
-(`src/remediate/riskSignal.ts` / `src/remediate/steps/contractPipeline.ts`, gated by
-`runLeanLightReviewGate` in `src/remediate/steps/nextStep.ts`) that lets a qualifying Path-A run (small,
-grounded, high-confidence, non-systemic finding set) skip the adversarial
-contract-design loop while still rejoining the normal plan→implement→close
+**How the risk dial realizes this, per** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
+**(the newer design-of-record):** depth scales with the run's risk tier rather than
+branching to a separate path. At the `low` tier a run synthesizes its extracted plan
+directly, skipping the adversarial contract-DESIGN loop while emitting the SAME
+`extracted-plan.json` join artifact and rejoining the same plan→implement→close
 machinery (deterministic grounding, block derivation, file-hash integrity,
-verify-before-merge) — it does not skip traceability or verification, only the
-expensive negotiation phases. The fast path runs a mandatory light adversarial
-pass (`interpretLeanLightReviewVerdict`) before proceeding, escalating to the
-full pipeline on any concern — never a bare skip. Treat this section's
-"both paths run the [full] pipeline" as the default; the lean fast path is the
-sanctioned, narrowly-scoped exception, not a contradiction of the rationale
-above.
+verify-before-merge). It skips only the expensive negotiation phases — never
+traceability or verification: a mandatory light adversarial pass runs first and any
+concern escalates the tier, which takes the run through the full pipeline.
+
+This is not a parallel path. The tier is the SINGLE classifier: finding-level risk
+evidence is folded into the shared risk signal before the gate, so there is no
+separate fast-path boolean that can disagree with the dial — a grounded handful
+touching a risk subsystem stays `high` and takes the full pipeline. Read this
+section's "both paths run the [full] pipeline" as the shape of the machinery every
+run passes through; the dial sets how much design negotiation happens on the way in.
 
 ### Multi-agent seam negotiation
 

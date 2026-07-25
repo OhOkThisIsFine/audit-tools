@@ -14,7 +14,7 @@ Pipeline: audit → report → remediate.
 When a decision is unclear, reason from these:
 
 - **One pipeline, two halves.** audit→findings contract; remediate→consumes+fixes. Each emits machine contract (JSON) + human render (md): `audit-findings.json` / `audit-report.md`; `remediation-outcomes.json` / `remediation-report.md`. JSON = source of truth.
-- **Obligation-driven, one bounded step.** Neither tool runs to completion. Each `next-step` derives state, picks highest-priority unsatisfied obligation, does one bounded unit, persists, returns. Resumable, parallelizable, failure-isolated.
+- **Obligation-driven, one bounded step.** Neither tool runs to completion. Each `next-step` derives state, picks highest-priority unsatisfied obligation, drains the deterministic frontier fold-aware, persists, returns — see *One bounded step per invocation*. Resumable, parallelizable, failure-isolated.
 - **Right tool, not deterministic dogma.** Three rules, balanced case-by-case — the project is *not* "100% deterministic": (1) where a mechanical/deterministic tool does the job as well as or better than an LLM, use the tool; (2) where a bit of non-deterministic LLM judgment *strongly* improves quality, use the LLM — bounded and recorded (semantic review, synthesis, ambiguity resolution, low-confidence fallbacks); (3) whatever *can* be enforced in tooling must be — never rely on the LLM to follow directions when the property can be guaranteed mechanically (see *Auditor-agnostic robustness*). Rules (1)/(2) choose who does the work; rule (3) constrains how the result is guaranteed regardless of who does it.
 - **Right-sized context.** Pre-digest scope/contracts/file lists/evidence/constraints so prompts stay focused and token-efficient.
 - **Artifacts are continuity; dependency DAG is truth.** Staleness propagates along explicit dependency map — never ad-hoc freshness checks.
@@ -58,22 +58,12 @@ have no clean `expect` equivalent.
 
 ### audit-code (`src/audit`)
 
-```bash
-npm test
-npx vitest run tests/audit/next-step.test.mjs
-npm run verify:release
-npm run smoke:packaged-audit-code        # AUDIT_CODE_VERBOSE=1 for verbose
-```
-
 Tests use vitest (`test`/`describe`/`it` + `expect`); `node:assert/strict` may still appear for
 control-flow assertions. Nested subtests use `describe`/`it`, not `t.test`.
 
 ### remediate-code (`src/remediate`)
 
 ```bash
-npm test
-npm run build && npx vitest run tests/remediate/next-step-*.test.ts
-npm run verify:release
 npm run fixtures:auditor-contract        # regenerate test fixture
 node remediate-code.mjs next-step --input report.md   # dev wrapper (auto-rebuilds)
 ```
@@ -112,8 +102,6 @@ Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is i
 
 **Lenses:** `correctness`, `architecture`, `maintainability`, `security`, `reliability`, `performance`, `data_integrity`, `tests`, `operability`, `config_deployment`, `observability`.
 
-**Other modules:** `src/audit/extractors/` (deterministic repo analysis), `src/audit/adapters/` (normalize semgrep/eslint/npm-audit), `src/audit/io/`, `src/audit/validation/`, `src/audit/reporting/` (synthesis + work-block rendering), `src/audit/supervisor/` (session config, run ledger, operator handoff).
-
 ## remediate-code architecture
 
 Accepts auditor reports or free-form feedback. Advances via bounded step prompts. Runtime deps: `commander` (CLI) and `zod` (schema validation, e.g. `src/remediate/state/types.ts`).
@@ -142,7 +130,7 @@ pending → planning → implementing → closing → complete
 
 **State persistence** (`src/remediate/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `LockedJsonStore` (`audit-tools/shared/io/lockedJsonStore.ts`, also used by the audit session-config mutator), which wraps `withFileLock` (`audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 
-**Core types** (`src/remediate/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `CoverageLedger`. `TestSpec` lives in `src/shared/types/contractPipeline.ts`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
+**Core types** live in `src/remediate/state/types.ts`; `TestSpec` lives in `src/shared/types/contractPipeline.ts`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
 
 **Artifact layout:**
 ```
@@ -161,19 +149,10 @@ pending → planning → implementing → closing → complete
 
 ## Release & publish
 
-Via `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs both).
-
-Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
-
-### Pipeline profiling (always-on)
-
-Profiling is a **standing feature** of every test + release run, single-sourced in `scripts/shared/profile.mjs` (never a manual flag). Ledgers land in `.audit-tools-profile/` (gitignored); under GitHub Actions each profile also appends a markdown table to the job summary.
-
-- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
-- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs suffix `-shardXofY`).
-- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
-
-`*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
+Shipping is the `/ship` skill (`.claude/skills/ship/SKILL.md`) — it owns the full land-and-publish flow,
+the trap list (CRLF clean-tree guard, allow-scripts postinstall on global reinstall,
+release-CI-is-the-real-signal), the release-pipeline shape, and the always-on pipeline profiling. Never
+park at the push/publish boundary.
 
 ## Conventions & invariants
 
@@ -195,7 +174,7 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
   states the trap and the fix when it fires). Current guards in `.claude/hooks/`:
   `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
   `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and
-  `mktemp`; agy headless flag/stdin traps; an advisory on exit-code masking by pipe),
+  `mktemp`; agy headless flag/stdin traps; a refusal of a suite/verify exit code masked by a pipe),
   `tool-input-guard.mjs` (PreToolUse Edit/Write/Agent — raw control bytes in written content, Agent
   `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
   `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`). Contract-tested in

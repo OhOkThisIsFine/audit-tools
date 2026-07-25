@@ -128,10 +128,13 @@ delegate-adversarial-phases-to-separate-agent, dispatch-enforcement-driving-judg
   bounded parallel units + boundary tests + scheduling deps, not force the host to phase by hand.
 - **Decomposition co-locates source + its tests** — each node owns its source AND the tests pinning it
   (separate source/test nodes deadlock).
-- **Parallel dispatch over overlapping files is the goal** — disjoint-file split is an interim crutch;
-  target = per-file edit-region ownership + disjoint-hunk merge.
+- **Parallel dispatch over overlapping files is OPTIMISTIC, with git as the correctness authority** —
+  two nodes may edit one file; the already-serialized accept-time cherry-pick decides collisions, and a
+  wrongly-admitted pair conflicts at rebase → quarantine → retry off updated HEAD. Pre-declared
+  per-file edit-region ownership was falsified: disjointness cannot be proven at decomposition time,
+  so proving it would be LLM judgment where the goal is enforcement in tooling.
 *(home: memory: remediator-must-decompose-and-boundary-enforce, decomposition-colocate-source-and-tests,
-parallel-dispatch-overlapping-files-is-goal)*
+parallel-dispatch-optimistic-not-anchors)*
 
 ## A9. Multi-agent cooperative runs
 

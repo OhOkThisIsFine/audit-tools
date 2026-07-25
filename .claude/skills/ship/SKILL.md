@@ -73,6 +73,28 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   manually (`node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`) or `npm i -g --allow-scripts=audit-tools`.
 - Smoke: `audit-code --version` + `remediate-code --version`. MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
 
+## Release pipeline shape (reference)
+
+`.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or
+manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version)
+→ `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded
+`vitest run`) jobs → `publish` (needs both).
+
+Bump/tag scripts: `release:patch` / `:minor` / `:major` (bump + commit + tag), or the `:publish`
+variants (also push + create GitHub Release + wait for CI).
+
+## Pipeline profiling (always-on)
+
+Profiling is a **standing feature** of every test + release run, single-sourced in
+`scripts/shared/profile.mjs` (never a manual flag). Ledgers land in `.audit-tools-profile/` (gitignored);
+under GitHub Actions each profile also appends a markdown table to the job summary.
+
+- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
+- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs suffix `-shardXofY`).
+- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
+
+`*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
+
 ## 6. Close out
 
 - Update the project memory state file (version, release commit/run); refresh `docs/HANDOFF.md` if mid-stream work remains.
