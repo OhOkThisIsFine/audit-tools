@@ -59,7 +59,7 @@
   the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
   lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
   it examined — and overturned two more premises this lap (see item 2).
-- **Current version = `package.json`** (authoritative): v0.34.31, published 2026-07-25 and live on npm;
+- **Current version = `package.json`** (authoritative): v0.34.32, published 2026-07-25 and live on npm;
   main is released to HEAD, nothing pending.
 - **⚠ The per-node token estimate is WIRED (v0.34.31) and has NO live evidence yet.** It is the first
   change that makes the `no_capable_pool` resumable pause reachable in real use. On the next real
