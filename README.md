@@ -38,8 +38,12 @@ human-readable render (markdown):
   abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
   for it is how that is honored — their output is normalized into shared contracts, never forked per
   ecosystem.
-- One pipeline, two halves: auditing produces findings, remediation consumes them and fixes. The machine
-  contract is the source of truth; the human report is its render.
+- Auditing and remediating are not two tools — they are two cases of ONE logical core, drawn read-only or
+  write-and-apply. The boundary between them is continuously being dissolved, and re-introducing it is the
+  most persistent mistake made against this project; a difference between the two is a policy axis of the
+  shared core, almost never a reason to fork it.
+- Auditing produces findings, remediation consumes them and fixes. The machine contract is the source of
+  truth; the human report is its render.
 - Nothing runs to completion in a single call. Each invocation does a bounded, persisted piece of work,
   so a run is resumable, parallelizable and failure-isolated.
 - Scale the process to the work — depth and granularity are dials on one pipeline, never a separate

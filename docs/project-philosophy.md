@@ -56,8 +56,12 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
   abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
   for it is how that is honored — their output is normalized into shared contracts, never forked per
   ecosystem.
-- One pipeline, two halves: auditing produces findings, remediation consumes them and fixes. The machine
-  contract is the source of truth; the human report is its render.
+- Auditing and remediating are not two tools — they are two cases of ONE logical core, drawn read-only or
+  write-and-apply. The boundary between them is continuously being dissolved, and re-introducing it is the
+  most persistent mistake made against this project; a difference between the two is a policy axis of the
+  shared core, almost never a reason to fork it.
+- Auditing produces findings, remediation consumes them and fixes. The machine contract is the source of
+  truth; the human report is its render.
 - Nothing runs to completion in a single call. Each invocation does a bounded, persisted piece of work,
   so a run is resumable, parallelizable and failure-isolated.
 - Scale the process to the work — depth and granularity are dials on one pipeline, never a separate
@@ -94,10 +98,19 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
 strength, not a constant — so every correctness property is guaranteed by the tool, not by the host being
 smart. Everything in Part A radiates from this. *(home: `CLAUDE.md` → auditor-agnostic robustness)*
 
-## A1. Core architecture & workflow
+## A1. Core architecture & workflow  ⚑
 
-- **One pipeline, two halves.** audit → findings contract; remediate → consumes + fixes. Each emits a
-  machine contract (JSON, source of truth) + human render (md).
+- **ONE logical core; auditing and remediating are two CASES of it.** ⚑ Not two tools that happen to
+  share a library — one body of logic, *drawn* read-only (audit) or write-and-apply (remediate). The
+  project is continuously **dissolving** the boundary between them, and re-introducing that boundary is
+  the most persistent agent error there is: a careless pass "restores" it every time it treats a
+  divergence as two domains rather than as one core with a policy axis. A genuine *category* difference
+  (two different KINDS of operation) is rare; "it would become a config-shell with several knobs" is not
+  a fork justification — a several-knob shared core is the correct endpoint, and it is what stops the
+  two sides drifting. Legitimately per-case: only genuinely different INPUT, or the terminal
+  result-routing adapter. Never the algorithm.
+- **Each case emits the same shapes.** audit → findings contract; remediate → consumes + fixes. Both emit
+  a machine contract (JSON, source of truth) + human render (md).
 - **Obligation-driven, bounded per invocation (fold-aware drain).** Neither tool runs to completion. Each
   `next-step` derives state and drains the deterministic obligation frontier — highest-priority-first,
   folding successive bounded steps into the one call — persisting each, and halts at the first host-input
@@ -258,11 +271,10 @@ agent-owns-ship-pipeline)*
   mechanism + deletion in one commit); never add-then-delete across commits.
 - **Dead-code release gate = default-mode knip** (not `--production`, which false-positives on dispatch/
   alias wiring); tested-but-unwired is a periodic manual grep-zero sweep.
-- **One core, two draws — not two forks in parity.** There is ONE shared body of logic; auditing and
-  remediating are two *draws* from it (read-only selection vs. write/apply selection). Default is one shared
-  core + per-mode policy/draw, never two forks kept "in parity"; single-source the common core in
-  `audit-tools/shared`, each orchestrator a thin policy-selecting adapter (so a fix in one usually belongs
-  in both).
+- **One core, two draws — the build-side consequence of A1, not a second statement of it.** Because there
+  is one logical core (A1), the default is one shared core + per-mode policy/draw, never two forks kept
+  "in parity": single-source the common logic in `audit-tools/shared`, each orchestrator a thin
+  policy-selecting adapter — so a fix in one usually belongs in both.
 - **Prefer extraction over drift-tests** — single-source two copies instead of guarding them with a drift
   test; make drift impossible. *(home: `CLAUDE.md` → Conventions/Preferences for the other B3 bullets;
   memory: knip-deadcode-gate-default-mode, prefer-extraction-over-drift-tests — the latter not yet in
@@ -308,6 +320,10 @@ end-of-sprint-cleanup-standing-step)*
 A few principles are the *same taste* pointed at the product and at the dev process — named once here so
 they aren't double-counted:
 
+- **"One logical core, two cases" (A1)** is a product truth AND a build rule (B3): the product is one
+  core drawn two ways, and the codebase must therefore be one core with per-mode policy, never two forks
+  in parity. It is listed in both places because the boundary gets reinstated from both directions — by
+  designing an "auditor feature", and by forking a file that both sides use.
 - **"Enforce in tooling, never discretion" (A3)** has a developer-facing shadow: *"a needed manual flag / a
   habit-fix is a bug signal" (B1/B3)*. When building, you resolve friction by moving it into the tool, not
   by adding a step to remember.
