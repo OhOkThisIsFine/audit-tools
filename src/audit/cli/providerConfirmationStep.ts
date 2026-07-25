@@ -95,11 +95,22 @@ export function renderProviderConfirmationPrompt(opts: {
    * regardless of who ranked it) or when the id is not among `capabilityAnchors`.
    */
   capabilityOrderLlmRanked?: readonly string[];
+  /**
+   * Declared `sources[]` entries that did NOT resolve this invocation, with the
+   * operator-facing reason each carries (`resolveAmbientSources`' `dropped[]`).
+   *
+   * Rendered so the drop reaches the operator in the GATE-0 PROMPT, which is the
+   * artifact they actually read. Its only other channel is a stderr line, which
+   * conversation-first use never surfaces — leaving a declared lane silently
+   * missing from the table with no stated cause.
+   */
+  droppedSources?: readonly { id: string; reason: string }[];
 }): string {
   const sorted = [...opts.providerPool].sort(
     (a, b) => (a.cost_order ?? Number.MAX_SAFE_INTEGER) - (b.cost_order ?? Number.MAX_SAFE_INTEGER),
   );
   const sourcePools = opts.sourcePools ?? [];
+  const droppedSources = opts.droppedSources ?? [];
 
   const priceCell = (entry: ConfirmedPoolEntry): string => {
     if (entry.blended_price_usd_per_mtok == null) {
@@ -370,6 +381,31 @@ export function renderProviderConfirmationPrompt(opts: {
           "",
           "- **`$/Mtok`** marked `(declared)` is the operator's own `cost_per_mtok`",
           "  on that source — authoritative over the models.dev catalog price.",
+          "",
+        ]
+      : []),
+    // A declared lane that did NOT resolve must be visible HERE, in the render the
+    // operator actually reads. The reasons have always existed, but the only channel
+    // was `resolveSessionConfig`'s stderr default — and nothing injected
+    // `onDroppedSources`, so in conversation-first use the operator's whole symptom
+    // was "the lane isn't in the table", with the reason reachable only by calling
+    // `resolveAmbientSources` by hand. A reason nobody renders is write-only
+    // ([[write-only-data-looks-authoritative]]); an absence with no explanation reads
+    // as the tool not supporting the lane rather than as a fixable local condition.
+    ...(droppedSources.length > 0
+      ? [
+          "## Declared sources that did NOT resolve (absent from the pool above)",
+          "",
+          "You declared these, and each was dropped for the stated reason. They are",
+          "**not dispatchable this run** — confirming the pool above accepts their",
+          "absence. Most reasons are local and fixable (an unset key env var, a proxy",
+          "that failed its liveness probe); fix and re-run to have the lane admitted.",
+          "",
+          "| Source id | Why it was dropped |",
+          "|-----------|--------------------|",
+          ...droppedSources.map(
+            (d) => `| ${d.id} | ${d.reason.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ")} |`,
+          ),
           "",
         ]
       : []),

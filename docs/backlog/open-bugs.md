@@ -551,16 +551,6 @@
   (landing gate MET carries the full mechanism),
   [`nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
 
-- **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
-  from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
-  discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap
-  hit the retired-`repair_proxy` rejection and an unset-key drop, and in both cases the *operator-visible*
-  symptom was simply "the proxy lane isn't there" — the reason was only observable by calling
-  `resolveAmbientSources()` directly. **Property to hold:** every `dropped[]` entry reaches the operator
-  in the Gate-0 render, not just the return value. NOT yet traced — verify the Gate-0 rendering path
-  before designing a fix; the reasons may already be displayed and this may be a non-issue.
-  [[write-only-data-looks-authoritative]] (a reason nobody renders is write-only).
-
 - **H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).** (a) The attended same-agent
   SPLIT semantics (blessed in the plan record: engine partition + host-subagent remainder on one meter,
   replacing HEAD's whole-frontier monopoly) is pinned only at pool-composition level — add a

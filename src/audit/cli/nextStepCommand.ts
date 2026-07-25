@@ -437,7 +437,26 @@ async function cmdNextStepBody(
       );
     }
   }
-  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
+  // Capture the drops instead of letting them go to the stderr default: the Gate-0
+  // prompt below renders them, so a declared-but-unresolved lane states its own
+  // reason in the artifact the operator reads. Without this the sole channel is a
+  // stderr line that conversation-first use never surfaces, and the lane is simply
+  // missing from the table with no stated cause.
+  const droppedSources: { id: string; reason: string }[] = [];
+  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor, {
+    onDroppedSources: (dropped) => {
+      for (const d of dropped) {
+        droppedSources.push({ id: d.id, reason: d.reason });
+        // ADD the render channel; do not REPLACE stderr. Injecting the callback
+        // suppresses the resolver's own stderr default, and that line is the only
+        // signal on every path that never reaches Gate-0 — headless runs, CI logs,
+        // and the non-confirmation obligations this same function serves. Emitting
+        // both keeps the drop loud at every draw, which is the property that made
+        // it loud in the first place.
+        process.stderr.write(`[audit-tools] declared source "${d.id}" not resolved: ${d.reason}\n`);
+      }
+    },
+  });
 
   // G3 reconciliation gate — computed ONCE per invocation, here, because it cannot
   // live inside the pure obligation scan: it needs `discoverProviders` (~6
@@ -1080,6 +1099,10 @@ async function cmdNextStepBody(
       prompt: renderProviderConfirmationPrompt({
         providerPool: suggested.provider_pool,
         sourcePools: deriveSourcePoolDisplayFromSources(dispatchSources),
+        // Declared lanes that did NOT resolve, WITH their reasons — the pool table
+        // above shows only what survived, so without this the operator confirms a
+        // roster that silently omits something they configured.
+        droppedSources,
         inputPath,
         continueCommand,
         // G3: non-empty ⇒ this is a re-confirmation; the prompt leads with the delta

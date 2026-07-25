@@ -85,6 +85,57 @@ describe("renderProviderConfirmationPrompt (a — visibility)", () => {
   test("does not render the (c) codex note when codex is absent from the pool", () => {
     expect(prompt).not.toMatch(/codex shows/);
   });
+
+  test("does not render the dropped-sources table when nothing was dropped", () => {
+    expect(prompt).not.toMatch(/did NOT resolve/);
+  });
+});
+
+describe("renderProviderConfirmationPrompt — dropped sources reach the operator at Gate-0", () => {
+  const pool = [{ name: "claude-code", capability_tier: "frontier", excluded: false, cost_order: 0 }];
+
+  // The reasons have always existed on `resolveAmbientSources`' `dropped[]`, but the
+  // only channel was a stderr line nothing rendered — so a declared lane was simply
+  // absent from the table with no stated cause, and the reason was reachable only by
+  // calling the resolver by hand. The GATE-0 PROMPT is the artifact the operator
+  // reads; a reason that never reaches it is write-only.
+  const withDrops = renderProviderConfirmationPrompt({
+    providerPool: pool,
+    inputPath: "/repo/.audit-tools/provider-confirmation.input.json",
+    continueCommand: "audit-code next-step --root /repo",
+    droppedSources: [
+      { id: "nim", reason: 'api_key_env "NVIDIA_API_KEY" is unset in this process.' },
+      { id: "proxy", reason: 'proxy at "http://127.0.0.1:4000" failed the liveness probe.' },
+    ],
+  });
+
+  test("renders every dropped source id together with its reason", () => {
+    expect(withDrops).toMatch(/did NOT resolve/);
+    expect(withDrops).toMatch(/\bnim\b/);
+    expect(withDrops).toMatch(/NVIDIA_API_KEY/);
+    expect(withDrops).toMatch(/\bproxy\b/);
+    expect(withDrops).toMatch(/failed the liveness probe/);
+  });
+
+  test("states that the drops are not dispatchable and are usually locally fixable", () => {
+    expect(withDrops).toMatch(/not dispatchable this run/i);
+    expect(withDrops).toMatch(/re-run/i);
+  });
+
+  test("a reason containing a pipe cannot break the markdown table", () => {
+    const escaped = renderProviderConfirmationPrompt({
+      providerPool: pool,
+      inputPath: "/repo/in.json",
+      continueCommand: "audit-code next-step",
+      droppedSources: [{ id: "weird", reason: "matched a|b but not c" }],
+    });
+    const row = escaped.split("\n").find((l) => l.startsWith("| weird "));
+    expect(row).toBeDefined();
+    // One escaped pipe in the cell body; the row still has exactly the 2 columns
+    // the header declares (leading + separator + trailing = 3 unescaped pipes).
+    expect(row).toMatch(/a\\\|b/);
+    expect(row.replace(/\\\|/g, "").split("|").length - 1).toBe(3);
+  });
 });
 
 describe("renderProviderConfirmationPrompt — sources[] pools + advisory notes (backlog a/b/c)", () => {
