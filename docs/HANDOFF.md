@@ -7,43 +7,35 @@
 
 ## Live state
 
-- **Third backlog clearance lap, 2026-07-24 (`d11588b6`).** The unplaceable-node routing
-  prerequisite SHIPPED on both dispatch paths, the `dropped[]`-at-Gate-0 entry was traced (the concern
-  was real — `onDroppedSources` had zero injectors anywhere) and fixed, and the exact-key leak-guard
-  helper landed. `open-bugs.md` is 96 → 94 entries, 141KB → 138.6KB, baseline ratcheted twice.
-  ⚠ **The per-node token estimate is now UNBLOCKED** — its stated blocker was exactly this routing, and
-  the entry says the wiring is then a two-line change. It is deliberately NOT in this lap: landing the
-  routing and landing the thing that makes the routing reachable in one lap gives the new pause path no
-  independent evidence. Do it next, and watch a real frontier.
-  ⚠ **Adding a channel is not the same as keeping one.** Injecting `onDroppedSources` to feed the Gate-0
+- **Fourth backlog clearance lap, 2026-07-24 (`5fc913a8` · `058c035d` · `be6e7c56`).** Six entries
+  closed by a fix, two refiled to `durable-traps.md` (they were standing reference, not work), one
+  measured into scope. `open-bugs.md` is 97 → 90 entries, 138.6KB → 133.6KB, baseline ratcheted.
+  Shipped: the masked-suite-exit-code REFUSAL (was an advisory that fired and was read past), the
+  chained-`attest && git commit` explanation, fail-open announcements on every pre-commit-gate infra
+  bail, one single-sourced root-containment guard replacing five hand-rolled copies, the CLAUDE.md
+  `admitSpawn` correction, and a reach preflight in the offload entrypoint.
+  ⚠ **Two REAL containment bugs fell out of the dedup, neither of which the entry predicted:** the
+  worktree-seeding copy omitted `isAbsolute`, so on win32 a DIFFERENT DRIVE read as contained (a
+  cross-drive `relative()` returns an absolute path), and every copy's `startsWith("..")` wrongly
+  rejected a real entry named `..cache`. Five copies of a security predicate is not a style problem.
+  ⚠ **The test tree is still untypechecked, but it is no longer open-ended:** a `tsconfig.test.json`
+  over `src`+`tests` yields **222 errors across 131 files, ALL in `tests/remediate/`**, 81 of them one
+  missing required property. Config and fixture sweep must land together, so nothing unwired was left
+  behind. This is the largest single closable item left.
+  ⚠ **Ratchet the backlog baseline LAST.** `--update-baseline` mid-lap, then more deletions, turns
+  `backlog-budget-unit.test.mjs` red against the live file — it reads exactly like a code regression and
+  cost a full-suite investigation here.
+
+- **Still live from the earlier 2026-07-24 laps.** The price-snapshot refresh INVERTS host tier cost
+  order (regenerating it ranks `claude-opus-4-8` below haiku, so cost-first routing at λ=0 sends every
+  packet to Opus; `cost-rank.test.mjs` caught it, and the service→vendor-id mapping is a PREREQUISITE,
+  not a follow-up) — open entry in [`open-bugs.md`](backlog/open-bugs.md); do not "fix" it by editing
+  the cost-rank expectations, they encode real list prices.
+  ⚠ **Adding a channel is not the same as keeping one:** injecting `onDroppedSources` to feed the Gate-0
   render SUPPRESSED the resolver's stderr default — a silent loss on every path that never reaches
-  Gate-0, caught only because `audit-code-wrapper.test.mjs` probes that line. The full suite was the
-  signal; `check` was green throughout. Emit both.
-
-- **Second backlog clearance lap, 2026-07-24 (`b044d070`).** The remediate claim-leak twin
-  SHIPPED (stray worktrees now carry their own terminal class), the rollingDispatch flake is de-flaked,
-  FLW-COR-003's second half verified holding and closed, and the stale-worktree entry corrected after its
-  central claim was falsified. `open-bugs.md` is 97 → 95 entries, 143KB → 141KB, baseline ratcheted twice.
-  ⚠ **The revert is again the load-bearing finding.** A per-node `token_estimate` for the fit gates was
-  built twice and reverted: an accurate estimate makes "this node fits NO pool" REACHABLE, and both
-  consumers handle that terminally (permanent `context_cap` strand headless; early-merge terminal block
-  hybrid) rather than pausing resumably. The flat 2000 was load-bearing, not merely imprecise — every node
-  lying about fitting is what kept the mishandled branch unreachable. Fix the routing FIRST. Record:
+  Gate-0, caught only by the full suite while `check` stayed green. Emit both.
+  Records: [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md) ·
   [`backlog-clearance-2026-07-24b.md`](reviews/backlog-clearance-2026-07-24b.md).
-
-- **Backlog clearance lap, 2026-07-24 (`6df9100e`).** Whole file
-  re-triaged (one NIM call per entry — batching 27 at a time died every time), then five fixes landed
-  and **one reverted**. `open-bugs.md` was 108 → 96 entries, 154KB → 143KB, baseline ratcheted twice.
-  ⚠ **The revert is the load-bearing finding.** Regenerating the price snapshot fixes the inert
-  provider-scoped path but rewrites the flat table to the CHEAPEST price across providers, which ranks
-  `claude-opus-4-8` at $0.85 blended — **below haiku** — so cost-first routing at λ=0 would send every
-  packet to Opus. `cost-rank.test.mjs` caught it (11 failures, CI shard 1, both Node versions); the
-  stale snapshot looked right only because the pre-collision `flatten()` happened to keep anthropic's
-  prices. The backlog said to settle the service→vendor-id mismatch AFTER refreshing; that ordering was
-  wrong and the entry now says the mapping is a PREREQUISITE. Do not "fix" it by editing the cost-rank
-  expectations — they encode real list prices and are what caught it.
-  ⚠ **Adversarial review overturned two premises of the remediate claim-leak item** — see IMMEDIATE
-  NEXT item 2. Record: [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md).
 
 - **⚠ Two corrections carried from the prior clear-out lap (`d4c8e9ea`) — both still live.**
   (1) FLW-COR-003's backlog-prescribed fix, "release claims on every path that claims", was WRONG: the
@@ -53,7 +45,7 @@
   the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
   lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
   it examined — and overturned two more premises this lap (see item 2).
-- **Current version = `package.json`** (authoritative): v0.34.27. Both clear-out laps are
+- **Current version = `package.json`** (authoritative): v0.34.29. The clearance laps after it are
   UNRELEASED. **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately
   not restated here** (this section had grown to ~107 lines of version-by-version narration, which is
   the changelog creep this doc's own header forbids).
@@ -152,18 +144,22 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. Work the actionable queue** in [`docs/backlog/open-bugs.md`](backlog/open-bugs.md). Re-triaged
-2026-07-24 across the 96 surviving entries: **~44 actionable, 24 owner-decision, 20
-accepted-residual-or-lesson, 14 live/env-blocked**; roughly a third of the actionable set is loop-core
-(attestation required). ⚠ Treat that classification as a LEAD — two entries it called actionable were
-verified and then rejected (one coupled to another spec, one premised on drifted line numbers).
-Remaining high-value clusters: the proxy-lane populate/refresh command (a drop reason names an internal
-function no operator can run — note its sibling half, rendering the reasons at Gate-0, is now DONE, so
-what is left is genuinely the missing COMMAND), and the advance-command-in-worker-prompts defect (any
-delegated executor becomes a second driver; 10+ emit sites, two of them loop-core, so it wants its own
-lap). Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
+**1. Sweep `tests/remediate` fixtures and land `tsconfig.test.json` with them.** The single largest
+closable item: **222 errors across 131 files, all in `tests/remediate/`** (81× missing required
+property, mostly the block fixture's `touched_files`; 28× TS7016 cleared by `allowJs`). The config is
+worthless until the sweep lands, so they ship as one change. Detail + the class breakdown in
+[`open-bugs.md`](backlog/open-bugs.md).
 
-**2. Wire the per-node token estimate — now UNBLOCKED (loop-core).** Its blocker, unplaceable-node
+**2. Work the rest of the actionable queue** in [`open-bugs.md`](backlog/open-bugs.md). Re-triaged
+2026-07-24: roughly half the surviving entries are actionable, a third of those loop-core (attestation
+required). ⚠ Treat that classification as a LEAD — entries it called actionable have been verified and
+then rejected. Remaining high-value clusters: the proxy-lane populate/refresh command (its sibling half,
+rendering drop reasons at Gate-0, is DONE — what is left is genuinely the missing COMMAND), and the
+advance-command-in-worker-prompts defect (any delegated executor becomes a second driver; 10+ emit
+sites, two loop-core, so it wants its own lap). Then **Gate-0 priority-order UX** (Track 3 — decisions
+resolved, implementation remains).
+
+**3. Wire the per-node token estimate — still UNBLOCKED and still not done (loop-core).** Its blocker, unplaceable-node
 routing, shipped in `835902f2`: a wholly-structural strand is now the resumable `no_capable_pool` pause
 on both paths, and `partition.unplaceable` lets the hybrid caller tell a structural refusal from the two
 benign empties. So `HYBRID_NODE_TOKEN_ESTIMATE` / `driveRollingDispatch`'s `() => 2000` can finally read
@@ -173,13 +169,14 @@ byte-SUMming the access set (retired for cause — see the docblock). ⚠ Land i
 watch a real frontier: this is the first work that makes the new pause path REACHABLE, and it has no
 live evidence yet. Detail in [`open-bugs.md`](backlog/open-bugs.md).
 
-**3. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
-138.6KB / 94 entries against a 120KB budget (was 154KB / 108 three laps ago). Sizes are UTF-8 BYTES —
-the gate agrees with `wc -c`. Condensation as a lever is exhausted: total excess over the 2600-byte
-per-entry budget is a few KB across all 94, so the remaining ~19KB has to come from closing entries
-(item 1). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
-shrink-only ceiling. ⚠ Never run `--update-baseline` to make a GROWN file pass — that raises the ceiling,
-which is the one thing this gate exists to prevent; pay for a new entry by condensing another.
+**4. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
+133.6KB / 90 entries against a 120KB budget (was 154KB / 108 four laps ago). Sizes are UTF-8 BYTES —
+the gate agrees with `wc -c`. Condensation as a lever is nearly exhausted: total excess over the
+2600-byte per-entry budget is a few KB across all 90, so the remaining ~14KB has to come from closing
+entries (items 1–2). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop — and
+only at the END of a lap — to ratchet the shrink-only ceiling. ⚠ Never run `--update-baseline` to make a
+GROWN file pass; that raises the ceiling, which is the one thing this gate exists to prevent. Pay for a
+new entry by condensing another — that is exactly what this lap's friction entry cost.
 
 **A2 (parked):** build the oracle corpus from small, public, PINNED repos (full SPEC in
 [`deferred.md`](backlog/deferred.md)) — resume once stability work is complete.

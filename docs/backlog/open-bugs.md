@@ -53,6 +53,15 @@
   explicitly (e.g. `api_key_env: null` / a `no_auth: true` knob) so reach probes the endpoint
   instead of an env var; an OMITTED key field can stay a drop (forgetting the key is the common
   error — the explicit form is what says "deliberate").
+  ⚠ **Re-verified 2026-07-24 and it is NOT a knob-sized change — decide before building.** (a) A bare
+  `no_auth: true` re-opens exactly the hole the inline-`api_key` refusal closes: it is a flag the
+  operator can always set, so the `declared ∩ ambient-verifiable` rule becomes opt-out by construction
+  (see `verifySourceReach`'s docblock). (b) The honest form — actually probing the endpoint — is a
+  sync→async contract change: `verifySourceReach` and `resolveAmbientSources` are synchronous and
+  `resolveSessionConfig` calls them that way, so the probe ripples through session-config resolution
+  and Gate-0. (c) "Only allow it for loopback endpoints" bounds (a) but does not fix reach — a dead
+  local proxy is the exact failure this lane hit twice. So the real choice is: pay for the async probe,
+  or accept that keyless lanes are declared-not-verified and say so at Gate-0.
 
 - **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
   (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
@@ -704,21 +713,21 @@
 
 - **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
 
-- **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (re-measured G3 A′ lap 2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a full `vitest run` but passes alone (35s), and a **third failure rotates** between runs — observed as `tests/remediate/wave-scheduler.test.ts`, `tests/audit/next-step.test.mjs`, `tests/shared/quota-state.test.mjs` (all heavy, all pass alone). **Measured baseline (as of the 2026-07-16 lap, pre-dating the 2026-07-19 `INV-shared-core-14` fix): clean `main` failed `linux-cycle-regression` + one rotating mover** — re-measure before relying on this count; `INV-shared-core-14` no longer belongs in it. Also timed `linux-cycle-regression` mine-vs-main: 35s both. Per the test-failure protocol these are test bugs (timeout under worker contention / shared quota-state dirs), not code regressions. **The real cost is the is-it-mine investigation** — every dispatch-touching lap pays a full-suite baseline run on stashed main (~2×260s) to prove parity. Property to hold: a green branch must be distinguishable from a flaky one WITHOUT re-running the suite on main. Fix the hermeticity/timeouts, or quarantine the known-flaky set into a separate serial shard.
-  **SPEC — persist the known-state baseline so parity is a LOOKUP, not a re-run.** The cost here is not the
-  flakes, it is that every dispatch-touching lap re-derives the same baseline by stashing and running the
-  full suite on main to prove innocence. The missing thing is a recorded answer to "what does main do under
-  these conditions": store, at green baseline, each test's deterministic-or-parallel-flaky status annotated
-  with the environment it was measured in (parallelism, OS, core count), since the whole phenomenon is
-  load-dependent and a status measured under different concurrency means nothing.
-  A branch failure then classifies against that record: a test that passes alone, fails under load, and is
-  recorded parallel-flaky on main for the same environment is reported as parity with an annotation rather
-  than as red. **Unrecognized failures stay red** — the classifier may only downgrade a failure it has a
-  matching record for, never wave through one it does not recognize.
-  **Property to hold:** a green branch is distinguishable from a flaky one without re-running the suite on
-  main. ⚠ Not to be confused with an ignore-list: suppressing these tests everywhere destroys the signal
-  permanently, and the hermeticity defects remain worth fixing on their own merits — this removes the
-  investigation tax, it does not make the flakes acceptable.
+- **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression
+  (2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a
+  full `vitest run` and passes alone; a second failure ROTATES between runs (seen: `wave-scheduler`,
+  `next-step`, `quota-state` — all heavy, all pass alone). Per the test-failure protocol these are test
+  bugs (timeout under worker contention / shared state dirs), not code regressions. ⚠ The 2026-07-16
+  failure count pre-dates the `INV-shared-core-14` fix — re-measure before relying on it.
+  **The real cost is the is-it-mine investigation:** every dispatch-touching lap re-derives the same
+  answer by stashing and running the full suite on main (~2×260s) to prove parity.
+  **SPEC — persist the known-state baseline so parity is a LOOKUP, not a re-run.** At green baseline,
+  record each test's deterministic-or-parallel-flaky status ANNOTATED with the environment it was measured
+  in (parallelism, OS, core count) — the phenomenon is load-dependent, so a status measured under
+  different concurrency means nothing. A branch failure then classifies against that record; **unrecognized
+  failures stay RED** — the classifier may only downgrade a failure it has a matching record for.
+  ⚠ Not an ignore-list: suppressing these tests destroys the signal, and the hermeticity defects remain
+  worth fixing on their own merits. This removes the investigation tax, not the flakes.
 
 - **No read-only surface shows the built dispatch pools — an exclusion rule is unverifiable until a live dispatch (G3 A″ lap 2026-07-16, tool-should-decide, medium).** Verifying "operator excludes one NIM model ⇒ siblings still route" end-to-end, I could observe the operator half at the real CLI (Gate-0 prompt → persisted `policy`) but **not the routing half**: `buildSourcePools` is reachable only from a live dispatch wave. Checked every read-only surface — `audit-code quota` reports only the host pool (`claude-code/*`) and reports the SAME with no exclusion at all, so it never builds source pools; `validate` surfaces none either. So an operator authors a rule and cannot see which pools resulted, and a typo'd rule (`openai-compatible:model-typo`) persists happily and matches nothing, silently. The grammar is OPEN by design so it can't be validated at parse time — but nothing reports "this rule matched zero backends". Property to hold: the operator can see the resolved dispatch pool set (and any zero-match rule) WITHOUT committing to a dispatch. Would also give the A″ routing filter a runtime surface to verify at, which it currently lacks.
 
@@ -808,6 +817,20 @@
   stale records — the ancestry probe is the corrective, so revisit only if a case escapes it.
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
+
+- **Friction walk (fourth backlog-clearance lap, 2026-07-24):** (1) **inefficient-feeding (medium):**
+  `llm-call.mjs` takes `--schema`, and the DEFAULT container silently flattened a six-part lettered
+  question into one `summary` with `findings: []` — which reads as model incapacity and is not. The
+  helper can detect this: an instruction containing enumerated sub-questions (`A.`/`B.`/`1.`) under the
+  default schema should warn (or refuse) at call time, since the shape mismatch is decidable from the
+  prompt. (2) **tool-should-decide (medium):** the backlog budget baseline is bound to the LIVE file, so
+  ratcheting mid-lap and then deleting more entries turns `backlog-budget-unit.test.mjs` RED in a way
+  that reads as a code regression — it cost a full-suite investigation here. Either ratchet only at
+  commit time (a hook), or have the test compare against the COMMITTED file rather than the worktree.
+  (3) **ambiguous-direction (low):** a backlog entry can name a property whose honest implementation is
+  a contract change the entry never mentions — the keyless-endpoint item reads knob-sized but needs a
+  sync→async ripple through session-config resolution. Entries should state the cost when the mechanism
+  is known to be structural ([[backlog-item-states-invariant-not-fix-mechanism]]).
 
 - **Friction walk (second backlog-clearance lap, 2026-07-24):** (1) **ambiguous-direction (medium):**
   a backlog entry can name a fix whose PREMISE is sound and whose CONSEQUENCE is unshippable — the
@@ -1004,32 +1027,19 @@
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
 
-- **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
-  numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
-  - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
-    `smoke:packaged-remediate-code` is 13.2s; everything else is ~12s combined. **→ The highest-leverage gate
-    win is the packaged-audit-code smoke.** Internal breakdown (measured): `next-step ×~7 to dispatch_review`
-    = 35.9s (53% — the real audit-flow round-trips, inherent coverage), `npm install from tarball` 9.3s,
-    `next-step to present_report` 10.1s, `npm pack` 7.2s (incl. a prepack rebuild). The next-step round-trips
-    are fresh-process pipeline runs — cutting them cuts coverage, so this needs a real design (e.g. an
-    in-process multi-step driver for the smoke, or packing once and sharing the tarball across both smokes
-    since they build the identical `audit-tools` package), not a quick trim.
-    **SPEC — build the tarball ONCE, assert many. Do not build an in-process smoke driver.** The two
-    candidates are not equivalent: an in-process driver consolidates ORCHESTRATION, but the duplicated
-    work is the REBUILD, so it optimizes the wrong axis and additionally weakens the smoke — the entire
-    point is exercising the real packaged/global-install path, which nothing else catches, and running it
-    in-process erodes exactly that. Meanwhile both smokes pack the identical package.
-    Resolution: one build phase produces the tarball, and every packaged smoke installs from that same
-    artifact into its own fresh sandbox and runs its own assertions. Smoke semantics are unchanged and
-    coverage is untouched — only the redundant rebuild is removed. ⚠ The next-step round-trips are NOT a
-    target: they are fresh-process pipeline runs and cutting them cuts real coverage.
-  - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
-    time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
-    `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
-    workers vs remediate 451s / shared 62s. `pool: 'threads'` / `isolate: false` won't help the run-time
-    tail (it's subprocess wall, not isolation overhead); the real lever is the sharding already shipped +
-    possibly splitting the few 100s+ integration files across more shards. Only pursue collect/pool changes
-    with per-file verification (many tests mutate fs / spawn subprocesses → isolation-off risks bleed).
+- **Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).**
+  `verify:checks` was 95.8s, of which `smoke:packaged-audit-code` alone was 70.2s; inside it the next-step
+  round-trips were 35.9s (real audit-flow coverage, explicitly NOT a target) and `npm pack` 7.2s including
+  a prepack rebuild.
+  **SPEC — build the tarball ONCE, assert many; do NOT build an in-process smoke driver.** The duplicated
+  work is the REBUILD, so an in-process driver optimizes the wrong axis AND erodes the one thing the smoke
+  exists to exercise (the real packaged/global-install path). One build phase produces the tarball; every
+  packaged smoke installs THAT artifact into its own fresh sandbox and runs its own assertions — semantics
+  and coverage unchanged, only the redundant rebuild removed.
+  Suite side: the tail is subprocess wall in a few audit integration files, not isolation overhead, so
+  `pool:'threads'` / `isolate:false` will not help — the lever is the sharding already shipped, plus
+  possibly splitting the 100s+ files across more shards (verify per-file: many tests spawn/mutate fs, so
+  isolation-off risks bleed). Live numbers are in `.audit-tools-profile/*-history.ndjson`, never here.
 
 - **Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).** The
   rework shipped; the design of record is

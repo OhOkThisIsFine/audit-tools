@@ -3,8 +3,6 @@
   "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier (9router-inspired) — extra SOURCE P": 4185,
   "forward-tracks.md::One repo intent, three filenames — the audit/remediate intent split is a `one ": 2789,
   "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6": 3664,
-  "open-bugs.md::__FILE__": 133980,
-  "open-bugs.md::A ROTATING set of heavy suite tests fails only under parallel load — hermetici": 2676,
-  "open-bugs.md::Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch": 2735,
-  "open-bugs.md::Top gate optimization lead (measured 2026-07-06, was the \"vitest collect\" item": 2654
+  "open-bugs.md::__FILE__": 133627,
+  "open-bugs.md::Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch": 2735
 }
