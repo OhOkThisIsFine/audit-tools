@@ -7,6 +7,17 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 
+- **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
+  (2026-07-25, medium, friction: inefficient-feeding).** Adding the `reviewed_clean` affirmation, the
+  fixture sweep globbed `tests/**` and went fully green: build, check, check:tests and the whole vitest
+  run. But two synthetic-result generators live in `scripts/audit/smoke-{packaged,linked}-audit-code.mjs`,
+  so `verify:checks` — which the pre-commit hook does NOT run — failed in release CI with 17 errors on a
+  commit that was locally green in four ways ([[lap-green-must-match-ci-evidence]]). Property: the set of
+  files a contract sweep must cover is derivable from the contract (every construction site of the type),
+  not from where tests happen to live — grep the TYPE across the whole repo, never one tree. Cheap
+  mitigation until then: run `verify:checks`, not `check`, before pushing anything that changes a
+  validated shape.
+
 - **The parallel-flake baseline RECORDS failures seen during ordinary development, so an in-progress
   red gets written into the artifact that decides what counts as a known flake (2026-07-25, medium,
   friction: tool-should-decide).** Landing a contract change turned 31 tests red for one run; the suite

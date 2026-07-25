@@ -39,6 +39,8 @@ async function buildSyntheticResults(tasks, root) {
       })),
     ),
     findings: [],
+    // Zero-finding results must affirm they were reviewed; see validateResultFindings.
+    reviewed_clean: true,
     notes: ["Synthetic completion result for linked smoke coverage."],
     requires_followup: false,
   })));

@@ -90,8 +90,9 @@
   check the pool's declared `context_tokens` before calling it a regression. **Per-release shipped detail is `git log` and the
   `docs/reviews/` records — deliberately not restated here** (this section had grown to ~107 lines of
   version-by-version narration, which is the changelog creep this doc's own header forbids).
-- **A2 oracle corpus stays PARKED** (owner redirect 2026-07-22) — SPEC intact in
-  [`docs/backlog/deferred.md`](backlog/deferred.md), nothing lost.
+- **A2 oracle corpus is UNPARKED** (owner 2026-07-25, superseding the 2026-07-22 park) — funded as the
+  mechanical answer to per-lane result quality. SPEC in
+  [`docs/backlog/deferred.md`](backlog/deferred.md).
 - **Shipped and settled — mechanism lives in the code + its record, not here.** Capability-evidence
   landing gate (R3-3), the trap-guard hook layer, the nightly maintenance routine, loop-core
   attestation + pre-commit hardening, the backend-identity migration (all stages) and the
@@ -207,7 +208,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 104 open item(s).
+> `verify:checks` and at commit). 105 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -216,6 +217,7 @@ its SPEC intact.
 
 ### Open bugs & frictions — the working queue
 
+- A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI (2026-07-25, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 - The parallel-flake baseline RECORDS failures seen during ordinary development, so an in-progress red gets written into the artifact that decides what counts as a known flake (2026-07-25, medium, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - `api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction). · [`open-bugs.md`](backlog/open-bugs.md)
