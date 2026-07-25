@@ -7,7 +7,20 @@
 
 ## Live state
 
-- **Second backlog clearance lap, 2026-07-24 (`b044d070`, unreleased).** The remediate claim-leak twin
+- **Third backlog clearance lap, 2026-07-24 (`d11588b6`).** The unplaceable-node routing
+  prerequisite SHIPPED on both dispatch paths, the `dropped[]`-at-Gate-0 entry was traced (the concern
+  was real — `onDroppedSources` had zero injectors anywhere) and fixed, and the exact-key leak-guard
+  helper landed. `open-bugs.md` is 96 → 94 entries, 141KB → 138.6KB, baseline ratcheted twice.
+  ⚠ **The per-node token estimate is now UNBLOCKED** — its stated blocker was exactly this routing, and
+  the entry says the wiring is then a two-line change. It is deliberately NOT in this lap: landing the
+  routing and landing the thing that makes the routing reachable in one lap gives the new pause path no
+  independent evidence. Do it next, and watch a real frontier.
+  ⚠ **Adding a channel is not the same as keeping one.** Injecting `onDroppedSources` to feed the Gate-0
+  render SUPPRESSED the resolver's stderr default — a silent loss on every path that never reaches
+  Gate-0, caught only because `audit-code-wrapper.test.mjs` probes that line. The full suite was the
+  signal; `check` was green throughout. Emit both.
+
+- **Second backlog clearance lap, 2026-07-24 (`b044d070`).** The remediate claim-leak twin
   SHIPPED (stray worktrees now carry their own terminal class), the rollingDispatch flake is de-flaked,
   FLW-COR-003's second half verified holding and closed, and the stale-worktree entry corrected after its
   central claim was falsified. `open-bugs.md` is 97 → 95 entries, 143KB → 141KB, baseline ratcheted twice.
@@ -145,30 +158,25 @@ accepted-residual-or-lesson, 14 live/env-blocked**; roughly a third of the actio
 (attestation required). ⚠ Treat that classification as a LEAD — two entries it called actionable were
 verified and then rejected (one coupled to another spec, one premised on drifted line numbers).
 Remaining high-value clusters: the proxy-lane populate/refresh command (a drop reason names an internal
-function no operator can run), `dropped[]` reasons never rendered at Gate-0 (**not yet traced** — verify
-before designing), and the advance-command-in-worker-prompts defect (any delegated executor becomes a
-second driver; 10+ emit sites, two of them loop-core, so it wants its own lap). Then **Gate-0
-priority-order UX** (Track 3 — decisions resolved, implementation remains).
-The `top_k` truncation and the remediate node-claim twin that used to head this list are respectively
-DONE and designed-not-applied (item 2).
+function no operator can run — note its sibling half, rendering the reasons at Gate-0, is now DONE, so
+what is left is genuinely the missing COMMAND), and the advance-command-in-worker-prompts defect (any
+delegated executor becomes a second driver; 10+ emit sites, two of them loop-core, so it wants its own
+lap). Then **Gate-0 priority-order UX** (Track 3 — decisions resolved, implementation remains).
 
-**2. Unplaceable-node routing — the prerequisite this lap uncovered (loop-core).** An implement node
-that fits NO pool is handled TERMINALLY on both paths: headless in-process returns `context_cap` for
-every pool → `neverDispatchable` → a permanent strand that blocks the rest of the run; the hybrid path
-leaves both partitions empty so the `partition.host.length === 0` early-merge runs instead of the
-`no_capable_pool` structural-refusal PAUSE, and every item is `blocked` + `markTerminal` — dead for the
-run even after the operator frees a larger pool. `buildEmptyPoolTerminal` then blames quota exhaustion,
-sending the operator entirely the wrong way. This is currently masked only because every node is sized
-at a flat 2000 and therefore always "fits". Property: an unplaceable node PAUSES resumably, naming the
-real cause. Landing it unblocks the per-node token estimate (then a two-line change). Detail in
-[`open-bugs.md`](backlog/open-bugs.md); evidence in
-[`backlog-clearance-2026-07-24b.md`](reviews/backlog-clearance-2026-07-24b.md).
-The remediate claim-leak twin that used to head this item **SHIPPED** in `b044d070`.
+**2. Wire the per-node token estimate — now UNBLOCKED (loop-core).** Its blocker, unplaceable-node
+routing, shipped in `835902f2`: a wholly-structural strand is now the resumable `no_capable_pool` pause
+on both paths, and `partition.unplaceable` lets the hybrid caller tell a structural refusal from the two
+benign empties. So `HYBRID_NODE_TOKEN_ESTIMATE` / `driveRollingDispatch`'s `() => 2000` can finally read
+the real `estimateImplementSlotTokens` — which `marshal.ts:427` already computes and feeds to
+`scheduleWave`; it is only the two FIT gates that still get the flat 2000. ⚠ Do NOT re-attempt it by
+byte-SUMming the access set (retired for cause — see the docblock). ⚠ Land it as its own change and
+watch a real frontier: this is the first work that makes the new pause path REACHABLE, and it has no
+live evidence yet. Detail in [`open-bugs.md`](backlog/open-bugs.md).
 
 **3. Make `open-bugs.md` a bounded read — only CLOSING entries moves it now.**
-141KB / 95 entries against a 120KB budget (was 154KB / 108 two laps ago). Sizes are UTF-8 BYTES — the
-gate agrees with `wc -c`. Condensation as a lever is exhausted: total excess over the 2600-byte
-per-entry budget is a few KB across all 95, so the remaining ~21KB has to come from closing entries
+138.6KB / 94 entries against a 120KB budget (was 154KB / 108 three laps ago). Sizes are UTF-8 BYTES —
+the gate agrees with `wc -c`. Condensation as a lever is exhausted: total excess over the 2600-byte
+per-entry budget is a few KB across all 94, so the remaining ~19KB has to come from closing entries
 (item 1). Run `node scripts/check-backlog-budget.mjs --update-baseline` after each drop to ratchet the
 shrink-only ceiling. ⚠ Never run `--update-baseline` to make a GROWN file pass — that raises the ceiling,
 which is the one thing this gate exists to prevent; pay for a new entry by condensing another.

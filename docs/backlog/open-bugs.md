@@ -117,36 +117,29 @@
 
 - **⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace):
   a lane can return success-shaped EMPTY results and nothing in routing notices.** agy
-  gemini-3.6-flash went 0-for-2 — an 11-task 6-lens security packet and an 8-entry
-  maintainability/tests packet, both contract-valid with 0 findings, where fable/codex/sonnet
-  packets on adjacent scope yielded 5-10 — and was benched from audit packets mid-run BY HAND,
-  which is host discretion.
-  ⚠ **The old "lens class belongs in the routing decision" framing is wrong at HEAD.** Lens class is
-  already a routing input: `SENSITIVE_HINT_LENSES` (`security`/`data_integrity`/`reliability`)
-  escalates a packet's tier floor to ≥`standard` in `resolveDispatchTier`
-  (`src/audit/cli/dispatch/tierRouting.ts:21,:82`), which becomes `requiredTier` at the packet→pool
-  capability floor (`dispatch.ts:593,:639` → `rollingDispatch.ts:1669`) — and the packet that failed
-  WAS a security packet, so more of that axis would not have caught it.
-  **The real gap is that the dispatch engine has no result-quality seam at all.** A pool is demoted
-  or excluded only on cost drift, credit exhaustion, model-unavailable or 429 cooldown
-  (`onCostDrift`/`onCreditExhausted`/`onModelUnavailable`/`onQuotaUnclassified`,
-  `rollingDispatch.ts:361-412`); nothing observes what a worker RETURNED, and no declared source
-  carries a lens/kind restriction, so "this lane under-reports" is inexpressible anywhere but by hand.
-  ⚠ **The "counts as covered" half is also overstated.** Selective deepening already re-reviews clean
-  results lens-agnostically for high-priority / `critical_flow` / external-analyzer scopes
-  (`isHighRiskCleanResult` → `buildHighRiskCleanFollowupTask`, `selectiveDeepening/highRiskClean.ts`,
-  wired at `selectiveDeepening/index.ts:168`) and builds a lens-steward verification task on
-  `many_no_finding_results` / `high_risk_clean_result` (`lensVerification.ts:124,:127`) for the same
-  three important lenses (`selectiveDeepening/shared.ts:22`). What has NO net is a low-priority
-  zero-finding result on a non-important lens — exactly the 8-entry maintainability/tests packet.
-  **Next move is an owner call, not code:** zero-finding rate is a noisy bench signal (a genuinely
-  clean scope legitimately returns none), quality is already RESOLVED as a FLOOR rather than a
-  tradeable axis (see the cost-speed-dial entry), and the ground truth that would calibrate a
-  per-lane floor for finding work is the DEFERRED A2 finding-quality oracle. Decide between widening
-  the deepening net to low-priority clean results and funding the oracle so finding-yield can gate
-  eligibility mechanically. Record:
+  gemini-3.6-flash went 0-for-2 (an 11-task 6-lens security packet and an 8-entry
+  maintainability/tests packet, both contract-valid with 0 findings, where fable/codex/sonnet packets
+  on adjacent scope yielded 5-10) and was benched mid-run BY HAND — host discretion.
+  ⚠ **Two framings this entry used to carry are wrong at HEAD.** (1) "Lens class belongs in the
+  routing decision" — it already is one: `SENSITIVE_HINT_LENSES` escalates a packet's tier floor to
+  ≥`standard` in `resolveDispatchTier` (`src/audit/cli/dispatch/tierRouting.ts`), which becomes
+  `requiredTier` at the packet→pool capability floor; the packet that failed WAS a security packet, so
+  more of that axis would not have caught it. (2) "It counts as covered" — selective deepening already
+  re-reviews clean results lens-agnostically for high-priority / `critical_flow` / external-analyzer
+  scopes (`isHighRiskCleanResult`, `selectiveDeepening/highRiskClean.ts`) and builds a lens-steward
+  verification task on `many_no_finding_results` / `high_risk_clean_result`.
+  **The real gap: the dispatch engine has no result-QUALITY seam at all.** A pool is demoted or excluded
+  only on cost drift, credit exhaustion, model-unavailable or 429 cooldown
+  (`rollingDispatch.ts`'s `onCostDrift`/`onCreditExhausted`/`onModelUnavailable`/`onQuotaUnclassified`);
+  nothing observes what a worker RETURNED, and no declared source carries a lens/kind restriction — so
+  "this lane under-reports" is inexpressible anywhere but by hand. What has NO net is a low-priority
+  zero-finding result on a non-important lens: exactly the maintainability/tests packet.
+  **Next move is an owner call, not code:** zero-finding rate is a noisy bench signal (a genuinely clean
+  scope legitimately returns none), quality is already RESOLVED as a FLOOR rather than a tradeable axis
+  (cost-speed-dial entry), and the ground truth that would calibrate a per-lane floor is the DEFERRED A2
+  oracle. Decide between widening the deepening net to low-priority clean results and funding the oracle
+  so finding-yield can gate eligibility mechanically. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
-
 - **RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, accepted —
   revisit on live evidence).** The pair itself SHIPPED (intent-equivalence gate wired as the
   `intent_equivalence_current` obligation — `nextStep.ts` PRIORITY slot between
@@ -425,36 +418,24 @@
 
 - **Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason
   (2026-07-19).** The design of record (Residual 1) says to validate scope once where a snapshot is
-  created so consumers are safe by construction, "when step 2 touches this code". Attempted and
-  REVERTED: it does not work as a drop-in. Every production caller swallows a throw from
-  `probeQuotaSource` into `status: "degraded"` (`apiPool.ts`'s two `.catch`es, plus the
-  `queryCurrentUsage` branch's own try), so asserting there converts a contract violation into a
-  quiet `quotaSignalDegraded` pool rather than a loud failure — and `compositeQuotaSource` bypasses
-  `probeQuotaSource` entirely, so "safe by construction" would be false regardless. **Property to
-  hold:** a scope violation from a live producer is distinguishable from a network degrade and
-  surfaces loudly — which needs a distinct error class that the degrade catches deliberately
-  re-throw, not another assert call. Meanwhile `scheduleWave` still asserts (live path, throws) and
-  `quotaSnapshotWindowPctMap` skips-and-warns (persisted path, must not throw).
-  **SPEC — a contract violation needs its own ERROR CLASS, not another assert at another site.** The
-  revert was correct and its lesson is that WHERE the check runs is not the problem: every production
-  caller wraps the probe in a catch that converts any throw into a degraded status, so an assert
-  anywhere inside that boundary is swallowed into a quiet degraded pool — the loudest possible bug
-  becomes the quietest possible symptom. Adding a third assert site repeats it.
-  The distinction the code cannot currently express is **"the remote is unreachable" versus "the
-  producer emitted something structurally invalid."** The first is expected and degrades; the second is
-  a bug and must surface.
-  **Return the violation IN-BAND as a typed failure result rather than throwing.** A distinct error class
-  that every degrade-catch agrees to re-throw would also work, but it stays vulnerable to the same defect
-  one refactor later — it relies on each catch site continuing to make an exception for it, which is the
-  remember-to-be-careful shape this project rejects. A typed result cannot be swallowed by a catch at all,
-  because it never travels as an exception: a caller must handle the variant to compile, and a scope
-  violation stops being confusable with a network degrade by construction rather than by convention.
-  Producer validation can then live wherever is most natural, including on paths that bypass the probe
-  entirely — which is why "safe by construction at one boundary" was never achievable here.
+  created, so consumers are safe by construction. Attempted and REVERTED — it is not a drop-in: every
+  production caller swallows a throw from `probeQuotaSource` into `status: "degraded"` (`apiPool.ts`'s
+  two `.catch`es plus the `queryCurrentUsage` branch's own try), so an assert there turns the loudest
+  possible bug into the quietest possible symptom; and `compositeQuotaSource` bypasses the probe
+  entirely, so "safe by construction" would be false regardless. Adding a third assert site repeats it —
+  WHERE the check runs was never the problem.
+  **SPEC — return the violation IN-BAND as a typed failure result, not a throw.** The distinction the
+  code cannot express is "the remote is unreachable" (expected → degrade) versus "the producer emitted
+  something structurally invalid" (a bug → must surface). A distinct error class that every degrade-catch
+  agrees to re-throw would also work, but it stays vulnerable one refactor later — it relies on each catch
+  site continuing to make an exception for it, the remember-to-be-careful shape this project rejects. A
+  typed result never travels as an exception, so no catch can swallow it and a caller must handle the
+  variant to compile. Producer validation can then live wherever is natural, including paths that bypass
+  the probe.
   **Property to hold:** a structurally invalid producer emission is always loud and never presents as a
-  network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
-  predate the field, and refusing to load them would turn a historical gap into an outage.
-
+  network degrade. ⚠ The persisted READ path must still skip-and-warn rather than throw — old artifacts
+  predate the field, and refusing to load them would turn a historical gap into an outage. Meanwhile
+  `scheduleWave` asserts (live path, throws) and `quotaSnapshotWindowPctMap` skips-and-warns.
 - **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
   The idea: revert each site of a change individually and require each reversion to turn the suite red,
   so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
@@ -963,37 +944,24 @@
     completeness, not a safety gap.
 
 - **Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).**
-  Owner's spec: when dispatching up to quota with tokens estimated a-priori, the ONLY legitimate reasons to
-  hold a packet for a later dispatch are (1) a non-parallelizable predecessor finishes and UNLOCKS the task,
-  (2) the quota window refreshes, (3) the pool is RATE-limited (RPM/TPM) — not budget-limited. Any other
-  hold is pure latency. Mapping onto audit-code:
-  - Base review packets are embarrassingly parallel (read-only, no write conflict, no ordering) → they
-    should ALL dispatch the instant they fit budget+rate; the `next-step → dispatch → merge-and-ingest →
-    next-step` barrier on the host path is an artificial wave, NOT one of (1)/(2)/(3).
-  - The IN-PROCESS rolling engine (codex/NIM via `driveRollingAuditDispatch`) ALREADY implements the correct
-    model — continuous slot-pull, dispatch-to-capacity, refill-on-completion, pace-on-rate. The host path is
-    the deviation.
-  - Legitimate (1) DOES apply to ONE layer: selective-deepening tasks are derived from completed packets'
-    findings (`+N deepening` per merge), so a merge must precede them — the barrier is correct for the
-    deepening layer, artificial for the base frontier.
-  **SPEC — delete "wave" as a concept; express the one legitimate barrier as a DEPENDENCY.** The layer
-  that genuinely needs a merge first needs it because its work does not exist until earlier results land —
-  that is precisely a task unlock, which is already reason (1) on the owner's own list. Modelling it as a
-  global phase boundary is what forces every unrelated packet to wait for it, so the barrier and the
-  artificial latency are the same mechanism.
-  Once the deepening layer's prerequisite is a dependency edge rather than a phase, there is nothing left
-  for "wave" to mean: everything is gated by budget, rate, and dependency unlock, uniformly, and the
-  in-process engine's continuous slot-pull becomes the only model. **The host path converges onto that
-  engine rather than keeping a second scheduler** — the deviation is the host path, not the engine, and
-  maintaining both is the fork this project's one-core rule exists to prevent.
-  **Property to hold:** a packet is held for exactly three reasons — its dependencies are unmet, the pool
-  is rate-limited, or the budget will not admit it. No fourth reason exists, and "the previous phase has
-  not finished" is not one of them.
-  - The calibration cap (below) is a FOURTH, illegitimate hold: it throttles on not-knowing-quota-in-tokens,
-    which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
-    full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
-    re-grants for the deepening layer only. Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
-
+  Owner's spec: the ONLY legitimate reasons to hold a packet are (1) a non-parallelizable predecessor
+  UNLOCKS it, (2) the quota window refreshes, (3) the pool is RATE-limited (RPM/TPM, not budget). Any
+  other hold is pure latency. On audit-code: base review packets are embarrassingly parallel (read-only,
+  no write conflict, no ordering), so the host path's `next-step → dispatch → merge-and-ingest →
+  next-step` barrier is an artificial wave, none of (1)/(2)/(3). The IN-PROCESS rolling engine already
+  implements the correct model (continuous slot-pull, refill-on-completion, pace-on-rate) — the host path
+  is the deviation. Reason (1) genuinely applies to ONE layer: selective-deepening tasks do not exist
+  until earlier findings land.
+  **SPEC — delete "wave" as a concept; express that one barrier as a DEPENDENCY EDGE.** The deepening
+  layer needs a merge first precisely because its work does not exist yet — already reason (1). Modelling
+  it as a global phase is what makes every unrelated packet wait, so the barrier and the latency are one
+  mechanism. With it as an edge, nothing is left for "wave" to mean, and the host path CONVERGES onto the
+  in-process engine rather than keeping a second scheduler (the fork the one-core rule exists to prevent).
+  The calibration cap is a FOURTH, illegitimate hold — it throttles on not-knowing-quota-in-tokens, which
+  is neither budget, rate, nor unlock, and never resolves.
+  **Property to hold:** a packet is held for exactly three reasons — unmet dependency, rate limit, or
+  budget. "The previous phase has not finished" is not one of them.
+  Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
 - **Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).** The prescribed half is SHIPPED: `gateHostFanout` (`src/audit/cli/dispatch/hostFanoutGate.ts`) runs at the five fan-out emitters in `nextStepCommand.ts` (four `design_review`, one `systemic_challenge`), granting a panel all-or-nothing through the same `buildDispatchPool` → `finalizeDispatchQuota` → `detectHostDispatchWall` primitives as packet dispatch, with per-family leases under `fanout-quota/<family>/`. What remains is every OTHER host Agent spawn — the recon/review/compaction subagents the conversation host launches on its own initiative, with no tool call in between: no admission, no lease, and no per-agent record, so nothing names what was in flight when a session limit lands (contrast remediate-code's per-node worktrees + claims). Their spend is not wholly invisible — it moves the account percent, so it arrives as unattributed pct drift in the merge-time slope fold (`tokenUsageObservation.ts` C5 note: understated slope, the safe direction) — but drift is not accounting.
   **This is an owner call, not a bounded fix:** the tool cannot gate a dispatch it never sees, and both mechanical routes are barred by standing rules — a `note-fanout`-style CLI the host must remember to call is host discretion, and a PreToolUse Agent hook is a host-IDE coupling. Decide the shape first: (i) every fan-out routes through a prescribed step so "ad-hoc" stops existing as a category, (ii) ad-hoc spend is explicitly accepted as unmetered account drift the pre/post attribution already absorbs, or (iii) an IDE-hook accounting layer is accepted as a deliberate, documented exception to IDE-agnostic. (Absorbs sliver (b) of the "ledger-writer / acceptNode-inert-clean lap" entry below — drop that half when this lands so the item has one home.)
 
@@ -1197,3 +1165,31 @@
     number of rounds; the run reaches synthesis on its own. FAIL = orphaned pending `deepening:*` tasks, the
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, run `force-synthesis` to unwedge and note the round count here.
+- **The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity
+  (2026-07-24, medium, friction: inefficient-feeding).** Dispatching 12 LiteLLM calls at once did not
+  queue: some returned a schema-valid `{"entries": []}`, others never returned — an empty result that
+  reads exactly like a weak model — the shape [[offload-lane-failures-are-usually-the-caller]]
+  warns about, at a NEW cause: concurrency, not `max_tokens`/schema. Serializing fixed it.
+  Separately `glm-5.2` (roster rank 1) returned NOTHING on two large analytical calls after >15min each
+  while `deepseek-v4-flash` answered the same prompt in seconds — rank is not a latency ordering, and
+  rank-1 is no default for a blocking call. Property: the lane states its concurrency (1) where a
+  caller reads it, and a call it cannot serve refuses loudly rather than returning an empty document.
+
+- **`npm test 2>&1 | tail -N` reports EXIT 0 for a RED suite, and the shell-trap guard does not fire
+  (2026-07-24, medium, friction: tool-should-decide).** Used to keep a long suite out of the transcript.
+  The pipe makes `$?` the exit code of `tail`, so a failing run reported `exit code 0`; and `tail`
+  buffers to EOF, so the captured output held only the build notices. Both signals read green at once.
+  Caught only by re-running redirected to a file — the real result was 1 failed. `shell-trap-guard.mjs`
+  has an exit-code-masking advisory that did not trigger here. Property: a suite invocation whose exit
+  code is masked by a pipe is refused at the tool call, not left to the caller noticing that "green" had
+  no test counts in it. (The EOF-buffering half is already logged; the exit-code half manufactures a
+  false green, which is the sharper defect — [[false-red-is-as-corrosive-as-false-green]].)
+
+- **A backlog entry overstated its own mechanism again — "blocks the rest of the run" vs. a wrong
+  terminal CLASSIFICATION (2026-07-24, low, friction: ambiguous-direction).** The unplaceable-node entry
+  said the headless path yields "a permanent strand blocking the rest of the run". It does not: the
+  strand removes those packets from `pendingQueue` and `continue`s, so every other packet keeps
+  dispatching. The real defect was narrower and elsewhere — `getTerminal` classifying a wholly-structural
+  strand as the non-retryable `empty_pool`, whose consumer BLOCKS the nodes and whose message blames
+  quota. Same family as [[backlog-prose-decays-verify-against-head]]: not staleness, a paraphrase that
+  shifted the mechanism. Cheap only because the code was read before the fix was designed.
