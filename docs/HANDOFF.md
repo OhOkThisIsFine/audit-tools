@@ -9,11 +9,27 @@
 
 ## Live state
 
+- **⚠ Four NEW refusals landed 2026-07-25 (`11bbb8f2`, `9732b1ed`, `df80e55b`) — all intended; a session
+  that does not expect them reads each as a fault.**
+  (1) **A live backtick in a Bash-tool command is DENIED.** A backtick command-substitutes inside double
+  quotes too, so markdown backticks in `git commit -m "… \`npm run check\` …"` are executed, not written.
+  Use single quotes, `-F <file>`, or `$(...)`; override `AUDIT_TOOLS_ALLOW_BACKTICKS=1`.
+  (2) **Two Stop hooks can BLOCK a stop.** `closeout-challenge-gate` asks "was that all taken care of?"
+  with mechanical evidence (max 2/session, per-tree-state); `question-philosophy-gate` fires when a
+  closing message ends in a question. Both are once-ish and both have kill switches
+  (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY`).
+  (3) **`AskUserQuestion` is gated once per session** — the philosophy brief is injected first; ask again
+  and it goes through. It does not suppress asking.
+  (4) **`README.md`'s Philosophy section is GENERATED** from THE BRIEF in `docs/project-philosophy.md`
+  (`check:philosophy-brief`, in `verify:checks`). Never hand-edit that block; edit the brief and run
+  `npm run check:philosophy-brief -- --write`.
+
 - **Nightly-items clearance lap, 2026-07-25 — the nightly queue is worked down; four gates are new.**
   `check:version-gates`, `check:constitutional-doc-paths`, `check:memory-citations` and the rebuilt
   `check:doc-manifest` all run in `verify:checks`. The manifest is now DATA
   (`scripts/doc-manifest-data.mjs`) rendered into `doc-review-guidelines.md` and byte-compared, and it
-  reaches the whole repo (117 docs, was 72). Constitutional docs are REFUSED at commit without
+  reaches the whole repo — the gate reports the count, don't carry one here. Constitutional docs are
+  REFUSED at commit without
   `node scripts/attest-constitutional-doc-change.mjs`.
   ⚠ **Two gates now refuse commits that previously passed.** A commit touching `CLAUDE.md`,
   a normative goals doc, `docs/project-philosophy.md` or `docs/doc-review-guidelines.md` needs a
