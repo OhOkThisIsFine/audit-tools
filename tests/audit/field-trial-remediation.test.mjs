@@ -213,6 +213,7 @@ test("validateAuditResults accepts zero-line file coverage for empty files", () 
         lens: "reliability",
         file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     [

@@ -289,6 +289,7 @@ function validAuditResultForTask(task, overrides = {}) {
       total_lines: task.file_line_counts?.[path] ?? 0,
     })),
     findings: [],
+    reviewed_clean: true,
     ...overrides,
   };
 }

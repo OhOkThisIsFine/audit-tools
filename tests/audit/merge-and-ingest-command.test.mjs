@@ -182,6 +182,7 @@ test("cmdMergeAndIngest discards a STALE completion marker when a pending task h
       lens: "correctness",
       file_coverage: [{ path: "src/x.ts", total_lines: 5 }],
       findings: [],
+      reviewed_clean: true,
     });
 
     await assert.rejects(
@@ -261,6 +262,7 @@ test("validateAndCollectResults rejects a duplicate task_id at ingest (dedup via
       lens: "security",
       file_coverage: [{ path, total_lines: 3 }],
       findings: [],
+      reviewed_clean: true,
     });
     const r1Path = join(dir, "r1.json");
     const r2Path = join(dir, "r2.json");

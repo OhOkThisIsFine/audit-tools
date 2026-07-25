@@ -135,6 +135,7 @@ test.concurrent("cmdWorkerRun: valid audit results reach runAuditStep (partition
       lens: "correctness",
       file_coverage: [{ path: "src/foo.ts", total_lines: 0, reviewed_ranges: [] }],
       findings: [],
+      reviewed_clean: true,
     };
     await writeFile(auditResultsPath, JSON.stringify(result) + "\n", "utf8");
 
@@ -228,6 +229,7 @@ test.concurrent("cmdWorkerRun writes a failed WorkerResult when agent mode yield
           lens: "correctness",
           file_coverage: [],
           findings: [],
+          reviewed_clean: true,
         },
       ]),
       "utf8",

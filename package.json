@@ -62,7 +62,7 @@
     "smoke:packaged-remediate-code": "node scripts/remediate/smoke-packaged-remediate-code.mjs",
     "update-languages": "node scripts/audit/update-languages.mjs",
     "update-models": "node scripts/shared/update-models.mjs",
-    "generate-schemas": "node scripts/audit/generate-schemas.mjs",
+    "generate-schemas": "node --import tsx/esm scripts/audit/generate-schemas.mjs",
     "fixtures:auditor-contract": "node scripts/remediate/generate-auditor-contract-fixture.mjs",
     "release:patch:publish": "node scripts/release-and-publish.mjs patch",
     "release:minor:publish": "node scripts/release-and-publish.mjs minor",

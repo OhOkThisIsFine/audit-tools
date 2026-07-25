@@ -41,6 +41,7 @@ function minimalValidResult(taskId) {
     lens: "correctness",
     file_coverage: [{ path: "src/utils/helper.ts", total_lines: 10 }],
     findings: [],
+    reviewed_clean: true,
   };
 }
 

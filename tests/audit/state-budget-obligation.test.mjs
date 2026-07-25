@@ -21,6 +21,7 @@ function result(taskId) {
     lens: "correctness",
     file_coverage: [{ path: `src/${taskId}.ts`, total_lines: 10 }],
     findings: [],
+    reviewed_clean: true,
   };
 }
 

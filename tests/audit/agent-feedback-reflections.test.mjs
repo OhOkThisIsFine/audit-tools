@@ -157,6 +157,7 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
               total_lines: lineIndex[p] ?? 10,
             })),
             findings: [],
+            reviewed_clean: true,
             notes: [],
             requires_followup: false,
           }));

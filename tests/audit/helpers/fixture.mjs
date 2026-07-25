@@ -111,6 +111,10 @@ export function buildSyntheticResults(tasks, lineIndex) {
             },
           ]
         : [],
+    // The contract requires a zero-finding result to AFFIRM it was reviewed, and
+    // refuses the affirmation alongside findings — so this mirrors the same
+    // index === 0 split the findings array uses.
+    ...(index === 0 ? {} : { reviewed_clean: true }),
     notes: ["fixture ingestion"],
     requires_followup: false,
   }));

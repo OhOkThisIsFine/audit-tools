@@ -221,6 +221,7 @@ test("decideNextStep covers representative priority states", () => {
             lens: "security",
             file_coverage: [{ path: "src/api/auth.ts", total_lines: 4 }],
             findings: [],
+            reviewed_clean: true,
           },
         ],
       }),

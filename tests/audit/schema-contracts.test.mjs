@@ -91,6 +91,7 @@ test("worker audit result accepts an empty findings array", () => {
       lens: "reliability",
       file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
       findings: [],
+      reviewed_clean: true,
     },
     "auditResult with empty findings",
   );
@@ -106,6 +107,7 @@ test("worker audit result accepts a verification shape", () => {
       lens: "security",
       file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
       findings: [],
+      reviewed_clean: true,
       verification: {
         verified: false,
         needs_followup: true,
@@ -168,6 +170,7 @@ test("worker audit results require an array, not a single object", () => {
         lens: "correctness",
         file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     "auditResults array",
@@ -182,6 +185,7 @@ test("worker audit results require an array, not a single object", () => {
       lens: "correctness",
       file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
       findings: [],
+      reviewed_clean: true,
     },
     "auditResults as a plain object",
   );

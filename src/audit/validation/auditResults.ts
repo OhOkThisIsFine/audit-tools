@@ -901,6 +901,32 @@ function validateResultFindings(
     return false; // signal to skip verification
   }
 
+  // A zero-finding result must AFFIRM that it is a reviewed clean result. A lane
+  // that errored, truncated, or returned an empty completion emits output shaped
+  // identically to a genuine clean review, so without a positive affirmation a
+  // broken lane is indistinguishable from a weak one. The affirmation cannot be
+  // produced by accident; conversely a non-empty result claiming `reviewed_clean`
+  // is self-contradictory and is refused so the flag cannot decay into boilerplate
+  // every worker stamps unconditionally.
+  if (findings.length === 0 && result.reviewed_clean !== true) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "reviewed_clean",
+      message:
+        "a result with zero findings must set reviewed_clean: true to affirm the scope WAS reviewed and is genuinely clean. " +
+        "If the review did not complete (error, truncation, empty completion), do not submit the result at all — an unaffirmed " +
+        "empty result is indistinguishable from a failed one.",
+    });
+  } else if (findings.length > 0 && result.reviewed_clean === true) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "reviewed_clean",
+      message: `reviewed_clean: true contradicts ${findings.length} reported finding(s). Set it only on a zero-finding result.`,
+    });
+  }
+
   const seenFindingIds = new Set<string>();
   for (let j = 0; j < findings.length; j++) {
     const label = `findings[${j}]`;

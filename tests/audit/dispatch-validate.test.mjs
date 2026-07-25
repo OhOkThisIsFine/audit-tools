@@ -21,6 +21,7 @@ function wellFormedResult() {
     lens: "security",
     file_coverage: [{ path: "src/api/auth.ts", total_lines: 3 }],
     findings: [],
+    reviewed_clean: true,
   };
 }
 

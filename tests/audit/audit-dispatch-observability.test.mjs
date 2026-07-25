@@ -274,6 +274,7 @@ test("FND-OBS-48c05a13: mergeAndIngestCommand logs notDispatched task IDs to std
       lens: taskA.lens,
       file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
       findings: [],
+      reviewed_clean: true,
     };
     await writeFile(join(taskResultsDir, `${taskA.task_id}.json`), JSON.stringify(resultA), "utf8");
 
@@ -408,6 +409,7 @@ function minimalValidResult(taskId) {
     lens: "correctness",
     file_coverage: [{ path: "src/utils/helper.ts", total_lines: 10 }],
     findings: [],
+    reviewed_clean: true,
   };
 }
 

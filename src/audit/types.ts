@@ -210,6 +210,19 @@ export const AuditResultSchema = z.object({
   // FindingSchema already types lens as string, so a Finding here IS a
   // SharedFinding (the former Omit<…,"lens"> narrowing was a no-op).
   findings: z.array(FindingSchema),
+  /**
+   * Worker-authored affirmation that an EMPTY `findings` array is a reviewed
+   * result, not a silent failure. REQUIRED when `findings` is empty and refused
+   * otherwise (enforced at ingest by `validateResultFindings`, which is the gate
+   * workers actually hit — the zod contract only advertises the field).
+   *
+   * Exists because a lane that errors, truncates, or returns an empty completion
+   * produces output shaped exactly like a genuine clean review, and nothing
+   * downstream could tell the two apart: a broken lane read as a weak one. An
+   * affirmation cannot be produced by accident, so a zero-finding result now
+   * carries positive evidence that a review happened.
+   */
+  reviewed_clean: z.boolean().optional(),
   notes: z.array(z.string()).optional(),
   requires_followup: z.boolean().optional(),
   followup_tasks: z.array(z.string()).optional(),

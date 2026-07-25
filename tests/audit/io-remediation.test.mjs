@@ -111,6 +111,7 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
           lens: "correctness",
           file_coverage: [{ path: "src/index.ts", total_lines: 10 }],
           findings: [],
+          reviewed_clean: true,
         },
       ],
       audit_report: "# Audit Report\n",

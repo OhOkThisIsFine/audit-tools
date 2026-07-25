@@ -11,6 +11,7 @@ function baseResult(over = {}) {
     lens: "security",
     file_coverage: [],
     findings: [],
+    reviewed_clean: true,
     ...over,
   };
 }

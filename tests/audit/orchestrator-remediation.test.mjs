@@ -109,6 +109,7 @@ test("deriveAuditState marks audit tasks complete when every task has a result",
         lens: "security",
         file_coverage: [{ path: "src/api/auth.ts", total_lines: 12 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
   });
@@ -222,6 +223,7 @@ test("deriveAuditState keeps explicit pending follow-up tasks actionable after c
         lens: "security",
         file_coverage: [{ path: "src/api/auth.ts", total_lines: 12 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
   });
@@ -253,6 +255,7 @@ test("deepening results do not add non-required lenses to coverage completion", 
           { path: "src/types/sessionConfig.ts", total_lines: 56 },
         ],
         findings: [],
+        reviewed_clean: true,
         requires_followup: false,
       },
     ],
@@ -391,6 +394,7 @@ test("selective deepening samples high-risk no-finding results", () => {
     lens: sourceTask.lens,
     file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
     findings: [],
+    reviewed_clean: true,
   };
 
   const tasks = buildSelectiveDeepeningTasks({
@@ -441,6 +445,7 @@ test("selective deepening creates a lens steward for risky completed lens output
       total_lines: task.file_line_counts[path],
     })),
     findings: [],
+    reviewed_clean: true,
   }));
 
   const tasks = buildSelectiveDeepeningTasks({
@@ -501,6 +506,7 @@ test("lens steward verification suggestions become bounded follow-up tasks", () 
       { path: "src/lib/session.ts", total_lines: 30 },
     ],
     findings: [],
+    reviewed_clean: true,
     verification: {
       verified: false,
       needs_followup: true,
@@ -552,6 +558,7 @@ test("selective deepening reconciles runtime validation disagreement", () => {
     lens: sourceTask.lens,
     file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
     findings: [],
+    reviewed_clean: true,
   };
 
   const tasks = buildSelectiveDeepeningTasks({
@@ -674,6 +681,7 @@ test("runtime validation updates append disagreement follow-ups to the next revi
           lens: sourceTask.lens,
           file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
           findings: [],
+          reviewed_clean: true,
         },
       ],
       runtime_validation_tasks: {
@@ -743,6 +751,7 @@ test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_F
     lens: task.lens,
     file_coverage: task.file_paths.map((path) => ({ path, total_lines: 40 })),
     findings: [],
+    reviewed_clean: true,
     // Do NOT set requires_followup: false — that would mark all as closed-clean
   }));
 
@@ -1840,6 +1849,7 @@ test("ingestion executor folds pending requeue tasks for uncovered files into th
     lens: authTask.lens,
     file_coverage: [{ path: "src/api/auth.ts", total_lines: 30 }],
     findings: [],
+    reviewed_clean: true,
   };
 
   const run = runResultIngestionExecutor(

@@ -7,6 +7,17 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 
+- **The parallel-flake baseline RECORDS failures seen during ordinary development, so an in-progress
+  red gets written into the artifact that decides what counts as a known flake (2026-07-25, medium,
+  friction: tool-should-decide).** Landing a contract change turned 31 tests red for one run; the suite
+  wrote all 31 into `scripts/shared/test-flake-baseline.json` as `status: "unproven"`, and they were
+  staged by a routine `git add -A`. They pass now, so the entries were pure noise — but the same
+  mechanism would happily record a REAL regression as a recognized flake, which is precisely the
+  fail-open the baseline exists to prevent ([[false-red-is-as-corrosive-as-false-green]]). Caught only
+  by reading the staged diff. Property: the baseline is written by an explicit, deliberate
+  re-baselining action on a GREEN tree — never as a side effect of a development test run. Same family
+  as `--update-baseline` raising a grown file's ceiling, below.
+
 - **`api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low).** The
   `openai-compatible` source branch refuses a `NAME=value` string with a named reason
   (`auditorSources.ts:467-476`), but `readProxyDeclaration` accepts any non-empty string (`:291`), and
@@ -99,25 +110,19 @@
   gemini-3.6-flash went 0-for-2 (an 11-task 6-lens security packet and an 8-entry
   maintainability/tests packet, both contract-valid with 0 findings, where fable/codex/sonnet packets
   on adjacent scope yielded 5-10) and was benched mid-run BY HAND — host discretion.
-  ⚠ **Two framings this entry used to carry are wrong at HEAD.** (1) "Lens class belongs in the
-  routing decision" — it already is one: `SENSITIVE_HINT_LENSES` escalates a packet's tier floor to
-  ≥`standard` in `resolveDispatchTier` (`src/audit/cli/dispatch/tierRouting.ts`), which becomes
-  `requiredTier` at the packet→pool capability floor; the packet that failed WAS a security packet, so
-  more of that axis would not have caught it. (2) "It counts as covered" — selective deepening already
-  re-reviews clean results lens-agnostically for high-priority / `critical_flow` / external-analyzer
-  scopes (`isHighRiskCleanResult`, `selectiveDeepening/highRiskClean.ts`) and builds a lens-steward
-  verification task on `many_no_finding_results` / `high_risk_clean_result`.
-  **The real gap: the dispatch engine has no result-QUALITY seam at all.** A pool is demoted or excluded
-  only on cost drift, credit exhaustion, model-unavailable or 429 cooldown
-  (`rollingDispatch.ts`'s `onCostDrift`/`onCreditExhausted`/`onModelUnavailable`/`onQuotaUnclassified`);
-  nothing observes what a worker RETURNED, and no declared source carries a lens/kind restriction — so
-  "this lane under-reports" is inexpressible anywhere but by hand. What has NO net is a low-priority
-  zero-finding result on a non-important lens: exactly the maintainability/tests packet.
-  **Next move is an owner call, not code:** zero-finding rate is a noisy bench signal (a genuinely clean
-  scope legitimately returns none), quality is already RESOLVED as a FLOOR rather than a tradeable axis
-  (cost-speed-dial entry), and the ground truth that would calibrate a per-lane floor is the DEFERRED A2
-  oracle. Decide between widening the deepening net to low-priority clean results and funding the oracle
-  so finding-yield can gate eligibility mechanically. Record:
+  ⚠ Two framings this entry used to carry are REFUTED at HEAD — lens class is already a routing input
+  (`resolveDispatchTier`), and selective deepening already re-reviews high-risk clean results
+  (`isHighRiskCleanResult`); neither would have caught this packet.
+  **The gap: the dispatch engine has no result-QUALITY seam.** A pool is demoted only on cost drift,
+  credit exhaustion, model-unavailable or 429 (`rollingDispatch.ts`); nothing observes what a worker
+  RETURNED, so "this lane under-reports" is inexpressible except by hand.
+  **Owner call TAKEN 2026-07-25 — three legs.** (1) **AFFIRMATION — SHIPPED:** a zero-finding
+  `AuditResult` must set `reviewed_clean: true`, and the flag is refused alongside findings so it cannot
+  decay into boilerplate (`validateResultFindings`; pinned in `validation-remediation.test.mjs`). That
+  separates a BROKEN lane from a weak one — what made the agy 0-for-2 unreadable. (2) **A2 oracle
+  UNPARKED** so yield can gate eligibility against ground truth ([`deferred.md`](deferred.md)).
+  (3) **Widen the deepening net** to low-priority zero-finding results — OPEN, wants (2)'s calibration
+  for the threshold. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
 - **RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, accepted —
   revisit on live evidence).** The pair itself SHIPPED (intent-equivalence gate wired as the
@@ -161,7 +166,13 @@
   regex classifier over summaries measured 8 false DROPS and 5 false KEEPS on ~25 realistic inputs; a
   dropped delta never reaches synthesis, so it fails silently and worse than the filler it replaces.
   Take the mechanical route: **a schema-legal `no_deltas: true` / explicitly-empty submission path**,
-  so a model can say "none" without inventing a row. Record:
+  so a model can say "none" without inventing a row.
+  ⚠ **The AUDIT-RESULT half of this shipped 2026-07-25** as `reviewed_clean` (see the success-shaped-empty
+  entry above) and is the pattern to copy. The DELTA path is untouched and is the sharper case:
+  `charterDeltaExecutor.ts:36-63` treats a MISSING submission and an explicitly-empty one identically
+  ("no submission supplied; settled the register with no deltas"), so a dead miner and a clean one are
+  indistinguishable. `CharterDeltaSubmissionSchema` is `.strict()`, so the affirmation must be added to
+  the schema rather than passed through. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):

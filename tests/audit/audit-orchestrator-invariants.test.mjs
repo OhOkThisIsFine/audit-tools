@@ -328,6 +328,7 @@ test("INV-06: audit_results_ingested is satisfied when all tasks have matching r
         lens: task.lens,
         file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
   };
@@ -620,6 +621,7 @@ test("INV-STATE-REACHABLE: a pause with NO pending tasks does not block (moot pa
         lens: task.lens,
         file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     active_dispatch: pausedActiveDispatchFixture(),
@@ -669,6 +671,7 @@ test("INV-PENDING-SINGLE-SOURCE: dispatch pending set and audit_tasks_completed 
         lens: t1.lens,
         file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
   };
@@ -692,6 +695,7 @@ test("INV-PENDING-SINGLE-SOURCE: dispatch pending set and audit_tasks_completed 
         lens: t1.lens,
         file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
   };

@@ -55,6 +55,7 @@ function resultsForPending(bundle) {
         total_lines: LINE_INDEX[p] ?? 10,
       })),
       findings: [],
+      reviewed_clean: true,
       notes: [],
       requires_followup: false,
     }));

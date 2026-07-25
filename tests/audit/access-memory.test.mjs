@@ -15,6 +15,7 @@ function makeResult(id, lens, paths, extra = {}) {
     lens,
     file_coverage: paths.map((p) => ({ path: p, total_lines: 42 })),
     findings: [],
+    reviewed_clean: true,
     ...extra,
   };
 }

@@ -38,6 +38,7 @@ async function buildSyntheticResults(tasks, root) {
       })),
     ),
     findings: [],
+    reviewed_clean: true,
     notes: ["Synthetic completion result for wrapper integration coverage."],
     requires_followup: false,
   })));

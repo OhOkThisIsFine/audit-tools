@@ -40,6 +40,7 @@ function validWorkerResults() {
       lens: "correctness",
       file_coverage: [{ path: "src/x.ts", total_lines: 10 }],
       findings: [],
+      reviewed_clean: true,
     },
   ];
 }
@@ -694,6 +695,7 @@ test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 co
       lens: "correctness",
       file_coverage: [{ path: "src/x.ts", total_lines: 10 }],
       findings: [],
+      reviewed_clean: true,
     },
   ];
   const coerced = contract.coercion.coerce(stripped);

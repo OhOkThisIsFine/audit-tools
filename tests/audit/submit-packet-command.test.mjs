@@ -40,9 +40,13 @@ function makeTaskCovering(taskId, path, lens = "security", unitId = "unit-1") {
 }
 
 /**
- * Build a minimal AuditResult for a given task.
+ * Build a minimal AuditResult for a given task. `reviewed_clean` is DERIVED from
+ * `findings` rather than fixed: the contract requires the affirmation on a
+ * zero-finding result and refuses it on a non-empty one, so a fixture that
+ * spread-overrode `findings` would otherwise emit a self-contradictory result.
+ * Pass findings here instead of overriding the field on the returned object.
  */
-function makeResult(task) {
+function makeResult(task, findings = []) {
   return {
     task_id: task.task_id,
     unit_id: task.unit_id,
@@ -53,7 +57,8 @@ function makeResult(task) {
       path: p,
       total_lines: task.file_line_counts?.[p] ?? 10,
     })),
-    findings: [],
+    findings,
+    ...(findings.length === 0 ? { reviewed_clean: true } : {}),
     notes: [],
     requires_followup: false,
   };
@@ -289,10 +294,7 @@ await test("cross-packet duplicate finding does NOT emit a warning at submit tim
   };
 
   const otherTask = makeTaskCovering("task-other-pkt", "src/shared.ts");
-  const otherResult = {
-    ...makeResult(otherTask),
-    findings: [duplicateFinding],
-  };
+  const otherResult = makeResult(otherTask, [duplicateFinding]);
 
   const { artifactsDir, runDir } = await makeArtifactsDir({
     tasks: [task1, otherTask],
@@ -310,12 +312,9 @@ await test("cross-packet duplicate finding does NOT emit a warning at submit tim
   // Submit a result for pkt-alpha that contains the same finding key.
   // submit-packet no longer performs cross-packet dedup scanning — that
   // responsibility moved to merge-and-ingest where all results are available.
-  const newResult = {
-    ...makeResult(task1),
-    findings: [
+  const newResult = makeResult(task1, [
       { ...duplicateFinding, id: "DUP-002" },
-    ],
-  };
+    ]);
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
@@ -426,7 +425,7 @@ await test("findingKey dedup: same finding in two packets is accepted without wa
   };
 
   const otherTask = makeTaskCovering("task-fkdup-other", "src/auth.ts");
-  const otherResult = { ...makeResult(otherTask), findings: [sharedFinding] };
+  const otherResult = makeResult(otherTask, [sharedFinding]);
 
   const { artifactsDir } = await makeArtifactsDir({
     tasks: [task1, otherTask],
@@ -439,7 +438,7 @@ await test("findingKey dedup: same finding in two packets is accepted without wa
 
   // Submit same finding (different id, same key fields) in pkt-alpha.
   // No cross-packet dedup warning expected at submit time.
-  const newResult = { ...makeResult(task1), findings: [{ ...sharedFinding, id: "FK-002" }] };
+  const newResult = makeResult(task1, [{ ...sharedFinding, id: "FK-002" }]);
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
@@ -464,7 +463,7 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   };
 
   const otherTask = makeTaskCovering("task-fkdiff-other", "src/db.ts");
-  const otherResult = { ...makeResult(otherTask), findings: [baseFinding] };
+  const otherResult = makeResult(otherTask, [baseFinding]);
 
   const { artifactsDir } = await makeArtifactsDir({
     tasks: [task1, otherTask],
@@ -476,10 +475,7 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Finding differs only in affected_files path
-  const newResult = {
-    ...makeResult(task1),
-    findings: [{ ...baseFinding, id: "FK-DIFF-002", affected_files: [{ path: "src/other.ts" }] }],
-  };
+  const newResult = makeResult(task1, [{ ...baseFinding, id: "FK-DIFF-002", affected_files: [{ path: "src/other.ts" }] }]);
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
@@ -513,7 +509,7 @@ await test("submit-packet accepts without warning even when prior result is arra
 
   const otherTask = makeTaskCovering("task-arrdup-other", "src/shared.ts");
   // Prior result is an AuditResult[] array — submit-packet no longer reads it.
-  const priorResultArray = [{ ...makeResult(otherTask), findings: [dupFinding] }];
+  const priorResultArray = [makeResult(otherTask, [dupFinding])];
 
   const { artifactsDir } = await makeArtifactsDir({
     tasks: [task1, otherTask],
@@ -526,7 +522,7 @@ await test("submit-packet accepts without warning even when prior result is arra
 
   // Submit a result for pkt-alpha containing the same finding key.
   // No cross-packet dedup at submit time — this is now merge-and-ingest's concern.
-  const newResult = { ...makeResult(task1), findings: [{ ...dupFinding, id: "ARR-DUP-002" }] };
+  const newResult = makeResult(task1, [{ ...dupFinding, id: "ARR-DUP-002" }]);
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 

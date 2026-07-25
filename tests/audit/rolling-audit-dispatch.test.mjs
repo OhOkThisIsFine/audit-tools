@@ -151,6 +151,7 @@ function makeWritingDispatcher(runDir, taskList) {
           total_lines: t.file_line_counts[p] ?? 1,
         })),
         findings: [],
+        reviewed_clean: true,
       };
     });
     await writeFile(entry.result_path, JSON.stringify(results), "utf8");

@@ -155,6 +155,7 @@ test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still
         task_id: tk.task_id, unit_id: tk.unit_id, pass_id: tk.pass_id, lens: tk.lens,
         file_coverage: tk.file_paths.map((p) => ({ path: p, total_lines: tk.file_line_counts[p] })),
         findings: [],
+        reviewed_clean: true,
       };
     });
     await writeFile(entry.result_path, JSON.stringify(results), "utf8");

@@ -320,6 +320,9 @@
           "additionalProperties": false
         }
       },
+      "reviewed_clean": {
+        "type": "boolean"
+      },
       "notes": {
         "type": "array",
         "items": {

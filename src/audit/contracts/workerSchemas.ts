@@ -93,6 +93,11 @@ export const WorkerAuditResultSchema = AuditResultSchema.extend({
     )
     .min(1),
   findings: z.array(WorkerFindingSchema),
+  // REQUIRED when `findings` is empty, refused when it is not — enforced at ingest
+  // (`validateResultFindings`). Declared here so the generated worker schema
+  // advertises the field; the conditional rule itself is not expressible in the
+  // flat JSON Schema the workers consume, so ingest is the authority.
+  reviewed_clean: z.boolean().optional(),
   followup_tasks: z.array(z.string()).optional(),
   verification: WorkerAuditVerificationSchema.optional(),
   submitted_at: z.string().datetime().optional(),

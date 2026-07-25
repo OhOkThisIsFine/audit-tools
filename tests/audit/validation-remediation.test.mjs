@@ -191,6 +191,68 @@ test("validateAuditResults exposes a shared path alias for empty evidence failur
   expect(formatAuditResultIssues([evidenceIssue])).toMatch(/\[error\] task-1 \/ findings\[0\]\.evidence:/i);
 });
 
+// A zero-finding result and a FAILED review are shaped identically on the wire, so a
+// lane that errors, truncates, or returns an empty completion reads as a lane that
+// reviewed carefully and found nothing. `reviewed_clean` is the affirmation that
+// separates them: it cannot be produced by accident, so an unaffirmed empty result is
+// refused rather than silently counted as coverage.
+test("a zero-finding result must AFFIRM it was reviewed, and cannot affirm alongside findings", () => {
+  const tasks = [
+    {
+      task_id: "task-clean",
+      unit_id: "unit-1",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 10 },
+      rationale: "fixture",
+    },
+  ];
+  const base = {
+    task_id: "task-clean",
+    unit_id: "unit-1",
+    pass_id: "pass:security",
+    lens: "security",
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+  };
+  const affirmationIssues = (result) =>
+    validateAuditResults([result], tasks).filter((i) => i.field === "reviewed_clean");
+
+  // 1. Empty findings, no affirmation → REFUSED. This is the case the gate exists for.
+  const unaffirmed = affirmationIssues({ ...base, findings: [] });
+  expect(unaffirmed).toHaveLength(1);
+  expect(unaffirmed[0].message).toMatch(/must set reviewed_clean: true/i);
+
+  // 2. Empty findings WITH the affirmation → accepted; a genuine clean review still passes.
+  expect(affirmationIssues({ ...base, findings: [], reviewed_clean: true })).toEqual([]);
+
+  // 3. Affirmation alongside findings → REFUSED, so the flag cannot decay into
+  //    boilerplate every worker stamps unconditionally (which would make it meaningless).
+  const finding = {
+    id: "SEC-001",
+    title: "Missing rejection telemetry",
+    category: "security",
+    severity: "medium",
+    confidence: "medium",
+    lens: "security",
+    summary: "Auth failures are not recorded with enough context.",
+    affected_files: [
+      { path: "src/api/auth.ts", line_start: 1, quoted_text: "export function auth() {" },
+    ],
+    evidence: ["src/api/auth.ts:1 - no structured failure event"],
+  };
+  const contradictory = affirmationIssues({
+    ...base,
+    findings: [finding],
+    reviewed_clean: true,
+  });
+  expect(contradictory).toHaveLength(1);
+  expect(contradictory[0].message).toMatch(/contradicts 1 reported finding/i);
+
+  // 4. Findings without the flag → the ordinary path, unaffected.
+  expect(affirmationIssues({ ...base, findings: [finding] })).toEqual([]);
+});
+
 test("validateAuditResults accepts file_coverage paths with backslashes or ./ prefix", () => {
   const tasks = [
     {
@@ -217,6 +279,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
           { path: "src\\index.ts", total_lines: 20 },
         ],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     tasks,
@@ -238,6 +301,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
           { path: "./src/index.ts", total_lines: 20 },
         ],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     tasks,
@@ -259,6 +323,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
           { path: "./src/index.ts", total_lines: 20 },
         ],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     tasks,
@@ -294,6 +359,7 @@ test("validateAuditResults rejects a backslash path that normalizes to an unreco
           { path: "src\\utils\\helper.ts", total_lines: 50 },
         ],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     tasks,
@@ -333,6 +399,7 @@ test("validateAuditResults detects duplicates across normalized paths", () => {
           { path: "src\\foo.ts", total_lines: 10 },
         ],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     tasks,
@@ -647,6 +714,7 @@ test("validateAuditResults logs a summary to stderr when issues are found", () =
           lens: "security",
           // file_coverage missing intentionally
           findings: [],
+          reviewed_clean: true,
         },
       ],
       [
@@ -1156,6 +1224,7 @@ test("validateAuditResults: significant total_lines divergence is a hard-reject 
         // Worker claims 40 lines; disk has 100 → 60% divergence → stale/wrong view.
         file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     [
@@ -1190,6 +1259,7 @@ test("validateAuditResults: small total_lines mismatch stays an advisory warning
         // 98 vs 100 → diff 2, under both thresholds → advisory.
         file_coverage: [{ path: "src/api/auth.ts", total_lines: 98 }],
         findings: [],
+        reviewed_clean: true,
       },
     ],
     [
