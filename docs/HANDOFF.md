@@ -59,10 +59,10 @@
   the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
   lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
   it examined — and overturned two more premises this lap (see item 2).
-- **Current version = `package.json`** (authoritative): v0.34.29. The clearance laps after it are
-  UNRELEASED. **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately
-  not restated here** (this section had grown to ~107 lines of version-by-version narration, which is
-  the changelog creep this doc's own header forbids).
+- **Current version = `package.json`** (authoritative): v0.34.30, published 2026-07-25 and live on npm;
+  main is released to HEAD, nothing pending. **Per-release shipped detail is `git log` and the
+  `docs/reviews/` records — deliberately not restated here** (this section had grown to ~107 lines of
+  version-by-version narration, which is the changelog creep this doc's own header forbids).
 - **A2 oracle corpus stays PARKED** (owner redirect 2026-07-22) — SPEC intact in
   [`docs/backlog/deferred.md`](backlog/deferred.md), nothing lost.
 - **Shipped and settled — mechanism lives in the code + its record, not here.** Capability-evidence
