@@ -181,8 +181,14 @@ Three properties follow, and each retires a known defect:
 
 1. **Unambiguous against open namespaces.** The axis is stated, never inferred, so an open `service`
    namespace costs nothing. The same pattern string means the same thing on every machine.
-2. **An unknown axis is a PARSE ERROR, not an inert rule.** The "typo'd rule persists happily and
-   matches nothing, silently" defect becomes impossible — the rule is rejected where it is authored.
+2. **An unknown axis is REFUSED AT AUTHORSHIP, not persisted as an inert rule.** The "typo'd rule
+   persists happily and matches nothing, silently" defect is closed where the operator types it. The
+   refusal is deliberately NOT a parse error: read-time migration rewrites a legacy bare form before
+   the parser sees it, so by parse time a typo has already been laundered into a well-formed rule that
+   matches nothing. Grammar is therefore checked on the submitted text, before migration. This covers
+   the axis head only — a model segment is an open string, so `transport:codex/model-typo` is
+   grammatical and matches nothing; that class is surfaced by the zero-match advisory at promotion,
+   never refused, because a rule matching nothing is legitimate (the tool authors one every run).
 3. **`service:nim` closes every transport reaching nim, including transports discovered later.** The
    multi-transport residue is gone, and gone *durably* — a snapshot of today's transports would have
    decayed the moment proxy expansion added a route.

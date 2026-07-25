@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readOptionalJsonFile, writeJsonFile } from "./json.js";
+import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
 
 /**
  * Tool-emitted end-of-run friction capture, single-sourced for BOTH orchestrators
@@ -162,8 +163,15 @@ export async function frictionCaptured(
   artifactsDir: string,
   runId: string,
 ): Promise<boolean> {
-  const existing = await readOptionalJsonFile<FrictionCaptureArtifact>(
-    frictionCapturePath(artifactsDir, runId),
+  // Discarded on mismatch, not merged. This artifact ACCUMULATES across a run, so
+  // folding an older-schema file into the current one would silently corrupt the
+  // accumulation; the notes are diagnostic, so losing a stale-shaped file is the
+  // cheaper failure. An absent file and a stale file behave identically here.
+  const existing = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<FrictionCaptureArtifact>(
+      frictionCapturePath(artifactsDir, runId),
+    ),
+    FRICTION_CAPTURE_SCHEMA_VERSION,
   );
   return existing !== undefined && existing !== null;
 }

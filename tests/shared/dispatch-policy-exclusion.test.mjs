@@ -218,11 +218,38 @@ describe("the exclusion grammar — transport / service / host", () => {
     expect(excluded.excludes(backend("openai-compatible", "qwen2.5"))).toBe(false);
   });
 
-  test("an unknown axis prefix is INVALID — matches nothing", () => {
+  // ⚠ NAME CORRECTED. This test used to be called "an unknown axis prefix is
+  // INVALID", which is NOT what it proves. `migrateExclusionPattern` runs at READ
+  // time on every pattern and rewrites any unrecognized head into `host:<pattern>`,
+  // so `model:model-a` never reaches `parseExclusionRule`'s `invalid` branch at all
+  // — it becomes the structurally VALID host rule `host:model:model-a`, which
+  // matches nothing because no endpoint is named `model:model-a`. Same observable
+  // verdict, completely different mechanism, and the wrong name is what let three
+  // documents claim a typo is impossible to persist. The typo is refused where it
+  // is AUTHORED instead (see the authorship-validation block at the end of this
+  // file); on READ it stays laundered, deliberately, so an operator's already-saved
+  // bare rules keep excluding what they were written to exclude.
+  test("an unknown axis prefix is LAUNDERED onto the host axis — valid, and matches nothing", () => {
     const excluded = resolveDispatchExclusion({ exclude: ["model:model-a"] }, {});
 
     expect(excluded.excludes(NIM_A)).toBe(false);
     expect(excluded.excludes(backend("not-a-real-provider", "model-a"))).toBe(false);
+    // The mechanism, pinned: it matches as a HOST rule, not as an invalid one. A
+    // backend whose endpoint literally IS that string is ruled out — which an
+    // `invalid` rule could never do.
+    expect(excluded.excludes(backend("openai-compatible", "m", "model:model-a"))).toBe(true);
+  });
+
+  test("`transport:` — the ONE ungrammatical form migration cannot launder — is invalid", () => {
+    // The axis head IS recognized, so `migrateExclusionPattern` returns it untouched
+    // and `parseExclusionRule` rejects the empty remainder. This is the only
+    // production-reachable path into the `invalid` branch, and the reason that branch
+    // is still live code rather than dead.
+    const excluded = resolveDispatchExclusion({ exclude: ["transport:"] }, {});
+
+    expect(excluded.excludes(NIM_A)).toBe(false);
+    expect(excluded.excludes(backend("openai-compatible", "m", "transport:"))).toBe(false);
+    expect(excluded.excludedBy(NIM_A)).toBe(null);
   });
 
   test("a bare un-prefixed pattern is migrated automatically in resolveDispatchExclusion", () => {
@@ -670,5 +697,188 @@ describe("the capacity guard: a policy that zeroes ALL reach must not be silent"
     for (const backend of [nimA, nimB, ocA]) {
       expect(exclusion.excludes(backend)).toBe(exclusion.excludedBy(backend) !== null);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AUTHORSHIP VALIDATION — the typo is refused where the operator TYPES it
+//
+// ⚠ RED-GREEN VALIDATED. Deleting the `if (exclude) { … throw … }` block from
+// `parseProviderConfirmationInput` (src/shared/providers/sharedProviderConfirmation.ts)
+// turns every `toThrow` case below RED; restoring it turns them GREEN.
+//
+// The defect: `migrateExclusionPattern` runs at READ time on EVERY pattern and
+// rewrites any unrecognized head into `host:<pattern>`. So `model:model-a` — a
+// mistyped rule naming an axis that deliberately does not exist — was laundered
+// into a structurally VALID host rule that matches zero backends, never reached
+// `parseExclusionRule`'s `invalid` branch, and persisted as policy that silently
+// excluded nothing. Three documents claimed that was impossible.
+//
+// The fix VALIDATES AT AUTHORSHIP and KEEPS MIGRATE-ON-READ. The read-time
+// migration is load-bearing — it is what keeps an operator's already-saved bare
+// rules excluding what they were written to exclude — so deleting it would risk
+// silently UN-excluding a saved rule. The refusal goes where the rule is written.
+// ---------------------------------------------------------------------------
+
+const {
+  parseProviderConfirmationInput,
+  ungrammaticalExclusionPatterns,
+  unmatchedExclusionPatterns,
+} = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
+const { PROVIDER_CONFIRMATION_INPUT_VERSION } = await import(
+  "../../src/shared/types/providerConfirmation.ts"
+);
+
+/** A complete, acceptable submission carrying exactly these exclusion rules. */
+const submissionExcluding = (exclude) => ({
+  schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+  exclude,
+});
+
+describe("an ungrammatical `exclude` rule is REFUSED at the authorship seam", () => {
+  test("the headline defect: `model:model-a` is refused, not laundered onto host:", () => {
+    // The exact pattern the read path launders. Both halves matter: the parse
+    // refuses it, AND the refusal names it so the operator can fix the typo.
+    expect(() => parseProviderConfirmationInput(submissionExcluding(["model:model-a"]))).toThrow(
+      /model:model-a/,
+    );
+    // …and says what a rule is supposed to look like, since the message is the
+    // operator's only instruction at this point.
+    expect(() => parseProviderConfirmationInput(submissionExcluding(["model:model-a"]))).toThrow(
+      /transport:/,
+    );
+  });
+
+  test.each([
+    ["an unknown axis head", "model:model-a"],
+    ["an unknown head that is neither provider nor host-shaped", "foo:bar"],
+    ["a valid axis with an EMPTY remainder", "transport:"],
+    ["…on the service axis too", "service:"],
+    ["…on the host axis too", "host:"],
+    ["a bare single label that is not a provider", "model-a"],
+    ["a leading-colon fragment", ":codex"],
+    ["the empty string", ""],
+  ])("REJECTS %s (`%s`)", (_why, pattern) => {
+    expect(() => parseProviderConfirmationInput(submissionExcluding([pattern]))).toThrow(
+      /Refused the Gate-0 submission/,
+    );
+  });
+
+  test.each([
+    ["an explicit transport rule", "transport:codex"],
+    ["a model-granular transport rule", "transport:openai-compatible/glm-5.2"],
+    ["a colon-bearing model id after the / delimiter", "transport:openai-compatible/qwen2.5:7b"],
+    ["an explicit service rule", "service:nim"],
+    ["a model-granular service rule", "service:nim/z-ai/glm-5.2"],
+    ["an explicit host rule", "host:integrate.api.nvidia.com"],
+    ["an explicit host:port rule", "host:localhost:8000"],
+    ["an explicit host rule naming a launcher command path", "host:c:\\tools\\codex.cmd"],
+    ["the legacy bare provider name migrate-on-read absorbs", "codex"],
+    ["the legacy `<provider>:<model>` form migrate-on-read absorbs", "openai-compatible:model-a"],
+    ["a legacy bare dotted domain", "integrate.api.nvidia.com"],
+    ["a legacy bare domain with a port", "nim.invalid:8443"],
+    ["a legacy bare localhost", "localhost"],
+    ["a legacy bare localhost:port", "localhost:8000"],
+    ["a legacy bare IPv4 endpoint", "127.0.0.1:8791"],
+  ])("ACCEPTS %s (`%s`)", (_why, pattern) => {
+    const parsed = parseProviderConfirmationInput(submissionExcluding([pattern]));
+    expect(parsed?.exclude).toEqual([pattern]);
+  });
+
+  test("GRAMMAR ONLY — a rule that will match nothing is still accepted", () => {
+    // The scope limit that makes this safe to enforce at all. The tool itself
+    // authors zero-match rules every run (`auto_exclude` outlives the reach that
+    // prompted it), and an operator may pre-declare an exclusion for a backend they
+    // have not configured yet. Refusing zero-match here would break both.
+    for (const pattern of [
+      // The backlog entry's own example: a REAL provider head with a typo'd model.
+      // Not catchable by grammar — the model segment is an open string. Caught by
+      // the non-refusing advisory instead (see below).
+      "openai-compatible:model-typo",
+      "transport:openai-compatible/model-typo",
+      "service:a-vendor-nobody-has-configured",
+      "host:not.reachable.invalid",
+    ]) {
+      expect(() => parseProviderConfirmationInput(submissionExcluding([pattern]))).not.toThrow();
+    }
+  });
+
+  test("the refusal does not eat the rest of the submission — the file is re-editable", () => {
+    // Nothing is promoted and nothing is consumed: the submission file is unlinked
+    // only after a SUCCESSFUL promotion, so the operator edits the typo and re-runs.
+    // The alternative (returning `null`) is indistinguishable from "no submission"
+    // and would re-emit the same prompt forever.
+    expect(() =>
+      parseProviderConfirmationInput({
+        schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+        capability_order: ["m-a", "m-b"],
+        exclude: ["model:model-a"],
+      }),
+    ).toThrow(/re-run/);
+  });
+
+  test("a submission with no `exclude` at all is untouched by the check", () => {
+    const parsed = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      capability_order: ["m-a"],
+    });
+    expect(parsed).toEqual({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      capability_order: ["m-a"],
+    });
+  });
+
+  test("the refusal names every bad rule, deduplicated, in submission order", () => {
+    expect(
+      ungrammaticalExclusionPatterns([
+        "model:model-a",
+        "transport:codex",
+        "foo:bar",
+        "model:model-a",
+      ]),
+    ).toEqual(["model:model-a", "foo:bar"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ADVISORY — a zero-match rule is REPORTED, never refused
+//
+// ⚠ RED-GREEN VALIDATED. Making `unmatchedExclusionPatterns` return `[]`
+// unconditionally turns the first case below RED; restoring it turns it GREEN.
+// ---------------------------------------------------------------------------
+
+describe("unmatchedExclusionPatterns — the non-blocking zero-match signal", () => {
+  const BACKENDS = [
+    { transport: "openai-compatible", model: "model-a", endpoint: "https://nim.invalid:8443/v1" },
+    { transport: "opencode", model: "model-b" },
+  ];
+
+  test("the defect the grammar validator provably CANNOT catch is caught here", () => {
+    // Real provider head, typo'd model — grammatical, so authorship accepts it, and
+    // it excludes nothing. This advisory is the only signal that exists for it.
+    expect(unmatchedExclusionPatterns(["openai-compatible:model-typo"], BACKENDS)).toEqual([
+      "openai-compatible:model-typo",
+    ]);
+  });
+
+  test("a rule that DOES match is not reported", () => {
+    expect(unmatchedExclusionPatterns(["transport:openai-compatible/model-a"], BACKENDS)).toEqual([]);
+    expect(unmatchedExclusionPatterns(["host:nim.invalid"], BACKENDS)).toEqual([]);
+    // Evaluated AFTER migration, so an already-saved bare form is judged by how it
+    // actually applies at dispatch — not by the string it was typed as.
+    expect(unmatchedExclusionPatterns(["openai-compatible:model-a"], BACKENDS)).toEqual([]);
+  });
+
+  test("reports in submission order, deduplicated, mixing matched and unmatched", () => {
+    expect(
+      unmatchedExclusionPatterns(
+        ["host:nowhere.invalid", "transport:opencode", "service:nobody", "host:nowhere.invalid"],
+        BACKENDS,
+      ),
+    ).toEqual(["host:nowhere.invalid", "service:nobody"]);
+  });
+
+  test("NOTHING gathered ⇒ NOTHING reported (absence of reach is not evidence of a typo)", () => {
+    expect(unmatchedExclusionPatterns(["host:nowhere.invalid"], [])).toEqual([]);
   });
 });

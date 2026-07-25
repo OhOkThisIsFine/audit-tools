@@ -764,9 +764,19 @@ function buildExclusion(
 
 /**
  * One parsed exclusion rule. Axis-explicit: the kind is decided by the literal
- * axis prefix (`transport:`, `service:`, `host:`). An unrecognized or absent
- * prefix is a PARSE ERROR (`invalid`), not an inert rule — the "typo'd rule
- * persists happily and matches nothing, silently" defect becomes impossible.
+ * axis prefix (`transport:`, `service:`, `host:`).
+ *
+ * ⚠ **`invalid` is NOT where a typo'd rule is caught — do not rely on it for that.**
+ * This parser is only ever reached AFTER {@link migrateExclusionPattern}, which
+ * rewrites any unrecognized head into `host:<pattern>`. So `model:model-a` arrives
+ * here as a structurally VALID host rule and never enters the `invalid` branch at
+ * all; the only form that still reaches it is a recognized axis with an EMPTY
+ * remainder (`transport:`). The "typo'd rule persists happily and matches nothing,
+ * silently" defect is closed at AUTHORSHIP instead
+ * ({@link isGrammaticalExclusionPattern}, applied in
+ * {@link parseProviderConfirmationInput}) — migrate-on-read deliberately stays
+ * permissive so an operator's already-saved bare rules keep excluding what they
+ * were written to exclude.
  *
  * Model-granular forms use `/` as the model delimiter (not `:`) because model
  * ids can contain colons (e.g. `qwen2.5:7b`). `transport:` and `service:` tiers
@@ -857,6 +867,143 @@ function migrateExclusionPattern(pattern: DispatchExclusionPattern): DispatchExc
 
 function isResolvedProviderName(value: string): boolean {
   return RESOLVED_PROVIDER_NAMES.includes(value as ResolvedProviderName);
+}
+
+/** One DNS-style label: `[a-z0-9]`, internal `-` allowed, never leading/trailing. */
+const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+/**
+ * Is `value` shaped like an endpoint ADDRESS — the only bare form that
+ * {@link migrateExclusionPattern} routes to the `host:` axis?
+ *
+ * **THE RULE**, stated here because the whole value of this predicate is that an
+ * operator can predict it: strip one optional trailing `:<port>` (1–5 digits),
+ * then accept what remains **iff** it is the literal `localhost` **or** a DOTTED
+ * name — two or more `.`-separated {@link HOST_LABEL}s. An IPv4 literal satisfies
+ * the dotted rule and needs no special case.
+ *
+ * Host-shaped: `integrate.api.nvidia.com`, `nim.invalid`, `nim.invalid:8443`,
+ * `localhost`, `localhost:8000`, `127.0.0.1:8791`.
+ * NOT host-shaped: `model-a`, `model:model-a`, `foo:bar`, `` (empty).
+ *
+ * **Why a dot (or the single `localhost` exception) is REQUIRED.** The bare legacy
+ * grammar had exactly two tiers — a known provider name, or an endpoint address —
+ * so a single bare label that is not a provider was never a rule anyone could have
+ * meant. That is precisely the typo class, and admitting it is what let a typo
+ * launder into a valid-but-inert `host:` rule.
+ *
+ * **Deliberately NOT accepted:** a bare launcher COMMAND PATH (`c:\tools\codex.cmd`),
+ * which the `host:` matcher does support against a non-URL endpoint. Bare, it is
+ * indistinguishable from `<typo>:<typo>`, so it must be written axis-explicitly
+ * (`host:c:\tools\codex.cmd`) — which {@link isGrammaticalExclusionPattern} accepts.
+ *
+ * **Known over-acceptance, and why it is fine:** a dotted MODEL id (`qwen2.5`)
+ * reads as host-shaped. This is grammar only — the zero-match case is caught,
+ * non-blocking, by {@link unmatchedExclusionPatterns}.
+ */
+function isHostShapedExclusionValue(value: string): boolean {
+  const lower = value.toLowerCase();
+  const withPort = /^(.*):(\d{1,5})$/.exec(lower);
+  const address = withPort ? withPort[1] : lower;
+  if (address.length === 0) return false;
+  if (address === "localhost") return true;
+  const labels = address.split(".");
+  return labels.length >= 2 && labels.every((label) => HOST_LABEL.test(label));
+}
+
+/**
+ * Is `pattern` a rule an operator could actually have MEANT — i.e. does it parse
+ * to something under the grammar, either directly or via the read-time migration?
+ *
+ * ⚠ **AUTHORSHIP-ONLY.** Applied where the operator TYPES a rule
+ * ({@link parseProviderConfirmationInput}), never at read time.
+ * {@link migrateExclusionPattern} must keep absorbing ALREADY-SAVED bare forms —
+ * deleting it would silently un-exclude a backend an operator ruled out under the
+ * old grammar. So both layers accept the SAME language; this one only refuses to
+ * let a NEW member of the laundered class be written in the first place.
+ *
+ * **The defect this closes.** Migrate-on-read rewrites any unrecognized head into
+ * `host:<pattern>`, so `model:model-a` became a structurally VALID host rule that
+ * matches zero backends and never reached {@link parseExclusionRule}'s `invalid`
+ * branch. A typo persisted as policy and silently excluded nothing.
+ *
+ * **GRAMMAR ONLY — a zero-match rule is NOT an error and is never refused here.**
+ * The tool itself authors zero-match rules on every run (`auto_exclude` for a
+ * backend that then goes unreachable), and an operator may legitimately pre-declare
+ * an exclusion for a backend that is not reachable right now. So
+ * `openai-compatible:model-typo` is ACCEPTED: the head IS a real provider and the
+ * model segment is an open string. That case is reported instead, without blocking,
+ * by {@link unmatchedExclusionPatterns}.
+ */
+function isGrammaticalExclusionPattern(pattern: string): boolean {
+  const colon = pattern.indexOf(":");
+  if (colon > 0) {
+    const head = pattern.slice(0, colon);
+    // Axis-explicit — the form the Gate-0 prompt teaches. A non-empty remainder is
+    // required: `transport:` is the one ungrammatical form the axis branch can
+    // produce, and it is what `parseExclusionRule` already calls `invalid`.
+    if (VALID_EXCLUSION_AXES.has(head)) return colon + 1 < pattern.length;
+    // Legacy `<provider>:<model>` → migrates to `transport:<provider>/<model>`.
+    if (isResolvedProviderName(head)) return true;
+  }
+  // Legacy bare forms → `transport:<provider>` / `host:<address>`.
+  return isResolvedProviderName(pattern) || isHostShapedExclusionValue(pattern);
+}
+
+/**
+ * The operator-authored patterns that no rule grammar can account for — see
+ * {@link isGrammaticalExclusionPattern}. Empty ⇒ every pattern is writable.
+ *
+ * Order is the operator's own submission order (deduplicated, first occurrence
+ * kept), so the refusal names their patterns back in the order they wrote them.
+ */
+export function ungrammaticalExclusionPatterns(
+  patterns: readonly DispatchExclusionPattern[],
+): DispatchExclusionPattern[] {
+  const seen = new Set<string>();
+  return patterns.filter(
+    (pattern) =>
+      !seen.has(pattern) &&
+      (seen.add(pattern), !isGrammaticalExclusionPattern(pattern)),
+  );
+}
+
+/**
+ * The patterns that matched NOTHING in `backends` — the ADVISORY half, and
+ * deliberately not an error.
+ *
+ * A zero-match rule is legitimate: `auto_exclude` entries go zero-match the moment
+ * their backend stops being reachable, and an operator may pre-declare an exclusion
+ * for a backend they have not configured yet. It is also the only signal available
+ * for the grammatically-valid typo `isGrammaticalExclusionPattern` cannot catch
+ * (`openai-compatible:model-typo` — real provider head, open model segment). So it
+ * is REPORTED at the confirmation summary and never refused anywhere.
+ *
+ * Patterns are migrated before matching, so an already-saved bare form is evaluated
+ * exactly as it will actually apply at dispatch — not as the string it was typed as.
+ *
+ * **Empty `backends` ⇒ empty result.** With nothing gathered there is no evidence
+ * that any rule failed to match, only that there was nothing to match against, and
+ * reporting every rule there would be noise the operator learns to read past.
+ *
+ * Order is the operator's own submission order (deduplicated, first occurrence kept).
+ */
+export function unmatchedExclusionPatterns(
+  patterns: readonly DispatchExclusionPattern[],
+  backends: readonly ExcludableBackend[],
+): DispatchExclusionPattern[] {
+  if (backends.length === 0) return [];
+  const seen = new Set<string>();
+  const unmatched: DispatchExclusionPattern[] = [];
+  for (const pattern of patterns) {
+    if (seen.has(pattern)) continue;
+    seen.add(pattern);
+    const rule = parseExclusionRule(migrateExclusionPattern(pattern));
+    if (!backends.some((backend) => ruleMatches(rule, backend))) {
+      unmatched.push(pattern);
+    }
+  }
+  return unmatched;
 }
 
 function ruleMatches(rule: ExclusionRule, backend: ExcludableBackend): boolean {
@@ -1519,6 +1666,11 @@ export const PROVIDER_CONFIRMATION_INPUT_FILENAME =
  * (the executor then falls back to the tool's suggested ordering). Only the
  * version is required; every other field is optional and validated to its
  * expected shape (a malformed field is dropped, not fatal).
+ *
+ * ⚠ **One deliberate exception: an ungrammatical `exclude` rule THROWS.** Every
+ * other field degrades because dropping it costs the operator only that field's
+ * effect; dropping an exclusion costs them a backend they ruled out, dispatchable
+ * and silent. See the `exclude` branch below for the full argument.
  */
 export function parseProviderConfirmationInput(
   value: unknown,
@@ -1543,7 +1695,47 @@ export function parseProviderConfirmationInput(
   // No cast: `exclude` is the OPEN exclusion grammar, so asserting the operator's
   // raw strings into the closed provider-name union would be a lie — and the exact
   // type-assert-your-way-in move the policy parser refuses for `include`.
+  //
+  // Open is not the same as unchecked. THIS is the authorship seam — the one place
+  // an operator TYPES a rule — and it is where an ungrammatical one has to be
+  // refused, because nothing downstream can: `migrateExclusionPattern` rewrites any
+  // unrecognized head into `host:<pattern>`, so `model:model-a` becomes a
+  // structurally VALID host rule that matches zero backends and never reaches
+  // `parseExclusionRule`'s `invalid` branch. Read-time migration STAYS (it is what
+  // keeps an operator's already-saved bare rules excluded); validation is added
+  // here, where a new one is written.
   const exclude = stringArray(obj.exclude);
+  if (exclude) {
+    // THROWS — the one field in this otherwise degrade-safe parser that refuses
+    // rather than drops, and the asymmetry is the whole point. Dropping a bad rule
+    // fails OPEN: the backend the operator meant to rule out stays dispatchable,
+    // silently. Returning `null` for the whole file is worse still — indistinguishable
+    // from "no submission", so the same prompt re-emits forever. Throwing names the
+    // exact pattern and the fix, and the submission file is NOT consumed (it is
+    // unlinked only after a successful promotion), so the operator edits the typo and
+    // re-runs. Loud and resumable, never silent and lossy.
+    //
+    // Authorship-blind on purpose: an autonomous run's LLM-authored submission is held
+    // to the identical grammar. Its `exclude` would be stripped a step later anyway
+    // (it may only answer `capability_order`), so a rule that cannot even parse is a
+    // malformed submission on either path — one grammar, one seam, no branch to drift.
+    const ungrammatical = ungrammaticalExclusionPatterns(exclude);
+    if (ungrammatical.length > 0) {
+      throw new Error(
+        `Refused the Gate-0 submission: ${ungrammatical.length} \`exclude\` rule(s) ` +
+          `are not valid exclusion patterns — ${ungrammatical
+            .map((p) => JSON.stringify(p))
+            .join(", ")}. ` +
+          `A rule names its axis: \`transport:<provider>\` or ` +
+          `\`transport:<provider>/<model>\` (one adapter), \`service:<vendor>\` or ` +
+          `\`service:<vendor>/<model>\` (one vendor, however reached), or ` +
+          `\`host:<endpoint-address>\` (e.g. \`host:integrate.api.nvidia.com\`, ` +
+          `\`host:localhost:8000\`). There is no \`model:\` axis. ` +
+          `Fix the rule(s) in ${PROVIDER_CONFIRMATION_INPUT_FILENAME} and re-run — ` +
+          `nothing was promoted, and no other field of this submission was lost.`,
+      );
+    }
+  }
   const include = stringArray(obj.include) as
     | ResolvedProviderName[]
     | undefined;
@@ -2105,7 +2297,14 @@ function sortRankedKeys(ranked: Array<{ key: string; order: number }>): string[]
 /**
  * Read the operator's Gate-0 input from `<artifactsDir>/provider-confirmation.input.json`.
  * Returns `null` when the file is absent, unreadable, or malformed — the "operator
- * has not acted yet" signal the gate uses to decide emit-vs-consume. Never throws.
+ * has not acted yet" signal the gate uses to decide emit-vs-consume.
+ *
+ * ⚠ Throws on exactly one condition, inherited from
+ * {@link parseProviderConfirmationInput}: an ungrammatical `exclude` rule. That is a
+ * REFUSAL, not a degrade — swallowing it here would turn a typo'd exclusion into
+ * "operator has not acted yet" and re-emit the same prompt forever, which is the
+ * silent failure the check exists to prevent. Every other malformed input still
+ * yields `null`.
  */
 export async function readProviderConfirmationInput(
   artifactsDir: string,

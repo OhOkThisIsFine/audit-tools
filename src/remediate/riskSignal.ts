@@ -23,7 +23,7 @@
  */
 
 import type { Finding } from "audit-tools/shared";
-import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, isRecord } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, isRecord, discardOnSchemaVersionMismatch } from "audit-tools/shared";
 import { intakePaths } from "./intake.js";
 
 export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
@@ -458,7 +458,13 @@ export function findingRiskEvidence(
 export async function readIntakeRiskSignal(
   artifactsDir: string,
 ): Promise<IntakeRiskSignal | undefined> {
-  return readOptionalJsonFile<IntakeRiskSignal>(intakePaths(artifactsDir).riskSignal);
+  // Regenerable: the signal is derived from intake, so an older-schema file is
+  // treated as absent and recomputed rather than steering dispatch under stale
+  // semantics.
+  return discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<IntakeRiskSignal>(intakePaths(artifactsDir).riskSignal),
+    INTAKE_RISK_SIGNAL_SCHEMA_VERSION,
+  );
 }
 
 /** Persist (overwrite) the intake risk signal. */

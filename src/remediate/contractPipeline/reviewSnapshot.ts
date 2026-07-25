@@ -24,6 +24,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   diffProjections,
+  discardOnSchemaVersionMismatch,
   readOptionalJsonFile,
   renderDiffReReviewSection,
   writeJsonFile,
@@ -83,14 +84,25 @@ export function reviewSnapshotExists(
   return existsSync(reviewSnapshotPath(artifactsDir, name));
 }
 
+/**
+ * Read a review snapshot, or null when none is usable.
+ *
+ * A snapshot is REGENERABLE state — one written under another schema version is
+ * discarded rather than reinterpreted, which costs one full re-review (the
+ * behaviour when no snapshot exists) instead of diffing a prior verdict against
+ * inputs projected under different semantics.
+ */
 export async function readReviewSnapshot(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
 ): Promise<ReviewSnapshot | null> {
   return (
-    (await readOptionalJsonFile<ReviewSnapshot>(
-      reviewSnapshotPath(artifactsDir, name),
-    )) ?? null
+    discardOnSchemaVersionMismatch(
+      await readOptionalJsonFile<ReviewSnapshot>(
+        reviewSnapshotPath(artifactsDir, name),
+      ),
+      SNAPSHOT_SCHEMA_VERSION,
+    ) ?? null
   );
 }
 

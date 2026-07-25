@@ -25,6 +25,7 @@ import { join } from "node:path";
 import {
   diffProjections,
   readOptionalJsonFile,
+  discardOnSchemaVersionMismatch,
   renderDiffReReviewSection,
   stableStringifyProjection,
   writeJsonFile,
@@ -77,10 +78,15 @@ export async function readDesignReviewSnapshot(
   artifactsDir: string,
   pass: DesignReviewPass,
 ): Promise<DesignReviewSnapshot | null> {
+  // Regenerable: a snapshot from an older schema is treated as ABSENT so the pass
+  // re-reviews, rather than being read back under semantics it was not written for.
   return (
-    (await readOptionalJsonFile<DesignReviewSnapshot>(
-      designReviewSnapshotPath(artifactsDir, pass),
-    )) ?? null
+    discardOnSchemaVersionMismatch(
+      await readOptionalJsonFile<DesignReviewSnapshot>(
+        designReviewSnapshotPath(artifactsDir, pass),
+      ),
+      SNAPSHOT_SCHEMA_VERSION,
+    ) ?? null
   );
 }
 

@@ -20,9 +20,11 @@ import {
   captureNewlyReachableBackendFriction,
   PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
   captureUnrankedCapabilityPromotionFriction,
+  unmatchedExclusionPatterns,
   type SessionConfig,
   type NewlyReachableBackend,
   type ProviderConfirmationInput,
+  type ExcludableBackend,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
@@ -261,6 +263,20 @@ export async function runProviderConfirmationAutoComplete(
   /** Models the capability gate flagged that this promotion clears WITHOUT ranking. */
   let unrankedOnPromotion: string[] = [];
   /**
+   * Operator `exclude` rules that matched NOTHING in the reach this gate gathered.
+   *
+   * ADVISORY, never a refusal — a zero-match rule is legitimate (the tool authors
+   * them itself, and an operator may pre-declare an exclusion for a backend that is
+   * not reachable yet). It is reported because it is the only available signal for
+   * the grammatically-VALID typo the authorship validator cannot catch:
+   * `openai-compatible:model-typo` has a real provider head and an open model
+   * segment, so it parses fine and excludes nothing.
+   *
+   * Computed inside `if (root)` below, which is the only place the gathered sources
+   * exist; empty everywhere else, which reports nothing rather than guessing.
+   */
+  let unmatchedExclusions: string[] = [];
+  /**
    * Anchor ids whose reorder this promotion is about to DISCARD. Computed before the
    * merge, from the RAW submission — `effectiveInput` already carries the merged (i.e.
    * reorder-free) order, so asking it afterwards can never reveal what was dropped.
@@ -355,6 +371,31 @@ export async function runProviderConfirmationAutoComplete(
       env: process.env,
     });
     const sources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
+    // The zero-match advisory's operand: the reach this gate is actually confirming.
+    // Both halves are needed — `sources` carries the endpoints a `host:` rule keys on,
+    // and the provider pool carries the CLI/host entries that have no source row at all
+    // (a `transport:codex` rule would otherwise read as matching nothing).
+    //
+    // Honest limit: a pool entry carries no endpoint, so a `host:` rule naming a
+    // launcher COMMAND path can still be reported unmatched. Advisory-only, so the
+    // cost of that residue is one line of noise, never a blocked run.
+    const gatheredBackends: ExcludableBackend[] = [
+      ...sources.map((source) => ({
+        transport: source.transport,
+        ...(source.service !== undefined ? { service: source.service } : {}),
+        ...(source.model !== undefined ? { model: source.model } : {}),
+        ...(source.endpoint !== undefined ? { endpoint: source.endpoint } : {}),
+      })),
+      ...confirmation.provider_pool.map((entry) => ({
+        transport: entry.name,
+        ...(entry.model_id !== undefined ? { model: entry.model_id } : {}),
+      })),
+    ];
+    // The OPERATOR's rules only — never `autoExclude`. The tool authors zero-match
+    // rules by design (a fail-closed exclusion outlives the reach that prompted it),
+    // so folding them in would make this advisory fire on the tool's own correct
+    // behavior every run — the fastest way to train an operator to read past it.
+    unmatchedExclusions = unmatchedExclusionPatterns(exclude, gatheredBackends);
     // R3-3: advance the LLM-ranked authorship set across this promotion (rule 1/2 —
     // see `advanceCapabilityOrderLlmRanked`), from the RAW submission (never
     // `effectiveInput.capability_order`, which is already the merged ordering and
@@ -459,6 +500,7 @@ export async function runProviderConfirmationAutoComplete(
       unrankedOnPromotion,
       discardedReorder,
       droppedLlmFields,
+      unmatchedExclusions,
     ),
   };
 }
@@ -469,6 +511,7 @@ function renderConfirmationSummary(
   unrankedOnPromotion: readonly string[] = [],
   discardedReorder: readonly string[] = [],
   droppedLlmFields: readonly string[] = [],
+  unmatchedExclusions: readonly string[] = [],
 ): string {
   // ACCUMULATE, never early-return. These outcomes CO-OCCUR: a submission can reorder
   // anchors (discarded) while the same promotion clears a capability delta it did not
@@ -522,6 +565,25 @@ function renderConfirmationSummary(
       `No operator decision covers ${newlyReachable.length} newly-reachable ` +
         `backend(s), so they were fail-closed-excluded rather than dispatched ` +
         `unconfirmed (${newlyReachable.map((b) => b.key).join(", ")}).`,
+    );
+  }
+  // LAST, and ADVISORY — the only line here that reports a suspicion rather than an
+  // outcome. It exists for the typo the authorship validator provably cannot catch:
+  // `openai-compatible:model-typo` is grammatical (real provider head, open model
+  // segment), so it parses, persists, and rules out nothing. A zero-match rule is NOT
+  // an error and is never refused — the tool authors zero-match rules itself, and an
+  // operator may pre-declare an exclusion for a backend they have not configured yet
+  // — so this states the fact and stops. Phrased to stand alone, since it may be the
+  // only part.
+  if (unmatchedExclusions.length > 0) {
+    parts.push(
+      `Note: ${unmatchedExclusions.length} of your \`exclude\` rule(s) matched no ` +
+        `backend in the pool just confirmed ` +
+        `(${unmatchedExclusions.map((p) => `\`${p}\``).join(", ")}) — they are kept ` +
+        `as policy (a rule may legitimately name a backend that is not reachable ` +
+        `yet), but if one was meant to rule something out, it is not doing so. ` +
+        `Check the model/provider/host segment against the table above. Advisory ` +
+        `only — nothing was blocked.`,
     );
   }
   if (parts.length > 0) return parts.join(" ");

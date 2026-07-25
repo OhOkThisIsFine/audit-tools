@@ -548,6 +548,17 @@ export {
   writeTextFile,
 } from "./io/json.js";
 
+// IO: schema-version read policy — the PAIR that names the two directions.
+// Regenerable state (cache/carry/snapshot) discards a stale version and
+// rebuilds; costly/authored state (confirmation/checkpoint) throws rather than
+// silently losing work. A version stamped on write and never compared on read
+// is an unchecked cast wearing a version field.
+export {
+  SchemaVersionMismatchError,
+  discardOnSchemaVersionMismatch,
+  throwOnSchemaVersionMismatch,
+} from "./io/schemaVersion.js";
+
 // IO: machine-global state dir (~/.audit-code / ~/.remediate-code) — the single
 // path source every reader/writer of that state resolves through, honoring the
 // AUDIT_CODE_STATE_DIR hermeticity override.
@@ -1481,7 +1492,7 @@ export {
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
 export type { SharedProviderConfirmation, RenderedProviderConfirmation, ConfirmedDispatchPolicy, DispatchExclusionPattern, DispatchExclusion, ExcludableBackend, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedCapabilityRanks, resolveUnevidencedCapabilityPools, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput, carryForwardConfirmationInput, retainAutoExclusions, detectDiscardedCapabilityReorder, mergeCapabilityOrder, selectCapabilityAnchors, DEFAULT_CAPABILITY_ANCHOR_COUNT, capabilityOrderNonAnchors, advanceCapabilityOrderLlmRanked } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedCapabilityRanks, resolveUnevidencedCapabilityPools, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, ungrammaticalExclusionPatterns, unmatchedExclusionPatterns, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput, carryForwardConfirmationInput, retainAutoExclusions, detectDiscardedCapabilityReorder, mergeCapabilityOrder, selectCapabilityAnchors, DEFAULT_CAPABILITY_ANCHOR_COUNT, capabilityOrderNonAnchors, advanceCapabilityOrderLlmRanked } from "./providers/sharedProviderConfirmation.js";
 
 // 3c — POPULATE trigger for the proxy lane (Gate-0 build time / explicit
 // refresh; the resolve path only READS the cache).

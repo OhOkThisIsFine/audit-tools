@@ -2154,3 +2154,135 @@ describe("retainAutoExclusions — an explicit include clears the matching auto-
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE ZERO-MATCH ADVISORY, END TO END — reported at the summary, NEVER blocking
+//
+// ⚠ RED-GREEN VALIDATED. Removing the `unmatchedExclusions` argument from the
+// `renderConfirmationSummary` call in src/audit/orchestrator/intakeExecutors.ts
+// (or making `unmatchedExclusionPatterns` return `[]`) turns the first test below
+// RED; restoring it turns it GREEN.
+//
+// This closes the residue the authorship validator provably cannot:
+// `openai-compatible:model-typo` is GRAMMATICAL — the head is a real provider and
+// the model segment is an open string — so it parses, persists, and rules out
+// nothing. Grammar cannot tell a typo'd model from a model that is simply not
+// configured yet, so the only honest move is to state the fact and not block.
+// ---------------------------------------------------------------------------
+
+describe("a zero-match operator exclusion is REPORTED, and the promotion still succeeds", () => {
+  const CONFIG_ADVISORY = {
+    // `provider: "claude-code"` keeps the primary fold inert, so the executor gathers
+    // exactly these two sources.
+    provider: "claude-code",
+    sources: [
+      {
+        id: "nim-real",
+        transport: "openai-compatible",
+        endpoint: "http://nim.local/v1",
+        model: "model-real",
+      },
+      {
+        id: "oc-real",
+        transport: "opencode",
+        model: "model-other",
+      },
+    ],
+  };
+
+  /** Attended (NOT autonomous) — an autonomous submission has its `exclude` stripped. */
+  const ATTENDED_GATE = { newlyReachable: [], unevidencedCapability: [], autonomous: false };
+
+  async function promoteExcluding(root, artifactsDir, exclude) {
+    await mkdir(artifactsDir, { recursive: true });
+    await writeInputFile(artifactsDir, { exclude });
+    return await runProviderConfirmationAutoComplete(
+      {},
+      root,
+      artifactsDir,
+      CONFIG_ADVISORY,
+      ATTENDED_GATE,
+    );
+  }
+
+  test("the grammatical typo (`openai-compatible:model-typo`) is named in the summary", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      const result = await promoteExcluding(root, artifactsDir, [
+        "openai-compatible:model-typo",
+      ]);
+
+      // The FACTS first: the promotion succeeded and the rule really did persist —
+      // so the summary assertion cannot pass against a run that refused it.
+      const persisted = await readSharedProviderConfirmation(root);
+      expect(persisted.policy.exclude).toEqual(["openai-compatible:model-typo"]);
+      // …and it really does exclude nothing.
+      const exclusion = resolveDispatchExclusion(persisted.policy, CLEAN_ENV);
+      expect(
+        exclusion.excludes({ transport: "openai-compatible", model: "model-real" }),
+      ).toBe(false);
+
+      expect(result.progress_summary).toMatch(/matched no\s+backend|matched no backend/);
+      expect(result.progress_summary).toContain("openai-compatible:model-typo");
+      // ADVISORY — it says so, because a line that reads as an error trains the
+      // operator to treat a legitimate pre-declared rule as a failure.
+      expect(result.progress_summary).toMatch(/Advisory only/);
+    });
+  });
+
+  test("a rule that DOES match is never reported", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      const result = await promoteExcluding(root, artifactsDir, [
+        "transport:openai-compatible/model-real",
+      ]);
+
+      const persisted = await readSharedProviderConfirmation(root);
+      expect(persisted.policy.exclude).toEqual([
+        "transport:openai-compatible/model-real",
+      ]);
+      expect(result.progress_summary).not.toMatch(/matched no/);
+    });
+  });
+
+  test("no operator exclusions at all ⇒ no advisory", async () => {
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeInputFile(artifactsDir, { capability_order: ["model-real"] });
+      const result = await runProviderConfirmationAutoComplete(
+        {},
+        root,
+        artifactsDir,
+        CONFIG_ADVISORY,
+        ATTENDED_GATE,
+      );
+      expect(result.progress_summary).not.toMatch(/matched no/);
+    });
+  });
+
+  test("an ungrammatical rule never reaches the advisory — it is refused first", async () => {
+    // The two mechanisms are ordered, not overlapping: grammar is refused at the
+    // authorship parse, so the executor never promotes it and the summary never
+    // renders. Only grammatical-but-inert rules reach the advisory.
+    await withTempRoot(async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeInputFile(artifactsDir, { exclude: ["model:model-real"] });
+      await expect(
+        runProviderConfirmationAutoComplete(
+          {},
+          root,
+          artifactsDir,
+          CONFIG_ADVISORY,
+          ATTENDED_GATE,
+        ),
+      ).rejects.toThrow(/Refused the Gate-0 submission/);
+      // Nothing was promoted, and the submission file is still there to fix.
+      expect(await readSharedProviderConfirmation(root)).toBeNull();
+      await expect(
+        readFile(join(artifactsDir, PROVIDER_CONFIRMATION_INPUT_FILENAME), "utf8"),
+      ).resolves.toContain("model:model-real");
+    });
+  });
+});

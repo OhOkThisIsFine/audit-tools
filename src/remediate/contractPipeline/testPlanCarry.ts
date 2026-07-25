@@ -15,7 +15,11 @@
  */
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import {
+  discardOnSchemaVersionMismatch,
+  readOptionalJsonFile,
+  writeJsonFile,
+} from "audit-tools/shared";
 import { contractPipelineDir } from "./artifactStore.js";
 import type { PriorTestSpec } from "./derive.js";
 
@@ -78,12 +82,19 @@ export async function captureTestPlanCarry(
   await writeJsonFile(testPlanCarryPath(artifactsDir), carry);
 }
 
-/** Read the carried prior specs keyed by obligation_id; empty when none. */
+/**
+ * Read the carried prior specs keyed by obligation_id; empty when none.
+ *
+ * The carry is REGENERABLE state — a carry from another schema version is
+ * discarded rather than reinterpreted, which costs one re-authoring of the
+ * affected specs and is the same fail-shape as an absent file (below).
+ */
 export async function readTestPlanCarry(
   artifactsDir: string,
 ): Promise<Record<string, PriorTestSpec>> {
-  const carry = await readOptionalJsonFile<TestPlanCarry>(
-    testPlanCarryPath(artifactsDir),
+  const carry = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<TestPlanCarry>(testPlanCarryPath(artifactsDir)),
+    CARRY_SCHEMA_VERSION,
   );
   return carry?.specs ?? {};
 }

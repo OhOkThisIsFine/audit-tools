@@ -221,7 +221,7 @@ Every other field is optional:
 {
   "schema_version": "provider-confirmation-input/v1",
   "cost_order": ["<provider-or-model-key>", "..."],
-  "exclude": ["<provider>:<model>", "<provider>", "<endpoint-host>"],
+  "exclude": ["transport:<name>", "transport:<name>/<model>", "service:<name>", "host:<endpoint-host>"],
   "include": ["<self-spawn-blocked provider to opt back in>"],
   "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }]
 }
@@ -232,19 +232,29 @@ Every other field is optional:
   report in `host_models`. Keys you omit keep their suggested relative order,
   appended after the ones you name; unrecognized keys are ignored. Omit it to accept
   the suggested order.
-- `exclude` — drops backends from the dispatchable pool. Each entry is a rule, at
-  whatever granularity you mean:
-  - `openai-compatible:gpt-oss-120b` — that **model** of that provider, leaving the
-    provider's other models routable. This is the granularity to reach for: you are
+- `exclude` — drops backends from the dispatchable pool. Each entry names its AXIS
+  explicitly, so the same string means the same thing on every machine:
+  - `transport:openai-compatible/gpt-oss-120b` — that **model** of that transport,
+    leaving its other models routable. This is the granularity to reach for: you are
     confirming model choices, so ruling out one model of a multi-model backend
     should not rule out the backend.
-  - `codex` — the whole **provider**, every model of it.
-  - `integrate.api.nvidia.com` (or `localhost:8000` to pin a port) — every source at
-    that **endpoint host**.
+  - `transport:codex` — the whole **transport**, every model of it.
+  - `service:nim` — every transport reaching that **service**, including ones
+    discovered later.
+  - `host:integrate.api.nvidia.com` (or `host:localhost:8000` to pin a port) — every
+    source at that **endpoint host**.
+
+  The older prefix-less forms (`codex`, `openai-compatible:gpt-oss-120b`,
+  `integrate.api.nvidia.com`) are still accepted and migrated to the axis form on
+  read, so saved rules keep working. A rule naming an axis that does not exist —
+  `model:gpt-oss-120b` — is REFUSED when you submit it, rather than being silently
+  reinterpreted as a host rule that matches nothing.
 
   A rule is a durable decision, not a reachability claim: it keeps applying on a
   later run and on a different machine, whatever is reachable there. A rule that
-  matches nothing is simply inert.
+  matches nothing is legitimate and stays inert — the tool authors one itself every
+  run — but the confirmation summary lists any of YOUR rules that matched nothing,
+  as an advisory, so a model-name typo is visible without blocking anything.
 - `include` — opts a self-spawn-blocked provider back in. A CLI provider detected
   while you are already inside a session of that same agent (`claude-code` under
   `CLAUDECODE`, `codex` under `CODEX`) is excluded by default so the run can't
