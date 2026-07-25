@@ -52,8 +52,8 @@ function makePlanningState(): RemediationState {
         },
       ],
       blocks: [
-        { block_id: "B-001", items: ["F-001"], parallel_safe: true },
-        { block_id: "B-002", items: ["F-002"], parallel_safe: true },
+        { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+        { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
@@ -134,7 +134,7 @@ describe("prepareImplementDispatch reconciliation", () => {
   it("re-dispatches a block when the existing result misses still-documented findings", async () => {
     const state = makeImplementingState();
     state.plan!.blocks = [
-      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true, touched_files: [] },
     ];
     state.items!["F-001"].block_id = "B-001";
     state.items!["F-001"].status = "resolved";
@@ -486,7 +486,7 @@ describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
   it("excludes a skipped item from its block's implement prompt", async () => {
     const state = makeImplementingState();
     state.plan!.blocks = [
-      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true, touched_files: [] },
     ];
     state.items!["F-001"].block_id = "B-001";
     state.items!["F-002"].block_id = "B-001";
@@ -603,7 +603,7 @@ describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
   it("a missing worker result does not flip a skipped item to blocked", async () => {
     const state = makeImplementingState();
     state.plan!.blocks = [
-      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true, touched_files: [] },
     ];
     state.items!["F-001"].block_id = "B-001";
     state.items!["F-002"].block_id = "B-001";

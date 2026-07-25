@@ -62,6 +62,7 @@ function makeNodeState(): RemediationState {
     block_id: "CP-BLOCK-N-x",
     items: [finding.id],
     parallel_safe: true,
+    touched_files: [],
   };
   return {
     status: "implementing",

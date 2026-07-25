@@ -18,7 +18,7 @@ const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 
 function makeImplementingState(
   terminalOverride?: PartialCompletionTerminal,
-  extraItems: Record<string, RemediationState["items"] extends Record<string, infer V> ? V : never> = {},
+  extraItems: NonNullable<RemediationState["items"]> = {},
 ): RemediationState {
   const items: NonNullable<RemediationState["items"]> = {
     "F-001": {
@@ -69,8 +69,8 @@ function makeImplementingState(
         },
       ],
       blocks: [
-        { block_id: "B-001", items: ["F-001"], parallel_safe: true },
-        { block_id: "B-002", items: ["F-002"], parallel_safe: true },
+        { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+        { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
@@ -165,8 +165,10 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
       hostCanDispatchSubagents: false,
     });
 
+    // NB: a former `.not.toBe("state_transition")` line was removed here — that
+    // kind does not exist in `RemediationStepKind`, so the assertion could never
+    // fail and proved nothing. The positive assertion above is the real check.
     expect(step.step_kind).toBe("present_report");
-    expect(step.step_kind).not.toBe("state_transition");
   });
 
   it("already-terminal items are NOT re-marked by the partial-completion terminal", async () => {

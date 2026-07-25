@@ -48,8 +48,10 @@ async function makeMinimalState(artifactsDir: string): Promise<void> {
         {
           block_id: BLOCK_ID,
           items: [finding.id],
-          deps: [],
-        } as RemediationBlock,
+          parallel_safe: true,
+          touched_files: [],
+          dependencies: [],
+        } satisfies RemediationBlock,
       ],
     },
     items: {

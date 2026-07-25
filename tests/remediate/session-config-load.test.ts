@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { loadRemediateSessionConfig } = await import(
-  "../../src/remediate/steps/sessionConfigLoad.ts"
+  "../../src/remediate/steps/sessionConfigLoad.js"
 );
 
 /** One reachable lane (its key env var is set) + one unreachable (its var is not). */

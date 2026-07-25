@@ -304,7 +304,7 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
     const result = await resolveIntakeStep({
       root: TEST_DIR,
       artifactsDir: ARTIFACTS_DIR,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...makeStubs(),
     });
 
@@ -320,7 +320,7 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
     const result = await resolveIntakeStep({
       root: TEST_DIR,
       artifactsDir: ARTIFACTS_DIR,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...makeStubs(),
     });
 
@@ -491,7 +491,7 @@ describe("N-R06: extract_findings step kind is no longer emitted", () => {
     const result = await resolveIntakeStep({
       root: TEST_DIR,
       artifactsDir: ARTIFACTS_DIR,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...makeStubs(),
     });
 
@@ -531,7 +531,7 @@ describe("N-R06: extract_findings step kind is no longer emitted", () => {
     const result = await resolveIntakeStep({
       root: TEST_DIR,
       artifactsDir: ARTIFACTS_DIR,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...makeStubs(),
     });
 

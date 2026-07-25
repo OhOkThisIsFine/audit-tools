@@ -172,9 +172,14 @@ describe("read_only nodes admit in full parallel (one maximal sub-wave) — the 
 describe("INV-SOO-03/05: real concurrent in-flight through the rolling driver", () => {
   const pool: CapacityPool = {
     id: "stub/*",
+    accountKey: "stub/*",
     providerName: "claude-code",
     hostModel: null,
-    hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
+    hostConcurrencyLimit: {
+      active_subagents: 8,
+      source: "session_config",
+      description: "Host active subagent limit from session-config.",
+    },
   };
   const session: SessionConfig = { quota: {} };
   const block = (id: string, files: string[]): RemediationBlock => ({
@@ -460,9 +465,14 @@ describe("M-B2: src/shared/index.ts barrel is an owned seam (two otherwise-disjo
 describe("M-B2 (integration): two barrel-only-sharing nodes complete merged with zero triage", () => {
   const pool: CapacityPool = {
     id: "stub/*",
+    accountKey: "stub/*",
     providerName: "claude-code",
     hostModel: null,
-    hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
+    hostConcurrencyLimit: {
+      active_subagents: 8,
+      source: "session_config",
+      description: "Host active subagent limit from session-config.",
+    },
   };
   const session: SessionConfig = { quota: {} };
   const BARREL = "src/shared/index.ts";

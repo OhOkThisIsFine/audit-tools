@@ -25,6 +25,7 @@ function makeStateWithBlock(
     block_id: blockId,
     items: findings.map((f) => f.id),
     parallel_safe: true,
+    touched_files: [],
   };
   const items: Record<string, RemediationItemState> = {};
   for (const finding of findings) {

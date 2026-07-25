@@ -958,10 +958,9 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       "utf8",
     );
 
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    while (step.step_kind === "state_transition") {
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    }
+    // `state_transition` was retired from RemediationStepKind — transitions now
+    // fold inside one decideNextStep call, so there is no bounce to drain.
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
     expect(step.step_kind).toBe("dispatch_implement");
     expect(existsSync(join(ARTIFACTS_DIR, "triage_resolution.json"))).toBe(false);

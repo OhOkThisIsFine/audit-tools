@@ -874,7 +874,7 @@ describe("runClosePhase", () => {
 
       const authorizedState = {
         ...previewState,
-        closing_plan: { ...previewState.closing_plan, pre_authorized: true },
+        closing_plan: { ...previewState.closing_plan!, pre_authorized: true },
       };
       const next = await runClosePhase(authorizedState, BASE_OPTIONS);
       expect(next.status).toBe("complete");

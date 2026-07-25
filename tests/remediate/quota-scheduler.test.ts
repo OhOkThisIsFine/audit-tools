@@ -243,6 +243,7 @@ describe("dispatch.ts scheduleWave", () => {
       sessionConfig: { provider: "claude-code", quota: {} },
       hostModel: null,
       itemCount: 5,
+      capabilityRanks: null,
     });
     expect(result.max_concurrent).toBe(5);
   });
@@ -254,6 +255,7 @@ describe("dispatch.ts scheduleWave", () => {
       hostModel: null,
       hostMaxConcurrent: 3,
       itemCount: 10,
+      capabilityRanks: null,
     });
     expect(result.max_concurrent).toBeLessThanOrEqual(3);
   });
@@ -270,6 +272,7 @@ describe("dispatch.ts scheduleWave", () => {
 function brokerPool(overrides: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id: "pool-a",
+    accountKey: "pool-a",
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,
@@ -533,6 +536,7 @@ describe("M5-WIRING convergence — concurrency is broker-output, never host dis
       itemCount: 50,
       hostMaxConcurrent: 2, // host handshake-only number
       estimatedSlotTokens: Array.from({ length: 50 }, () => 1000),
+      capabilityRanks: null,
     });
     // (a) wave size never exceeds the host handshake-only number…
     expect(result.max_concurrent).toBeLessThanOrEqual(2);

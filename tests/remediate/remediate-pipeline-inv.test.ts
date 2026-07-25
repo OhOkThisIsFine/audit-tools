@@ -669,7 +669,9 @@ describe("INV-remediate-pipeline-07: resume/restart/merge ack choices reach dist
             evidence: ["e1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -797,7 +799,9 @@ describe("INV-remediate-pipeline-09: dispatch prompts are cwd-explicit; implemen
             evidence: ["ev1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -840,7 +844,9 @@ describe("INV-remediate-pipeline-09: dispatch prompts are cwd-explicit; implemen
             evidence: ["ev2"],
           },
         ],
-        blocks: [{ block_id: "B-002", items: ["F-002"], parallel_safe: true }],
+        blocks: [
+          { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -887,7 +893,9 @@ describe("INV-remediate-pipeline-10: mergeImplementResults transitions to triage
             evidence: ["ev1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+        ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -957,9 +965,15 @@ describe("INV-remediate-pipeline-10: mergeImplementResults transitions to triage
           },
         ],
         blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true },
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
           // B-002 depends on B-001 so it won't be dispatched in first wave
-          { block_id: "B-002", items: ["F-002"], parallel_safe: false, dependencies: ["B-001"] },
+          {
+            block_id: "B-002",
+            items: ["F-002"],
+            parallel_safe: false,
+            dependencies: ["B-001"],
+            touched_files: [],
+          },
         ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],

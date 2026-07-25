@@ -58,7 +58,7 @@ function initRepo(prefix: string): string {
 }
 
 function block(id: string, items: string[]): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, dependencies: [] };
+  return { block_id: id, items, parallel_safe: true, dependencies: [], touched_files: [] };
 }
 
 const NODES = [
@@ -162,7 +162,11 @@ describe("driveRollingDispatch — exhausted-pool pass-through (H2 commit 2)", (
           complexity: 0.5,
         },
         outcome: "credit_exhausted" as const,
-        creditExhaustion: { rawMatch: "credits exhausted" },
+        creditExhaustion: {
+          channel: "error" as const,
+          text: "credits exhausted",
+          rawMatch: "credits exhausted",
+        },
       }),
       rebuildSharedBetweenLevels: async () => {},
     });
@@ -227,7 +231,11 @@ describe("driveRollingImplementDispatch — partition scope + lifecycle (H2 comm
             complexity: 0.5,
           },
           outcome: "credit_exhausted" as const,
-          creditExhaustion: { rawMatch: "credits exhausted" },
+          creditExhaustion: {
+            channel: "error" as const,
+            text: "credits exhausted",
+            rawMatch: "credits exhausted",
+          },
         }),
         rebuildSharedBetweenLevels: async () => {},
         blocksOverride: ["B-001"],
@@ -293,7 +301,11 @@ describe("driveRollingImplementDispatch — partition scope + lifecycle (H2 comm
             complexity: 0.5,
           },
           outcome: "credit_exhausted" as const,
-          creditExhaustion: { rawMatch: "credits exhausted" },
+          creditExhaustion: {
+            channel: "error" as const,
+            text: "credits exhausted",
+            rawMatch: "credits exhausted",
+          },
         }),
         rebuildSharedBetweenLevels: async () => {},
         poolsOverride: [backendPool("nim/full-wall")],

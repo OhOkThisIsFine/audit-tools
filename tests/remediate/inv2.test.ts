@@ -176,6 +176,7 @@ describe("INV-2 buildConfirmedPools wiring (hermetic)", () => {
       sessionConfig: { quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 32_000,
+      capabilityRanks: null,
     });
     expect(pools.length).toBeGreaterThanOrEqual(1);
     for (const pool of pools) {

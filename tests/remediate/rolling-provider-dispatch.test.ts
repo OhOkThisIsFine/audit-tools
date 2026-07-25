@@ -44,7 +44,7 @@ import type { RemediationBlock } from "../../src/remediate/state/types.js";
 const SLOT: ProviderSlot = { providerName: "stub", hostModel: null, poolId: "p/0" };
 
 function block(id: string, items: string[]): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, dependencies: [] };
+  return { block_id: id, items, parallel_safe: true, dependencies: [], touched_files: [] };
 }
 
 function initRepo(): { repo: string; ok: boolean } {

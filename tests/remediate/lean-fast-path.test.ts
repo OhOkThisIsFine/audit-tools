@@ -141,7 +141,7 @@ const harness = createNextStepHarness(".test-lean-fast-path");
 const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake, approveReviewGate } = harness;
 
 describe("decideNextStep — lean path = the low risk tier (integration)", () => {
-  let priorRollingEngine;
+  let priorRollingEngine: string | undefined;
   beforeEach(async () => {
     await harness.resetTestRepo();
     // G2: dispatch.rolling_engine is unrepresentable on disk; pin the wave opt-out via

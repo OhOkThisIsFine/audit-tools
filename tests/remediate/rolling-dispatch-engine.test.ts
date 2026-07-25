@@ -58,7 +58,7 @@ import type { IntentCheckpoint } from "audit-tools/shared";
 // ---------------------------------------------------------------------------
 
 function block(id: string, items: string[], deps: string[] = []): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, dependencies: deps };
+  return { block_id: id, items, parallel_safe: true, touched_files: [], dependencies: deps };
 }
 
 function findingState(
@@ -139,6 +139,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         { rank: "small", context_tokens: 32_000, output_tokens: 4_096 },
         { rank: "deep", context_tokens: 200_000, output_tokens: 8_192 },
       ],
+      capabilityRanks: null,
     });
     expect(pools.length).toBe(2);
     // Each pool carries its declared rank + discovered window (quota inputs),
@@ -153,6 +154,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
       sessionConfig: { provider: "claude-code", quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 8_192,
+      capabilityRanks: null,
     });
     const cap = computeDispatchCapacity({
       pools,
@@ -172,6 +174,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
+      capabilityRanks: null,
     });
     expect(pools.length).toBe(2);
     const api = pools.find((p) => p.providerName === "openai-compatible");
@@ -194,6 +197,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
+      capabilityRanks: null,
     });
     expect(pools.filter((p) => p.providerName === "openai-compatible").length).toBe(1);
     // The host pool keys to the conversation host, not the worker backend (D5).
@@ -208,6 +212,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
+      capabilityRanks: null,
     });
     // The conversation-host pool keys to claude-code (NOT codex — the founding-bug
     // quota mis-keying), and codex appears as a SEPARATE source pool so the host
@@ -229,6 +234,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         agy: { command: "agy", model: "gemini-3-pro" },
       },
+      capabilityRanks: null,
     });
     const agyPool = pools.find((p) => p.providerName === "agy");
     expect(agyPool).toBeTruthy();
@@ -244,6 +250,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         subprocess_template: { command_template: ["run", "{prompt}"] },
       },
+      capabilityRanks: null,
     });
     expect(pools.some((p) => p.providerName === "subprocess-template")).toBeTruthy();
     expect(pools.some((p) => p.providerName === "claude-code")).toBeTruthy();
@@ -261,6 +268,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
+      capabilityRanks: null,
     });
     const codexPools = pools.filter((p) => p.providerName === "codex");
     expect(codexPools.length).toBe(1);
@@ -276,6 +284,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
+      capabilityRanks: null,
       hostCanDispatch: false,
     });
     expect(pools.some((p) => p.providerName === "claude-code")).toBeFalsy();
@@ -291,9 +300,14 @@ describe("INV-ROLL-02: rolling dispatch fills a freed slot on completion", () =>
   it("dispatches all packets to completion as slots free up (no wave batching)", async () => {
     const pool: CapacityPool = {
       id: "claude-code/*",
+      accountKey: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
-      hostConcurrencyLimit: { active_subagents: 2, source: "session_config" },
+      hostConcurrencyLimit: {
+        active_subagents: 2,
+        source: "session_config",
+        description: "test fixture host limit",
+      },
     };
     const session: SessionConfig = { quota: {} };
     const order: string[] = [];
@@ -519,9 +533,14 @@ describe("fail-3: empty-pool stranding (no surviving pool)", () => {
   it("strands every pending packet and surfaces an empty_pool terminal when a pool rate-limits with no survivor", async () => {
     const pool: CapacityPool = {
       id: "p/only",
+      accountKey: "p/only",
       providerName: "claude-code",
       hostModel: null,
-      hostConcurrencyLimit: { active_subagents: 1, source: "session_config" },
+      hostConcurrencyLimit: {
+        active_subagents: 1,
+        source: "session_config",
+        description: "test fixture host limit",
+      },
     };
     const session: SessionConfig = { quota: {} };
     const dispatcher = createRollingDispatcher<{ id: string }>({

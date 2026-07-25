@@ -60,6 +60,7 @@ function makeNodeState(): RemediationState {
     block_id: "CP-BLOCK-N-x",
     items: [finding.id],
     parallel_safe: true,
+    touched_files: [],
   };
   return {
     status: "implementing",
@@ -186,7 +187,7 @@ describe("mergeImplementResults — missing-result cause diagnosis", () => {
   it("NEVER-DISPATCHED (no task.json): blocks with an explicit engine plan/drive-inconsistency cause, not an opaque reason", async () => {
     await saveState(makeNodeState());
     const merged = await mergeWithMissingResult({ taskJson: false });
-    const item = merged.items["N-x"];
+    const item = merged.items!["N-x"];
     expect(item.status).toBe("blocked");
     // The failure names that no worker was ever dispatched (the dangerous
     // cascade root), not just "no result file".
@@ -200,7 +201,7 @@ describe("mergeImplementResults — missing-result cause diagnosis", () => {
       taskJson: true,
       stderr: "codex: fatal: sandbox denied write outside workspace",
     });
-    const item = merged.items["N-x"];
+    const item = merged.items!["N-x"];
     expect(item.status).toBe("blocked");
     expect(item.failure_reason).toMatch(/WAS dispatched/i);
     expect(item.failure_reason).toMatch(/sandbox denied write/);
@@ -443,6 +444,7 @@ describe("mergeImplementResults — E2 incomplete-coverage convergence", () => {
       block_id: "CP-BLOCK-N-x",
       items: [findingX.id, findingY.id],
       parallel_safe: true,
+      touched_files: [],
     };
     const mkItem = (id: string) => ({
       finding_id: id,

@@ -41,6 +41,7 @@ All TypeScript (ES2022, NodeNext, strict), Node 20+. From repo root:
 npm install                       # install deps
 npm run build                     # tsc → dist/
 npm run check                     # typecheck only (no emit)
+npm run check:tests               # typecheck the TEST tree too (tsconfig.test.json; in verify:checks)
 npm test                          # build + vitest (audit + shared + remediate)
 
 npx vitest run tests/audit/<file>.test.mjs           # single audit test

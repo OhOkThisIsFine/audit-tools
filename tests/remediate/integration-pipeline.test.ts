@@ -167,7 +167,7 @@ function makePlanningState(items: Record<string, unknown> = {}): RemediationStat
           evidence: ["src/a.ts:1 evidence"],
         },
       ],
-      blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+      blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] }],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
     },
@@ -777,7 +777,7 @@ describe("rolling dispatch: per-node verification before merge via mergeImplemen
             evidence: [`src/${findingId.toLowerCase()}.ts:1`],
           },
         ],
-        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true }],
+        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -971,8 +971,8 @@ describe("ownership-gated affected_files amendment", () => {
           },
         ],
         blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true },
-          { block_id: "B-002", items: ["F-002"], parallel_safe: true },
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+          { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
@@ -1165,6 +1165,7 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
             block_id: "B-001",
             items: ["F-001"],
             parallel_safe: false,
+            touched_files: [],
           },
         ],
         project_type: "unknown",
@@ -1244,7 +1245,7 @@ describe("context-carrying triage retries", () => {
             evidence: ["src/a.ts:1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -1284,12 +1285,9 @@ describe("context-carrying triage retries", () => {
       }),
       "utf8",
     );
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    // Consume any state_transition steps.
-    let maxIter = 5;
-    while (step.step_kind === "state_transition" && maxIter-- > 0) {
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    }
+    // Deterministic transitions fold inside a single decideNextStep drain — there
+    // is no "state_transition" step kind for the host to consume.
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
     // The run must not dispatch a retry — it must close or present report.
     expect(["present_report", "run_close_action", "no_closing_actions", "collect_triage"]).toContain(step.step_kind);
@@ -1316,7 +1314,7 @@ describe("context-carrying triage retries", () => {
             evidence: ["src/a.ts:1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -1379,7 +1377,7 @@ describe("evidence-backed close verification report", () => {
             evidence: ["src/a.ts:1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
@@ -1446,8 +1444,8 @@ describe("evidence-backed close verification report", () => {
           },
         ],
         blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true },
-          { block_id: "B-002", items: ["F-002"], parallel_safe: true },
+          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+          { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
@@ -1503,7 +1501,7 @@ describe("evidence-backed close verification report", () => {
             evidence: ["src/a.ts:1"],
           },
         ],
-        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+        blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },

@@ -52,6 +52,7 @@ describe("detectRepoConventions cached once per root", () => {
           {
             id: findingId,
             title: "Conv cache test",
+            category: "maintainability",
             severity: "low",
             confidence: "high",
             lens: "maintainability",
@@ -62,6 +63,8 @@ describe("detectRepoConventions cached once per root", () => {
         ],
         blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: ["src/x.js"] }],
         themes: [],
+        project_type: "unknown",
+        candidate_closing_actions: [],
       },
       items: {
         [findingId]: { finding_id: findingId, status: "pending", block_id: blockId },
@@ -133,6 +136,7 @@ describe("detectRepoConventions cached once per root", () => {
           {
             id: findingId,
             title: "Conv in prompt test",
+            category: "maintainability",
             severity: "low",
             confidence: "high",
             lens: "maintainability",
@@ -143,6 +147,8 @@ describe("detectRepoConventions cached once per root", () => {
         ],
         blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: ["src/x.js"] }],
         themes: [],
+        project_type: "unknown",
+        candidate_closing_actions: [],
       },
       items: {
         [findingId]: { finding_id: findingId, status: "pending", block_id: blockId },

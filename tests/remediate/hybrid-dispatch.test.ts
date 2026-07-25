@@ -50,6 +50,9 @@ function snapshot(remainingPct: number): CapacityPool["quotaSourceSnapshot"] {
 function hostPool(over: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id: "pool/claude-code",
+    // Unattributable in-test pool → meters alone under its own pool id, the
+    // documented `deriveAccountKey` fallback.
+    accountKey: "pool/claude-code",
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: {
@@ -66,6 +69,7 @@ function hostPool(over: Partial<CapacityPool> = {}): CapacityPool {
 function nimPool(over: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id: "pool/openai-compatible",
+    accountKey: "pool/openai-compatible",
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,

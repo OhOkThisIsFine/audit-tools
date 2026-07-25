@@ -46,8 +46,8 @@ describe("mergeBlocksSharingFiles", () => {
   it("A3: independent parallel blocks sharing a file stay SEPARATE, each cofile_parallel_safe", () => {
     const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
     expect(merged).toHaveLength(2);
@@ -58,12 +58,13 @@ describe("mergeBlocksSharingFiles", () => {
   it("does not merge blocks already serialized by a dependency", () => {
     const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
       {
         block_id: "B-002",
         items: ["F-2"],
         parallel_safe: false,
         dependencies: ["B-001"],
+        touched_files: [],
       },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
@@ -73,8 +74,8 @@ describe("mergeBlocksSharingFiles", () => {
   it("leaves blocks that share no file untouched", () => {
     const findings = [f("F-1", "a.ts"), f("F-2", "b.ts")];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
     expect(merged).toHaveLength(2);
@@ -86,8 +87,8 @@ describe("mergeBlocksSharingFiles", () => {
     // both independent blocks are flagged cofile_parallel_safe.
     const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/x.ts")];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
     expect(merged).toHaveLength(2);
@@ -97,8 +98,8 @@ describe("mergeBlocksSharingFiles", () => {
   it("CE-008: distinct files under different spellings still do NOT merge", () => {
     const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/y.ts")];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
     expect(merged).toHaveLength(2);
@@ -114,13 +115,14 @@ describe("mergeBlocksSharingFiles", () => {
       f("F-3", "other.ts"),
     ];
     const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
       {
         block_id: "B-003",
         items: ["F-3"],
         parallel_safe: false,
         dependencies: ["B-002"],
+        touched_files: [],
       },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
@@ -435,8 +437,8 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
       plan_id: "PLAN-test",
       findings: [fA, fB] as any[],
       blocks: [
-        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [] },
-        { block_id: "B-002", items: ["F-B"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [], touched_files: [] },
+        { block_id: "B-002", items: ["F-B"], parallel_safe: true, dependencies: [], touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"] as any,
@@ -463,8 +465,8 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
       plan_id: "PLAN-test",
       findings: [fA, fB] as any[],
       blocks: [
-        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [] },
-        { block_id: "B-002", items: ["F-B"], parallel_safe: false, dependencies: ["B-001"] },
+        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [], touched_files: [] },
+        { block_id: "B-002", items: ["F-B"], parallel_safe: false, dependencies: ["B-001"], touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"] as any,
@@ -508,7 +510,7 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
       plan_id: "PLAN-test",
       findings: [fA, fB] as any[],
       blocks: [
-        { block_id: "B-001", items: ["F-A", "F-B"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-001", items: ["F-A", "F-B"], parallel_safe: true, dependencies: [], touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"] as any,
@@ -533,7 +535,7 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
       plan_id: "PLAN-test",
       findings: [f] as any[],
       blocks: [
-        { block_id: "B-001", items: ["F-1"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-001", items: ["F-1"], parallel_safe: true, dependencies: [], touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"] as any,

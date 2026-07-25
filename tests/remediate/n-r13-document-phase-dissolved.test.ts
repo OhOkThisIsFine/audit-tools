@@ -94,7 +94,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
           },
         ],
         blocks: [
-          { block_id: "B-001", items: [findingId], parallel_safe: true },
+          { block_id: "B-001", items: [findingId], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown" as const,
         candidate_closing_actions: ["none" as const],
@@ -237,7 +237,7 @@ describe("N-R13: prepareImplementDispatch accepts pending items", () => {
           },
         ],
         blocks: [
-          { block_id: "B-001", items: [findingId], parallel_safe: true },
+          { block_id: "B-001", items: [findingId], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown" as const,
         candidate_closing_actions: ["none" as const],
@@ -300,7 +300,7 @@ describe("N-R13: prepareImplementDispatch accepts pending items", () => {
           },
         ],
         blocks: [
-          { block_id: "B-002", items: [findingId], parallel_safe: true },
+          { block_id: "B-002", items: [findingId], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown" as const,
         candidate_closing_actions: ["none" as const],
@@ -326,11 +326,11 @@ describe("N-R13: prepareImplementDispatch accepts pending items", () => {
     const dispatchItem = plan.items[0];
 
     // read_paths and write_paths must include src/b.ts (from affected_files)
-    expect(dispatchItem.access.read_paths).toEqual(
-      expect.arrayContaining(["src/b.ts"]),
-    );
-    expect(dispatchItem.access.write_paths).toEqual(
-      expect.arrayContaining(["src/b.ts"]),
-    );
+    const access = dispatchItem.access;
+    if (!access) {
+      throw new Error("dispatch item carried no access scope");
+    }
+    expect(access.read_paths).toEqual(expect.arrayContaining(["src/b.ts"]));
+    expect(access.write_paths).toEqual(expect.arrayContaining(["src/b.ts"]));
   });
 });

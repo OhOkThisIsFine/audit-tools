@@ -255,7 +255,7 @@ describe("CP_ARTIFACT_NAMES ordering enforces dependency order", () => {
   });
 
   it("design_spec is NOT in CP_ARTIFACT_NAMES (replaced by seam-negotiation phases)", () => {
-    // @ts-expect-error — intentional check that design_spec is removed
+    // Intentional check that design_spec is removed from the name tuple.
     expect(CP_ARTIFACT_NAMES).not.toContain("design_spec");
   });
 });

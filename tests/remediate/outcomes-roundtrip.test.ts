@@ -97,14 +97,15 @@ function makeCompletedRunClosingState(): RemediationState {
       plan_id: "PLAN-ROUNDTRIP",
       findings: [F_FIX, F_FAIL, F_IGN],
       blocks: [
-        { block_id: "B-001", items: ["F-FIX"], parallel_safe: true },
+        { block_id: "B-001", items: ["F-FIX"], parallel_safe: true, touched_files: [] },
         {
           block_id: "B-002",
           items: ["F-FAIL"],
           parallel_safe: false,
           dependencies: ["B-001"],
+          touched_files: [],
         },
-        { block_id: "B-003", items: ["F-IGN"], parallel_safe: true },
+        { block_id: "B-003", items: ["F-IGN"], parallel_safe: true, touched_files: [] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
@@ -162,7 +163,7 @@ function makeCompletedRunClosingState(): RemediationState {
         },
       ],
     },
-  } as RemediationState;
+  };
 }
 
 /**

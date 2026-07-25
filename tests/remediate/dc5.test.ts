@@ -515,6 +515,7 @@ function makeStoreNodeState(): RemediationState {
     block_id: "CP-BLOCK-N-store",
     items: [finding.id],
     parallel_safe: true,
+    touched_files: [],
   };
   return {
     status: "implementing",

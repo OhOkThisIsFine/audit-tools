@@ -25,6 +25,15 @@
       "service": "nim",
       "model": "z-ai/glm-5.2",
       "cost_per_mtok": 0
+    },
+    {
+      "id": "local-proxy-keyless",
+      "transport": "openai-compatible",
+      "endpoint": "http://127.0.0.1:4000/v1",
+      "model": "glm-5.2",
+      "no_auth": true,
+      "worker_kind": "single_shot",
+      "cost_per_mtok": 0
     }
   ],
   "proxy": {

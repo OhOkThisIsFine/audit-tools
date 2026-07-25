@@ -710,7 +710,12 @@ type ExtendedRepairTarget = "finalized_module_contracts" | "obligation_ledger" |
  *   fallback                                        → finalized_module_contracts
  */
 export function inferRepairTarget(
-  classifications: JudgeReport["classifications"],
+  // Widened to match the guard below rather than the other way round: judge
+  // reports are read back from artifact JSON, so `classifications` genuinely
+  // arrives absent on a malformed/partial report. The declared-required type
+  // said that could not happen while the body defended against it — and a
+  // signature that disagrees with its own null-guard makes one of them dead.
+  classifications: JudgeReport["classifications"] | undefined,
 ): ExtendedRepairTarget {
   const accepted = (classifications ?? []).filter(
     (c) => c.classification === "accepted",

@@ -150,6 +150,7 @@ describe("stepUtils exports are stable after extraction", () => {
         items: ["F-001"],
         parallel_safe: true,
         dependencies: [],
+        touched_files: [],
       };
       const state = makeState({ "F-001": { status: "pending" } });
       expect(dependenciesSatisfied(block, state)).toBe(true);
@@ -161,12 +162,14 @@ describe("stepUtils exports are stable after extraction", () => {
         items: ["F-001"],
         parallel_safe: true,
         dependencies: [],
+        touched_files: [],
       };
       const dependentBlock: RemediationBlock = {
         block_id: "B-002",
         items: ["F-002"],
         parallel_safe: true,
         dependencies: ["B-001"],
+        touched_files: [],
       };
       const state = makeState(
         { "F-001": { status: "pending" }, "F-002": { status: "pending" } },

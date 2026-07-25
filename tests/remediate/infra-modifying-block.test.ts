@@ -173,7 +173,8 @@ async function makeMinimalState(
         {
           block_id: "TEST-BLOCK-001",
           items: [finding.id],
-          deps: [],
+          parallel_safe: true,
+          touched_files: [],
         } as RemediationBlock,
       ],
     },

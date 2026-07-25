@@ -7,21 +7,30 @@
 
 ## Live state
 
-- **Fourth backlog clearance lap, 2026-07-24 (`5fc913a8` · `058c035d` · `be6e7c56`).** Six entries
-  closed by a fix, two refiled to `durable-traps.md` (they were standing reference, not work), one
-  measured into scope. `open-bugs.md` is 97 → 90 entries, 138.6KB → 133.6KB, baseline ratcheted.
+- **Fourth backlog clearance lap, 2026-07-24 (`5fc913a8` · `058c035d` · `be6e7c56` + the sweep).** Eight
+  entries closed by a fix, two refiled to `durable-traps.md` (they were standing reference, not work),
+  one new LEAD opened by the sweep. `open-bugs.md` is 97 → 90 entries, 138.6KB → 132.8KB.
   Shipped: the masked-suite-exit-code REFUSAL (was an advisory that fired and was read past), the
   chained-`attest && git commit` explanation, fail-open announcements on every pre-commit-gate infra
   bail, one single-sourced root-containment guard replacing five hand-rolled copies, the CLAUDE.md
-  `admitSpawn` correction, and a reach preflight in the offload entrypoint.
+  `admitSpawn` correction, a reach preflight in the offload entrypoint, and a KEYLESS openai-compatible
+  source (`no_auth: true`) whose reach is proven by the endpoint liveness probe the `claude-worker` lane
+  already used — the entry had claimed this needed a sync→async ripple; the sync probe was one `switch`
+  branch away the whole time.
   ⚠ **Two REAL containment bugs fell out of the dedup, neither of which the entry predicted:** the
   worktree-seeding copy omitted `isAbsolute`, so on win32 a DIFFERENT DRIVE read as contained (a
   cross-drive `relative()` returns an absolute path), and every copy's `startsWith("..")` wrongly
   rejected a real entry named `..cache`. Five copies of a security predicate is not a style problem.
-  ⚠ **The test tree is still untypechecked, but it is no longer open-ended:** a `tsconfig.test.json`
-  over `src`+`tests` yields **222 errors across 131 files, ALL in `tests/remediate/`**, 81 of them one
-  missing required property. Config and fixture sweep must land together, so nothing unwired was left
-  behind. This is the largest single closable item left.
+  ⚠ **The test tree is now TYPECHECKED** — `check:tests` (`tsconfig.test.json`, `allowJs`) is wired into
+  `verify:checks`, landed atomically with the fixture sweep that makes it pass: 197 errors across 50
+  files cleared by 8 parallel agents, plus ~20 more that TS only unmasks once a sibling error on the
+  same literal is fixed. Every fix was semantics-preserving and no banned construct (`as any`,
+  `@ts-expect-error`, optional-widening) was used. ⚠ Read item 1 before celebrating the zero — the sweep
+  bought the green partly by writing `touched_files: []` into ~50 fixtures.
+  ⚠ **Latent things the sweep exposed, all now real:** two long-lived fixtures carried keys that are not
+  fields at all (`deps`, `depends_on` — the real one is `dependencies`), and two carried `while
+  (step.step_kind === "state_transition")` loops against a kind RETIRED from `RemediationStepKind`, so
+  they never executed. Nothing had flagged either, because nothing typechecked the tree.
   ⚠ **Ratchet the backlog baseline LAST.** `--update-baseline` mid-lap, then more deletions, turns
   `backlog-budget-unit.test.mjs` red against the live file — it reads exactly like a code regression and
   cost a full-suite investigation here.
@@ -144,11 +153,15 @@
 **runtime-loop defects**, not the A2 oracle corpus (A2 is PARKED in backlog *Deferred / waiting* —
 its SPEC is intact, nothing lost).
 
-**1. Sweep `tests/remediate` fixtures and land `tsconfig.test.json` with them.** The single largest
-closable item: **222 errors across 131 files, all in `tests/remediate/`** (81× missing required
-property, mostly the block fixture's `touched_files`; 28× TS7016 cleared by `allowJs`). The config is
-worthless until the sweep lands, so they ship as one change. Detail + the class breakdown in
-[`open-bugs.md`](backlog/open-bugs.md).
+**1. Decide the `touched_files` contract — the sweep made this urgent, not optional.** The test tree is
+now typechecked (`check:tests`, in `verify:checks`), which required adding `touched_files: []` at 97
+block-fixture sites. Each is byte-equivalent to the omission it replaced, because every production consumer
+reads `block.touched_files ?? []` — but `state/types.ts:35-42` says a block with no declared surface "is
+a producer bug, not an implicit empty", so those fixtures now encode the producer-bug case as NORMAL.
+Compounding it: `validateRemediationBlock` requires the field but sits off the load path, which uses
+`store.ts`'s weaker `validateState`. Decide whether the field is genuinely required (then the `?? []`
+defaults are the bug) or genuinely optional (then `requireKeys` is), before the fixtures calcify. Entry
+in [`open-bugs.md`](backlog/open-bugs.md).
 
 **2. Work the rest of the actionable queue** in [`open-bugs.md`](backlog/open-bugs.md). Re-triaged
 2026-07-24: roughly half the surviving entries are actionable, a third of those loop-core (attestation

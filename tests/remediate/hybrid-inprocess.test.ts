@@ -50,6 +50,9 @@ const SESSION = { quota: { unknown_hosted_concurrency: 8 } } as SessionConfig;
 /** A confirmed in-process backend pool (the NIM / openai-compatible worker). */
 const NIM_POOL: CapacityPool = {
   id: "pool/nim",
+  // Unattributable single pool: the documented fallback is the pool's own id, so it
+  // meters alone (no sibling account fold) — the shape this fixture already had.
+  accountKey: "pool/nim",
   providerName: "openai-compatible",
   hostModel: null,
   hostConcurrencyLimit: null,
@@ -191,7 +194,9 @@ describe("A-8 in-process partition via the rolling engine (H2+H4 collapse)", () 
       sessionConfig: SESSION,
       claimRegistry: registry,
       readSettled: () => settled,
-      onSettle: (p) => settled.add(p),
+      onSettle: (p) => {
+        settled.add(p);
+      },
       isInProcess: (pool) => pool.providerName === "openai-compatible",
     });
     expect(partition.inProcess.length).toBe(2);
@@ -247,7 +252,9 @@ describe("A-8 in-process partition via the rolling engine (H2+H4 collapse)", () 
       sessionConfig: SESSION,
       claimRegistry: registry,
       readSettled: () => settled,
-      onSettle: (p) => settled.add(p),
+      onSettle: (p) => {
+        settled.add(p);
+      },
       isInProcess: (pool) => pool.providerName === "openai-compatible",
     });
 

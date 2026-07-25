@@ -13,11 +13,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFile, rm, mkdtemp } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileHidden as execFile } from "../helpers/spawn.mjs";
-import { promisify } from "node:util";
+import { execFileHidden } from "../helpers/spawn.mjs";
 import { tmpdir } from "node:os";
-
-const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = join(__dirname, "..", "..");
@@ -35,6 +32,26 @@ const GENERATOR_SCRIPT = join(
   "generate-auditor-contract-fixture.mjs",
 );
 
+/**
+ * Promise wrapper over the window-hidden `execFile` helper. Written out rather
+ * than `promisify`d because the helper is untyped JS, so `promisify` cannot
+ * recover its `(file, args, options, callback)` arity from the inferred type.
+ * Rejects on a non-zero exit exactly as `promisify(execFile)` did.
+ */
+function runGenerator(outPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFileHidden(
+      process.execPath,
+      [GENERATOR_SCRIPT, outPath],
+      { cwd: PACKAGE_ROOT },
+      (error: Error | null) => {
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+  });
+}
+
 let tempDir: string | undefined;
 
 afterEach(async () => {
@@ -51,9 +68,7 @@ describe("auditor-contract fixture drift guard", () => {
     const tempOut = join(tempDir, "auditor-contract-audit-findings.json");
 
     // Run the real generator, redirecting output to temp.
-    await execFileAsync(process.execPath, [GENERATOR_SCRIPT, tempOut], {
-      cwd: PACKAGE_ROOT,
-    });
+    await runGenerator(tempOut);
 
     // Read both as raw UTF-8 strings — no JSON.parse, no re-serialization.
     const generated = await readFile(tempOut, "utf8");
@@ -67,9 +82,7 @@ describe("auditor-contract fixture drift guard", () => {
     tempDir = await mkdtemp(join(tmpdir(), "fixture-drift-guard-version-"));
     const tempOut = join(tempDir, "auditor-contract-audit-findings.json");
 
-    await execFileAsync(process.execPath, [GENERATOR_SCRIPT, tempOut], {
-      cwd: PACKAGE_ROOT,
-    });
+    await runGenerator(tempOut);
 
     const generated = await readFile(tempOut, "utf8");
     const parsed: unknown = JSON.parse(generated);
@@ -87,9 +100,7 @@ describe("auditor-contract fixture drift guard", () => {
     const tempOut = join(tempDir, "auditor-contract-audit-findings.json");
 
     // Generator writes to tempOut, NOT the committed path.
-    await execFileAsync(process.execPath, [GENERATOR_SCRIPT, tempOut], {
-      cwd: PACKAGE_ROOT,
-    });
+    await runGenerator(tempOut);
 
     // The committed fixture must be byte-identical to what it was before the run.
     const after = await readFile(COMMITTED_FIXTURE, "utf8");

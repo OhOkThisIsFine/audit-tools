@@ -77,6 +77,7 @@ function makeImplementingState(finding: Finding): RemediationState {
     block_id: `CP-BLOCK-${finding.id}`,
     items: [finding.id],
     parallel_safe: true,
+    touched_files: [],
   };
   const item: RemediationItemState = {
     finding_id: finding.id,

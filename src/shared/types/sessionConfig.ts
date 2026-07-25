@@ -452,6 +452,19 @@ export interface DispatchableSource {
   /** Inline API key (discouraged — prefer `api_key_env`). */
   api_key?: string;
   /**
+   * Operator-declared: this endpoint takes NO credential (an unauthenticated local
+   * proxy — LiteLLM with no master key, LM Studio, a local vLLM). Reach is then
+   * proven by an endpoint liveness probe instead of by an env var, exactly as the
+   * `claude-worker` proxy lane already does.
+   *
+   * EXPLICIT by design, never inferred from an omitted `api_key_env`: forgetting the
+   * key is the common error, and the liveness probe cannot catch it (any HTTP status
+   * on `/v1/models` counts as alive, so a 401 from a keyed endpoint still reads as
+   * reachable). Declaring it together with `api_key_env` is contradictory and is
+   * refused rather than silently resolved.
+   */
+  no_auth?: boolean;
+  /**
    * Worker-kind override (see {@link WorkerKind} / {@link deriveWorkerKind}).
    * Normally DERIVED from the transport — declare it only where genuinely ambiguous.
    */

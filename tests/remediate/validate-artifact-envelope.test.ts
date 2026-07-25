@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isEnvelope } from "../../src/remediate/contractPipeline/artifactStore.js";
-import { CONTRACT_PIPELINE_VALIDATORS } from "../../src/remediate/validation/contractPipeline.js";
 import {
-  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  isEnvelope,
   type ContractPipelineArtifactName,
-} from "audit-tools/shared";
+} from "../../src/remediate/contractPipeline/artifactStore.js";
+import { CONTRACT_PIPELINE_VALIDATORS } from "../../src/remediate/validation/contractPipeline.js";
+import { CONTRACT_PIPELINE_GOAL_SPEC_VERSION } from "audit-tools/shared";
 
 // These tests cover the `validate-artifact` CLI command's envelope-unwrap
 // behavior (F8 / CP-NODE-3) build-free: they exercise the exact decision the

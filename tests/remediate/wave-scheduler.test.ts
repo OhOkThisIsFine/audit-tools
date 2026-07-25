@@ -126,6 +126,7 @@ describe("scheduleWave", () => {
       hostMaxConcurrent: 3,
       sessionConfig: null,
       itemCount: 10,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.max_concurrent).toBe(3);
@@ -137,6 +138,7 @@ describe("scheduleWave", () => {
     const uncapped = await scheduleWave({
       sessionConfig: null,
       itemCount: 20,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(uncapped.max_concurrent).toBeGreaterThan(2);
@@ -148,6 +150,7 @@ describe("scheduleWave", () => {
       hostMaxConcurrent: 2,
       sessionConfig: null,
       itemCount: 20,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(capped.max_concurrent).toBe(2);
@@ -163,6 +166,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 20,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.max_concurrent).toBe(20);
@@ -177,6 +181,7 @@ describe("scheduleWave", () => {
       hostMaxConcurrent: 10,
       sessionConfig: null,
       itemCount: 3,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.max_concurrent).toBe(3);
@@ -186,6 +191,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 0,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.max_concurrent).toBe(1);
@@ -196,6 +202,7 @@ describe("scheduleWave", () => {
       hostMaxConcurrent: 4,
       sessionConfig: null,
       itemCount: 10,
+      capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
       env: {} as any,
     });
@@ -207,6 +214,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 5,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.estimated_wave_tokens).toBe(0);
@@ -216,6 +224,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: { parallel_workers: 7 },
       itemCount: 20,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.max_concurrent).toBe(7);
@@ -225,6 +234,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 4,
+      capabilityRanks: null,
       hostModels: [
         { rank: "small", context_tokens: 32_000, output_tokens: 8_000 },
         { rank: "deep", context_tokens: 200_000, output_tokens: 32_000 },
@@ -239,6 +249,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: { quota: {} } as any,
       itemCount: 12,
+      capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 12 }, () => 500),
       hostModels: [
         { rank: "small", context_tokens: 32_000, output_tokens: 8_000 },
@@ -262,6 +273,7 @@ describe("scheduleWave", () => {
     const withId = await scheduleWave({
       sessionConfig: { quota: {} } as any,
       itemCount: 2,
+      capabilityRanks: null,
       hostModelId: "opaque-x",
       env: {} as any,
     });
@@ -269,6 +281,7 @@ describe("scheduleWave", () => {
     const withoutId = await scheduleWave({
       sessionConfig: { quota: {} } as any,
       itemCount: 2,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(withoutId.capacity_pools?.[0].pool_id).toMatch(/\/\*$/);
@@ -278,6 +291,7 @@ describe("scheduleWave", () => {
     const result = await scheduleWave({
       sessionConfig: { quota: {} } as any,
       itemCount: 8,
+      capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 8 }, () => 500),
       hostModels: [
         { rank: "standard", context_tokens: 100_000, output_tokens: 16_000, model_id: "rank-s" },
@@ -304,6 +318,7 @@ describe("buildDispatchQuota", () => {
       hostMaxConcurrent: 5,
       sessionConfig: null,
       itemCount: 10,
+      capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
       env: {} as any,
     });
@@ -337,6 +352,7 @@ describe("buildDispatchQuota", () => {
     const schedule = await scheduleWave({
       sessionConfig: null,
       itemCount: 3,
+      capabilityRanks: null,
       env: {} as any,
     });
     const quota = await buildDispatchQuota("RUN-456", "implement", schedule, mkPackets(3), false);
@@ -359,6 +375,7 @@ describe("buildDispatchQuota", () => {
       hostMaxConcurrent: 5,
       sessionConfig: null,
       itemCount: 10,
+      capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
       env: {} as any,
     });
@@ -385,6 +402,7 @@ async function makeScheduleResult(): Promise<WaveScheduleResult> {
     hostMaxConcurrent: 4,
     sessionConfig: null,
     itemCount: 4,
+    capabilityRanks: null,
     env: {} as any,
   });
 }
@@ -446,6 +464,7 @@ describe("scheduleWave — quota-enabled path", () => {
     const result = await scheduleWave({
       sessionConfig: { quota: {} },
       itemCount: 3,
+      capabilityRanks: null,
       estimatedSlotTokens: [1000, 2000, 3000],
       env: {} as any,
     });
@@ -470,6 +489,7 @@ describe("scheduleWave — host capability handshake (N8)", () => {
     const result = await scheduleWave({
       sessionConfig: null, // quota disabled → default early-return branch
       itemCount: 3,
+      capabilityRanks: null,
       hostContextTokens: 200_000,
       hostOutputTokens: 32_000,
       env: {} as any,
@@ -482,6 +502,7 @@ describe("scheduleWave — host capability handshake (N8)", () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 3,
+      capabilityRanks: null,
       env: {} as any,
     });
     expect(result.resolved_limits.context_tokens).toBe(32_000);
@@ -492,12 +513,14 @@ describe("scheduleWave — host capability handshake (N8)", () => {
     const floor = await scheduleWave({
       sessionConfig: { quota: {} },
       itemCount: 3,
+      capabilityRanks: null,
       estimatedSlotTokens: [1000, 2000, 3000],
       env: {} as any,
     });
     const discovered = await scheduleWave({
       sessionConfig: { quota: {} },
       itemCount: 3,
+      capabilityRanks: null,
       estimatedSlotTokens: [1000, 2000, 3000],
       hostContextTokens: 200_000,
       hostOutputTokens: 32_000,
@@ -814,6 +837,7 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
   const hostLimit = {
     active_subagents: HOST_CAP,
     source: "session_config" as const,
+    description: "Host active subagent limit from session-config.",
   };
 
   it("repair entry (broker) returns admitted < N with binding_cap=host_concurrency", () => {
@@ -836,6 +860,7 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
   it("rolling-engine entry (computeDispatchCapacity) routes the SAME cap", () => {
     const pool: CapacityPool = {
       id: "claude-code/*",
+      accountKey: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
       hostConcurrencyLimit: hostLimit,
@@ -865,6 +890,7 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
       pools: [
         {
           id: "claude-code/*",
+          accountKey: "claude-code/*",
           providerName: "claude-code",
           hostModel: null,
           hostConcurrencyLimit: hostLimit,
@@ -900,7 +926,11 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
 
 describe("F4 inv-10 — O3 stage-3 re-dispatch flows through the broker chokepoint", () => {
   const HOST_CAP = 2;
-  const hostLimit = { active_subagents: HOST_CAP, source: "session_config" as const };
+  const hostLimit = {
+    active_subagents: HOST_CAP,
+    source: "session_config" as const,
+    description: "Host active subagent limit from session-config.",
+  };
 
   it("re-dispatch sizes through the broker's shared scheduleWave authority + buildConfirmedPools agree", () => {
     const broker = createBrokeredRepairDispatch();
@@ -929,6 +959,7 @@ describe("F4 inv-10 — O3 stage-3 re-dispatch flows through the broker chokepoi
       pools: [
         {
           id: "claude-code/*",
+          accountKey: "claude-code/*",
           providerName: "claude-code",
           hostModel: null,
           hostConcurrencyLimit: hostLimit,
@@ -1105,6 +1136,7 @@ describe("scheduleWave — logs to stderr when the quota state file is unusable"
         scheduleWave({
           sessionConfig: { quota: {} },
           itemCount: 3,
+          capabilityRanks: null,
           env: {} as any,
         }),
       );
@@ -1519,6 +1551,7 @@ describe("F4 fail-4 [CP-NODE-52]: unusable quota state => default wave, non-fata
         scheduleWave({
           sessionConfig: { quota: {} },
           itemCount: 4,
+          capabilityRanks: null,
           env: {} as any,
         }),
       );

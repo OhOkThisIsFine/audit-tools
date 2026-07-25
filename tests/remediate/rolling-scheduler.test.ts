@@ -53,7 +53,7 @@ function block(
   items: string[],
   dependencies: string[] = [],
 ): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, dependencies };
+  return { block_id: id, items, parallel_safe: true, dependencies, touched_files: [] };
 }
 
 function item(

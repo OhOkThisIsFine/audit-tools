@@ -29,6 +29,84 @@ const NIM = {
   api_key_env: "NVIDIA_API_KEY",
 };
 
+describe("verifySourceReach — a keyless openai-compatible endpoint is declarable", () => {
+  // An unauthenticated local proxy (LiteLLM with no master key, LM Studio, local
+  // vLLM) needs no credential, but the reach check used to hard-drop any
+  // openai-compatible source without `api_key_env` — so those lanes had to declare
+  // a semantically unrelated set var just to pass. `no_auth: true` swaps the env-var
+  // proof for the endpoint liveness proof the claude-worker lane already uses.
+  const KEYLESS = {
+    id: "local",
+    transport: "openai-compatible",
+    endpoint: "http://127.0.0.1:4000/v1",
+    model: "glm-5.2",
+    no_auth: true,
+  };
+
+  it("verifies a keyless source when the endpoint answers the probe", () => {
+    const result = verifySourceReach(KEYLESS, {
+      ...deps({ env: {} }),
+      probeHttpReachable: () => true,
+    });
+    expect(result.verified).toBe(true);
+  });
+
+  it("REFUSES a keyless source whose endpoint is dead — keyless is not unverified", () => {
+    const result = verifySourceReach(KEYLESS, {
+      ...deps({ env: {} }),
+      probeHttpReachable: () => false,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/liveness probe/u);
+  });
+
+  it("refuses a contradictory declaration (no_auth AND api_key_env)", () => {
+    const result = verifySourceReach(
+      { ...KEYLESS, api_key_env: "SOME_KEY" },
+      { ...deps({ env: { SOME_KEY: "k" } }), probeHttpReachable: () => true },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/BOTH no_auth and api_key_env/u);
+  });
+
+  it("an OMITTED key is still a drop — forgetting the key must not read as keyless", () => {
+    const { no_auth, ...noMarker } = KEYLESS;
+    const result = verifySourceReach(noMarker, {
+      ...deps({ env: {} }),
+      probeHttpReachable: () => true,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/no_auth: true/u);
+  });
+});
+
+describe("verifySourceReach — api_key_env must be a NAME, not NAME=value", () => {
+  // A declaration carrying `NAME=value` was accepted verbatim and then reported as
+  // an unset var named `NAME=value`, which sends the operator to their shell
+  // instead of to the typo.
+  it("names the NAME=value mistake instead of reporting an unset var", () => {
+    const result = verifySourceReach(
+      { ...NIM, api_key_env: "NVIDIA_API_KEY=sk-live" },
+      deps({ env: {} }),
+    );
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/NAME=value pair/u);
+    expect(result.reason).not.toMatch(/unset or empty/u);
+  });
+
+  it("rejects other non-NAME shapes", () => {
+    for (const bad of ["1KEY", "has space", "dash-key"]) {
+      const r = verifySourceReach({ ...NIM, api_key_env: bad }, deps({ env: {} }));
+      expect(r.verified, `expected "${bad}" refused`).toBe(false);
+      expect(r.reason).toMatch(/environment variable NAME/u);
+    }
+  });
+
+  it("still accepts a well-formed NAME whose var is set", () => {
+    expect(verifySourceReach(NIM, deps({ env: { NVIDIA_API_KEY: "sk" } })).verified).toBe(true);
+  });
+});
+
 describe("resolveSourceDeclarationPath", () => {
   it("is machine-level — no auditor id in the name", () => {
     const path = resolveSourceDeclarationPath("/home/test");

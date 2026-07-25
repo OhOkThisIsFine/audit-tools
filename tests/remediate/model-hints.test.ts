@@ -47,7 +47,12 @@ function makeState(
 describe("buildImplementModelHint", () => {
   it("returns deep when a finding has critical severity", () => {
     const f = makeFinding({ id: "F-1", severity: "critical" });
-    const block: RemediationBlock = { block_id: "B-1", items: ["F-1"], parallel_safe: true };
+    const block: RemediationBlock = {
+      block_id: "B-1",
+      items: ["F-1"],
+      parallel_safe: true,
+      touched_files: [],
+    };
     const state = makeState([f], [block]);
     const hint = buildImplementModelHint(block, state);
     expect(hint.tier).toBe("deep");
@@ -62,6 +67,7 @@ describe("buildImplementModelHint", () => {
       block_id: "B-1",
       items: findings.map((f) => f.id),
       parallel_safe: true,
+      touched_files: [],
     };
     const state = makeState(findings, [block]);
     const hint = buildImplementModelHint(block, state);
@@ -71,7 +77,12 @@ describe("buildImplementModelHint", () => {
 
   it("returns small for single safe finding with low severity", () => {
     const f = makeFinding({ id: "F-1", severity: "low", confidence: "high" });
-    const block: RemediationBlock = { block_id: "B-1", items: ["F-1"], parallel_safe: true };
+    const block: RemediationBlock = {
+      block_id: "B-1",
+      items: ["F-1"],
+      parallel_safe: true,
+      touched_files: [],
+    };
     const state = makeState([f], [block], { "F-1": { tier: "safe" } });
     const hint = buildImplementModelHint(block, state);
     expect(hint.tier).toBe("small");
@@ -83,7 +94,12 @@ describe("buildImplementModelHint", () => {
       makeFinding({ id: "F-1", severity: "medium" }),
       makeFinding({ id: "F-2", severity: "low" }),
     ];
-    const block: RemediationBlock = { block_id: "B-1", items: ["F-1", "F-2"], parallel_safe: true };
+    const block: RemediationBlock = {
+      block_id: "B-1",
+      items: ["F-1", "F-2"],
+      parallel_safe: true,
+      touched_files: [],
+    };
     const state = makeState(findings, [block]);
     const hint = buildImplementModelHint(block, state);
     expect(hint.tier).toBe("standard");
@@ -92,7 +108,12 @@ describe("buildImplementModelHint", () => {
 
   it("returns standard when no item_spec exists", () => {
     const f = makeFinding({ id: "F-1", severity: "low" });
-    const block: RemediationBlock = { block_id: "B-1", items: ["F-1"], parallel_safe: true };
+    const block: RemediationBlock = {
+      block_id: "B-1",
+      items: ["F-1"],
+      parallel_safe: true,
+      touched_files: [],
+    };
     const state = makeState([f], [block]);
     const hint = buildImplementModelHint(block, state);
     expect(hint.tier).toBe("standard");

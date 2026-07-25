@@ -114,6 +114,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -144,6 +145,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [join(TEST_DIR, "does-not-exist.md")],
         checked: [join(TEST_DIR, "does-not-exist.md")],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -181,6 +183,7 @@ describe("resolveIntakeStep", () => {
         existing: [auditFindingsPath],
         missing: [],
         checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
       },
       ...stubs,
     });
@@ -278,6 +281,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -304,6 +308,7 @@ describe("resolveIntakeStep", () => {
         existing: [docPath],
         missing: [],
         checked: [docPath],
+        allExisting: [docPath],
       },
       ...stubs,
     });
@@ -341,6 +346,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -368,6 +374,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -404,6 +411,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -437,7 +445,7 @@ describe("resolveIntakeStep", () => {
       root: TEST_DIR,
       artifactsDir,
       // Bare call: default discovery surfaced the stale candidate, no --input.
-      inputResolution: { supplied: false, existing: [stalePath], missing: [], checked: [stalePath] },
+      inputResolution: { supplied: false, existing: [stalePath], missing: [], checked: [stalePath], allExisting: [stalePath] },
       ...stubs,
     });
 
@@ -489,6 +497,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -517,6 +526,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -567,6 +577,7 @@ describe("resolveIntakeStep", () => {
         existing: [fileB],
         missing: [],
         checked: [fileB],
+        allExisting: [fileB],
       },
       ...stubs,
     });
@@ -618,6 +629,7 @@ describe("resolveIntakeStep", () => {
         existing: [auditFindingsPath],
         missing: [],
         checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
       },
       ...stubs,
     });
@@ -655,6 +667,7 @@ describe("resolveIntakeStep", () => {
         existing: [auditFindingsPath],
         missing: [],
         checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
       },
       ...stubs,
     });
@@ -702,6 +715,7 @@ describe("resolveIntakeStep", () => {
         existing: [auditFindingsPath],
         missing: [],
         checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
       },
       ...stubs,
     });
@@ -925,6 +939,7 @@ describe("resolveIntakeStep", () => {
         existing: [fileB],
         missing: [],
         checked: [fileB],
+        allExisting: [fileB],
       },
       ...stubs,
     });
@@ -964,6 +979,7 @@ describe("resolveIntakeStep", () => {
         existing: [badJsonPath],
         missing: [],
         checked: [badJsonPath],
+        allExisting: [badJsonPath],
       },
       ...stubs,
     });
@@ -999,6 +1015,7 @@ describe("resolveIntakeStep", () => {
         existing: [unknownSchemaPath],
         missing: [],
         checked: [unknownSchemaPath],
+        allExisting: [unknownSchemaPath],
       },
       ...stubs,
     });
@@ -1028,6 +1045,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });
@@ -1057,6 +1075,7 @@ describe("resolveIntakeStep", () => {
         existing: [],
         missing: [],
         checked: [],
+        allExisting: [],
       },
       ...stubs,
     });

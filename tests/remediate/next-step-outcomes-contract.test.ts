@@ -63,14 +63,20 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
             makeFinding("F-004", "Fourth", "maintainability", "src/d.ts"),
           ],
           blocks: [
-            { block_id: "B-001", items: ["F-001"], parallel_safe: true },
+            { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
             {
               block_id: "B-002",
               items: ["F-002"],
               parallel_safe: false,
               dependencies: ["B-001"],
+              touched_files: [],
             },
-            { block_id: "B-003", items: ["F-003", "F-004"], parallel_safe: true },
+            {
+              block_id: "B-003",
+              items: ["F-003", "F-004"],
+              parallel_safe: true,
+              touched_files: [],
+            },
           ],
           project_type: "unknown",
           candidate_closing_actions: ["none"],
@@ -228,7 +234,9 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         plan: {
           plan_id: "PLAN-COVERAGE",
           findings: [fPlanned],
-          blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+          blocks: [
+            { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
+          ],
           project_type: "unknown",
           candidate_closing_actions: ["none"],
         },

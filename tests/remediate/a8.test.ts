@@ -47,6 +47,9 @@ function nodes(count: number, tokens = 1000): FrontierNode[] {
 function pool(id: string, over: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id,
+    // Unattributable test pool: the documented fallback is the pool's own id, so
+    // each fixture pool meters alone rather than joining a shared allowance.
+    accountKey: id,
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,
@@ -55,7 +58,7 @@ function pool(id: string, over: Partial<CapacityPool> = {}): CapacityPool {
 }
 
 /** A complete real-time usage snapshot carrying a given remaining_pct. */
-function snapshot(remainingPct: number): CapacityPool["quotaSourceSnapshot"] {
+function snapshot(remainingPct: number): NonNullable<CapacityPool["quotaSourceSnapshot"]> {
   return {
     remaining_pct: remainingPct,
     reset_at: null,

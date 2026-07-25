@@ -76,8 +76,8 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
       mkFinding("F2", "src/shared.ts"),
     ];
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], parallel_safe: true },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: [] },
     ];
     const plan = {
       plan_id: "P-INV01",
@@ -99,8 +99,8 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
       mkFinding("F2", "src/shared.ts"),
     ];
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
     ];
     const plan = {
       plan_id: "P-INV01b",
@@ -140,8 +140,8 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
       mkFinding("F2", ["src/shared.ts"]),
     ];
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
     // Must remain 2 blocks — serialization makes the shared file safe.
@@ -156,8 +156,8 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
       mkFinding("F2", ["src/shared.ts"]),
     ];
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], parallel_safe: true },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: [] },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
     // A3: independent same-file blocks are NOT unioned — kept separate + flagged.
@@ -168,7 +168,7 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
   it("singleton block is returned unchanged", () => {
     const findings = [mkFinding("F1", ["src/a.ts"])];
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
     ];
     const result = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
     expect(result).toHaveLength(1);
@@ -210,8 +210,8 @@ describe("splitBlocksByContextBudget — INV-remediate-phases-03: dep-remap cove
     // above budget → each finding becomes its own sub-block.
     const baseBudget = 0; // force split
     const blocks: RemediationBlock[] = [
-      { block_id: "B-base", items: ["F1", "F2"], parallel_safe: true },
-      { block_id: "B-dep", items: ["F3"], dependencies: ["B-base"], parallel_safe: false },
+      { block_id: "B-base", items: ["F1", "F2"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-dep", items: ["F3"], dependencies: ["B-base"], parallel_safe: false, touched_files: [] },
     ];
 
     const result = splitBlocksByContextBudget(blocks, findings, "/tmp", baseBudget);
@@ -236,8 +236,8 @@ describe("splitBlocksByContextBudget — INV-remediate-phases-03: dep-remap cove
   it("does not remap when no block is split", () => {
     const findings = [mkFinding("F1", 0), mkFinding("F2", 0)] as any;
     const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false },
+      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
     ];
     // Large budget — no split.
     const result = splitBlocksByContextBudget(blocks, findings, "/tmp", 1_000_000);

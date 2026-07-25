@@ -51,7 +51,7 @@ describe("MNT-ce15022c: inferRepairTarget no longer returns deprecated design_sp
   it("returns finalized_module_contracts when all classifications are non-accepted", () => {
     expect(inferRepairTarget([
       { counterexample_id: "CE-1", classification: "out_of_scope", rationale: "irrelevant" },
-      { counterexample_id: "CE-2", classification: "rejected", rationale: "wrong" },
+      { counterexample_id: "CE-2", classification: "invalid", rationale: "wrong" },
     ])).toBe("finalized_module_contracts");
   });
 

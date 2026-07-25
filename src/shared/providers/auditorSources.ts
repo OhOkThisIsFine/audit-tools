@@ -373,11 +373,19 @@ export async function populateProxyCatalogIfMissing(
  * enters the pool only if this process PROVES reach, never `declared ∪ stored`. Each
  * check verifies what the declaration actually asserts:
  *
- * - `api_key_env` → the env var is present and non-empty
+ * - `api_key_env` → the env var is present and non-empty (and is a NAME, not `NAME=value`)
+ * - `no_auth: true` → the endpoint answers a liveness probe (see below)
  * - CLI provider → its launcher resolves on PATH
  * - `subprocess-template` → its `command_template[0]` resolves on PATH
  * - `credentials_path` → the file is readable
  * - inline `api_key` → NOT verifiable (see below)
+ *
+ * **`no_auth: true` is not an opt-out.** It swaps one PROOF for another — the env-var
+ * check for an endpoint liveness probe — so a keyless lane is still verified, not
+ * merely asserted. It must be declared explicitly rather than inferred from a missing
+ * `api_key_env`, because the probe treats any HTTP status as alive (a 401 proves the
+ * endpoint is listening), so inferring it would silently admit a keyed endpoint whose
+ * key the operator forgot.
  *
  * **Inline `api_key` is refused.** Possessing a credential proves nothing about reach:
  * the endpoint may be dead, the key revoked. It is also the one shape an operator can
@@ -424,8 +432,47 @@ export function verifySourceReach(
             "inline api_key is not ambient-verifiable (it proves possession, not reach) — move the key into an env var and declare api_key_env.",
         };
       }
+      // Explicitly keyless: reach is the endpoint answering, not an env var — the
+      // same bar the `claude-worker` proxy lane below already holds. Contradictory
+      // declarations are refused rather than silently resolved.
+      if (source.no_auth === true) {
+        if (source.api_key_env !== undefined) {
+          return {
+            verified: false,
+            reason:
+              "source declares BOTH no_auth and api_key_env — pick one (no_auth means the endpoint takes no credential).",
+          };
+        }
+        const noAuthProbe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
+        const noAuthEndpoint = source.endpoint.trim().replace(/\/+$/u, "");
+        return noAuthProbe(noAuthEndpoint)
+          ? { verified: true }
+          : {
+              verified: false,
+              reason: `keyless endpoint "${noAuthEndpoint}" failed the liveness probe.`,
+            };
+      }
       if (!source.api_key_env?.trim()) {
-        return { verified: false, reason: "openai-compatible source has no api_key_env." };
+        return {
+          verified: false,
+          reason:
+            "openai-compatible source has no api_key_env (declare no_auth: true if the endpoint genuinely takes no credential).",
+        };
+      }
+      // `api_key_env` is an env var NAME. A declaration carrying `NAME=value`
+      // (or the value itself) used to be accepted verbatim and then reported as
+      // "unset var \"NAME=value\"" — which reads as a missing env var and sends
+      // the operator to their shell instead of to the typo. A `=` or whitespace
+      // in an env NAME is never right, so say so precisely.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source.api_key_env.trim())) {
+        return {
+          verified: false,
+          reason:
+            `api_key_env "${source.api_key_env.trim()}" is not an environment variable NAME` +
+            (source.api_key_env.includes("=")
+              ? " — it looks like a NAME=value pair; declare only the NAME (the value belongs in the environment)."
+              : " (expected letters, digits and underscores, not starting with a digit)."),
+        };
       }
       if (!(env[source.api_key_env] ?? "").trim()) {
         return {

@@ -452,7 +452,7 @@ describe("deduplicateCrossLensFindings — INV-remediate-state-05: source findin
 describe("fixupBlocksAfterDedup", () => {
   it("replaces merged finding IDs in block items", () => {
     const blocks: RemediationBlock[] = [
-      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true },
+      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true, touched_files: [] },
     ];
     const mergeMap = new Map([["A-001", "B-001"]]);
     const result = fixupBlocksAfterDedup(blocks, mergeMap);
@@ -461,7 +461,12 @@ describe("fixupBlocksAfterDedup", () => {
 
   it("deduplicates block items after replacement", () => {
     const blocks: RemediationBlock[] = [
-      { block_id: "B-001", items: ["TST-001", "COR-001", "SEC-001"], parallel_safe: true },
+      {
+        block_id: "B-001",
+        items: ["TST-001", "COR-001", "SEC-001"],
+        parallel_safe: true,
+        touched_files: [],
+      },
     ];
     const mergeMap = new Map([["TST-001", "COR-001"]]);
     const result = fixupBlocksAfterDedup(blocks, mergeMap);
@@ -470,7 +475,7 @@ describe("fixupBlocksAfterDedup", () => {
 
   it("returns blocks unchanged when mergeMap is empty", () => {
     const blocks: RemediationBlock[] = [
-      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true },
+      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true, touched_files: [] },
     ];
     const result = fixupBlocksAfterDedup(blocks, new Map());
     expect(result).toBe(blocks);
@@ -482,8 +487,8 @@ describe("fixupBlocksAfterDedup", () => {
   // referenced), not emptied out.
   it("remaps (never drops) an absorbed finding whose survivor lives in another block", () => {
     const blocks: RemediationBlock[] = [
-      { block_id: "B-survivor", items: ["SURV"], parallel_safe: true },
-      { block_id: "B-absorbed", items: ["ABS"], parallel_safe: true },
+      { block_id: "B-survivor", items: ["SURV"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-absorbed", items: ["ABS"], parallel_safe: true, touched_files: [] },
     ];
     const mergeMap = new Map([["ABS", "SURV"]]);
     const result = fixupBlocksAfterDedup(blocks, mergeMap);

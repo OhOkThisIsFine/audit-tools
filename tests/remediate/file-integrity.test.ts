@@ -227,9 +227,9 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
 
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
-    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
-      written.push(String(chunk));
-      return original(chunk, ...(args as Parameters<typeof original>));
+    const spy = (...args: Parameters<typeof original>): boolean => {
+      written.push(String(args[0]));
+      return original(...args);
     };
     process.stderr.write = spy as typeof process.stderr.write;
     try {
@@ -253,9 +253,9 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
 
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
-    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
-      written.push(String(chunk));
-      return original(chunk, ...(args as Parameters<typeof original>));
+    const spy = (...args: Parameters<typeof original>): boolean => {
+      written.push(String(args[0]));
+      return original(...args);
     };
     process.stderr.write = spy as typeof process.stderr.write;
     try {
@@ -275,9 +275,9 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
     const missing = join(TEST_DIR, "not-here.ts");
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
-    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
-      written.push(String(chunk));
-      return original(chunk, ...(args as Parameters<typeof original>));
+    const spy = (...args: Parameters<typeof original>): boolean => {
+      written.push(String(args[0]));
+      return original(...args);
     };
     process.stderr.write = spy as typeof process.stderr.write;
     try {

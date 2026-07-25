@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnLoggedCommand } from "audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../../src/remediate/providers/index.js";
-import type { LaunchFreshSessionInput } from "../../src/remediate/providers/types.js";
+import type { LaunchFreshSessionInput } from "audit-tools/shared";
 import type { WriteStream } from "node:fs";
+import type { SpawnOptions } from "node:child_process";
 import { createClaudeCodeProvider } from "../../src/remediate/providers/claudeCodeProvider.js";
 import { createOpenCodeProvider } from "../../src/remediate/providers/opencodeProvider.js";
 import {
@@ -58,11 +59,23 @@ function makeWriteStream(): WriteStream {
   return stream as unknown as WriteStream;
 }
 
+/**
+ * Signature a `spawnLoggedCommand` spawn double must present. `typeof spawn` is
+ * overloaded across both the `(command, options)` and `(command, args, options)`
+ * forms, so a single-signature double is only assignable to it when its second
+ * parameter accepts either shape.
+ */
+type SpawnDouble = (
+  command: string,
+  args?: readonly string[] | SpawnOptions,
+  options?: SpawnOptions,
+) => any;
+
 function makeSpawnMock(
   exitCode: number | null,
   exitSignal: string | null = null,
-) {
-  return (_cmd: string, _args: string[], _opts: any): any => {
+): SpawnDouble {
+  return (_cmd, _args, _opts) => {
     const child: any = new EventEmitter();
     child.pid = 9999;
     child.killed = false;
@@ -123,7 +136,7 @@ async function withProviderFiles(
 
 describe("spawnLoggedCommand", () => {
   it("resolves with accepted:true when process exits with code 0 normally", async () => {
-    const mockSpawn = (_cmd: string, _args: string[], _opts: any): any => {
+    const mockSpawn: SpawnDouble = (_cmd, _args, _opts) => {
       const child: any = new EventEmitter();
       child.pid = 1234;
       child.killed = false;
@@ -189,7 +202,7 @@ describe("spawnLoggedCommand", () => {
 
   it("calls onProgress with output events for stdout lines", async () => {
     const updates: any[] = [];
-    const mockSpawn = (_cmd: string, _args: string[], _opts: any): any => {
+    const mockSpawn: SpawnDouble = (_cmd, _args, _opts) => {
       const child: any = new EventEmitter();
       child.pid = 5555;
       child.killed = false;

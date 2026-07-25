@@ -501,7 +501,7 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...stubs,
     });
 
@@ -524,7 +524,7 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...stubs,
     });
 
@@ -546,7 +546,7 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
-      inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
+      inputResolution: { supplied: false, existing: [], missing: [], checked: [], allExisting: [] },
       ...stubs,
     });
 

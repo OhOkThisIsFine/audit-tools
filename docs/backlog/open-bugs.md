@@ -53,15 +53,17 @@
   explicitly (e.g. `api_key_env: null` / a `no_auth: true` knob) so reach probes the endpoint
   instead of an env var; an OMITTED key field can stay a drop (forgetting the key is the common
   error — the explicit form is what says "deliberate").
-  ⚠ **Re-verified 2026-07-24 and it is NOT a knob-sized change — decide before building.** (a) A bare
-  `no_auth: true` re-opens exactly the hole the inline-`api_key` refusal closes: it is a flag the
-  operator can always set, so the `declared ∩ ambient-verifiable` rule becomes opt-out by construction
-  (see `verifySourceReach`'s docblock). (b) The honest form — actually probing the endpoint — is a
-  sync→async contract change: `verifySourceReach` and `resolveAmbientSources` are synchronous and
-  `resolveSessionConfig` calls them that way, so the probe ripples through session-config resolution
-  and Gate-0. (c) "Only allow it for loopback endpoints" bounds (a) but does not fix reach — a dead
-  local proxy is the exact failure this lane hit twice. So the real choice is: pay for the async probe,
-  or accept that keyless lanes are declared-not-verified and say so at Gate-0.
+  ⚠ **Re-verified 2026-07-24: the mechanism ALREADY EXISTS one branch away.** The `claude-worker` case
+  in the same `verifySourceReach` switch treats `api_key_env` as optional ("keyless proxy default"),
+  refuses inline `api_key` for the identical possession≠reach reason, and proves reach with
+  `defaultProbeHttpReachable` — a SYNCHRONOUS liveness probe (it spawns a short-lived node fetch), so
+  there is no sync→async ripple and no new primitive to build. The `openai-compatible` branch simply
+  never adopted it.
+  ⚠ Two constraints the fix must respect: the probe counts ANY HTTP status on `/v1/models` as alive (a
+  401 proves it is listening), so probe-alone would ADMIT a keyed endpoint whose key the operator
+  forgot — which is why keyless must be declared EXPLICITLY (`no_auth: true`) rather than inferred from
+  an omitted field; and declaring `no_auth` together with `api_key_env` is contradictory and should be
+  refused, not silently resolved.
 
 - **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
   (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
@@ -337,32 +339,6 @@
   unverified and needs that live probe. The `--dangerously-skip-permissions` workaround stays refused by
   `shell-trap-guard.mjs` (prompt-derail trap, with the three agy headless traps). Delete this entry once
   the probe is green.
-
-- **The TEST TREE IS NOT TYPECHECKED AT ALL — `.ts` tests included (2026-07-19).** `tsconfig.json`
-  is `include: ["src"]` and vitest has no `typecheck` configured, so no test file is typechecked.
-  This keeps defeating "make the field required so `tsc` enumerates the sites": that guarantee is
-  real for production (`CapacityPool.accountKey` correctly enumerated its 2 producers) and worth
-  ZERO over fixtures. Concretely, three `.mjs` fixtures built pools without the new required field
-  and failed at RUNTIME rather than at compile time, and two more (`tests/audit/inv2.test.mjs`,
-  `tests/remediate/inv2.test.ts`) produced `account_key: undefined` through
-  `summarizeDispatchCapacityPools` and PASSED because nothing schema-parsed there. This is the same
-  class as the scope-less-window fixture problem. **Property to hold:** a fixture that omits a
-  required contract field fails loudly — either the test tree is typechecked, or the wire crossing
-  schema-validates on every path a fixture can reach.
-  **MEASURED 2026-07-24 — the sweep is bounded, so stop treating it as open-ended:** a
-  `tsconfig.test.json` extending the base with `include: ["src","tests"]` yields **222 errors across 131
-  files, ALL in `tests/remediate/`** (every other area is `.mjs` and invisible without `allowJs`).
-  Classes: 81× TS2741 missing required property (mostly `touched_files` on the block fixture), 53×
-  TS2345 arg-type, 28× TS7016 (`.mjs` helper import with no declarations — cleared by `allowJs`), 23×
-  TS2352, 17× TS2322. The config is worthless until the fixture sweep lands, so they ship together.
-  Two more symptoms of the same root, worth knowing because each costs time on its own: (a) making a
-  field required *because omission is a defect* enforces nothing in tests — the compiler correctly
-  sweeps production call sites while every test call site silently keeps getting `undefined`, so a
-  green suite reads as "every call site swept" when it cannot be; (b) a large `Edit` that breaks brace
-  balance in a `.test.mjs` is invisible to the typecheck and surfaces only as vitest failing to
-  transform the whole FILE — one opaque "Failed Suites" entry naming no test, masking every real
-  assertion in it. Candidate mechanisms: a `tsconfig.test.json` wired into `verify:checks`, or
-  `vitest --typecheck`.
 
 - **SPEC — delete inline `api_key` support; a credential must be named, never pasted.** Account identity
   compares `(endpoint, credential REFERENCE)`, so a source naming its key through an env var and a
@@ -818,6 +794,21 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **`touched_files` is documented REQUIRED but nothing enforces it, and state LOAD uses the WEAKER of
+  two validators (2026-07-24, medium, LEAD — surfaced by the test-tree typecheck sweep).**
+  `src/remediate/state/types.ts:35-42` says a block with no declared surface "is a producer bug, not an
+  implicit empty". Yet (a) every production consumer reads `block.touched_files ?? []`
+  (`nextStep.ts:868,1353,1398,1410`, `plan.ts:308,486`), so the producer bug is silently normalized, and
+  (b) `validateRemediationBlock` DOES list it in `requireKeys` (`validation/remediationState.ts:84-95`)
+  but is only reached via `validateRemediationPlan` (`nextStep.ts:1619`, `validation/artifacts.ts:307,321`)
+  — state LOAD goes through `store.ts`'s own `validateState` (`:142`, called at `:247`), which does not
+  require it. Two validators for one object, disagreeing on required fields, weaker one on the load path.
+  ⚠ **Decide the contract before the fixtures calcify:** the 2026-07-24 sweep added `touched_files: []`
+  at 97 fixture sites. Each is byte-equivalent to the omission it replaced (`?? []`), but they now ENCODE the
+  producer-bug case as normal. Same root: long-lived fixtures carried dead keys `deps` / `depends_on`
+  (neither is a field — the real one is `dependencies`), which survived only because nothing validates a
+  block on save. [[validator-guards-every-field-caller-reads]]
+
 - **Friction walk (fourth backlog-clearance lap, 2026-07-24):** (1) **inefficient-feeding (medium):**
   `llm-call.mjs` takes `--schema`, and the DEFAULT container silently flattened a six-part lettered
   question into one `summary` with `findings: []` — which reads as model incapacity and is not. The
@@ -831,6 +822,13 @@
   a contract change the entry never mentions — the keyless-endpoint item reads knob-sized but needs a
   sync→async ripple through session-config resolution. Entries should state the cost when the mechanism
   is known to be structural ([[backlog-item-states-invariant-not-fix-mechanism]]).
+  (4) **ambiguous-direction (HIGH — nearly cost the whole task):** the sweep was first sized at "222
+  errors / 131 files" and deferred as multi-hour. Both numbers were wrong: `tsc` continuation lines were
+  counted as filenames (real: 50 files), and `allowJs` erased 28 errors outright. Eight parallel agents
+  cleared it in ~7 minutes. A mis-parsed tool report inflated the estimate 2.6× and the inflated estimate
+  was then used to justify NOT doing the work. Parse a tool's output with its actual grammar before
+  sizing anything from it. ⚠ Related measurement trap: `tsc` reports only ONE missing property per object
+  literal, so an error count is a LOWER BOUND — every batch found 10-20% more once siblings unmasked.
 
 - **Friction walk (second backlog-clearance lap, 2026-07-24):** (1) **ambiguous-direction (medium):**
   a backlog entry can name a fix whose PREMISE is sound and whose CONSEQUENCE is unshippable — the

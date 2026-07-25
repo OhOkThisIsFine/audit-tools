@@ -20,9 +20,14 @@ import { driveRollingDispatch } from "../../src/remediate/steps/nextStep.js";
 
 const pool: CapacityPool = {
   id: "stub/*",
+  accountKey: "stub/*",
   providerName: "claude-code",
   hostModel: null,
-  hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
+  hostConcurrencyLimit: {
+    active_subagents: 8,
+    source: "session_config",
+    description: "test fixture host limit",
+  },
 };
 const session: SessionConfig = { quota: {} };
 

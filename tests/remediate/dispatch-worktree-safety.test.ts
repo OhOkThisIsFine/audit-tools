@@ -400,7 +400,12 @@ function makeReconState(): RemediationState {
     affected_files: [{ path: "src/x.ts" }],
     evidence: ["e"],
   } as Finding;
-  const block: RemediationBlock = { block_id: BLOCK, items: [finding.id], parallel_safe: true };
+  const block: RemediationBlock = {
+    block_id: BLOCK,
+    items: [finding.id],
+    parallel_safe: true,
+    touched_files: [],
+  };
   return {
     status: "implementing",
     plan: {

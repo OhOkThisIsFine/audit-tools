@@ -56,6 +56,7 @@ describe("byte-based token estimation — implement dispatch", () => {
           {
             id: findingId,
             title: "Impl token test",
+            category: "maintainability",
             severity: "medium",
             confidence: "high",
             lens: "maintainability",
@@ -68,10 +69,14 @@ describe("byte-based token estimation — implement dispatch", () => {
           {
             block_id: blockId,
             items: [findingId],
-            depends_on: [],
+            parallel_safe: true,
+            touched_files: [],
+            dependencies: [],
           },
         ],
         themes: [],
+        project_type: "unknown",
+        candidate_closing_actions: [],
       },
       items: {
         [findingId]: {

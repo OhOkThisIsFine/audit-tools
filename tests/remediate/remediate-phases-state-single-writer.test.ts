@@ -123,7 +123,7 @@ describe("N-remediate-phases — step constant + evidence path agreement (OBL-IN
             evidence: ["evidence"],
           },
         ],
-        blocks: [{ block_id: "B-RPS", items: ["F-RPS"], parallel_safe: true }],
+        blocks: [{ block_id: "B-RPS", items: ["F-RPS"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       },
