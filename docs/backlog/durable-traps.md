@@ -10,6 +10,14 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).**
+  A refused `git add <files> && git commit …` is refused at the tool call, before any statement executes, so
+  the `add` did not happen either — and the retry fails identically, reading as "the gate ignored my fix".
+  Compounded by the constitutional-doc / loop-core attestations, which bind to the EXACT staged tree: the
+  natural `add && attest && commit` chain can never work, since staging after attesting invalidates the
+  override. Stage in its own call, then attest, then commit. (Converse of
+  [[pretooluse-gate-misses-chained-git-add-commit]], where the chain BYPASSES the gate.)
+
 - **An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).** The memory
   consolidation found a memory listing 4 open items of which 3 were long done (audit's symmetric
   `runRollingDispatch` wiring, INV-QD-14 spill, `rate_limited` handling). Same decay as
