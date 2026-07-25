@@ -372,7 +372,7 @@ describe("mergeImplementResults per-item validation", () => {
     );
   });
 
-  it("note 3 part B: needs_clarification routes to a clarification round, not triage", async () => {
+  it("note 3 part B: needs_clarification records the question and defers it, never triage", async () => {
     await saveState(makeImplementingState());
     const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
     await mkdir(resultDir, { recursive: true });
@@ -415,10 +415,14 @@ describe("mergeImplementResults per-item validation", () => {
       runId,
     );
 
-    // The item is paused (NOT blocked → triage, NOT terminal) and the run flips to
-    // the clarification round with the worker's question surfaced.
+    // The item is paused (NOT blocked → triage, NOT terminal) and the worker's
+    // question is surfaced for the batched round. The run does NOT flip to that
+    // round here: F-002 is still pending, and a question no longer freezes a
+    // sibling's remaining work — the round is deferred to the end of the implement
+    // phase (see tests/remediate/deferred-clarification.test.ts).
     expect(merged.items?.["F-001"].status).toBe("needs_clarification");
-    expect(merged.status).toBe("waiting_for_clarification");
+    expect(merged.items?.["F-002"].status).toBe("pending");
+    expect(merged.status).toBe("implementing");
     expect(merged.clarifications?.[0]).toMatchObject({
       finding_id: "F-001",
       category: "scope_of_fix",

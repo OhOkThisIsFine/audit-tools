@@ -1,6 +1,10 @@
 import type { Finding, ItemSpec, RemediationBlock } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
-import { isTerminalStatus, isVerifiedCompleteStatus } from "../state/itemStatus.js";
+import {
+  isInProgressStatus,
+  isTerminalStatus,
+  isVerifiedCompleteStatus,
+} from "../state/itemStatus.js";
 
 export type FindingRiskTier = "safe" | "substantive" | "context_dependent";
 
@@ -62,6 +66,64 @@ export function dependencyVerifiedComplete(
     }
   }
   return true;
+}
+
+/**
+ * Whether every unsatisfied dependency edge of `block` traces to an item that is
+ * merely AWAITING A CLARIFICATION ANSWER, rather than to one that genuinely
+ * failed. This is the discriminator the dead-end sweep needs.
+ *
+ * {@link dependencyVerifiedComplete} answers only "may this node dispatch NOW",
+ * and a `needs_clarification` prerequisite fails it exactly the way a skipped or
+ * blocked one does. Conflating them is safe only while an unanswered question
+ * freezes the entire run. Once the question is DEFERRED to the end of the
+ * implement phase (so siblings keep working), the dead-end sweep reaches the
+ * dependents of an unanswered question and would mark them `blocked` — silently
+ * converting "awaiting an answer" into "upstream failed", a worse bug than the
+ * freeze. A node this predicate accepts is left `pending` instead and re-decided
+ * after the batched clarification round: an answer that re-opens the upstream
+ * makes the node eligible; an answer that disposes the upstream (a SKIP) makes
+ * this predicate false, so the ordinary sweep dead-ends the node then, with the
+ * accurate reason.
+ *
+ * Transitive, because the hold propagates down a chain (A→B→C with C awaiting
+ * leaves both B and A held), and cycle-guarded, so a cyclic edge is never
+ * reported as awaiting and still dead-ends exactly as it does today.
+ */
+export function dependencyAwaitingClarification(
+  block: RemediationBlock,
+  state: RemediationState,
+  seen: ReadonlySet<string> = new Set(),
+): boolean {
+  if (seen.has(block.block_id)) return false; // cycle: not awaiting, dead-end it
+  const guard = new Set(seen).add(block.block_id);
+  let awaiting = false;
+  for (const depId of block.dependencies ?? []) {
+    const depBlock = state.plan?.blocks.find((b) => b.block_id === depId);
+    if (!depBlock) continue; // dangling edge: never waited on (mirrors the predicates above)
+    for (const findingId of depBlock.items) {
+      const status = state.items?.[findingId]?.status;
+      if (isVerifiedCompleteStatus(status)) continue; // this edge is satisfied
+      if (status === "needs_clarification") {
+        awaiting = true;
+        continue;
+      }
+      // A dependency still mid-flight counts as awaiting only when IT is itself
+      // held by a question further upstream. Anything else — blocked, a SKIP, a
+      // missing item, an eligible-but-undispatched node — is not an awaited
+      // answer, so the node is left to the ordinary dead-end sweep.
+      if (
+        status !== undefined &&
+        isInProgressStatus(status) &&
+        dependencyAwaitingClarification(depBlock, state, guard)
+      ) {
+        awaiting = true;
+        continue;
+      }
+      return false;
+    }
+  }
+  return awaiting;
 }
 
 /**

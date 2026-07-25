@@ -9,11 +9,24 @@ but runs independently; when the two are paired, read alongside the auditor's
 
 1. Automate every step that can be automated; reserve the LLM for judgment
    calls that cannot be reduced to a deterministic rule.
-2. User interaction is confined to explicit, batched windows: an up-front
-   planning window before implementation starts, and an end-of-run triage
-   window for any blocked items. No ad hoc prompts during implementation.
-3. Remediation is binary: every remediation item is resolved, deemed
-   inappropriate, or user-confirmed ignored. No partial completion state.
+2. User *questions* are confined to explicit, batched windows: an up-front
+   planning window before implementation starts, a clarification window at the
+   END of the implement phase for questions workers raised mid-phase, and an
+   end-of-run triage window for any blocked items. No ad hoc prompts during
+   implementation — a worker that hits a scoping or judgment question records it
+   and returns; it never prompts the user itself, and its question never
+   interrupts a sibling item's remaining work. (A batched *question* window is
+   not the same thing as a pause: a run can also halt resumably without asking
+   anything — a provider quota wall is one such pause, see Resume semantics.
+   The windows above are not an exhaustive list of every point a run can stop.)
+3. Remediation is binary: every remediation item ends in a TERMINAL state, and a
+   run cannot complete while any item has not. The terminal states are resolved,
+   resolved with no change needed, user-confirmed ignored, deemed inappropriate,
+   and abandoned (the tool gave up — retry bound exhausted, final gate red, or
+   operator halt). No partial completion state: an item that reached no end state
+   at all is exactly what `abandoned` exists to prevent, and abandonment is
+   deliberately distinct from ignoring, so "the tool gave up" is never recorded as
+   "the user decided not to act".
 4. The final retained output is deterministic Markdown at
    `remediation-report.md`.
 5. Remediation must resume cleanly after interruption at any phase boundary.
@@ -125,7 +138,7 @@ gates fire at planning, each at most once per run:
   A declined node becomes a RECORDED terminal disposition (`ignored`), never
   silently bulk-dispositioned inside a quality-tail node.
 - **Ambiguity gate** (`runPlanAmbiguityGate`): every scoping/judgment ambiguity
-  across all items is batched into a single `clarification_request.json` and
+  across all items is batched into a single `ambiguity_request.json` and
   surfaced to the user at once (categories under Ambiguity criteria below).
   Remediation halts until every clarification is resolved.
 
@@ -152,8 +165,8 @@ and the project-level `closing_plan` persist inline on `RemediationState`
 (`state.items[id].item_spec`, `state.closing_plan`), validated against
 `ItemSpecSchema` / `ClosingPlanSchema` before the next phase may read them.
 
-After the gates exit cleanly, no further user interaction occurs until the
-end-of-run triage window.
+After the gates exit cleanly, the next user *question* is the deferred
+clarification window at the end of Phase 3, or the end-of-run triage window.
 
 ### Phase 3: Implement (LLM, sequential or parallel)
 
@@ -176,11 +189,28 @@ Within a block, each item runs through:
 
 Per-item state: `pending -> tested -> tested_successfully -> refactored -> verified -> resolved`
 (or `resolved_no_change`), with side-states `blocked`, `needs_clarification`, `deemed_inappropriate`,
-and `ignored` reachable at defined points. A blocked item does not stop sibling items in the same
-block or other blocks from making progress.
+`ignored`, and `abandoned` reachable at defined points (`abandoned` is the tool giving up — retry bound
+exhausted, final gate red, or operator halt — so that every item ends terminal). A blocked item does
+not stop sibling items in the same block or other blocks from making progress.
 
-Phase 3 runs to termination. Every item that can make progress does, even
-if other items are blocked. No item-level user prompts during Phase 3.
+**Deferred clarifications.** A worker that hits a scoping or judgment question
+sets `needs_clarification`, records the question, and returns. That does NOT halt
+the run: pending work keeps dispatching, and the questions are batched into one
+window at the END of the implement phase, once the eligible dispatch frontier has
+drained. Because a `needs_clarification` item is not verified-complete, its
+dependents are ineligible while the answer is outstanding — they are HELD
+`pending`, explicitly distinguished from nodes whose upstream genuinely failed
+(`dependencyAwaitingClarification`), so an unanswered question is never recorded
+as "upstream failed". Once the answer lands, a re-opened upstream makes the
+dependents eligible and a disposed (skipped) upstream dead-ends them with the
+accurate reason.
+
+Every item that can make progress does, even if other items are blocked or
+awaiting an answer. No item-level user prompts during Phase 3. Phase 3 does not
+run to completion in one call: like every phase it advances one bounded step per
+invocation, and it can halt mid-phase at a resumable pause that is not a question
+(a provider quota wall emits `quota_paused`, leaving the stranded nodes pending —
+see Resume semantics) or re-block at a phase-boundary test gate.
 
 ### Phase 3b: Triage (user, batched)
 
@@ -194,8 +224,8 @@ them into a single triage interaction:
 Retried items re-enter Phase 3. Ignored items are terminal and recorded in
 the final report. Halt leaves durable state and exits.
 
-Triage is the only user interaction after Phase 2. If Phase 3 produces no
-blocked items, Phase 3b is skipped.
+Triage and the deferred clarification window are the user interactions after
+Phase 2. If Phase 3 produces no blocked items, Phase 3b is skipped.
 
 ### Phase 4: Close
 
@@ -306,8 +336,8 @@ orchestration tooling.
 
 Remediation is complete only when:
 
-- every item is in a terminal state (resolved, deemed-inappropriate, or
-  user-confirmed ignored),
+- every item is in a terminal state (`resolved`, `resolved_no_change`,
+  `deemed_inappropriate`, user-confirmed `ignored`, or `abandoned`),
 - the full unit/integration test suite passes on the combined post-remediation state,
 - end-to-end tests pass (if an `e2e_command` was detected),
 - the configured closing action has either executed or been explicitly

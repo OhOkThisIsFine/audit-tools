@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { discardOnSchemaVersionMismatch, readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -46,7 +46,10 @@ import {
 import { resolveRepoRoot } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
-import { dependencyVerifiedComplete } from "./stepUtils.js";
+import {
+  dependencyAwaitingClarification,
+  dependencyVerifiedComplete,
+} from "./stepUtils.js";
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
@@ -79,6 +82,7 @@ import {
   buildReviewRequest,
   applyReviewResolution,
   isResolutionForRequest,
+  REVIEW_REQUEST_SCHEMA_VERSION,
   type ReviewRequest,
   type ReviewResolution,
 } from "../review/reviewGate.js";
@@ -536,12 +540,18 @@ function implementableBlocks(state: RemediationState): RemediationBlock[] {
 }
 
 /**
- * Pending nodes that are NOT eligible because at least one dependency did not
- * reach a verified-complete disposition (a prerequisite was skipped, blocked, or
- * is still pending). Once no eligible block remains, these are dead-ended: the
- * rolling scheduler marks them `blocked` (their upstream surface never landed)
- * rather than looping forever. Used by `handlePlanning` to make that transition
- * deterministic.
+ * Pending nodes that are genuinely DEAD-ENDED: at least one dependency did not
+ * reach a verified-complete disposition and never will (a prerequisite was
+ * skipped or blocked, or the edges are cyclic). Once no eligible block remains,
+ * these are marked `blocked` — their upstream surface never landed — rather than
+ * looping forever.
+ *
+ * A node held only by an UNANSWERED WORKER QUESTION is deliberately excluded
+ * (`dependencyAwaitingClarification`): since the clarification round is deferred
+ * to the end of the implement phase, such a node reaches this sweep while its
+ * answer is still outstanding, and blocking it would report "upstream failed"
+ * for what is really "awaiting an answer". It stays `pending` and is re-decided
+ * once the answer lands.
  */
 function blockedByUnsatisfiedDependency(
   state: RemediationState,
@@ -550,7 +560,20 @@ function blockedByUnsatisfiedDependency(
   return state.plan.blocks.filter(
     (block) =>
       !dependencyVerifiedComplete(block, state) &&
+      !dependencyAwaitingClarification(block, state) &&
       block.items.some((findingId) => state.items?.[findingId]?.status === "pending"),
+  );
+}
+
+/**
+ * Whether any item is paused on a worker question that has not been answered yet.
+ * Drives the deferred clarification round (the `deferred_clarification`
+ * obligation): the question waits until the implement frontier drains, then is
+ * asked in one batched window.
+ */
+function hasUnansweredClarification(state: RemediationState): boolean {
+  return Object.values(state.items ?? {}).some(
+    (it) => it.status === "needs_clarification",
   );
 }
 
@@ -2718,8 +2741,13 @@ async function handlePendingExtractedPlan(
         run_start_dirty: [...stagedAndUntracked(root)].sort(),
       };
     }
-    const reviewDecision = await readOptionalJsonFile<ReviewDecisionRecord>(
-      reviewDecisionPath(artifactsDir),
+    // Discarded on mismatch, so the gate re-asks rather than replaying operator
+    // decisions under semantics they were not made under. Re-asking costs a repeat
+    // answer; applying them blind could act on a keep/decline that no longer means
+    // what it meant when it was recorded.
+    const reviewDecision = discardOnSchemaVersionMismatch(
+      await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir)),
+      REVIEW_DECISION_SCHEMA_VERSION,
     );
     // Coverage ledger. Path A (structured_audit): the single filter pass ran at
     // intake over the ORIGINAL findings and persisted its dispositions — build
@@ -2950,9 +2978,12 @@ async function runReviewApprovalGate(
       };
     }
     // Consume the resolution into a durable, reasoned decision record.
+    // Regenerable: a stale-schema request is treated as absent and rebuilt below.
     const request =
-      (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
-      buildReviewRequest(survivors, randomRunId("path-a-review"));
+      discardOnSchemaVersionMismatch(
+        await readOptionalJsonFile<ReviewRequest>(requestPath),
+        REVIEW_REQUEST_SCHEMA_VERSION,
+      ) ?? buildReviewRequest(survivors, randomRunId("path-a-review"));
     const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
     if (!isResolutionForRequest(request, resolution)) {
       // Stale cross-run resolution (plan_id mismatch): archive it and RE-HALT
@@ -2988,7 +3019,12 @@ async function runReviewApprovalGate(
   // decision approves a SUBSET with declined EMPTY (leftovers live but not
   // approved), so keying the replay on the declined set alone would silently
   // re-approve every leftover on the next call.
-  const decision = await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath);
+  // Discarded on mismatch — see the note at the sibling read: a stale-schema
+  // decision record re-asks rather than replaying stale operator intent.
+  const decision = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath),
+    REVIEW_DECISION_SCHEMA_VERSION,
+  );
   const declined = decision?.declined ?? [];
   const declinedIds = new Set(declined.map((d) => d.finding_id));
   const approvedIds = decision ? new Set(decision.approved_ids ?? []) : undefined;
@@ -3714,7 +3750,17 @@ async function applyPlanClarificationResolution(
   const remainingPending = state.plan.findings.some(
     (f) => state.items?.[f.id]?.status === "pending",
   );
-  state.status = remainingPending ? "implementing" : "closing";
+  // Undecided-remainder guard, mirroring triage's still-blocked guard: a
+  // resolution covering only SOME of the paused items must not fall through to
+  // closing, which would force-close the undecided ones as `abandoned` and drop
+  // their questions unanswered. Load-bearing now that the round runs at the
+  // DRAINED end of the implement phase, where `remainingPending` is normally
+  // false — the fall-through it guards is the common case, not a corner.
+  state.status = remainingPending
+    ? "implementing"
+    : hasUnansweredClarification(state)
+      ? "waiting_for_clarification"
+      : "closing";
   state.clarifications = [];
   state.closing_plan ??= { action: "none" };
   await store.saveState(state);
@@ -3815,9 +3861,12 @@ async function runPlanningReviewGate(
   }
 
   // Resolution present: consume it into a durable, reasoned decision record.
+  // Regenerable: a stale-schema request is treated as absent and rebuilt below.
   const request =
-    (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
-    buildReviewRequest(findings, reviewPlanId);
+    discardOnSchemaVersionMismatch(
+      await readOptionalJsonFile<ReviewRequest>(requestPath),
+      REVIEW_REQUEST_SCHEMA_VERSION,
+    ) ?? buildReviewRequest(findings, reviewPlanId);
   const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
   if (!isResolutionForRequest(request, resolution)) {
     // Stale cross-run resolution: archive it and re-halt with the live request.
@@ -4983,6 +5032,7 @@ const MAIN_PRIORITY: readonly string[] = [
   "waiting_for_triage",
   "planning_documentable",
   "partial_terminal",
+  "deferred_clarification",
   "implementing",
   "triage",
   "planning_zero",
@@ -5120,6 +5170,36 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           options,
           runLogger,
         );
+      },
+    },
+    {
+      // Deferred clarification round. A worker question no longer freezes the run
+      // at merge time; it waits HERE — at the END of the implement phase, once the
+      // eligible dispatch frontier has drained — so every sibling's remaining work
+      // lands first and the questions are asked in one batched window (the goals
+      // doc's bounded-window promise).
+      //
+      // Ordered ABOVE `implementing` only because the derive already requires an
+      // empty frontier: while any node is dispatchable this obligation is
+      // satisfied and `implementing` dispatches it. Ordered above `triage` /
+      // `all_terminal` / `closing` so an unanswered question can never be swept
+      // past into close (triage with no blocked items routes straight to closing,
+      // which would force-close the paused item as `abandoned` and lose the
+      // question). It is NOT the only mid-phase halt — `partial_terminal` still
+      // owns the quota pause, and keeps its higher slot.
+      id: "deferred_clarification",
+      derive: (state) =>
+        state != null &&
+        (state.status === "implementing" || state.status === "triage") &&
+        hasUnansweredClarification(state) &&
+        implementableBlocks(state).length === 0
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => {
+        const s = requireState(state);
+        s.status = "waiting_for_clarification";
+        await store.saveState(s);
+        return { kind: "transition", state: s };
       },
     },
     {

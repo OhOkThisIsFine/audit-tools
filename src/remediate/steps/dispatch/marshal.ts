@@ -1523,22 +1523,27 @@ async function mergeImplementResultsIntoState(
       `${implementRejected} rejected\n`,
   );
 
-  // A worker that reported needs_clarification (note 3, part B) outranks both
-  // implementing and triage: pause the run for the batched clarification round so
-  // the user's answer is applied before any more work is dispatched or triaged.
-  // Otherwise route back to implementing while pending work remains (later
-  // dependency waves, or blocks deferred this wave because a prerequisite was
-  // still running); else advance to triage.
+  // A worker that reported needs_clarification (note 3, part B) DEFERS its
+  // question to the end of the implement phase — it no longer freezes the run at
+  // merge time, which used to stall every sibling item's remaining work behind
+  // one operator answer. Pending work therefore outranks the question: route back
+  // to implementing while any work remains (later dependency waves, or blocks
+  // deferred this wave because a prerequisite was still running), and the batched
+  // clarification round fires once the eligible frontier drains — either here,
+  // when this merge leaves nothing pending, or at the `deferred_clarification`
+  // obligation in nextStep.ts, when what remains pending is held behind the
+  // unanswered question. The question still outranks triage: an unanswered
+  // question must never be swept past into close.
   const needsClarification = Object.values(state.items).some(
     (it) => it.status === "needs_clarification",
   );
   const moreToImplement = Object.values(state.items).some(
     (it) => it.status === "pending",
   );
-  state.status = needsClarification
-    ? "waiting_for_clarification"
-    : moreToImplement
-      ? "implementing"
+  state.status = moreToImplement
+    ? "implementing"
+    : needsClarification
+      ? "waiting_for_clarification"
       : "triage";
 
   // Persist this pass's actually-landed files into the run-wide staging manifest
