@@ -154,6 +154,14 @@ the trap list (CRLF clean-tree guard, allow-scripts postinstall on global reinst
 release-CI-is-the-real-signal), the release-pipeline shape, and the always-on pipeline profiling. Never
 park at the push/publish boundary.
 
+## Before implementing
+
+The pre-implementation gate is the `/design-check` skill (`.claude/skills/design-check/SKILL.md`) — it
+owns the retirement-collision check (does this add back something deliberately removed), the
+independent refutation pass, and the failing-test-first handoff. Run it before non-trivial loop-core /
+shared-contract / dispatch work, not after the code exists: the same catch costs an edit to a plan
+instead of a rewrite. Trivial mechanical edits skip it.
+
 ## Conventions & invariants
 
 - **Auditor-agnostic robustness — enforce in tooling, never host discretion.** The host/auditor agent is a variable of any strength, not a constant. Every workflow correctness property must be guaranteed by the tool itself — CLI option shape, contract validator, renderer template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement — never by the host *remembering*, *noticing*, or *reasoning*. Any place the workflow only works because a capable host folded in guidance, relayed upstream evidence, paced dispatch safely, picked the right id, verified from disk, or hand-fixed a cross-block break is a **latent failure mode** → move it into the tool so it's impossible to get wrong. "Be careful" / "habit fix" / "my side" is never a fix; prefer changes that make the process *simpler*, not ones that add a step the host must remember. (Generalizes "Conversation-first" and "a needed manual flag is a bug signal".)
@@ -174,10 +182,14 @@ park at the push/publish boundary.
   states the trap and the fix when it fires). Current guards in `.claude/hooks/`:
   `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
   `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and
-  `mktemp`; agy headless flag/stdin traps; a refusal of a suite/verify exit code masked by a pipe),
+  `mktemp`; a live backtick, which command-substitutes inside double quotes too, so markdown backticks in a
+  quoted message are executed rather than written; agy headless flag/stdin traps; a refusal of a suite/verify
+  exit code masked by a pipe),
   `tool-input-guard.mjs` (PreToolUse Edit/Write/Agent — raw control bytes in written content, Agent
   `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
-  `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`). Contract-tested in
+  `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`, a stale git
+  `index.lock`/`shallow.lock`, and offload-lane liveness so a down proxy is a known constraint at lap start
+  rather than a mid-lap stall). Contract-tested in
   `tests/shared/hook-trap-guards.test.mjs` (under `tests/` because vitest excludes `.claude/**`, so a test
   beside a hook never runs in CI). **Adding a hook:** register it in `.claude/settings.json` AND add the
   `!.claude/hooks/<name>` line to `.gitignore` in the SAME commit — the commit gate blocks a settings.json

@@ -195,6 +195,7 @@ export const DOC_MANIFEST = [
   {
     type: "meta-tooling / dev-workflow",
     files: [
+      ".claude/skills/design-check/SKILL.md",
       ".claude/skills/disambiguate-backlog/SKILL.md",
       ".claude/skills/ship/SKILL.md",
       ".claude/skills/start-lap/SKILL.md",

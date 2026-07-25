@@ -101,6 +101,40 @@ export function stripHeredocBodies(cmd) {
   return out.join('\n');
 }
 
+// Find backticks that COMMAND-SUBSTITUTE in a POSIX shell, i.e. every backtick
+// except the inert ones. Callers cannot use stripQuoted for this: it blanks the
+// content of BOTH quote kinds, so the double-quoted case — the one that actually
+// bites — is erased before the scan can see it.
+//
+// Substituting: bare (outside quotes) and inside DOUBLE quotes. Inert: inside
+// SINGLE quotes, and backslash-escaped in either substituting position. Returns
+// `[{ index, context: 'double' | 'bare' }]`, empty when the text is inert.
+export function findLiveBackticks(s) {
+  const hits = [];
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue; // no escapes inside single quotes; nothing substitutes
+    }
+    if (c === '\\' && i + 1 < s.length) {
+      i++; // escaped char — literal in both remaining positions
+      continue;
+    }
+    if (c === '`') {
+      hits.push({ index: i, context: quote === '"' ? 'double' : 'bare' });
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+  }
+  return hits;
+}
+
 // Split a command into shell statements on `&&`, `||`, `;`, and newlines that
 // occur OUTSIDE quoted spans. Line CONTINUATIONS are joined first — `\` +
 // newline (POSIX) and backtick + newline (PowerShell) continue the same

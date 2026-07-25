@@ -7,8 +7,9 @@
 // Always exits 0: a probe must never block a session from starting. Network and
 // git faults degrade to silence.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { get as httpGet } from 'node:http';
+import { join, resolve } from 'node:path';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state');
@@ -70,6 +71,72 @@ try {
   }
 } catch {
   /* offline / not a git repo — stay silent */
+}
+
+// ── Stale git lock ───────────────────────────────────────────────────────────
+// `index.lock` / `shallow.lock` outlive a killed or timed-out git process, and
+// every later write fails with "Unable to create '...': File exists" — read as a
+// permissions or corruption fault far more often than as the leftover it is. A
+// live lock is held for well under a second, so age is the discriminator.
+// Reported, never removed: deleting the lock of a git process that IS running
+// corrupts the index.
+try {
+  const gitDir = git(['rev-parse', '--git-dir'], 5_000);
+  if (gitDir.ok && gitDir.stdout) {
+    // `--git-dir` is relative in a plain checkout and ABSOLUTE in a linked
+    // worktree — resolve, never join, or the absolute form is appended to ROOT.
+    for (const lock of ['index.lock', 'shallow.lock']) {
+      const p = resolve(ROOT, gitDir.stdout, lock);
+      if (!existsSync(p)) continue;
+      const ageMs = Date.now() - statSync(p).mtimeMs;
+      if (ageMs < 60_000) continue; // plausibly a live git process
+      notes.push(
+        `STALE git lock: ${lock} (${Math.round(ageMs / 60_000)} min old). Every git write will fail ` +
+          `with "Unable to create ... File exists" until it is cleared. Confirm no git process is running, ` +
+          `then remove it:\n    rm "${p.replace(/\\/g, '/')}"`,
+      );
+    }
+  }
+} catch {
+  /* not a git repo / stat fault — stay silent */
+}
+
+// ── Offload-lane liveness ────────────────────────────────────────────────────
+// The LiteLLM proxy is the free offload lane and it has no standalone fallback,
+// so when it is down every delegated call fails — but only once the lap has
+// already planned around delegation. Ten seconds at session start converts a
+// mid-lap stall into a known constraint. Probe only; starting it is the owner's
+// call (it needs the UTF-8 env, and a second instance would collide on the port).
+const PROXY_URL = process.env.AUDIT_TOOLS_OFFLOAD_PROBE_URL ?? 'http://127.0.0.1:4000/v1/models';
+const proxyUp = await new Promise((resolve) => {
+  let settled = false;
+  const done = (v) => {
+    if (!settled) {
+      settled = true;
+      resolve(v);
+    }
+  };
+  try {
+    const req = httpGet(PROXY_URL, (res) => {
+      res.resume(); // drain — status is the whole signal
+      done(res.statusCode !== undefined && res.statusCode < 500);
+    });
+    req.setTimeout(2_000, () => {
+      req.destroy();
+      done(false);
+    });
+    req.on('error', () => done(false));
+  } catch {
+    done(false);
+  }
+});
+if (!proxyUp) {
+  notes.push(
+    `OFFLOAD LANE DOWN — the LiteLLM proxy is not answering on ${PROXY_URL}, and it has no standalone ` +
+      'fallback: every delegated recon/review call will fail. Plan this lap without delegation, or start it ' +
+      '(the UTF-8 env is required on Windows or the startup banner crashes on cp1252):\n' +
+      '    PYTHONIOENCODING=utf-8 litellm --config ~/.audit-code/litellm-config.yaml --port 4000',
+  );
 }
 
 if (notes.length > 0) {

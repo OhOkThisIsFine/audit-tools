@@ -17,7 +17,12 @@
 // Failure policy: FAIL-OPEN on anything unexpected (unparseable payload, git
 // fault). A guard must never wedge the session.
 import { spawnSync } from 'node:child_process';
-import { stripQuoted, splitShellStatements, stripHeredocBodies } from './shell-split.mjs';
+import {
+  stripQuoted,
+  splitShellStatements,
+  stripHeredocBodies,
+  findLiveBackticks,
+} from './shell-split.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -225,6 +230,34 @@ if (isBash) {
       '`mktemp` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that node / the packaged CLI ' +
         'cannot resolve — it is re-rooted at the Windows CWD.\n' +
         '  fix: use the session scratchpad directory (an absolute `C:/...` path) for temp files.',
+    );
+  }
+
+  // A backtick in a POSIX shell is command substitution EVERYWHERE except inside
+  // single quotes — including inside double quotes, which is where prose lives.
+  // Markdown backticks in a commit message or a doc line therefore do not survive
+  // as text: the shell RUNS what they wrap and splices the output in. That is how
+  // a backlog file was corrupted — the writer read as prose, the shell read as a
+  // command, and the file landed with the substitution's output in place of the
+  // markdown.
+  //
+  // DENY rather than advise: both uses have a strictly better form ($() for a
+  // real substitution, -F <file> for prose), so there is nothing this refuses
+  // that has no correct rewrite ([[an-advisory-that-fires-and-is-read-past]]).
+  const liveTicks = findLiveBackticks(cmd);
+  if (liveTicks.length > 0 && process.env.AUDIT_TOOLS_ALLOW_BACKTICKS !== '1') {
+    const inProse = liveTicks.some((t) => t.context === 'double');
+    denials.push(
+      'live backtick in a Bash-tool command — a backtick COMMAND-SUBSTITUTES everywhere except inside ' +
+        "single quotes, so it substitutes inside double quotes too. Markdown backticks in a quoted " +
+        'message are executed, not written; that is how a backlog file landed with command output ' +
+        'spliced into its prose.\n' +
+        (inProse
+          ? '  fix (prose/markdown): write the body to the scratchpad and use `git commit -F <file>`, or ' +
+            'single-quote the string — inside single quotes a backtick is literal.\n'
+          : '') +
+        '  fix (real substitution): use $(...) instead — same semantics, nests, and does not collide with markdown.\n' +
+        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_BACKTICKS=1.',
     );
   }
 }

@@ -117,6 +117,51 @@ describe('shell-trap-guard: Bash-tool syntax traps', () => {
   });
 });
 
+describe('shell-trap-guard: a live backtick substitutes, including inside double quotes', () => {
+  // A backlog file was corrupted this way: markdown backticks written inside a
+  // double-quoted shell string are COMMAND SUBSTITUTION, so the shell ran what
+  // they wrapped and spliced the output into the file in place of the prose.
+  it('blocks markdown backticks inside a double-quoted commit message', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash('git commit -m "fix `npm run check` drift"'));
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/backtick/i);
+  });
+
+  it('allows the same text in SINGLE quotes, where a backtick is literal', () => {
+    expect(runHook(SHELL_GUARD, bash("git commit -m 'fix `npm run check` drift'")).code).toBe(0);
+  });
+
+  it('blocks a bare backtick substitution and names $() as the replacement', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash('echo `git rev-parse HEAD`'));
+    expect(code).toBe(2);
+    expect(stderr).toContain('$(...)');
+  });
+
+  it('allows the $() form it points at', () => {
+    expect(runHook(SHELL_GUARD, bash('echo $(git rev-parse HEAD)')).code).toBe(0);
+  });
+
+  it('allows a BACKSLASH-ESCAPED backtick — it does not substitute', () => {
+    expect(runHook(SHELL_GUARD, bash('git commit -m "literal \\` tick"')).code).toBe(0);
+  });
+
+  it('does not fire on backticks inside a heredoc body (stdin data, not argv)', () => {
+    const cmd = ["cat > msg.txt <<'EOF'", 'docs: explain `npm run check`', 'EOF'].join('\n');
+    const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+    expect(code, `expected allow; stderr:\n${stderr}`).toBe(0);
+  });
+
+  it('does NOT apply to PowerShell, where a backtick is the escape character', () => {
+    const payload = { tool_name: 'PowerShell', tool_input: { command: 'Write-Output "a`nb"' } };
+    expect(runHook(SHELL_GUARD, payload).code).toBe(0);
+  });
+
+  it('honours the deliberate-use override', () => {
+    const r = runHook(SHELL_GUARD, bash('echo `date`'), { env: { AUDIT_TOOLS_ALLOW_BACKTICKS: '1' } });
+    expect(r.code).toBe(0);
+  });
+});
+
 describe('shell-trap-guard: a heredoc BODY is data, not argv', () => {
   // Writing the commit message for this very change was refused: the body named
   // `mktemp` and the agy flag while describing them. A heredoc body reaches
