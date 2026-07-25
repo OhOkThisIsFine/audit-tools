@@ -229,24 +229,43 @@ if (isBash) {
   }
 }
 
-// ── ADVISE: exit-code masking ────────────────────────────────────────────────
-// `$?` after a pipe is the FILTER's status. Reading `exit=0` off a grep produced
-// a confident false-green on `verify:checks` that CI then caught. Same family:
-// `npm test > out; echo done` reports the trailing command, and a background job
-// piped through `tail` stays EMPTY until EOF (tail buffers), so progress polling
-// reads an empty file for minutes.
-const VERIFY_CMD = /\bnpm\s+(test|run\s+(check|build|verify|test|ci)[\w:]*)/;
+// ── Rule: a suite/verify exit code masked by a pipe ──────────────────────────
+// `$?` after a pipe is the FILTER's status, so `npm test 2>&1 | tail -50`
+// reports EXIT 0 for a RED suite — and `tail` buffers to EOF, so the captured
+// text held only the build notices. Both signals read green at once; the run
+// was actually 1 failed, found only by re-running redirected to a file
+// (2026-07-24). An earlier false-green on `verify:checks` reached CI the same
+// way.
+//
+// This was an ADVISORY and the advisory FIRED — it was read past, which is
+// precisely what an advisory cannot prevent. A manufactured false green is not
+// the "usually wrong but legitimately used" class: there is a strictly better
+// form for every use, so it is a DENY ([[false-red-is-as-corrosive-as-false-green]]).
+const SUITE_CMD =
+  /\b(?:npm|pnpm|yarn)\s+(?:test|run\s+(?:check|build|verify|test|ci|smoke|lint|fixtures)[\w:-]*)|\bnpx\s+vitest\b|\bvitest\s+run\b|\bnode\s+--test\b/;
+const FILTER_PIPE = /\|\s*(?:grep|rg|tail|head|wc|sed|awk|Select-String|Select-Object|more|less)\b/;
+// The masking is defeated when the statement propagates the pipeline's real
+// status: bash `set -o pipefail` / `${PIPESTATUS[0]}`. Those are correct usage.
+// Tested against the WHOLE command, never the statement: `set -o pipefail` is
+// its own statement and applies to every pipeline after it, and `${PIPESTATUS[0]}`
+// is read in the statement AFTER the pipe. A per-statement check sees neither.
+const PIPE_STATUS_PRESERVED = /\bpipefail\b|\bPIPESTATUS\b/.test(stripQuoted(cmd));
 for (const sub of subCmds) {
-  if (!VERIFY_CMD.test(sub)) continue;
-  if (/\|\s*(grep|rg|tail|head|Select-String)\b/.test(sub)) {
-    advisories.push(
-      'exit-code masking: `$?` after a pipe reports the FILTER\'s status, not the command\'s — this exact ' +
-        'shape produced a false-green on verify:checks that CI then caught. Capture the status first ' +
-        '(`cmd > log 2>&1 && echo PASS || echo "FAIL=$?"`) and read the log separately. ' +
-        'For a BACKGROUND job never pipe through `tail` — it buffers and the output file stays empty until exit.',
-    );
-    break;
-  }
+  const stripped = stripQuoted(sub);
+  if (!SUITE_CMD.test(stripped) || !FILTER_PIPE.test(stripped)) continue;
+  if (PIPE_STATUS_PRESERVED) continue;
+  if (process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT === '1') continue;
+  denials.push(
+    'masked suite exit code — a test/verify command piped into a filter reports the FILTER\'s status, ' +
+      'so a RED suite comes back EXIT 0. `tail` also buffers to EOF, so the captured text holds only the ' +
+      'early build notices: green status AND green-looking output, both false.\n' +
+      (isBash
+        ? '  fix: `npm test > run.log 2>&1; echo "EXIT=$?"` then read/grep `run.log` separately ' +
+          '(`set -o pipefail` also propagates the real status if you must pipe).\n'
+        : '  fix: `npm test *> run.log; "EXIT=$LASTEXITCODE"` then read/grep `run.log` separately.\n') +
+      `  offending statement: ${sub.slice(0, 200)}`,
+  );
+  break;
 }
 
 // ── Emit ─────────────────────────────────────────────────────────────────────

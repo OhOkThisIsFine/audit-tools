@@ -162,11 +162,51 @@ describe('shell-trap-guard: agy headless (three silent-failure traps)', () => {
   });
 });
 
-describe('shell-trap-guard: exit-code masking is ADVISORY, never a block', () => {
-  it('advises but allows a verify command piped into grep', () => {
-    const { code, stderr } = runHook(SHELL_GUARD, bash('npm run verify:checks 2>&1 | grep -iE "fail|error"'));
+describe('shell-trap-guard: a masked suite exit code is REFUSED (manufactured false green)', () => {
+  // Was an advisory until 2026-07-24. The advisory fired on `npm test 2>&1 |
+  // tail -50` and was read past: the suite was RED, the status said 0, and the
+  // buffered `tail` output held only build notices. An advisory cannot fix a
+  // signal that reads green — hence the promotion to DENY.
+  it('blocks `npm test` piped into tail', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash('npm test 2>&1 | tail -50'));
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/masked suite exit code/);
+    expect(stderr).toMatch(/EXIT=\$\?/);
+  });
+
+  it('blocks a verify command piped into grep', () => {
+    expect(runHook(SHELL_GUARD, bash('npm run verify:checks 2>&1 | grep -iE "fail|error"')).code).toBe(2);
+  });
+
+  it('covers the runners invoked directly, not only via npm scripts', () => {
+    expect(runHook(SHELL_GUARD, bash('npx vitest run 2>&1 | tail -50')).code).toBe(2);
+    expect(runHook(SHELL_GUARD, bash('vitest run tests/shared | head -20')).code).toBe(2);
+    expect(runHook(SHELL_GUARD, bash('node --test tests/ | wc -l')).code).toBe(2);
+  });
+
+  it('allows the correct form: redirect to a file, then read the status', () => {
+    const { code } = runHook(SHELL_GUARD, bash('npm test > run.log 2>&1; echo "EXIT=$?"'));
     expect(code).toBe(0);
-    expect(stderr).toMatch(/reports the FILTER/);
+  });
+
+  it('allows a pipe that PROPAGATES the real status (`pipefail` / `PIPESTATUS`)', () => {
+    expect(runHook(SHELL_GUARD, bash('set -o pipefail; npm test 2>&1 | tail -50')).code).toBe(0);
+    expect(runHook(SHELL_GUARD, bash('npm test 2>&1 | tail -50; exit ${PIPESTATUS[0]}')).code).toBe(0);
+  });
+
+  it('honors the deliberate escape hatch', () => {
+    const r = runHook(SHELL_GUARD, bash('npm test 2>&1 | tail -50'), {
+      env: { AUDIT_TOOLS_ALLOW_MASKED_EXIT: '1' },
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it('does not fire on a QUOTED mention of the shape (documenting the trap is not running it)', () => {
+    expect(runHook(SHELL_GUARD, bash('rg "npm test 2>&1 | tail" docs/')).code).toBe(0);
+  });
+
+  it('does not fire on an unrelated command piped into a filter', () => {
+    expect(runHook(SHELL_GUARD, bash('git log --oneline | head -20')).code).toBe(0);
   });
 });
 

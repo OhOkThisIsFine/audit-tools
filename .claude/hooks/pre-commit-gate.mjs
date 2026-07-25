@@ -70,7 +70,10 @@ let cmd = '';
 try {
   cmd = JSON.parse(raw)?.tool_input?.command ?? '';
 } catch {
-  process.exit(0); // unparseable payload — never wedge the session
+  // Never wedge the session — but the gate did NOT run, and a silent exit 0 is
+  // indistinguishable from a pass.
+  noteFailOpen('the hook payload was unparseable — no check ran for this command');
+  process.exit(0);
 }
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -227,6 +230,30 @@ const hasStageCommand =
   subCmds.some(isGitSubcommand('add')) ||
   commitSubCmds.some((s) => /(?:^|\s)(?:-(?!-)[a-zA-Z]*a[a-zA-Z]*|--all)(?=\s|$)/.test(s));
 
+// A chained `node .claude/hooks/attest-loop-core-review.mjs … && git commit …`
+// CANNOT satisfy the loop-core attestation check: PreToolUse fires once, on the
+// whole Bash call, so the attest half has not run when this gate reads the
+// attestation directory. Accepting the chain instead of blocking is not an
+// option — the gate would then be trusting an attestation whose verdict it has
+// never seen (`--verdict block` would sail through). So the chain stays blocked
+// and the MESSAGE names the real cause; otherwise the generic "no attestation"
+// text sends the agent off to write one it demonstrably just wrote.
+const chainsAttestation = subCmds.some((s) => /attest-loop-core-review(?:\.mjs)?\b/.test(stripQuoted(s)));
+const CHAINED_ATTEST_NOTE =
+  `\n⚠ This command CHAINS the attestation with the commit. That can never pass: PreToolUse fires once, ` +
+  `on the whole command, so the attest step has not run yet when this gate reads the attestation. ` +
+  `Run the attest command as its OWN tool call, then commit in a second call.`;
+
+// ── Fail-open announcement ───────────────────────────────────────────────────
+// The gate fails OPEN on infra faults (never wedge the session) — but a silent
+// fail-open is indistinguishable from a clean pass, so the commit it waved
+// through looks verified when nothing checked it. Every fail-open path states
+// which check it skipped. Written to stderr on an allow (exit 0), so it is
+// advice, not a block.
+function noteFailOpen(reason) {
+  console.error(`[pre-commit gate] FAIL-OPEN (allowing the commit): ${reason}`);
+}
+
 // ── git helper: run a git subcommand, capturing status/stdout/stderr. ────────
 // Never throws — callers branch on `.ok`. Used for the snapshot orchestration so
 // a git fault degrades to a decision, not an unhandled exception.
@@ -335,7 +362,13 @@ function runGate(committedPaths) {
   // test on main (release-contract.test.mjs asserts EXACT strings). We inspect
   // the staged set (git diff --cached) — the files that will actually commit.
   const cached = git(['diff', '--cached', '--name-only']);
-  if (!cached.ok) return { blocked: false }; // can't list staged — skip subset
+  if (!cached.ok) {
+    // Fail open, but SAY SO: a gate that degrades in silence reads exactly like
+    // a gate that ran and passed, so the one commit it waved through looks
+    // verified. Every fail-open below announces which check it skipped.
+    noteFailOpen('cannot list the staged set (`git diff --cached` failed) — doc-contract and loop-core checks SKIPPED');
+    return { blocked: false };
+  }
   let staged = cached.stdout
     .split(/\r?\n/)
     .map((p) => p.trim())
@@ -425,6 +458,9 @@ function runGate(committedPaths) {
   // precise trap this check exists to close. If settings.json is unreadable
   // there is nothing to assert; if the path set could not be computed
   // (committedPaths null) this skips, fail-open on infra.
+  if (!committedPaths) {
+    noteFailOpen('could not enumerate the committed path set — the hook-tracking invariant was SKIPPED');
+  }
   if (committedPaths) try {
     const settingsText = readFileSync(join(root, '.claude', 'settings.json'), 'utf8');
     const referenced = [
@@ -472,7 +508,13 @@ function runGate(committedPaths) {
     }
     if (!sha) {
       const wt = git(['write-tree']);
-      if (!wt.ok) return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+      if (!wt.ok) {
+        noteFailOpen(
+          'cannot bind the staged tree (`git write-tree` failed) — the LOOP-CORE ATTESTATION check was SKIPPED ' +
+            `for ${loopCoreStaged.length} loop-core path(s). This commit is NOT attested.`,
+        );
+        return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+      }
       sha = wt.stdout.trim();
     }
     const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
@@ -487,7 +529,8 @@ function runGate(committedPaths) {
           `The staged set touches loop-core (dispatch/quota/rolling/orchestrator substrate):\n` +
           loopCoreStaged.map((p) => `  - ${p}`).join('\n') +
           `\nHand-authored loop-core edits require a FRESH, staged-tree-bound review. Run:\n  ${runHint}\n` +
-          `then retry the commit (the attestation binds to the exact staged tree ${sha.slice(0, 12)}).`,
+          `then retry the commit (the attestation binds to the exact staged tree ${sha.slice(0, 12)}).` +
+          (chainsAttestation ? CHAINED_ATTEST_NOTE : ''),
       };
     }
     let attest;
@@ -507,7 +550,8 @@ function runGate(committedPaths) {
         message:
           `pre-commit gate: loop-core commit blocked — the review attestation is STALE (binds tree ` +
           `${String(attest?.staged_tree).slice(0, 12)}, staged tree is ${sha.slice(0, 12)}). ` +
-          `Re-review the current staged snapshot:\n  ${runHint}`,
+          `Re-review the current staged snapshot:\n  ${runHint}` +
+          (chainsAttestation ? CHAINED_ATTEST_NOTE : ''),
       };
     }
     // Destination-keyed strictness: the gate protects what can LAND on main,
@@ -561,7 +605,9 @@ function workingTreeDivergesFromIndex() {
 const diverges = workingTreeDivergesFromIndex();
 if (diverges === null) {
   // Not a git repo / git error — can't reason about the staged snapshot.
-  // FAIL-OPEN: allow the commit rather than wedge the session.
+  // FAIL-OPEN: allow the commit rather than wedge the session — but announce it,
+  // or a skipped gate is indistinguishable from a passed one.
+  noteFailOpen('`git status` failed (not a repo, or a git fault) — the ENTIRE gate was SKIPPED for this commit');
   process.exit(0);
 }
 

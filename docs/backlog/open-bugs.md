@@ -1036,16 +1036,6 @@
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
 
-- **The commit gate cannot see a chained `attest && git commit` (low).** PreToolUse fires on the whole
-  Bash call, so the attestation half has not run when the gate checks; workaround is to attest as its own
-  call. A gate that recognized the attest step in the same chain would remove the trap. Lesson home:
-  [[delegate-adversarial-phases-to-separate-agent]].
-
-- **A pre-commit-gate fail-open on infra fault is SILENT (low).** The linked-worktree case is fixed
-  (scratch index → `os.tmpdir()`), but the durable property is not: when the staged-snapshot path bails,
-  the gate should say so on stderr rather than passing quietly. Lesson home:
-  [[spec-degradation-and-doc-staleness]].
-
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
   - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
@@ -1174,16 +1164,6 @@
   while `deepseek-v4-flash` answered the same prompt in seconds — rank is not a latency ordering, and
   rank-1 is no default for a blocking call. Property: the lane states its concurrency (1) where a
   caller reads it, and a call it cannot serve refuses loudly rather than returning an empty document.
-
-- **`npm test 2>&1 | tail -N` reports EXIT 0 for a RED suite, and the shell-trap guard does not fire
-  (2026-07-24, medium, friction: tool-should-decide).** Used to keep a long suite out of the transcript.
-  The pipe makes `$?` the exit code of `tail`, so a failing run reported `exit code 0`; and `tail`
-  buffers to EOF, so the captured output held only the build notices. Both signals read green at once.
-  Caught only by re-running redirected to a file — the real result was 1 failed. `shell-trap-guard.mjs`
-  has an exit-code-masking advisory that did not trigger here. Property: a suite invocation whose exit
-  code is masked by a pipe is refused at the tool call, not left to the caller noticing that "green" had
-  no test counts in it. (The EOF-buffering half is already logged; the exit-code half manufactures a
-  false green, which is the sharper defect — [[false-red-is-as-corrosive-as-false-green]].)
 
 - **A backlog entry overstated its own mechanism again — "blocks the rest of the run" vs. a wrong
   terminal CLASSIFICATION (2026-07-24, low, friction: ambiguous-direction).** The unplaceable-node entry

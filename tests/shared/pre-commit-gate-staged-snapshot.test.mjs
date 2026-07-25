@@ -367,3 +367,76 @@ describe("pre-commit gate: bypass scoping, attester class, destination-keyed con
     expect(onBranch.status, `expected allow (0) off main; stderr:\n${onBranch.stderr}`).toBe(0);
   });
 });
+
+describe("pre-commit gate: a chained attest+commit names its own impossibility", () => {
+  // PreToolUse fires ONCE, on the whole Bash call, so `attest … && git commit …`
+  // is checked before the attest half has run. It must stay blocked (accepting
+  // the chain would trust a verdict the gate never read) — but the generic "no
+  // attestation" text sent the agent to write one it had just written.
+  test("blocks and explains when the attest step is chained into the commit", () => {
+    stageLoopCoreFile();
+    const r = runGate(
+      'node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t --attester-class agent ' +
+        '--checked "fixture" && git commit -m x',
+    );
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("CHAINS the attestation");
+    expect(r.stderr).toContain("as its OWN tool call");
+  });
+
+  test("the chained-note is absent from an ordinary missing-attestation block", () => {
+    stageLoopCoreFile();
+    const r = runGate();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("no adversarial-review attestation");
+    expect(r.stderr).not.toContain("CHAINS the attestation");
+  });
+
+  test("re-attesting after the staged tree MOVES is the same trap (attestation is sha-keyed)", () => {
+    // The attestation file is named for the staged tree, so moving the tree
+    // makes it MISSING, not stale — the chained form is the natural reflex
+    // there ("just re-attest and commit"), and it must be named as impossible.
+    stageLoopCoreFile();
+    const at = runAttest([
+      "--reviewed-by", "t",
+      "--attester-class", "agent",
+      "--checked", "checked the fixture loop-core edit for accounting drift and off-by-one",
+    ]);
+    expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
+    writeFileSync(join(repo, "src", "shared", "quota", "x.ts"), "export const x = 2;\n");
+    g("add", "-A");
+    const r = runGate("node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t ; git commit -m x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("CHAINS the attestation");
+  });
+});
+
+describe("pre-commit gate: a fail-open ANNOUNCES which check it skipped", () => {
+  // A silent fail-open is indistinguishable from a clean pass, so the commit it
+  // waved through looks verified when nothing checked it.
+  test("outside a git repo, the gate allows but says the whole gate was skipped", () => {
+    const notARepo = mkdtempSync(join(tmpdir(), "gate-nonrepo-"));
+    try {
+      const r = spawnSync(process.execPath, [GATE], {
+        input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "git commit -m x" } }),
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: notARepo },
+      });
+      expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+      expect(r.stderr).toContain("FAIL-OPEN");
+      expect(r.stderr).toContain("SKIPPED");
+    } finally {
+      rmSync(notARepo, { recursive: true, force: true });
+    }
+  });
+
+  test("an unparseable payload allows but says no check ran", () => {
+    const r = spawnSync(process.execPath, [GATE], {
+      input: "not json",
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain("FAIL-OPEN");
+  });
+});
