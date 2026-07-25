@@ -32,8 +32,13 @@ import type { DiscoveredRateLimitsInput } from '../quota/scheduler.js';
 import { scheduleWave, classifyProvider } from '../quota/scheduler.js';
 import { estimateTokensFromBytes, ESTIMATED_PROMPT_OVERHEAD_TOKENS } from '../tokens.js';
 import { resolveContextBudget } from '../tokens.js';
-import { getQuotaStatePath, readQuotaStateForUpdate, writeQuotaState } from '../quota/state.js';
-import { withFileLock } from '../quota/fileLock.js';
+// No quota-state or file-lock import by design. This module performs NO disk I/O:
+// the cooldown it records lives in the in-process registry only. The write that
+// used to be here captured its lock path synchronously but resolved the read and
+// write targets late, and ran unawaited — so a `setQuotaStateDir` landing in
+// between locked one quota-state file and rewrote a DIFFERENT one, clobbering
+// whichever run owned the second. Re-adding an import from `../quota/state.js`
+// here is how that returns.
 
 /**
  * One unit of work the broker is asked to dispatch. The broker derives a

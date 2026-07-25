@@ -8,20 +8,6 @@
 
 
 
-- **`open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
-  friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed
-  `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read in one call,
-  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records
-  this file's ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the
-  ceiling is today's size, not the goal.
-  ⚠ **Condensation is EXHAUSTED as a lever:** nearly every entry already sits inside the 2600-byte
-  per-entry budget, so squeezing the rest barely moves the file. The gap closes only by
-  **CLOSING entries** — downstream of the actionable queue, not a separate task. ⚠ Never hand-carry
-  sizes here; `node scripts/check-backlog-budget.mjs --report` has the current figures (UTF-8
-  BYTES — matches `wc -c`).
-  Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
-  driver is narrative accreting onto entries, so a budget that always passes measures nothing.
-
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
   "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary
@@ -796,7 +782,7 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **`touched_files` is documented REQUIRED but nothing enforces it, and state LOAD uses the WEAKER of
+- **▶ `touched_files` is documented REQUIRED but nothing enforces it, and state LOAD uses the WEAKER of
   two validators (2026-07-24, medium, LEAD — surfaced by the test-tree typecheck sweep).**
   `src/remediate/state/types.ts:35-42` says a block with no declared surface "is a producer bug, not an
   implicit empty". Yet (a) every production consumer reads `block.touched_files ?? []`
@@ -844,7 +830,7 @@
   file until the whole run ends, because `tail` buffers to EOF — so a long suite cannot be progress-
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
-- **An HONEST per-node token estimate is UNBLOCKED and still unwired (medium, loop-core).** The remediate
+- **▶ An HONEST per-node token estimate is UNBLOCKED and still unwired (medium, loop-core).** The remediate
   hybrid frontier and the in-process engine both size every implement node at a flat 2000
   (`HYBRID_NODE_TOKEN_ESTIMATE`, `driveRollingDispatch`'s `() => 2000`), so the fit gates cannot tell a
   large node from a small one. The flat estimate was load-bearing only because it made "this node fits NO
@@ -853,6 +839,20 @@
   gates — is two lines. ⚠ Never byte-SUM the access set instead (retired for cause — see that function's
   docblock; a second derived number desyncs plan from admission). ⚠ Land it ALONE and watch a real
   frontier: it is the first work making that pause path reachable, and has no live evidence yet.
+
+- **▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
+  friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed
+  `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read in one call,
+  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records
+  this file's ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the
+  ceiling is today's size, not the goal.
+  ⚠ **Condensation is EXHAUSTED as a lever:** nearly every entry already sits inside the 2600-byte
+  per-entry budget, so squeezing the rest barely moves the file. The gap closes only by
+  **CLOSING entries** — downstream of the actionable queue, not a separate task. ⚠ Never hand-carry
+  sizes here; `node scripts/check-backlog-budget.mjs --report` has the current figures (UTF-8
+  BYTES — matches `wc -c`).
+  Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
+  driver is narrative accreting onto entries, so a budget that always passes measures nothing.
 
 - **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
 
@@ -1146,10 +1146,9 @@
   `conceptual_findings: []` and no LLM call ever having run. A vacuous green and a genuine clean bill are
   indistinguishable downstream. **Property to hold:** a review pass is satisfiable only by evidence a real
   review ran — require a non-fallback finding set, or block synthesis on an auto-completed-empty pass.
-  Lifted from `spec/contract-authoring-determinism-design.md` (a durable design spec is not where open
-  status belongs); its S8 section states the design.
+  Lifted from `spec/contract-authoring-determinism-design.md`; its S8 section states the design.
 
 - **ID minting is not routed through the one registry.** `goal_id` / module / obligation ids are still
   minted outside `src/remediate/contractPipeline/idRegistry.ts`, so the single-authority property the S4
   design asserts is not enforced. **Property to hold:** every minted id passes through the registry, so
-  uniqueness and format are mechanical rather than per-call-site care. Lifted from the same spec as above.
+  uniqueness and format are mechanical, not per-call-site care. Lifted from the same spec.
