@@ -6,9 +6,11 @@ on:
       - main
     paths:
       # A gate's trigger paths must cover every path the gate INSPECTS.
-      # verify:checks runs check:doc-manifest, which guards docs/ — without
-      # docs/** a docs-only push plants a violation CI never runs, which then
+      # verify:checks runs check:doc-manifest, which reconciles EVERY tracked
+      # *.md in the repo, not just docs/ — without "**/*.md" a markdown-only
+      # push outside docs/ plants a violation CI never runs, which then
       # detonates on the next unrelated src/ commit. Happened 2026-07-19.
+      - "**/*.md"
       - docs/**
       - src/**
       - tests/**
@@ -29,9 +31,11 @@ on:
       - main
     paths:
       # A gate's trigger paths must cover every path the gate INSPECTS.
-      # verify:checks runs check:doc-manifest, which guards docs/ — without
-      # docs/** a docs-only push plants a violation CI never runs, which then
+      # verify:checks runs check:doc-manifest, which reconciles EVERY tracked
+      # *.md in the repo, not just docs/ — without "**/*.md" a markdown-only
+      # push outside docs/ plants a violation CI never runs, which then
       # detonates on the next unrelated src/ commit. Happened 2026-07-19.
+      - "**/*.md"
       - docs/**
       - src/**
       - tests/**

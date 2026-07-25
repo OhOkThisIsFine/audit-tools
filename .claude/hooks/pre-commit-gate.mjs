@@ -48,6 +48,21 @@ import { stripQuoted, collapseQuoted, splitShellStatements } from './shell-split
 // repo-relative path.
 import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
 
+// ── Constitutional-doc refusal ───────────────────────────────────────────────
+// A constitutional doc states what this project IS (the two philosophies, the
+// instruction files, the doc-review rubric, the normative spec/audit contracts
+// and goals docs). `docs/doc-review-guidelines.md` has always SAID these are
+// escalate-only and "never silently rewritten to match code" — and commit
+// 6fc2e453 rewrote spec/remediate/remediation-goals.md anyway, inside a routine
+// nine-file doc-review sweep. The gap was a REFUSAL, not a label; this is the
+// refusal. Same import arrangement as the loop-core list: the canonical home is
+// `src/shared/constitutionalDocPaths.ts`, which this pre-build hook cannot
+// import, so it imports a generated sibling. The generated file lives under
+// `scripts/` because `.gitignore` re-includes `.claude/hooks/*` BY NAME — a new
+// file there is silently dropped from commits until someone adds the allowlist
+// line. `npm run check:constitutional-doc-paths` fails the build on drift.
+import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
+
 // Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
 // from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a
 // "/"-terminated pattern matches the directory prefix, else exact match.
@@ -238,7 +253,9 @@ const hasStageCommand =
 // never seen (`--verdict block` would sail through). So the chain stays blocked
 // and the MESSAGE names the real cause; otherwise the generic "no attestation"
 // text sends the agent off to write one it demonstrably just wrote.
-const chainsAttestation = subCmds.some((s) => /attest-loop-core-review(?:\.mjs)?\b/.test(stripQuoted(s)));
+const chainsAttestation = subCmds.some((s) =>
+  /attest-loop-core-review(?:\.mjs)?\b|attest-constitutional-doc-change(?:\.mjs)?\b/.test(stripQuoted(s)),
+);
 const CHAINED_ATTEST_NOTE =
   `\n⚠ This command CHAINS the attestation with the commit. That can never pass: PreToolUse fires once, ` +
   `on the whole command, so the attest step has not run yet when this gate reads the attestation. ` +
@@ -325,6 +342,45 @@ function checkoutTreeExact(scratchIndex, tree, presentPaths) {
     }
   }
   return true;
+}
+
+// The tree SHA an attestation binds to — the exact snapshot the commit will
+// carry. When the command stages the working tree first (`git add -A && git
+// commit`, `git commit -a`/`-am`) that snapshot is the WORKTREE tree, captured
+// through a SCRATCH index so the real staged index is never touched; otherwise
+// it is the staged-index tree. Returns null on a git fault, and every caller
+// fails OPEN on that (an infra fault must not wedge the session) while failing
+// CLOSED on a missing/stale attestation.
+//
+// Single-sourced because two independent gates below bind to it — the loop-core
+// review attestation and the constitutional-doc override. Two copies of a
+// binding rule is two chances for one of them to bind to the wrong tree.
+// Memoized: both gates can fire on one commit, and the `hasStageCommand` path
+// costs a whole scratch-index `git add -A` capture.
+let boundStagedTreeSha;
+function bindStagedTreeSha() {
+  if (boundStagedTreeSha !== undefined) return boundStagedTreeSha;
+  boundStagedTreeSha = computeStagedTreeSha();
+  return boundStagedTreeSha;
+}
+
+function computeStagedTreeSha() {
+  if (hasStageCommand) {
+    const scratchIndex = join(tmpdir(), `scratch-idx-${randomBytes(6).toString('hex')}`);
+    let sha = null;
+    if (gitWithIndex(scratchIndex, ['read-tree', 'HEAD']).ok && gitWithIndex(scratchIndex, ['add', '-A']).ok) {
+      const wtScratch = gitWithIndex(scratchIndex, ['write-tree']);
+      if (wtScratch.ok) sha = wtScratch.stdout.trim();
+    }
+    try {
+      rmSync(scratchIndex, { force: true });
+    } catch {
+      /* ignore */
+    }
+    if (sha) return sha;
+  }
+  const wt = git(['write-tree']);
+  return wt.ok ? wt.stdout.trim() : null;
 }
 
 // Run the full gate (typecheck + conditional doc-contract subset) against
@@ -416,15 +472,22 @@ function runGate(committedPaths) {
     }
   }
 
-  // 2b. Doc-manifest reconciliation — only when the STAGED set carries a
-  // `docs/**/*.md`. `check:doc-manifest` lives in `verify:checks` (the CI gate
-  // job), which no local preflight runs in full, so an unregistered doc rode to
-  // CI and burned a release tag three times (v0.33.8, v0.34.4, v0.34.17). The
-  // checker enumerates GIT-TRACKED docs — which is exactly why running it here
-  // is correct and running it ad-hoc is not: this gate has materialized the
-  // staged snapshot, so `git ls-files` sees the same tree CI will, including a
+  // 2b. Doc-manifest reconciliation — whenever the STAGED set carries ANY
+  // markdown. `check:doc-manifest` lives in `verify:checks` (the CI gate job),
+  // which no local preflight runs in full, so an unregistered doc rode to CI and
+  // burned a release tag three times (v0.33.8, v0.34.4, v0.34.17). The checker
+  // enumerates GIT-TRACKED docs — which is exactly why running it here is
+  // correct and running it ad-hoc is not: this gate has materialized the staged
+  // snapshot, so `git ls-files` sees the same tree CI will, including a
   // brand-new doc that an untracked-file check would miss.
-  if (staged.some((p) => /^docs\/.*\.md$/i.test(p.replace(/\\/g, '/')))) {
+  //
+  // The trigger was `^docs/.*\.md$` while the checker only enumerated `docs/`.
+  // The checker now reconciles the WHOLE tracked markdown tree (that narrowness
+  // is how `examples/9router-harness-proxy-setup.md` sat unregistered with
+  // nothing to catch it), so the trigger must widen with it — a trigger narrower
+  // than the check it fires plants violations the gate never runs on. Same
+  // reasoning as the `paths:` filters in .github/workflows/ci.yml.
+  if (staged.some((p) => /\.md$/i.test(p.replace(/\\/g, '/')))) {
     try {
       execSync('npm run check:doc-manifest', {
         cwd: root,
@@ -438,10 +501,12 @@ function runGate(committedPaths) {
       return {
         blocked: true,
         message:
-          `pre-commit gate: doc-manifest check FAILED — commit blocked. A staged doc under docs/ is not ` +
-          `registered in the routing table in docs/doc-review-guidelines.md (or a row points at a deleted ` +
-          `file). This is the check that fails RELEASE CI and burns a release tag.\n` +
-          `Register the doc (type + reason) in the routing table, or delete it.\n${tail}`,
+          `pre-commit gate: doc-manifest check FAILED — commit blocked. A staged markdown file is not ` +
+          `registered in the canonical doc manifest (scripts/doc-manifest-data.mjs), or a row points at a ` +
+          `deleted file, or the rendered table in docs/doc-review-guidelines.md is out of date. This is the ` +
+          `check that fails RELEASE CI and burns a release tag.\n` +
+          `Register the doc (type + reason to exist) in scripts/doc-manifest-data.mjs and re-render with ` +
+          `\`node scripts/check-doc-manifest.mjs --write\`, or delete the doc.\n${tail}`,
       };
     }
   }
@@ -482,6 +547,88 @@ function runGate(committedPaths) {
     /* settings.json absent/unreadable in the snapshot — nothing to assert */
   }
 
+  // 2d. Constitutional-doc refusal — only when the STAGED set touches a doc that
+  // defines what the project IS (src/shared/constitutionalDocPaths.ts: the two
+  // philosophies, the instruction files, the doc-review rubric, the normative
+  // spec/audit contracts and goals docs).
+  //
+  // The manifest already CALLED these escalate-only and "never silently
+  // rewritten to match code". Commit 6fc2e453 — a routine doc-review sweep —
+  // rewrote spec/remediate/remediation-goals.md anyway, bundled with eight other
+  // files, and nothing objected. The gap was a REFUSAL, not a label: a doc that
+  // says what the project should be is the one thing that must not be quietly
+  // edited to match what the code happens to do, because then nothing is left to
+  // measure the code against.
+  //
+  // The override is the SAME mechanism as the loop-core attestation below, not a
+  // second one: a record bound to the exact staged tree, naming who issued it and
+  // what the owner decided. FAIL-CLOSED on a missing/stale/incomplete record;
+  // FAIL-OPEN only on a genuine git write-tree fault.
+  const constitutionalStaged = staged.filter(isConstitutionalDocPath);
+  if (constitutionalStaged.length > 0) {
+    const sha = bindStagedTreeSha();
+    const overrideHint =
+      `node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> ` +
+      `--attester-class <agent|human> --owner-decision "<the owner's call, and where it was escalated>"`;
+    if (!sha) {
+      noteFailOpen(
+        'cannot bind the staged tree (`git write-tree` failed) — the CONSTITUTIONAL-DOC refusal was SKIPPED ' +
+          `for ${constitutionalStaged.length} normative doc(s). This commit carries NO override record.`,
+      );
+    } else {
+      const overridePath = join(root, '.claude', 'constitutional-doc-review', sha + '.json');
+      const blockMessage = (why, extra = '') => ({
+        blocked: true,
+        message:
+          `pre-commit gate: commit blocked — it rewrites CONSTITUTIONAL doc(s), and ${why}.\n` +
+          constitutionalStaged.map((p) => `  - ${p}`).join('\n') +
+          `\nThese state what this project IS; the doc-review manifest routes every one of them as ` +
+          `escalate-only ("never silently rewritten to match code"). Editing one to match current code ` +
+          `destroys the thing the code is measured against — which is exactly what commit 6fc2e453 did to ` +
+          `spec/remediate/remediation-goals.md inside a routine doc-review sweep.\n` +
+          `If the owner has decided this change, record that decision and retry:\n  ${overrideHint}\n` +
+          `Otherwise: unstage the constitutional doc(s), ship the rest, and escalate the change.` +
+          extra +
+          (chainsAttestation ? CHAINED_ATTEST_NOTE : ''),
+      });
+      if (!existsSync(overridePath)) {
+        return blockMessage(
+          'no owner-decision override record exists for the staged tree',
+          `\n(The override binds to the exact staged tree ${sha.slice(0, 12)} — restaging invalidates it.)`,
+        );
+      }
+      let override;
+      try {
+        override = JSON.parse(readFileSync(overridePath, 'utf8'));
+      } catch {
+        return blockMessage(
+          `the override record at .claude/constitutional-doc-review/${sha}.json is unreadable/corrupt`,
+        );
+      }
+      if (override?.staged_tree !== sha) {
+        return blockMessage(
+          `the override record is STALE (binds tree ${String(override?.staged_tree).slice(0, 12)}, staged ` +
+            `tree is ${sha.slice(0, 12)})`,
+        );
+      }
+      if (typeof override.owner_decision !== 'string' || override.owner_decision.trim() === '') {
+        return blockMessage('the override record names no owner decision');
+      }
+      // A record written before this commit grew a NEW constitutional path can
+      // only exist if the tree hash matched — which it cannot, since staging a
+      // file changes the tree. Assert coverage anyway: the record is the audit
+      // trail, and a path it does not name is a path nobody signed off on.
+      const uncovered = constitutionalStaged.filter(
+        (p) => !(override.constitutional_files ?? []).includes(p),
+      );
+      if (uncovered.length > 0) {
+        return blockMessage(
+          `the override record does not cover ${uncovered.join(', ')}`,
+        );
+      }
+    }
+  }
+
   // 3. Loop-core adversarial-review attestation — only when the STAGED set
   // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
   // staged-tree-hash-bound review attestation. This enforces attestation
@@ -493,29 +640,13 @@ function runGate(committedPaths) {
   // write-tree fault.
   if (staged.some(pinsLoopCore)) {
     const loopCoreStaged = staged.filter(pinsLoopCore);
-    let sha = null;
-    if (hasStageCommand) {
-      const scratchIndex = join(tmpdir(), `scratch-idx-${randomBytes(6).toString('hex')}`);
-      if (gitWithIndex(scratchIndex, ['read-tree', 'HEAD']).ok && gitWithIndex(scratchIndex, ['add', '-A']).ok) {
-        const wtScratch = gitWithIndex(scratchIndex, ['write-tree']);
-        if (wtScratch.ok) sha = wtScratch.stdout.trim();
-      }
-      try {
-        rmSync(scratchIndex, { force: true });
-      } catch {
-        /* ignore */
-      }
-    }
+    const sha = bindStagedTreeSha();
     if (!sha) {
-      const wt = git(['write-tree']);
-      if (!wt.ok) {
-        noteFailOpen(
-          'cannot bind the staged tree (`git write-tree` failed) — the LOOP-CORE ATTESTATION check was SKIPPED ' +
-            `for ${loopCoreStaged.length} loop-core path(s). This commit is NOT attested.`,
-        );
-        return { blocked: false }; // can't bind → don't wedge (infra fail-open)
-      }
-      sha = wt.stdout.trim();
+      noteFailOpen(
+        'cannot bind the staged tree (`git write-tree` failed) — the LOOP-CORE ATTESTATION check was SKIPPED ' +
+          `for ${loopCoreStaged.length} loop-core path(s). This commit is NOT attested.`,
+      );
+      return { blocked: false }; // can't bind → don't wedge (infra fail-open)
     }
     const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
     const runHint =
