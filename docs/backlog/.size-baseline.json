@@ -3,6 +3,6 @@
   "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier (9router-inspired) — extra SOURCE P": 4185,
   "forward-tracks.md::One repo intent, three filenames — the audit/remediate intent split is a `one ": 2789,
   "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6": 3664,
-  "open-bugs.md::__FILE__": 132520,
+  "open-bugs.md::__FILE__": 133840,
   "open-bugs.md::Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch": 2730
 }

@@ -1140,3 +1140,17 @@
   strand as the non-retryable `empty_pool`, whose consumer BLOCKS the nodes and whose message blames
   quota. Same family as [[backlog-prose-decays-verify-against-head]]: not staleness, a paraphrase that
   shifted the mechanism. Cheap only because the code was read before the fix was designed.
+- **A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review
+  finding nothing.** `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can
+  mark a pass `contract_reviewed: true` / `conceptual_reviewed: true` with `contract_findings` /
+  `conceptual_findings: []` and no LLM call ever having run. A vacuous green and a genuine clean bill are
+  indistinguishable downstream. **Property to hold:** a review pass is satisfiable only by evidence a real
+  review ran — either require a non-fallback finding set, or block synthesis when the pass auto-completed
+  empty. Lifted out of `spec/contract-authoring-determinism-design.md`, which is a durable design spec and
+  is not where open status belongs; the S8 section there states the design.
+
+- **ID minting is not routed through the one registry.** `goal_id` / module / obligation ids are still
+  minted outside `src/remediate/contractPipeline/idRegistry.ts`, so the single-authority property the S4
+  design asserts is not enforced. **Property to hold:** every minted id passes through the registry, so
+  uniqueness and format are guaranteed mechanically rather than by each call site being careful. Lifted
+  out of `spec/contract-authoring-determinism-design.md` for the same reason as the entry above.

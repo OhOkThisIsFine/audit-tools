@@ -27,8 +27,20 @@ that frontier:
 - **0 < λ < 1** → a blended operating point between the two.
 
 The dial is **1D**: cost ↔ throughput, with **capability as a hard floor** (not a tradeable axis).
-Whether *quality* also becomes tradeable (a true 2D dial needing a per-task quality-worth weighting)
-is deferred — see *Deferred*.
+Capability gates ELIGIBILITY — anything above the floor is fair game, and the dial then chooses among
+those by cost and throughput.
+
+Quality as a *second tradeable axis* (a true 2D dial) was **considered and declined**, on the shape of
+the quantity rather than on effort: **capability does not degrade smoothly.** A model above the floor
+produces usable output; one below it does not produce cheaper, slightly-worse output — it produces
+output that fails review and costs a full retry plus the wasted first attempt. A tradeable axis
+presumes a continuum that buys you something at the low end, and here the low end has negative value.
+That is exactly what a floor encodes, so the floor is not a simplification of a 2D model — it is the
+correct shape. A 2D dial would also require a per-task "what is better output worth here" weighting
+that does not exist, is not derivable from anything currently measured, and would land as an operator
+knob — which this project treats as a bug signal.
+
+**The invariant: capability gates eligibility and is never traded away for price or speed.**
 
 ## The throughput axis — concurrency, auto-derived (no declaration)
 
@@ -173,8 +185,6 @@ which the existing `costRank` already delivers.
 
 ## Deferred / open
 
-- **Quality as a tradeable axis (true 2D dial).** Default recorded = 1D cost↔speed + capability
-  floor. A 2D dial needs a per-task quality-worth weighting; revisit only on an owner call.
 - **Free-source registration** (opencode-free / vertex-trial / multi-account OAuth) — the arbitrage
   track [[arbitrage-dispatch-tier-design]], not this spec.
 - **UI beyond a 1D slider.** MVP is a single `dispatch_bias` scalar at Gate-0; a 2D frontier plot

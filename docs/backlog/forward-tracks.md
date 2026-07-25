@@ -173,22 +173,6 @@ followed" is otherwise indistinguishable from a bug.
     validation only** (no more code): a real opencode-free run confirming declared-free routing, a live
     lapsed-free demotion, and the `declared_cost_drift` event end-to-end.
 
-- **RESOLVED — quality stays a FLOOR, not a tradeable axis. Keep the 1D dial.** The dispatch dial trades
-  cost against throughput; capability gates eligibility. Making quality a second tradeable axis was
-  considered and is declined, on the shape of the quantity rather than on effort: **capability does not
-  degrade smoothly.** A model above the floor produces usable output; one below it does not produce
-  cheaper, slightly-worse output — it produces output that fails review and costs a full retry plus the
-  wasted first attempt. A tradeable axis presumes a continuum that buys you something at the low end, and
-  here the low end has negative value. That is exactly what a floor encodes, so the floor is not a
-  simplification of a 2D model, it is the correct shape.
-  It would also require a per-task "what is better output worth here" weighting that does not exist, is
-  not derivable from anything currently measured, and would land as an operator knob — which the project
-  treats as a bug signal.
-  **Property to hold:** capability gates eligibility and is never traded away for price or speed.
-  Design of record
-  [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md); extends
-  [[cost-first-routing-design]].
-
 - **models.dev static window can over-state a specific deployment (carried from W1).** With no capability
   handshake and no `quota.models` override, `resolveLimits` falls to the vendored snapshot
   (`src/shared/quota/limits.ts` rung 2.5 → `source: "static_metadata"`, confidence `medium`), and the snapshot
