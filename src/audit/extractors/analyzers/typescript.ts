@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as TS from "typescript";
 import type { GraphEdge } from "audit-tools/shared";
+import { resolveWithinRoot } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath, resolveCandidate } from "../graphPathUtils.js";
 import type { AnalyzerContext, AnalyzerOutput, LanguageAnalyzer } from "./types.js";
 import {
@@ -116,12 +117,12 @@ function mapToIncluded(
   const normalizedAbsolute = isAbsolute(absolutePath)
     ? absolutePath
     : resolve(state.root, absolutePath);
+  if (resolveWithinRoot(state.root, normalizedAbsolute) === null) {
+    return undefined;
+  }
   const relativePath = normalizeGraphPath(
     relative(state.root, normalizedAbsolute),
   );
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    return undefined;
-  }
   return resolveCandidate(relativePath, state.context.pathLookup);
 }
 

@@ -1,5 +1,5 @@
 import { readFile, mkdir, writeFile, appendFile, stat, rm } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type {
   FreshSessionProvider,
   LaunchFreshSessionInput,
@@ -8,6 +8,7 @@ import type {
 import type { OpenAiCompatibleConfig } from "../types/sessionConfig.js";
 import { writeJsonFile } from "../io/json.js";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
+import { resolveWithinRoot } from "../io/pathContainment.js";
 
 export const OPENAI_COMPATIBLE_PROVIDER_NAME = "openai-compatible" as const;
 
@@ -843,12 +844,9 @@ async function safeText(res: { text: () => Promise<string> }): Promise<string> {
  * `..` escape returns null so the caller can reject it.
  */
 function safeResolveInRepo(repoRoot: string, candidate: string): string | null {
-  if (typeof candidate !== "string" || candidate.length === 0) return null;
-  const normalizedRoot = resolve(repoRoot);
-  const abs = resolve(normalizedRoot, candidate);
-  const rel = relative(normalizedRoot, abs);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
-  return abs;
+  // `allowRoot: false` — a model-supplied target that resolves to the worktree
+  // ITSELF is never a legal file to write.
+  return resolveWithinRoot(repoRoot, candidate, { allowRoot: false });
 }
 
 /**

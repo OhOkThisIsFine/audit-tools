@@ -1,5 +1,5 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
-import { readJsonFile, isFileMissingError } from "audit-tools/shared";
+import { join } from "node:path";
+import { readJsonFile, isFileMissingError, assertWithinRoot } from "audit-tools/shared";
 import type { DispatchResultMap, DispatchResultMapEntry } from "./types.js";
 import { DISPATCH_RESULT_MAP_FILENAME } from "./types.js";
 import { getFlag, fromBase64Url } from "../args.js";
@@ -8,13 +8,7 @@ import { getFlag, fromBase64Url } from "../args.js";
 // result-map path helpers, result-map I/O, and small arg/entry utilities.
 
 export function withinRoot(root: string, path: string): string {
-  const rootPath = resolve(root);
-  const absolutePath = resolve(rootPath, path);
-  const relativePath = relative(rootPath, absolutePath);
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    throw new Error(`Path '${path}' escapes repository root '${rootPath}'.`);
-  }
-  return absolutePath;
+  return assertWithinRoot(root, path);
 }
 
 export function dispatchResultMapPath(runDir: string): string {

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { posix } from "node:path";
 import type { RepoManifest } from "../types.js";
 import type {
@@ -9,7 +9,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
-import { hashContent, stableStringify } from "audit-tools/shared";
+import { hashContent, stableStringify, resolveWithinRoot } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
@@ -515,9 +515,8 @@ export async function buildGraphBundleFromFs(
         return;
       }
 
-      const absolutePath = resolve(rootPath, file.path);
-      const relativeToRoot = relative(rootPath, absolutePath);
-      if (relativeToRoot.startsWith("..") || isAbsolute(relativeToRoot)) {
+      const absolutePath = resolveWithinRoot(rootPath, file.path);
+      if (absolutePath === null) {
         return;
       }
 

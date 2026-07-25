@@ -593,6 +593,8 @@ export {
 
 // IO: repo-root anchoring (untrust the process cwd; never nest .audit-tools)
 export { resolveRepoRoot, climbOutOfAuditTools } from "./io/repoRoot.js";
+export { resolveWithinRoot, assertWithinRoot } from "./io/pathContainment.js";
+export type { WithinRootOptions } from "./io/pathContainment.js";
 
 // IO: node-worktree context guard (a dispatched worker's cwd must never reach
 // the shared run state through a driver lifecycle CLI or a session writer).

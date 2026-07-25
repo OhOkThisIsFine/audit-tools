@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
-import { spawnSyncHidden } from "audit-tools/shared";
+import { spawnSyncHidden, resolveWithinRoot } from "audit-tools/shared";
 import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
 import {
   toRepoRelative,
@@ -84,11 +84,14 @@ export function seedUntrackedDeclaredPaths(
 ): void {
   for (const rel of new Set(declaredPaths)) {
     if (!rel || isAbsolute(rel)) continue;
-    // Reject paths that escape the root (defence-in-depth; declared scope is
-    // repo-relative and never `..`-prefixed in practice).
-    const dst = join(worktreeRoot, rel);
-    const src = join(root, rel);
-    if (relative(worktreeRoot, dst).startsWith("..")) continue;
+    // Reject paths that escape EITHER root (defence-in-depth; declared scope is
+    // repo-relative and never `..`-prefixed in practice). This used to test only
+    // `relative(worktreeRoot, dst).startsWith("..")`, which misses the win32
+    // different-drive case where `relative()` returns an ABSOLUTE path — and it
+    // never checked the SOURCE side at all.
+    const dst = resolveWithinRoot(worktreeRoot, rel);
+    const src = resolveWithinRoot(root, rel);
+    if (dst === null || src === null) continue;
     if (!existsSync(src) || existsSync(dst)) continue;
     try {
       mkdirSync(dirname(dst), { recursive: true });
