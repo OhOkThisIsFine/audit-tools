@@ -8,15 +8,15 @@
 
 
 
-- **`open-bugs.md` is 143KB / 96 entries against a 120KB budget — still not one bounded read
+- **`open-bugs.md` is 134KB / 89 entries against a 120KB budget — still not one bounded read
   (2026-07-24, medium, friction: inefficient-feeding).** Splitting the single 1,706-line backlog by
   section fixed `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read
   in one call, which is the condition that let ~21% of entries go stale unnoticed.
   `check:backlog-budget` records a per-file and per-entry ceiling in `.size-baseline.json` and enforces
   SHRINK-ONLY, so it cannot regrow — but the ceiling is today's size, not the goal.
   ⚠ **Condensation is EXHAUSTED as a lever — measured, not estimated:** total excess over the 2600-byte
-  per-entry budget is a few KB across all 96, so squeezing every oversized entry to budget still leaves
-  ~140KB. The remaining ~23KB comes only from **CLOSING entries** — downstream of the actionable queue,
+  per-entry budget is a few KB across all 89, so squeezing every oversized entry to budget still leaves
+  ~130KB. The remaining ~14KB comes only from **CLOSING entries** — downstream of the actionable queue,
   not a separate task. (Sizes are UTF-8 BYTES; the gate agrees with `wc -c`.)
   Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
   driver is narrative accreting onto entries, so a budget that always passes measures nothing.
@@ -236,18 +236,6 @@
   (2026-07-24, two probes): those paths are all gitignored, so `rg`/`git grep` cannot see them. The
   surviving lesson is a search-tool trap, now in [`durable-traps.md`](durable-traps.md).
 
-- **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
-  to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
-  returned 101 failures — every one `connect ECONNREFUSED 127.0.0.1:4000`, i.e. the proxy had died
-  mid-lap, exactly as on 2026-07-24's earlier lap. The whole pass was wasted before the cause was
-  read. The standing remedy is prose ("Probe `/v1/models` before diagnosing a model") in
-  `~/.claude/CLAUDE.md` and in the roster-latency entry below — a remember-to-be-careful rule, which
-  is the shape this project rejects. Property: any caller that fans out more than one offload
-  request probes reach ONCE up front and fails fast naming the restart command, so a dead lane costs
-  one call rather than N and can never be misread as model incapacity. The batch runner is currently
-  per-lap scratchpad code, so the durable form is a tiny shared preflight helper the offload
-  entrypoint owns, not a rule each caller re-implements. [[offload-lane-failures-are-usually-the-caller]]
-
 - **LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.** Root cause of
   the observed `UND_ERR_HEADERS_TIMEOUT` storm (9 observations across glm-5.2, deepseek-v4-pro,
   nemotron-3-ultra-550b, qwen3.5-397b) was the CALLER's transport, not lane health: global `fetch`
@@ -341,25 +329,6 @@
   `shell-trap-guard.mjs` (prompt-derail trap, with the three agy headless traps). Delete this entry once
   the probe is green.
 
-- **CLAUDE.md overstates the `admitSpawn` consent gate (2026-07-19).** *Own-vs-acquire analyzer
-  engine* states every acquired-tool spawn "routes through the single `admitSpawn` chokepoint and
-  requires the per-run `ExternalAcquisitionConfig.consent_token`." Verified against HEAD:
-  `defaultRun` **bypasses** the token requirement — only non-default tools require it
-  (`src/audit/extractors/analyzers/acquisitionEngine.ts:216-224`); `admitSpawn` is at `:304,:478`.
-  SPEC: decide which is the intended invariant, then make doc and code agree — either the curated
-  default set is legitimately exempt (say so explicitly in CLAUDE.md, since "every spawn requires the
-  token" is currently false) or `defaultRun` must also pass through the token check. Surfaced by the
-  memory-consolidation verification pass, `docs/reviews/memory-consolidation-2026-07-19.md`.
-
-- **Memory/doc claims of "open item" decay exactly like backlog prose (2026-07-19).** The memory
-  consolidation found a memory listing 4 open items of which 3 were long done (audit's symmetric
-  `runRollingDispatch` wiring, INV-QD-14 spill, `rate_limited` handling). Same class as
-  [[backlog-prose-decays-verify-against-head]] but in the memory store, where nothing ever forces a
-  re-read. SPEC: treat any "open"/"remaining"/"TODO" claim in a memory or spec as a LEAD requiring a
-  HEAD check before it becomes work — never as a work order. No tooling fix proposed yet; if this
-  recurs, the mechanical form is a lint that greps memory/spec for open-item phrasing and reports
-  the ones whose named symbols now exist.
-
 - **The TEST TREE IS NOT TYPECHECKED AT ALL — `.ts` tests included (2026-07-19).** `tsconfig.json`
   is `include: ["src"]` and vitest has no `typecheck` configured, so no test file is typechecked.
   This keeps defeating "make the field required so `tsc` enumerates the sites": that guarantee is
@@ -371,6 +340,12 @@
   class as the scope-less-window fixture problem. **Property to hold:** a fixture that omits a
   required contract field fails loudly — either the test tree is typechecked, or the wire crossing
   schema-validates on every path a fixture can reach.
+  **MEASURED 2026-07-24 — the sweep is bounded, so stop treating it as open-ended:** a
+  `tsconfig.test.json` extending the base with `include: ["src","tests"]` yields **222 errors across 131
+  files, ALL in `tests/remediate/`** (every other area is `.mjs` and invisible without `allowJs`).
+  Classes: 81× TS2741 missing required property (mostly `touched_files` on the block fixture), 53×
+  TS2345 arg-type, 28× TS7016 (`.mjs` helper import with no declarations — cleared by `allowJs`), 23×
+  TS2352, 17× TS2322. The config is worthless until the fixture sweep lands, so they ship together.
   Two more symptoms of the same root, worth knowing because each costs time on its own: (a) making a
   field required *because omission is a defect* enforces nothing in tests — the compiler correctly
   sweeps production call sites while every test call site silently keeps getting `undefined`, so a
@@ -585,12 +560,6 @@
   classification showed the risk runs the other way — stale entries survive because nobody can hold
   the whole file at once.
 
-- **Durable trap — never delete from `docs/backlog.md` by LINE NUMBER.** Entries can span two physical
-  lines while being one logical bullet, because a hook may embed a literal newline inside a code span. A
-  line-keyed delete then removes half an entry and leaves an orphaned fragment that reads as corruption.
-  Bit this file during the 2026-07-19 classification pass. Delete by matching the entry's text, and after
-  any scripted edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
-
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
@@ -702,7 +671,6 @@
 
 - **A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).** `acceptNode.ts` (962) / `worktreeLifecycle.ts` (923) / `writeScope.ts` (496) / `verifyCommands.ts` (274) / `acceptReconcile.ts` (190) are not dispatch: `executeNodeInWorktree` (`acceptNode.ts:883`) is called only by the **driver** `driveRollingImplementDispatch` (`nextStep.ts:1130`, call at `:1346`), never by `prepareImplementDispatch` (`marshal.ts:234-513`), which ends having written `dispatch-plan.json` (`:426`) + `dispatch-quota.json` (`:510`). ⚠ Correcting the old entry's absolute: prepare is not worktree-*free* — it reaches two landing symbols, `ensureRemediationBranchCheckedOut` (`:342`) and `worktreePath` (`:405`, prompt rooting) — but it creates, verifies and merges nothing, so the stage boundary holds and those two imports are exactly what an import-graph test would catch. They live under `dispatch/` only because the barrel (`dispatch.ts:49-136`) aggregated them; `acceptNodeWorktree` even takes a base-branch lock (`acceptNode.ts:434`) — pure serialization, zero dispatch content. `marshal.ts` itself fuses two stages: prepare (`:234-513`) and the landing merge `mergeImplementResults` (`:596-1561`). Symmetrically on the audit side, `prepareDispatchArtifacts` (`src/audit/cli/dispatch.ts:187-881`) both *decides* and *renders the prompt* — lens defs (`:293-294`), knip/analyzer anchor indices (`:517`,`:524`), source-reading anchor extraction (`:560` → `dispatch/packetPrompt.ts:123-161`), `buildPacketPrompt` + `writeFile` (`:580-581`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** The assembly-unification lap this was told not to bundle with has SHIPPED (shared `buildHostPoolPreamble`, `src/shared/quota/hostPool.ts:149`, consumed by `quotaPool.ts:135` + `waveScheduling.ts:160`), so the re-home is unblocked. ⚠ Loop-core: `src/remediate/steps/dispatch/` is a `LOOP_CORE_PATTERNS` directory prefix (`src/shared/loopCorePaths.ts:41`) — a new `steps/land/` prefix must land in the canonical list AND both `.mjs` hook copies in the same commit or the parity test goes red. Record: [`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) §3.
 
-- **`withinRoot` — a root-containment SECURITY guard — is reimplemented 5× (owner question 2026-07-16, medium).** `dispatch/paths.ts:10`, `openAiCompatibleProvider.ts:763`, `extractors/graph.ts:520`, `analyzers/typescript.ts:122`, partially `worktreeLifecycle.ts:91`. Five copies of a containment check = five chances for one to be subtly wrong, and a security guard is exactly the class where that matters. Single-source it.
 
 - **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `dispatch.ts:219-230` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
 

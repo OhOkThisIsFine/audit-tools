@@ -10,6 +10,18 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).** The memory
+  consolidation found a memory listing 4 open items of which 3 were long done (audit's symmetric
+  `runRollingDispatch` wiring, INV-QD-14 spill, `rate_limited` handling). Same decay as
+  [[backlog-prose-decays-verify-against-head]], but in the memory store, where nothing ever forces a
+  re-read. Verify any "open"/"remaining"/"TODO" claim against HEAD before it becomes work.
+
+- **Never delete from a backlog file by LINE NUMBER.** Entries can span two physical lines while being
+  one logical bullet, because a hook may embed a literal newline inside a code span. A line-keyed delete
+  then removes half an entry and leaves an orphaned fragment that reads as corruption. Bit `open-bugs.md`
+  during the 2026-07-19 classification pass. Delete by matching the entry's TEXT, and after any scripted
+  edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
+
 - **The offload lane is reliable per-ITEM and unreliable in BULK (2026-07-24, friction:
   inefficient-feeding).** Classifying 101 backlog entries: every bulk shape failed — two whole-file
   calls at `max_tokens: 48000` ran 28+ min with no first byte, four ~40KB chunks were killed at the
@@ -19,6 +31,10 @@ the trap and the fix when it fires.
   neither, it is the request shape. Split to the natural per-item unit, pool ~6-wide, retry on a
   DIFFERENT alias, and size `max_tokens` to the per-item output (1200 truncated 7 long entries; 4000
   cleared them). Full recipe: [[nim-offload-reliable-unit-is-one-entry]].
+  ⚠ The **dead-lane** half is now mechanical, not remembered: `~/.claude/llm-call.mjs` probes
+  `/v1/models` before every request and exits 3 naming the restart command, so a dead proxy costs one
+  round-trip instead of N identical `ECONNREFUSED`s misread as model failure. That helper is OUTSIDE the
+  repo — no test here guards it; re-add the preflight if the file is ever reset.
 
 - **The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).** A call passed
   `timeout: 1800000` for a long offload run and was killed at exactly 10m00s — the excess is
