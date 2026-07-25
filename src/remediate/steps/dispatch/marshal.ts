@@ -968,6 +968,11 @@ async function mergeImplementResultsIntoState(
     // that never committed sets none, so guarding on it excludes the non-quarantine
     // failures. Routed through the single CE-005 chokepoint keyed on the node id (one
     // event per node, deduped across its findings). Best-effort / non-fatal.
+    //
+    // A STRAY is a hard-fail that committed NOTHING, so it must not be described with
+    // the quarantine sentence: naming `reverify-node` for it points the reader at a
+    // command that can only answer `no_quarantine`, which is the same
+    // confidently-wrong-instruction failure the directive already avoids.
     if (acceptHardFailed && acceptOutcome.diagnostic) {
       await captureStepBoundaryFriction(
         options.artifactsDir,
@@ -975,11 +980,14 @@ async function mergeImplementResultsIntoState(
         {
           eventType: "node_quarantine",
           discriminator: blockId,
-          note:
-            `Node ${blockId} committed edits but hard-failed the tool's verify/scope/merge ` +
-            `(outcome=${acceptOutcome.outcome}); work quarantined and NOT landed — re-drive ` +
-            `with \`remediate-code reverify-node --id ${blockId} --run-id ${runId}\` once the ` +
-            `cause is fixed.`,
+          note: acceptOutcome.strayWorktreeSuspected
+            ? `Node ${blockId} claimed a resolved edit but its designated worktree held no ` +
+              `commits (stray worktree) — nothing was committed, so there is NO quarantine ` +
+              `ref and nothing to re-drive. Its items are blocked and routed to triage.`
+            : `Node ${blockId} committed edits but hard-failed the tool's verify/scope/merge ` +
+              `(outcome=${acceptOutcome.outcome}); work quarantined and NOT landed — re-drive ` +
+              `with \`remediate-code reverify-node --id ${blockId} --run-id ${runId}\` once the ` +
+              `cause is fixed.`,
           category: "bug",
         },
         "remediate-code",
@@ -1037,11 +1045,17 @@ async function mergeImplementResultsIntoState(
           stateItem.status = "blocked";
           markTerminal(stateItem);
           stateItem.failure_reason =
-            `Node ${blockId} reported finding ${itemResult.finding_id} ` +
-            `${itemResult.status}, but its tool-owned accept failed ` +
-            `(outcome=${acceptOutcome!.outcome}, merged=false); the edits were quarantined ` +
-            `and are NOT in the main tree. Routed to triage so dependents never build on ` +
-            `missing code.` +
+            (acceptOutcome!.strayWorktreeSuspected
+              ? `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+                `${itemResult.status}, but its designated worktree held no commits — the ` +
+                `edits were never made where the tool could see them, so NOTHING was ` +
+                `committed and there is no quarantine ref to re-drive. Routed to triage so ` +
+                `dependents never build on missing code.`
+              : `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+                `${itemResult.status}, but its tool-owned accept failed ` +
+                `(outcome=${acceptOutcome!.outcome}, merged=false); the edits were quarantined ` +
+                `and are NOT in the main tree. Routed to triage so dependents never build on ` +
+                `missing code.`) +
             (acceptOutcome!.diagnostic
               ? `\nFailing command output:\n${acceptOutcome!.diagnostic}`
               : "");

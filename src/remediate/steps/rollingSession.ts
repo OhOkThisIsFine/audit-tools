@@ -86,6 +86,19 @@ export interface RollingSession {
    */
   accept_failed?: string[];
   /**
+   * Block ids whose accept rejected on the STRAY-WORKTREE guard: the node's result
+   * claimed a resolved edit but its designated worktree has no commits beyond base,
+   * so nothing was ever committed. Terminal for this session's counts, but a class
+   * of its own rather than a member of `accept_failed` — a failed accept quarantines
+   * real commits under a durable ref and is re-drivable with `reverify-node`, whereas
+   * a stray has NO ref by construction, so that directive would return
+   * `no_quarantine`. Folding the two would turn a hard stop into a confidently-wrong
+   * instruction. Recorded BEFORE the guard's throw so `terminal` counts the node and
+   * `inFlight` cannot stay pinned ≥1 (a permanent hang, not a timed stall).
+   * Optional: sessions persisted before this field default to empty.
+   */
+  accept_stray?: string[];
+  /**
    * Owner token minted by the shared `ClaimRegistry` for each dispatched node,
    * keyed by block id. Persisted so a later `accept-node` invocation (a separate
    * process) can RELEASE the claim it holds once the node's lifecycle finishes —
@@ -103,15 +116,31 @@ export interface RollingSession {
    * finalizer over every driver's accept outcomes). Absent/empty in the common
    * single-driver case, so `total` stays `frontier.length`. Invariant:
    * `dispatched ∩ contested = ∅` — a contested node is never dispatched by this
-   * session (the completion math relies on this: `accepted`/`accept_failed` are
-   * subsets of `dispatched`, so `in_flight` can never go negative).
+   * session (the completion math relies on this: `accepted`, `accept_failed` and
+   * `accept_stray` are pairwise disjoint subsets of `dispatched`, so `in_flight`
+   * can never go negative).
    */
   contested?: string[];
 }
 
 export type RollingDirective =
-  | { kind: "wait"; in_flight: number; accepted: number; accept_failed: string[]; total: number }
-  | { kind: "done"; accepted: number; accept_failed: string[]; total: number };
+  | {
+      kind: "wait";
+      in_flight: number;
+      accepted: number;
+      accept_failed: string[];
+      /** Stray-worktree rejections — terminal, but NOT `reverify-node`-recoverable. */
+      accept_stray: string[];
+      total: number;
+    }
+  | {
+      kind: "done";
+      accepted: number;
+      accept_failed: string[];
+      /** Stray-worktree rejections — terminal, but NOT `reverify-node`-recoverable. */
+      accept_stray: string[];
+      total: number;
+    };
 
 function implementDir(artifactsDir: string, runId: string): string {
   return join(artifactsDir, "runs", runId, "implement");
@@ -408,7 +437,16 @@ export async function prepareHostRollingDispatch(
     .map((i) => i.block_id);
   if (cooldownWall.atWall && cooldownWall.reason === "cooldown" && strandedBlockIds.length > 0) {
     return {
-      session: { run_id: runId, frontier: [], dispatched: [], accepted: [], accept_failed: [], claims: {}, contested: [] },
+      session: {
+        run_id: runId,
+        frontier: [],
+        dispatched: [],
+        accepted: [],
+        accept_failed: [],
+        accept_stray: [],
+        claims: {},
+        contested: [],
+      },
       initial: [],
       planPath: join(dir, "dispatch-plan.json"),
       quotaPath,
@@ -464,6 +502,7 @@ export async function prepareHostRollingDispatch(
     dispatched: initialNodes.map((n) => n.block_id),
     accepted: [],
     accept_failed: [],
+    accept_stray: [],
     claims,
     contested,
   };
@@ -481,14 +520,89 @@ export async function prepareHostRollingDispatch(
 }
 
 /**
+ * This session's completion state, derived from the persisted terminal sets.
+ *
+ * No per-completion JIT refill: the whole granted set already has worktrees
+ * (worktrees == granted set — admission bounded it to the live budget at grant
+ * time). The pending remainder is re-granted at the NEXT next-step. So each
+ * `accept-node` only runs the finished node's lifecycle, then reports wait/done.
+ * The completion target is the granted set minus the nodes a peer driver owns —
+ * empty `contested` (the common single-driver case) gives the full granted set.
+ *
+ * Every accept outcome is terminal for this math: a FAILED node is no longer in
+ * flight (its recovery runs out-of-band via `reverify-node`), so it must not hold
+ * the directive at `wait` forever; a STRAY is terminal for a harder reason —
+ * nothing was ever committed, so there is nothing to re-drive at all. All three
+ * terminal sets are pairwise disjoint and are subsets of `dispatched`, which is
+ * what makes `in_flight` unable to go negative.
+ *
+ * Derived in ONE place because the stray path needs the same directive it would
+ * have returned, to carry on its rejection (see {@link StrayWorktreeRejection}).
+ */
+function rollingDirective(session: RollingSession): RollingDirective {
+  const acceptFailed = session.accept_failed ?? [];
+  const acceptStray = session.accept_stray ?? [];
+  const ownTotal = session.frontier.length - (session.contested ?? []).length;
+  const terminal = session.accepted.length + acceptFailed.length + acceptStray.length;
+  const inFlight = session.dispatched.length - terminal;
+  // Done when every node this session is responsible for reached a terminal accept
+  // AND nothing is still in flight — a contested node held by a peer driver does not
+  // keep this session waiting forever (the peer accepts it; the run-level
+  // `mergeImplementResults` is the finalizer over both drivers' outcomes, and it
+  // reconciles the grant's reservation-ledger leases so budget frees for the next
+  // grant).
+  if (terminal >= ownTotal && inFlight <= 0) {
+    return {
+      kind: "done",
+      accepted: session.accepted.length,
+      accept_failed: [...acceptFailed],
+      accept_stray: [...acceptStray],
+      total: ownTotal,
+    };
+  }
+  return {
+    kind: "wait",
+    in_flight: inFlight,
+    accepted: session.accepted.length,
+    accept_failed: [...acceptFailed],
+    accept_stray: [...acceptStray],
+    total: ownTotal,
+  };
+}
+
+/**
+ * Thrown when a node's accept trips the stray-worktree guard. The rejection stays
+ * LOUD (it is an error, and the CLI exits non-zero on it), but it CARRIES the
+ * directive the call would otherwise have returned.
+ *
+ * Without that, a stray in a ONE-node grant delivered no directive at all: the
+ * session was correctly persisted terminal, but the only call that could surface
+ * it had thrown, so the host had nothing to read and stalled anyway — the hang
+ * this whole path exists to remove, merely relocated. Attaching the directive is
+ * the tool-side fix; the alternative was a prompt line telling the host to call
+ * `accept-node` a second time, which is exactly the "host must remember" shape the
+ * project forbids.
+ */
+export class StrayWorktreeRejection extends Error {
+  constructor(
+    message: string,
+    /** The directive this call would have returned had it not rejected. */
+    readonly directive: RollingDirective,
+  ) {
+    super(message);
+    this.name = "StrayWorktreeRejection";
+  }
+}
+
+/**
  * The `accept-node` per-completion callback. Runs the shared accept lifecycle for
  * the finished node, then JIT-dispatches the next undispatched frontier node (if
  * any). Lock-guarded so concurrent completions don't race the session's
  * read-modify-write (which would double-dispatch or lose an acceptance).
  * Idempotent on a re-run for the same node (skips the lifecycle if the node already
- * reached a terminal accept — accepted OR accept_failed; a failed node's re-run
- * surfaces the recorded failure in the directive rather than re-running or silently
- * reading as accepted).
+ * reached ANY terminal accept — accepted, accept_failed, or accept_stray; such a
+ * re-run surfaces the recorded outcome in the directive rather than re-running the
+ * lifecycle or silently reading as accepted).
  */
 export async function advanceHostRolling(opts: {
   root: string;
@@ -513,13 +627,15 @@ export async function advanceHostRolling(opts: {
     // Sessions persisted before claim-wiring lack `claims` — default to empty so
     // the read-modify-write is forward-only (never throws on an older session).
     session.claims ??= {};
-    // Local const so the array stays narrowed across the awaits below.
+    // Local consts so the arrays stay narrowed across the awaits below.
     const acceptFailed = (session.accept_failed ??= []);
+    const acceptStray = (session.accept_stray ??= []);
     const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
 
     if (
       !session.accepted.includes(opts.blockId) &&
-      !acceptFailed.includes(opts.blockId)
+      !acceptFailed.includes(opts.blockId) &&
+      !acceptStray.includes(opts.blockId)
     ) {
       // Contested-node fail-closed guard (OD3 layer 2, D-66/67 slice-1 §5b):
       // `prepareHostRollingDispatch` never writes `session.claims[block_id]` for a
@@ -578,10 +694,36 @@ export async function advanceHostRolling(opts: {
       // disk even though this accept-node call itself rejects.
       await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept);
       if (accept.strayWorktreeSuspected) {
-        throw new Error(
+        // A stray IS terminal — the node will never be accepted by this session — so
+        // it must be counted and unclaimed BEFORE the guard throws. Leaving the throw
+        // above this block (the pre-fix shape) skipped `writeSessionFile` entirely, so
+        // `terminal` never counted the node, `inFlight` stayed pinned ≥1, and the run
+        // hung permanently rather than stalling for a lease window.
+        //
+        // The ORDER below is load-bearing and easy to get backwards:
+        //   1. sidecar (already written above, and it must stay FIRST) — `marshal.ts`
+        //      derives `acceptHardFailed` from it, so a null sidecar leaves that gate
+        //      inert and a never-landed node's self-reported `resolved` is trusted
+        //      through merge. `acceptReconcile` cannot repair that: it only fixes
+        //      blocks that DO have landed git evidence, which a stray lacks by
+        //      construction.
+        //   2. mark terminal → 3. drop the token from the persisted map →
+        //   4. persist → 5. release the claim → 6. throw last.
+        // Persist-then-release is the right way round: a persist failure leaves claim
+        // and session both intact (the pre-fix behaviour, still valid inside the 30s
+        // `STALE_LOCK_MS` window), whereas a release failure leaves the session
+        // terminal with the token already dropped — nothing reads a stale token and
+        // the orphaned registry entry ages out on its own.
+        acceptStray.push(opts.blockId);
+        session.contested ??= [];
+        if (ownerToken) delete session.claims[opts.blockId];
+        await writeSessionFile(opts.artifactsDir, opts.runId, session);
+        if (ownerToken) await registry.release(opts.blockId, ownerToken);
+        throw new StrayWorktreeRejection(
           accept.diagnostic ??
             `node ${opts.blockId}: stray worktree suspected — its result claims a ` +
               `resolved edit but the designated worktree has no commits beyond base.`,
+          rollingDirective(session),
         );
       }
       if (accept.outcome === "success") {
@@ -606,42 +748,8 @@ export async function advanceHostRolling(opts: {
 
     session.contested ??= [];
 
-    // No per-completion JIT refill: the whole granted set already has worktrees
-    // (worktrees == granted set — admission bounded it to the live budget at grant
-    // time). The pending remainder is re-granted at the NEXT next-step. So each
-    // `accept-node` only runs the finished node's lifecycle, then reports wait/done.
-    // This session's completion target is the granted set minus the nodes a peer
-    // driver owns. Empty `contested` (the common single-driver case) → the full
-    // granted set, so the counts are unchanged.
-    const ownTotal = session.frontier.length - session.contested.length;
-    // Both accept outcomes are terminal for THIS session's completion math — a
-    // failed node is no longer in flight (its recovery runs out-of-band via
-    // `reverify-node`), so it must not hold the directive at `wait` forever.
-    const terminal = session.accepted.length + acceptFailed.length;
-    const inFlight = session.dispatched.length - terminal;
-
     await writeSessionFile(opts.artifactsDir, opts.runId, session);
-    // Done when every node this session is responsible for has been accepted AND
-    // nothing is still in flight — a contested node held by a peer driver does not
-    // keep this session waiting forever (the peer accepts it; the run-level
-    // `mergeImplementResults` is the finalizer over both drivers' outcomes, and it
-    // reconciles the grant's reservation-ledger leases so budget frees for the next
-    // grant).
-    if (terminal >= ownTotal && inFlight <= 0) {
-      return {
-        kind: "done",
-        accepted: session.accepted.length,
-        accept_failed: [...acceptFailed],
-        total: ownTotal,
-      };
-    }
-    return {
-      kind: "wait",
-      in_flight: inFlight,
-      accepted: session.accepted.length,
-      accept_failed: [...acceptFailed],
-      total: ownTotal,
-    };
+    return rollingDirective(session);
   });
 }
 

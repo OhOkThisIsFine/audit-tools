@@ -390,22 +390,31 @@ async function acceptNodeWorktreeLocked(
     removeWorktree(root, wt);
     if (params.nodeClaimsEdit) {
       // The node's OWN result claims a real ("resolved") edit, yet its DESIGNATED
-      // worktree has zero commits beyond base — that is impossible for a genuine
-      // no-op and is the classic stray-worktree symptom: the Agent tool's own
-      // `isolation:"worktree"` was passed when dispatching this node, spawning a
-      // SECOND unrelated worktree the subagent actually edited in. Fail loud rather
-      // than silently stranding the real work in that stray tree.
+      // worktree has zero commits beyond base — impossible for a genuine no-op, so
+      // the edits were made somewhere the tool cannot see. Fail loud rather than
+      // silently stranding the real work wherever it went.
+      //
+      // The diagnostic states the OBSERVATION and lists the causes, rather than
+      // asserting one: the symptom is identical whether the subagent got a second
+      // worktree from `isolation:"worktree"` or simply edited the main tree, and
+      // naming only the first sends an operator looking for a tree that may not
+      // exist. Note the designated worktree was removed just above, so the path is
+      // an identifier here, not somewhere to go and look.
       return {
         outcome: "error",
         verifyPassed,
         merged,
         diagnostic:
           `node ${blockId}'s result reports a resolved (real-edit) finding, but its ` +
-          `designated worktree \`${wt}\` has NO commits beyond base — the Agent ` +
-          `tool's own isolation:"worktree" was passed when dispatching this node, ` +
-          `spawning a SECOND unrelated worktree the subagent edited in. Never pass ` +
+          `designated worktree (\`${wt}\`, now removed) had NO commits beyond base, ` +
+          `so the edits were made outside it and are not recoverable by this run. ` +
+          `The two causes that produce this: the Agent tool's own ` +
+          `isolation:"worktree" was passed when dispatching the node, spawning a ` +
+          `SECOND worktree the subagent edited in; or the subagent edited the MAIN ` +
+          `repository tree instead of the worktree it was given. Never pass ` +
           `isolation:"worktree" to the Agent tool for a remediate implement node — ` +
-          `the dispatch plan already creates the node's own worktree.`,
+          `the dispatch plan already creates the node's own worktree — and set each ` +
+          `subagent's working directory to that worktree.`,
         strayWorktreeSuspected: true,
       };
     }

@@ -1499,6 +1499,12 @@ export async function driveRollingImplementDispatch(
  * coordinator splits by per-pool SLOTS (concurrency) — host vs. backend — so a
  * uniform estimate is sufficient here; it matches the default the in-process engine
  * uses (`driveRollingDispatch`'s `() => 2000`), keeping the two paths consistent.
+ *
+ * ⚠ **Deliberately still flat.** Replacing it with the real per-node estimate was
+ * built and REVERTED (2026-07-24): it is accurate, and that is precisely the
+ * problem — an honest estimate makes "this node fits no pool" REACHABLE, and both
+ * consumers mishandle that case terminally rather than resumably. See the backlog
+ * entry; the fit gates cannot consume a real estimate until that routing is fixed.
  */
 const HYBRID_NODE_TOKEN_ESTIMATE = 2000;
 
@@ -2261,12 +2267,26 @@ directive on stdout:
 
 \`${rollMerge}\`
 
-If the directive's \`accept_failed\` array names any node, that node's accept FAILED:
-its committed work is preserved under a quarantine ref and nothing landed. Do NOT
-re-run \`accept-node\` for it (that only re-reports the failure). Fix the named cause,
-then re-drive it with:
+If the directive's \`accept_failed\` array names any node, that node's accept FAILED and
+nothing landed. Do NOT re-run \`accept-node\` for it (that only re-reports the failure).
+If the node had COMMITTED work, it is preserved under a quarantine ref and the recovery
+is to fix the named cause and re-drive it with the command below; if the node never
+committed (its worker died or errored before making an edit) there is no ref, that
+command answers \`no_quarantine\`, and the merge routes its items to triage instead. The
+node's recorded diagnostic says which case it is — read it before choosing.
 
 \`${reverifyCmd}\`
+
+If the directive's \`accept_stray\` array names any node, that node committed NOTHING:
+its result claimed a resolved edit but its designated worktree held no commits, so the
+edits were made somewhere the tool cannot see (a second worktree, or the main tree).
+Its work is NOT recoverable — there is no quarantine ref, so \`reverify-node\` would
+return \`no_quarantine\`, and its worktree has already been removed. Do not run
+\`reverify-node\` for it and do not re-spawn a subagent for it in this step. The tool has
+already recorded the node as hard-failed; run the \`merge-implement-results\` command
+shown ABOVE as usual, which blocks its items and routes them to triage. \`accept-node\`
+for that node exits NON-ZERO with the diagnostic on stderr — that exit code is expected,
+and it still prints the directive on stdout, so read the directive and keep going.
 
 Then run:
 

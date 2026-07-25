@@ -26,6 +26,40 @@ function makePacket(id, { estimatedTokens = 1000, complexity = 0.5, payload = {}
   return { id, payload, estimatedTokens, complexity };
 }
 
+/**
+ * Wait until `predicate()` holds, polling on a short tick with a generous deadline.
+ *
+ * The engine's re-dispatch is event-driven, so how long it takes to observe is a
+ * property of the RUNNER's load, not of the code under test. A fixed `setTimeout`
+ * therefore encodes a wall-clock guess that passes in isolation and loses the race
+ * under full parallel load — it flaked two publish CIs ("expected 1 to be 2",
+ * "expected 2 to be 3"), each cleared by a bare re-run. Polling makes the wait as
+ * long as it needs to be while keeping the assertion itself exact, so a genuine
+ * regression still fails (on the deadline) instead of being masked by a longer sleep.
+ */
+async function waitFor(predicate, description, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for: ${description}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * The engine's re-pass interval. A poll returns the instant a bound is TOUCHED, so
+ * on its own it converts "exactly N are in flight" into "at least N" — a regression
+ * that admits the extra packet on the NEXT pass would slip through. Settling for one
+ * full re-pass before a negative assertion restores what the original fixed sleep
+ * covered, without the fixed sleep also having to cover the wait itself (which is
+ * what made it lose the race on a loaded runner).
+ */
+const ENGINE_REPASS_SETTLE_MS = 60;
+const settleOnePass = () =>
+  new Promise((resolve) => setTimeout(resolve, ENGINE_REPASS_SETTLE_MS));
+
 function makePool(id, overrides = {}) {
   // Mirror buildSourcePool: the account partition is the wire-carried accountKey, derived
   // from the source declaration (service-scoped), falling back to the unique pool id when
@@ -254,18 +288,24 @@ test("createRollingDispatcher — re-dispatches immediately on result arrival (r
 
   const runPromise = dispatcher.run();
 
-  // Give the dispatcher a moment to start the first packet
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Each step waits for the PROGRESS event (removing the runner-speed race that
+  // flaked this test twice in publish CI), then settles one engine re-pass before
+  // asserting the exact count — the `toBe(N)` half is a negative assertion ("and
+  // nothing else started"), which a bare poll would no longer be able to catch.
+  await waitFor(() => dispatchOrder.length >= 1, "the first packet to be dispatched");
+  await settleOnePass();
   expect(dispatchOrder.length, "only one dispatch should be active initially").toBe(1);
 
   // Complete p1 — p2 should start
   resolvers["p1"]();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitFor(() => dispatchOrder.length >= 2, "p2 to be dispatched after p1 completes");
+  await settleOnePass();
   expect(dispatchOrder.length, "second dispatch should start after first completes").toBe(2);
 
   // Complete p2 — p3 should start
   resolvers["p2"]();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitFor(() => dispatchOrder.length >= 3, "p3 to be dispatched after p2 completes");
+  await settleOnePass();
   expect(dispatchOrder.length, "third dispatch should start after second completes").toBe(3);
 
   // Complete p3 — run() should resolve
@@ -301,8 +341,11 @@ test("createRollingDispatcher — a pool's own concurrencyCap ceilings its in-fl
   dispatcher.enqueue([1, 2, 3, 4, 5].map((n) => makePacket(`p${n}`)));
   const runPromise = dispatcher.run();
 
-  // Let the first pass fill to the cap and stabilize.
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  // Let the first pass fill to the cap. Same fixed-sleep race as the rolling test
+  // above — wait for the fill event, then settle one re-pass so the "at most 2"
+  // assertion still has a window in which an over-admit could show up.
+  await waitFor(() => active >= 2, "the first pass to fill in-flight up to the cap");
+  await settleOnePass();
   expect(active, "cap=2 admits at most 2 concurrently").toBeLessThanOrEqual(2);
   expect(active, "cap=2 fills to the cap (endpoint not left idle)").toBe(2);
 

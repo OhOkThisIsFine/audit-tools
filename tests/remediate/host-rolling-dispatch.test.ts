@@ -28,6 +28,7 @@ import {
   prepareHostRollingDispatch,
   nodeClaimRegistry,
   nodeClaimRegistryPath,
+  StrayWorktreeRejection,
   type RollingSession,
 } from "../../src/remediate/steps/rollingSession.js";
 import {
@@ -558,6 +559,89 @@ describe("advanceHostRolling", () => {
     expect(rec.outcome).toBe("error");
     expect(rec.merged).toBe(false);
     expect(rec.stray_worktree_suspected).toBe(true);
+
+    // A stray is TERMINAL: the guard's throw used to sit above the bookkeeping, so
+    // `writeSessionFile` never ran — the node was never counted and `inFlight` stayed
+    // pinned ≥1, hanging the run permanently. Both records must be settled BEFORE the
+    // throw. (Invert by moving the throw back above the terminal block: this goes red
+    // while every sibling test stays green.)
+    const claimsFile = nodeClaimRegistryPath(artifactsDir, RID);
+    const rawClaims = JSON.parse(readFileSync(claimsFile, "utf8"));
+    const liveClaims = rawClaims.claims ?? rawClaims ?? {};
+    expect(Object.keys(liveClaims), "the stray's claim is released, not leaked").not.toContain("B1");
+
+    const persisted: RollingSession = JSON.parse(
+      readFileSync(join(artifactsDir, "runs", RID, "implement", "rolling-session.json"), "utf8"),
+    );
+    expect(persisted.accept_stray).toContain("B1");
+    expect(persisted.claims).not.toHaveProperty("B1");
+    // Its own class, never `accept_failed` — see the sibling-directive test below.
+    expect(persisted.accept_failed ?? []).not.toContain("B1");
+  });
+
+  it("a ONE-node grant that strays still delivers a terminal directive on the rejection", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // The narrowest case, and a routine one — the granted-set size IS the admission
+    // width, so a one-node grant is ordinary. Persisting the node terminal is not
+    // enough here: the only call that could surface that state is the one that
+    // rejected, so without the directive riding on the rejection the host has
+    // nothing to read and stalls anyway — the same hang, merely relocated.
+    const artifactsDir = await seedSession(repo, ["B1"]);
+    writeFileSync(
+      join(artifactsDir, "B1.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "B1", status: "resolved", evidence: ["ok"] }],
+      }),
+    );
+
+    const err = await advanceHostRolling({
+      root: repo,
+      artifactsDir,
+      runId: RID,
+      blockId: "B1",
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err, "the stray still rejects loudly").toBeInstanceOf(StrayWorktreeRejection);
+    const rejection = err as StrayWorktreeRejection;
+    expect(rejection.directive.kind, "the wave is complete — nothing is still in flight").toBe(
+      "done",
+    );
+    expect(rejection.directive.accept_stray).toEqual(["B1"]);
+    expect(rejection.directive.accepted).toBe(0);
+  });
+
+  it("a sibling's directive reports the stray in accept_stray, NOT accept_failed (no phantom quarantine ref)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = await seedSession(repo, ["B1", "B2"]);
+    // B1 claims a real edit with an untouched worktree → stray.
+    writeFileSync(
+      join(artifactsDir, "B1.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "B1", status: "resolved", evidence: ["ok"] }],
+      }),
+    );
+    await expect(
+      advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" }),
+    ).rejects.toThrow(/stray worktree|isolation:"worktree"/i);
+
+    // B2 is a genuine no-op and accepts clean. Its directive is what the host reads,
+    // and it must NOT name B1 in `accept_failed`: that field's host directive promises
+    // the work is "preserved under a quarantine ref" and instructs `reverify-node`, but
+    // a stray never committed, so no ref exists and the command returns `no_quarantine`
+    // — a hard stop turned into a confidently-wrong instruction.
+    const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" });
+    expect(d.accept_failed).not.toContain("B1");
+    expect(d.accept_stray).toEqual(["B1"]);
+    // Both nodes are terminal, so the run completes instead of waiting forever.
+    expect(d.kind).toBe("done");
   });
 
   it("companion: a genuine resolved_no_change node with zero commits does NOT throw", async () => {

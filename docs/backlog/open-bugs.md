@@ -76,22 +76,24 @@
   HEAD sha if the cost ever bites on a large repo.
 
 - **FLW-COR-003 claim-release livelock — the IN-PROCESS half is SHIPPED; the HOST half is what
-  remains (2026-07-22, downgraded from HIGH to medium 2026-07-24 after a code trace).** Original:
-  with every NIM worker 429-failing, claims from a failed round sat live for the full 20-min lease
-  (`AUDIT_TASK_CLAIM_LEASE_MS`, dispatch.ts:135); every interleaved next-step then saw all pending
-  tasks peer-claimed → dispatch plan `[]` → obligation unsatisfied → drain re-selected it to
-  `maxTransitions(100)`, exit 1, one empty run dir per ~10s (571 accumulated).
-  **Already fixed for the in-process rolling driver** (commit `681df1f5`): `releaseOwnedTaskClaims`
+  remains (2026-07-22, downgraded from HIGH to medium 2026-07-24 after a code trace).** Symptom: claims
+  from an all-workers-failed round sat live for the full 20-min lease (`AUDIT_TASK_CLAIM_LEASE_MS`,
+  dispatch.ts:135), so every interleaved next-step saw all pending tasks peer-claimed → empty dispatch
+  plan → obligation unsatisfied → drain re-selected to `maxTransitions(100)` and exit 1.
+  **Fixed for the in-process rolling driver** (commit `681df1f5`): `releaseOwnedTaskClaims`
   (dispatch.ts:149) is called at drive end (`rollingAuditDispatch.ts:675`) and on the empty-plan
-  round (`:485`), so a failed/stranded round frees its claims immediately.
+  round (`:485`).
   **Still open — the HOST path never releases.** `prepareDispatchArtifacts` claims the candidate set
   for all three callers, but only the rolling driver sweeps; `prepareDispatchCommand.ts:36` (the
   `audit-code prepare-dispatch` CLI) and `semanticReviewStep.ts:119` claim and rely solely on merge's
   terminal `clear()` — so a host round whose workers all die still holds its claims for the lease.
   Property: claims release on worker failure, not only at merge, on EVERY path that claims.
-  ⚠ The "zero-granted round pauses the drain" half is a SEPARATE property from claim release — verify
-  it independently at HEAD (the per-packet pause wall and host-dispatch wall have both landed since
-  this was written). Record:
+  ✅ The "zero-granted round pauses the drain" half is **VERIFIED HOLDING at HEAD (2026-07-24) — no work
+  remains on it.** Two independent reasons: admission never runs inside a loop (every dispatch executor
+  is `host_delegation`, so both drains halt at the dispatch boundary *before* admission is computed),
+  and `detectHostDispatchWall` (`src/shared/dispatch/hostDispatchWall.ts:118-128`) returns
+  `atWall` with a discriminated `emptyGrantCause` the moment `grantedCount === 0` — the single wall
+  predicate BOTH orchestrators draw. Record:
   [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
 
 - **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
@@ -229,20 +231,17 @@
   Both halves were attempted and reverted in this lap (`548380df` → restored); nothing is
   half-applied at HEAD.
 
-- **Stale agent worktrees are never pruned, and their `dist/` pollutes every repo-wide grep
-  (2026-07-24, low, friction: tool-should-decide).** Four worktrees survive under `.claude/worktrees/`
-  from prior agent runs, plus an unregistered orphan dir. **Cleared by hand 2026-07-24 — the MECHANISM is
-  still missing**, so it recurs on the next agent run. Verifying the header-extraction island was dead, a
-  repo-wide grep hit `.claude/worktrees/agent-…/dist/` and reported the deleted code as still referenced —
-  a stale build tree that answers greps as if it were source is a false-positive generator for exactly the
-  dead-code and residual-reference checks this project runs.
+- **Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide).**
+  Worktrees survive from prior agent runs, plus unregistered orphan dirs. **Cleared by hand 2026-07-24 —
+  the MECHANISM is still missing**, so it recurs on the next agent run.
   Property: a completed worktree is reaped by whatever created it, or by a periodic prune over those whose
-  HEAD is an ancestor of `main` with a clean tree; a repo-wide grep must never see a build output.
-  ⚠ **Not every stale worktree is a duplicate.** Three of four were ancestors of `main`; the fourth
-  (`9820b7e9`) was a SUPERSEDED ALTERNATIVE — the same slow-first-byte NIM fix via a `node:http` transport
-  (`nodeHttpFetch.ts` + its test, neither in main) where main uses an undici `Agent`. Tagged
-  `archive/nodehttpfetch-alternative-9820b7e9` rather than dropped. A blanket `git worktree remove`
-  without the ancestor+clean check is how that work disappears silently.
+  HEAD is an ancestor of `main` with a clean tree.
+  ⚠ **Not every stale worktree is a duplicate**, so a blanket `git worktree remove` without the
+  ancestor+clean check silently destroys work: of four cleared by hand three were ancestors of `main`,
+  the fourth a superseded ALTERNATIVE kept as `archive/nodehttpfetch-alternative-9820b7e9`.
+  ⚠ The entry's original "their `dist/` pollutes every repo-wide grep" clause was **FALSIFIED**
+  (2026-07-24, two probes): those paths are all gitignored, so `rg`/`git grep` cannot see them. The
+  surviving lesson is a search-tool trap, now in [`durable-traps.md`](durable-traps.md).
 
 - **A dead offload proxy is only detectable by REMEMBERING to probe it, and it fails identically
   to a model problem (2026-07-24, medium, friction: tool-should-decide).** A 101-call batch run
@@ -348,14 +347,6 @@
   unverified and needs that live probe. The `--dangerously-skip-permissions` workaround stays refused by
   `shell-trap-guard.mjs` (prompt-derail trap, with the three agy headless traps). Delete this entry once
   the probe is green.
-
-- **`tests/shared/rollingDispatch.test.mjs` "re-dispatches immediately on result arrival" is
-  timing-flaky on loaded runners (2026-07-23, low, hermeticity).** First observation: CI shard 2 of
-  the v0.34.23 publish run — the 50ms `setTimeout` at rollingDispatch.test.mjs:268-269 lost the
-  race on a busy runner ("expected 2 to be 3"); passed locally alone (72/72) and in the same-day
-  full local run; CI rerun green. Same class as the linux-cycle entry below: the fix is an
-  event-driven wait (poll for `dispatchOrder.length === 3` with a generous deadline), not a fixed
-  sleep. One observation — fix if it recurs.
 
 - **CLAUDE.md overstates the `admitSpawn` consent gate (2026-07-19).** *Own-vs-acquire analyzer
   engine* states every acquired-tool spawn "routes through the single `admitSpawn` chokepoint and
@@ -658,7 +649,6 @@
 
 - **Friction walk (H2+H4 collapse lap, 2026-07-18):** (1) **ambiguous-direction (medium):** my own plan doc asserted "the host-vs-source dedup already exists" from a docblock's phrasing — the adversarial plan review refuted it against the writers (dedup was source-vs-source only, the new rule was new code); and the reviewer's own proposed fix for the display filter was itself a gate-that-never-fires (relative floor can't refuse every pool) — caught only by re-deriving at implementation time. Both are the standing lesson: every causal claim, including a REVIEWER's fix, gets verified against source before building. [[gate-must-be-traced-not-designed]] (2) **tool-should-decide (low):** the pre-commit loop-core gate evaluates a CHAINED `attest && commit` command before the inner attest has run, so the legitimate one-shot form is blocked — attest must be its own Bash call first; either the hook could ignore commits preceded by an attest in the same chain, or document the split as the required shape. (3) **inefficient-feeding (medium, recurrences):** NIM `llm read` lane 503-saturated ("Worker local total request limit 163/32") after ONE call in its session — recon fell back to targeted greps; and a delegated implementer died mid-task on the Claude session limit, with its partial recon unrecoverable (clean tree, redone in-context). Both argue for the standing pattern: main context implements from subagent recon it can verify, not the reverse.
 
-- **Remediate hybrid frontier still sizes with a FLAT per-node estimate (step-G remediate half, medium).** `HYBRID_NODE_TOKEN_ESTIMATE` (`src/remediate/steps/nextStep.ts:1441`) makes the claim-time fit gate blind for implement nodes (audit's half fixed 2026-07-17 with real `token_estimate`s). Property: derive per-node estimates from the node's `affected_files` sizes (`estimateTokensFromBytes`) so a chronically-413ing (node,pool) pair is pre-skipped, not re-claimed each cycle.
 
 - **Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** A Haiku subagent handed one bounded step (charter_extraction) with an explicit "do NOT run next-step" instruction obeyed the step prompt's own embedded advance command instead and drove the workflow forward — the parent lost the step boundary. This generalizes the existing "design-review worker prompts FOLLOW-UP" entry from one branch to EVERY step prompt: the advance command belongs to the DRIVER, not the step executor, and prompt text cannot enforce that split (host/worker discretion). Property to hold: a step prompt handed to a non-driving executor must not carry the advance command — e.g. emit it only in the step JSON (driver-facing), not in the worker-facing prompt md, or gate next-step on the driving agent-id. **Recurrence 2026-07-17 (design-review re-dogfood):** a `systemic_challenge` adversary subagent, handed its step-prompt path to follow, executed the prompt's embedded `next-step` and advanced the loop from round 7→8 — even convergence-loop worker prompts carry the advance command, so this is not branch-specific. Mitigation used the rest of the lap: the dispatch message explicitly overrides ("do NOT run next-step; the parent owns advancement"), which held — but that is host-discretion, exactly what the property says to remove. [[enforce-robustness-in-tooling-not-host-discretion]] [[delegate-adversarial-phases-to-separate-agent]]
   **SPEC — the advance command goes in the DRIVER-facing artifact only, never in the worker-facing prompt.**
@@ -839,7 +829,7 @@
 
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
-- **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12) — item (2) refuted at HEAD, item (1) restated:** **inefficient-feeding (medium):** every contract-pipeline phase that still needs judgment is authored by the HOST conversation, and there is no route to a $0 pool. `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1634`) calls `scheduleWave` for a fan-out *cap only* — the comment at `:1663` states outright that `capacity_pools` never reaches `buildDispatchQuota` from here — so the per-module drafting wave, like every other phase step, renders a prompt asking the HOST to dispatch sub-agents (`:1705`). Determinism has already trimmed the count (`obligation_ledger` `:1968`, `contract_finalization` `:2014`, the single-module `seam_reconciliation` no-op `:1984` and the no-cycles `cyclic_seam_resolution` `:2349` are tool-derived; `FRAMING_COLLAPSE_GROUP` `:164` folds goal→context→decomposition into one round-trip at the low tier), so the true figure is ~9-11 host round-trips, not the ~15 first logged — but every one of them bills host quota BEFORE the first implement dispatch, so routing fixes on the implement half never touch the planning bill. The second half is real but DELIBERATE, not accidental: a validation failure moves the host's `<name>.input.json` into `contract/history/` (`archiveContractArtifact` `:409`, archived rather than deleted so no LLM output is destroyed) and `rejectionRewriteInstruction` `:457` instructs "Write a fresh complete artifact at its original path — do NOT Edit the previous file", so a one-field schema error costs a whole re-author. **Both remaining halves are owner calls, not bounded fixes:** (a) should the planning phases become dispatchable to a non-host pool (they are the only pipeline half that cannot be), and (b) is a targeted in-place repair path worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that currently makes re-emission trivially correct? **Dropped — the implementation_dag citation-grounding claim does not describe the gate at HEAD.** `validateContractCitationGrounding` grounds `affected_files` FIRST via `groundDesignFinding` (`src/remediate/validation/contractPipelineGates.ts:1198`), then path-shaped tokens against the tracked-path set *plus* real parent directories so a not-yet-created file still grounds (`:1222`); prose tokens are the last resort, not the gate. `normalizeRepoPath` preserves a dotfile-dir leading dot by invariant (INV-B3-1, `src/shared/validation/findingGrounding.ts:46`, pinned red-green by `tests/remediate/source-grounded-citation.test.ts:87`), and `deriveNodeFiles` (`contractPipeline.ts:2947`, `c60eb73f`, landed three hours after this entry was written) gives every DAG node a file scope, so a scope-less node can no longer fall through to prose-token grounding at all. [[synth-scopeless-nodes-doomed-run]]
+- **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1634`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1663`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
 
 - **Exact key-set leak-guards name the offending field in the diff but not in the failure headline (2026-07-15 friction walk, tool-should-decide, low).** `tests/audit/review-packets.test.mjs:1071` asserts `Object.keys(plan[0]).sort()` against a literal key list — an additive-hostile leak-guard by design, so ANY new field on `DispatchPlanEntry` (`src/audit/cli/dispatch/types.ts:144`) reds it. When it fires the headline is `expected [ 'access', 'complexity', …(6) ] to deeply equal [ 'access', 'complexity', …(5) ]` — those counts are "N more items", not key counts, and no field name appears; the key is named only in the +/- diff the default reporter prints below it (`vitest.config.ts:29` keeps `"default"` in `reporters`, so the diff is never lost). So a log tail, a job-summary line, or a truncated CI excerpt reads as an opaque count mismatch. Endpoint: a shared `expectExactKeys(actual, expected, label)` helper under `tests/helpers/` that asserts on the sorted unexpected/missing delta, putting the field name in the headline itself; low value while the diff is right there. The one concrete instance is CLOSED — `DispatchPlanEntry.file_paths` was added by an adversarial-review HIGH-fix AFTER the full-suite run, only targeted tests were re-run, release CI shard 1/4 caught it, fixed in `85593e05` (one forward-bump). Standing rule from that miss: a post-review change to a CONTRACT SHAPE (a new field on a persisted/asserted type) forces a full-suite rerun — the blast radius is every exact-shape assertion, not the changed module.
 
@@ -882,14 +872,28 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
+- **An HONEST per-node token estimate is BLOCKED on unplaceable-node routing — built, verified, and
+  REVERTED 2026-07-24 (medium, loop-core).** The remediate hybrid frontier and the in-process engine both
+  size every implement node at a flat 2000 (`HYBRID_NODE_TOKEN_ESTIMATE`, `driveRollingDispatch`'s
+  `() => 2000`), so the fit gates cannot tell a large node from a small one. The obvious fix — persist
+  `estimateImplementSlotTokens` onto the plan item and read it at both gates — was built and reverted:
+  an accurate estimate makes "this node fits NO pool" **reachable**, and both consumers mishandle that
+  case terminally instead of resumably:
+  (a) **headless in-process** — `context_cap` for every pool → `neverDispatchable` → permanent strand
+  blocking the rest of the run. A block whose largest read file is ~230KB estimates ~59.5k against a 32k
+  floor; 16 files here exceed 60KB, so this is ordinary.
+  (b) **hybrid** — an all-unplaceable frontier leaves BOTH partitions empty, so the
+  `partition.host.length === 0` early-merge runs instead of the `no_capable_pool` structural-refusal
+  PAUSE, and every item is `blocked` + `markTerminal` — dead for the run even after the operator frees a
+  larger pool (`no_capable_pool` is deliberately not in `TRANSIENT_REFUSAL_REASONS`). `buildEmptyPoolTerminal`
+  then reports "the provider pool was exhausted", sending the operator to quota when nothing was.
+  Property: an unplaceable node routes to a RESUMABLE structural-refusal pause naming the real cause
+  (split it, or declare a larger `context_tokens`), never a permanent strand or terminal block.
+  Fix that routing FIRST; the estimate wiring is then a two-line change. ⚠ Do not re-attempt it by
+  byte-SUMming the access set — that model was retired for cause (`estimateImplementSlotTokens`'s
+  docblock), and a second derived number also desyncs the plan from admission.
 
-- **`tests/shared/rollingDispatch.test.mjs` is a genuine timing flake (2026-07-12, tool-should-decide, medium).**
-  "second dispatch should start after first completes: expected 1 to be 2" — a wall-clock/ordering assertion
-  that flakes under full parallel load; passes in isolation. It flaked the v0.32.62 publish CI (shard 2/4;
-  the CI test suite has no `--retry`, unlike the now-hardened remediate gate) → re-run cleared it. De-flake the
-  test itself (deterministic scheduling/fake timers), per test-failure-protocol "passes alone = hermeticity/
-  timing bug → fix the test." Until then, a publish may need one CI re-run.
+- **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
 
 - **"Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).**
   The step prompt tells the host to hand the rolling loop to one dedicated dispatcher subagent, but worker
@@ -1064,19 +1068,15 @@
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
 
-- **Friction-walk lesson (D-66/67 slice-1 ownership-gate lap):** design-level adversarial review pays for
-  itself before a line is written, and review depth should scale with delicacy
-  (`[[delegate-adversarial-phases-to-separate-agent]]`) — see memory. Open tool sliver (low value): the
-  PreToolUse commit-gate fires on the whole Bash call before a chained `attest && git commit` runs, so the
-  attestation half hasn't executed when the gate checks (workaround = attest as its own call); a gate that
-  recognized the attest step in the same chain would remove the trap.
+- **The commit gate cannot see a chained `attest && git commit` (low).** PreToolUse fires on the whole
+  Bash call, so the attestation half has not run when the gate checks; workaround is to attest as its own
+  call. A gate that recognized the attest step in the same chain would remove the trap. Lesson home:
+  [[delegate-adversarial-phases-to-separate-agent]].
 
-- **Friction-walk lesson (backlog-clearance lap):** a backlog item / chosen option / design memory is a
-  point-in-time proposal — verify its premises against current code AND a real measurement before building
-  (`[[spec-degradation-and-doc-staleness]]`) — see memory. Open tool sliver: the pre-commit gate that
-  silently failed-open in linked worktrees is FIXED (scratch index → `os.tmpdir()`), but the durable
-  improvement — make a fail-open on infra fault OBSERVABLE (a one-line stderr when the staged-snapshot path
-  bails) rather than silent — is not yet done.
+- **A pre-commit-gate fail-open on infra fault is SILENT (low).** The linked-worktree case is fixed
+  (scratch index → `os.tmpdir()`), but the durable property is not: when the staged-snapshot path bails,
+  the gate should say so on stderr rather than passing quietly. Lesson home:
+  [[spec-degradation-and-doc-staleness]].
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):

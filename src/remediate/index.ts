@@ -9,7 +9,11 @@ import {
   mergeImplementResults,
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
-import { advanceHostRolling, reverifyQuarantinedNode } from "./steps/rollingSession.js";
+import {
+  advanceHostRolling,
+  reverifyQuarantinedNode,
+  StrayWorktreeRejection,
+} from "./steps/rollingSession.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
@@ -296,14 +300,32 @@ program
     ".audit-tools/remediation",
   )
   .action(async (options) => {
-    const directive = await withBackendLogsOnStderr(() =>
-      advanceHostRolling({
-        root: resolve(options.root),
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-        runId: options.runId,
-        blockId: options.id,
-      }),
-    );
+    let directive;
+    try {
+      directive = await withBackendLogsOnStderr(() =>
+        advanceHostRolling({
+          root: resolve(options.root),
+          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+          runId: options.runId,
+          blockId: options.id,
+        }),
+      );
+    } catch (err) {
+      // A stray-worktree rejection is terminal for the node but NOT for the wave:
+      // the session is already persisted with that node counted, so the remaining
+      // nodes still have a completion state to read. Print the diagnostic loudly on
+      // stderr and exit non-zero (the rejection stays a hard failure), but still
+      // emit the directive on stdout — otherwise a one-node grant rejects with no
+      // directive at all and the host stalls with nothing to act on.
+      if (err instanceof StrayWorktreeRejection) {
+        console.error(err.message);
+        const { kind, ...rest } = err.directive;
+        console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
     const { kind, ...rest } = directive;
     console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
   });
