@@ -392,6 +392,32 @@ function computeStagedTreeSha() {
   return wt.ok ? wt.stdout.trim() : null;
 }
 
+// The path set this commit will carry in the INDEX sense: the staged listing,
+// widened with pending worktree changes when the command stages before
+// committing (`git add -A && git commit`, `git commit -a`/`-am`) so a chained
+// add cannot slip paths past a staged-set-triggered gate. Null on a git fault —
+// every caller fails open on that, announcing which check it skipped.
+// Single-sourced because two gates key off it (the branch-strand refusal in the
+// main flow, and every staged-set trigger inside runGate); two copies of "what
+// this commit stages" is two chances for one of them to answer differently.
+function collectStagedSet() {
+  const cached = git(['diff', '--cached', '--name-only']);
+  if (!cached.ok) return null;
+  const staged = cached.stdout
+    .split(/\r?\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!hasStageCommand) return staged;
+  const status = git(['status', '--porcelain']);
+  if (!status.ok) return staged;
+  const pending = status.stdout
+    .split(/\r?\n/)
+    .map((line) => line.slice(3).trim())
+    .map((p) => (p.includes(' -> ') ? p.split(' -> ')[1] : p))
+    .filter(Boolean);
+  return Array.from(new Set([...staged, ...pending]));
+}
+
 // Run the full gate (typecheck + conditional doc-contract subset) against
 // whatever is currently in the working tree. Returns { blocked, message }.
 // `blocked` true => a gate RESULT failed (fail-closed). Infra faults inside are
@@ -426,29 +452,13 @@ function runGate(committedPaths) {
   // `npm run check` only typechecks; a prose reword can land a RED doc-contract
   // test on main (release-contract.test.mjs asserts EXACT strings). We inspect
   // the staged set (git diff --cached) — the files that will actually commit.
-  const cached = git(['diff', '--cached', '--name-only']);
-  if (!cached.ok) {
+  const staged = collectStagedSet();
+  if (staged === null) {
     // Fail open, but SAY SO: a gate that degrades in silence reads exactly like
     // a gate that ran and passed, so the one commit it waved through looks
     // verified. Every fail-open below announces which check it skipped.
     noteFailOpen('cannot list the staged set (`git diff --cached` failed) — doc-contract and loop-core checks SKIPPED');
     return { blocked: false };
-  }
-  let staged = cached.stdout
-    .split(/\r?\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  if (hasStageCommand) {
-    const status = git(['status', '--porcelain']);
-    if (status.ok) {
-      const pending = status.stdout
-        .split(/\r?\n/)
-        .map((line) => line.slice(3).trim())
-        .map((p) => (p.includes(' -> ') ? p.split(' -> ')[1] : p))
-        .filter(Boolean);
-      staged = Array.from(new Set([...staged, ...pending]));
-    }
   }
 
   // The docs/assets the doc-contract subset pins: any markdown (docs/**.md,
@@ -777,6 +787,53 @@ function workingTreeDivergesFromIndex() {
     if (line.startsWith('??') || (y && y !== ' ')) return true;
   }
   return false;
+}
+
+// ── Branch-strand refusal ────────────────────────────────────────────────────
+// A remediation run switches the PRIMARY checkout onto `remediation/<runId>`
+// (`ensureRemediationBranchCheckedOut`) at implement-dispatch and leaves it
+// there, so every later commit from that checkout lands on the run branch — a
+// docs/closeout commit made afterwards strands off main. It has bitten three
+// times; HANDOFF has carried a "verify HEAD before committing" warning since the
+// second bite and the warning did not prevent the third, because remembering is
+// not a mechanism.
+//
+// The discriminator is mechanical, not a judgement call: remediation edits are
+// produced in the per-node LINKED worktrees and merged by accept-node, so a
+// staged set that is ENTIRELY docs/spec on a `remediation/*` HEAD is main-bound
+// prose that lost its branch, not run output. Refused BEFORE the staged-snapshot
+// round-trip — a commit that must not happen should cost two git reads, not a
+// worktree rewrite plus a full typecheck.
+const isDocOrSpecPath = (p) => {
+  const n = p.replace(/\\/g, '/').replace(/^\.\//, '');
+  return /\.md$/i.test(n) || n.startsWith('docs/') || n.startsWith('spec/');
+};
+const headBranch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+const headBranchName = headBranch.ok ? headBranch.stdout.trim() : '';
+if (headBranchName.startsWith('remediation/')) {
+  const stagedForStrand = collectStagedSet();
+  if (stagedForStrand === null) {
+    noteFailOpen(
+      'cannot list the staged set (`git diff --cached` failed) — the BRANCH-STRAND refusal was SKIPPED, ' +
+        `and HEAD is the remediation run branch ${headBranchName}. Verify where this commit lands.`,
+    );
+  } else if (stagedForStrand.length > 0 && stagedForStrand.every(isDocOrSpecPath)) {
+    console.error(
+      `pre-commit gate: commit blocked — HEAD is the remediation run branch \`${headBranchName}\` and every ` +
+        `staged path is docs/spec, so this commit would STRAND off main:\n` +
+        stagedForStrand.map((p) => `  - ${p}`).join('\n') +
+        `\nA remediation run switches this checkout onto \`remediation/<runId>\` and leaves it there. Run ` +
+        `output is produced in the per-node linked worktrees, not here — so a prose-only commit from this ` +
+        `checkout is main-bound work that lost its branch. This has happened three times.\n` +
+        `Recovery — land it on main; the staged set follows the checkout:\n` +
+        `  git checkout main && git commit …\n` +
+        `then \`git checkout ${headBranchName}\` to resume the run. If the checkout refuses because a staged ` +
+        `path differs between the branches, \`git stash --include-untracked\` first, then \`git stash pop\` ` +
+        `on main.\n` +
+        `If this prose genuinely belongs to the RUN, commit it together with the code change it documents.`,
+    );
+    process.exit(2);
+  }
 }
 
 // ── Gate the staged snapshot, restoring the working tree afterward. ──────────

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { resolveSmokeTarball } from "../shared/smoke-tarball.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const packageJsonPath = join(repoRoot, "package.json");
@@ -575,11 +576,6 @@ async function main() {
   const installDir = await mkdtemp(
     join(tmpdir(), "audit-code-packed-install-"),
   );
-  const packDir = await mkdtemp(
-    join(tmpdir(), "audit-code-pack-"),
-  );
-  let tarballPath;
-  let tarballFilename;
 
   try {
     await writeFile(
@@ -596,32 +592,15 @@ async function main() {
     );
 
     stepStart = Date.now();
-    step("npm pack");
-    detail(
-      "Isolating inherited npm_config_* overrides and publish credentials so nested npm publish --dry-run does not suppress tarball generation.",
-    );
-    const packed = JSON.parse(
-      (
-        await runCommand(platformCommand("npm"), ["pack", "--json", "--pack-destination", packDir], {
-          cwd: repoRoot,
-          env: createIsolatedNpmEnv(),
-          liveOutput: liveCommandOutput,
-          label: "npm pack --json",
-          failureHint:
-            "If this smoke run is nested under npm publish --dry-run, make sure inherited npm_config_* flags were cleared and rerun with AUDIT_CODE_VERBOSE=1 for live child output.",
-        })
-      ).stdout,
-    );
-    // npm pack --json returns either an array (older npm) or object (npm 12+)
-    const packEntries = Array.isArray(packed) ? packed : Object.values(packed);
-    assert.equal(packEntries.length, 1, "npm pack --json must produce exactly one tarball");
-    const packMetadata = packEntries[0];
-    assert.ok(packMetadata, "npm pack --json did not return tarball metadata");
-    assert.equal(typeof packMetadata.filename, "string");
+    step("resolve packaged tarball");
+    // One tarball serves both packaged smokes (scripts/shared/smoke-tarball.mjs): the
+    // shared pack step produces it, this smoke reuses it while it is still current and
+    // packs for itself otherwise, so a standalone run never depends on gate order.
+    const { tarballPath, metadata: packMetadata, packed } = resolveSmokeTarball();
+    const tarballFilename = packMetadata.filename;
     assertPackagedContract(packMetadata);
-    tarballFilename = packMetadata.filename;
-    tarballPath = join(packDir, packMetadata.filename);
-    process.stderr.write(`[smoke:packaged] elapsed: npm pack — ${Date.now() - stepStart}ms\n`);
+    detail(`${packed ? "packed" : "reused"} ${tarballPath}`);
+    process.stderr.write(`[smoke:packaged] elapsed: resolve packaged tarball — ${Date.now() - stepStart}ms\n`);
 
     stepStart = Date.now();
     step("npm install from tarball");
@@ -1030,11 +1009,9 @@ async function main() {
       `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the next-step/ingest-results/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
     );
   } finally {
-    if (tarballPath) {
-      await rm(tarballPath, { force: true });
-    }
+    // The tarball is deliberately left in the shared pack cache — it is the artifact
+    // the sibling packaged smoke installs, and it lives outside the repo.
     await rm(installDir, { recursive: true, force: true });
-    await rm(packDir, { recursive: true, force: true });
   }
 }
 

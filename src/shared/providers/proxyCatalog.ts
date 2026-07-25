@@ -43,9 +43,25 @@ export const POPULATE_PROBE_CONCURRENCY = 4;
 /**
  * A same-endpoint cache younger than this skips the registry fetch + probes
  * entirely (see the freshness short-circuit in {@link populateProxyCatalog}).
- * Refresh throttle only — read-side staleness policy is a separate concern.
+ * Refresh THROTTLE — how often we are willing to PAY for a refresh, which is a
+ * different question from how long an unrefreshed cache may still be believed
+ * ({@link PROXY_CATALOG_MAX_READ_AGE_MS}). The two thresholds share one age
+ * derivation and nothing else.
  */
 export const POPULATE_CACHE_FRESH_TTL_MS = 10 * 60_000;
+
+/**
+ * Past this age a cache is returned STALE by {@link readProxyCatalog} — the
+ * expansion still travels, with a verdict attached, so the caller decides rather
+ * than consuming an unbounded-age cache blind.
+ *
+ * A day: comfortably longer than any single run (a mid-run flip to stale would be
+ * churn, not signal), and short enough that a roster the operator changed — a model
+ * added to or dropped from the proxy config — cannot go unnoticed indefinitely.
+ * The cache is machine-global and tool-written, so being wrong here costs one
+ * repopulate, never data.
+ */
+export const PROXY_CATALOG_MAX_READ_AGE_MS = 24 * 60 * 60_000;
 
 /** Resolve the populate-cache path for this machine (state dir via `io/stateDir.ts`). */
 export function resolveProxyCatalogPath(homeDir?: string): string {
@@ -66,17 +82,41 @@ export function resolveProxyCatalogPath(homeDir?: string): string {
  */
 export const PROXY_CATALOG_VERSION = 2;
 
-/** The on-disk cache shape: expansion + when it was fetched (staleness policy later). */
+/** The on-disk cache shape: the expansion + when it was fetched. */
 export interface ProxyCatalog {
   /** Shape version — see {@link PROXY_CATALOG_VERSION}. Absent ⇒ pre-versioned (v1). */
   version: number;
-  /** ISO timestamp of the populate fetch. Read-side returns it; NO TTL is enforced yet. */
+  /**
+   * ISO timestamp of the populate fetch. REQUIRED to be parseable — the read-side
+   * age rule is derived from it, and an age derived from a substituted default
+   * would launder a corrupt file into a fresh-looking one.
+   */
   fetched_at: string;
   /** The proxy endpoint the registry was fetched from. */
   endpoint: string;
   /** Expanded `claude-worker` sources, ready to fold into the dispatch pool. */
   sources: DispatchableSource[];
 }
+
+/**
+ * The cache as READ: the persisted shape plus the read-time age verdict.
+ *
+ * Staleness is DERIVED at read, never persisted — a stored flag would age into a lie
+ * the moment the clock moved past it. A stale cache is returned, not withheld: the
+ * expansion is the caller's to keep (dropping it would surface as "cache absent, run
+ * the populate", which sends the operator after a file that is right there), and it is
+ * not thrown either (the resolve path must not be failable by an old file).
+ *
+ * `stale_reason` rides the `stale: true` branch so it cannot be read without branching
+ * on the verdict, and so every caller reports one wording instead of composing its own.
+ */
+export type ProxyCatalogRead = ProxyCatalog & {
+  /** Cache age at read time, ms. Negative ⇒ stamped ahead of this machine's clock. */
+  age_ms: number;
+} & (
+    | { stale: false; stale_reason?: undefined }
+    | { stale: true; stale_reason: string }
+  );
 
 /**
  * Neutral proxy-contract model advert after shape adaptation.
@@ -545,24 +585,22 @@ export async function populateProxyCatalog(
   // Freshness short-circuit: populate carries live per-model probes — real
   // `/v1/messages` POSTs through the proxy that cost seconds and burn quota.
   // A same-endpoint cache younger than the TTL answers instead. This is a
-  // REFRESH throttle, not staleness acceptance — the no-TTL-on-READ residual
-  // (backlog) is unchanged.
-  const cached = readProxyCatalog({ homeDir: options.homeDir });
-  if (cached && cached.endpoint === endpoint) {
-    const nowMs = (options.now?.() ?? new Date()).getTime();
-    const fetchedMs = Date.parse(cached.fetched_at);
-    if (
-      Number.isFinite(fetchedMs) &&
-      nowMs - fetchedMs >= 0 &&
-      nowMs - fetchedMs < POPULATE_CACHE_FRESH_TTL_MS
-    ) {
-      return {
-        sources: cached.sources,
-        written: false,
-        reason: `cache is fresh (fetched ${Math.round((nowMs - fetchedMs) / 1000)}s ago); refresh skipped.`,
-        dropped: [],
-      };
-    }
+  // REFRESH throttle, a tighter window than the read-side staleness bound;
+  // the age itself comes from the ONE derivation in `readProxyCatalog` (on this
+  // call's clock), so the two thresholds can never disagree about how old a file is.
+  const cached = readProxyCatalog({ homeDir: options.homeDir, now: options.now });
+  if (
+    cached &&
+    cached.endpoint === endpoint &&
+    cached.age_ms >= 0 &&
+    cached.age_ms < POPULATE_CACHE_FRESH_TTL_MS
+  ) {
+    return {
+      sources: cached.sources,
+      written: false,
+      reason: `cache is fresh (fetched ${Math.round(cached.age_ms / 1000)}s ago); refresh skipped.`,
+      dropped: [],
+    };
   }
 
   // Discover model roster (required baseline: /v1/models).
@@ -704,6 +742,8 @@ export interface ReadProxyCatalogDeps {
   homeDir?: string;
   /** Raw cache reader (tests inject); defaults to reading the cache file. */
   readCatalogFile?: (path: string) => string | null;
+  /** Clock (tests); defaults to `new Date()`. Fixes the age rule's reference point. */
+  now?: () => Date;
 }
 
 function defaultReadCatalogFile(path: string): string | null {
@@ -714,17 +754,27 @@ function defaultReadCatalogFile(path: string): string | null {
   }
 }
 
+/** Human-readable magnitude for an age/skew, in the largest unit that still reads. */
+function describeAgeMs(ms: number): string {
+  const abs = Math.abs(ms);
+  if (abs < 90 * 60_000) return `${Math.round(abs / 60_000)}m`;
+  if (abs < 48 * 3_600_000) return `${(abs / 3_600_000).toFixed(1)}h`;
+  return `${(abs / 86_400_000).toFixed(1)}d`;
+}
+
 /**
- * READ the populate cache. Returns the entries + `fetched_at` (NO TTL enforcement —
- * staleness policy is a later commit; the caller decides). Degrades to `null` on
- * absent / unparseable / structurally-invalid content — never throws (same bar as
- * `readSourceDeclaration`: the resolve path must not be failable by a bad file).
- * Cached sources are held to the shared source validator, so a hand-edited or
- * version-skewed cache degrades to "no cache" rather than admitting a half-checked pool.
+ * READ the populate cache, with the read-side age rule applied: every result carries
+ * `age_ms` and a `stale` verdict against {@link PROXY_CATALOG_MAX_READ_AGE_MS}, so an
+ * old cache reaches its caller labelled rather than indistinguishable from a fresh one.
+ * Degrades to `null` on absent / unparseable / structurally-invalid content — never
+ * throws (same bar as `readSourceDeclaration`: the resolve path must not be failable by
+ * a bad file). Cached sources are held to the shared source validator, so a hand-edited
+ * or version-skewed cache degrades to "no cache" rather than admitting a half-checked
+ * pool.
  */
 export function readProxyCatalog(
   deps: ReadProxyCatalogDeps = {},
-): ProxyCatalog | null {
+): ProxyCatalogRead | null {
   const path = resolveProxyCatalogPath(deps.homeDir);
   const raw = (deps.readCatalogFile ?? defaultReadCatalogFile)(path);
   if (raw === null) return null;
@@ -745,7 +795,42 @@ export function readProxyCatalog(
   if (version !== PROXY_CATALOG_VERSION) return null;
   if (typeof fetched_at !== "string" || typeof endpoint !== "string") return null;
   if (!Array.isArray(sources)) return null;
+  // An unparseable stamp is a corrupt file, not an old one: no honest age can be
+  // derived from it, and aging it from a substituted default would launder it into
+  // a fresh-looking cache. Refuse it the way every other invalid field is refused.
+  const fetchedMs = Date.parse(fetched_at);
+  if (!Number.isFinite(fetchedMs)) return null;
   const issues = validateSessionConfig({ sources });
   if (issues.some((issue) => issue.severity === "error")) return null;
-  return { version, fetched_at, endpoint, sources: sources as DispatchableSource[] };
+  const ageMs = (deps.now?.() ?? new Date()).getTime() - fetchedMs;
+  const catalog = {
+    version,
+    fetched_at,
+    endpoint,
+    sources: sources as DispatchableSource[],
+    age_ms: ageMs,
+  };
+  // A stamp ahead of our clock proves nothing about freshness — it is skew or a hand
+  // edit, and believing it would pin the cache fresh for as long as the stamp says.
+  // Not fresh and not refused: stale, with the anomaly named. Mirrors the populate
+  // short-circuit, which likewise refuses to count a future stamp as young.
+  if (ageMs < 0) {
+    return {
+      ...catalog,
+      stale: true,
+      stale_reason:
+        `populate cache is stamped ${describeAgeMs(ageMs)} in the future ("${fetched_at}") ` +
+        `relative to this machine's clock, so its age cannot be trusted — re-run the populate.`,
+    };
+  }
+  if (ageMs >= PROXY_CATALOG_MAX_READ_AGE_MS) {
+    return {
+      ...catalog,
+      stale: true,
+      stale_reason:
+        `populate cache was fetched ${describeAgeMs(ageMs)} ago (max ${describeAgeMs(PROXY_CATALOG_MAX_READ_AGE_MS)}), ` +
+        `so its expansion may no longer match the proxy's roster — re-run the populate.`,
+    };
+  }
+  return { ...catalog, stale: false };
 }

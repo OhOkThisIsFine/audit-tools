@@ -5,6 +5,7 @@ import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
+import { resolveSmokeTarball } from "../shared/smoke-tarball.mjs";
 
 const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const packageVersion = JSON.parse(
@@ -47,9 +48,7 @@ const smokeTmpRoot = defaultSmokeTmpRoot();
 mkdirSync(smokeTmpRoot, { recursive: true });
 const smokeRoot = mkdtempSync(join(smokeTmpRoot, "remediate-code-smoke-"));
 const npmCacheDir = join(smokeRoot, "npm-cache");
-const packDir = join(smokeRoot, "pack");
 mkdirSync(npmCacheDir, { recursive: true });
-mkdirSync(packDir, { recursive: true });
 
 // Strip inherited npm_config_* overrides and publish credentials so that a
 // nested `npm publish --dry-run` in the parent process does not suppress
@@ -88,51 +87,24 @@ function check(label, fn) {
 
 const smokeStart = Date.now();
 console.log("smoke:packaged-remediate-code");
-console.log(
-  "  isolating inherited npm_config_* overrides so dry-run does not suppress tarball creation",
-);
 
-// 1. Pack the single audit-tools package
-console.log("  packing...");
+// 1. Resolve the single audit-tools tarball. One tarball serves both packaged smokes
+// (scripts/shared/smoke-tarball.mjs): the shared pack step produces it, this smoke
+// reuses it while it is still current and packs for itself otherwise, so a standalone
+// run never depends on gate order.
 const packStart = Date.now();
-const packResult = spawnNpm(
-  ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
-  {
-  cwd: pkgRoot,
-  encoding: "utf8",
-  env: isolatedNpmEnv(),
-  },
-);
-if (packResult.status !== 0) {
-  console.error(
-    `npm pack failed after ${Date.now() - packStart}ms:`,
-    packResult.stderr || packResult.error?.message,
-  );
-  rmSync(smokeRoot, { recursive: true, force: true });
-  process.exit(1);
-}
-
-let packOutput;
+let tarball;
 try {
-  packOutput = JSON.parse(packResult.stdout.trim());
-} catch (err) {
-  console.error(
-    "npm pack --json output was not valid JSON (lifecycle script noise may have been mixed in):",
-    packResult.stdout.slice(0, 500),
+  const resolvedTarball = resolveSmokeTarball();
+  tarball = resolvedTarball.tarballPath;
+  console.log(
+    `  ${resolvedTarball.packed ? "packed" : "reused"}: ${tarball} (${Date.now() - packStart}ms)`,
   );
+} catch (err) {
+  console.error(`resolving the packaged tarball failed after ${Date.now() - packStart}ms:`, err.message);
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }
-// npm pack --json returns either an array (older npm) or object (npm 12+)
-const packEntries = Array.isArray(packOutput) ? packOutput : Object.values(packOutput);
-const packMetadata = packEntries[0];
-if (packEntries.length !== 1 || !packMetadata || !packMetadata.filename) {
-  console.error("npm pack --json did not return exactly one tarball's metadata");
-  rmSync(smokeRoot, { recursive: true, force: true });
-  process.exit(1);
-}
-const tarball = join(packDir, packMetadata.filename);
-console.log(`  packed: ${tarball} (${Date.now() - packStart}ms)`);
 
 // 2. Install into temp dir
 const installDir = join(smokeRoot, "install");
@@ -217,7 +189,8 @@ try {
     });
   }
 } finally {
-  rmSync(tarball, { force: true });
+  // The tarball is deliberately left in the shared pack cache — it is the artifact the
+  // sibling packaged smoke installs, and it lives outside the repo.
   rmSync(smokeRoot, { recursive: true, force: true });
 }
 

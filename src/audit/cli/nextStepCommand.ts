@@ -69,7 +69,7 @@ import {
   stampDesignReviewSkipped,
   stampSystemicChallengeSkipped,
 } from "./nextStepHelpers.js";
-import type { ArtifactBundle } from "../io/artifacts.js";
+import { ARTIFACT_DEFINITIONS, type ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
 import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
@@ -245,6 +245,80 @@ async function gateHostFanoutOrPause(params: {
 }
 
 /**
+ * The dispatch pieces for the adversarial contract-review pass. Mirrors
+ * `ConceptualDispatch` — the two passes contribute the same kinds of pieces to
+ * whichever branch emits them (packet + results in `artifactPaths`, the access
+ * grants, and one fan-out unit for the quota gate).
+ */
+interface ContractDispatch {
+  /** Host-facing line describing how to run the contract pass. */
+  instructionLine: string;
+  artifactPaths: Record<string, string>;
+  readPaths: string[];
+  writePaths: string[];
+  fanoutUnit: HostFanoutUnit;
+}
+
+/**
+ * Write the contract-review worker packet and return the dispatch pieces —
+ * single-sourced so the parallel branch (both passes outstanding) and the solo
+ * branch (only the contract pass left) cannot drift into two shapes.
+ *
+ * Two properties ride on this being one function rather than two mirrored
+ * blocks. (1) INDEPENDENCE: the adversarial pass is always dispatched to a
+ * subagent, never rendered into the host's own step prompt — the host drove the
+ * artifacts under review, and an author grading their own work misses exactly
+ * what this pass exists to catch. (2) ADVANCE-FREE: the packet carries no
+ * `next-step` command, because a worker that runs it becomes a SECOND driver of
+ * the orchestrator; the advance belongs solely to the host's dispatch prompt.
+ */
+async function prepareContractDispatch(opts: {
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  maxUnits: number | undefined;
+}): Promise<ContractDispatch> {
+  const incoming = join(opts.artifactsDir, "incoming");
+  await mkdir(incoming, { recursive: true });
+  const promptPath = join(incoming, "design-review-contract-prompt.md");
+  const resultsPath = join(incoming, "design-review-contract-findings.json");
+  const reReview = await buildDesignReReviewSection(
+    opts.artifactsDir,
+    opts.bundle,
+    "contract",
+  );
+  const rejectionNotice = renderDesignReviewRejectionNotice(opts.bundle, [
+    "legacy",
+    "contract",
+  ]);
+  const promptText = [
+    renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
+    "## Results path",
+    "",
+    'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
+    "",
+    `  ${resultsPath}`,
+    ...(reReview ? ["", reReview] : []),
+    ...(rejectionNotice ? ["", rejectionNotice] : []),
+  ].join("\n");
+  await writeFile(promptPath, promptText, "utf8");
+
+  return {
+    instructionLine:
+      "**Contract review** (adversarial): dispatch a subagent that reads the prompt at the contract prompt path and writes findings to the contract results path.",
+    artifactPaths: {
+      contract_prompt: promptPath,
+      contract_results: resultsPath,
+    },
+    readPaths: [promptPath],
+    writePaths: [resultsPath],
+    fanoutUnit: {
+      id: "contract",
+      estInputBytes: Buffer.byteLength(promptText, "utf8"),
+    },
+  };
+}
+
+/**
  * The G3 reconciliation gate's delta for THIS invocation: backends this auditor can
  * reach now that the operator's persisted confirmation never mentions.
  *
@@ -417,17 +491,29 @@ async function cmdNextStepBody(
   // graph/quota/…) are preserved identically; only the DISPATCH consumers switch to the
   // effective config. Persistence is untouched — the store reads/writes intent only, so an
   // in-memory resolve can never write dispatch inventory back into the repo config.
-  // 3c POPULATE trigger (plan §populate-vs-resolve): with no Gate-0 confirmation on
-  // disk yet, THIS invocation is the provider-confirmation build — refresh the
-  // proxy catalog populate cache NOW, before the effective config resolves, so this
-  // same invocation's `resolveAmbientSources` reads the fresh expansion and the
-  // roster the operator confirms includes the proxied lane. Gated on the machine
-  // declaration's `proxy` block (no lane declared ⇒ no network) and — via the
-  // confirmation-absent check — run once per run, never per next-step. Confirmed
-  // runs re-populate only on explicit refresh. Network-tolerant: a failed populate
-  // degrades to a stderr warning (the lane then resolves from the existing cache or
-  // unexpanded, with its own dropped[] reason) — it never blocks Gate-0.
-  if ((await readSharedProviderConfirmation(root)) === null) {
+  // 3c POPULATE trigger (plan §populate-vs-resolve): with Gate-0 still unsatisfied,
+  // THIS invocation is the provider-confirmation build — refresh the proxy catalog
+  // populate cache NOW, before the effective config resolves, so this same
+  // invocation's `resolveAmbientSources` reads the fresh expansion and the roster the
+  // operator confirms includes the proxied lane. Gated on the machine declaration's
+  // `proxy` block (no lane declared ⇒ no network) and — via the Gate-0-pending check —
+  // run only until the confirmation lands, never on every next-step. Confirmed runs
+  // re-populate only on explicit refresh. Network-tolerant: a failed populate degrades
+  // to a stderr warning (the lane then resolves from the existing cache or unexpanded,
+  // with its own dropped[] reason) — it never blocks Gate-0.
+  //
+  // Keyed on the SAME artifact Gate-0's obligation reads (`bundle.provider_confirmation`,
+  // the PER-TOOL `provider_confirmation.json` under this run's artifacts dir), so one
+  // confirmation drives both. It previously keyed on the SHARED, repo-level
+  // confirmation — a different lifetime: that artifact outlives the artifacts dir and
+  // is written by remediate too, so any repo that had ever confirmed suppressed the
+  // populate while Gate-0 was still pending, and the operator confirmed a roster built
+  // from an unrefreshed cache. Filename comes from the artifact registry, not a literal.
+  const gate0ArtifactPath = join(
+    artifactsDir,
+    ARTIFACT_DEFINITIONS.provider_confirmation.fileName,
+  );
+  if (!existsSync(gate0ArtifactPath)) {
     const populated = await populateDeclaredProxyCatalog().catch(() => null);
     if (populated !== null && !populated.written) {
       process.stderr.write(
@@ -620,28 +706,22 @@ async function cmdNextStepBody(
     // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
     // or deep (N independent perspective subagents + an independent judge),
     // resolved JIT from the user-confirmed checkpoint / session config.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
 
     const conceptualSettings = resolveConceptualReviewSettings(
       result.bundle,
       intent,
     );
-    const contractReReview = await buildDesignReReviewSection(
+    const contract = await prepareContractDispatch({
       artifactsDir,
-      result.bundle,
-      "contract",
-    );
+      bundle: result.bundle,
+      maxUnits: conceptualSettings.max_units,
+    });
     const conceptualReReview = await buildDesignReReviewSection(
       artifactsDir,
       result.bundle,
       "conceptual",
     );
-    const contractRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
-      "legacy",
-      "contract",
-    ]);
     const conceptualRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
       "legacy",
       "conceptual",
@@ -657,33 +737,12 @@ async function cmdNextStepBody(
       reReviewSection: conceptualNotesSection || undefined,
     });
 
-    const contractPromptText = [
-      renderContractReviewPrompt(result.bundle, {
-        max_units: conceptualSettings.max_units,
-      }),
-      "## Results path",
-      "",
-      'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
-      "",
-      `  ${contractResultsPath}`,
-      // NO advance command in this packet: it is written to a file and DISPATCHED
-      // TO A SUBAGENT (see the enclosing dispatchPrompt). A worker that runs
-      // `next-step` becomes a SECOND driver of the orchestrator while the host is
-      // still mid-parallel-dispatch (the conceptual perspectives run concurrently).
-      // The advance belongs solely to the host's dispatchPrompt below.
-      ...(contractReReview ? ["", contractReReview] : []),
-      ...(contractRejectionNotice ? ["", contractRejectionNotice] : []),
-    ].join("\n");
-
-    const contractPromptPath = join(artifactsDir, "incoming", "design-review-contract-prompt.md");
-    await writeFile(contractPromptPath, contractPromptText, "utf8");
-
     const dispatchPrompt = [
       "# Design review — parallel dispatch",
       "",
       "Run the two design-review passes concurrently. Do not wait for one before starting the other.",
       "",
-      "1. **Contract review** (adversarial): dispatch a subagent that reads the prompt at the contract prompt path and writes findings to the contract results path.",
+      `1. ${contract.instructionLine}`,
       `2. ${conceptual.instructionLines.join("\n   ")}`,
       "",
       "When the contract results and the conceptual results have both been written, run:",
@@ -703,13 +762,7 @@ async function cmdNextStepBody(
         continueCommand,
         bundle: result.bundle,
         family: "design_review",
-        units: [
-          {
-            id: "contract",
-            estInputBytes: Buffer.byteLength(contractPromptText, "utf8"),
-          },
-          ...conceptual.fanoutUnits,
-        ],
+        units: [contract.fanoutUnit, ...conceptual.fanoutUnits],
       })
     ) {
       return;
@@ -725,14 +778,13 @@ async function cmdNextStepBody(
         "Dispatch the contract and conceptual review subagents in parallel, then run next-step once both results are written.",
       repoRoot: root,
       artifactPaths: {
-        contract_prompt: contractPromptPath,
-        contract_results: contractResultsPath,
+        ...contract.artifactPaths,
         ...conceptual.artifactPaths,
       },
       prompt: dispatchPrompt,
       access: {
-        read_paths: [contractPromptPath, ...conceptual.readPaths],
-        write_paths: [contractResultsPath, ...conceptual.writePaths],
+        read_paths: [...contract.readPaths, ...conceptual.readPaths],
+        write_paths: [...contract.writePaths, ...conceptual.writePaths],
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -740,32 +792,29 @@ async function cmdNextStepBody(
   }
 
   if (result.kind === "design_review_contract") {
-    // Only the contract pass remains.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    // Only the contract pass remains — dispatched exactly as in the parallel
+    // branch. This branch is reached whenever the conceptual pass is already
+    // done, i.e. late in a run the host itself drove, which is precisely when
+    // rendering the adversarial review into the host's own prompt would have it
+    // grade its own work (see prepareContractDispatch).
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
-    const contractReReview = await buildDesignReReviewSection(
+    const contract = await prepareContractDispatch({
       artifactsDir,
-      result.bundle,
-      "contract",
-    );
-    const contractRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
-      "legacy",
-      "contract",
-    ]);
-    const prompt = [
-      renderContractReviewPrompt(result.bundle, { max_units: intent.design_review?.max_units }),
-      "## Results path",
+      bundle: result.bundle,
+      maxUnits: intent.design_review?.max_units,
+    });
+
+    const dispatchPrompt = [
+      "# Design review — contract pass",
       "",
-      'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
+      contract.instructionLine,
       "",
-      `  ${contractResultsPath}`,
+      "When the contract results have been written, run:",
       "",
-      `Then run: ${continueCommand}`,
+      `  ${continueCommand}`,
       "",
-      ...(contractReReview ? ["", contractReReview] : []),
-      ...(contractRejectionNotice ? ["", contractRejectionNotice] : []),
     ].join("\n");
+
     if (
       await gateHostFanoutOrPause({
         root,
@@ -775,9 +824,7 @@ async function cmdNextStepBody(
         continueCommand,
         bundle: result.bundle,
         family: "design_review",
-        units: [
-          { id: "contract", estInputBytes: Buffer.byteLength(prompt, "utf8") },
-        ],
+        units: [contract.fanoutUnit],
       })
     ) {
       return;
@@ -789,12 +836,14 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write contract review findings to the results path, then run next-step.",
+        "Dispatch the contract review subagent, then run next-step once the contract results are written.",
       repoRoot: root,
-      artifactPaths: {
-        design_review_contract_results: contractResultsPath,
+      artifactPaths: contract.artifactPaths,
+      prompt: dispatchPrompt,
+      access: {
+        read_paths: contract.readPaths,
+        write_paths: contract.writePaths,
       },
-      prompt,
     });
     console.log(JSON.stringify(step, null, 2));
     return;

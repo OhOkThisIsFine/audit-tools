@@ -21,6 +21,8 @@ const {
   POPULATE_PROBE_TIMEOUT_MS,
   POPULATE_PROBE_CONCURRENCY,
   POPULATE_CACHE_FRESH_TTL_MS,
+  PROXY_CATALOG_MAX_READ_AGE_MS,
+  PROXY_CATALOG_VERSION,
 } = await import("../../src/shared/providers/proxyCatalog.ts");
 
 const PROXY = "http://127.0.0.1:8791";
@@ -692,6 +694,72 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
     const raw = JSON.parse(readFileSync(resolveProxyCatalogPath(homeDir), "utf8"));
     expect(raw.endpoint).toBe(PROXY);
     expect(raw.sources[0].transport).toBe("claude-worker");
+  });
+});
+
+/**
+ * READ-side age rule. The populate throttle (`POPULATE_CACHE_FRESH_TTL_MS`) governs how
+ * often we are willing to PAY for a refresh; this governs how long an unrefreshed
+ * expansion may still be believed. Past the max read age the cache comes back STALE —
+ * sources intact, verdict attached — never silently consumed, never thrown.
+ */
+describe("readProxyCatalog — read-side age rule", () => {
+  const HOUR_MS = 3_600_000;
+  const NOW_MS = Date.UTC(2026, 6, 25, 12, 0, 0);
+
+  /** A structurally valid v2 cache stamped `agedMs` in the past (negative ⇒ future). */
+  function readAged(agedMs, { fetchedAt } = {}) {
+    return readProxyCatalog({
+      homeDir: "/home/test",
+      readCatalogFile: () =>
+        JSON.stringify({
+          version: PROXY_CATALOG_VERSION,
+          fetched_at: fetchedAt ?? new Date(NOW_MS - agedMs).toISOString(),
+          endpoint: PROXY,
+          sources: [
+            {
+              transport: "claude-worker",
+              endpoint: PROXY,
+              service: "nim",
+              model: "z-ai/glm-5.2",
+              worker_kind: "agentic",
+            },
+          ],
+        }),
+      now: () => new Date(NOW_MS),
+    });
+  }
+
+  it("a three-day-old cache comes back STALE, sources intact, with an operator-facing reason", () => {
+    const catalog = readAged(72 * HOUR_MS);
+    expect(catalog).not.toBeNull();
+    expect(catalog.stale).toBe(true);
+    expect(catalog.age_ms).toBe(72 * HOUR_MS);
+    // Surfaced, not discarded: the caller still holds the expansion and decides.
+    expect(catalog.sources).toHaveLength(1);
+    expect(catalog.stale_reason).toMatch(/populate/i);
+  });
+
+  it("a cache inside the max read age is fresh, carrying no reason", () => {
+    const catalog = readAged(HOUR_MS);
+    expect(catalog.stale).toBe(false);
+    expect(catalog.age_ms).toBe(HOUR_MS);
+    expect(catalog.stale_reason).toBeUndefined();
+  });
+
+  it("the cut is the stated max age, with no wider grace", () => {
+    expect(readAged(PROXY_CATALOG_MAX_READ_AGE_MS - 1).stale).toBe(false);
+    expect(readAged(PROXY_CATALOG_MAX_READ_AGE_MS).stale).toBe(true);
+  });
+
+  it("a fetched_at ahead of this machine's clock is stale — it proves nothing about freshness", () => {
+    const catalog = readAged(-5 * 60_000);
+    expect(catalog.stale).toBe(true);
+    expect(catalog.stale_reason).toMatch(/future/i);
+  });
+
+  it("an unparseable fetched_at is refused, never aged from a substituted default", () => {
+    expect(readAged(0, { fetchedAt: "t" })).toBeNull();
   });
 });
 

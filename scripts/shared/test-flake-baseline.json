@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "environments": {
+    "win32-cpu16-w16": {
+      "environment": {
+        "platform": "win32",
+        "cpuCount": 16,
+        "workers": 16
+      },
+      "tests": {
+        "tests/shared/charter-extraction.test.mjs > assembleDeltas — negative-finding lint (schema-forced filler) > drops a 'fully aligned, no material gap' row": {
+          "status": "unproven",
+          "evidence": {
+            "passedSolo": false,
+            "failedSolo": false,
+            "failedParallel": true
+          }
+        },
+        "tests/shared/charter-extraction.test.mjs > assembleDeltas — negative-finding lint (schema-forced filler) > drops the observed filler row (agrees / no divergence / negative finding)": {
+          "status": "unproven",
+          "evidence": {
+            "passedSolo": false,
+            "failedSolo": false,
+            "failedParallel": true
+          }
+        },
+        "tests/shared/handoff-roadmap.test.mjs > the live tree > `--check` is green on the committed tree": {
+          "status": "unproven",
+          "evidence": {
+            "passedSolo": false,
+            "failedSolo": false,
+            "failedParallel": true
+          }
+        },
+        "tests/shared/handoff-roadmap.test.mjs > the live tree > docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one": {
+          "status": "unproven",
+          "evidence": {
+            "passedSolo": false,
+            "failedSolo": false,
+            "failedParallel": true
+          }
+        }
+      }
+    }
+  }
+}

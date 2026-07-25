@@ -187,6 +187,11 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
           model: source.model,
           api_key_env: source.api_key_env,
           api_key: source.api_key,
+          // The credential DECLARATION travels whole: a keyless lane clears reach
+          // by liveness probe rather than by env var, so dropping the marker here
+          // would hand the launch a source with no key and no licence to omit the
+          // Authorization header — a verified lane that fails 100% of its packets.
+          no_auth: source.no_auth,
           ...p,
         },
       };
@@ -475,6 +480,10 @@ function openAiCompatibleSource(
     model: oc.model,
     api_key_env: oc.api_key_env,
     api_key: oc.api_key,
+    // Same credential declaration, opposite leg of the bridge (block → source):
+    // the fold feeds `verifySourceReach`, which reads the marker to know a keyless
+    // endpoint is proven by a liveness probe, not by an env var.
+    no_auth: oc.no_auth,
     parameters: {
       ...(oc.temperature !== undefined ? { temperature: oc.temperature } : {}),
       ...(oc.headers !== undefined ? { headers: oc.headers } : {}),

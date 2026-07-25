@@ -172,6 +172,12 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     const baseUrl = this.config.base_url?.trim().replace(/\/+$/, "");
     const model = this.config.model?.trim();
+    // An explicitly keyless endpoint (an unauthenticated local LiteLLM / LM Studio
+    // / vLLM). DECLARED, never inferred from an absent key — a forgotten key is the
+    // common error, and inferring keyless from it would silently turn that mistake
+    // into an unauthenticated request. Mirrors `verifySourceReach`, which proves
+    // such a lane's reach by liveness probe instead of by env var.
+    const noAuth = this.config.no_auth === true;
     const apiKey =
       this.config.api_key?.trim() ||
       (this.config.api_key_env
@@ -180,9 +186,17 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     if (!baseUrl) return fail("openai-compatible provider requires openai_compatible.base_url.");
     if (!model) return fail("openai-compatible provider requires openai_compatible.model.");
-    if (!apiKey) {
+    // Refused, not silently resolved — the reach gate applies this same rule, and
+    // a launch that quietly picked one side would let the two disagree about what
+    // a keyless lane is.
+    if (noAuth && (this.config.api_key_env?.trim() || this.config.api_key?.trim())) {
       return fail(
-        `openai-compatible provider has no API key — set openai_compatible.api_key_env to a populated env var (e.g. NVIDIA_API_KEY)${this.config.api_key_env ? ` (env "${this.config.api_key_env}" is empty)` : ""}.`,
+        "openai-compatible provider declares BOTH no_auth and an api_key/api_key_env — pick one (no_auth means the endpoint takes no credential).",
+      );
+    }
+    if (!noAuth && !apiKey) {
+      return fail(
+        `openai-compatible provider has no API key — set openai_compatible.api_key_env to a populated env var (e.g. NVIDIA_API_KEY)${this.config.api_key_env ? ` (env "${this.config.api_key_env}" is empty)` : ""}, or declare openai_compatible.no_auth if the endpoint takes no credential.`,
       );
     }
     if (this.fetchFn !== null && typeof this.fetchFn !== "function") {
@@ -265,7 +279,10 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     };
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      // A keyless endpoint gets NO Authorization header at all — not an empty
+      // Bearer, which some gateways reject outright. Operator `headers` still
+      // overlay last, so an endpoint wanting its own auth scheme can set one.
+      ...(noAuth ? {} : { Authorization: `Bearer ${apiKey}` }),
       ...(this.config.headers ?? {}),
     };
     // Hoisted so the request's cap and the truncation refusal that NAMES it cannot

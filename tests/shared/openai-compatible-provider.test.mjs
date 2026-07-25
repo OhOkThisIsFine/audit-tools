@@ -16,6 +16,8 @@ const {
   parseJsonLoose,
   resolveFreshSessionProviderName,
   createFreshSessionProvider,
+  sourceProviderConfig,
+  collectDispatchableSources,
 } = await import("audit-tools/shared");
 
 // Cleanup terminates and releases handles: every mkdtemp dir is tracked and
@@ -1198,4 +1200,84 @@ test("launch with no injected fetchFn does NOT route through globalThis.fetch (w
     globalThis.fetch = realFetch;
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+// --- keyless (no_auth) lane: declaration → source→config bridge → launch -----
+//
+// `no_auth` is honoured at REACH (`verifySourceReach` probes the endpoint instead
+// of an env var), so an honestly-declared keyless lane resolves as verified and
+// joins the dispatch pool. These cover the rest of the thread: it must also reach
+// LAUNCH, or every packet routed to that lane fails on a key it was never meant
+// to have.
+
+/** A fetch fake recording each request's url + init, so headers are assertable. */
+function recordingFetch(content) {
+  const calls = [];
+  const fn = async (url, init) => {
+    calls.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content } }] }),
+      text: async () => content,
+    };
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test("a keyless (no_auth) source launches with NO Authorization header and never fails for a missing key", async () => {
+  const { input } = makeCtx();
+  const fetchFn = recordingFetch(JSON.stringify({ files: [], result: { ok: true } }));
+  // Built through the source→provider bridge on purpose: the provider honouring
+  // `no_auth` is worthless if `sourceProviderConfig` drops it on the way in.
+  const { openai_compatible: config } = sourceProviderConfig({
+    transport: "openai-compatible",
+    endpoint: "http://127.0.0.1:4000/v1",
+    model: "glm-5.2",
+    no_auth: true,
+  });
+  const provider = new OpenAiCompatibleProvider(config, { fetchFn, env: {} });
+  const res = await provider.launch(input);
+
+  expect(res.accepted, res.error ?? "").toBe(true);
+  expect(fetchFn.calls.length).toBe(1);
+  expect(
+    "Authorization" in fetchFn.calls[0].init.headers,
+    "a keyless endpoint must be sent no Authorization header",
+  ).toBe(false);
+});
+
+test("launch refuses a contradictory keyless declaration (no_auth AND a credential)", async () => {
+  const { input } = makeCtx();
+  const fetchFn = recordingFetch("{}");
+  // Same rule verifySourceReach applies at reach time — the two must not
+  // disagree about what a keyless lane is.
+  const provider = new OpenAiCompatibleProvider(
+    { base_url: "https://nim.test/v1", model: "m", no_auth: true, api_key_env: "NVIDIA_API_KEY" },
+    { fetchFn, env: { NVIDIA_API_KEY: "k" } },
+  );
+  const res = await provider.launch(input);
+
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/BOTH no_auth and/);
+  expect(fetchFn.calls.length, "a contradictory declaration must reject before any POST").toBe(0);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
+});
+
+test("a keyless legacy openai_compatible block folds into a source that keeps no_auth", () => {
+  // The reverse leg of the same bridge: block → DispatchableSource. Dropping the
+  // marker here would fail the lane's reach probe and then its launch.
+  const sources = collectDispatchableSources(
+    {
+      openai_compatible: {
+        base_url: "http://127.0.0.1:4000/v1",
+        model: "glm-5.2",
+        no_auth: true,
+      },
+    },
+    "claude-code",
+  );
+  const oai = sources.find((source) => source.transport === "openai-compatible");
+  expect(oai?.no_auth, "the fold must not drop the keyless marker").toBe(true);
 });

@@ -50,7 +50,24 @@ beforeEach(() => {
   g("config", "commit.gpgsign", "false");
   writeFileSync(
     join(repo, "package.json"),
-    JSON.stringify({ name: "fixture", type: "module", scripts: { check: "node check.mjs" } }, null, 2),
+    JSON.stringify(
+      {
+        name: "fixture",
+        type: "module",
+        scripts: {
+          check: "node check.mjs",
+          // The doc-triggered subsets are no-ops here: these tests are about
+          // WHICH gate fires for a staged markdown set, not about the content
+          // checks themselves, and a missing script would make npm's own error
+          // read as a gate block.
+          "test:doc-contract": "node --version",
+          "check:doc-manifest": "node --version",
+          "check:handoff-roadmap": "node --version",
+        },
+      },
+      null,
+      2,
+    ),
   );
   writeFileSync(join(repo, "check.mjs"), CHECK_SCRIPT);
   writeFileSync(join(repo, "sentinel.txt"), "GOOD\n");
@@ -427,6 +444,88 @@ describe("pre-commit gate: a chained attest+commit names its own impossibility",
     const r = runGate("node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t ; git commit -m x");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("CHAINS the attestation");
+  });
+});
+
+describe("pre-commit gate: branch-strand refusal (docs-only commit on a remediation branch)", () => {
+  // `ensureRemediationBranchCheckedOut` switches the PRIMARY checkout onto
+  // `remediation/<runId>` and leaves it there, so a later docs/closeout commit
+  // strands off main. It bit three times; the HANDOFF warning did not prevent
+  // the third, so the refusal has to be mechanical.
+  function stageDoc(relPath, body = "# doc\n") {
+    const parts = relPath.split("/");
+    if (parts.length > 1) mkdirSync(join(repo, ...parts.slice(0, -1)), { recursive: true });
+    writeFileSync(join(repo, ...parts), body);
+    g("add", "-A");
+  }
+
+  test("BLOCKS a docs-only commit on remediation/* and names the recovery", () => {
+    g("branch", "-M", "main");
+    g("checkout", "-qb", "remediation/PLAN-1");
+    stageDoc("docs/HANDOFF.md");
+
+    const r = runGate();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("remediation/PLAN-1");
+    expect(r.stderr).toContain("STRAND");
+    // The message must carry the recovery, not just the diagnosis.
+    expect(r.stderr).toContain("git checkout main && git commit");
+    expect(r.stderr).toContain("docs/HANDOFF.md");
+  });
+
+  test("the same docs-only commit on main is ALLOWED (the branch is the discriminator)", () => {
+    g("branch", "-M", "main");
+    stageDoc("docs/HANDOFF.md");
+
+    const r = runGate();
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toContain("STRAND");
+  });
+
+  test("a MIXED staged set on remediation/* is allowed — only an entirely-docs set strands", () => {
+    // Prose committed alongside the code it documents is plausibly run output,
+    // and the refusal's own message names that as the way to commit it here.
+    g("branch", "-M", "main");
+    g("checkout", "-qb", "remediation/PLAN-2");
+    writeFileSync(join(repo, "src.txt"), "code\n");
+    stageDoc("docs/notes.md");
+
+    const r = runGate();
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toContain("STRAND");
+  });
+
+  test("a code-only commit on remediation/* is untouched by the refusal", () => {
+    g("branch", "-M", "main");
+    g("checkout", "-qb", "remediation/PLAN-3");
+    writeFileSync(join(repo, "src.txt"), "code\n");
+    g("add", "-A");
+
+    const r = runGate();
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toContain("STRAND");
+  });
+
+  test("a chained `git add -A && git commit` of docs on remediation/* is blocked too", () => {
+    // The strand-prone shape in practice: nothing is staged yet when the gate
+    // runs, so the refusal must read the set the chained add WILL stage.
+    g("branch", "-M", "main");
+    g("checkout", "-qb", "remediation/PLAN-4");
+    mkdirSync(join(repo, "docs"), { recursive: true });
+    writeFileSync(join(repo, "docs", "HANDOFF.md"), "# doc\n"); // left UNSTAGED
+
+    const r = runGate("git add -A && git commit -m x");
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("STRAND");
+  });
+
+  test("an empty staged set on remediation/* is not 'entirely docs' — no block", () => {
+    g("branch", "-M", "main");
+    g("checkout", "-qb", "remediation/PLAN-5");
+
+    const r = runGate();
+    expect(r.status, `expected allow (0); stderr:\n${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toContain("STRAND");
   });
 });
 

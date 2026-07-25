@@ -73,33 +73,19 @@
   per dispatching drive (memoized per dispatcher, removed in the drive's `finally`) — reuse keyed on
   HEAD sha if the cost ever bites on a large repo.
 
-- **FLW-COR-003 claim-release livelock — the IN-PROCESS half is SHIPPED; the HOST half is what
-  remains (2026-07-22, downgraded from HIGH to medium 2026-07-24 after a code trace).** Symptom: claims
-  from an all-workers-failed round sat live for the full 20-min lease (`AUDIT_TASK_CLAIM_LEASE_MS`,
-  dispatch.ts:135), so every interleaved next-step saw all pending tasks peer-claimed → empty dispatch
-  plan → obligation unsatisfied → drain re-selected to `maxTransitions(100)` and exit 1.
-  **Fixed for the in-process rolling driver** (commit `681df1f5`): `releaseOwnedTaskClaims`
-  (dispatch.ts:150) is called at drive end (`rollingAuditDispatch.ts:691`) and on the empty-plan
-  round (`:490`).
-  ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do not
-  implement it.** Three things contradict it: the shared claim site already sweeps the over-claim
-  (`dispatch.ts:481-492` clears every claimed-but-not-emitted task), so all three callers leave only
-  the EMITTED in-flight set claimed; that residual set is exactly what the lease is FOR
-  (`dispatch.ts:129-135` — the claim spans an out-of-process worker run with no heartbeat, and
-  `prepare-dispatch` returns before the workers run, so "the workers all died" is never observable
-  host-side to release on); and merge does not only clear terminal results —
-  `mergeAndIngestCommand.ts:885-909` releases the whole `failing` set including attempted-but-missing,
-  before the all-missing throw. Only `deferred` (never attempted) is deliberately retained.
-  This is the SAME inversion this file already recorded at its 2026-07-18 friction walk.
-  **What actually remains (low):** an attempted-and-dead host round holds its emitted claims until a
-  merge runs, bounded by the lease. That is the designed behaviour, not a livelock — revisit only if a
-  live run shows the lease outliving a genuinely dead round.
-  The "zero-granted round pauses the drain" half is **VERIFIED HOLDING at HEAD (2026-07-24) — no work
-  remains on it.** Two independent reasons: admission never runs inside a loop (every dispatch executor
-  is `host_delegation`, so both drains halt at the dispatch boundary *before* admission is computed),
-  and `detectHostDispatchWall` (`src/shared/dispatch/hostDispatchWall.ts:118-128`) returns
-  `atWall` with a discriminated `emptyGrantCause` the moment `grantedCount === 0` — the single wall
-  predicate BOTH orchestrators draw. Record:
+- **FLW-COR-003 claim-release livelock — SHIPPED except one low residual (2026-07-22; downgraded from
+  HIGH after a 2026-07-24 code trace).** The in-process rolling driver sweeps its claims at drive end
+  and on the empty-plan round (`releaseOwnedTaskClaims`, commit `681df1f5`).
+  ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do NOT
+  implement it.** The shared claim site already sweeps the over-claim (`dispatch.ts:481-492`), leaving
+  only the EMITTED in-flight set — which is exactly what the lease is FOR (`dispatch.ts:129-135`: the
+  claim spans an out-of-process worker run with no heartbeat, and `prepare-dispatch` returns before the
+  workers run, so "the workers all died" is never observable host-side). And merge already releases the
+  whole `failing` set including attempted-but-missing (`mergeAndIngestCommand.ts:885-909`); only
+  `deferred` is deliberately retained. Same inversion this file recorded at its 2026-07-18 friction walk.
+  **What remains (low):** an attempted-and-dead host round holds its emitted claims until a merge runs,
+  bounded by the lease — designed behaviour; revisit only on live evidence of the lease outliving a dead
+  round. The "zero-granted round pauses the drain" half is VERIFIED HOLDING; nothing open. Record:
   [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
 
 - **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
@@ -184,8 +170,11 @@
   emitted a "delta" whose summary literally said "genuinely agrees — surfaced to document the
   negative finding", despite an explicit skip instruction; pruned host-side before submit (host
   discretion). Delta ingest routes deltas as WORK, so a filler row becomes a dispatched no-op.
-  Candidates: an explicit `no_deltas: true` escape hatch in the submission shape (a schema-legal
-  way to say "none"), or a cheap negative-finding lint at ingest. Record:
+  ⚠ **The "negative-finding lint at ingest" candidate is REFUTED (built + reverted 2026-07-25).** A
+  regex classifier over summaries measured 8 false DROPS and 5 false KEEPS on ~25 realistic inputs; a
+  dropped delta never reaches synthesis, so it fails silently and worse than the filler it replaces.
+  Take the mechanical route: **a schema-legal `no_deltas: true` / explicitly-empty submission path**,
+  so a model can say "none" without inventing a row. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
@@ -338,7 +327,10 @@
   (`installation_id`, `brain/`, `cache/`, `updater/`) and simply has no `settings.json` yet.
   `~/.gemini/config/config.json` is a different file and holds only `userSettings` — which is why the
   original search came up empty. `agy --help` exposes no allow-rule flag and no `config` subcommand, so
-  that file is the only lever. Remaining step: author `~/.gemini/antigravity-cli/settings.json` with a
+  that file is the only lever — **re-confirmed 2026-07-25 by an independent scan** (no workspace-local
+  `.gemini` variant, no `workspaceSettings`/`projectSettings` key, no CLI flag): an OWNER action
+  outside the repo, closable by no lap. Do not re-investigate the lever.
+  Remaining step: author `~/.gemini/antigravity-cli/settings.json` with a
   read-only `permissions.allow` block, then probe with a trivial `agy -p` read and confirm the
   "no output produced" symptom clears — the rule GRAMMAR (tool names, argument matching) is still
   unverified and needs that live probe. The `--dangerously-skip-permissions` workaround stays refused by
@@ -431,6 +423,13 @@
   What is missing is that the operator still expresses the collapse by hand as a `top_k: 1` on the
   proxy declaration. **Property to hold:** when several models share one budget, restricting the roster
   to the member that best serves the work is derived, not hand-declared.
+  ⚠ **Premise FALSIFIED (built + reverted 2026-07-25) — re-derive before retrying.** (1) There is no
+  honest shared-budget key: `deriveAccountKey` returns null for a keyless proxy, and `apiPool.ts`
+  meters those sources as N separate accounts, so a collapse asserts one budget where quota meters
+  many. (2) "Strictly dominated" is false — `rollingDispatch`'s capability term reads the coarse
+  `pool.rank`, never set on source-built pools, so siblings tie into a deliberate fan-out, and
+  low-complexity packets prefer the LEAST-capable pool by design. (3) Inert anyway: `top_k: 1` keeps
+  the same member whenever every member is ranked.
 
 - **SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no
   operator-runnable refresh.** A day-old cache whose roster no longer matched the running proxy was
@@ -439,6 +438,12 @@
   there is "no TTL": a 10-minute TTL DOES exist, but it only decides whether the populate step re-fetches.
   The read path deliberately accepts cached data of any age. So the freshness concept is present and
   applied on exactly the wrong side.
+  ⚠ **Half SHIPPED 2026-07-25 and the shipped half is WRITE-ONLY.** `readProxyCatalog` derives
+  `age_ms`/`stale`/`stale_reason` and refuses an unparseable `fetched_at`, but nothing branches on the
+  verdict: `populateProxyCatalogIfMissing` (`auditorSources.ts:354`) still short-circuits on a cache of
+  ANY age and `resolveProxyLane` (`:653`) folds sources in without surfacing `stale_reason`. Give the
+  follow-up `auditorSources.ts`, or this reads closed while unchanged
+  ([[write-only-data-looks-authoritative]]).
   **Two properties to hold:** (a) the age rule applies where staleness does damage — the read path either
   revalidates against the live roster or surfaces the cache's age rather than presenting stale data as
   current; (b) every drop reason names an action the operator can actually take, which requires that such
@@ -565,18 +570,13 @@
   no test makes (stub `run`; the E404 is stub-authored text). Both were caught only by tracing
   source. The template already says to link the primary record rather than retell it; what is still
   missing is anything that ENFORCES it. [[backlog-prose-decays-verify-against-head]]
-  (2) **tool-should-decide (medium):** a first cut of the concurrent-suite guard refused a second
-  `vitest` outright, which broke parallel agent work within minutes — per-invocation fixture roots
-  had already removed the hazard, so the mutex was defending a defect that no longer existed. The
-  reusable shape: when isolation fixes a race at the source, a lock on top of it is not extra safety,
-  it is a new failure mode. (3) **inefficient-feeding (medium, three instances):** the Claude
-  subagent pool hit its session limit mid-run and killed 44 of 55 condense agents (11 usable, 0
-  verified — none applied); the LiteLLM proxy had silently died since session start, so the whole
-  NIM fallback failed 15/15 with one truncated error until probed directly; and a Codex recon spent
-  its full budget on file enumeration and timed out before writing conclusions. Standing lesson
-  reconfirmed: probe the lane cheaply BEFORE dispatching a batch to it
-  ([[offload-lane-failures-are-usually-the-caller]]) — all three were caller/environment, not model
-  capability.
+  (2) **inefficient-feeding (medium, two instances):** the Claude subagent pool hit its session
+  limit mid-run and killed 44 of 55 condense agents (11 usable, 0 verified — none applied), and a
+  Codex recon spent its full budget on file enumeration and timed out before writing conclusions.
+  Both were caller/environment, not model capability, and neither lane is probed for remaining
+  capacity or bounded in scope before a batch is committed to it
+  ([[offload-lane-failures-are-usually-the-caller]]). Primary record:
+  [`backlog-clearance-2026-07-24.md`](../reviews/backlog-clearance-2026-07-24.md).
 
 
 
@@ -692,7 +692,17 @@
   commit as any shared-assembly lift" was WRONG and the 2026-07-16 lift shipped without it.
   Detail: [`g4-g5-g6-premise-check-2026-07-16.md`](../reviews/g4-g5-g6-premise-check-2026-07-16.md).
 
-- **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
+- **A declared source that verified reach and then lies at dispatch is never ejected — the reactive
+  `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).**
+  `verifySourceReach` refuses an inline `api_key` because possession is not reach, and its own comment
+  names that quarantine as the only catcher for the always-passes lane it is refusing
+  (`src/shared/providers/auditorSources.ts:390-394`) — the catcher does not exist. A lane whose key was
+  revoked or whose endpoint died still verifies (env var present, launcher on PATH) and is re-admitted
+  every run; under cost-first routing (λ=0) a stale free-tier declaration then takes EVERY packet first
+  and fails them all. Open property: a source that fails reactively (oversize / 402 / tool-corruption)
+  leaves the pool for the rest of the run. This is what remains of G5 — its other two clauses were
+  already dead when it was triaged, and that disposition lives in
+  [`g4-g5-g6-premise-check-2026-07-16.md`](../reviews/g4-g5-g6-premise-check-2026-07-16.md).
 
 - **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression
   (2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a

@@ -224,6 +224,17 @@ export interface OpenAiCompatibleConfig {
   api_key_env?: string;
   /** Inline API key. Discouraged (prefer `api_key_env` so the key never lands in config files). */
   api_key?: string;
+  /**
+   * This endpoint takes NO credential — the launch sends no `Authorization`
+   * header instead of refusing for a missing key. The launch-side half of
+   * {@link DispatchableSource.no_auth} (carried across by `sourceProviderConfig`
+   * in both directions), so a lane that clears the keyless REACH probe can
+   * actually run: without it an honestly-declared keyless lane joined the pool
+   * verified and then failed every packet on a key it was never meant to have.
+   * Declaring it together with `api_key` / `api_key_env` is contradictory and is
+   * refused at launch, matching `verifySourceReach`.
+   */
+  no_auth?: boolean;
   /** Extra HTTP headers merged into the request. */
   headers?: Record<string, string>;
   /** Sampling temperature (default 0 for deterministic edits). */
