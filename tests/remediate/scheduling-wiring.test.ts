@@ -50,6 +50,9 @@ function block(
 async function capture(level: RemediationBlock[]): Promise<scheduler.OwnershipSchedulerNode[]> {
   const spy = vi.spyOn(scheduler, "ownershipSubWaves");
   await driveRollingDispatch([level], {
+    // Explicit per-node size: the drive no longer defaults it, so a test that
+    // relied on the old flat 2000 now states what it means.
+    estimateTokens: () => 2000,
     confirmedPools: [pool],
     sessionConfig: session,
     rebuildSharedBetweenLevels: async () => {},

@@ -846,15 +846,16 @@
   file until the whole run ends, because `tail` buffers to EOF — so a long suite cannot be progress-
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
-- **▶ An HONEST per-node token estimate is UNBLOCKED and still unwired (medium, loop-core).** The remediate
-  hybrid frontier and the in-process engine both size every implement node at a flat 2000
-  (`HYBRID_NODE_TOKEN_ESTIMATE`, `driveRollingDispatch`'s `() => 2000`), so the fit gates cannot tell a
-  large node from a small one. The flat estimate was load-bearing only because it made "this node fits NO
-  pool" unreachable; both paths now route an unplaceable node to a resumable structural-refusal pause
-  (`835902f2`), so the fix — persist `estimateImplementSlotTokens` onto the plan item, read it at both
-  gates — is two lines. ⚠ Never byte-SUM the access set instead (retired for cause — see that function's
-  docblock; a second derived number desyncs plan from admission). ⚠ Land it ALONE and watch a real
-  frontier: it is the first work making that pause path reachable, and has no live evidence yet.
+- **▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).** Both fit
+  gates now read `DispatchPlanItem.estimated_input_tokens`, stamped once in `prepareImplementDispatch`
+  at the point the rendered prompt exists; `HYBRID_NODE_TOKEN_ESTIMATE` and `driveRollingDispatch`'s
+  `() => 2000` default are DELETED, and `estimateTokens` is a required option so no caller can silently
+  restore the blindness. The field is required and validator-enforced for implement dispatch.
+  ⚠ **This is the first change that makes the `no_capable_pool` structural-refusal pause REACHABLE in
+  real use, and it has no live evidence yet.** Watch a real frontier: an unplaceable node must reach a
+  RESUMABLE pause naming the real cause (split it, or declare a larger `context_tokens`) — never
+  `empty_pool`, and never a terminal strand. If a large node now refuses everywhere, that is the honest
+  estimate working; check the pool's declared `context_tokens` before treating it as a regression.
 
 - **▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
   friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed

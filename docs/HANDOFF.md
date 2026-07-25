@@ -184,7 +184,7 @@ its SPEC intact.
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ An HONEST per-node token estimate is UNBLOCKED and still unwired (medium, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 
 ### Open bugs & frictions — the working queue

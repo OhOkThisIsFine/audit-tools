@@ -756,6 +756,7 @@ describe("prepareHostRollingDispatch — Increment B cooldown wall (residual a)"
       artifacts_dir: artifactsDir,
       items: blockIds.map((id) => ({
         task_id: `t-${id}`,
+        estimated_input_tokens: 2000,
         block_id: id,
         prompt_path: join(artifactsDir, `${id}.md`),
         result_path: join(artifactsDir, `${id}.result.json`),

@@ -200,6 +200,9 @@ describe("INV-SOO-03/05: real concurrent in-flight through the rolling driver", 
     let peak = 0;
     let results = 0;
     await driveRollingDispatch([level], {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: [pool],
       sessionConfig: session,
       rebuildSharedBetweenLevels: async () => {},
@@ -497,6 +500,9 @@ describe("M-B2 (integration): two barrel-only-sharing nodes complete merged with
     let peakBarrelInFlight = 0;
     let results = 0;
     await driveRollingDispatch([level], {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: [pool],
       sessionConfig: session,
       rebuildSharedBetweenLevels: async () => {},

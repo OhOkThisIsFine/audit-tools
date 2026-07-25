@@ -113,4 +113,69 @@ describe("byte-based token estimation — implement dispatch", () => {
       Math.ceil(8000 / BYTES_PER_TOKEN),
     );
   });
+
+  it("stamps a per-node estimate on the plan item that SCALES with the node", async () => {
+    // The two fit gates (the hybrid frontier and the in-process engine) sized every
+    // node at a flat 2000, so they could not tell a large node from a small one.
+    // The real number already existed here — it fed `scheduleWave` and never left
+    // the function. Persisting it on the item is what lets both gates read the ONE
+    // number rather than deriving a second one. [[honest-estimate-needs-resumable-refusal]]
+    const srcDir = join(tmpRoot, "scaled");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(join(srcDir, "small.ts"), "s".repeat(200));
+    await writeFile(join(srcDir, "big.ts"), "b".repeat(120_000));
+
+    const mk = (n: string, path: string) => ({
+      id: `F-SCALE-${n}`,
+      title: `Scale ${n}`,
+      category: "maintainability",
+      severity: "medium" as const,
+      confidence: "high" as const,
+      lens: "maintainability",
+      summary: "Test finding",
+      evidence: [] as string[],
+      affected_files: [{ path }],
+    });
+    const state = makeState({
+      plan: {
+        plan_id: "PLAN-SCALE",
+        findings: [mk("S", "scaled/small.ts"), mk("B", "scaled/big.ts")],
+        blocks: [
+          { block_id: "B-SMALL", items: ["F-SCALE-S"], parallel_safe: true, touched_files: ["scaled/small.ts"], dependencies: [] },
+          { block_id: "B-BIG", items: ["F-SCALE-B"], parallel_safe: true, touched_files: ["scaled/big.ts"], dependencies: [] },
+        ],
+        themes: [],
+        project_type: "unknown",
+        candidate_closing_actions: [],
+      },
+      items: {
+        "F-SCALE-S": {
+          finding_id: "F-SCALE-S", block_id: "B-SMALL", status: "pending",
+          item_spec: { finding_id: "F-SCALE-S", concrete_change: "x", no_change: false, touched_files: ["scaled/small.ts"], tests_to_write: [], not_applicable_steps: [] },
+        },
+        "F-SCALE-B": {
+          finding_id: "F-SCALE-B", block_id: "B-BIG", status: "pending",
+          item_spec: { finding_id: "F-SCALE-B", concrete_change: "y", no_change: false, touched_files: ["scaled/big.ts"], tests_to_write: [], not_applicable_steps: [] },
+        },
+      },
+    });
+
+    await new StateStore(artifactsDir).saveState(state);
+    const plan = await prepareImplementDispatch(
+      { root: tmpRoot, artifactsDir },
+      `tok-scale-${Date.now()}`,
+    );
+
+    const small = plan.items.find((i) => i.block_id === "B-SMALL");
+    const big = plan.items.find((i) => i.block_id === "B-BIG");
+    expect(small?.estimated_input_tokens).toBeGreaterThan(0);
+    expect(big?.estimated_input_tokens).toBeGreaterThan(0);
+    // The whole point: a 120KB node must not be sized the same as a 200-byte one.
+    expect(big!.estimated_input_tokens).toBeGreaterThan(
+      small!.estimated_input_tokens * 2,
+    );
+    expect(big!.estimated_input_tokens).toBeGreaterThanOrEqual(
+      Math.ceil(120_000 / BYTES_PER_TOKEN),
+    );
+  });
 });

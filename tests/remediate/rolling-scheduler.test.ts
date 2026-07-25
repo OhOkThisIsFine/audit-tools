@@ -396,6 +396,9 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
     let rebuildCount = 0;
     const order: string[] = [];
     const result = await driveRollingDispatch(levels, {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: pools,
       sessionConfig,
       dispatchNode: async (b, _slot: ProviderSlot) => {
@@ -418,6 +421,9 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
     const levels = [[block("A", ["FA"]), block("B", ["FB"])]];
     let rebuildCount = 0;
     const result = await driveRollingDispatch(levels, {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: pools,
       sessionConfig,
       dispatchNode: async (b) => ({
@@ -440,6 +446,9 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
     let concurrentRebuilds = 0;
     let maxConcurrentRebuilds = 0;
     const result = await driveRollingDispatch(levels, {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: pools,
       sessionConfig,
       dispatchNode: async (b) => ({
@@ -485,6 +494,9 @@ describe("driveRollingDispatch: capability floor enforced in the engine (F4)", (
     ];
     const seen: string[] = [];
     const result = await driveRollingDispatch([[block("A", ["FA"])]], {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: pools,
       sessionConfig: { quota: { safety_margin: 1.0 } } as SessionConfig,
       dispatchNode: async (b, slot: ProviderSlot) => {

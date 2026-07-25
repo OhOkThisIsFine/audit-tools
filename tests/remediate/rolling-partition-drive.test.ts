@@ -152,6 +152,9 @@ function successNodeStub() {
 describe("driveRollingDispatch — exhausted-pool pass-through (H2 commit 2)", () => {
   it("surfaces the unified driver's exhaustedPoolIds on the adapter result", async () => {
     const result = await driveRollingDispatch([[block("B-X", ["F-X"])]], {
+      // Explicit per-node size: the drive no longer defaults it, so a test that
+      // relied on the old flat 2000 now states what it means.
+      estimateTokens: () => 2000,
       confirmedPools: [backendPool("nim/exhausts")],
       sessionConfig: { quota: { safety_margin: 1.0 } } as SessionConfig,
       dispatchNode: async (b, slot: ProviderSlot) => ({

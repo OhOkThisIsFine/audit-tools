@@ -79,7 +79,29 @@ export interface DispatchPlanItem {
   artifact_paths?: Record<string, string>;
   model_hint?: DispatchModelHint;
   access?: AccessDeclaration;
+  /**
+   * The node's estimated input-token cost — REQUIRED, and the ONE number every
+   * fit gate reads (the hybrid frontier split, the in-process rolling engine,
+   * and admission). Deliberately not optional and never defaulted: both gates
+   * previously sized every node at a flat 2000, so neither could tell a large
+   * node from a small one. A `?? <flat>` fallback here would silently reinstate
+   * exactly that blindness for any producer that forgot to stamp it.
+   *
+   * Computed once by `prepareImplementDispatch` at the single point where the
+   * rendered prompt exists on disk — a second derived number would desync the
+   * plan from admission ("one node, one number").
+   */
+  estimated_input_tokens: number;
 }
+
+/**
+ * A dispatch plan item before its token estimate is stamped on.
+ * `estimateImplementSlotTokens` needs the RENDERED prompt on disk, so the
+ * estimate cannot exist at item-construction time; the dispatch path completes
+ * the draft immediately after writing the prompt, and the merge path — which
+ * only needs identity and paths — consumes the draft as-is.
+ */
+export type DispatchPlanItemDraft = Omit<DispatchPlanItem, "estimated_input_tokens">;
 
 export interface RemediationDispatchPlan {
   contract_version: typeof REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION;

@@ -170,6 +170,21 @@ function validateDispatchPlan(
     if (phase === "implement" && typeof item.block_id !== "string") {
       pushValidationIssue(issues, `${itemPath}.block_id`, `${itemPath}.block_id must be a string for implement dispatch.`);
     }
+    // The fit gates read this off the item and deliberately do not default it, so
+    // a plan that omits it would strand the node rather than mis-size it. Refuse
+    // it here, where the producer bug is still attributable to the producer.
+    if (
+      phase === "implement" &&
+      (typeof item.estimated_input_tokens !== "number" ||
+        !Number.isFinite(item.estimated_input_tokens) ||
+        item.estimated_input_tokens <= 0)
+    ) {
+      pushValidationIssue(
+        issues,
+        `${itemPath}.estimated_input_tokens`,
+        `${itemPath}.estimated_input_tokens must be a positive number for implement dispatch.`,
+      );
+    }
     if (phase === "document" && typeof item.finding_id !== "string") {
       pushValidationIssue(issues, `${itemPath}.finding_id`, `${itemPath}.finding_id must be a string for document dispatch.`);
     }

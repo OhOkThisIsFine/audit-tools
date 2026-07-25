@@ -104,6 +104,7 @@ function planFor(repo: string, blockIds: string[]): RemediationDispatchPlan {
     artifacts_dir: dir,
     items: blockIds.map((id) => ({
       task_id: id,
+      estimated_input_tokens: 2000,
       block_id: id,
       prompt_path: join(dir, `${id}.prompt.md`),
       result_path: join(dir, `${id}.result.json`),

@@ -16,7 +16,7 @@ import type { Finding, ItemSpec, RemediationBlock } from "../../state/types.js";
 import {
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
   type DispatchModelHint,
-  type DispatchPlanItem,
+  type DispatchPlanItemDraft,
 } from "../types.js";
 import { classifyFindingRisk } from "../stepUtils.js";
 import { isTerminalStatus } from "../../state/itemStatus.js";
@@ -216,7 +216,7 @@ export function buildImplementDispatchItem(
   block: RemediationBlock,
   state: RemediationState,
   dir: string,
-): DispatchPlanItem {
+): DispatchPlanItemDraft {
   const taskId = `implement-${block.block_id}`;
   const readFiles = blockReadFiles(block, state);
   const writeFiles = blockWriteFiles(block, state);

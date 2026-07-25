@@ -30,6 +30,7 @@ import { validateImplementWorkerResult } from "../../validation/artifacts.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   type DispatchPlanItem,
+  type DispatchPlanItemDraft,
   type ImplementWorkerResult,
   type RemediationDispatchPlan,
 } from "../types.js";
@@ -406,8 +407,18 @@ export async function prepareImplementDispatch(
           : undefined,
       ),
     );
-    items.push(item);
-    itemReadFileLists.push([...readFiles, ...referencingTests]);
+    // Stamp the node's token estimate HERE — the one point where both inputs
+    // exist: the full read set, and the rendered prompt just written to disk.
+    // This is the only place the number is derived; every fit gate reads it off
+    // the item ("one node, one number").
+    const nodeReadFiles = [...readFiles, ...referencingTests];
+    items.push({
+      ...item,
+      estimated_input_tokens: estimateImplementSlotTokens(nodeReadFiles, options.root, {
+        promptPath: item.prompt_path,
+      }),
+    });
+    itemReadFileLists.push(nodeReadFiles);
   }
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);
@@ -425,11 +436,9 @@ export async function prepareImplementDispatch(
   };
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);
 
-  const estimatedSlotTokens = itemReadFileLists.map((files, i) =>
-    estimateImplementSlotTokens(files, options.root, {
-      promptPath: items[i]?.prompt_path,
-    }),
-  );
+  // Read back the per-item estimate stamped above rather than recomputing it —
+  // a second derivation is how the plan and admission drift apart.
+  const estimatedSlotTokens = items.map((i) => i.estimated_input_tokens);
   // The persisted host handshake (state.host_capabilities, written at the
   // decideNextStep seam) is the fallback for every capability field the wave
   // scheduler reads: a caller that passes no waveOptions — the bare
@@ -720,7 +729,10 @@ async function mergeImplementResultsIntoState(
   const plannedBlockIds = new Set(
     plan.items.map((item) => item.block_id).filter((id): id is string => typeof id === "string"),
   );
-  const itemsToMerge = [...plan.items];
+  // Drafts, not full plan items: merge keys on identity + paths only, and the
+  // reconciliation branch below re-derives items for blocks whose results already
+  // exist — those have no rendered prompt to size, so they carry no estimate.
+  const itemsToMerge: DispatchPlanItemDraft[] = [...plan.items];
   for (const block of state.plan?.blocks ?? []) {
     if (plannedBlockIds.has(block.block_id)) {
       continue;

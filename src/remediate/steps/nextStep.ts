@@ -751,8 +751,13 @@ export interface DriveRollingDispatchOptions {
    * once per inter-level boundary and never concurrently with itself.
    */
   rebuildSharedBetweenLevels: () => Promise<void>;
-  /** Per-node estimated input tokens (defaults to a flat overhead estimate). */
-  estimateTokens?: (block: RemediationBlock) => number;
+  /**
+   * Per-node estimated input tokens. REQUIRED — there is deliberately no default.
+   * The flat 2000 that used to stand in here made every node the same size to the
+   * fit gates, so "this node does not fit" was unreachable; a default would put
+   * that back for any caller that forgot to pass one.
+   */
+  estimateTokens: (block: RemediationBlock) => number;
   /**
    * A block's capability floor — its dispatch tier (F4), stamped onto the engine
    * packet as `requiredTier` so packet→pool selection never binds the node below
@@ -886,7 +891,7 @@ export async function driveRollingDispatch(
   if (options.quotaStateDir) {
     setQuotaStateDir(options.quotaStateDir);
   }
-  const estimateTokens = options.estimateTokens ?? (() => 2000);
+  const estimateTokens = options.estimateTokens;
   const scopeForBlock =
     options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files);
   const allBlocks = levels.flat();
@@ -1410,6 +1415,11 @@ export async function driveRollingImplementDispatch(
   const writePathsByBlock = new Map(
     allBlockScopes.map((s) => [s.block_id, s.write_paths]),
   );
+  const tokensByBlock = new Map(
+    plan.items
+      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+      .map((i) => [i.block_id, i.estimated_input_tokens]),
+  );
   // Continuity bias (context-efficiency track, increment 2d): load the harvested
   // access-memory and reduce it to a per-block mass keyed on each block's declared
   // source surface (`touched_files` — the clean surface the harvest attributes to,
@@ -1431,6 +1441,20 @@ export async function driveRollingImplementDispatch(
     continuityScores,
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files,
+    // The node's real size, read off the plan item that already carries it. No
+    // fallback: a block in the drive that is absent from the plan is a producer
+    // desync, and defaulting it would silently restore the flat estimate that
+    // made every node look identical to the fit gates.
+    estimateTokens: (block) => {
+      const estimate = tokensByBlock.get(block.block_id);
+      if (estimate === undefined) {
+        throw new Error(
+          `Block ${block.block_id} is being dispatched but carries no dispatch-plan item, ` +
+            `so its token estimate is unknown. The drive and the plan have desynced.`,
+        );
+      }
+      return estimate;
+    },
     tierForBlock: (block) => tierByBlock.get(block.block_id),
     // Reactive cost verification: a declared-free source pool observed charging has
     // been demoted by the engine; surface it as reviewable friction so the operator
@@ -1516,20 +1540,6 @@ export async function driveRollingImplementDispatch(
     ...(driven.terminal ? { terminal: driven.terminal } : {}),
   };
 }
-
-/**
- * Flat per-node input-token estimate for the A-8 hybrid frontier split. The
- * coordinator splits by per-pool SLOTS (concurrency) — host vs. backend — so a
- * uniform estimate is sufficient here; it matches the default the in-process engine
- * uses (`driveRollingDispatch`'s `() => 2000`), keeping the two paths consistent.
- *
- * ⚠ **Deliberately still flat.** Replacing it with the real per-node estimate was
- * built and REVERTED (2026-07-24): it is accurate, and that is precisely the
- * problem — an honest estimate makes "this node fits no pool" REACHABLE, and both
- * consumers mishandle that case terminally rather than resumably. See the backlog
- * entry; the fit gates cannot consume a real estimate until that routing is fixed.
- */
-const HYBRID_NODE_TOKEN_ESTIMATE = 2000;
 
 
 // ---------------------------------------------------------------------------
@@ -2047,7 +2057,7 @@ async function buildImplementDispatchStep(ctx: {
         });
         const frontier: FrontierNode[] = plan.items
           .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-          .map((i) => ({ id: i.block_id, estimatedTokens: HYBRID_NODE_TOKEN_ESTIMATE }));
+          .map((i) => ({ id: i.block_id, estimatedTokens: i.estimated_input_tokens }));
         if (frontier.length === 0) {
           const merged = await mergeImplementResults({ root, artifactsDir }, runId);
           return { kind: "transition", state: merged };
