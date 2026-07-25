@@ -370,6 +370,7 @@ async function writeMinimalState(
         block_id: b.block_id,
         items: b.items,
         parallel_safe: true,
+        touched_files: b.write_paths ?? b.items.map((id) => `src/${id}.ts`),
         ...(b.write_paths ? { write_paths: b.write_paths } : {}),
       })),
       project_type: "typescript",

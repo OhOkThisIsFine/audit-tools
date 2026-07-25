@@ -888,7 +888,7 @@ export async function driveRollingDispatch(
   }
   const estimateTokens = options.estimateTokens ?? (() => 2000);
   const scopeForBlock =
-    options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files ?? []);
+    options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files);
   const allBlocks = levels.flat();
   const blockById = new Map(allBlocks.map((b) => [b.block_id, b]));
   const hostSession = options.hostSession;
@@ -1373,7 +1373,7 @@ export async function driveRollingImplementDispatch(
       artifactsDir,
       runId,
       resultPath,
-      seedPaths: block.touched_files ?? [],
+      seedPaths: block.touched_files,
       allBlockScopes,
       additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
       dispatchNode,
@@ -1418,7 +1418,7 @@ export async function driveRollingImplementDispatch(
   const continuityScores = computeBlockContinuityScores(
     await readRemediationAccessMemory(artifactsDir),
     levels.flat(),
-    (block) => block.touched_files ?? [],
+    (block) => block.touched_files,
   );
   const driven = await driveRollingDispatch(levels, {
     confirmedPools,
@@ -1430,7 +1430,7 @@ export async function driveRollingImplementDispatch(
     hostSession,
     continuityScores,
     scopeForBlock: (block) =>
-      writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
+      writePathsByBlock.get(block.block_id) ?? block.touched_files,
     tierForBlock: (block) => tierByBlock.get(block.block_id),
     // Reactive cost verification: a declared-free source pool observed charging has
     // been demoted by the engine; surface it as reviewable friction so the operator

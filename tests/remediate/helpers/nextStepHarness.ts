@@ -94,8 +94,8 @@ export function makePlanningState(
         },
       ],
       blocks: [
-        { block_id: "B-001", items: ["F-001"], parallel_safe: true },
-        { block_id: "B-002", items: ["F-002"], parallel_safe: true },
+        { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: ["src/a.ts"] },
+        { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: ["src/b.ts"] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],

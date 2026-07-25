@@ -300,7 +300,7 @@ export async function prepareImplementDispatch(
   // detectable afterwards.
   const emptyScopeBlocks = eligibleBlocks.filter(
     (block) =>
-      (block.touched_files ?? []).length === 0 &&
+      block.touched_files.length === 0 &&
       block.items.every(
         (findingId) =>
           (state.plan?.findings.find((f) => f.id === findingId)?.affected_files ?? [])

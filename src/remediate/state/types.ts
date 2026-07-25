@@ -35,9 +35,11 @@ export const RemediationBlockSchema = z
     /**
      * Repo-relative paths that this block's implementation is expected to touch.
      * First-class and REQUIRED (an empty array is allowed, an omitted field is
-     * rejected by `validateRemediationBlock`): the file-ownership-disjoint
-     * scheduler and `attributePostMergeFailure` both read it, so a block with no
-     * declared surface is a producer bug, not an implicit empty.
+     * rejected by `validateRemediationBlock` — which the state LOAD gate
+     * delegates to, so the requirement holds on every path a block reaches a
+     * consumer through): the file-ownership-disjoint scheduler and
+     * `attributePostMergeFailure` both read it, so a block with no declared
+     * surface is a producer bug, not an implicit empty.
      */
     touched_files: z.array(z.string()),
     /**

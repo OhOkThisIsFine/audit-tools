@@ -782,20 +782,19 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **▶ `touched_files` is documented REQUIRED but nothing enforces it, and state LOAD uses the WEAKER of
-  two validators (2026-07-24, medium, LEAD — surfaced by the test-tree typecheck sweep).**
-  `src/remediate/state/types.ts:35-42` says a block with no declared surface "is a producer bug, not an
-  implicit empty". Yet (a) every production consumer reads `block.touched_files ?? []`
-  (`nextStep.ts:868,1353,1398,1410`, `plan.ts:308,486`), so the producer bug is silently normalized, and
-  (b) `validateRemediationBlock` DOES list it in `requireKeys` (`validation/remediationState.ts:84-95`)
-  but is only reached via `validateRemediationPlan` (`nextStep.ts:1619`, `validation/artifacts.ts:307,321`)
-  — state LOAD goes through `store.ts`'s own `validateState` (`:142`, called at `:247`), which does not
-  require it. Two validators for one object, disagreeing on required fields, weaker one on the load path.
-  ⚠ **Decide the contract before the fixtures calcify:** the 2026-07-24 sweep added `touched_files: []`
-  at 97 fixture sites. Each is byte-equivalent to the omission it replaced (`?? []`), but they now ENCODE the
-  producer-bug case as normal. Same root: long-lived fixtures carried dead keys `deps` / `depends_on`
-  (neither is a field — the real one is `dependencies`), which survived only because nothing validates a
-  block on save. [[validator-guards-every-field-caller-reads]]
+- **Friction walk (touched_files load-gate lap, 2026-07-25):** (1) **tool-should-decide (medium):** a
+  fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts:109`)
+  makes `check:tests` inert for that fixture — it hid blocks missing a REQUIRED contract field from the
+  gate added to catch exactly that. Property: a fixture must not be able to cast away a contract's
+  required keys — `satisfies`, or a builder that cannot omit them.
+  (2) **ambiguous-direction (medium):** the offload refutation INVENTED a retirement collision (read the
+  plan's edit-site list as a "hand-maintained table", cited `KNOWN_MODEL_LIMITS`) despite a prompt
+  saying "default to clean unless you can quote evidence". An adversarial prompt biases toward finding
+  something — budget a verification pass per lead
+  ([[verify-delegated-findings-mechanism-not-just-citation]]).
+  (3) **inefficient-feeding (low):** `llm-call.mjs --schema <file>` was accepted but the reply came back
+  in the DEFAULT container shape, so a task-shaped schema silently degrades to prose. Unverified whether
+  the helper or the proxy drops it.
 
 - **Friction walk (fourth backlog-clearance lap, 2026-07-24):** (1) **inefficient-feeding (medium):**
   `llm-call.mjs` takes `--schema`, and the DEFAULT container silently flattened a six-part lettered

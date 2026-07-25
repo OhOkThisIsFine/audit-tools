@@ -305,7 +305,7 @@ export function splitOversizedSingleFindingBlocks(
       // (rare — promotion mirrors the citation set) ride on the FIRST sub-block
       // only, so nothing is silently dropped and no path is double-declared
       // across parallel siblings.
-      const surface = (block.touched_files ?? []).filter(
+      const surface = block.touched_files.filter(
         (p) => groupPaths.has(p) || (i === 0 && !parentPaths.has(p)),
       );
       outBlocks.push({
@@ -483,7 +483,7 @@ export function splitBlocksByContextBudget(
           items: subBlocks[i]!,
           // Sub-blocks inherit the parent's declared surface; the per-sub-block
           // narrowing is a downstream (M1-DECOMPOSE) concern.
-          touched_files: [...(block.touched_files ?? [])],
+          touched_files: [...block.touched_files],
           ...(commands !== undefined
             ? { targeted_commands: commands }
             : {}),

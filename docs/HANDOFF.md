@@ -184,7 +184,6 @@ its SPEC intact.
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ `touched_files` is documented REQUIRED but nothing enforces it, and state LOAD uses the WEAKER of two validators (2026-07-24, medium, LEAD — surfaced by the test-tree typecheck sweep). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ An HONEST per-node token estimate is UNBLOCKED and still unwired (medium, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -255,6 +254,7 @@ its SPEC intact.
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open). · [`open-bugs.md`](backlog/open-bugs.md)
 - Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19). · [`open-bugs.md`](backlog/open-bugs.md)
+- Friction walk (touched_files load-gate lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (fourth backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (second backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
 - Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)

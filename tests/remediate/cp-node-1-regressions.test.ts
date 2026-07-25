@@ -210,6 +210,39 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     await expect(store.loadState()).rejects.toThrow(/schema validation/);
   });
 
+  it("NEGATIVE: a block omitting touched_files fails load validation", async () => {
+    // `touched_files` is REQUIRED on the block contract (state/types.ts) and
+    // `validateRemediationBlock` enforces it — but that validator is only reached
+    // through `validateRemediationPlan`, never on the LOAD path. The load gate
+    // checked only that `plan.blocks` is an array, so a block with no declared
+    // surface loaded clean and every reader normalized the omission away with
+    // `?? []` — i.e. a producer bug presenting as "collides with nothing" to the
+    // file-ownership-disjoint scheduler. Two validators for one object,
+    // disagreeing, with the weaker one on the load path.
+    const store = await writeRawState("store-block-no-touched-files", {
+      status: "implementing",
+      plan: {
+        ...fullPlan,
+        blocks: [{ block_id: "B-1", items: ["F-A"], parallel_safe: true }],
+      },
+      items: fullItems,
+    });
+    await expect(store.loadState()).rejects.toThrow(/touched_files/);
+  });
+
+  it("POSITIVE: an EMPTY touched_files array stays legal on load", async () => {
+    // The contract rejects an OMITTED field, not an empty one — a block may
+    // legitimately declare an empty surface. Guards the obvious over-correction.
+    const store = await writeRawState("store-block-empty-touched-files", {
+      status: "implementing",
+      plan: fullPlan,
+      items: fullItems,
+    });
+    await expect(store.loadState()).resolves.toMatchObject({
+      status: "implementing",
+    });
+  });
+
   it("NEGATIVE: a 'closing' state without a closing_plan fails load validation", async () => {
     const store = await writeRawState("store-closing-incomplete", {
       status: "closing",

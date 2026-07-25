@@ -132,6 +132,7 @@ function stateFor(blockIds: string[]): RemediationState {
         block_id: id,
         items: [`${id}-f`],
         parallel_safe: true,
+        touched_files: [`src/${id}-f.ts`],
         dependencies: [],
       })),
       project_type: "unknown",

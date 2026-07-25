@@ -124,6 +124,7 @@ async function setupRun(
           block_id: blockId,
           items: [findingId],
           parallel_safe: true,
+          touched_files: [file],
           ...(opts.targetedCommands ? { targeted_commands: opts.targetedCommands } : {}),
         },
       ],

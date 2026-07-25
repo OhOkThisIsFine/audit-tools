@@ -14,6 +14,7 @@ import {
   ClosingPlan,
   CoverageLedger,
 } from "./types.js";
+import { validateRemediationBlock } from "../validation/remediationState.js";
 
 export interface RemediationState {
   status:
@@ -175,6 +176,25 @@ function validateState(value: unknown): string[] {
       }
       if (!Array.isArray(p["blocks"])) {
         errors.push(`status "${status}" requires plan.blocks`);
+      } else {
+        // Per-block shape is delegated to the ONE block validator rather than
+        // re-checked here. Two validators for one object is how the load path
+        // came to be the weaker of the pair: `validateRemediationBlock` requires
+        // `touched_files` (the surface the file-ownership-disjoint scheduler and
+        // post-merge attribution read), but it was reachable only through
+        // `validateRemediationPlan`, so a block with no declared surface loaded
+        // clean and every reader normalized the omission to an implicit empty —
+        // i.e. "collides with nothing". [[validator-guards-every-field-caller-reads]]
+        for (const [i, block] of (p["blocks"] as unknown[]).entries()) {
+          for (const issue of validateRemediationBlock(
+            block,
+            `plan.blocks[${i}]`,
+          )) {
+            if (issue.severity === "error") {
+              errors.push(`${issue.path}: ${issue.message}`);
+            }
+          }
+        }
       }
     }
     const items = obj["items"];

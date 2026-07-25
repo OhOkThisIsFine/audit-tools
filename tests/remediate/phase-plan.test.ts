@@ -170,8 +170,8 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       finding("FB1", "file-b1.ts"),
     ];
     const blocks = [
-      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
-      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true, touched_files: [] },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, touched_files: [], dependencies: ["A"] },
     ];
     // root is not used for file-size stats when files are absent (returns 0 bytes)
     const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
@@ -193,8 +193,8 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       finding("FB1", "file-b1.ts"),
     ];
     const blocks = [
-      { block_id: "A", items: ["FA1"], parallel_safe: true },
-      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
+      { block_id: "A", items: ["FA1"], parallel_safe: true, touched_files: [] },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, touched_files: [], dependencies: ["A"] },
     ];
     // Budget is large enough that A's single finding never splits
     const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", 1_000_000);
@@ -213,9 +213,9 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       finding("FC1", "file-c1.ts"),
     ];
     const blocks = [
-      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
-      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
-      { block_id: "C", items: ["FC1"], parallel_safe: false, dependencies: ["B"] },
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true, touched_files: [] },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, touched_files: [], dependencies: ["A"] },
+      { block_id: "C", items: ["FC1"], parallel_safe: false, touched_files: [], dependencies: ["B"] },
     ];
     const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
 
@@ -234,8 +234,8 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       finding("FB2", "fb2.ts"),
     ];
     const blocks = [
-      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
-      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, dependencies: ["A"] },
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true, touched_files: [] },
+      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, touched_files: [], dependencies: ["A"] },
     ];
     const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
 
@@ -257,9 +257,9 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       finding("FB2", "b2.ts"),
     ];
     const blocks = [
-      { block_id: "Prereq", items: ["FP1"], parallel_safe: true },
-      { block_id: "A", items: ["FA1"], parallel_safe: false, dependencies: ["Prereq"] },
-      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, dependencies: ["A"] },
+      { block_id: "Prereq", items: ["FP1"], parallel_safe: true, touched_files: [] },
+      { block_id: "A", items: ["FA1"], parallel_safe: false, touched_files: [], dependencies: ["Prereq"] },
+      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, touched_files: [], dependencies: ["A"] },
     ];
     const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
 
@@ -289,6 +289,7 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
         block_id: "Hub",
         items: findings.map((f) => f.id),
         parallel_safe: true,
+        touched_files: [],
       },
     ];
 
@@ -322,6 +323,7 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
         block_id: "Small",
         items: ["FS1", "FS2"],
         parallel_safe: true,
+        touched_files: [],
       },
     ];
 
@@ -573,7 +575,7 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
     const findings = Array.from({ length: 22 }, (_, i) =>
       mkFinding(`FD${i + 1}`, `Finding ${i + 1}`, { files: ["src"], evidence: ["e"] }),
     );
-    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true }];
+    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true, touched_files: [] }];
     // Budget = 20,000: without directory exclusion, 22 × 600 + 900 = 14,100 < 20,000 → 1 block.
     // With directory exclusion from union-find, 22 independent groups × 1,500 tokens → 2 blocks.
     const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 20_000);
@@ -590,7 +592,7 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
       mkFinding("FA", "A", { files: ["src/shared.ts"], evidence: ["e"] }),
       mkFinding("FB", "B", { files: ["src/shared.ts"], evidence: ["e"] }),
     ];
-    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true }];
+    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true, touched_files: [] }];
 
     const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 1_000_000);
 
@@ -610,7 +612,7 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
       mkFinding("FA", "A", { files: ["src/shared.ts"], evidence: ["e"] }),
       mkFinding("FB", "B", { files: ["./src/shared.ts"], evidence: ["e"] }),
     ];
-    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true }];
+    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true, touched_files: [] }];
 
     const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 1_000_000);
 
@@ -631,7 +633,7 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
     const findings = Array.from({ length: 6 }, (_, i) =>
       mkFinding(`FD${i + 1}`, `Finding ${i + 1}`, { files: ["src"], evidence: ["e"] }),
     );
-    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true }];
+    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true, touched_files: [] }];
     // Each finding group: base(900) + walkDirBytes(~30 000 bytes)/4(~7 500) + overhead(600) = ~9 000.
     // Budget = 10 000: one fits (9 000 ≤ 10 000), two do not (18 000 > 10 000) → 6 blocks.
     const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 10_000);
