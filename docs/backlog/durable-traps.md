@@ -309,8 +309,9 @@ the trap and the fix when it fires.
   command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races the output
   file, so a real failure reads as "green." Capture the suite's own status:
   `npm test > out 2>&1 && echo PASS || echo "FAIL=$?"`. (The *pipe* form of this trap —
-  `npm test | grep …; echo $?`, which reports grep's status — is caught by the shell-trap guard's
-  advisory; the redirect form above is not detectable without false positives, so it stays yours.)
+  `npm test | grep …; echo $?`, which reports grep's status — is REFUSED by the shell-trap guard
+  (escape hatches: `pipefail`/`PIPESTATUS` in the command, or `AUDIT_TOOLS_ALLOW_MASKED_EXIT=1`); the
+  redirect form above is not detectable without false positives, so it stays yours.)
 
 - **Global `-g` install BLOCKS `postinstall`** (npm 12 `allowScripts`) → the host-integration deploy
   (`~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.gemini`) never runs. npm *does* warn on stderr and
