@@ -7,6 +7,14 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 
+- **`api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low).** The
+  `openai-compatible` source branch refuses a `NAME=value` string with a named reason
+  (`auditorSources.ts:467-476`), but `readProxyDeclaration` accepts any non-empty string (`:291`), and
+  both `resolveProxyLane` (`:636`) and the `claude-worker` reach branch (`:547`) then look the
+  malformed string up as a variable name and report it as merely *unset* — the misleading symptom the
+  validated branch exists to prevent. Property: one validator guards every site that reads a credential
+  reference; the check belongs to the FIELD, not to one of its readers.
+  [[fix-the-defect-class-not-the-named-instance]] [[validator-guards-every-field-caller-reads]]
 
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
@@ -30,27 +38,6 @@
   compliant worker never hits it, (b) `unwrapIncomingArray` is SHARED with edge-reasoning (`.rewrites`),
   so a named-key preference needs a design-review-specific accessor, not a change to the shared unwrap.
   Revisit if a live NIM design-review run shows chatty-lane quarantines.
-
-- **`verifySourceReach` demands `api_key_env` on every openai-compatible source, so a KEYLESS
-  local endpoint cannot be declared honestly (2026-07-23, low, friction: tool-should-decide).**
-  An unauthenticated local proxy (LiteLLM with no enforced master key, LM Studio, local vLLM)
-  needs no credential, but the reach check hard-drops any openai-compatible source without
-  `api_key_env` — the 2026-07-23 single-shot NIM-via-proxy lanes had to declare a semantically
-  unrelated set var (`NVIDIA_API_KEY`) just to pass. Property: keyless should be declarable
-  explicitly (e.g. `api_key_env: null` / a `no_auth: true` knob) so reach probes the endpoint
-  instead of an env var; an OMITTED key field can stay a drop (forgetting the key is the common
-  error — the explicit form is what says "deliberate").
-  ⚠ **Re-verified 2026-07-24: the mechanism ALREADY EXISTS one branch away.** The `claude-worker` case
-  in the same `verifySourceReach` switch treats `api_key_env` as optional ("keyless proxy default"),
-  refuses inline `api_key` for the identical possession≠reach reason, and proves reach with
-  `defaultProbeHttpReachable` — a SYNCHRONOUS liveness probe (it spawns a short-lived node fetch), so
-  there is no sync→async ripple and no new primitive to build. The `openai-compatible` branch simply
-  never adopted it.
-  ⚠ Two constraints the fix must respect: the probe counts ANY HTTP status on `/v1/models` as alive (a
-  401 proves it is listening), so probe-alone would ADMIT a keyed endpoint whose key the operator
-  forgot — which is why keyless must be declared EXPLICITLY (`no_auth: true`) rather than inferred from
-  an omitted field; and declaring `no_auth` together with `api_key_env` is contradictory and should be
-  refused, not silently resolved.
 
 - **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
   (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
@@ -272,41 +259,6 @@
   silently and reported the whole string as an unset var — worth a shape validation (a `=` in an env
   NAME is never right).
 
-- **LEAD (2026-07-23, low, surfaced by the pause-wall recon — out-of-repo resolvers only):
-  `window_uncalibrated` ledger blocks are a fixed-state 50ms-poll livelock if a custom
-  `resolvePoolConstraints` emits unpriced windows.** The forced anti-deadlock retry unbounds
-  budgets only, so an uncalibrated window refuses the forced admit too and the packet re-enters
-  the 50ms branch with nothing that can change (`rollingDispatch.ts` forced-retry path; traced by
-  Codex recon 2026-07-23 with citations). Not reachable from shipped wiring — the in-repo
-  producer omits unpriceable windows from `window_budgets` (`scheduler.ts:573,:586,:617`).
-  Property if it ever bites: an uncalibrated-window block with `anyOutstanding:false` should
-  strand loudly (or pause) rather than poll. Record:
-  [`pause-wall-per-packet-strand-2026-07-23.md`](reviews/pause-wall-per-packet-strand-2026-07-23.md).
-  (The zero-spill entry's companion pause-wall LEAD — deep packet spinning the wait tick on a
-  paused best pool — SHIPPED 2026-07-23 as the per-packet pause wall; same record. The adjacent
-  legibility fact — 144 granted with leases/explains empty — stays carried by the
-  dispatch-legibility entry below.)
-
-- **RESIDUAL of the partial-wave deferral (shipped v0.34.27, 2026-07-24, low) — two accepted
-  residuals, no open work.** Both dispatch paths record their attempted packet set into the
-  run-scoped `dispatch-attempted.json` (`src/audit/cli/dispatchAttempted.ts`): the host path records
-  `admission.granted_packet_ids` (`dispatch.ts:688`), the in-process driver opts out
-  (`recordAttemptedGrant: false`) and records the packets the engine actually drove
-  (`rollingAuditDispatch.ts:667`), so a stranded packet stays unattempted. Merge defers a missing
-  result whose packet is not in that set (`partitionUnattemptedMissing`), keeps its claim, skips
-  retry-dispatch and suppresses the completion marker — pinned by three tests in
-  `tests/audit/merge-ownership-gate.test.mjs`. Residuals, revisit on live evidence: (a) a `null`
-  attempted set deliberately preserves the pre-fix classification (an unrecorded round must not
-  swallow failures), so any FUTURE third dispatch path must record its attempted set or its partial
-  waves regress to the exit-code lie — nothing enforces that mechanically; (b) the record is a
-  monotonic union per run id and never pruned, so a long-lived run id accumulates packet ids
-  (bounded by the run's plan, not unbounded).
-  ⚠ **The companion FLW-COR-002 "idempotent REPLAY of a completed merge flips the exit code" claim is
-  REFUTED at HEAD** — a replay returns `has_failures:false` → exit 0, and `merge-complete.json` is
-  written only by a zero-failure merge that also exits 0. The observed 2→1 instability was the
-  partial-wave re-run above. The mechanism post-mortem (claims are taken at PLAN time, so claim
-  liveness is not an in-flight signal) lives in [[claim-liveness-is-not-an-inflight-signal]].
-
 - **⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply
   (2026-07-21, low).** The dispatch prompt wants per-result `{input_tokens, output_tokens}`; Claude
   Code's subagent tool reports only a TOTAL. An honest host must skip the stamp, so calibration
@@ -317,25 +269,6 @@
   (2026-07-21, low).** This run's challenge arrived as "round 10" with 11 prior improvements from
   earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
   [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
-
-- **agy's headless lane still has no `permissions.allow` rules, so `-p` auto-denies `read_file`/`command`
-  (2026-07-23, low, friction: tool-should-decide).** Headless `agy -p` denies its own tool permissions and
-  exits 0 with only a "jetski: no output produced" line, so the lane is prompt-inlined content only
-  (≲30KB argv). ⚠ **Correcting this entry's own "the settings file could not be located" claim — it IS
-  located.** The agy binary carries the literal path `~/.gemini/antigravity-cli/settings.json`
-  (string scan of `%LOCALAPPDATA%\agy\bin\agy.exe`); that directory is agy's real state home on this box
-  (`installation_id`, `brain/`, `cache/`, `updater/`) and simply has no `settings.json` yet.
-  `~/.gemini/config/config.json` is a different file and holds only `userSettings` — which is why the
-  original search came up empty. `agy --help` exposes no allow-rule flag and no `config` subcommand, so
-  that file is the only lever — **re-confirmed 2026-07-25 by an independent scan** (no workspace-local
-  `.gemini` variant, no `workspaceSettings`/`projectSettings` key, no CLI flag): an OWNER action
-  outside the repo, closable by no lap. Do not re-investigate the lever.
-  Remaining step: author `~/.gemini/antigravity-cli/settings.json` with a
-  read-only `permissions.allow` block, then probe with a trivial `agy -p` read and confirm the
-  "no output produced" symptom clears — the rule GRAMMAR (tool names, argument matching) is still
-  unverified and needs that live probe. The `--dangerously-skip-permissions` workaround stays refused by
-  `shell-trap-guard.mjs` (prompt-derail trap, with the three agy headless traps). Delete this entry once
-  the probe is green.
 
 - **SPEC — delete inline `api_key` support; a credential must be named, never pasted.** Account identity
   compares `(endpoint, credential REFERENCE)`, so a source naming its key through an env var and a
@@ -417,20 +350,6 @@
   may only relocate the claim again unless the names are derived (e.g. from a baseline coverage/ownership
   map) — and whether N full-suite runs per commit is a cost worth paying.
 
-- **Nothing derives "collapse a shared-budget roster to its best member" (low).** The selection rule
-  itself is settled and already falls out of the cost-first comparator: a free pool's costs all tie so
-  capability decides, and a metered pool sorts on price with the capability floor gating eligibility.
-  What is missing is that the operator still expresses the collapse by hand as a `top_k: 1` on the
-  proxy declaration. **Property to hold:** when several models share one budget, restricting the roster
-  to the member that best serves the work is derived, not hand-declared.
-  ⚠ **Premise FALSIFIED (built + reverted 2026-07-25) — re-derive before retrying.** (1) There is no
-  honest shared-budget key: `deriveAccountKey` returns null for a keyless proxy, and `apiPool.ts`
-  meters those sources as N separate accounts, so a collapse asserts one budget where quota meters
-  many. (2) "Strictly dominated" is false — `rollingDispatch`'s capability term reads the coarse
-  `pool.rank`, never set on source-built pools, so siblings tie into a deliberate fan-out, and
-  low-complexity packets prefer the LEAST-capable pool by design. (3) Inert anyway: `top_k: 1` keeps
-  the same member whenever every member is ranked.
-
 - **SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no
   operator-runnable refresh.** A day-old cache whose roster no longer matched the running proxy was
   served silently, and deleting the cache dropped the whole proxy lane with a reason naming an internal
@@ -457,33 +376,6 @@
   while glm cooled) — the two entries share a mechanism. Also observed on the same call: the
   engine's drain re-stormed cooling glm to 143 consecutive 429s, so wave-3 pre-wall pacing from
   learned limits is still not happening on a single-model pool.
-
-- **A DEADLINE must drive λ from measured progress, never become a second operator knob — and nothing
-  measures progress yet (blocked on an owner call, not on code).** At HEAD the dial is exactly one durable
-  operator scalar: `dispatch_bias` (λ ∈ [0,1]) captured at Gate-0
-  (`ProviderConfirmationInput.dispatch_bias`, `src/shared/types/providerConfirmation.ts`), clamped in
-  `admitBatch` and applied at the single ordering chokepoint `orderCandidates`
-  (`src/shared/dispatch/admissionLoop.ts`). The speed axis it blends against is
-  `deriveThroughputConcurrency` — declared source `max_concurrent` else `+Infinity`, host subagent budget
-  else `1`. So throughput is a DECLARED-CONCURRENCY ordinal, not a measured rate: no elapsed-time,
-  tokens/sec, or progress-to-completion quantity is recorded per run anywhere (`RunLogger` carries
-  `duration_ms` on step/executor spans only; the `provider_done` diagnostic carries no duration at all),
-  and every `deadline` in `src/` is a file-lock or HTTP timeout. "Finish within an hour" is a CONSTRAINT,
-  so it belongs as something that drives λ — a manual deadline flag is a bug signal, and a guessed
-  controller wired into the dial is WORSE than the flag (it hunts and overshoots with no dataset to debug
-  against).
-  **Property to hold:** no control law reaches the dial before it has been fitted to measured runs and
-  validated, and the absence of a law is never filled by an operator knob in the meantime. **Both hold
-  today** — there is nothing here to close, only to decide.
-  **The owner call that gates any move:** the proposed intermediate (a passive observer recording elapsed
-  time, measured throughput and progress-to-completion per run, with a deadline acting only as a hard stop
-  plus a persisted trace) introduces a MEASURED dispatch signal, which the dial's own invariant forbids
-  ("never learned, measured, or hand-declared" — `spec/dispatch-cost-speed-dial.md`) and which the
-  STOP-HUNTING ruling pushes back on ([[concurrency-is-declared-or-absent-never-learned]]). Decide whether
-  a measure-but-never-route observer is admissible under those rules — and whether deadline support is
-  wanted at all — before any code is written.
-  Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
-  $/Mtok alone, never demoting a quota-saturated pool).
 
 - **Ranked-pool composition — live-wave watch + the absolute-floor question (mechanism shipped R3-3
   `c0cf7e9b` 2026-07-21; residue only).** ⬇ **Blocked on a real wave.** (a) The composition prediction
@@ -577,7 +469,6 @@
   capacity or bounded in scope before a batch is committed to it
   ([[offload-lane-failures-are-usually-the-caller]]). Primary record:
   [`backlog-clearance-2026-07-24.md`](../reviews/backlog-clearance-2026-07-24.md).
-
 
 
 - **Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** A Haiku subagent handed one bounded step (charter_extraction) with an explicit "do NOT run next-step" instruction obeyed the step prompt's own embedded advance command instead and drove the workflow forward — the parent lost the step boundary. This generalizes the existing "design-review worker prompts FOLLOW-UP" entry from one branch to EVERY step prompt: the advance command belongs to the DRIVER, not the step executor, and prompt text cannot enforce that split (host/worker discretion). Property to hold: a step prompt handed to a non-driving executor must not carry the advance command — e.g. emit it only in the step JSON (driver-facing), not in the worker-facing prompt md, or gate next-step on the driving agent-id. **Recurrence 2026-07-17 (design-review re-dogfood):** a `systemic_challenge` adversary subagent, handed its step-prompt path to follow, executed the prompt's embedded `next-step` and advanced the loop from round 7→8 — even convergence-loop worker prompts carry the advance command, so this is not branch-specific. Mitigation used the rest of the lap: the dispatch message explicitly overrides ("do NOT run next-step; the parent owns advancement"), which held — but that is host-discretion, exactly what the property says to remove. [[enforce-robustness-in-tooling-not-host-discretion]] [[delegate-adversarial-phases-to-separate-agent]]
@@ -793,8 +684,6 @@
   declaration, whatever the proof mechanism is for that backend class. A backend whose endpoint or
   credential cannot be discovered stays operator-declared — that is correct, not a gap.
 
-- **Gate-0's quota-demotion primitive (`CostCandidate.saturated`) is unwired — and the real question is whether Gate-0 is the right layer at all (2026-07-13 audit-gate review; re-verified against HEAD 2026-07-24).** `suggestCostOrdering` (`src/shared/dispatch/costRank.ts:216-256`) stably partitions `saturated` candidates below healthy ones, but nothing in `src/` ever sets the flag — the only writers in the tree are `tests/shared/cost-rank.test.mjs`; `annotateConfirmedPool` (`src/shared/providers/providerConfirmation.ts:352-410`) builds every provider / host-model / source candidate with no quota query. **Two facts make the obvious "probe quota at the candidate-building site" fix wrong-shaped, and they ARE the open decision:** (1) `provider_confirmation` is `PRIORITY[0]`, so Gate-0 runs before any dispatch in the run — `quota-state.json` normally carries no live cooldown at that moment and a local probe would be inert in the common case; (2) the suggestion IS the persisted order — with no operator `cost_order`, `resolveFinalCostOrder` returns `suggested_order` verbatim (`providerConfirmation.ts:296`), `readConfirmedCostPositions` reads it back off disk, and `deriveCostRank` treats it as rung 1, authoritative OVER price — so a transient 60s cooldown observed at Gate-0 would demote that pool for the entire run. Meanwhile dispatch already gates on LIVE headroom (`admissionPoolsFromSummaries` budget from `remaining_token_budget`; `computeWaveSchedule` sets `binding_cap: "cooldown"` / waveSize 1), so costRank is a sort key, not the admission gate — the unwired flag costs ordering fidelity, not admission safety. Mapping is also non-trivial: three candidate keyspaces (provider NAME, bare host `model_id`, `source::<id>`) must reach `quotaPoolKey`'s `provider[#account]/model`, and account resolution is async while `annotateConfirmedPool` is sync. **Owner decision before any wiring:** (a) probe local cooldown at Gate-0 and accept a frozen, usually-empty snapshot; (b) probe live quota per source at Gate-0 (N network calls, still frozen); (c) move the demotion to the dispatch read-back, where quota is live per wave; or (d) delete `saturated` + its partition + tests as a primitive at the wrong layer. [[quota-before-cost-ordering]]
-
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 
 - **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts:123-136`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `coordinator.ts:227` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`rollingDispatch.ts:1741` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts:226-236`; the two-mode split is documented at `admissionLoop.ts:887-896`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts:2309`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
@@ -929,13 +818,6 @@
   this artifact dir's own `dispatch-quota.json` files, keyed on a run-terminal signal.
   `reclaimExpired()` (`reservationLedger.ts:403`) is unwired and only drops already-expired leases, so
   it does not close this.
-
-- **openai-compatible content-inlining — residuals (each low, documented at the code site) ([[openai-compatible-content-inlining]]).**
-  (a) **large-packet hard-refuse** — a review packet whose `file_paths` exceed the default caps
-  (64KiB/file, 256KiB total, 24 files) REFUSES on a single-shot worker rather than silently
-  half-reviewing (intended: loud > fabricated coverage; operator raises `openai_compatible.referenced_*`
-  caps or routes to a file-reading provider). (b) The stat-error branch refuses on a non-ENOENT error
-  (EACCES/ELOOP) for an existing granted file — correct, but untested (hard to simulate portably).
 
 - **A2b unmatched-quota fallback — two residuals (each low, documented at the code site).**
   - (a) **`pausedPoolResetAt` + `quotaUnclassifiedPoolIds` are not injected across sub-waves** the way

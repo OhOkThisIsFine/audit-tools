@@ -185,7 +185,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 110 open item(s).
+> `verify:checks` and at commit). 103 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -194,9 +194,9 @@ its SPEC intact.
 
 ### Open bugs & frictions — the working queue
 
+- `api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined, not unwrapped. · [`open-bugs.md`](backlog/open-bugs.md)
-- `verifySourceReach` demands `api_key_env` on every openai-compatible source, so a KEYLESS local endpoint cannot be declared honestly (2026-07-23, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree (2026-07-22, low, revisit on live evidence only). · [`open-bugs.md`](backlog/open-bugs.md)
 - FLW-COR-003 claim-release livelock — SHIPPED except one low residual (2026-07-22; downgraded from HIGH after a 2026-07-24 code trace). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes instead of agentic ones that all drop. · [`open-bugs.md`](backlog/open-bugs.md)
@@ -210,18 +210,13 @@ its SPEC intact.
 - Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE-CONFIRMED (re-dogfood 2026-07-21): the proxy-lane drop reason names an internal function, and no populate command exists (medium, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
-- LEAD (2026-07-23, low, surfaced by the pause-wall recon — out-of-repo resolvers only): `window_uncalibrated` ledger blocks are a fixed-state 50ms-poll livelock if a custom `resolvePoolConstraints` emits unpriced windows. · [`open-bugs.md`](backlog/open-bugs.md)
-- RESIDUAL of the partial-wave deferral (shipped v0.34.27, 2026-07-24, low) — two accepted residuals, no open work. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
-- agy's headless lane still has no `permissions.allow` rules, so `-p` auto-denies `read_file`/`command` (2026-07-23, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - SPEC — delete inline `api_key` support; a credential must be named, never pasted. · [`open-bugs.md`](backlog/open-bugs.md)
 - Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19). · [`open-bugs.md`](backlog/open-bugs.md)
 - Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason (2026-07-19). · [`open-bugs.md`](backlog/open-bugs.md)
 - A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main. · [`open-bugs.md`](backlog/open-bugs.md)
-- Nothing derives "collapse a shared-budget roster to its best member" (low). · [`open-bugs.md`](backlog/open-bugs.md)
 - SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no operator-runnable refresh. · [`open-bugs.md`](backlog/open-bugs.md)
-- A DEADLINE must drive λ from measured progress, never become a second operator knob — and nothing measures progress yet (blocked on an owner call, not on code). · [`open-bugs.md`](backlog/open-bugs.md)
 - Ranked-pool composition — live-wave watch + the absolute-floor question (mechanism shipped R3-3 `c0cf7e9b` 2026-07-21; residue only). · [`open-bugs.md`](backlog/open-bugs.md)
 - H2+H4 collapse residual pins (2026-07-18, low, from review h2c3). · [`open-bugs.md`](backlog/open-bugs.md)
 - Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -253,7 +248,6 @@ its SPEC intact.
 - A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE-run watch only — unified routing A–G (shipped 2026-07-17, 6 attested loop-core commits). · [`open-bugs.md`](backlog/open-bugs.md)
 - SPEC — probe the local OpenAI-compatible ENDPOINT, the way CLI providers are probed on PATH. · [`open-bugs.md`](backlog/open-bugs.md)
-- Gate-0's quota-demotion primitive (`CostCandidate.saturated`) is unwired — and the real question is whether Gate-0 is the right layer at all (2026-07-13 audit-gate review; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - agy quota may reuse the wrong credential store (unverified, live-check). · [`open-bugs.md`](backlog/open-bugs.md)
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -265,7 +259,6 @@ its SPEC intact.
 - "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch). · [`open-bugs.md`](backlog/open-bugs.md)
 - Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug). · [`open-bugs.md`](backlog/open-bugs.md)
-- openai-compatible content-inlining — residuals (each low, documented at the code site) ([[openai-compatible-content-inlining]]). · [`open-bugs.md`](backlog/open-bugs.md)
 - A2b unmatched-quota fallback — two residuals (each low, documented at the code site). · [`open-bugs.md`](backlog/open-bugs.md)
 - Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track). · [`open-bugs.md`](backlog/open-bugs.md)
 - Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]). · [`open-bugs.md`](backlog/open-bugs.md)

@@ -272,32 +272,17 @@ describe("suggestCostOrdering — Gate-0 suggestion", () => {
   });
 });
 
-describe("suggestCostOrdering — quota-aware demotion (fixes quota-before-cost-ordering)", () => {
-  test("a saturated candidate is demoted below every healthy one, cost order preserved intra-group", () => {
+describe("suggestCostOrdering — ordering is a pure cost sort, never a quota gate", () => {
+  test("ordering is cost-ascending and carries no saturation concept", () => {
     const suggestion = suggestCostOrdering([
-      { key: "haiku", model: "claude-haiku-4-5", saturated: true }, // cheapest but saturated
-      { key: "sonnet", model: "claude-sonnet-5" },
-      { key: "opus", model: "claude-opus-4-8" },
-    ]);
-    // Healthy (sonnet, opus) first by cost; saturated haiku demoted last despite being cheapest.
-    expect(suggestion.map((s) => s.key)).toEqual(["sonnet", "opus", "haiku"]);
-    expect(suggestion.find((s) => s.key === "haiku")?.saturated).toBe(true);
-    expect(suggestion.find((s) => s.key === "sonnet")?.saturated).toBe(false);
-  });
-  test("multiple saturated candidates keep their cost order among themselves, after the healthy", () => {
-    const suggestion = suggestCostOrdering([
-      { key: "opus", model: "claude-opus-4-8", saturated: true }, // dearer, saturated
-      { key: "haiku", model: "claude-haiku-4-5", saturated: true }, // cheaper, saturated
-      { key: "sonnet", model: "claude-sonnet-5" }, // healthy
-    ]);
-    expect(suggestion.map((s) => s.key)).toEqual(["sonnet", "haiku", "opus"]);
-  });
-  test("no saturation signal ⇒ ordering unchanged (additive no-op)", () => {
-    const withFlag = suggestCostOrdering([
       { key: "opus", model: "claude-opus-4-8" },
       { key: "haiku", model: "claude-haiku-4-5" },
+      { key: "sonnet", model: "claude-sonnet-5" },
     ]);
-    expect(withFlag.map((s) => s.key)).toEqual(["haiku", "opus"]);
-    expect(withFlag.every((s) => s.saturated === false)).toBe(true);
+    expect(suggestion.map((s) => s.key)).toEqual(["haiku", "sonnet", "opus"]);
+    // The retired `saturated` demotion lived at the wrong layer: Gate-0 runs before any
+    // dispatch, so it had no live signal to read, and its output IS the persisted order.
+    // Quota demotion belongs downstream against live headroom, not here.
+    expect(suggestion.every((s) => !("saturated" in s))).toBe(true);
   });
 });

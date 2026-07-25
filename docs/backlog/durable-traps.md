@@ -10,6 +10,19 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **agy's headless lane is INERT until `~/.gemini/antigravity-cli/settings.json` grants tool
+  permissions — and the grammar is `tool(target)` (verified live 2026-07-25).** Without that file
+  `agy -p` exits 0 and prints only `jetski: no output produced — a tool required the "command"
+  permission that headless mode cannot prompt for`, which reads as a dead lane. The error message
+  itself names the grammar: a `permissions.allow` array of `tool(target)` entries, `*` accepted as the
+  target wildcard. `read_file`/`glob`/`list_directory`/`search_file_content` are NOT sufficient on
+  their own — agy shells out, so `command(...)` is required for any file work. The CLI's cwd defaults
+  to its own `…/antigravity-cli/scratch`, so pass `--add-dir <repo>` AND absolute paths in the prompt
+  or it reports the file missing. `--dangerously-skip-permissions` remains refused by
+  `shell-trap-guard.mjs` (prompt-derail trap) and is not needed. ⚠ The allow-list is MACHINE-GLOBAL and
+  currently grants `command(*)`, i.e. every headless agy session auto-approves any command — narrow it
+  if agy is ever pointed at untrusted input.
+
 - **A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).**
   A refused `git add <files> && git commit …` is refused at the tool call, before any statement executes, so
   the `add` did not happen either — and the retry fails identically, reading as "the gate ignored my fix".

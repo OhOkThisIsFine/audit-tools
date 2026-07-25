@@ -181,15 +181,6 @@ export interface CostCandidate {
    * on the Gate-0 suggestion surface, not by its catalog price.
    */
   declaredCost?: number | null;
-  /**
-   * Optional live quota-saturation marker: `true` when this candidate's pool is out
-   * of usable headroom (exhausted budget / in active cooldown). A saturated candidate
-   * is DEMOTED below every healthy candidate in the suggested order — a STABLE
-   * partition that preserves each group's internal cost order — and echoed on the
-   * output. Absent/`false` = healthy = current behavior; with no saturated candidate
-   * the partition is a no-op, so "no quota signal" changes nothing.
-   */
-  saturated?: boolean;
 }
 
 /** A candidate with its resolved price + the tool's suggested position. */
@@ -197,9 +188,7 @@ export interface OrderedCostCandidate extends CostCandidate {
   /** Blended $/Mtok, or `undefined` when the dataset can't price it. */
   blended_price?: number;
   price_known: boolean;
-  /** Echo of the input saturation marker (default `false`). */
-  saturated: boolean;
-  /** 0-based suggested position (ascending cost; saturated candidates demoted last). */
+  /** 0-based suggested position (ascending cost). */
   suggested_order: number;
 }
 
@@ -208,10 +197,14 @@ export interface OrderedCostCandidate extends CostCandidate {
  * candidates first (cheapest $/Mtok first), unknown-price candidates after,
  * ordered among themselves by capability tier (cheaper tier first). Cost-equal
  * candidates break by `capabilityRank` (lower = more capable, first), then by the
- * input `key` for a deterministic tail. Finally, a STABLE quota partition demotes
- * every `saturated` candidate below the healthy ones (each group keeps its cost
- * order) so an exhausted backend never heads the list. The operator approves or
- * reorders this; the confirmed order becomes rung 1.
+ * input `key` for a deterministic tail. The operator approves or reorders this;
+ * the confirmed order becomes rung 1.
+ *
+ * Deliberately NOT quota-aware: Gate-0 is `PRIORITY[0]`, so no live cooldown exists
+ * to read yet, and this suggestion IS the persisted order — a transient cooldown
+ * observed here would demote a pool for the whole run. Admission safety is enforced
+ * downstream against LIVE headroom (`admissionPoolsFromSummaries`), where the signal
+ * is current; this function is a sort key, never an admission gate.
  */
 export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCandidate[] {
   const priced = candidates.map((c) => {
@@ -238,19 +231,10 @@ export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCan
       compareCapability(a.candidate.capabilityRank, b.candidate.capabilityRank) ||
       compareKey(a.candidate.key, b.candidate.key);
   });
-  // Quota-aware demotion (fixes [[quota-before-cost-ordering]]): a stable partition —
-  // healthy candidates first (preserving their cost order), saturated after (preserving
-  // theirs). filter() is stable, so intra-group cost order is untouched; with no
-  // saturated candidate this is a plain copy (current behavior).
-  const partitioned = [
-    ...sorted.filter((e) => e.candidate.saturated !== true),
-    ...sorted.filter((e) => e.candidate.saturated === true),
-  ];
-  return partitioned.map((entry, index) => ({
+  return sorted.map((entry, index) => ({
     ...entry.candidate,
     blended_price: entry.price,
     price_known: entry.price !== undefined,
-    saturated: entry.candidate.saturated === true,
     suggested_order: index,
   }));
 }
