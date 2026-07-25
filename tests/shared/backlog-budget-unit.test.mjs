@@ -1,6 +1,6 @@
 /**
- * Two properties of the backlog size gate are pinned here, because both were
- * regressions waiting to happen and neither is visible from reading the script.
+ * Three properties of the backlog size gate are pinned here, because each was a
+ * regression waiting to happen and none is visible from reading the script.
  *
  * 1. IT MEASURES UTF-8 BYTES, NOT JS STRING LENGTH. The two silently disagreed:
  *    `check-backlog-budget.mjs` counted `text.length` while every tool a maintainer
@@ -23,9 +23,20 @@
  *    FILE is still refused, and an entry that grows while its file shrinks is accepted.
  *    The second case is the entire point of the change and would go red if the per-entry
  *    ratchet were ever reinstated.
+ *
+ * 3. `--update-baseline` CANNOT RAISE A CEILING. The enforce run refuses a file that grew
+ *    past its recorded ceiling — and `--update-baseline` used to re-record whatever the
+ *    file currently measured, so that one refusal was a single flag away from being
+ *    erased by the same command whose legitimate job (locking in a shrink) reads
+ *    identically. The only thing standing between them was a prose caution in HANDOFF,
+ *    which is host discretion, not a guarantee. Both directions are driven below, at the
+ *    pure-function level AND end-to-end through the CLI, because the defect lived in the
+ *    argv wiring as much as in the computation.
  */
-import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -38,6 +49,7 @@ const {
   entryKey,
   evaluateBacklog,
   normalizeBaseline,
+  planBaselineUpdate,
   ENTRY_BUDGET_BYTES,
   FILE_BUDGET_BYTES,
 } = await import(SCRIPT);
@@ -59,6 +71,17 @@ function bulk(count, bytesEach) {
   return Array.from({ length: count }, (_, i) => entry(`Filler ${i}`, bytesEach));
 }
 
+/**
+ * What a recorded file ceiling promises: it is a BYTE count that caps the file.
+ *
+ * Measured against `Buffer.byteLength`, never against the script's own `sizeOf` — `sizeOf`
+ * is the function under suspicion here, so comparing a ceiling to it is self-referential
+ * and a revert to `.length` would agree with itself and pass.
+ */
+function ceilingIsInBytes(ceiling, text) {
+  return ceiling >= Buffer.byteLength(text, "utf8");
+}
+
 describe("backlog budget measures bytes", () => {
   it("sizeOf counts UTF-8 bytes, so a multi-byte glyph costs more than one unit", () => {
     // The exact confusion: one CHARACTER, three BYTES.
@@ -76,17 +99,47 @@ describe("backlog budget measures bytes", () => {
     expect(parsed.bytes).toBeGreaterThan(body.length);
   });
 
-  it("a recorded FILE ceiling is in bytes — it agrees with the real file size", () => {
+  it("a recorded FILE ceiling is in bytes — it caps the real file size", () => {
     // The property that makes the gate trustworthy from the shell: what the baseline
-    // says is what `wc -c` says. If someone reverts the metric to `.length`, every
-    // over-budget file's recorded ceiling drifts below its true size and this goes red.
+    // says is what `wc -c` says, in the same unit.
+    //
+    // It is a CEILING, not a snapshot. The gate lets an over-budget file shrink beneath
+    // its recorded number without re-recording (that is the whole ratchet), so closing an
+    // entry legitimately puts the ceiling ABOVE the file. Pinning equality here made that
+    // ordinary event read as a code regression — twice, each time costing a full-suite
+    // investigation. The direction is what the gate actually promises, and it is still the
+    // direction the metric revert breaks: a baseline re-recorded under `.length` lands
+    // BELOW the file's true byte size. Proven both ways in the next test.
     const raw = JSON.parse(readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8"));
     const ceilings = Object.entries(raw.file_ceilings ?? {});
     expect(ceilings.length, "at least one file is over budget and thus baselined").toBeGreaterThan(0);
     for (const [name, ceiling] of ceilings) {
       const text = readFileSync(join(BACKLOG_DIR, name), "utf8");
-      expect(ceiling, `${name} ceiling must be a BYTE count`).toBe(sizeOf(text));
+      const bytes = Buffer.byteLength(text, "utf8");
+      expect(
+        ceilingIsInBytes(ceiling, text),
+        `${name} ceiling ${ceiling} must be a BYTE count capping the file's ${bytes} bytes`,
+      ).toBe(true);
     }
+  });
+
+  it("a ceiling re-recorded under a reverted (character-count) metric is still refused", () => {
+    // Why the direction above is not a loosening. On decorated prose — which every backlog
+    // file is, being full of ⚠ / → / ⇒ / — — a character count lands strictly below the
+    // byte count, so it fails the cap it was supposed to be. Synthetic content, so this
+    // stays true no matter how the live backlog is edited.
+    const decorated = `- **Entry ⚠ with arrows → and ⇒ plus an em-dash —**\n  ${"body ".repeat(100)}\n`;
+    expect(decorated.length, "the two metrics must disagree, or this proves nothing").toBeLessThan(
+      sizeOf(decorated),
+    );
+
+    expect(ceilingIsInBytes(sizeOf(decorated), decorated), "a byte ceiling holds").toBe(true);
+    expect(ceilingIsInBytes(decorated.length, decorated), "a char ceiling is refused").toBe(false);
+
+    // And a legitimate shrink — the case that kept going false-red — is accepted.
+    const shrunk = decorated.replace(`  ${"body ".repeat(100)}`, `  ${"body ".repeat(60)}`);
+    expect(sizeOf(shrunk)).toBeLessThan(sizeOf(decorated));
+    expect(ceilingIsInBytes(sizeOf(decorated), shrunk), "a shrink under its ceiling holds").toBe(true);
   });
 
   it("budgets are declared in bytes and the whole backlog is measured by one function", () => {
@@ -182,5 +235,124 @@ describe("the ratchet is per-FILE; the per-entry budget is a plain threshold", (
       JSON.parse(readFileSync(join(BACKLOG_DIR, ".size-baseline.json"), "utf8")),
     );
     expect(evaluateBacklog(files, baseline).violations).toEqual([]);
+  });
+});
+
+describe("--update-baseline may lower a ceiling, never raise one", () => {
+  /** An over-budget synthetic file, plus a recorded ceiling `delta` bytes away from it. */
+  function overBudget(delta) {
+    const text = file(...bulk(60, 2000));
+    expect(sizeOf(text)).toBeGreaterThan(FILE_BUDGET_BYTES);
+    return { text, measured: sizeOf(text), recorded: sizeOf(text) + delta };
+  }
+
+  function plan(text, fileCeilings, raiseCeiling) {
+    const baseline = normalizeBaseline({ file_ceilings: fileCeilings, entries_over_budget: [] });
+    const result = evaluateBacklog([{ file: "big.md", text }], baseline);
+    return planBaselineUpdate(result.nextBaseline, baseline, { raiseCeiling });
+  }
+
+  it("keeps the recorded ceiling when the file GREW, and says what it refused", () => {
+    const { text, measured, recorded } = overBudget(-500);
+    const { baseline, refused, raised } = plan(text, { "big.md": recorded }, false);
+
+    expect(baseline.file_ceilings["big.md"], "the grown size must not reach disk").toBe(recorded);
+    expect(refused).toEqual([{ file: "big.md", recorded, measured }]);
+    expect(raised).toEqual([]);
+  });
+
+  it("re-records a SHRINK with no flag at all — the legitimate half is untouched", () => {
+    const { text, measured, recorded } = overBudget(+500);
+    const { baseline, refused } = plan(text, { "big.md": recorded }, false);
+
+    expect(baseline.file_ceilings["big.md"]).toBe(measured);
+    expect(refused).toEqual([]);
+  });
+
+  it("records a first ceiling for a file that has none — there is nothing to raise yet", () => {
+    const { text, measured } = overBudget(0);
+    const { baseline, refused } = plan(text, {}, false);
+
+    expect(baseline.file_ceilings["big.md"]).toBe(measured);
+    expect(refused).toEqual([]);
+  });
+
+  it("--raise-ceiling writes the grown size and names it, so the raise is on the record", () => {
+    const { text, measured, recorded } = overBudget(-500);
+    const { baseline, refused, raised } = plan(text, { "big.md": recorded }, true);
+
+    expect(baseline.file_ceilings["big.md"]).toBe(measured);
+    expect(refused).toEqual([]);
+    expect(raised).toEqual([{ file: "big.md", recorded, measured }]);
+  });
+
+  it("refuses a non-boolean intent rather than treating a truthy string as consent", () => {
+    // `"false"` is truthy. A caller that forwards an unparsed argv value would otherwise
+    // wave every raise through, silently, in the direction that loses data.
+    const { text, recorded } = overBudget(-500);
+    expect(() => plan(text, { "big.md": recorded }, "false")).toThrow(/boolean/);
+  });
+
+  describe("end-to-end through the CLI, where the defect actually lived", () => {
+    // A throwaway repo skeleton: the script resolves its backlog dir from its OWN
+    // location, so a copy under <tmp>/scripts reads <tmp>/docs/backlog and cannot
+    // touch the real baseline. Driving argv is the point — the pure planner can be
+    // correct while `main()` never calls it.
+    let dir;
+    let script;
+    let baselineFile;
+    let measured;
+    let recorded;
+
+    beforeAll(() => {
+      dir = mkdtempSync(join(tmpdir(), "backlog-budget-"));
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      mkdirSync(join(dir, "docs", "backlog"), { recursive: true });
+      script = join(dir, "scripts", "check-backlog-budget.mjs");
+      baselineFile = join(dir, "docs", "backlog", ".size-baseline.json");
+      copyFileSync(SCRIPT, script);
+
+      const text = file(...bulk(60, 2000));
+      measured = sizeOf(text);
+      recorded = measured - 500;
+      writeFileSync(join(dir, "docs", "backlog", "big.md"), text, "utf8");
+      writeFileSync(
+        baselineFile,
+        JSON.stringify({ file_ceilings: { "big.md": recorded }, entries_over_budget: [] }, null, 2) + "\n",
+        "utf8",
+      );
+    });
+
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+    const run = (...args) =>
+      spawnSyncHidden(process.execPath, [script, ...args], { encoding: "utf8" });
+
+    const ceilingOnDisk = () => JSON.parse(readFileSync(baselineFile, "utf8")).file_ceilings["big.md"];
+
+    it("refuses the raise, leaves the recorded ceiling on disk, and exits non-zero", () => {
+      const r = run("--update-baseline");
+      expect(r.status, "a refused update must not read as success").toBe(1);
+      expect(r.stderr).toContain("REFUSED");
+      expect(r.stderr).toContain("--raise-ceiling");
+      expect(ceilingOnDisk()).toBe(recorded);
+
+      // …and the enforce run still fails, i.e. the violation was not laundered.
+      expect(run().status).toBe(1);
+    });
+
+    it("raises only when asked out loud, and then the enforce run passes", () => {
+      const r = run("--update-baseline", "--raise-ceiling");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("raised");
+      expect(ceilingOnDisk()).toBe(measured);
+      expect(run().status).toBe(0);
+    });
+
+    it("refuses --raise-ceiling on its own instead of silently ignoring it", () => {
+      const r = run("--raise-ceiling");
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("--update-baseline");
+    });
   });
 });

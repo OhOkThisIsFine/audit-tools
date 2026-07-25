@@ -73,6 +73,22 @@ const OPENCODE_REMEDIATE_BASH_PERMISSION = {
 // skipped with a warning instead of failing the whole install.
 const sharedOpenCodePermissions = await resolveSharedOpenCodePermissions();
 
+// A pre-hardening deploy wrote agent-scope bash['*']='allow' (the historically
+// managed broad value). Migrate exactly that value away so the generated 'ask'
+// seed wins on re-deploy; any other user-authored wildcard survives untouched.
+// This mirrors the install wrapper so an upgrade that only ever runs
+// `npm install` converges on the same hardened agent block — otherwise the
+// postinstall is the one path that keeps a broad wildcard alive.
+function withoutManagedBroadBashWildcard(rule) {
+  const { withoutOpenCodeWildcard, OPENCODE_MANAGED_BROAD_VALUE } =
+    sharedOpenCodePermissions;
+  const existing = objectValue(rule);
+  if (existing["*"] !== OPENCODE_MANAGED_BROAD_VALUE) {
+    return rule;
+  }
+  return withoutOpenCodeWildcard(existing);
+}
+
 // Remediator agent scope: managed rules win for specific patterns; an
 // existing user wildcard survives (the managed set is passed without "*").
 function renderOpenCodeAgentPermissionConfig(existing) {
@@ -90,7 +106,7 @@ function renderOpenCodeAgentPermissionConfig(existing) {
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      existingPermission.bash,
+      withoutManagedBroadBashWildcard(existingPermission.bash),
       OPENCODE_REMEDIATE_BASH_PERMISSION,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),

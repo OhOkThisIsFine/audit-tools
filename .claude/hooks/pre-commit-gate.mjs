@@ -253,8 +253,17 @@ const hasStageCommand =
 // never seen (`--verdict block` would sail through). So the chain stays blocked
 // and the MESSAGE names the real cause; otherwise the generic "no attestation"
 // text sends the agent off to write one it demonstrably just wrote.
+//
+// Raw-matched, for the same reason `hasStageCommand` above is: a QUOTED script
+// path still runs the script, and stripQuoted blanks quoted-span CONTENT — so
+// every shape an agent naturally writes (`node ".claude/hooks/attest-…mjs"`,
+// `node "$CLAUDE_PROJECT_DIR/.claude/hooks/attest-…mjs"`, the single-quoted
+// form) had the script name erased before the scan saw it, and the note was
+// dropped exactly when it was needed. A commit message that merely NAMES the
+// attest script now adds the note to an already-blocking message — a false
+// positive here only costs one extra explanatory paragraph, the safe direction.
 const chainsAttestation = subCmds.some((s) =>
-  /attest-loop-core-review(?:\.mjs)?\b|attest-constitutional-doc-change(?:\.mjs)?\b/.test(stripQuoted(s)),
+  /attest-loop-core-review(?:\.mjs)?\b|attest-constitutional-doc-change(?:\.mjs)?\b/.test(s),
 );
 const CHAINED_ATTEST_NOTE =
   `\n⚠ This command CHAINS the attestation with the commit. That can never pass: PreToolUse fires once, ` +

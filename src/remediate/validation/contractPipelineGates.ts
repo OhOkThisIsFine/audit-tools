@@ -1022,30 +1022,19 @@ export interface ContractCitationGroundingResult {
 }
 
 /**
- * Enumerate the working-tree paths at `repoRoot` via `git ls-files`, normalized
- * through the shared `normalizeRepoPath`. Returns an empty set when git is
+ * Enumerate the working-tree paths at `repoRoot`, normalized through the shared
+ * `normalizeRepoPath` for membership matching. This is the lowercased *draw* over
+ * the one shared corpus — `enumerateTrackedFilePaths` owns the git invocation and
+ * its NUL-delimited parsing, so the two corpora cannot drift on how a path is
+ * read off the index (they did: both split newline-terminated `ls-files` output,
+ * so a C-quoted non-ASCII path corrupted both). Returns an empty set when git is
  * unavailable or the tree is empty (caller treats empty as the fail-closed
- * unreadable-tree signal). OS-agnostic: `shell: false`, forward-slash output.
+ * unreadable-tree signal).
  */
 export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
   const known = new Set<string>();
-  let result;
-  try {
-    result = spawnSync("git", ["ls-files"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      shell: false,
-      windowsHide: true,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch {
-    return known;
-  }
-  if (!result || result.status !== 0 || typeof result.stdout !== "string") {
-    return known;
-  }
-  for (const line of result.stdout.split("\n")) {
-    const path = normalizeRepoPath(line);
+  for (const tracked of enumerateTrackedFilePaths(repoRoot)) {
+    const path = normalizeRepoPath(tracked);
     if (path.length > 0) known.add(path);
   }
   return known;

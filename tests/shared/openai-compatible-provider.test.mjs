@@ -452,6 +452,25 @@ test("unroutable guard: an over-cap granted file refuses the dispatch before any
   expect(fetchFn._calls).toBe(0);
 });
 
+// The non-cap arm of the same guard: a granted path that cannot be RESOLVED at all
+// is bad data, not a to-be-created output, so it must refuse rather than silently
+// drop out of the packet (a silent drop is the coverage hole the guard exists for).
+// Deliberately exercised via the path-escape branch, which behaves identically on
+// win32 and POSIX — an unreadable-existing-path case cannot be: `stat()` through a
+// regular file (`a.txt/b.txt`) raises ENOTDIR on POSIX but ENOENT on Windows, and
+// ENOENT is the legitimate "the worker will create it" signal.
+test("unroutable guard: a granted path that escapes the worktree refuses before any POST", async () => {
+  const { input } = makeCtx("Review the granted files.");
+  input.referencedFiles = ["../outside-the-repo.ts"];
+  const fetchFn = fakeFetchReturning(JSON.stringify({ files: [], result: [] }));
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/unroutable/i);
+  expect(res.error ?? "").toMatch(/outside-the-repo\.ts/);
+  expect(fetchFn._calls, "an unroutable packet must not reach the endpoint").toBe(0);
+  expect(existsSync(input.resultPath)).toBe(false);
+});
+
 test("unroutable guard: a granted file that does not exist is a to-be-created output, not a refusal", async () => {
   // A `touched_files` output the fix will CREATE is legitimately absent on disk; the
   // worker writes it from scratch, so it must NOT trip the guard.
@@ -639,6 +658,101 @@ test("C4: a persistent transient status exhausts the retry budget and fails", as
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/HTTP 503/);
   expect(fetchFn._calls, "1 initial + 2 retries = 3 attempts, then gives up").toBe(3);
+});
+
+// ---------------------------------------------------------------------------
+// Truncated completion (finish_reason=length). A response the endpoint cut off
+// at the output cap is a fragment, not an answer — and it wears a success shape:
+// either it parses cleanly (a short array) or its tail degenerates into nonsense.
+// Both read exactly like model incapacity, which is how an unset/low `max_tokens`
+// gets misdiagnosed as a weak backend. The provider must refuse and name the lever.
+// ---------------------------------------------------------------------------
+
+// A fetch returning a completion carrying an explicit finish_reason (+ optional
+// usage), so the truncation signal reaches the provider; counts invocations.
+function fakeFetchFinishing(content, finishReason, usage) {
+  const fn = async () => {
+    fn._calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content }, ...(finishReason !== undefined ? { finish_reason: finishReason } : {}) }],
+        ...(usage !== undefined ? { usage } : {}),
+      }),
+      text: async () => content,
+    };
+  };
+  fn._calls = 0;
+  return fn;
+}
+
+test("a truncated completion is refused even when the fragment happens to parse — and writes NO result", async () => {
+  const { input } = makeCtx();
+  // The sharpest case: the cut-off payload is still valid JSON, so every existing
+  // check passes and the truncation is silently accepted as a real answer.
+  const content = JSON.stringify({ files: [], result: [{ task_id: "t1", findings: [] }] });
+  const fetchFn = fakeFetchFinishing(content, "length", { prompt_tokens: 900, completion_tokens: 1024 });
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted, "a truncated completion must never be accepted").toBe(false);
+  expect(res.error ?? "").toMatch(/truncat/i);
+  // The message must name the LEVER, not just the symptom — that is the whole
+  // difference between "the model is weak" and "raise the cap".
+  expect(res.error ?? "").toMatch(/max_output_tokens/);
+  // The measured evidence the endpoint itself reported.
+  expect(res.error ?? "").toMatch(/1024/);
+  expect(existsSync(input.resultPath), "a rejected launch must not produce a result artifact").toBe(false);
+});
+
+test("a truncated completion is diagnosed as truncation, not as unparseable JSON", async () => {
+  const { input } = makeCtx();
+  // The observed real shape: the model closes nothing because it hit the wall.
+  // Reporting this as "not parseable JSON" points the operator at the model.
+  const fetchFn = fakeFetchFinishing('{"files":[],"result":[{"a":1},{"b":', "length");
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/truncat/i);
+  expect(res.error ?? "", "truncation must outrank the parse failure it CAUSED").not.toMatch(/parseable JSON/);
+});
+
+test("truncation is terminal — never retried (the same cap truncates identically)", async () => {
+  const { input } = makeCtx();
+  const fetchFn = fakeFetchFinishing(JSON.stringify({ files: [], result: {} }), "length");
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn, retryBackoffMs: 1 }).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(fetchFn._calls, "retrying a deterministic truncation only spends the tokens again").toBe(1);
+});
+
+test("the truncation message names the OPERATOR's configured cap, not the built-in default", async () => {
+  const { input } = makeCtx();
+  const fetchFn = fakeFetchFinishing(JSON.stringify({ files: [], result: {} }), "length");
+  const res = await new OpenAiCompatibleProvider(
+    { ...minimalConfig, max_output_tokens: 333 },
+    { fetchFn },
+  ).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/333/);
+});
+
+test("the Anthropic-native truncation dialect (max_tokens) is refused too", async () => {
+  // Some gateways relay Anthropic's `max_tokens` stop reason verbatim — same
+  // dual-dialect tolerance the usage extractor already carries.
+  const { input } = makeCtx();
+  const fetchFn = fakeFetchFinishing(JSON.stringify({ files: [], result: {} }), "MAX_TOKENS");
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/truncat/i);
+});
+
+test("no false refusal: finish_reason 'stop' — or an endpoint that omits it — is accepted", async () => {
+  // Refusing on "anything but stop" would turn a dialect difference into a false
+  // refusal on a COMPLETE answer; plenty of OpenAI-compatible backends omit the field.
+  for (const finishReason of ["stop", undefined, "", "eos_token", null]) {
+    const { input } = makeCtx();
+    const fetchFn = fakeFetchFinishing(JSON.stringify({ files: [], result: { ok: true } }), finishReason);
+    const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+    expect(res.accepted, `finish_reason=${String(finishReason)} must not be read as truncation`).toBe(true);
+  }
 });
 
 // ---------------------------------------------------------------------------

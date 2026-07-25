@@ -180,7 +180,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 113 open item(s).
+> `verify:checks` and at commit). 110 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -199,7 +199,7 @@ its SPEC intact.
 - RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, accepted — revisit on live evidence). · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from weaker models when the true answer is empty. · [`open-bugs.md`](backlog/open-bugs.md)
-- ⬇ LIVE (re-dogfood 2026-07-22, low): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it. · [`open-bugs.md`](backlog/open-bugs.md)
+- ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it. · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release defect the audit side just fixed? · [`open-bugs.md`](backlog/open-bugs.md)
 - Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED). · [`open-bugs.md`](backlog/open-bugs.md)
 - Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -223,7 +223,6 @@ its SPEC intact.
 - "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high). · [`open-bugs.md`](backlog/open-bugs.md)
 - The open-work record exceeds a single-read budget, so every pass navigates it blind (friction: inefficient-feeding, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (backlog clear-out lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
-- Friction walk (H2+H4 collapse lap, 2026-07-18): · [`open-bugs.md`](backlog/open-bugs.md)
 - Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -267,7 +266,7 @@ its SPEC intact.
 - Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]). · [`open-bugs.md`](backlog/open-bugs.md)
 - Design-review independence — solo `design_review_contract` is the one pass the host judges itself (2026-07-24, low; the old "second-driver hazard" framing is REFUTED). · [`open-bugs.md`](backlog/open-bugs.md)
 - Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the code site). · [`open-bugs.md`](backlog/open-bugs.md)
-- Friction-walk lesson (ledger-writer / acceptNode-inert-clean lap): · [`open-bugs.md`](backlog/open-bugs.md)
+- Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable (low). · [`open-bugs.md`](backlog/open-bugs.md)
 - External shared-logic audit V1–V7 residuals · [`open-bugs.md`](backlog/open-bugs.md)
 - Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06). · [`open-bugs.md`](backlog/open-bugs.md)
 - Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -276,7 +275,6 @@ its SPEC intact.
 - Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound. · [`open-bugs.md`](backlog/open-bugs.md)
 - Selective-deepening convergence — live validation env-bound. · [`open-bugs.md`](backlog/open-bugs.md)
 - The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
-- A backlog entry overstated its own mechanism again — "blocks the rest of the run" vs. a wrong terminal CLASSIFICATION (2026-07-24, low, friction: ambiguous-direction). · [`open-bugs.md`](backlog/open-bugs.md)
 - A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing. · [`open-bugs.md`](backlog/open-bugs.md)
 - ID minting is not routed through the one registry. · [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -307,7 +305,6 @@ its SPEC intact.
 - A2 finding-quality oracle — REDIRECTED (owner 2026-07-22): base the corpus on SMALL, PUBLIC, PINNED git repos, not on labeled self-audit runs. · [`deferred.md`](backlog/deferred.md)
 - A7 multi-host validation — automated half green, manual GUI half never run. · [`deferred.md`](backlog/deferred.md)
 - Manual real-OpenCode validation · [`deferred.md`](backlog/deferred.md)
-- Gated live e2es — the current flag set. · [`deferred.md`](backlog/deferred.md)
 - Prose-heavy staleness narrowing — the bounded semantic gate SHIPPED for the artifact that drove it; what stays deferred is the cascade-cost measurement and the remaining prose artifacts (2026-07-24, low). · [`deferred.md`](backlog/deferred.md)
 
 <!-- END GENERATED ROADMAP -->

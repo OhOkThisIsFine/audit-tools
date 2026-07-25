@@ -93,19 +93,31 @@ export function resolveBasenameToTrackedPath(
 
 /**
  * Case-preserving corpus of the tracked working-tree paths at `root`, via
- * `git ls-files` (forward-slashed, trimmed). This is the sibling of the M-B3
- * gate's `enumerateRepoTreePaths` (which `normalizeRepoPath`-lowercases for
- * membership matching): the remediate consumers that resolve a basename and then
- * read the file off disk (line counting) need the REAL on-disk case, so this one
- * does not lowercase. Degrades to an empty set when git is missing / not a repo
- * (callers then fall back to their existing `existsSync` check — monotonic, never
- * a regression). OS-agnostic: `shell: false`, forward-slash output.
+ * `git ls-files -z` (forward-slashed). THE one git enumeration behind both
+ * grounding corpora: the M-B3 gate's `enumerateRepoTreePaths` is a
+ * `normalizeRepoPath`-lowercased draw over this set, while the remediate
+ * consumers that resolve a basename and then read the file off disk (line
+ * counting) need the REAL on-disk case, so this one does not lowercase.
+ *
+ * `-z` is load-bearing, not a flourish: plain `ls-files` renders any path git
+ * considers unusual in C-quoted form (`core.quotePath` turns a non-ASCII byte
+ * into `\303`, and a path containing a newline is quoted too), so a newline
+ * split yielded an entry that no longer equals the real repo path — every
+ * citation naming that file silently failed to ground while the file-disposition
+ * rule, which already used `-z`, kept it in scope. NUL-delimited output is
+ * unquoted and unambiguous, so entries are taken verbatim (no trim: with no line
+ * terminator to strip, trimming could only damage a legitimately space-padded
+ * POSIX path).
+ *
+ * Degrades to an empty set when git is missing / not a repo (callers then fall
+ * back to their existing `existsSync` check — monotonic, never a regression).
+ * OS-agnostic: `shell: false`, forward-slash output.
  */
 export function enumerateTrackedFilePaths(root: string): Set<string> {
   const known = new Set<string>();
   let result;
   try {
-    result = spawnSync("git", ["ls-files"], {
+    result = spawnSync("git", ["ls-files", "-z"], {
       cwd: root,
       encoding: "utf8",
       shell: false,
@@ -118,8 +130,8 @@ export function enumerateTrackedFilePaths(root: string): Set<string> {
   if (!result || result.status !== 0 || typeof result.stdout !== "string") {
     return known;
   }
-  for (const line of result.stdout.split("\n")) {
-    const path = line.trim().replace(/\\/g, "/");
+  for (const entry of result.stdout.split("\0")) {
+    const path = entry.replace(/\\/g, "/");
     if (path.length > 0) known.add(path);
   }
   return known;

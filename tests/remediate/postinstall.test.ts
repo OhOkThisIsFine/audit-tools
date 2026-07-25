@@ -155,14 +155,16 @@ describe("scripts/postinstall.mjs", () => {
 
   it("preserves an existing agent-scope \"*\" wildcard over the managed default (COR-fc1f12a6)", async () => {
     // The remediator agent scope still lets an existing user wildcard win over
-    // the generated "ask" default.
+    // the generated "ask" default. The sample value must NOT be "allow": that is
+    // the historically tool-managed broad value, which the deployer now migrates
+    // away (tests/shared/postinstall-agent-bash-wildcard.test.mjs owns that case).
     const configDir = join(TEMP_HOME, ".config", "opencode");
     await mkdir(configDir, { recursive: true });
     const configPath = join(configDir, "opencode.json");
     await writeFile(
       configPath,
       JSON.stringify({
-        agent: { remediator: { permission: { bash: { "*": "allow" } } } },
+        agent: { remediator: { permission: { bash: { "*": "deny" } } } },
       }),
       "utf8",
     );
@@ -172,7 +174,7 @@ describe("scripts/postinstall.mjs", () => {
     expect(result.error).toBeUndefined();
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    expect(config.agent.remediator.permission.bash["*"]).toBe("allow");
+    expect(config.agent.remediator.permission.bash["*"]).toBe("deny");
     expect(config.agent.remediator.permission.bash["rm *"]).toBe("deny");
   });
 

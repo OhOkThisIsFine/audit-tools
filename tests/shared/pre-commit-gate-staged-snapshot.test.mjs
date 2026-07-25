@@ -392,6 +392,25 @@ describe("pre-commit gate: a chained attest+commit names its own impossibility",
     expect(r.stderr).not.toContain("CHAINS the attestation");
   });
 
+  // The script path is QUOTED in every shape an agent naturally writes it —
+  // a path with a `$CLAUDE_PROJECT_DIR` prefix is quoted by reflex, and the
+  // repo's own settings.json spells hook invocations that way. Detecting the
+  // chain on quote-STRIPPED text blanks the span content, so the script name
+  // vanishes and the explanatory note is dropped exactly when it is needed.
+  test.each([
+    ['double-quoted', '"$CLAUDE_PROJECT_DIR/.claude/hooks/attest-loop-core-review.mjs"'],
+    ['double-quoted relative', '".claude/hooks/attest-loop-core-review.mjs"'],
+    ['single-quoted', "'.claude/hooks/attest-loop-core-review.mjs'"],
+  ])("blocks and explains when the chained attest path is %s", (_shape, scriptArg) => {
+    stageLoopCoreFile();
+    const r = runGate(
+      `node ${scriptArg} --reviewed-by t --attester-class agent --checked "fixture" && git commit -m x`,
+    );
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("CHAINS the attestation");
+    expect(r.stderr).toContain("as its OWN tool call");
+  });
+
   test("re-attesting after the staged tree MOVES is the same trap (attestation is sha-keyed)", () => {
     // The attestation file is named for the staged tree, so moving the tree
     // makes it MISSING, not stale — the chained form is the natural reflex

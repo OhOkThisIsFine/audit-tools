@@ -268,12 +268,16 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       Authorization: `Bearer ${apiKey}`,
       ...(this.config.headers ?? {}),
     };
+    // Hoisted so the request's cap and the truncation refusal that NAMES it cannot
+    // drift: an operator told to raise a number must be reading the number that
+    // actually bound the response.
+    const maxOutputTokens = this.config.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const buildBody = (mode: ConstraintMode): string => {
       const body: Record<string, unknown> = {
         model,
         messages,
         temperature: this.config.temperature ?? 0,
-        max_tokens: this.config.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        max_tokens: maxOutputTokens,
         stream: false,
       };
       if (mode === "json_schema" && outputSchema) {
@@ -346,7 +350,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
           return fail(`openai-compatible endpoint returned HTTP ${res.status}: ${truncate(body, 600)}`);
         }
         const json = (await res.json()) as {
-          choices?: Array<{ message?: { content?: unknown } }>;
+          choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }>;
           cost?: unknown;
           usage?: {
             cost?: unknown;
@@ -359,6 +363,26 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
             cache_creation_input_tokens?: unknown;
           };
         };
+        // A completion the endpoint cut off at the output cap is a FRAGMENT, not an
+        // answer — and it wears a success shape: either it still parses (a short
+        // array whose tail is missing) or it degenerates into nonsense against the
+        // wall. Both read exactly like model incapacity, so an unset/low cap gets
+        // diagnosed as a weak backend and the packet is re-routed instead of
+        // re-budgeted. Checked BEFORE the content and parse checks so the refusal
+        // names the CAUSE rather than the parse failure it produced. Terminal, never
+        // retried: the same request under the same cap truncates identically, so a
+        // retry only spends the tokens again.
+        const truncatedAs = truncationSignal(json.choices?.[0]?.finish_reason);
+        if (truncatedAs !== null) {
+          const emitted = toFiniteNonNegative(json.usage?.completion_tokens);
+          return fail(
+            `openai-compatible endpoint truncated the completion (finish_reason="${truncatedAs}"): the response ` +
+              `hit the output-token cap mid-answer, so it is a cut-off fragment, not a result` +
+              `${emitted !== undefined ? ` (completion_tokens=${emitted})` : ""}. Raise ` +
+              `openai_compatible.max_output_tokens (currently ${maxOutputTokens}), or split the task into a ` +
+              `smaller packet.`,
+          );
+        }
         const raw = json.choices?.[0]?.message?.content;
         if (typeof raw !== "string" || raw.trim().length === 0) {
           return fail("openai-compatible endpoint returned an empty completion (no choices[0].message.content).");
@@ -783,6 +807,25 @@ export function extractObservedUsage(json: {
     ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
     ...(cacheCreationTokens !== undefined ? { cacheCreationTokens } : {}),
   };
+}
+
+/**
+ * The endpoint's completion-cut-off signal, or `null` when the response was not
+ * truncated. Two dialects, same tolerance as {@link extractObservedUsage}:
+ * OpenAI / vLLM / NIM report `finish_reason:"length"`, while Anthropic's
+ * `max_tokens` stop reason reaches us verbatim through gateways that relay it.
+ *
+ * Only those two are truncation. An ABSENT or unrecognized value is explicitly NOT
+ * — many OpenAI-compatible backends omit the field, emit `null`, or use their own
+ * vocabulary (`eos_token`), and a "anything but stop is a failure" rule would turn
+ * a dialect difference into a false refusal on a complete answer. The reverse
+ * mistake is cheap to detect downstream (the result schema gates it); a false
+ * refusal strands a finished packet.
+ */
+function truncationSignal(finishReason: unknown): string | null {
+  if (typeof finishReason !== "string") return null;
+  const normalized = finishReason.trim().toLowerCase();
+  return normalized === "length" || normalized === "max_tokens" ? finishReason : null;
 }
 
 /**

@@ -45,15 +45,6 @@
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned
   subtasks. Folds into the A7 checklist.
 
-- **Gated live e2es — the current flag set.** `RUN_PROVIDER_MATRIX_E2E=1`
-  (`tests/audit/provider-matrix-dispatch-e2e.test.mjs`) and `AUDIT_TOOLS_LIVE_QUOTA=1` (the live Claude
-  `/usage` probe in `tests/audit/inv2.test.mjs`) gate on the **flag alone** — creds only decide which
-  matrix rows are reachable / whether the probe gets a snapshot. `RUN_NIM_E2E=1`
-  (`tests/audit/hybrid-nim-audit-e2e.test.mjs`, `tests/remediate/nim-rolling-e2e.test.ts`,
-  `tests/remediate/hybrid-nim-e2e.test.ts`), `RUN_AUTONOMY_E2E=1` (`tests/audit/a9.test.mjs`) and
-  `RUN_CLAUDE_WORKER_SMOKE=1` (`tests/shared/claude-worker-provider.test.mjs`) additionally require a key
-  (`NVIDIA_API_KEY`/`LLM_BACKEND_API_KEY`) or `claude` on `PATH`, and skip cleanly without it. None run in CI.
-
 - **Prose-heavy staleness narrowing — the bounded semantic gate SHIPPED for the artifact that drove
   it; what stays deferred is the cascade-cost measurement and the remaining prose artifacts
   (2026-07-24, low).** Content-hash staleness still means a cosmetic reword can cascade an expensive

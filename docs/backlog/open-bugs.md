@@ -81,11 +81,19 @@
   **Fixed for the in-process rolling driver** (commit `681df1f5`): `releaseOwnedTaskClaims`
   (dispatch.ts:150) is called at drive end (`rollingAuditDispatch.ts:691`) and on the empty-plan
   round (`:490`).
-  **Still open — the HOST path never releases.** `prepareDispatchArtifacts` claims the candidate set
-  for all three callers, but only the rolling driver sweeps; `prepareDispatchCommand.ts:36` (the
-  `audit-code prepare-dispatch` CLI) and `semanticReviewStep.ts:119` claim and rely solely on merge's
-  terminal `clear()` — so a host round whose workers all die still holds its claims for the lease.
-  Property: claims release on worker failure, not only at merge, on EVERY path that claims.
+  ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do not
+  implement it.** Three things contradict it: the shared claim site already sweeps the over-claim
+  (`dispatch.ts:481-492` clears every claimed-but-not-emitted task), so all three callers leave only
+  the EMITTED in-flight set claimed; that residual set is exactly what the lease is FOR
+  (`dispatch.ts:129-135` — the claim spans an out-of-process worker run with no heartbeat, and
+  `prepare-dispatch` returns before the workers run, so "the workers all died" is never observable
+  host-side to release on); and merge does not only clear terminal results —
+  `mergeAndIngestCommand.ts:885-909` releases the whole `failing` set including attempted-but-missing,
+  before the all-missing throw. Only `deferred` (never attempted) is deliberately retained.
+  This is the SAME inversion this file already recorded at its 2026-07-18 friction walk.
+  **What actually remains (low):** an attempted-and-dead host round holds its emitted claims until a
+  merge runs, bounded by the lease. That is the designed behaviour, not a livelock — revisit only if a
+  live run shows the lease outliving a genuinely dead round.
   The "zero-granted round pauses the drain" half is **VERIFIED HOLDING at HEAD (2026-07-24) — no work
   remains on it.** Two independent reasons: admission never runs inside a loop (every dispatch executor
   is `host_delegation`, so both drains halt at the dispatch boundary *before* admission is computed),
@@ -180,13 +188,23 @@
   way to say "none"), or a cheap negative-finding lint at ingest. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4.
 
-- **⬇ LIVE (re-dogfood 2026-07-22, low): completion cleanup removes the friction dir before the
-  session stop-gate's close-out walk runs against it.** After present_report,
-  `.audit-tools/audit/` was cleaned to steps/ only; the stop-gate then demanded the walk and the
-  record had to be recreated by hand. Ordering property: the close-out walk is part of run
-  completion — cleanup preserves (or the close step completes) the friction record before
-  archiving. Record:
+- **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
+  completion cleanup removes the friction dir before the session stop-gate's close-out walk runs
+  against it.** Ordering property: the close-out walk is part of run completion — cleanup preserves
+  (or the close step completes) the friction record before archiving. Record:
   [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #13.
+  ⚠ **Three findings from the reverted attempt — a naive "exempt friction/ from the rm" does NOT work
+  and introduces a regression.** (1) The audit half's completion cleanup is `promoteFinalAuditReport`
+  (`src/audit/io/artifacts.ts:465`, called from `nextStepHelpers.ts:417` and
+  `advanceAuditCommand.ts:69,105`), NOT `cleanupStaleArtifactsDir` — the latter runs at the START of
+  the next advance, so patching it changes nothing at completion. (2) The remediate half's stop-gate is
+  MARKER-gated: `.claude/hooks/friction-stop-gate.mjs` requires a recent `state.json` before it reads
+  `friction/` at all, and a fully-green close deletes `state.json` — so preserving the record alone
+  still leaves the gate skipping the area. (3) Preserving `friction/` across cleanups REGRESSES the
+  audit side, where the run id is the hardcoded literal `"run"` (`nextStepHelpers.ts:416,:2696`,
+  `executorRunners.ts:223`, `operatorHandoff.ts:381`): every run shares one `friction/run.json`, so a
+  prior run's complete record permanently satisfies both the blocking close-out and the hook's
+  `anyComplete` check. A real fix must address the run-id collision first.
 
 - **LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release
   defect the audit side just fixed?** Audit's completion livelock (claims released only at merge →
@@ -560,7 +578,6 @@
   ([[offload-lane-failures-are-usually-the-caller]]) — all three were caller/environment, not model
   capability.
 
-- **Friction walk (H2+H4 collapse lap, 2026-07-18):** (1) **ambiguous-direction (medium):** my own plan doc asserted "the host-vs-source dedup already exists" from a docblock's phrasing — the adversarial plan review refuted it against the writers (dedup was source-vs-source only, the new rule was new code); and the reviewer's own proposed fix for the display filter was itself a gate-that-never-fires (relative floor can't refuse every pool) — caught only by re-deriving at implementation time. Both are the standing lesson: every causal claim, including a REVIEWER's fix, gets verified against source before building. [[gate-must-be-traced-not-designed]] (2) **tool-should-decide (low):** the pre-commit loop-core gate evaluates a CHAINED `attest && commit` command before the inner attest has run, so the legitimate one-shot form is blocked — attest must be its own Bash call first; either the hook could ignore commits preceded by an attest in the same chain, or document the split as the required shape. (3) **inefficient-feeding (medium, recurrences):** NIM `llm read` lane 503-saturated ("Worker local total request limit 163/32") after ONE call in its session — recon fell back to targeted greps; and a delegated implementer died mid-task on the Claude session limit, with its partial recon unrecoverable (clean tree, redone in-context). Both argue for the standing pattern: main context implements from subagent recon it can verify, not the reverse.
 
 
 - **Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** A Haiku subagent handed one bounded step (charter_extraction) with an explicit "do NOT run next-step" instruction obeyed the step prompt's own embedded advance command instead and drove the workflow forward — the parent lost the step boundary. This generalizes the existing "design-review worker prompts FOLLOW-UP" entry from one branch to EVERY step prompt: the advance command belongs to the DRIVER, not the step executor, and prompt text cannot enforce that split (host/worker discretion). Property to hold: a step prompt handed to a non-driving executor must not carry the advance command — e.g. emit it only in the step JSON (driver-facing), not in the worker-facing prompt md, or gate next-step on the driving agent-id. **Recurrence 2026-07-17 (design-review re-dogfood):** a `systemic_challenge` adversary subagent, handed its step-prompt path to follow, executed the prompt's embedded `next-step` and advanced the loop from round 7→8 — even convergence-loop worker prompts carry the advance command, so this is not branch-specific. Mitigation used the rest of the lap: the dispatch message explicitly overrides ("do NOT run next-step; the parent owns advancement"), which held — but that is host-discretion, exactly what the property says to remove. [[enforce-robustness-in-tooling-not-host-discretion]] [[delegate-adversarial-phases-to-separate-agent]]
@@ -991,12 +1008,14 @@
   - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
     lack run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
 
-- **Friction-walk lesson (ledger-writer / acceptNode-inert-clean lap):** `[[spec-degradation-and-doc-staleness]]`
-  (verify premises before building; a pause/interrupt is not a content-veto) — see memory. Open tool slivers:
-  (a) NIM `llm read` going down silently degrades the "route review to free NIM" plan to paid subagents with no
-  signal — a health-probe-then-route would remove the guesswork; (b) ad-hoc Agent fan-out (recon/review)
-  still has no per-agent ledger for a session-limit mid-edit death, unlike remediate-code's per-node
-  worktrees + claims.
+- **Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable
+  (low).** Unlike remediate-code's per-node worktrees + claims, a recon/review Agent that dies
+  mid-edit leaves nothing to resume from. Property: every dispatched unit of work is recoverable from
+  a record outside the dying context. (Harness/workflow property — no single file owns it.)
+  ⚠ The former sliver (a) of this entry is CLOSED and its premise was stale twice over: `llm read` is
+  RETIRED, and the health probe it asked for shipped — `.claude/hooks/session-start-guards.mjs:110-138`
+  probes the lane and prints `OFFLOAD LANE DOWN` with the restart command at lap start. Only the
+  *then-route* half was never built, and nothing has asked for it since.
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
   site):
@@ -1131,14 +1150,6 @@
   rank-1 is no default for a blocking call. Property: the lane states its concurrency (1) where a
   caller reads it, and a call it cannot serve refuses loudly rather than returning an empty document.
 
-- **A backlog entry overstated its own mechanism again — "blocks the rest of the run" vs. a wrong
-  terminal CLASSIFICATION (2026-07-24, low, friction: ambiguous-direction).** The unplaceable-node entry
-  said the headless path yields "a permanent strand blocking the rest of the run". It does not: the
-  strand removes those packets from `pendingQueue` and `continue`s, so every other packet keeps
-  dispatching. The real defect was narrower and elsewhere — `getTerminal` classifying a wholly-structural
-  strand as the non-retryable `empty_pool`, whose consumer BLOCKS the nodes and whose message blames
-  quota. Same family as [[backlog-prose-decays-verify-against-head]]: not staleness, a paraphrase that
-  shifted the mechanism. Cheap only because the code was read before the fix was designed.
 - **A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review
   finding nothing.** `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can
   mark a pass `contract_reviewed: true` / `conceptual_reviewed: true` with `contract_findings` /

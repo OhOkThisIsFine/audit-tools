@@ -106,7 +106,11 @@ export function makePlanningState(
     },
     closing_plan: { action: "none" },
     ...overrides,
-  } as RemediationState;
+    // No `as RemediationState`: the return-type annotation is the CHECK. A cast
+    // here asserted the contract instead of verifying it, so a fixture missing a
+    // required field (e.g. a block with no `touched_files`) sailed past
+    // `check:tests` — the gate that exists to catch exactly that.
+  };
 }
 
 /** The planning state advanced to `implementing` with item_specs attached. */

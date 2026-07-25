@@ -1,7 +1,5 @@
-import { resolveSessionConfig, readConfirmedCapabilityRanks, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
+import { readConfirmedCapabilityRanks } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
-import { resolveFreshSessionProviderName } from "../providers/index.js";
-import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
   quotaPoolKey,
   readQuotaStateOrDegrade,
@@ -11,36 +9,17 @@ import {
   lookupDiscoveredLimits,
 } from "../quota/index.js";
 import { buildDispatchPool } from "./dispatch/quotaPool.js";
-import {
-  getArtifactsDir,
-  getAuditorDescriptor,
-  getExplicitProvider,
-  getHostModel,
-  getRootDir,
-} from "./args.js";
+import { resolveDispatchDriverIdentity } from "./prepareDispatchCommand.js";
+import { getRootDir } from "./args.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
-  const artifactsDir = getArtifactsDir(argv);
-  let intent: RepoSessionIntent;
-  try {
-    intent = await loadSessionConfig(artifactsDir);
-  } catch (e) {
-    process.stderr.write(
-      `[quota] session-config.json is invalid — using defaults. Error: ${e instanceof Error ? e.message : String(e)}\n`,
-    );
-    intent = {};
-  }
-  const explicitProvider = getExplicitProvider(argv);
-  const hostModel = getHostModel(argv);
-  // G2: driver handshake comes off the single `--auditor <json>` descriptor; resolve it
-  // over the repo INTENT so the quota preview reflects the descriptor's provider/sources.
-  const descriptor = getAuditorDescriptor(argv);
-  const sessionConfig: SessionConfig = resolveSessionConfig(intent, descriptor);
+  // This command is a read-only PREVIEW of what `prepare-dispatch` builds, so it
+  // resolves the driver through that entry point's resolver: same fail-closed load of
+  // `session-config.json`, same provider, same host-model precedence. Resolving it here
+  // instead is how the preview came to report a quota key the real pool never used.
+  const { descriptor, sessionConfig, providerName, hostModel } =
+    await resolveDispatchDriverIdentity(argv);
   const self = descriptor?.self ?? {};
-  const providerName = resolveFreshSessionProviderName(
-    explicitProvider ?? (sessionConfig.provider === undefined ? "auto" : undefined),
-    sessionConfig,
-  );
   const providerModelKey = quotaPoolKey(providerName, hostModel);
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });

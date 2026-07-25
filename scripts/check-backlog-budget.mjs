@@ -54,6 +54,8 @@
 //   node scripts/check-backlog-budget.mjs                    # enforce
 //   node scripts/check-backlog-budget.mjs --report           # show the distribution
 //   node scripts/check-backlog-budget.mjs --update-baseline  # re-record after condensing
+//   node scripts/check-backlog-budget.mjs --update-baseline --raise-ceiling
+//                                                            # …and accept a HIGHER ceiling
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -101,7 +103,9 @@ export function entryKey(file, entry) {
  * different kinds of promise:
  *
  *   `file_ceilings`      file → recorded BYTES. A shrink-only ratchet: an over-budget
- *                        file may only get smaller.
+ *                        file may only get smaller — including through
+ *                        `--update-baseline`, which cannot re-record one upward
+ *                        (`planBaselineUpdate`).
  *   `entries_over_budget` a LIST of entry keys, with no sizes. A named amnesty, not a
  *                        ratchet — these predate the budget and may move in either
  *                        direction; their file's ceiling is what bounds them.
@@ -196,23 +200,114 @@ export function evaluateBacklog(files, baseline) {
   return { violations, totalEntries, grandfathered, staleAmnesty: [...staleAmnesty], nextBaseline, distribution };
 }
 
+/**
+ * What `--update-baseline` is ALLOWED to write. Measuring the files says what they ARE;
+ * this says what may be RECORDED, and the two are not the same question.
+ *
+ * WHY it is a separate decision. The enforce run's one refusal is "an over-budget file
+ * may only shrink" — and `--update-baseline` re-recorded whatever the file currently
+ * measured, so erasing that refusal was a single flag away from its legitimate use
+ * (locking in a shrink), with the two reading identically at the shell. The only thing
+ * between them was a written caution not to do it, which is host discretion where a
+ * mechanism was available: a raise is now refused and the recorded ceiling KEPT unless
+ * `--raise-ceiling` states the intent out loud, and either way the file is NAMED.
+ *
+ * A file with no recorded ceiling is recorded as-is — there is nothing to raise yet, and
+ * that first record is the ratchet being armed, not defeated. The refusal is partial by
+ * design: other files' shrinks and the entry amnesty still land, so one grown file does
+ * not strand the rest of an end-of-lap update.
+ *
+ * @param {{file_ceilings: Record<string, number>, entries_over_budget: string[]}} nextBaseline
+ * @param {{fileCeilings: Record<string, number>}} baseline  what is recorded today
+ * @param {{raiseCeiling: boolean}} intent
+ */
+export function planBaselineUpdate(nextBaseline, baseline, { raiseCeiling }) {
+  // Required and typed, not defaulted: `"false"` — an argv value forwarded unparsed — is
+  // truthy, and would wave through every raise in silence.
+  if (typeof raiseCeiling !== "boolean") {
+    throw new TypeError(`planBaselineUpdate: raiseCeiling must be a boolean, got ${typeof raiseCeiling}`);
+  }
+
+  const file_ceilings = {};
+  const refused = [];
+  const raised = [];
+  // Insertion order is `evaluateBacklog`'s sorted order, so the written file stays stable.
+  for (const [file, measured] of Object.entries(nextBaseline.file_ceilings)) {
+    const recorded = baseline.fileCeilings[file];
+    if (recorded === undefined || measured <= recorded) {
+      file_ceilings[file] = measured;
+      continue;
+    }
+    if (raiseCeiling) {
+      file_ceilings[file] = measured;
+      raised.push({ file, recorded, measured });
+      continue;
+    }
+    file_ceilings[file] = recorded;
+    refused.push({ file, recorded, measured });
+  }
+
+  return {
+    baseline: { file_ceilings, entries_over_budget: nextBaseline.entries_over_budget },
+    refused,
+    raised,
+  };
+}
+
 function main() {
   const report = process.argv.includes("--report");
   const updateBaseline = process.argv.includes("--update-baseline");
+  const raiseCeiling = process.argv.includes("--raise-ceiling");
+
+  // A flag that silently does nothing is how an operator concludes the gate is broken.
+  if (raiseCeiling && !updateBaseline) {
+    process.stderr.write(
+      `\ncheck-backlog-budget: --raise-ceiling only means anything with --update-baseline,\n` +
+        `which is the command that writes the ceiling. Nothing was written.\n\n`,
+    );
+    process.exit(1);
+  }
+
   const files = readdirSync(backlogDir)
     .filter((f) => f.endsWith(".md"))
     .sort()
     .map((file) => ({ file, text: readFileSync(join(backlogDir, file), "utf8") }));
 
-  const result = evaluateBacklog(files, loadBaseline());
+  const baseline = loadBaseline();
+  const result = evaluateBacklog(files, baseline);
 
   if (updateBaseline) {
-    writeFileSync(baselinePath, JSON.stringify(result.nextBaseline, null, 2) + "\n", "utf8");
+    const plan = planBaselineUpdate(result.nextBaseline, baseline, { raiseCeiling });
+    writeFileSync(baselinePath, JSON.stringify(plan.baseline, null, 2) + "\n", "utf8");
     process.stdout.write(
-      `wrote ${baselinePath} — ${Object.keys(result.nextBaseline.file_ceilings).length} file ceiling(s), ` +
-        `${result.nextBaseline.entries_over_budget.length} grandfathered entr(ies).\n` +
-        `A file ceiling may only shrink; a grandfathered entry is amnestied by name, not metered.\n`,
+      `wrote ${baselinePath} — ${Object.keys(plan.baseline.file_ceilings).length} file ceiling(s), ` +
+        `${plan.baseline.entries_over_budget.length} grandfathered entr(ies).\n` +
+        `A file ceiling may only shrink; a grandfathered entry is amnestied by name, not metered.\n` +
+        plan.raised
+          .map(
+            ({ file, recorded, measured }) =>
+              `  raised docs/backlog/${file}: ${recorded} → ${measured} bytes (--raise-ceiling)\n`,
+          )
+          .join(""),
     );
+    if (plan.refused.length > 0) {
+      process.stderr.write(
+        `\ncheck-backlog-budget: REFUSED to raise ${plan.refused.length} file ceiling(s)\n\n` +
+          plan.refused
+            .map(
+              ({ file, recorded, measured }) =>
+                `  docs/backlog/${file}: recorded ${recorded} bytes, now ${measured} ` +
+                `(+${measured - recorded}) — kept ${recorded}\n`,
+            )
+            .join("") +
+          `\nAn over-budget file may only SHRINK, and re-recording the grown size would erase\n` +
+          `exactly the refusal this gate exists for. Pay for the growth by condensing\n` +
+          `elsewhere in the same file. Everything else in this run was written.\n\n` +
+          `If the ceiling genuinely must rise, say so — it goes on the record:\n` +
+          `  node scripts/check-backlog-budget.mjs --update-baseline --raise-ceiling\n\n`,
+      );
+      process.exit(1);
+    }
     return;
   }
 
