@@ -8,8 +8,13 @@
 
 
 
-- **A2 finding-quality oracle — REDIRECTED (owner 2026-07-22): base the corpus on SMALL, PUBLIC,
-  PINNED git repos, not on labeled self-audit runs.** The `score-audit` scorer is built; the prior
+- **A2 finding-quality oracle — UNPARKED (owner 2026-07-25); corpus is SMALL, PUBLIC, PINNED git
+  repos, not labeled self-audit runs (owner redirect 2026-07-22).**
+  ⚠ **No longer deferred.** Funded as the mechanical answer to "a lane can return success-shaped EMPTY
+  results" ([`open-bugs.md`](open-bugs.md)): without ground truth, per-lane yield is a noisy signal and
+  lane quality stays a hand-benching judgement, which the tool-enforced rule forbids. Its affirmation
+  half (`reviewed_clean`) shipped 2026-07-25; the oracle is what lets yield gate ELIGIBILITY. Move to
+  the working queue when the lap opens. The `score-audit` scorer is built; the prior
   plan (hand-label a live run's findings into `corpus/<run-id>.labels.json`) has two structural
   flaws the redirect fixes: (a) labels against our own moving tree ROT — findings reference
   file:lines that drift within days, so a labeled run is a one-shot number, never a regression

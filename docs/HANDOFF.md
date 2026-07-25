@@ -9,7 +9,29 @@
 
 ## Live state
 
-- **⚠ Four NEW refusals landed 2026-07-25 (`11bbb8f2`, `9732b1ed`, `df80e55b`) — all intended; a session
+- **⚠ EVERY owner call in the backlog was answered 2026-07-25. The decisions are recorded IN their
+  entries — do not re-ask them.** Thirteen items were blocked on the owner rather than on code; each now
+  carries an `⚠ OWNER DECISION 2026-07-25` paragraph naming the option taken and, where it matters, what
+  that decision does NOT settle. Two remain owner-OWNED and no lap can close them: the A7 GUI host
+  checklist (a human at Antigravity / OpenCode / VS Code) and the dogfood run below.
+  ⚠ Three decisions carry a trap worth reading before building: the per-site pinning gate's
+  diff-derived site list does NOT solve its second property (test names are still author-supplied);
+  Slice-3's lease-sized-to-work decision does NOT settle the accept-time claim move, which the owner was
+  explicitly unsure about; and contract-pipeline (b) narrows the whole-artifact-rewrite invariant, so it
+  must be scoped to rejections naming specific fields.
+
+- **⚠ `reviewed_clean` is a NEW hard contract on every zero-finding AuditResult (`e6b3f7b1`).** An empty
+  `findings` array is refused unless the result also sets `reviewed_clean: true`, and the flag is refused
+  ALONGSIDE findings. A worker or fixture written against the old contract now fails validation — that is
+  the gate, not a regression. Rationale: a lane that errors or truncates emits output identical to a
+  careful clean review, so a broken lane read as a weak one.
+
+- **▶ NEXT: the dogfood self-audit (owner: run it AFTER the code fixes land).** ~15 `⬇ LIVE-run watch`
+  items are blocked only on evidence from a real run — including the per-node token estimate below,
+  which still has none. Do not start it mid-fix: a commit re-stales the planning chain and regresses the
+  run to `charter_extraction`.
+
+- **⚠ Four refusals landed earlier on 2026-07-25 (`11bbb8f2`, `9732b1ed`, `df80e55b`) — all intended; a session
   that does not expect them reads each as a fault.**
   (1) **A live backtick in a Bash-tool command is DENIED.** A backtick command-substitutes inside double
   quotes too, so markdown backticks in `git commit -m "… \`npm run check\` …"` are executed, not written.
@@ -301,7 +323,7 @@ its SPEC intact.
 
 ### Deferred / waiting — blocked on data, a live run, credentials or a toolchain
 
-- A2 finding-quality oracle — REDIRECTED (owner 2026-07-22): base the corpus on SMALL, PUBLIC, PINNED git repos, not on labeled self-audit runs. · [`deferred.md`](backlog/deferred.md)
+- A2 finding-quality oracle — UNPARKED (owner 2026-07-25); corpus is SMALL, PUBLIC, PINNED git repos, not labeled self-audit runs (owner redirect 2026-07-22). · [`deferred.md`](backlog/deferred.md)
 - A7 multi-host validation — automated half green, manual GUI half never run. · [`deferred.md`](backlog/deferred.md)
 - Manual real-OpenCode validation · [`deferred.md`](backlog/deferred.md)
 - Prose-heavy staleness narrowing — the bounded semantic gate SHIPPED for the artifact that drove it; what stays deferred is the cascade-cost measurement and the remaining prose artifacts (2026-07-24, low). · [`deferred.md`](backlog/deferred.md)

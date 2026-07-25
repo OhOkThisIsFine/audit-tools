@@ -173,6 +173,13 @@ followed" is otherwise indistinguishable from a bug.
     **vertex-trial → deferred** (needs the operator's GCP $300-trial SA JSON). **Remaining = live
     validation only** (no more code): a real opencode-free run confirming declared-free routing, a live
     lapsed-free demotion, and the `declared_cost_drift` event end-to-end.
+  ⚠ **OWNER DECISION 2026-07-25 — reading (B): build the arbitrage tier INTO audit/remediate dispatch.**
+  The scoping question is settled: (A) (pointing a harness's `ANTHROPIC_BASE_URL` at a failover proxy) is
+  deployment config that rescues the HOST loop, while (B) adds captured-account source pools so the
+  existing admission loop rotates across them, rescuing DISPATCHED work. The owner chose (B) with (A)
+  not adopted. So the multi-account credential store + refresh-under-lock is live work, under the
+  standing constraint that every capture lane stays per-provider opt-in, operator-consented and never
+  default-on.
 
 - **models.dev static window can over-state a specific deployment (carried from W1).** With no capability
   handshake and no `quota.models` override, `resolveLimits` falls to the vendored snapshot
@@ -291,5 +298,11 @@ followed" is otherwise indistinguishable from a bug.
     semantics on the same registry. FOCUSED-LAP track — the most delicate machinery in the repo
     (pause/claim/quota); "redesign before scheduled autonomy" applies. [[multi-ide-concurrent-runs-design]] /
     [[dispatch-admission-control-design]]
+  ⚠ **OWNER DECISION 2026-07-25 — size the per-node lease TO THE WORK, derived deterministically from
+  signals the tool ALREADY produces** (per-node token estimate, complexity rating, risk rating). That is
+  the decision for both paths, and it deliberately avoids a learned/measured input
+  ([[concurrency-is-declared-or-absent-never-learned]]). ⚠ The owner was explicitly UNSURE about the
+  companion move (relocating the claim from dispatch time to accept time) — treat it as OPEN and settle
+  it with a call-path trace before building, not by assuming it follows from the lease sizing.
 
 - **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).

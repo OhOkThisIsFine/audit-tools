@@ -340,26 +340,22 @@
 - **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
   The idea: revert each site of a change individually and require each reversion to turn the suite red,
   so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
-  A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch — it is in NO ref reachable at
-  HEAD — and the independent review that exercised it named the shape that makes a naive version
-  worthless ([`account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md),
+  A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch, reachable from NO ref at HEAD.
+  The independent review that exercised it named both fail-open shapes
+  ([`account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md),
   *The evidence apparatus is itself fail-open*): it measured *"the suite went red"*, not *"a test
-  asserting THIS behavior went red"* — renaming the `resolvePoolAccountKey` export so importers crash
-  produced `71 failed` and the gate reported `PINNED … All 1 site(s) individually pinned.` That is the
-  same fail-open the tool exists to catch, relocated one level up. A hand-written site list has the
-  mirror problem: 7 sites declared against ≥11 substantive src hunks, so "all N sites pinned" is
-  literally true and materially misleading — there, the two hunks that ARE the fix's core claim
-  (`capacity.ts` / `apiPool.ts` stamps) sat outside the author's own denominator.
-  Nothing stands in for it at HEAD: the loop-core gate checks attestation existence, staged-tree
-  binding and verdict only (`.claude/hooks/pre-commit-gate.mjs`), and `--checked` is recorded as free
-  text with a ≥20-char floor (`.claude/hooks/attest-loop-core-review.mjs`) — so "red-green validated by
-  mutation" in a handoff or attestation is still the author's word about their own work.
-  **Properties to hold:** each spec site binds to the NAME(s) of the test(s) expected to fail, and the
-  site list is DERIVED from the diff so an omitted hunk is impossible. Until both hold, no such gate's
-  output is admissible as attestation evidence. **Owner call before any build:** whether the second
-  property is even reachable — expected-failing test NAMES are themselves author-supplied, so the gate
-  may only relocate the claim again unless the names are derived (e.g. from a baseline coverage/ownership
-  map) — and whether N full-suite runs per commit is a cost worth paying.
+  asserting THIS behavior went red"*; and a hand-written site list declared 7 sites against ≥11
+  substantive hunks, so "all N pinned" was literally true and materially misleading.
+  Nothing stands in for it at HEAD — the loop-core gate checks attestation existence, staged-tree
+  binding and verdict only, and `--checked` is free text with a ≥20-char floor — so "red-green
+  validated" in an attestation is still the author's word about their own work.
+  **Properties to hold:** each site binds to the NAME(s) of the test(s) expected to fail, and the site
+  list is DERIVED from the diff so an omitted hunk is impossible.
+  ⚠ **OWNER DECISION 2026-07-25 — BUILD it, with a DIFF-DERIVED site list**, closing the denominator
+  hole. ⚠ The second property is NOT thereby solved: expected-failing test names are still
+  author-supplied, so a naive build relocates the claim instead of removing it. Derive the name binding
+  (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
+  exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
 
 - **SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no
   operator-runnable refresh.** A day-old cache whose roster no longer matched the running proxy was
@@ -667,10 +663,20 @@
   drawn by history rather than by role, and both are fixed by moving code rather than by tuning a list.
 
 - **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md:201-206`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
+  ⚠ **OWNER DECISION 2026-07-25 on (1):** require a **`gated by:` clause** on any spec statement of an
+  ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
+  not re-admit the status vocabulary `design-docs-declarative.test.mjs` bans. The lint's doc set widens
+  to the spec files carrying endpoint statements. (2) and (3) are unchanged and still open.
 
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
 - **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1634`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1663`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
+  ⚠ **OWNER DECISION 2026-07-25 — BOTH calls answered YES.** (a) Planning phases BECOME dispatchable to
+  a non-host pool; it is the only half that cannot currently route to a $0 pool, and every one of its
+  ~9-11 round-trips bills before the first implement dispatch. (b) A targeted in-place repair IS admitted
+  for a single-field rejection. ⚠ (b) narrows the whole-artifact-rewrite invariant, so scope it to a
+  rejection whose issue set names specific fields — a rewrite stays the fallback whenever the repair
+  target is not unambiguous, or the invariant erodes into "patch whatever looks wrong".
 
 - **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with only a flood of identical `{"kind":"staleness",...}` lines and no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat (or the staleness spam should collapse to one line) so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 
@@ -780,6 +786,13 @@
   BYTES — matches `wc -c`).
   Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
   driver is narrative accreting onto entries, so a budget that always passes measures nothing.
+  ⚠ **OWNER DECISION 2026-07-25 — do NOT split. Build a GENERATED seekable index** (title → anchor →
+  area → severity) so the file is navigable in bounded reads without a split. This settles the sub-axis
+  question the entry was blocked on: splitting for size is what `documentation-philosophy.md`
+  §*The condensation bias* argues against, and every new file would owe a `check:doc-manifest` routing
+  row. ⚠ The file is currently UNDER budget again (2026-07-25) after closing 8 stale entries — closing
+  entries remains the real lever, as this entry already says; the index is what makes it navigable
+  meanwhile.
 
 - **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
 
@@ -864,6 +877,12 @@
   Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
 - **Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).** The prescribed half is SHIPPED: `gateHostFanout` (`src/audit/cli/dispatch/hostFanoutGate.ts`) runs at the five fan-out emitters in `nextStepCommand.ts` (four `design_review`, one `systemic_challenge`), granting a panel all-or-nothing through the same `buildDispatchPool` → `finalizeDispatchQuota` → `detectHostDispatchWall` primitives as packet dispatch, with per-family leases under `fanout-quota/<family>/`. What remains is every OTHER host Agent spawn — the recon/review/compaction subagents the conversation host launches on its own initiative, with no tool call in between: no admission, no lease, and no per-agent record, so nothing names what was in flight when a session limit lands (contrast remediate-code's per-node worktrees + claims). Their spend is not wholly invisible — it moves the account percent, so it arrives as unattributed pct drift in the merge-time slope fold (`tokenUsageObservation.ts` C5 note: understated slope, the safe direction) — but drift is not accounting.
   **This is an owner call, not a bounded fix:** the tool cannot gate a dispatch it never sees, and both mechanical routes are barred by standing rules — a `note-fanout`-style CLI the host must remember to call is host discretion, and a PreToolUse Agent hook is a host-IDE coupling. Decide the shape first: (i) every fan-out routes through a prescribed step so "ad-hoc" stops existing as a category, (ii) ad-hoc spend is explicitly accepted as unmetered account drift the pre/post attribution already absorbs, or (iii) an IDE-hook accounting layer is accepted as a deliberate, documented exception to IDE-agnostic. (Absorbs sliver (b) of the "ledger-writer / acceptNode-inert-clean lap" entry below — drop that half when this lands so the item has one home.)
+  ⚠ **OWNER DECISION 2026-07-25 — option (i): route every fan-out through a prescribed step, so
+  "ad-hoc" stops existing as a category.** Options (ii) accept-as-drift and (iii) an IDE-hook accounting
+  layer are both REFUSED — (ii) because drift is not accounting, (iii) because it buys per-agent records
+  with a documented breach of IDE-agnosticism. This is now a bounded design task, not an open question.
+  It also subsumes the "Ad-hoc Agent fan-out has no per-agent ledger" entry below — close that one with
+  this.
 
 - **Design-review independence — solo `design_review_contract` is the one pass the host judges itself
   (2026-07-24, low; the old "second-driver hazard" framing is REFUTED).** ⚠ The prior prose called the
