@@ -511,6 +511,44 @@ function runGate(committedPaths) {
     }
   }
 
+  // 2b-ii. HANDOFF roadmap ↔ backlog parity — whenever the STAGED set touches
+  // `docs/HANDOFF.md` or any `docs/backlog/*.md`. HANDOFF's ordered roadmap is
+  // GENERATED from the backlog (`scripts/shared/generate-handoff-roadmap.mjs`);
+  // the two used to carry the same open items as full specs, which is how they
+  // drifted, and how ~107 lines of changelog narration regrew in HANDOFF one lap
+  // after being cut. Both directions of edit can stale it, so both trigger.
+  //
+  // Wired HERE as well as in `verify:checks` deliberately: the pre-commit hook
+  // does NOT run `verify:checks`, so a gate wired only there first fails in
+  // RELEASE CI and burns a tag — the class that burned v0.34.17.
+  const pinsRoadmap = (p) => {
+    const n = p.replace(/\\/g, '/');
+    return n === 'docs/HANDOFF.md' || /^docs\/backlog\/[^/]+\.md$/.test(n);
+  };
+  if (staged.some(pinsRoadmap)) {
+    try {
+      execSync('npm run check:handoff-roadmap', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: HANDOFF roadmap check FAILED — commit blocked. docs/HANDOFF.md's generated ` +
+          `roadmap no longer matches docs/backlog/, so the two are once again separate homes for the same ` +
+          `open items.\n` +
+          `Fix: node scripts/shared/generate-handoff-roadmap.mjs — then re-stage docs/HANDOFF.md.\n` +
+          `Do NOT hand-edit inside the BEGIN/END GENERATED ROADMAP markers; the entry text lives in the ` +
+          `backlog and nowhere else.\n${tail}`,
+      };
+    }
+  }
+
   // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
   // re-includes each hook BY NAME, so a new hook committed without its
   // `!.claude/hooks/<name>` line is silently dropped from the commit — and if

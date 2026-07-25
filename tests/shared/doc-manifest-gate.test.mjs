@@ -288,6 +288,9 @@ describe('pre-commit gate — constitutional-doc refusal', () => {
           check: 'node -e ""',
           'test:doc-contract': 'node -e ""',
           'check:doc-manifest': 'node -e ""',
+          // Staging `docs/HANDOFF.md` also trips the roadmap-parity trigger; a
+          // no-op here keeps these cases about the CONSTITUTIONAL refusal only.
+          'check:handoff-roadmap': 'node -e ""',
           ...over,
         },
       },

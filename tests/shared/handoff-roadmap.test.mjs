@@ -1,0 +1,349 @@
+// Contract tests for the generated HANDOFF roadmap:
+// `scripts/shared/generate-handoff-roadmap.mjs` + its trigger inside
+// `.claude/hooks/pre-commit-gate.mjs`.
+//
+// These live under tests/shared (not beside the hook) on purpose: vitest
+// EXCLUDES `.claude/**`, so a test placed next to a hook never runs in CI and
+// the guard is unverified exactly where it matters — same reason
+// tests/shared/hook-trap-guards.test.mjs and doc-manifest-gate.test.mjs live here.
+//
+// What must hold, and why each half matters:
+//   • POINTERS, not specs — a generated line carries the backlog entry's own
+//     title and a link, never its body. The defect being removed is that the
+//     same open item was written out as a full SPEC in HANDOFF *and* in
+//     docs/backlog/open-bugs.md, so the two drifted; a restating renderer would
+//     silently re-create it.
+//   • ORDER is derived — (source rank, position in file), with an optional `▶`
+//     pin. Nothing is dropped, so an item cannot fall out of the roadmap by
+//     being unmarked.
+//   • the hand-written parts survive — only the delimited block is replaced.
+//   • the gate FIRES AT COMMIT, not only in verify:checks. The pre-commit hook
+//     does not run verify:checks, so a check wired only there first fails in
+//     RELEASE CI and burns a tag (the class that burned v0.34.17).
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { spawnSyncHidden, execFileSyncHidden } from '../helpers/spawn.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import {
+  BEGIN_MARKER,
+  END_MARKER,
+  PIN_MARKER,
+  ROADMAP_SOURCES,
+  collectRoadmap,
+  parseBulletEntries,
+  parseTrackEntries,
+  renderRoadmap,
+  sectionText,
+  spliceRoadmap,
+} from '../../scripts/shared/generate-handoff-roadmap.mjs';
+
+const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
+const GATE = join(REPO_ROOT, '.claude', 'hooks', 'pre-commit-gate.mjs');
+const GENERATOR = join(REPO_ROOT, 'scripts', 'shared', 'generate-handoff-roadmap.mjs');
+
+describe('entry parsing — the pointer is the entry\'s own title, verbatim', () => {
+  it('takes the whole bold lead-in, even when it wraps across lines', () => {
+    const text = [
+      '# Open bugs',
+      '',
+      '- **A title that wraps across',
+      '  two lines (2026-07-25, medium).** body prose that must NOT reach the roadmap',
+      '  more body.',
+      '',
+      '- **Second entry.** more body',
+    ].join('\n');
+    const entries = parseBulletEntries(text, 'docs/backlog/x.md');
+    expect(entries.map((e) => e.title)).toEqual([
+      'A title that wraps across two lines (2026-07-25, medium).',
+      'Second entry.',
+    ]);
+    expect(entries.map((e) => e.line)).toEqual([3, 7]);
+  });
+
+  it('a nested bullet is NOT an entry — only column-0 `- **` starts one', () => {
+    const text = ['- **Real entry.** body', '  - **not an entry** sub-bullet', '- **Another.** body'].join('\n');
+    expect(parseBulletEntries(text).map((e) => e.title)).toEqual(['Real entry.', 'Another.']);
+  });
+
+  it('an UNTERMINATED bold title fails loudly, naming file and line', () => {
+    // Degrading to "first line, truncated" would put a mangled paraphrase in the
+    // roadmap — a second, wrong copy of the title, which is the exact class this
+    // generator exists to remove. So it refuses instead.
+    expect(() => parseBulletEntries('- **never closed\nmore text', 'docs/backlog/x.md')).toThrow(
+      /docs\/backlog\/x\.md:1[\s\S]*UNTERMINATED/,
+    );
+  });
+
+  it('reads the `**Track N — …**` paragraph form that Open tracks uses', () => {
+    const text = ['## Open tracks', '', '**Track 1 — first.** body', '', '**Track 2 — second.** body'].join('\n');
+    expect(parseTrackEntries(text).map((e) => e.title)).toEqual(['Track 1 — first.', 'Track 2 — second.']);
+  });
+
+  it('sectionText slices one `## ` section, and refuses a heading that moved', () => {
+    const text = ['# doc', '## A', 'a1', '## B', 'b1'].join('\n');
+    expect(sectionText(text, 'A')).toBe('a1');
+    expect(sectionText(text, 'B')).toBe('b1');
+    expect(() => sectionText(text, 'C')).toThrow(/"## C" not found/);
+  });
+});
+
+describe('ordering — derived from document structure, nothing dropped', () => {
+  const sources = () =>
+    new Map([
+      ['open-bugs.md', ['- **bug one.** b', '', '- **bug two.** b'].join('\n')],
+      [
+        'forward-tracks.md',
+        ['## Open tracks', '', '**Track 1 — t1.** b', '', '## Forward tracks', '', '- **fwd one.** b'].join('\n'),
+      ],
+      ['deferred.md', '- **parked one.** b'],
+    ]);
+
+  it('orders by (source rank, position in file)', () => {
+    const groups = collectRoadmap(sources());
+    expect(groups.map((g) => g.items.map((i) => i.title))).toEqual([
+      ['bug one.', 'bug two.'],
+      ['Track 1 — t1.'],
+      ['fwd one.'],
+      ['parked one.'],
+    ]);
+    // Source order is the roadmap's ordering spine — pin it explicitly.
+    expect(ROADMAP_SOURCES.map((s) => `${s.file}${s.section ? `#${s.section}` : ''}`)).toEqual([
+      'open-bugs.md',
+      'forward-tracks.md#Open tracks',
+      'forward-tracks.md#Forward tracks',
+      'deferred.md',
+    ]);
+  });
+
+  it('no "Next up" group exists while nothing is pinned — an empty head would read as "nothing is next"', () => {
+    const groups = collectRoadmap(sources());
+    expect(groups.some((g) => g.heading.includes('Next up'))).toBe(false);
+    expect(groups[0].heading).toMatch(/Open bugs/);
+  });
+
+  it(`a \`${PIN_MARKER}\` prefix hoists an entry to the top, keeping document order among the pinned`, () => {
+    const s = sources();
+    s.set('open-bugs.md', ['- **bug one.** b', '', `- **${PIN_MARKER} pinned bug.** b`].join('\n'));
+    s.set(
+      'deferred.md',
+      [`- **${PIN_MARKER} pinned parked.** b`, '', '- **parked one.** b'].join('\n'),
+    );
+    const groups = collectRoadmap(s);
+    expect(groups[0].heading).toContain('Next up');
+    expect(groups[0].items.map((i) => i.title)).toEqual([
+      `${PIN_MARKER} pinned bug.`,
+      `${PIN_MARKER} pinned parked.`,
+    ]);
+    // A pinned entry LEAVES its source group — it appears once, not twice.
+    const all = groups.flatMap((g) => g.items.map((i) => i.title));
+    expect(all.filter((t) => t === `${PIN_MARKER} pinned bug.`)).toHaveLength(1);
+  });
+
+  it('every entry reaches the roadmap — selection is not a filter', () => {
+    const groups = collectRoadmap(sources());
+    expect(groups.flatMap((g) => g.items)).toHaveLength(5);
+  });
+});
+
+describe('rendering — a pointer, never a restated spec', () => {
+  const groups = [{ heading: 'G', items: [{ title: 'the entry title (2026-07-25, medium).', file: 'open-bugs.md' }] }];
+
+  it('emits the title verbatim plus a link, and never the entry body', () => {
+    const out = renderRoadmap(groups);
+    expect(out).toContain('- the entry title (2026-07-25, medium). · [`open-bugs.md`](backlog/open-bugs.md)');
+    expect(out.startsWith(BEGIN_MARKER)).toBe(true);
+    expect(out.endsWith(END_MARKER)).toBe(true);
+  });
+
+  it('states the count and the excluded source, so neither is a silent decision', () => {
+    const out = renderRoadmap(groups);
+    expect(out).toMatch(/1 open item\(s\)/);
+    expect(out).toContain('durable-traps.md');
+  });
+
+  it('an empty group says so rather than rendering as absent', () => {
+    expect(renderRoadmap([{ heading: 'G', items: [] }])).toMatch(/\*\(none open\)\*/);
+  });
+});
+
+describe('splicing — only the delimited block is touched', () => {
+  const handoff = `# HANDOFF\n\nhand-written above\n\n${BEGIN_MARKER}\nOLD\n${END_MARKER}\n\nhand-written below\n`;
+
+  it('leaves every hand-written line byte-identical', () => {
+    const out = spliceRoadmap(handoff, `${BEGIN_MARKER}\nNEW\n${END_MARKER}`);
+    expect(out).toBe(`# HANDOFF\n\nhand-written above\n\n${BEGIN_MARKER}\nNEW\n${END_MARKER}\n\nhand-written below\n`);
+  });
+
+  it('refuses a HANDOFF with no markers rather than appending a second copy', () => {
+    expect(() => spliceRoadmap('# HANDOFF\n\nno markers\n', `${BEGIN_MARKER}\nX\n${END_MARKER}`)).toThrow(
+      /missing the generated-roadmap markers/,
+    );
+  });
+
+  it('refuses markers in the wrong order', () => {
+    expect(() =>
+      spliceRoadmap(`${END_MARKER}\n${BEGIN_MARKER}\n`, `${BEGIN_MARKER}\nX\n${END_MARKER}`),
+    ).toThrow(/out of order/);
+  });
+});
+
+describe('the live tree', () => {
+  it('docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one', () => {
+    const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
+    const sources = new Map(
+      [...new Set(ROADMAP_SOURCES.map((s) => s.file))].map((f) => [
+        f,
+        readFileSync(join(REPO_ROOT, 'docs', 'backlog', f), 'utf8'),
+      ]),
+    );
+    const fresh = spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(sources)));
+    expect(fresh).toBe(onDisk);
+
+    // The check must be able to FAIL, or it is decoration: drop one backlog
+    // entry and the rendered roadmap must stop matching.
+    const drifted = new Map(sources);
+    drifted.set('deferred.md', sources.get('deferred.md').replace(/^- \*\*/m, 'x- **'));
+    expect(spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(drifted)))).not.toBe(onDisk);
+  });
+
+  it('`--check` is green on the committed tree', () => {
+    const r = spawnSyncHidden(process.execPath, [GENERATOR, '--check'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+      windowsHide: true,
+    });
+    expect(r.status, `${r.stdout ?? ''}${r.stderr ?? ''}`).toBe(0);
+    expect(r.stdout).toMatch(/pointer\(s\)/);
+  });
+
+  it('shares ONE definition of "a backlog entry" with check-backlog-budget', () => {
+    // Two entry grammars would drift into two different item counts, and the
+    // roadmap would silently omit whatever only the budget gate can see.
+    const r = spawnSyncHidden(process.execPath, [join(REPO_ROOT, 'scripts', 'check-backlog-budget.mjs'), '--report'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+      windowsHide: true,
+    });
+    const counts = new Map(
+      [...(r.stdout ?? '').matchAll(/^(\S+\.md): (\d+) entries/gm)].map((m) => [m[1], Number(m[2])]),
+    );
+    expect(counts.size).toBeGreaterThan(0);
+    for (const file of ['open-bugs.md', 'deferred.md', 'forward-tracks.md']) {
+      const text = readFileSync(join(REPO_ROOT, 'docs', 'backlog', file), 'utf8');
+      expect(parseBulletEntries(text, file), `${file} entry grammar drifted`).toHaveLength(counts.get(file));
+    }
+  });
+});
+
+// ── the pre-commit gate, end to end in a throwaway repo ──────────────────────
+// The gate is spawned as a real process with a real hook payload on stdin — the
+// same contract Claude Code uses. Exit 2 = blocked, exit 0 = allowed. The temp
+// repo's `check:handoff-roadmap` script FAILS, so the gate blocking proves the
+// trigger actually ran the check rather than merely being wired.
+describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () => {
+  let repo;
+
+  const git = (args) => execFileSyncHidden('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+
+  const writeFile = (rel, body) => {
+    const abs = join(repo, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, body, 'utf8');
+  };
+
+  const runGate = () => {
+    const r = spawnSyncHidden(process.execPath, [GATE], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git commit -m "wip"' } }),
+      encoding: 'utf8',
+      timeout: 120_000,
+      windowsHide: true,
+      cwd: repo,
+      env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    });
+    return { code: r.status, stderr: r.stderr ?? '' };
+  };
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'audit-tools-roadmap-gate-'));
+    execFileSyncHidden('git', ['init', '--initial-branch=main'], { cwd: repo, stdio: 'pipe' });
+    git(['config', 'user.email', 'test@test']);
+    git(['config', 'user.name', 'test']);
+    git(['config', 'commit.gpgsign', 'false']);
+    writeFile(
+      'package.json',
+      JSON.stringify(
+        {
+          name: 'roadmap-fixture',
+          version: '0.0.0',
+          private: true,
+          scripts: {
+            check: 'node -e ""',
+            'test:doc-contract': 'node -e ""',
+            'check:doc-manifest': 'node -e ""',
+            'check:handoff-roadmap': 'node -e "process.exit(1)"',
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    writeFile('README.md', '# fixture\n');
+    writeFile('.gitignore', '.claude/\nnode_modules/\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'base']);
+  });
+
+  afterAll(() => {
+    try {
+      rmSync(repo, { recursive: true, force: true });
+    } catch {
+      /* windows may hold a handle briefly; a leaked temp dir is not a failure */
+    }
+  });
+
+  const reset = () => {
+    git(['reset', '--hard', 'HEAD']);
+    git(['clean', '-fd']);
+  };
+
+  it('BLOCKS a commit that edits a BACKLOG file (the backlog can stale HANDOFF)', () => {
+    writeFile('docs/backlog/open-bugs.md', '# open bugs\n\n- **new entry.** body\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF roadmap check FAILED/);
+    expect(stderr).toMatch(/generate-handoff-roadmap\.mjs/);
+    reset();
+  });
+
+  it('BLOCKS a commit that edits HANDOFF itself (a hand-edit inside the block is the drift)', () => {
+    writeFile('docs/HANDOFF.md', '# handoff\n\nhand-edited roadmap\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF roadmap check FAILED/);
+    reset();
+  });
+
+  it('does NOT fire on unrelated markdown — the trigger stays narrow', () => {
+    // `docs/backlog.md` is the INDEX, not a section file; `docs/reviews/*` are
+    // records. Firing on those would train the regenerate step into noise.
+    writeFile('docs/reviews/some-record-2026-07-25.md', '# record\n');
+    writeFile('docs/backlog.md', '# index\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(0);
+    reset();
+  });
+
+  it('does NOT fire on a commit that carries no docs at all', () => {
+    writeFile('src/thing.ts', 'export const x = 1;\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(0);
+    reset();
+  });
+});

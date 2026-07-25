@@ -422,10 +422,11 @@ the trap and the fix when it fires.
 
 - **Ratchet the backlog baseline LAST, once, at the end of a lap.**
   `node scripts/check-backlog-budget.mjs --update-baseline` run mid-lap and then followed by more
-  deletions leaves `tests/shared/backlog-budget-unit.test.mjs:54` asserting a recorded ceiling that no
-  longer equals the live file — it goes red and reads exactly like a code regression (it cost a
+  deletions leaves `tests/shared/backlog-budget-unit.test.mjs` asserting a recorded FILE ceiling that
+  no longer equals the live file — it goes red and reads exactly like a code regression (it cost a
   full-suite investigation once). ⚠ Never run `--update-baseline` to make a GROWN file pass: that
-  raises the ceiling, which is the one thing the gate exists to prevent.
+  raises the ceiling, which is the one thing the gate exists to prevent. (Only files are ratcheted;
+  an over-budget entry is amnestied by NAME, so no entry edit can trip this.)
 
 ## Doc-set hygiene (enforced)
 

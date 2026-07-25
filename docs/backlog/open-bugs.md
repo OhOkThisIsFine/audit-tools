@@ -11,9 +11,9 @@
 - **`open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
   friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed
   `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read in one call,
-  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records a
-  per-file and per-entry ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot
-  regrow — but the ceiling is today's size, not the goal.
+  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records
+  this file's ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the
+  ceiling is today's size, not the goal.
   ⚠ **Condensation is EXHAUSTED as a lever:** nearly every entry already sits inside the 2600-byte
   per-entry budget, so squeezing the rest barely moves the file. The gap closes only by
   **CLOSING entries** — downstream of the actionable queue, not a separate task. ⚠ Never hand-carry
@@ -100,7 +100,7 @@
   `audit-code prepare-dispatch` CLI) and `semanticReviewStep.ts:119` claim and rely solely on merge's
   terminal `clear()` — so a host round whose workers all die still holds its claims for the lease.
   Property: claims release on worker failure, not only at merge, on EVERY path that claims.
-  ✅ The "zero-granted round pauses the drain" half is **VERIFIED HOLDING at HEAD (2026-07-24) — no work
+  The "zero-granted round pauses the drain" half is **VERIFIED HOLDING at HEAD (2026-07-24) — no work
   remains on it.** Two independent reasons: admission never runs inside a loop (every dispatch executor
   is `host_delegation`, so both drains halt at the dispatch boundary *before* admission is computed),
   and `detectHostDispatchWall` (`src/shared/dispatch/hostDispatchWall.ts:118-128`) returns
@@ -848,11 +848,11 @@
   hybrid frontier and the in-process engine both size every implement node at a flat 2000
   (`HYBRID_NODE_TOKEN_ESTIMATE`, `driveRollingDispatch`'s `() => 2000`), so the fit gates cannot tell a
   large node from a small one. The flat estimate was load-bearing only because it made "this node fits NO
-  pool" unreachable; both dispatch paths now route an unplaceable node to a resumable structural-refusal
-  pause (`835902f2`), so the fix — persist `estimateImplementSlotTokens` onto the plan item and read it at
-  both gates — is a two-line change. ⚠ Do not re-attempt it by byte-SUMming the access set — that model
-  was retired for cause (`estimateImplementSlotTokens`'s docblock), and a second derived number also
-  desyncs the plan from admission.
+  pool" unreachable; both paths now route an unplaceable node to a resumable structural-refusal pause
+  (`835902f2`), so the fix — persist `estimateImplementSlotTokens` onto the plan item, read it at both
+  gates — is two lines. ⚠ Never byte-SUM the access set instead (retired for cause — see that function's
+  docblock; a second derived number desyncs plan from admission). ⚠ Land it ALONE and watch a real
+  frontier: it is the first work making that pause path reachable, and has no live evidence yet.
 
 - **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
 
@@ -1145,12 +1145,11 @@
   mark a pass `contract_reviewed: true` / `conceptual_reviewed: true` with `contract_findings` /
   `conceptual_findings: []` and no LLM call ever having run. A vacuous green and a genuine clean bill are
   indistinguishable downstream. **Property to hold:** a review pass is satisfiable only by evidence a real
-  review ran — either require a non-fallback finding set, or block synthesis when the pass auto-completed
-  empty. Lifted out of `spec/contract-authoring-determinism-design.md`, which is a durable design spec and
-  is not where open status belongs; the S8 section there states the design.
+  review ran — require a non-fallback finding set, or block synthesis on an auto-completed-empty pass.
+  Lifted from `spec/contract-authoring-determinism-design.md` (a durable design spec is not where open
+  status belongs); its S8 section states the design.
 
 - **ID minting is not routed through the one registry.** `goal_id` / module / obligation ids are still
   minted outside `src/remediate/contractPipeline/idRegistry.ts`, so the single-authority property the S4
   design asserts is not enforced. **Property to hold:** every minted id passes through the registry, so
-  uniqueness and format are guaranteed mechanically rather than by each call site being careful. Lifted
-  out of `spec/contract-authoring-determinism-design.md` for the same reason as the entry above.
+  uniqueness and format are mechanical rather than per-call-site care. Lifted from the same spec as above.
