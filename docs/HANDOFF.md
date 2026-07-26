@@ -9,153 +9,62 @@
 
 ## Live state
 
-- **⚠ The whole backlog was mechanically TRIAGED 2026-07-25 — read the triage before opening a lap.**
-  Every open entry was classified one-per-offload-call:
-  [`backlog-triage-2026-07-25.md`](reviews/backlog-triage-2026-07-25.md). Counts at the time: ~60
-  actionable, 22 live-run-blocked, 18 flagged owner-decision, 2 accepted residuals. ⚠ **The verdicts are
-  ADVISORY, not conclusions** — the lane over-flags `owner_decision_needed` (its habitual hedge is
-  "schedule a discussion"), and most of those 18 state their own resolution already. Verify a row against
-  HEAD before working it ([[backlog-prose-decays-verify-against-head]]); this lap found three entries
-  whose premise was already fixed at HEAD.
+- **▶ NEXT: work the actionable backlog queue.** Start from the triage
+  ([`backlog-triage-2026-07-25.md`](reviews/backlog-triage-2026-07-25.md)) — every open entry classified,
+  regenerate with `node scripts/shared/triage-backlog.mjs`. Then use the SEEK INDEX in
+  [`backlog.md`](backlog.md): each entry carries a `file:line` anchor, so read the index once and jump
+  with an offset read instead of paging the file blind.
+  ⚠ **The triage's verdicts are ADVISORY.** The lane over-flags `owner_decision_needed` (its hedge is
+  "schedule a discussion"), and it cannot check HEAD — the 2026-07-25 lap opened three entries whose
+  premise was already fixed. Verify a premise before working it
+  ([[backlog-prose-decays-verify-against-head]]).
 
-- **▶ NEXT: keep working the actionable queue.** Use the seek index in
-  [`backlog.md`](backlog.md) — every entry now carries a `file:line` anchor, so read the index once and
-  jump with an offset read rather than paging the file blind.
+- **⚠ Every owner call in the backlog is ANSWERED, recorded in the entry that owns it — do not re-ask.**
+  Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
+  never re-raised; `node scripts/nightly/answer.mjs --list` shows what is genuinely still open.
+  Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
+  Antigravity / OpenCode / VS Code) and the **dogfood run** below.
+  ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does
+  NOT solve its second property (expected-failing test names are still author-supplied, so a naive build
+  relocates the claim instead of removing it); and contract-pipeline (b) narrows the
+  whole-artifact-rewrite invariant, so it must be scoped to rejections naming specific fields.
 
-- **⚠ EVERY owner call in the backlog was answered 2026-07-25. The decisions are recorded IN their
-  entries — do not re-ask them.** Two further owner calls were settled late on 2026-07-25 and are
-  likewise recorded in their entries: the backlog gets a **generated index, not a split** (shipped), and
-  the **Slice-3 claim STAYS at dispatch time** (moving it to accept time reopens the double-dispatch
-  window the claim exists to close). The nightly queue's own determinations live in
-  `.claude/nightly-decisions.json` — settled by subject, so they are never re-asked.
-  Two remain owner-OWNED and no lap can close them: the A7 GUI host checklist (a human at
-  Antigravity / OpenCode / VS Code) and the dogfood run below.
-  ⚠ Two decision traps worth reading before building: the per-site pinning gate's diff-derived site list
-  does NOT solve its second property (test names are still author-supplied); and contract-pipeline (b)
-  narrows the whole-artifact-rewrite invariant, so it must be scoped to rejections naming specific fields.
+- **The dogfood self-audit is the OWNER's, in a separate conversation, after the code fixes land.**
+  ~22 `⬇ LIVE-run watch` entries are blocked only on evidence from it. A lap lands what it can WITHOUT
+  the run and must not start one: a commit mid-run re-stales the planning chain and regresses it to
+  `charter_extraction`. Recipe is in the collapsed section below.
 
-- **⚠ `reviewed_clean` is a NEW hard contract on every zero-finding AuditResult (`e6b3f7b1`).** An empty
-  `findings` array is refused unless the result also sets `reviewed_clean: true`, and the flag is refused
-  ALONGSIDE findings. A worker or fixture written against the old contract now fails validation — that is
-  the gate, not a regression. Rationale: a lane that errors or truncates emits output identical to a
-  careful clean review, so a broken lane read as a weak one.
+- **⚠ `reviewed_clean` is a hard contract on every zero-finding `AuditResult`.** An empty `findings`
+  array is REFUSED unless the result also sets `reviewed_clean: true`, and the flag is refused ALONGSIDE
+  findings. A worker or fixture written against the older contract fails validation — that is the gate,
+  not a regression. A contract sweep must therefore grep the TYPE across the whole repo: the
+  `reviewed_clean` sweep globbed `tests/**`, went green four ways locally, and failed release CI on two
+  producers in `scripts/`.
 
-- **The dogfood self-audit is the OWNER's, in a separate conversation, after the code fixes land**
-  (decided 2026-07-25). ~22 `⬇ LIVE-run watch` entries are blocked only on evidence from it — including
-  the per-node token estimate, which still has none. A lap must land what it can WITHOUT the run and not
-  start one: a commit mid-run re-stales the planning chain and regresses it to `charter_extraction`.
+- **⚠ The per-node token estimate is WIRED and has NO live evidence yet.** It is the first change that
+  makes the `no_capable_pool` resumable pause reachable in real use. On the next real frontier an
+  unplaceable node must reach a RESUMABLE pause naming the real cause — never `empty_pool`, never a
+  terminal strand. A large node that now refuses everywhere is the honest estimate working; check the
+  pool's declared `context_tokens` before calling it a regression.
 
-- **⚠ Four refusals landed earlier on 2026-07-25 (`11bbb8f2`, `9732b1ed`, `df80e55b`) — all intended; a session
-  that does not expect them reads each as a fault.**
-  (1) **A live backtick in a Bash-tool command is DENIED.** A backtick command-substitutes inside double
-  quotes too, so markdown backticks in `git commit -m "… \`npm run check\` …"` are executed, not written.
-  Use single quotes, `-F <file>`, or `$(...)`; override `AUDIT_TOOLS_ALLOW_BACKTICKS=1`.
-  (2) **Two Stop hooks can BLOCK a stop.** `closeout-challenge-gate` asks "was that all taken care of?"
-  with mechanical evidence (max 2/session, per-tree-state); `question-philosophy-gate` fires when a
-  closing message ends in a question. Both are once-ish and both have kill switches
-  (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY`).
-  (3) **`AskUserQuestion` is gated once per session** — the philosophy brief is injected first; ask again
-  and it goes through. It does not suppress asking.
-  (4) **`README.md`'s Philosophy section is GENERATED** from THE BRIEF in `docs/project-philosophy.md`
-  (`check:philosophy-brief`, in `verify:checks`). Never hand-edit that block; edit the brief and run
-  `npm run check:philosophy-brief -- --write`.
+- **⚠ Regenerating the price snapshot INVERTS host tier cost order — still live.** `npm run update-models`
+  rewrites the flat table, whose entry for a colliding id is the CHEAPEST across providers by
+  construction, so `claude-opus-4-8` ranks below haiku and cost-first routing at λ=0 sends every packet
+  to Opus. The service→vendor-id mapping is a PREREQUISITE, not a follow-up. Do NOT "fix" it by editing
+  `cost-rank.test.mjs`'s expectations — they encode real list prices and are what caught it.
 
-- **Nightly-items clearance lap, 2026-07-25 — the nightly queue is worked down; four gates are new.**
-  `check:version-gates`, `check:constitutional-doc-paths`, `check:memory-citations` and the rebuilt
-  `check:doc-manifest` all run in `verify:checks`. The manifest is now DATA
-  (`scripts/doc-manifest-data.mjs`) rendered into `doc-review-guidelines.md` and byte-compared, and it
-  reaches the whole repo — the gate reports the count, don't carry one here. Constitutional docs are
-  REFUSED at commit without
-  `node scripts/attest-constitutional-doc-change.mjs`.
-  ⚠ **Two gates now refuse commits that previously passed.** A commit touching `CLAUDE.md`,
-  a normative goals doc, `docs/project-philosophy.md` or `docs/doc-review-guidelines.md` needs a
-  constitutional attestation; a commit stamping a schema version into a payload read back unchecked
-  fails `check:version-gates`. Both are intended.
-  ⚠ **`verify:checks` runs the gates; the pre-commit hook does NOT run `verify:checks`.** A gate wired
-  only into `verify:checks` still fails first in RELEASE CI. Wire anything commit-critical into
-  `.claude/hooks/pre-commit-gate.mjs` as well.
+- **A2 oracle corpus is UNPARKED** (superseding the earlier park) — funded as the mechanical answer to
+  per-lane result quality. Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+  SPEC in [`deferred.md`](backlog/deferred.md).
 
+- **Current version = `package.json`** (authoritative): v0.34.32, live on npm; main is released to HEAD
+  with nothing pending.
 
-- **Still live from the earlier 2026-07-24 laps.** The price-snapshot refresh INVERTS host tier cost
-  order (regenerating it ranks `claude-opus-4-8` below haiku, so cost-first routing at λ=0 sends every
-  packet to Opus; `cost-rank.test.mjs` caught it, and the service→vendor-id mapping is a PREREQUISITE,
-  not a follow-up) — open entry in [`open-bugs.md`](backlog/open-bugs.md); do not "fix" it by editing
-  the cost-rank expectations, they encode real list prices.
-  ⚠ **Adding a channel is not the same as keeping one:** injecting `onDroppedSources` to feed the Gate-0
-  render SUPPRESSED the resolver's stderr default — a silent loss on every path that never reaches
-  Gate-0, caught only by the full suite while `check` stayed green. Emit both.
-  Records: [`backlog-clearance-2026-07-24.md`](reviews/backlog-clearance-2026-07-24.md) ·
-  [`backlog-clearance-2026-07-24b.md`](reviews/backlog-clearance-2026-07-24b.md).
-
-- **⚠ Two corrections carried from the prior clear-out lap (`d4c8e9ea`) — both still live.**
-  (1) FLW-COR-003's backlog-prescribed fix, "release claims on every path that claims", was WRONG: the
-  lease must span out-of-process workers (`dispatch.ts:129-136`), and the real leak was merge throwing
-  before its own release. (2) The `analyzerDeps` "live npm install E404" entry was REFUTED — no test
-  shells out to npm; it was a stub-log leak manufacturing a convincing false alarm. Both are the class
-  the backlog keeps hitting: an entry paraphrasing its own incident until the mechanism inverts. That
-  lap also established the adversarial-second-pass habit, which **overturned 41 of 62** close verdicts
-  it examined — and overturned two more premises this lap (see item 2).
-- **Current version = `package.json`** (authoritative): v0.34.32, published 2026-07-25 and live on npm;
-  main is released to HEAD, nothing pending.
-- **⚠ The per-node token estimate is WIRED (v0.34.31) and has NO live evidence yet.** It is the first
-  change that makes the `no_capable_pool` resumable pause reachable in real use. On the next real
-  frontier: an unplaceable node must reach a RESUMABLE pause naming the real cause — never `empty_pool`,
-  never a terminal strand. A large node that now refuses everywhere is the honest estimate working;
-  check the pool's declared `context_tokens` before calling it a regression. **Per-release shipped detail is `git log` and the
-  `docs/reviews/` records — deliberately not restated here** (this section had grown to ~107 lines of
-  version-by-version narration, which is the changelog creep this doc's own header forbids).
-- **A2 oracle corpus is UNPARKED** (owner 2026-07-25, superseding the 2026-07-22 park) — funded as the
-  mechanical answer to per-lane result quality. SPEC in
-  [`docs/backlog/deferred.md`](backlog/deferred.md).
-- **Shipped and settled — mechanism lives in the code + its record, not here.** Capability-evidence
-  landing gate (R3-3), the trap-guard hook layer, the nightly maintenance routine, loop-core
-  attestation + pre-commit hardening, the backend-identity migration (all stages) and the
-  account-metering whole-defect closure are all DONE. Durable design is in project memory
-  ([[trap-guard-hook-layer]], [[nightly-maintenance-routine]],
-  [[account-metering-closed-producer-decides-partition]]); contracts in `docs/nightly-routine.md`
-  and `CLAUDE.md`; per-change detail in `git log` + `docs/reviews/`.
-  ⚠ Two carry-forward cautions from that work, both still live: service-scope the CREDENTIAL-DERIVED
-  account branch too, since proxied lanes share one credential and must stay split by service; and a
-  self-issued attestation reads as one, which is why `--attester-class` is recorded rather than
-  trusted ([[attestation-cannot-tell-reviewer-from-author]]).
-- **⚠ Changing an identity means auditing every FILTER that feeds it, not just every consumer.**
-  v0.33.11 service-qualified the Gate-0 key and was verified against its consumers — but the source
-  fold UPSTREAM still deduped on the bare model id, so a source colliding with a host tier on another
-  service was dropped from the confirmed record and could never be confirmed (a livelock, fixed in
-  v0.33.12). While the key was bare-model that same collision silently matched, which was the BYPASS:
-  one defect, fail-open from one side and wedged-shut from the other. The verification was thorough
-  within the boundary drawn, and the boundary was the error.
-- **⚠ A local test failure can be an AMBIENT-PATH artifact, not a regression.** `INV-shared-core-14`
-  stubbed only two provider constructors while auto-resolution walks the real PATH — so it passed in CI
-  (no CLIs on the runner) and failed on any box with `agy`/`codex` installed, reading as a product
-  defect. Fixed, but the CLASS recurs: before believing a local red, check whether the test's fixture
-  depends on what happens to be installed ([[lap-green-must-match-ci-evidence]] cuts BOTH ways — CI
-  green over a local red is just as much a real signal as the reverse).
-- **⚠ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main`
-  before starting a lap — a worktree can branch behind main and must fast-forward + re-read
-  HANDOFF/backlog first.
-- **Local env:** npm 12 blocks dependency install scripts by default and can emit object-shaped
-  `npm pack --json`. Smokes are fixed, but read [`docs/backlog/durable-traps.md`](backlog/durable-traps.md) before any manual
-  `npm install -g` / packaged-install work.
-- **Offload lane changed:** `llm-worker-tools` (`llm read`/`llm write`) is RETIRED. Bulk work goes direct
-  to the local LiteLLM proxy — see `~/.claude/CLAUDE.md` → *Offload lane*. The proxy must be running;
-  there is no standalone fallback (it was found DEAD at the start of the 2026-07-24 lap, taking the
-  whole lane down until restarted). ⚠ **LiteLLM is being RETIRED in favour of 9router** — Track 1 in
-  [`forward-tracks.md`](backlog/forward-tracks.md); infrastructure is live but ZERO code migrated, so
-  `:4000` is still load-bearing today. ⚠ **The lane handles judgment work, not just recon.** The standing
-  belief that it could not was traced to unset request parameters (no `max_tokens`; a misfitting schema
-  under strict decoding) — properly configured it produced review-grade analysis. Check `finish_reason`
-  before concluding anything about a model ([[offload-lane-failures-are-usually-the-caller]]).
-- **The backlog was fully classified and disambiguated 2026-07-19.** Every open item was verified against
-  code rather than its own prose; ~21% were closable and several load-bearing claims were false. Items
-  now carry an explicit **SPEC** paragraph stating the agreed mechanism. Treat an entry without one as
-  still raw ([[backlog-prose-decays-verify-against-head]]).
-- **Project memory was consolidated 2026-07-19** (149 → 136 files; record:
-  [`memory-consolidation-2026-07-19.md`](reviews/memory-consolidation-2026-07-19.md)). The single-package
-  collapse had left **17 memories citing dead paths**, concentrated in the trap/recovery files whose
-  procedures were runnable and wrong; three more described *reverted* directions as the current goal.
-  All fixed. ⚠ Carried-forward caveat: an "open item" claim inside a memory is a LEAD, not a work order —
-  one listed 4 opens of which 3 were long done ([[refactor-must-sweep-memory-not-just-code]]).
+**Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately not restated
+here.** This section had twice grown into version-by-version narration, which is the changelog creep this
+doc's own header forbids. Durable traps belong in
+[`durable-traps.md`](backlog/durable-traps.md), durable design in project memory, durable how-to in
+`CLAUDE.md` — if a bullet here is none of those three and is not the immediate next step, delete it.
 
 ## Cadence & standing rules (don't re-derive)
 

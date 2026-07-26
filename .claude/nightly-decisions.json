@@ -54,5 +54,26 @@
     "subject": "PREMISE REFUTED — the operator guide was right; the residual is a type looser than its own validator",
     "path": "src/shared/types/auditorDescriptor.ts",
     "decided_at": "2026-07-26T00:33:19.903Z"
+  },
+  "115ec89691c8f7ec": {
+    "disposition": "settled",
+    "answer": "Cut the lap narration. Live state rewritten 2026-07-25 from 150 lines/20 bullets to 59/8. THE RULE, not just this instance: a Live-state bullet must be the immediate next step, or a currently-live gate/trap that will bite the next lap. Anything else has another home -- durable traps to durable-traps.md, durable design to project memory, durable how-to to CLAUDE.md, per-release detail to git log. If a bullet is none of the three and is not the next step, delete it. That rule is now stated at the foot of the section.",
+    "subject": "Changelog creep re-accreted in HANDOFF Live state — 27 fresh lines narrating what the last lap shipped",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-07-26T00:59:55.538Z"
+  },
+  "7e706f05f7e31c27": {
+    "disposition": "settled",
+    "answer": "Resolved by the same rewrite: the \"code tracks closed\" framing is GONE. The real ordering is the actionable backlog queue, worked from the triage record and the seek index; the live-validation dogfood run is the OWNER-owned half and is named as such.",
+    "subject": "HANDOFF contradicts itself about what the current work is — \"code tracks closed\" vs a 90-entry active queue",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-07-26T00:59:55.586Z"
+  },
+  "075493b11dd655ec": {
+    "disposition": "settled",
+    "answer": "The BACKLOG keeps the full spec in every case; HANDOFF carries pointers only. Live state no longer restates either the touched_files contract or the per-node token estimate as a spec -- the token-estimate bullet is now a one-paragraph live-watch warning, and the roadmap below it is generated pointers by construction.",
+    "subject": "Two open items are written out as full specs in BOTH HANDOFF and the backlog",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-07-26T00:59:55.636Z"
   }
 }

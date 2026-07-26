@@ -10,6 +10,13 @@ A trap that can be detected at a tool call is enforced by a hook in `.claude/hoo
 entry is DELETED here rather than restated: two copies decay independently, and the guard states
 the trap and the fix when it fires.
 
+- **A local test RED can be an ambient-PATH artifact, not a regression.** `INV-shared-core-14`
+  stubbed only two provider constructors while auto-resolution walks the real `PATH`, so it passed in CI
+  (no CLIs on the runner) and failed on any box with `agy`/`codex` installed — reading as a product
+  defect. Fixed, but the CLASS recurs: before believing a local red, check whether the fixture depends on
+  what happens to be installed. [[lap-green-must-match-ci-evidence]] cuts BOTH ways — CI green over a
+  local red is as real a signal as the reverse.
+
 - **agy's headless lane is INERT until `~/.gemini/antigravity-cli/settings.json` grants tool
   permissions — and the grammar is `tool(target)` (verified live 2026-07-25).** Without that file
   `agy -p` exits 0 and prints only `jetski: no output produced — a tool required the "command"
