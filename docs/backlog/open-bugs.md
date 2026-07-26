@@ -25,7 +25,12 @@
   staged by a routine `git add -A`. They pass now, so the entries were pure noise — but the same
   mechanism would happily record a REAL regression as a recognized flake, which is precisely the
   fail-open the baseline exists to prevent ([[false-red-is-as-corrosive-as-false-green]]). Caught only
-  by reading the staged diff. Property: the baseline is written by an explicit, deliberate
+  by reading the staged diff.
+  ⚠ **RE-HIT 2026-07-25, and this time the recorded failures were GENUINE.** Adding the seek-index gate
+  broke two `handoff-roadmap.test.mjs` cases (one real behaviour change, one a fixture cascade); both
+  were written into the baseline as `status: "unproven"` and staged by a routine `git add -A`, then
+  reverted by hand. The first hit recorded noise; this one recorded actual regressions — the fail-open
+  is no longer hypothetical. Property: the baseline is written by an explicit, deliberate
   re-baselining action on a GREEN tree — never as a side effect of a development test run. Same family
   as `--update-baseline` raising a grown file's ceiling, below.
 
@@ -446,25 +451,7 @@
   single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
   cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
-- **The open-work record exceeds a single-read budget, so every pass navigates it blind (friction:
-  inefficient-feeding, medium).** It is past what one read call returns, so working on it means paged
-  reads plus grep-by-anchor, and line numbers shift under every edit. It is also the document most
-  likely to be scanned by an agent with no prior context:
-  `.claude/skills/disambiguate-backlog/SKILL.md` step 1 instructs "Read every file under
-  `docs/backlog/` in full", which no longer executes in one call.
-  **Property to hold:** the open-work record is navigable in bounded reads.
-  ⚠ **Splitting along the existing `##` boundaries does NOT satisfy it** — *Open bugs / frictions*
-  carries most of it by itself, so the split left the same defect in the biggest piece —
-  `open-bugs.md` is still over the per-file budget. The open question is therefore what
-  sub-axis divides *Open bugs* (by area? by
-  severity? one file per entry? a generated index that makes the whole thing seekable without
-  splitting), and that is an owner call for two reasons: `docs/documentation-philosophy.md` §*The
-  condensation bias* says **split only when one doc genuinely carries two unrelated durable concepts*
-  * — splitting for size is what it argues against — and every file a split creates must earn a
-  routing row in `docs/doc-review-guidelines.md` or `check:doc-manifest` fails the release.
-  ⚠ Do not solve it by pruning aggressively: the entries earn their length, and the 2026-07-19
-  classification showed the risk runs the other way — stale entries survive because nobody can hold
-  the whole file at once.
+- **The open-work record is navigable in bounded reads via a GENERATED seek index — the remaining sliver is the skill that still says "read it in full" (2026-07-25, low).** The size question is SETTLED: owner chose a generated index over a split, because `docs/documentation-philosophy.md` §*The condensation bias* argues against splitting for size and every split file would owe a routing row in `docs/doc-review-guidelines.md`. `scripts/shared/generate-backlog-index.mjs` now emits a `file:line` anchor per entry into `docs/backlog.md`, gated by `check:backlog-index` in `verify:checks` AND at commit (anchors move under every backlog edit, and a stale anchor sends the reader to confidently wrong prose). **What stays open:** `.claude/skills/disambiguate-backlog/SKILL.md` step 1 still instructs "Read every file under `docs/backlog/` in full", which no longer executes in one call — it should read the index and then seek. Pruning aggressively is still the wrong fix: entries earn their length, and the 2026-07-19 classification showed stale entries survive precisely because nobody can hold the file at once.
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
@@ -783,27 +770,6 @@
   RESUMABLE pause naming the real cause (split it, or declare a larger `context_tokens`) — never
   `empty_pool`, and never a terminal strand. If a large node now refuses everywhere, that is the honest
   estimate working; check the pool's declared `context_tokens` before treating it as a regression.
-
-- **▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium,
-  friction: inefficient-feeding).** Splitting the single 1,706-line backlog by section fixed
-  `forward-tracks` / `deferred` / `durable-traps`; this section remains too large to read in one call,
-  which is the condition that let ~21% of entries go stale unnoticed. `check:backlog-budget` records
-  this file's ceiling in `.size-baseline.json` and enforces SHRINK-ONLY, so it cannot regrow — but the
-  ceiling is today's size, not the goal.
-  ⚠ **Condensation is EXHAUSTED as a lever:** nearly every entry already sits inside the 2600-byte
-  per-entry budget, so squeezing the rest barely moves the file. The gap closes only by
-  **CLOSING entries** — downstream of the actionable queue, not a separate task. ⚠ Never hand-carry
-  sizes here; `node scripts/check-backlog-budget.mjs --report` has the current figures (UTF-8
-  BYTES — matches `wc -c`).
-  Property: every backlog file is one bounded read. ⚠ Do NOT close this by raising the budget — the
-  driver is narrative accreting onto entries, so a budget that always passes measures nothing.
-  ⚠ **OWNER DECISION 2026-07-25 — do NOT split. Build a GENERATED seekable index** (title → anchor →
-  area → severity) so the file is navigable in bounded reads without a split. This settles the sub-axis
-  question the entry was blocked on: splitting for size is what `documentation-philosophy.md`
-  §*The condensation bias* argues against, and every new file would owe a `check:doc-manifest` routing
-  row. ⚠ The file is currently UNDER budget again (2026-07-25) after closing 8 stale entries — closing
-  entries remains the real lever, as this entry already says; the index is what makes it navigable
-  meanwhile.
 
 - **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
 

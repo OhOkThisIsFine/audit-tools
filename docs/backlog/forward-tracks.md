@@ -301,8 +301,10 @@ followed" is otherwise indistinguishable from a bug.
   ⚠ **OWNER DECISION 2026-07-25 — size the per-node lease TO THE WORK, derived deterministically from
   signals the tool ALREADY produces** (per-node token estimate, complexity rating, risk rating). That is
   the decision for both paths, and it deliberately avoids a learned/measured input
-  ([[concurrency-is-declared-or-absent-never-learned]]). ⚠ The owner was explicitly UNSURE about the
-  companion move (relocating the claim from dispatch time to accept time) — treat it as OPEN and settle
-  it with a call-path trace before building, not by assuming it follows from the lease sizing.
+  ([[concurrency-is-declared-or-absent-never-learned]]). ⚠ **OWNER DECISION 2026-07-25 (companion move
+  SETTLED): the claim STAYS at dispatch time.** Relocating it to accept time reopens the double-dispatch
+  window the claim exists to close — the lease must span the out-of-process worker run, which is the same
+  property FLW-COR-003 established (`dispatch.ts:129-136`). Lease SIZING is the whole fix; claim TIMING is
+  not in play. Do not re-raise it.
 
 - **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).

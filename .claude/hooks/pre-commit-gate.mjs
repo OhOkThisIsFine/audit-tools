@@ -568,6 +568,42 @@ function runGate(committedPaths) {
     }
   }
 
+  // 2b-iii. Backlog seek-index ↔ backlog parity — whenever the STAGED set
+  // touches `docs/backlog.md` or any `docs/backlog/*.md`. The index gives every
+  // entry a `file:line` anchor so `open-bugs.md` is navigable in bounded reads
+  // without being split. Line numbers move under EVERY edit to a backlog file,
+  // so this stales far more easily than the roadmap does — and a stale anchor is
+  // worse than no anchor, because it sends the reader to confidently wrong prose
+  // rather than to nothing.
+  //
+  // Wired HERE as well as in `verify:checks` for the same reason as 2b-ii.
+  const pinsBacklogIndex = (p) => {
+    const n = p.replace(/\\/g, '/');
+    return n === 'docs/backlog.md' || /^docs\/backlog\/[^/]+\.md$/.test(n);
+  };
+  if (staged.some(pinsBacklogIndex)) {
+    try {
+      execSync('npm run check:backlog-index', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: backlog seek-index check FAILED — commit blocked. docs/backlog.md's generated ` +
+          `index no longer matches docs/backlog/, so its line anchors point at the wrong entries.\n` +
+          `Fix: node scripts/shared/generate-backlog-index.mjs — then re-stage docs/backlog.md.\n` +
+          `Do NOT hand-patch line numbers inside the BEGIN/END GENERATED SEEK INDEX markers; they are ` +
+          `derived, and the next backlog edit moves them again.\n${tail}`,
+      };
+    }
+  }
+
   // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
   // re-includes each hook BY NAME, so a new hook committed without its
   // `!.claude/hooks/<name>` line is silently dropped from the commit — and if

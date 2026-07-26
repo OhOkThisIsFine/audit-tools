@@ -20,7 +20,7 @@
 //   • the gate FIRES AT COMMIT, not only in verify:checks. The pre-commit hook
 //     does not run verify:checks, so a check wired only there first fails in
 //     RELEASE CI and burns a tag (the class that burned v0.34.17).
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { spawnSyncHidden, execFileSyncHidden } from '../helpers/spawn.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -284,6 +284,10 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
             'test:doc-contract': 'node -e ""',
             'check:doc-manifest': 'node -e ""',
             'check:handoff-roadmap': 'node -e "process.exit(1)"',
+            // The seek-index gate is a SEPARATE trigger in the same hook and it
+            // legitimately owns `docs/backlog.md`. It must succeed here, so that
+            // what this suite observes is the roadmap trigger alone.
+            'check:backlog-index': 'node -e ""',
           },
         },
         null,
@@ -309,6 +313,12 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['clean', '-fd']);
   };
 
+  // The fixture repo is shared across cases, so a case that throws BEFORE its
+  // own `reset()` leaves its staged files behind and the NEXT case fails for a
+  // reason that has nothing to do with what it asserts. That cascade cost a
+  // false second failure the first time this suite met a new gate trigger.
+  afterEach(reset);
+
   it('BLOCKS a commit that edits a BACKLOG file (the backlog can stale HANDOFF)', () => {
     writeFile('docs/backlog/open-bugs.md', '# open bugs\n\n- **new entry.** body\n');
     git(['add', '-A']);
@@ -329,13 +339,30 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
   });
 
   it('does NOT fire on unrelated markdown — the trigger stays narrow', () => {
-    // `docs/backlog.md` is the INDEX, not a section file; `docs/reviews/*` are
-    // records. Firing on those would train the regenerate step into noise.
+    // `docs/reviews/*` are records. Firing on those would train the regenerate
+    // step into noise.
+    //
+    // `docs/backlog.md` used to be listed here too, on the reasoning that it is
+    // the INDEX rather than a section file. That is still true of the ROADMAP —
+    // but the file now also carries the generated SEEK INDEX, whose own gate
+    // legitimately fires on it (a hand-edit inside that block is exactly the
+    // drift it catches). So it belongs to the other trigger, not to this
+    // "unrelated" set; the case below pins that split.
     writeFile('docs/reviews/some-record-2026-07-25.md', '# record\n');
-    writeFile('docs/backlog.md', '# index\n');
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(0);
+    reset();
+  });
+
+  it('leaves docs/backlog.md to the seek-index trigger, not this one', () => {
+    writeFile('docs/backlog.md', '# index\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    // The roadmap check is rigged to exit 1 in this fixture, so if the ROADMAP
+    // trigger fired the gate would block with its message. It must not.
+    expect(code, stderr).toBe(0);
+    expect(stderr).not.toMatch(/HANDOFF roadmap check FAILED/);
     reset();
   });
 

@@ -1,0 +1,51 @@
+{
+  "5886ddc59ad08767": {
+    "disposition": "settled",
+    "answer": "Sanctioned exception. The mid-run needs_clarification pause is correct shipped behavior; amend the goals doc with an explicit carve-out naming it. No code change.",
+    "subject": "A normative \"no prompts during implementation\" rule is contradicted by a shipped mid-run clarification path",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-07-26T00:11:09.705Z"
+  },
+  "3846efadcaea79a1": {
+    "disposition": "settled",
+    "answer": "The doc is stale. Amend it to four end states: resolved, resolved_no_change, deemed inappropriate, user-confirmed ignored -- plus the force_closed_unresolved disposition. The code is right.",
+    "subject": "The goals doc says remediation is binary with three end states; the code has four plus a force-closed disposition",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-07-26T00:11:09.753Z"
+  },
+  "7fc1c1d310dda95d": {
+    "disposition": "settled",
+    "answer": "It is the defect. THE BRIEF settles it: depth and granularity are dials on ONE pipeline, never a separate lighter path. Fold the lean fast path into the self-scaling continuum.",
+    "subject": "The lean fast path is a real structural fork at HEAD — sanctioned exception to \"one pipeline\", or the defect?",
+    "path": "spec/remediation-workflow-design.md",
+    "decided_at": "2026-07-26T00:11:09.802Z"
+  },
+  "382fc399247ea706": {
+    "disposition": "settled",
+    "answer": "Already resolved: the per-entry ratchet was retired; the ratchet is per-FILE and shrink-only, so an entry may grow provided its file shrinks. A verified factual correction is never refused for size.",
+    "subject": "FRICTION HIT TONIGHT: the shrink-only size ratchet refused a correct stale-reference fix for costing 14 bytes",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T00:11:09.850Z"
+  },
+  "5496115851346eca": {
+    "disposition": "settled",
+    "answer": "Already fixed at HEAD: src/shared/quota/coverage.ts:82 emits spec/cross-provider-quota-matrix.md. Verified by reading the file. No change needed.",
+    "subject": "Code defect: a runtime message sends the host agent to a doc path that does not exist (one-character fix, held back on remit)",
+    "path": "src/shared/quota/coverage.ts",
+    "decided_at": "2026-07-26T00:12:59.702Z"
+  },
+  "3592dcb75b2d1300": {
+    "disposition": "settled",
+    "answer": "Already fixed at HEAD: ripgrep over the whole repo finds no leaked </content> or </invoke> lines; both named files end cleanly. Separately YES -- the manifest exclusion should not cover file-integrity defects, tracked as its own item.",
+    "subject": "Leaked tool-call XML sits at the end of two tracked docs — and the manifest exclusion is why nothing reviews them",
+    "path": "docs/reviews/g3-dispatch-policy-plan-2026-07-16.md",
+    "decided_at": "2026-07-26T00:12:59.752Z"
+  },
+  "9d36874b81175de3": {
+    "disposition": "settled",
+    "answer": "Settled: generated index, no split. Keep open-bugs.md as one file and generate a seekable index (id, title, severity, anchor) so it is navigable in bounded reads. Splitting for size is what the condensation bias argues against, and every split file would need a manifest routing row. The older stale-premised entry can be deleted once the index ships.",
+    "subject": "The open-bugs file is still over budget, and the two entries that discuss it prescribe different fixes",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T00:24:40.947Z"
+  }
+}

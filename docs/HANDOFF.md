@@ -208,12 +208,11 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 105 open item(s).
+> `verify:checks` and at commit). 104 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
 - ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
-- ▶ `open-bugs.md` is over the 120KB budget — still not one bounded read (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 
 ### Open bugs & frictions — the working queue
 
@@ -246,7 +245,7 @@ its SPEC intact.
 - H2+H4 collapse residual pins (2026-07-18, low, from review h2c3). · [`open-bugs.md`](backlog/open-bugs.md)
 - Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high). · [`open-bugs.md`](backlog/open-bugs.md)
-- The open-work record exceeds a single-read budget, so every pass navigates it blind (friction: inefficient-feeding, medium). · [`open-bugs.md`](backlog/open-bugs.md)
+- The open-work record is navigable in bounded reads via a GENERATED seek index — the remaining sliver is the skill that still says "read it in full" (2026-07-25, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (backlog clear-out lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
 - Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
