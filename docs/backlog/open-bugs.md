@@ -426,6 +426,18 @@
   single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
   cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
+- **A nightly item is PRESENTED for an answer without its premise being re-checked, so settled subjects
+  keep getting asked (2026-07-25, medium, friction: inefficient-feeding).** Walking the 21 open items with
+  the owner, 15 were already fixed at HEAD — docs-13, 16, 17, 18, 21, 24, 25a/b/d, backlog-2, 3, 5, 6,
+  sol-1, sol-2 — several by the same day's laps. An item stays open until it is ANSWERED, and nothing
+  re-tests the premise between generation and presentation, so the queue reports work that no longer
+  exists and the owner pays the reading cost. ⚠ **A nightly re-verification pass does NOT fix this** (owner,
+  2026-07-25): these were created and resolved on the same day, so a nightly sweep never sees the window.
+  Property: an item's premise is re-checked at PRESENTATION time — when it is surfaced or answered — and an
+  item whose premise no longer holds is closed as resolved rather than asked. Same class as
+  [[insights-report-recommended-a-retired-fix]], one layer earlier: that one generated a stale
+  recommendation, this one keeps serving stale recommendations after the fact.
+
 - **The open-work record is navigable in bounded reads via a GENERATED seek index — the remaining sliver is the skill that still says "read it in full" (2026-07-25, low).** The size question is SETTLED: owner chose a generated index over a split, because `docs/documentation-philosophy.md` §*The condensation bias* argues against splitting for size and every split file would owe a routing row in `docs/doc-review-guidelines.md`. `scripts/shared/generate-backlog-index.mjs` now emits a `file:line` anchor per entry into `docs/backlog.md`, gated by `check:backlog-index` in `verify:checks` AND at commit (anchors move under every backlog edit, and a stale anchor sends the reader to confidently wrong prose). **What stays open:** `.claude/skills/disambiguate-backlog/SKILL.md` step 1 still instructs "Read every file under `docs/backlog/` in full", which no longer executes in one call — it should read the index and then seek. Pruning aggressively is still the wrong fix: entries earn their length, and the 2026-07-19 classification showed stale entries survive precisely because nobody can hold the file at once.
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the

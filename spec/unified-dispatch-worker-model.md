@@ -258,24 +258,28 @@ the confirmed **decision** (policy, legitimately inherited) against **this** aud
 ## The exclusion grammar — and three distinct keyspaces
 
 The exclusion key must be **reach-independent**: an exclusion authored on one auditor must mean
-something to an auditor with a different reachable set. The grammar is `provider:model`, with
-`provider` and endpoint-host as coarser patterns. It is an **OPEN** grammar — an endpoint-host pattern
-is not a provider name, so rules are kept verbatim rather than membership-checked, and an unmatchable
-rule is inert. The head token decides the tier against the closed provider-name set, which is what keeps
-the three forms unambiguous. Resolution returns a **matcher over backends**, not a name set — model
-granularity is the point: excluding one model of a multi-model backend must leave its siblings routable.
+something to an auditor with a different reachable set. **The grammar itself is owned by
+[`backend-identity-axes.md`](backend-identity-axes.md) → *The exclusion grammar: axis-explicit*** — a
+rule names its axis (`transport:` / `service:` / `host:`), and an unknown axis is refused at authorship
+rather than persisted as an inert rule. Do not restate the forms here; what belongs here is only what
+that grammar means for dispatch: resolution returns a **matcher over backends**, not a name set — model
+granularity is the point, because excluding one model of a multi-model backend must leave its siblings
+routable.
 
 **Do not conflate three keyspaces** ([[exclusion-grammar-open-not-closed]]):
 
 | Keyspace | Shape | Account is | Used for |
 |---|---|---|---|
 | quota-ledger pool identity | `service[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
-| operator exclusion pattern | `provider:model` (open, 3 tiers), **transport**-qualified | irrelevant | route decisions |
-| gate compare key | `(backend_provider ?? provider):model`, **backend**-qualified | irrelevant | delta detection |
+| operator exclusion pattern | axis-explicit (`transport:` / `service:` / `host:`) | irrelevant | route decisions |
+| gate compare key | `service:model`, else bare `service` | irrelevant | delta detection |
 
-The gate key falls back to the bare provider name rather than being a plain `provider:model` because a
-representative model id is known for only some providers — a model-only key is blind to a CLI backend
-appearing on PATH.
+The gate key is `backendIdentity(modelId, serviceName)` (`src/shared/providers/identity.ts:59-64`) and
+degrades to the bare service name when no model id is known — a model-only key would be blind to a CLI
+backend that merely appears on PATH. The `serviceName` half is supplied by three different call sites in
+`confirmedBackendKeys`: the provider pool passes its entry `name`, the source pool passes
+`service ?? transport`, and host models pass `provider`. So "service" here means *whatever names the
+thing serving the model*, not one field.
 
 The gate key and the exclusion pattern are built beside each other but are **not the same string**, and
 the difference is only visible for a proxied lane. The key qualifies on the BACKEND actually serving the

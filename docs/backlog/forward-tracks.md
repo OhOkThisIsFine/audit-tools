@@ -95,7 +95,7 @@ followed" is otherwise indistinguishable from a bug.
     activates the fold for a source carrying `account` but no `service`, changing those CapacityPool
     ids and orphaning their learned `quota-state.json` keys — those pools silently fall back to blind
     defaults. Not a correctness break, but no migration was ever written.
-  - **Stage 3** — **`Locus` discriminated union** (`{kind:"url"} | {kind:"command"}`); host-tier rules apply only to URLs. ⚠ **Cannot be built as written — the spec REFUTES the two-arm union**: a `claude-worker` lane carries a proxy URL *and* a launcher command at once, `subprocess-template` a command array, so the honest shape is a network target and a launch target as separate optional facets. Lowest priority of the migration, and justified only BY the exclusion grammar, never independently (there is no live parsing bug; `endpointHosts` guards on `//`).
+  - **Stage 3 — KNOWN WRONG, not queued work.** The `Locus` two-arm union (`{kind:"url"} | {kind:"command"}`) is refuted and must not be re-proposed; the reasoning is at [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md) → *the url | command locus union*.
   - **Stage 5** — **Fail-closed autonomous write emits the `service` axis.** Closes the multi-transport residue durably: a transport snapshot decays the moment proxy expansion adds a route, a service rule does not. Touches `intakeExecutors.ts` → loop-core, attestation required.
   **Property to hold:** a new consumer PICKS an axis from the spec's table; it never invents an identity. ⚠ Do NOT collapse the keyspaces — that instinct is what produced both the bypass and the fail-open proposal.
 

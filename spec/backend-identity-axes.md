@@ -198,16 +198,16 @@ decay. The interactive confirmation prompt still renders the narrower `transport
 each backend — an operator deciding one reachable backend is ruling out the lane in front of them,
 not every future transport reaching that vendor.
 
-### Three conditions this change must satisfy — it is NOT "strictly better" without them
+### Three conditions the axis-explicit grammar holds — it is NOT "strictly better" without them
 
 An earlier draft called the axis-explicit grammar strictly better. That was refuted, and the objections
-are real preconditions rather than reasons to abandon it:
+became standing conditions rather than reasons to abandon it:
 
-- **It is a breaking migration, not an additive one.** Persisted operator policy, the Gate-0 prompt
-  template that teaches operators the syntax, and several test fixtures all encode the bare forms.
-  Ship a one-shot migration of persisted patterns together with the parser and the prompt text, in one
-  atomic change. Do NOT leave a dual parser standing — that reintroduces exactly the "two answers"
-  disease this document exists to end.
+- **The migration is breaking, not additive, and it shipped as one atomic change.** Persisted operator
+  policy, the Gate-0 prompt template that teaches operators the syntax, and several test fixtures all
+  encoded the bare forms; a one-shot migration of persisted patterns landed together with the parser and
+  the prompt text (`migrateExclusionPatterns`). No dual parser stands — a second parser would reintroduce
+  exactly the "two answers" disease this document exists to end.
 - **A `model:` axis is DANGEROUS and is deliberately excluded.** A model-only rule matches one model
   string across every service — which recombines precisely the identities the gate exists to keep
   apart, and contradicts the Gate-0 promise that a rendered rule excludes *that* backend and not its

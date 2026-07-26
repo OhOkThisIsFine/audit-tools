@@ -43,25 +43,19 @@ See `spec/unified-dispatch-worker-model.md` → *Source resolution — in-proces
 
 It shows the quota-arbitrage pattern: adding a genuinely-free backend as an extra **dispatch source pool**
 alongside the conversation host, so background work routes to it first. Pure config — no provider code —
-using the `openai-compatible` shape pointed at opencode's public ZEN endpoint:
+using the `openai-compatible` shape pointed at opencode's public ZEN endpoint. To run it:
 
-- `endpoint: "https://opencode.ai/zen/v1"` with `api_key_env: "OPENCODE_ZEN_API_KEY"` — the free models
-  need only the static `Bearer public` token (no account, no signup; the "get an API key" flow is
-  opencode's *paid* tier), so export `OPENCODE_ZEN_API_KEY=public`. It must be an **env var**, not an
-  inline `api_key`: a declared lane enters the pool only if the process can PROVE reach, and possessing a
-  credential proves nothing about reachability. An inline key would be an always-passes lane whose only
-  catcher (the reactive `lies reachably` quarantine) is not built yet — and a stale free-tier declaration
-  wins cost-first routing and fails *every* packet.
-- `cost_per_mtok: 0` declares the source free, so `deriveCostRank` sorts it below any priced pool and
-  the admission router fills it first. This declared `0` is **backed by reactive cost verification**:
-  opencode returns an actual `cost` on each completion, so if a "free" model starts charging, the pool
-  is demoted out of free-first for the rest of the run and a `declared_cost_drift` friction event fires
-  telling you to reconcile the declaration — a stale `cost_per_mtok:0` can't silently keep winning.
-- `model` — the free model ids are **promotional and time-limited**; fetch the current list from
-  `GET https://opencode.ai/zen/v1/models` (public, unauthenticated) rather than trusting the example's
-  id. Free models are small / coding-optimized and degrade like any `reactive_only` source (a broken
-  model spills to the next pool on a 401/format error, never an outage).
+- Export `OPENCODE_ZEN_API_KEY=public` — the free models need only the static `Bearer public` token (no
+  account, no signup; the "get an API key" flow is opencode's *paid* tier). The declaration names the
+  variable (`api_key_env`) and never carries an inline `api_key`; **why** a declared lane must prove
+  reach rather than merely possess a credential is at
+  `spec/unified-dispatch-worker-model.md` → *Source resolution — in-process, by construction*.
+- The free model ids are **promotional and time-limited** — fetch the current list from
+  `GET https://opencode.ai/zen/v1/models` (public, unauthenticated) rather than trusting the example's id.
 
-Cost must be declared per **source** (`sources[].cost_per_mtok`): the legacy singleton
-`openai_compatible` provider block has no cost field, so a free backend is configured as a `sources[]`
-entry, not the singleton.
+`cost_per_mtok: 0` declares the source free. Declared cost wins pricing precedence for a source and is
+backed by reactive verification, so a "free" tier that starts billing is demoted for the rest of the run —
+the ranking rule lives in [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), and the drift
+event is documented at its code site (`src/shared/friction/stepBoundaryCapture.ts`,
+`declared_cost_drift`). Cost is declared per **source** (`sources[].cost_per_mtok`); the legacy singleton
+`openai_compatible` provider block has no cost field.

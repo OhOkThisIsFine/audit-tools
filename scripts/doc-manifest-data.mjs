@@ -201,10 +201,6 @@ export const DOC_MANIFEST = [
       ".claude/skills/start-lap/SKILL.md",
       "docs/nightly-routine.md",
       "docs/nightly-routine-prompt.md",
-      [
-        "examples/9router-harness-proxy-setup.md",
-        "harness-level deployment guidance, not audit-tools code — check the commands / ports / paths still resolve",
-      ],
     ],
     check:
       "Standalone dev-workflow how-to (no generated-asset relationship); do the documented commands/paths " +

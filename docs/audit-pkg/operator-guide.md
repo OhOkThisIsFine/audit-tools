@@ -233,7 +233,10 @@ Every other field is optional:
   appended after the ones you name; unrecognized keys are ignored. Omit it to accept
   the suggested order.
 - `exclude` — drops backends from the dispatchable pool. Each entry names its AXIS
-  explicitly, so the same string means the same thing on every machine:
+  explicitly, so the same string means the same thing on every machine. The grammar
+  is defined in [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)
+  → *The exclusion grammar: axis-explicit*; what follows is how to use it, and that
+  spec wins on any disagreement:
   - `transport:openai-compatible/gpt-oss-120b` — that **model** of that transport,
     leaving its other models routable. This is the granularity to reach for: you are
     confirming model choices, so ruling out one model of a multi-model backend
