@@ -135,6 +135,14 @@ describe("smoke synthetic-result producer", () => {
       }
     }
 
-    expect(producers).toEqual(["audit/smoke-audit-flow.mjs"]);
+    assert.deepEqual(
+      producers,
+      ["audit/smoke-audit-flow.mjs"],
+      "a SECOND AuditResult construction site appeared in scripts/. That is the exact shape of the " +
+        "`reviewed_clean` miss: scripts/ is reached by no tsconfig, so a producer here is checked by " +
+        "nothing a contract sweep would find. Either fold it into buildSyntheticResults (which " +
+        "validates its own output), or make the new site validate through validateAuditResults too " +
+        "and add it to this list deliberately.",
+    );
   });
 });
