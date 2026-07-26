@@ -224,10 +224,11 @@ export interface ProxyDeclaration {
  *
  * The check belongs to the FIELD, not to one of its readers: it previously
  * guarded only the `openai-compatible` source branch while `readProxyDeclaration`
- * accepted any non-empty string, so the proxy lane and the expanded
- * `claude-worker` sources both inherited the misleading symptom the validated
- * branch exists to prevent. Returns a precise reason, or `null` when the name is
- * well formed. [[validator-guards-every-field-caller-reads]]
+ * and the `claude-worker` reach branch accepted any non-empty string, so both
+ * inherited the misleading symptom the validated branch exists to prevent.
+ * Returns a precise reason, or `null` when the name is well formed. Reach
+ * branches call {@link apiKeyEnvReachReason}, which pairs this with the
+ * env-is-set half. [[validator-guards-every-field-caller-reads]]
  */
 export function invalidEnvVarNameReason(field: string, value: string): string | null {
   const name = value.trim();
@@ -238,6 +239,28 @@ export function invalidEnvVarNameReason(field: string, value: string): string | 
       ? " — it looks like a NAME=value pair; declare only the NAME (the value belongs in the environment)."
       : " (expected letters, digits and underscores, not starting with a digit).")
   );
+}
+
+/**
+ * The whole `api_key_env` reach rule in ONE place: the declared string must be a
+ * well-formed variable NAME, and that variable must be set and non-empty in this
+ * process. Returns the refusal reason, or `null` when the field proves reach.
+ *
+ * Every reach branch that reads `api_key_env` calls this. Copying the two checks
+ * per transport is what let the `claude-worker` proxy lane keep reporting a
+ * `NAME=value` typo as an unset variable long after the `openai-compatible`
+ * branch was fixed. [[validator-guards-every-field-caller-reads]]
+ */
+function apiKeyEnvReachReason(
+  apiKeyEnv: string,
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const bad = invalidEnvVarNameReason("api_key_env", apiKeyEnv);
+  if (bad !== null) return bad;
+  if (!(env[apiKeyEnv.trim()] ?? "").trim()) {
+    return `env var "${apiKeyEnv.trim()}" is unset or empty in this process.`;
+  }
+  return null;
 }
 
 export interface ProxyDeclarationResult {
@@ -494,18 +517,8 @@ export function verifySourceReach(
             "openai-compatible source has no api_key_env (declare no_auth: true if the endpoint genuinely takes no credential).",
         };
       }
-      // Single-sourced with `readProxyDeclaration` — see
-      // {@link invalidEnvVarNameReason}. This branch used to own the only copy
-      // of the rule, which is how the other two readers inherited the symptom it
-      // exists to prevent.
-      const badName = invalidEnvVarNameReason("api_key_env", source.api_key_env);
-      if (badName !== null) return { verified: false, reason: badName };
-      if (!(env[source.api_key_env] ?? "").trim()) {
-        return {
-          verified: false,
-          reason: `env var "${source.api_key_env}" is unset or empty in this process.`,
-        };
-      }
+      const badKeyEnv = apiKeyEnvReachReason(source.api_key_env, env);
+      if (badKeyEnv !== null) return { verified: false, reason: badKeyEnv };
       return { verified: true };
     }
     case "codex":
@@ -569,14 +582,11 @@ export function verifySourceReach(
             "inline api_key is not ambient-verifiable (it proves possession, not reach) — declare api_key_env if the proxy requires one, otherwise omit.",
         };
       }
-      // When api_key_env is declared, the env var must be set (reach verification).
+      // When api_key_env is declared, it is held to the SAME bar as every other
+      // reader of the field — name shape included (see {@link apiKeyEnvReachReason}).
       if (source.api_key_env?.trim()) {
-        if (!(env[source.api_key_env] ?? "").trim()) {
-          return {
-            verified: false,
-            reason: `env var "${source.api_key_env}" is unset or empty in this process.`,
-          };
-        }
+        const badProxyKeyEnv = apiKeyEnvReachReason(source.api_key_env, env);
+        if (badProxyKeyEnv !== null) return { verified: false, reason: badProxyKeyEnv };
       }
       const probe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
       const endpoint = source.endpoint.trim().replace(/\/+$/u, "");

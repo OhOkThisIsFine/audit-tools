@@ -105,6 +105,25 @@ describe("verifySourceReach — api_key_env must be a NAME, not NAME=value", () 
   it("still accepts a well-formed NAME whose var is set", () => {
     expect(verifySourceReach(NIM, deps({ env: { NVIDIA_API_KEY: "sk" } })).verified).toBe(true);
   });
+
+  // The rule is a property of `api_key_env`, not of one transport's branch. The
+  // claude-worker proxy lane read the same field and inherited the symptom the
+  // openai-compatible branch was fixed for.
+  it("applies to the claude-worker proxy lane too", () => {
+    const result = verifySourceReach(
+      {
+        id: "cw",
+        transport: "claude-worker",
+        endpoint: "http://127.0.0.1:4000",
+        model: "glm-5.2",
+        api_key_env: "PROXY_KEY=sk-live",
+      },
+      deps({ env: {}, probeHttpReachable: () => true }),
+    );
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/NAME=value pair/u);
+    expect(result.reason).not.toMatch(/unset or empty/u);
+  });
 });
 
 describe("resolveSourceDeclarationPath", () => {
