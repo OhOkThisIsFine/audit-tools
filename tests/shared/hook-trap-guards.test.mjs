@@ -9,7 +9,7 @@
 // the same contract Claude Code uses. Exit 2 = blocked, exit 0 = allowed.
 import { describe, it, expect } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -17,13 +17,36 @@ const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SHELL_GUARD = join(REPO_ROOT, '.claude', 'hooks', 'shell-trap-guard.mjs');
 const INPUT_GUARD = join(REPO_ROOT, '.claude', 'hooks', 'tool-input-guard.mjs');
 
+/**
+ * Every guard bypass, scrubbed from the inherited environment before a hook runs.
+ *
+ * The harness spreads `process.env`, so a developer (or a wrapping command) with
+ * `AUDIT_TOOLS_ALLOW_MASKED_EXIT=1` exported silently disabled the very rule the
+ * test below asserts — the guard exited 0 and three `expect(code).toBe(2)` cases
+ * failed for a reason that had nothing to do with the guard. The dangerous
+ * direction is the other one: had those cases been written to expect 0, the suite
+ * would have gone GREEN while the rule was off.
+ *
+ * That is the same class as the ambient-`PATH` red in `durable-traps.md` — a
+ * fixture whose verdict depends on what happens to be set in the shell that ran
+ * it. So bypass state is EXPLICIT per test: scrubbed here, and re-added only by a
+ * case that is deliberately testing a bypass.
+ */
+const BYPASS_VARS = [
+  'AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE',
+  'AUDIT_TOOLS_ALLOW_BACKTICKS',
+  'AUDIT_TOOLS_ALLOW_MASKED_EXIT',
+];
+
 function runHook(hook, payload, { root = REPO_ROOT, env = {} } = {}) {
+  const scrubbed = { ...process.env };
+  for (const name of BYPASS_VARS) delete scrubbed[name];
   const r = spawnSyncHidden(process.execPath, [hook], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     timeout: 30_000,
     windowsHide: true,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
+    env: { ...scrubbed, CLAUDE_PROJECT_DIR: root, ...env },
   });
   return { code: r.status, stderr: r.stderr ?? '' };
 }
@@ -317,6 +340,68 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
     }
   });
 
+  // The denial text says "re-run with AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1".
+  // A caller reaches for an inline PREFIX, which sets the variable on the child
+  // the guard never sees — so the guard used to refuse anyway and its own
+  // documented escape did not work. A guard whose stated escape is a lie trains
+  // the reader to believe the guard is broken.
+  it('honors the escape given as an INLINE PREFIX, the form the message implies', () => {
+    const { dir } = makeRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const r = runHook(
+        SHELL_GUARD,
+        bash('AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git checkout -- a.txt'),
+        { root: dir },
+      );
+      expect(r.code, r.stderr).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('honors the escape given via export in an earlier statement', () => {
+    const { dir } = makeRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const r = runHook(
+        SHELL_GUARD,
+        bash('export AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 && git checkout -- a.txt'),
+        { root: dir },
+      );
+      expect(r.code, r.stderr).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a command that merely MENTIONS the bypass does not enable it', () => {
+    // Otherwise documenting the escape would disable the guard. The name is
+    // preceded by a quote here, not by a statement boundary or `export`.
+    const { dir } = makeRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+      const r = runHook(
+        SHELL_GUARD,
+        bash('echo "set AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 to override" && git checkout -- a.txt'),
+        { root: dir },
+      );
+      expect(r.code).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the inline-prefix escape works for the OTHER bypasses too — the class, not the instance', () => {
+    const ticks = runHook(SHELL_GUARD, bash('AUDIT_TOOLS_ALLOW_BACKTICKS=1 echo `date`'));
+    expect(ticks.code, ticks.stderr).toBe(0);
+    const masked = runHook(
+      SHELL_GUARD,
+      bash('AUDIT_TOOLS_ALLOW_MASKED_EXIT=1 npm test | tail -5'),
+    );
+    expect(masked.code, masked.stderr).toBe(0);
+  });
+
   it('never fires on plain branch switching', () => {
     const { dir } = makeRepo();
     try {
@@ -454,5 +539,31 @@ describe('guards fail open', () => {
     for (const p of payloads) {
       expect(runHook(ASYNC_TYPECHECK, p).code).toBe(0);
     }
+  });
+});
+
+describe('the harness itself cannot be disabled by the ambient shell', () => {
+  it('scrubs every bypass var, so an exported override cannot green a rule silently', () => {
+    // Asserted by RUNNING with the bypass exported into this process: the guard
+    // must still block, because the harness removed it. Without the scrub the
+    // three masked-exit cases above fail (observed) — and a case written to
+    // expect 0 would have passed with the rule switched off.
+    const prior = process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT;
+    process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT = '1';
+    try {
+      const r = runHook(SHELL_GUARD, bash('npm test 2>&1 | tail -30'));
+      expect(r.code, r.stderr).toBe(2);
+      expect(r.stderr).toMatch(/masked suite exit code/);
+    } finally {
+      if (prior === undefined) delete process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT;
+      else process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT = prior;
+    }
+  });
+
+  it('lists every bypass the guard actually reads, so a new one cannot be forgotten', () => {
+    const guard = readFileSync(SHELL_GUARD, 'utf8');
+    const used = [...guard.matchAll(/bypassEnabled\('([A-Z_]+)'\)/g)].map((m) => m[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const name of new Set(used)) expect(BYPASS_VARS).toContain(name);
   });
 });

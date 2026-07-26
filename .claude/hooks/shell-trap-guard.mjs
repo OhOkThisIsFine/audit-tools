@@ -62,6 +62,32 @@ const isBash = toolName === 'Bash';
 // command" is a question rules ask.
 const subCmds = splitShellStatements(cmd);
 
+/**
+ * Is a named bypass enabled for THIS call?
+ *
+ * Every bypass used to be read from `process.env` alone — which is the HOOK's
+ * environment, not the command's. So the escape each denial text advertises
+ * (`re-run with AUDIT_TOOLS_ALLOW_X=1`) did not work in the form a caller
+ * actually reaches for: an inline prefix, `AUDIT_TOOLS_ALLOW_X=1 git restore …`,
+ * sets the variable for the child process the guard never sees, so the refusal
+ * simply repeated. A guard whose stated escape does not work trains the reader to
+ * believe the guard is broken, which is worse than having no escape documented.
+ *
+ * So a bypass is honored when the hook's own env carries it OR the command sets
+ * it, as a statement-leading prefix or via `export`. Anchoring to a statement
+ * boundary (or `export`) is what keeps a command that merely MENTIONS the
+ * variable — `echo "set AUDIT_TOOLS_ALLOW_BACKTICKS=1"` — from enabling it, since
+ * there the name is preceded by a quote rather than a separator.
+ *
+ * Fixes the CLASS: all three bypasses route through here, so the next one added
+ * cannot reintroduce the defect. [[fix-the-defect-class-not-the-named-instance]]
+ */
+function bypassEnabled(name) {
+  if (process.env[name] === '1') return true;
+  const assign = String.raw`${name}=(?:'1'|"1"|1)(?=\s|$|;|&)`;
+  return new RegExp(String.raw`(?:^|[;&|]\s*|\bexport\s+)${assign}`).test(cmd);
+}
+
 const denials = [];
 const advisories = [];
 
@@ -141,7 +167,7 @@ for (const sub of subCmds) {
   // or a quoted path never matches the pathspec and the rule silently misses.
   const targets = restoreTargets(sub)?.map((t) => t.replace(/^['"]|['"]$/g, ''));
   if (!targets || targets.length === 0) continue;
-  if (process.env.AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE === '1') continue;
+  if (bypassEnabled('AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE')) continue;
   const st = git(['status', '--porcelain', '--', ...targets]);
   if (!st.ok) continue; // git fault → fail open
   // Porcelain "XY path": Y is the WORKTREE column. A non-space Y means the file
@@ -245,7 +271,7 @@ if (isBash) {
   // real substitution, -F <file> for prose), so there is nothing this refuses
   // that has no correct rewrite ([[an-advisory-that-fires-and-is-read-past]]).
   const liveTicks = findLiveBackticks(cmd);
-  if (liveTicks.length > 0 && process.env.AUDIT_TOOLS_ALLOW_BACKTICKS !== '1') {
+  if (liveTicks.length > 0 && !bypassEnabled('AUDIT_TOOLS_ALLOW_BACKTICKS')) {
     const inProse = liveTicks.some((t) => t.context === 'double');
     denials.push(
       'live backtick in a Bash-tool command — a backtick COMMAND-SUBSTITUTES everywhere except inside ' +
@@ -287,7 +313,7 @@ for (const sub of subCmds) {
   const stripped = stripQuoted(sub);
   if (!SUITE_CMD.test(stripped) || !FILTER_PIPE.test(stripped)) continue;
   if (PIPE_STATUS_PRESERVED) continue;
-  if (process.env.AUDIT_TOOLS_ALLOW_MASKED_EXIT === '1') continue;
+  if (bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT')) continue;
   denials.push(
     'masked suite exit code — a test/verify command piped into a filter reports the FILTER\'s status, ' +
       'so a RED suite comes back EXIT 0. `tail` also buffers to EOF, so the captured text holds only the ' +

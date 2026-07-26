@@ -447,13 +447,12 @@
   `}`, but ONLY after `finish_reason === "stop"`, so a truncated body cannot be laundered into a
   valid-looking record. The general property is unbuilt: schema non-adherence is a per-alias trait the
   roster does not record, so every new caller rediscovers it.
-  (3) **tool-should-decide (low, guard defect):** `shell-trap-guard.mjs`'s destructive-restore rule names
-  `AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1` as its bypass, but supplying it as an inline env PREFIX
-  (`AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git restore …`) is still refused — the guard reads the
-  hook's own env, not the command string it is inspecting. The documented escape therefore does not work
-  in the form a user would naturally reach for; the working route was
-  `git show HEAD:<path> > <path>`. Property: a guard's stated bypass is honored in the form it states,
-  or it states the form that works.
+  (3) **tool-should-decide (guard defect) — FIXED, mechanism in the code + `hook-trap-guards.test.mjs`.**
+  A guard's advertised escape must work in the form it advertises: all three `shell-trap-guard` bypasses
+  read the HOOK's env, so an inline prefix never reached them. Now one `bypassEnabled` helper. The fix's
+  live check then found the sharper half — the guard's own harness inherited `process.env`, so a bypass
+  exported in the shell disabled the rule under test; the harness scrubs them now. Same class as the
+  ambient-`PATH` red in [`durable-traps.md`](durable-traps.md).
   (4) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
   (`api_key_env` type narrowing, the leaked tool-call XML, the doc-path typo) — the standing
   verify-against-HEAD rule caught them, but only after each was opened. The triage lane cannot check
