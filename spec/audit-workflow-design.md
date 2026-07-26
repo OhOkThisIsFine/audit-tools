@@ -19,6 +19,9 @@ provider_confirmation       [user gate]
   → batch_deterministic     [graph_enrichment → design_assessment
                              → structure_decomposition]
   → intent_checkpoint       [user gate]
+  → intent_equivalence      [host_delegation for a prose-only delta; every other arm
+                             (baseline stamp, gate-version stale, structured delta)
+                             resolves deterministically — DD-9]
   → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling]
   → charter_delta           [host_delegation, independent delta-miner over the Phase-C.1 charters]
   → design_review × 2       [parallel host_delegation: contract + conceptual]

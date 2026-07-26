@@ -1,7 +1,9 @@
 # Dispatch: admission control over a shared quota ledger
 
-This is the design of record for the dispatch/quota model. It describes the
-contract for how dispatch admits work against a shared quota ledger.
+This is the design of record for **admission control** — the contract for how dispatch admits work
+against a shared quota ledger. It is deliberately not the design of record for the whole dispatch/quota
+model: *who tracks which quota, and why* is owned by
+[`docs/quota-dispatch-design.md`](../../docs/quota-dispatch-design.md), which this document consumes.
 
 ## Why this exists
 

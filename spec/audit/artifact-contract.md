@@ -52,6 +52,7 @@ the staleness DAG (see dependency-map.md).
 | `surface_manifest.json` | JSON | Public API surface and exports. |
 | `critical_flows.json` | JSON | Identified critical execution/data flows. |
 | `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. |
+| `intent-equivalence-verdict.json` | JSON | Durable host input: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. |
 | `flow_coverage.json` | JSON | Coverage of critical flows by ingested results. |
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |

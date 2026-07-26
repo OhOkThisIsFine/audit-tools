@@ -69,7 +69,9 @@ LLM responsibilities:
   chain (the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`), each a bounded, gated,
   attributable step that runs only when its obligation is unsatisfied — the deterministic frontier
   folds silently, these break the fold for host input or LLM judgment. In obligation order they are:
-  interactive **provider confirmation** and **intent checkpoint** (host-interactive gates);
+  interactive **provider confirmation** and **intent checkpoint** (host-interactive gates); the
+  **intent-equivalence** gate (DD-9 — does a re-stated intent still mean what the confirmed
+  checkpoint meant; host-delegated only for a prose-only delta, deterministic on every other arm);
   **charter extraction** and **charter delta** (subsystem-charter authoring/diff);
   **contract** and **conceptual design review**; **charter clarification**; the **systemic
   (second-order adversarial) challenge**; and, after synthesis, the optional additive

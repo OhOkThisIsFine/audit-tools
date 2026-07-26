@@ -83,6 +83,12 @@ The orchestrator may mark completion only when:
 - no required requeue remains
 - no mandatory runtime validation obligation is unresolved in a way that blocks completion
 
+Completion is **not** strictly all-or-nothing: there is one sanctioned partial-completion valve, for a
+run that cannot make progress after bounded retries. It is defined in
+[`audit-goals.md`](audit-goals.md) → *Completion* and implemented by `recordPartialCompletionTerminal`
+(`src/audit/cli/dispatch/pausePersist.ts`). A partial completion is recorded as such, never reported as
+a clean finish.
+
 ## State machine
 
 The orchestration above is expressed as a small state machine (following

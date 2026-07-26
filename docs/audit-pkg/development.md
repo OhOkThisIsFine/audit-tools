@@ -38,16 +38,13 @@ workflow semantics.
 
 ## Architecture
 
-The system separates deterministic extraction from bounded LLM judgment:
+The system separates deterministic extraction from bounded LLM judgment: a provider-confirmation gate,
+intake, the analysis artifacts, task planning, review, ingestion, and synthesis into `audit-report.md`.
 
-1. a one-time provider-confirmation gate (discover, cost-order, and confirm the provider pool)
-2. intake and file disposition
-3. surface, flow, graph, unit, risk, and coverage artifacts
-4. audit task planning
-5. review packet construction
-6. semantic review through the active conversation or fallback provider bridge
-7. result ingestion, selective deepening, runtime validation, and synthesis
-8. final `audit-report.md`
+**The ordering has one home** — the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`, walked by
+`decideNextStep`. `README.md` carries the conceptual grouping with the disclaimer that `PRIORITY` is
+authoritative; read the array for the real sequence. Copies of it have drifted before, which is why
+neither this file nor any other keeps a second one.
 
 Portability rules:
 
