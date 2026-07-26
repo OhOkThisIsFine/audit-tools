@@ -434,6 +434,32 @@
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
 
+- **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium,
+  the lap's biggest cost):** the offload triage was first run on `glm-5.2` — rank 1, a heavy reasoning
+  model — for a mechanical classification, at ~4 min/entry (~7h for the file) before the alias was
+  changed to the flash tier, which answered in seconds. Nothing in the lane's interface expresses "this
+  is mechanical, pick down the roster", so alias choice is host discretion on every call. Property: an
+  offload caller declares the WORK CLASS and the lane picks the alias, rather than the caller guessing
+  rank. [[offload-lane-failures-are-usually-the-caller]]
+  (2) **tool-should-decide (medium):** `deepseek-v4-flash` prepends prose before the JSON despite
+  `response_format: json_schema` — 11 of 14 calls unparseable, which reads exactly like model incapacity
+  and is not. `scripts/shared/triage-backlog.mjs` now salvages the object between the first `{` and last
+  `}`, but ONLY after `finish_reason === "stop"`, so a truncated body cannot be laundered into a
+  valid-looking record. The general property is unbuilt: schema non-adherence is a per-alias trait the
+  roster does not record, so every new caller rediscovers it.
+  (3) **tool-should-decide (low, guard defect):** `shell-trap-guard.mjs`'s destructive-restore rule names
+  `AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1` as its bypass, but supplying it as an inline env PREFIX
+  (`AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE=1 git restore …`) is still refused — the guard reads the
+  hook's own env, not the command string it is inspecting. The documented escape therefore does not work
+  in the form a user would naturally reach for; the working route was
+  `git show HEAD:<path> > <path>`. Property: a guard's stated bypass is honored in the form it states,
+  or it states the form that works.
+  (4) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
+  (`api_key_env` type narrowing, the leaked tool-call XML, the doc-path typo) — the standing
+  verify-against-HEAD rule caught them, but only after each was opened. The triage lane cannot check
+  HEAD, so its `actionable_now` verdict is a routing signal and never a work order.
+  [[backlog-prose-decays-verify-against-head]]
+
 - **Friction walk (backlog clear-out lap, 2026-07-24):** (1) **ambiguous-direction (medium, two
   instances, same class):** two entries had paraphrased their own incident until the MECHANISM
   inverted, and each would have produced a wrong fix if worked from the entry alone — FLW-COR-003

@@ -3,7 +3,8 @@
 > Mechanical classification of every open entry in `docs/backlog/`, one entry per offload call
 > (NIM `gpt-oss-120b`, `glm-5.2` for the retries). **Advisory, not a verdict** — each row is a routing
 > signal to be verified against HEAD before it is worked ([[backlog-prose-decays-verify-against-head]]).
-> Regenerate: the script is scratch-local; the method is one entry = one call with a task-fitted schema.
+> Regenerate: `node scripts/shared/triage-backlog.mjs` (one entry = one call, task-fitted schema;
+> alias choice is the whole cost — see the script's header).
 
 | verdict | count |
 |---|---|
