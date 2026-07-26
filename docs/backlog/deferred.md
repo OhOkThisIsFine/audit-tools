@@ -50,9 +50,9 @@
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned
   subtasks. Folds into the A7 checklist.
 
-- **Prose-heavy staleness narrowing — the bounded semantic gate SHIPPED for the artifact that drove
-  it; what stays deferred is the cascade-cost measurement and the remaining prose artifacts
-  (2026-07-24, low).** Content-hash staleness still means a cosmetic reword can cascade an expensive
+- **Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts
+  stay deferred (2026-07-24, low).** The bounded semantic gate SHIPPED for the artifact that drove it.
+  Content-hash staleness still means a cosmetic reword can cascade an expensive
   re-emit, but the class is far narrower at HEAD than "nothing has been built": provenance fields are
   stripped from the canonical hash per artifact and the narrative arrays are canonicalized
   (`NON_SEMANTIC_FIELDS_BY_ARTIFACT` / `canonicalizeNarrativeArrays`, `artifactFreshness.ts:23`);

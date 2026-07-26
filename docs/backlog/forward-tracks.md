@@ -307,4 +307,4 @@ followed" is otherwise indistinguishable from a bug.
   property FLW-COR-003 established (`src/audit/cli/dispatch.ts:129-136`). Lease SIZING is the whole fix; claim TIMING is
   not in play. Do not re-raise it.
 
-- **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).
+- **Packet `task_ids`/`lens` attribution is missing from the token-usage ledger** (`DispatchPlanEntry` carries neither). Non-blocking follow-up to the context-efficiency access-memory track, whose items 1-3 shipped.

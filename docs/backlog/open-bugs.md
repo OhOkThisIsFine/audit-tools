@@ -44,8 +44,8 @@
   so a named-key preference needs a design-review-specific accessor, not a change to the shared unwrap.
   Revisit if a live NIM design-review run shows chatty-lane quarantines.
 
-- **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
-  (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
+- **CLI-worker write-scope — four accepted residuals, revisit on live evidence only (2026-07-22,
+  low).** The review-snapshot worktree SHIPPED; the enforcement itself is closed and
   single-homed: mechanism + rationale live in `src/shared/providers/reviewSnapshot.ts`'s docblock and
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #8, contract-tested
   in `tests/shared/review-snapshot.test.mjs`. What stays open: (a) git REFS are shared through the
@@ -65,8 +65,8 @@
   per dispatching drive (memoized per dispatcher, removed in the drive's `finally`) — reuse keyed on
   HEAD sha if the cost ever bites on a large repo.
 
-- **FLW-COR-003 claim-release livelock — SHIPPED except one low residual (2026-07-22; downgraded from
-  HIGH after a 2026-07-24 code trace).** The in-process rolling driver sweeps its claims at drive end
+- **FLW-COR-003 claim-release livelock — one low residual (2026-07-22; downgraded from HIGH after a
+  2026-07-24 code trace).** The fix SHIPPED: the in-process rolling driver sweeps its claims at drive end
   and on the empty-plan round (`releaseOwnedTaskClaims`, commit `681df1f5`).
   ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do NOT
   implement it.** The shared claim site already sweeps the over-claim (`src/audit/cli/dispatch.ts:481-492`), leaving
@@ -118,8 +118,8 @@
   (3) **Widen the deepening net** to low-priority zero-finding results — OPEN, wants (2)'s calibration
   for the threshold. Record:
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
-- **RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, accepted —
-  revisit on live evidence).** The pair itself SHIPPED (intent-equivalence gate wired as the
+- **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
+  accepted).** The pair itself SHIPPED (intent-equivalence gate wired as the
   `intent_equivalence_current` obligation — `nextStep.ts` PRIORITY slot between
   `intent_checkpoint_current` and `charter_extraction_current` — with
   `artifact_metadata.intent_baseline` as the intent entry's revision authority; per-edge dependency
@@ -351,8 +351,9 @@
   3.5h past TTL; an operator `top_k` change had zero effect until `populateProxyCatalog` was
   hand-imported from dist with `force:true`).
 
-- **Ranked-pool composition — live-wave watch + the absolute-floor question (mechanism shipped R3-3
-  `c0cf7e9b` 2026-07-21; residue only).** ⬇ **Blocked on a real wave.** (a) The composition prediction
+- **Ranked-pool composition — live-wave watch + the absolute-floor question.** ⬇ **Blocked on a real
+  wave.** The mechanism shipped R3-3 (`c0cf7e9b`, 2026-07-21); what follows is residue.
+  (a) The composition prediction
   that started this — free/unranked pools preferentially drawing `deep` packets — has never been
   observed live: watch that every pool arrives ranked at Gate-0, that `deep` routes by band, and that
   the autonomous ranker step round-trips in a real headless lap (emit branch
@@ -669,7 +670,8 @@
 
 - **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 
-- **⬇ LIVE-run watch only — unified routing A–G (shipped 2026-07-17, 6 attested loop-core commits).**
+- **⬇ LIVE-run watch only — unified routing A–G.** The routing work shipped 2026-07-17 across 6
+  attested loop-core commits; only the live evidence is outstanding.
   On a fresh conversation-first self-audit, watch: small pools take fitting packets; an oversized packet
   SKIPS (no 413); a 429 on pool A leaves pool B dispatchable; a zero-grant renders its honest cause.
   Mechanism and the refuted "HOST-ONLY" premise live in
@@ -694,7 +696,7 @@
 
 - **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](../reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts:123-136`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `src/shared/dispatch/coordinator.ts:242` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`src/shared/dispatch/rollingDispatch.ts:1773` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts:226-236`; the two-mode split is documented at `admissionLoop.ts:887-896`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts:2309`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
 
-- **Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open).** Mechanism, the
+- **Accept-latch — two low residuals stay open.** The family SHIPPED 2026-07-23. Mechanism, the
   REFUTED "rollback to session-recorded base" premise, and the disposition of a/c/d live in
   [`accept-latch-family-mechanisms-2026-07-23.md`](../reviews/accept-latch-family-mechanisms-2026-07-23.md).
   Open: (1) a rolling-dispatched node whose accept sidecar is ABSENT at merge (runId-mismatch chaos) is
@@ -702,7 +704,7 @@
   independent of sidecar presence; (2) the sidecar's monotonic `merged:true` guard still blanket-preserves
   stale records — the ancestry probe is the corrective, so revisit only if a case escapes it.
 
-- **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
+- **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
 - **Friction walk (contract-sweep producer lap, 2026-07-26):** (1) **tool-should-decide (medium):**
   `scripts/` is a whole tracked tree covered by NO tsconfig — `tsconfig.json` includes `["src"]`,
@@ -898,8 +900,8 @@
   (`:183-189`) writes the findings file and asserts nothing, so a future rewrite of that branch off the
   shared helper would not be caught. Extend the parallel-branch assertion to the solo step.
 
-- **Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the
-  code site).** The scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
+- **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
+  site).** Shipped 2026-07-10; the scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
   scope rule (one batched `git ls-files -z`; still-included files absent from the index → `excluded/untracked`,
   guards mirror the gitignore rule) so untracked litter can never enter the auditable scope, plus a
   single-sourced `renderHostScratchNote`/`hostScratchDir` prompt line directing host scratch into
@@ -1055,8 +1057,9 @@
   review ran — require a non-fallback finding set, or block synthesis on an auto-completed-empty pass.
   Lifted from `spec/contract-authoring-determinism-design.md`; its S8 section states the design.
 
-- **ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25).**
-  Obligation ids now mint through `obligationId`/`moduleSlug` in
+- **`goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD
+  2026-07-25).** The rest of ID minting is routed through the one registry:
+  obligation ids now mint through `obligationId`/`moduleSlug` in
   `src/remediate/contractPipeline/idRegistry.ts` (the encoder and its phase/write-scope decoders were two
   identical implementations plus a "MUST stay in lockstep" comment), and uniqueness is the shared
   `mintUniqueId`. What is left: `goal_id` is not minted at all — it is read verbatim off the LLM envelope
