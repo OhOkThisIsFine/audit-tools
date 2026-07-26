@@ -8,15 +8,18 @@
 
 
 - **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
-  (2026-07-25, medium, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep
-  globbed `tests/**` and went green four ways locally; two synthetic-result generators lived in
-  `scripts/audit/smoke-{packaged,linked}-audit-code.mjs`, so `verify:checks` — which the pre-commit hook
-  does NOT run — failed release CI ([[lap-green-must-match-ci-evidence]]). **Narrowed 2026-07-25:** the
-  two generators are now ONE, in `scripts/audit/smoke-audit-flow.mjs`, whose docblock states the rule at
-  the construction site. What stays open is the general property: the files a contract sweep must cover
-  are derivable from the contract (every construction site of the type), not from where tests live — and
-  nothing enforces that. Until then run `verify:checks`, not `check`, before pushing a validated-shape
-  change.
+  (2026-07-25, low, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep globbed
+  `tests/**`; the synthetic-result generators in `scripts/` are reached only by `verify:checks`, which
+  the pre-commit hook does NOT run, so it failed release CI ([[lap-green-must-match-ci-evidence]]).
+  **Narrowed 2026-07-26 (AuditResult is CLOSED):** `scripts/` is covered by neither tsconfig, so the
+  producer could not fail on a contract it never consulted. `buildSyntheticResults` now validates its own
+  output through `validateAuditResults` and throws on any error, and
+  `tests/audit/smoke-producer-contract.test.mjs` gates both that refusal and the single-construction-site
+  claim its docblock used to merely assert. What stays open is the GENERALIZATION to the other validated
+  contract types: coverage should be derivable from the contract (every construction site of the type),
+  not from where tests live. Not yet designed — the doc-manifest data+refusal shape (`2adc716c`) is the
+  precedent to follow, and a typecheck gate is NOT (a cast makes it inert,
+  [[test-tree-typecheck-gate-and-its-cost]]).
 
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said

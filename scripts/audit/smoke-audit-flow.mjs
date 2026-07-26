@@ -8,11 +8,15 @@
 // present_report friction gate).
 //
 // ⚠ `buildSyntheticResults` below is the ONLY AuditResult construction site in
-// `scripts/`. A change to the AuditResult contract must sweep every construction
-// site of the type across the whole repo, not just `tests/**` — the
-// `reviewed_clean` affirmation was added with a `tests/**` sweep, went green four
-// ways locally, and failed release CI here. Keeping this single-homed is what
-// makes that sweep one edit.
+// `scripts/`, and it VALIDATES its own output against the contract's own
+// validator before returning. That is not belt-and-braces — `scripts/` is
+// covered by neither `tsconfig.json` (`include: ["src"]`) nor
+// `tsconfig.test.json` (`include: ["src","tests"]`, `checkJs: false`), so no
+// typechecker sees this file. The `reviewed_clean` affirmation was added with a
+// `tests/**` fixture sweep, went green four ways locally, and failed release CI
+// *here*, because a hand-built contract payload cannot fail on a contract it
+// never consults. Validating at the construction site makes the next contract
+// change break cheaply, at `npm test`, instead of in a packaged smoke in CI.
 
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
@@ -39,10 +43,28 @@ async function countLines(root, path) {
     : content.split(/\r?\n/).length;
 }
 
+// The contract's own validator, loaded from the built tree. Imported lazily so
+// this module still loads before a build; the failure names the missing build
+// rather than surfacing as an opaque resolution error at import time.
+async function loadAuditResultValidator() {
+  try {
+    const mod = await import("../../dist/audit/validation/auditResults.js");
+    return mod.validateAuditResults;
+  } catch (cause) {
+    throw new Error(
+      "smoke flow: cannot load the AuditResult validator from dist/ — run `npm run build` first. " +
+        "The synthetic-result producer validates its own output against the contract and cannot " +
+        "be run unvalidated.",
+      { cause },
+    );
+  }
+}
+
 // Synthesize one AuditResult per assigned task. See the contract note at the top
 // of this file before changing the shape.
 export async function buildSyntheticResults(tasks, root, smokeLabel) {
-  return Promise.all(tasks.map(async (task) => ({
+  const validateAuditResults = await loadAuditResultValidator();
+  const results = await Promise.all(tasks.map(async (task) => ({
     task_id: task.task_id,
     unit_id: task.unit_id,
     pass_id: task.pass_id,
@@ -60,6 +82,23 @@ export async function buildSyntheticResults(tasks, root, smokeLabel) {
     notes: [`Synthetic completion result for ${smokeLabel} smoke coverage.`],
     requires_followup: false,
   })));
+
+  // Refuse to hand back a payload the contract rejects. Warnings are left to
+  // the ingest path that owns their policy (e.g. the deliberately-downgraded
+  // total_lines mismatch); only errors are a broken producer.
+  const errors = validateAuditResults(results, tasks).filter(
+    (issue) => issue.severity === "error",
+  );
+  if (errors.length > 0) {
+    throw new Error(
+      `smoke flow: the synthetic AuditResult payload is contract-invalid — ` +
+        `${errors.length} error(s). This producer is an AuditResult construction site and must be ` +
+        `swept alongside the contract:\n` +
+        errors.map((e) => `  - [${e.task_id}] ${e.field}: ${e.message}`).join("\n"),
+    );
+  }
+
+  return results;
 }
 
 // Drive `next-step` past the host pause steps that precede review dispatch by
