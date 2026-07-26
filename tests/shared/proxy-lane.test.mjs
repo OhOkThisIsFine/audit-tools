@@ -427,14 +427,8 @@ describe("verifySourceReach — claude-worker", () => {
     ).toContain("model");
   });
 
-  it("refuses an inline api_key — possession is not reach", () => {
-    const result = verifySourceReach(
-      { transport: "claude-worker", endpoint: PROXY, model: "m", api_key: "k" },
-      deps({ probe: () => true }),
-    );
-    expect(result.verified).toBe(false);
-    expect(result.reason).toContain("api_key");
-  });
+  // The inline-`api_key` refusal that stood here is gone with the field: it is RETIRED
+  // and refused at validation, so it cannot reach the proxy branch either.
 
   it("api_key_env must be set when declared", () => {
     const source = { transport: "claude-worker", endpoint: PROXY, model: "m", api_key_env: "UNSET_VAR" };

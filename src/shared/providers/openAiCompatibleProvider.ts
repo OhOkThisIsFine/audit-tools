@@ -178,20 +178,18 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     // into an unauthenticated request. Mirrors `verifySourceReach`, which proves
     // such a lane's reach by liveness probe instead of by env var.
     const noAuth = this.config.no_auth === true;
-    const apiKey =
-      this.config.api_key?.trim() ||
-      (this.config.api_key_env
-        ? (this.env[this.config.api_key_env] ?? "").trim()
-        : "");
+    const apiKey = this.config.api_key_env
+      ? (this.env[this.config.api_key_env] ?? "").trim()
+      : "";
 
     if (!baseUrl) return fail("openai-compatible provider requires openai_compatible.base_url.");
     if (!model) return fail("openai-compatible provider requires openai_compatible.model.");
     // Refused, not silently resolved — the reach gate applies this same rule, and
     // a launch that quietly picked one side would let the two disagree about what
     // a keyless lane is.
-    if (noAuth && (this.config.api_key_env?.trim() || this.config.api_key?.trim())) {
+    if (noAuth && this.config.api_key_env?.trim()) {
       return fail(
-        "openai-compatible provider declares BOTH no_auth and an api_key/api_key_env — pick one (no_auth means the endpoint takes no credential).",
+        "openai-compatible provider declares BOTH no_auth and an api_key_env — pick one (no_auth means the endpoint takes no credential).",
       );
     }
     if (!noAuth && !apiKey) {

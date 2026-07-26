@@ -220,10 +220,12 @@ export interface OpenAiCompatibleConfig {
   base_url?: string;
   /** Model id (e.g. `openai/gpt-oss-120b`). Never defaulted — no hardcoded model identity. */
   model?: string;
-  /** Name of the env var holding the API key (e.g. `NVIDIA_API_KEY`). Preferred over `api_key`. */
+  /**
+   * Name of the env var holding the API key (e.g. `NVIDIA_API_KEY`) — the ONLY way to
+   * declare a credential. A key is named, never pasted: identity compares references,
+   * so one key declared two ways would meter as two accounts.
+   */
   api_key_env?: string;
-  /** Inline API key. Discouraged (prefer `api_key_env` so the key never lands in config files). */
-  api_key?: string;
   /**
    * This endpoint takes NO credential — the launch sends no `Authorization`
    * header instead of refusing for a missing key. The launch-side half of
@@ -231,8 +233,8 @@ export interface OpenAiCompatibleConfig {
    * in both directions), so a lane that clears the keyless REACH probe can
    * actually run: without it an honestly-declared keyless lane joined the pool
    * verified and then failed every packet on a key it was never meant to have.
-   * Declaring it together with `api_key` / `api_key_env` is contradictory and is
-   * refused at launch, matching `verifySourceReach`.
+   * Declaring it together with `api_key_env` is contradictory and is refused at
+   * launch, matching `verifySourceReach`.
    */
   no_auth?: boolean;
   /** Extra HTTP headers merged into the request. */
@@ -470,10 +472,12 @@ export interface DispatchableSource {
   endpoint?: string;
   /** Model id, where the backend takes one. Never defaulted (no hardcoded model identity). */
   model?: string;
-  /** Env var holding the API key (API sources). Preferred over `api_key`. */
+  /**
+   * Env var holding the API key (API sources) — the ONLY way to declare a credential.
+   * An inline key is refused at validation: possession is not reach, and one key
+   * declared two ways would split into two metered accounts.
+   */
   api_key_env?: string;
-  /** Inline API key (discouraged — prefer `api_key_env`). */
-  api_key?: string;
   /**
    * Operator-declared: this endpoint takes NO credential (an unauthenticated local
    * proxy — LiteLLM with no master key, LM Studio, a local vLLM). Reach is then

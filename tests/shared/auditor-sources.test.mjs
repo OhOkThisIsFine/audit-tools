@@ -185,12 +185,10 @@ describe("verifySourceReach — declared ∩ ambient", () => {
     expect(result.verified).toBe(false);
   });
 
-  it("refuses an inline api_key — possession is not reach", () => {
-    const inline = { id: "zen", transport: "openai-compatible", endpoint: "https://x/v1", model: "m", api_key: "public" };
-    const result = verifySourceReach(inline, deps({}));
-    expect(result.verified).toBe(false);
-    expect(result.reason).toContain("api_key_env");
-  });
+  // No inline-`api_key` refusal is pinned here any more: the field is RETIRED, so a
+  // pasted key is refused at validation before it can reach this gate. The refusal
+  // lives in tests/audit/validation-remediation.test.mjs ("C1: … sources[] transport
+  // + quota"), which pins both declaration shapes.
 
   it("drops openai-compatible with no endpoint or no model", () => {
     expect(verifySourceReach({ ...NIM, endpoint: undefined }, deps({ env: { NVIDIA_API_KEY: "k" } })).verified).toBe(false);

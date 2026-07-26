@@ -905,6 +905,24 @@ test("C1: validateSessionConfig validates sources[] transport + quota", () => {
   // ...and it does NOT also emit the generic must-be-one-of noise for the same source.
   expect(legacyShape.some((i) => /must be one of/i.test(i.message))).toBeFalsy();
 
+  // Inline `api_key` is RETIRED — a credential is named, never pasted. Deleting the
+  // field without refusing it would be silent: unknown keys pass this validator
+  // untouched, so a pasted key would be dropped and the source would launch keyless
+  // while the operator believed it was authenticated. Both declaration shapes refuse.
+  const inlineSourceKey = validateSessionConfig({
+    sources: [{ transport: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key: "sk-secret" }],
+  });
+  expect(inlineSourceKey.some(
+      (i) => i.path === "sources[0].api_key" && /api_key_env/i.test(i.message),
+    )).toBeTruthy();
+
+  const inlineBlockKey = validateSessionConfig({
+    openai_compatible: { base_url: "http://nim/v1", model: "m", api_key: "sk-secret" },
+  });
+  expect(inlineBlockKey.some(
+      (i) => i.path === "openai_compatible.api_key" && /api_key_env/i.test(i.message),
+    )).toBeTruthy();
+
   // A bad per-source quota is caught at the source's path.
   const badQuota = validateSessionConfig({
     sources: [{ transport: "openai-compatible", quota: { output_tokens: -1 } }],

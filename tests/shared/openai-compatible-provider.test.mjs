@@ -73,10 +73,16 @@ function fakeFetchReturning(content, { ok = true, status = 200 } = {}) {
   return fn;
 }
 
+// A credential is NAMED, never pasted (inline `api_key` is retired), so the fixture
+// declares an env var and this file populates it. Call sites below omit `env`, which
+// resolves against `process.env` — the same path production takes.
+const KEY_ENV = "AUDIT_TOOLS_TEST_API_KEY";
+process.env[KEY_ENV] = "k";
+
 const minimalConfig = {
   base_url: "https://nim.test/v1",
   model: "openai/gpt-oss-120b",
-  api_key: "k",
+  api_key_env: KEY_ENV,
 };
 
 test("parseJsonLoose parses direct, fenced, and prose-wrapped JSON", () => {
@@ -157,7 +163,7 @@ test("launch requires both base_url and model — and the rejection has NO side 
   const { input } = makeCtx();
   const noBaseFetch = fakeFetchReturning("{}");
   const noBase = new OpenAiCompatibleProvider(
-    { model: "m", api_key: "k" },
+    { model: "m", api_key_env: KEY_ENV },
     { fetchFn: noBaseFetch },
   );
   expect((await noBase.launch(input)).accepted).toBe(false);
@@ -166,7 +172,7 @@ test("launch requires both base_url and model — and the rejection has NO side 
 
   const noModelFetch = fakeFetchReturning("{}");
   const noModel = new OpenAiCompatibleProvider(
-    { base_url: "https://x/v1", api_key: "k" },
+    { base_url: "https://x/v1", api_key_env: KEY_ENV },
     { fetchFn: noModelFetch },
   );
   expect((await noModel.launch(input)).accepted).toBe(false);

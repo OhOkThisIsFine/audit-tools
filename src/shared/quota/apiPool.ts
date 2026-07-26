@@ -186,7 +186,6 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
           base_url: source.endpoint,
           model: source.model,
           api_key_env: source.api_key_env,
-          api_key: source.api_key,
           // The credential DECLARATION travels whole: a keyless lane clears reach
           // by liveness probe rather than by env var, so dropping the marker here
           // would hand the launch a source with no key and no licence to omit the
@@ -479,7 +478,6 @@ function openAiCompatibleSource(
     endpoint: oc.base_url,
     model: oc.model,
     api_key_env: oc.api_key_env,
-    api_key: oc.api_key,
     // Same credential declaration, opposite leg of the bridge (block → source):
     // the fold feeds `verifySourceReach`, which reads the marker to know a keyless
     // endpoint is proven by a liveness probe, not by an env var.

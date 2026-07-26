@@ -25,18 +25,20 @@ test("explicitly-id'd siblings on ONE api_key_env share an account key", () => {
   expect(deriveAccountKey(nano)).not.toBeNull();
 });
 
-test("explicitly-id'd siblings on ONE inline api_key share an account key", () => {
-  // The shape claimed fixed three consecutive rounds while still broken.
-  const nano = { id: "nim-nano", transport: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "nano" };
-  const superb = { id: "nim-super", transport: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "super" };
-  expect(deriveAccountKey(nano)).toBe(deriveAccountKey(superb));
+test("a pasted key contributes NOTHING to identity — the inline shape is retired", () => {
+  // The mixed-reference split (one sibling naming the key, one pasting it, resolving to
+  // two accounts that each metered a full allowance) is now unrepresentable rather than
+  // detected: `api_key` is refused at validation and derives no credential here. A
+  // source carrying one anyway is a source with NO credential, never a second account.
+  const pasted = { id: "x", transport: "openai-compatible", endpoint: NIM, api_key: "sk-super-secret-value", model: "m" };
+  expect(deriveAccountKey(pasted)).toBeNull();
 });
 
 test("the account key never contains a secret", () => {
-  const key = deriveAccountKey({ id: "x", transport: "openai-compatible", endpoint: NIM, api_key: "sk-super-secret-value" });
-  // This string is persisted into the reservation-ledger file and appears in artifacts.
-  expect(key).not.toContain("sk-super-secret-value");
-  expect(key).toMatch(/::inline:[0-9a-f]{16}$/);
+  const key = deriveAccountKey({ id: "x", transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY" });
+  // This string is persisted into the reservation-ledger file and appears in artifacts,
+  // so it carries the env var's NAME — never a value that could be a secret.
+  expect(key).toMatch(/::env:NVIDIA_API_KEY$/);
 });
 
 test("DIFFERENT credentials on one endpoint stay distinct", () => {

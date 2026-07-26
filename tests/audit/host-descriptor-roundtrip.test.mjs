@@ -78,7 +78,7 @@ describe("auditor descriptor round-trip", () => {
   // top-level `sources[]` (G2 reslice).
   test("a sources[] pool round-trips inside the descriptor", () => {
     const sources = [
-      { id: "s1", transport: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key: "public", cost_per_mtok: 0 },
+      { id: "s1", transport: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key_env: "PUBLIC_KEY_VAR", cost_per_mtok: 0 },
       { transport: "codex", endpoint: "codex", model: "gpt-x" },
     ];
     const argv = renderAuditorDescriptor({ self: { provider: "claude-code", can_dispatch_subagents: true }, sources });

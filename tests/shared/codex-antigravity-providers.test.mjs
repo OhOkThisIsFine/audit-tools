@@ -510,10 +510,16 @@ test("chooseAutoProvider: Codex Desktop session markers resolve codex", () => {
 // here), degrades on a 400/422 down json_schema → json_object → none, and behaves
 // exactly as before when no schema is supplied.
 
+// A credential is NAMED, never pasted (inline `api_key` is retired), so the fixture
+// declares an env var and this file populates it — an unset one rejects the launch
+// before any POST, which would look like a schema-degradation failure.
+const OAI_KEY_ENV = "AUDIT_TOOLS_TEST_OAI_KEY";
+process.env[OAI_KEY_ENV] = "k";
+
 const oaiConfig = {
   base_url: "https://nim.test/v1",
   model: "openai/gpt-oss-120b",
-  api_key: "k",
+  api_key_env: OAI_KEY_ENV,
 };
 
 function launchOai(config, inputOverrides = {}, fetchImpl) {

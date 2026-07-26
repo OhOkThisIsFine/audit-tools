@@ -271,21 +271,6 @@
   earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
   [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
 
-- **SPEC — delete inline `api_key` support; a credential must be named, never pasted.** Account identity
-  compares `(endpoint, credential REFERENCE)`, so a source naming its key through an env var and a
-  sibling pasting that same key inline resolve to two accounts and each meters a full allowance — a 2×
-  over-admission of the main metering defect's class. Hashing the credential VALUE to unify them is
-  refused on purpose: identity would then change on every key rotation, orphaning ledger state and
-  learned slopes for what is still one account. An explicit operator-declared `account` on both siblings
-  already overrides the derivation and unifies them, but that is a workaround the operator must know to
-  apply — the wrong thing stays possible.
-  **The resolution is to remove the second way of expressing a credential.** Inline `api_key` is already
-  documented as discouraged, there are no external consumers, and under the no-legacy rule a discouraged
-  duplicate path is simply deleted rather than defended. With one representation, two references to one
-  credential cannot disagree — the defect becomes unrepresentable rather than detected.
-  **Property to hold:** a credential is identified by reference only, and there is exactly one way to
-  declare one. Secrets also stop landing in declaration files as a side effect.
-
 - **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Step 2
   ran 4 adversarial rounds; each spawned FRESH agents that re-grepped the same `tokens_per_pct` /
   `admit` / `reconcile` call-site map from scratch (~135k subagent tokens per round, much of it
@@ -623,9 +608,9 @@
 
 - **A declared source that verified reach and then lies at dispatch is never ejected — the reactive
   `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).**
-  `verifySourceReach` refuses an inline `api_key` because possession is not reach, and its own comment
-  names that quarantine as the only catcher for the always-passes lane it is refusing
-  (`src/shared/providers/auditorSources.ts:448-452`) — the catcher does not exist. A lane whose key was
+  `verifySourceReach`'s own comment names that quarantine as the catcher the reach gate does not have
+  (`src/shared/providers/auditorSources.ts:456-458`) — the catcher does not exist. Retiring inline
+  `api_key` closed the always-passes lane that used to be refused here, but not this one. A lane whose key was
   revoked or whose endpoint died still verifies (env var present, launcher on PATH) and is re-admitted
   every run; under cost-first routing (λ=0) a stale free-tier declaration then takes EVERY packet first
   and fails them all. Open property: a source that fails reactively (oversize / 402 / tool-corruption)

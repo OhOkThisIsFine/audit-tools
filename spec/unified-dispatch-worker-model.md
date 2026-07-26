@@ -168,9 +168,12 @@ merge is handed back to the host, straight into the host-discretion anti-pattern
 `{self, sources}` JSON, whose failure mode is an empty pool indistinguishable from an unreachable
 machine. Populate lands behind the resolve seam, never in front of it.
 
-**Inline `api_key` is refused** as not ambient-verifiable: possession ≠ reach, and it is the one shape
-an operator can always choose, which would make the rule opt-out by construction. Its only catcher is
-the reactive lies-reachably quarantine.
+**A credential is NAMED, never pasted** — `api_key_env` is the only way to declare one, and an inline
+`api_key` is refused at validation. Refusing it at the reach gate was the earlier answer, but a shape an
+operator can still declare makes the rule opt-out by construction (possession ≠ reach) and leaves an
+always-passes lane whose only catcher is the reactive lies-reachably quarantine. Deleting the shape
+closes that by making it unrepresentable; it also keeps one key from splitting into two metered
+accounts, since identity compares references.
 
 **No auditor id is needed for multi-IDE isolation.** Each IDE spawns its own process, which inherits
 THAT IDE's env, so each intersects the same declaration against its own real reach. Nothing is shared,

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { QuotaStateEntry } from "./types.js";
 
 /**
@@ -7,36 +6,30 @@ import type { QuotaStateEntry } from "./types.js";
  * endpoint through the same credential reference resolve to one identity, which is
  * what makes them ONE metered account.
  *
- * ⚠ It compares REFERENCES, not values. Two sources naming the same real key by
- * different references — one `api_key_env: "NVIDIA_API_KEY"`, a sibling pasting that
- * same key inline — split into two accounts and each meters its own allowance.
- * Deliberate: keying on the VALUE would make the account identity change whenever the
- * operator rotates the credential, orphaning the ledger state and the learned slopes
- * for what is still the same account. The mixed-reference config is narrow (inline
- * `api_key` is documented as discouraged) and tracked in `docs/backlog.md`.
+ * ⚠ It compares REFERENCES, not values — and a reference is the ONLY way to declare a
+ * credential, so two declarations of one key cannot disagree. Keying on the VALUE is
+ * refused deliberately: identity would then change whenever the operator rotates the
+ * credential, orphaning ledger state for what is still the same account. The mixed
+ * reference/inline config that used to split one key into two metered accounts is now
+ * unrepresentable rather than detected — inline `api_key` is retired and refused at
+ * validation (`validation/sessionConfig.ts`).
  *
- * ⚠ Never contains a secret. An `api_key_env` contributes its NAME; an inline
- * `api_key` contributes a truncated SHA-256 of its value, never the value — this
- * string is persisted into the reservation-ledger file and appears in artifacts.
- * Supporting the inline shape is not optional polish: it is a documented supported
- * field, and treating it as "no credential" is what left the motivating
- * `nim-nano`/`nim-super` case splitting across four rounds of repairs.
+ * ⚠ Never contains a secret: an `api_key_env` contributes its NAME. This string is
+ * persisted into the reservation-ledger file and appears in artifacts. Ledger state
+ * written before the retirement can still carry an `…::inline:<hash>` segment; it stays
+ * readable as opaque historical state (nothing parses the segment) and expires with its
+ * lease — the retirement removes the way to DECLARE one, not the ability to read one.
  *
  * Returns null only when the source exposes no discriminator at all — no endpoint,
- * or no credential of either shape.
+ * or no credential.
  */
 export function deriveCredentialIdentity(source: {
   endpoint?: string;
   api_key_env?: string;
-  api_key?: string;
 }): string | null {
   const normalizedEndpoint = source.endpoint?.trim().toLowerCase().replace(/\/+$/, "");
   if (!normalizedEndpoint) return null;
   if (source.api_key_env) return `${normalizedEndpoint}::env:${source.api_key_env}`;
-  if (source.api_key) {
-    const digest = createHash("sha256").update(source.api_key).digest("hex").slice(0, 16);
-    return `${normalizedEndpoint}::inline:${digest}`;
-  }
   return null;
 }
 
@@ -83,7 +76,6 @@ export function deriveAccountKey(source: {
   service?: string;
   endpoint?: string;
   api_key_env?: string;
-  api_key?: string;
   account?: string | null;
 }): string | null {
   const namespace = source.service ?? source.transport;

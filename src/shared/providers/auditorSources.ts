@@ -436,7 +436,6 @@ export async function populateProxyCatalogIfMissing(
  * - CLI provider → its launcher resolves on PATH
  * - `subprocess-template` → its `command_template[0]` resolves on PATH
  * - `credentials_path` → the file is readable
- * - inline `api_key` → NOT verifiable (see below)
  *
  * **`no_auth: true` is not an opt-out.** It swaps one PROOF for another — the env-var
  * check for an endpoint liveness probe — so a keyless lane is still verified, not
@@ -445,13 +444,18 @@ export async function populateProxyCatalogIfMissing(
  * endpoint is listening), so inferring it would silently admit a keyed endpoint whose
  * key the operator forgot.
  *
- * **Inline `api_key` is refused.** Possessing a credential proves nothing about reach:
- * the endpoint may be dead, the key revoked. It is also the one shape an operator can
- * always choose, so admitting it would make the whole rule opt-out by construction —
- * and it is an always-passes lane whose only catcher (the reactive `lies reachably`
- * quarantine) is G5, not yet built. A stale free-tier declaration would be admitted as
- * reachable and, under cost-first routing (λ=0), take EVERY packet first and fail them
- * all. A public constant lives in an env var fine.
+ * **There is no inline-`api_key` case to refuse here — the field is RETIRED**, and a
+ * credential is named (`api_key_env`) or absent. It used to be refused at this gate:
+ * possession proves nothing about reach, and it was the one shape an operator could
+ * always choose, which made the whole rule opt-out by construction. Refusing a shape
+ * that can still be declared leaves an always-passes lane whose only catcher (the
+ * reactive `lies reachably` quarantine) does not exist; deleting the shape closes it
+ * at the source. The declaration is now refused earlier and louder, at validation
+ * (`validation/sessionConfig.ts`), so a pasted key can never reach this function.
+ *
+ * ⚠ That does NOT close the quarantine gap itself: a lane whose key was revoked or whose
+ * endpoint died still verifies here (env var present, launcher on PATH) and is
+ * re-admitted every run. That open property is tracked in `docs/backlog/open-bugs.md`.
  *
  * NOTE — this is the repo's first ambient CREDENTIAL probe, and it deliberately
  * inverts the policy stated at `providerFactory.ts` ("env presence is intentionally not
@@ -482,13 +486,6 @@ export function verifySourceReach(
       }
       if (!source.model?.trim()) {
         return { verified: false, reason: "openai-compatible source has no model." };
-      }
-      if (source.api_key !== undefined && source.api_key_env === undefined) {
-        return {
-          verified: false,
-          reason:
-            "inline api_key is not ambient-verifiable (it proves possession, not reach) — move the key into an env var and declare api_key_env.",
-        };
       }
       // Explicitly keyless: reach is the endpoint answering, not an env var — the
       // same bar the `claude-worker` proxy lane below already holds. Contradictory
@@ -564,8 +561,7 @@ export function verifySourceReach(
       // The proxied isolated Claude-harness worker: its reach IS the proxy's
       // liveness (endpoint = the proxy url). Normally these sources come pre-verified
       // from the populate cache via the `proxy` lane; a hand-declared one is held to
-      // the same bar. Inline api_key refused for the same possession≠reach reasons as
-      // openai-compatible above; api_key_env is optional (keyless proxy default).
+      // the same bar. `api_key_env` is optional here (keyless proxy default).
       if (!source.endpoint?.trim()) {
         return {
           verified: false,
@@ -574,13 +570,6 @@ export function verifySourceReach(
       }
       if (!source.model?.trim()) {
         return { verified: false, reason: "claude-worker source has no model." };
-      }
-      if (source.api_key !== undefined) {
-        return {
-          verified: false,
-          reason:
-            "inline api_key is not ambient-verifiable (it proves possession, not reach) — declare api_key_env if the proxy requires one, otherwise omit.",
-        };
       }
       // When api_key_env is declared, it is held to the SAME bar as every other
       // reader of the field — name shape included (see {@link apiKeyEnvReachReason}).

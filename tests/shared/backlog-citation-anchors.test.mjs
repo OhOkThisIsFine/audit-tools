@@ -40,10 +40,13 @@ const ANCHORED_ENTRIES = [
     /** `path:from-to` tokens the entry must carry, each proven against the cited range. */
     anchors: [
       {
-        token: "src/shared/providers/auditorSources.ts:448-452",
+        // Re-pointed when inline `api_key` was RETIRED: the entry used to cite the
+        // refusal comment, but deleting the shape does not build the quarantine, so the
+        // anchor now names the comment that states the gap that actually remains.
+        token: "src/shared/providers/auditorSources.ts:456-458",
         evidence: [
-          /\*\*Inline `api_key` is refused\.\*\*/,
-          /only catcher \(the reactive `lies reachably`[\s\S]{0,24}quarantine\) is G5, not yet built/,
+          /That does NOT close the quarantine gap itself/,
+          /key was revoked or whose[\s\S]{0,32}endpoint died still verifies here/,
         ],
       },
     ],

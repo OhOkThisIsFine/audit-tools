@@ -214,13 +214,17 @@ describe("hybrid decision point — the pools the drive receives (H2+H4 residual
       // Passed as the EFFECTIVE config, not written to session-config.json: dispatch
       // inventory (`provider` / `sources`) is descriptor-borne and the persisted-intent
       // validator refuses it on disk.
+      // A credential is NAMED, never pasted (inline `api_key` is retired), so the stub
+      // sources declare an env var and it must actually resolve — an unset one drops
+      // the lane before dispatch, which reads as "the drive got no pools".
+      process.env.STUB_KEY_VAR = "stub-key";
       const source = (id: string, account: string, lane: string, cost: number) => ({
         id,
         account,
         transport: "openai-compatible" as const,
         endpoint: endpoint!.baseUrlFor(lane),
         model: `stub/${lane}`,
-        api_key: "stub-key",
+        api_key_env: "STUB_KEY_VAR",
         cost_per_mtok: cost,
         quota: { context_tokens: 200_000, max_concurrent: 2 },
       });

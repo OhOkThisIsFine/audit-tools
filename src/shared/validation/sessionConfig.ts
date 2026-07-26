@@ -124,6 +124,37 @@ function validateQuotaModelLimits(
 }
 
 /**
+ * Refuse the RETIRED inline `api_key` on either declaration shape — a credential is
+ * identified by REFERENCE (`api_key_env`), never pasted by value.
+ *
+ * Two references to one real key resolved to two accounts and each metered a full
+ * allowance, because account identity compares `(endpoint, credential reference)`.
+ * Unifying them by hashing the VALUE was refused on purpose: identity would then change
+ * on every key rotation, orphaning ledger state for what is still one account. With one
+ * representation the disagreement is unrepresentable rather than detected.
+ *
+ * The refusal is the load-bearing half, not the type deletion: unknown keys pass this
+ * validator untouched, so a merely-deleted field would leave a pasted key SILENTLY
+ * dropped and the source launching keyless while the operator believed it was
+ * authenticated. Loud and actionable, exactly like the retired `provider` field above.
+ */
+function refuseInlineApiKey(
+  issues: ValidationIssue[],
+  value: Record<string, unknown>,
+  path: string,
+): void {
+  if (value.api_key === undefined) return;
+  pushIssue(
+    issues,
+    `${path}.api_key`,
+    "inline `api_key` is retired; put the key in an environment variable and name it " +
+      "with `api_key_env` instead. A credential is identified by reference, so two " +
+      "declarations of one key cannot split into two metered accounts — and secrets " +
+      "stop landing in declaration files.",
+  );
+}
+
+/**
  * The `DispatchableSource` fields that must be strings when present — every one is
  * read by the ambient-reach probe (`providers/auditorSources.ts`) and/or the launch
  * path, so a non-string here coerces to nonsense downstream rather than failing.
@@ -133,7 +164,6 @@ const DISPATCHABLE_SOURCE_STRING_FIELDS = [
   "endpoint",
   "model",
   "api_key_env",
-  "api_key",
   "credentials_path",
   "account",
   "service",
@@ -173,6 +203,7 @@ function validateDispatchableSources(
     // dual parser is the "two answers" disease the rename exists to end — so the
     // obligation is to fail LOUD and actionable instead of reporting a missing field
     // the operator never omitted.
+    refuseInlineApiKey(issues, source, path);
     if (source.transport === undefined && typeof source.provider === "string") {
       pushIssue(
         issues,
@@ -493,7 +524,8 @@ function validateOpenAiCompatibleSection(
     pushIssue(issues, path, "Provider config must be a JSON object.");
     return;
   }
-  for (const key of ["base_url", "model", "api_key_env", "api_key"] as const) {
+  refuseInlineApiKey(issues, value, path);
+  for (const key of ["base_url", "model", "api_key_env"] as const) {
     const entry = value[key];
     if (
       entry !== undefined &&

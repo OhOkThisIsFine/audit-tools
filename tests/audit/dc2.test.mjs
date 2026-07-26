@@ -129,12 +129,12 @@ await test("the executor persists from the EFFECTIVE config, not a disk re-read 
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify({
-        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key_env: "PUBLIC_KEY_VAR", cost_per_mtok: 1 }],
       }),
     );
     // The per-auditor handshake inventory (effective config) reports a DIFFERENT source.
     const effectiveConfig = {
-      sources: [{ id: "handshake-src", transport: "openai-compatible", endpoint: "https://h/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+      sources: [{ id: "handshake-src", transport: "openai-compatible", endpoint: "https://h/v1", model: "m", api_key_env: "PUBLIC_KEY_VAR", cost_per_mtok: 1 }],
     };
     await runProviderConfirmationAutoComplete({}, root, artifactsDir, effectiveConfig);
     const persisted = await readFile(sharedProviderConfirmationPath(root), "utf8");
@@ -158,7 +158,7 @@ await test("without an effective config the fallback is driver-self-only — rep
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify({
-        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key_env: "PUBLIC_KEY_VAR", cost_per_mtok: 1 }],
       }),
     );
     await runProviderConfirmationAutoComplete({}, root, artifactsDir);
