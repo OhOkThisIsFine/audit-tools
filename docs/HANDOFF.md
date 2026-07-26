@@ -63,8 +63,12 @@
   per-lane result quality. Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
   SPEC in [`deferred.md`](backlog/deferred.md).
 
-- **Current version = `package.json`** (authoritative): v0.34.33, live on npm; main is released to HEAD
-  with nothing pending.
+- **Current version = `package.json`** (authoritative): v0.34.33, live on npm. HEAD sits AHEAD of the
+  tag, and that is the normal resting state — docs, specs, tests and hooks land without a release. Read
+  "nothing pending" off the DIFF, not off the commit count:
+  `git diff --name-only $(git describe --tags --abbrev=0 --match 'v*')..HEAD -- src/ package.json`
+  empty ⇒ nothing publishable. A bare "released to HEAD" claim here went false the moment the next docs
+  commit landed, which is the class of status line this doc is not supposed to carry.
 
 **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately not restated
 here.** This section had twice grown into version-by-version narration, which is the changelog creep this
