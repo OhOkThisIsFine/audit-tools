@@ -422,8 +422,6 @@
   [[insights-report-recommended-a-retired-fix]], one layer earlier: that one generated a stale
   recommendation, this one keeps serving stale recommendations after the fact.
 
-- **The open-work record is navigable in bounded reads via a GENERATED seek index — the remaining sliver is the skill that still says "read it in full" (2026-07-25, low).** The size question is SETTLED: owner chose a generated index over a split, because `docs/documentation-philosophy.md` §*The condensation bias* argues against splitting for size and every split file would owe a routing row in `docs/doc-review-guidelines.md`. `scripts/shared/generate-backlog-index.mjs` now emits a `file:line` anchor per entry into `docs/backlog.md`, gated by `check:backlog-index` in `verify:checks` AND at commit (anchors move under every backlog edit, and a stale anchor sends the reader to confidently wrong prose). **What stays open:** `.claude/skills/disambiguate-backlog/SKILL.md` step 1 still instructs "Read every file under `docs/backlog/` in full", which no longer executes in one call — it should read the index and then seek. Pruning aggressively is still the wrong fix: entries earn their length, and the 2026-07-19 classification showed stale entries survive precisely because nobody can hold the file at once.
-
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`

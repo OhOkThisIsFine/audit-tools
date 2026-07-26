@@ -53,9 +53,12 @@ the interpretation the first missed. You see both, then judge.
 
 ### 1. Collect — everything, no filtering yet
 
-Read every file under `docs/backlog/` in full. Enumerate every item in the three in-scope
-sections as a discrete unit (one bullet = one item; a bullet with sub-bullets is
-one item). Glob `.audit-tools/**/agent-feedback.jsonl` and read `meta-audit-log.md`
+Read the SEEK INDEX in [`docs/backlog.md`](../../../docs/backlog.md) first — it is generated
+(`scripts/shared/generate-backlog-index.mjs`, gated at commit) and carries a `file:line` anchor per
+entry. Enumerate the items from that index, then read each entry with an OFFSET read at its anchor.
+Do not read the backlog files in full: they no longer fit one call, so a "read it in full" pass
+silently truncates and the items past the cut go missing without a signal. Each item is a discrete
+unit (one bullet = one item; a bullet with sub-bullets is one item). Glob `.audit-tools/**/agent-feedback.jsonl` and read `meta-audit-log.md`
 if it exists; parse reflections, group recurring ambiguities/frictions into
 candidate items. Hold the full list — don't drop anything yet.
 

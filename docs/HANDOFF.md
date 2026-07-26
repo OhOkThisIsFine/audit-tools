@@ -145,7 +145,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 105 open item(s).
+> `verify:checks` and at commit). 104 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -180,7 +180,6 @@ its SPEC intact.
 - Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high). · [`open-bugs.md`](backlog/open-bugs.md)
 - A nightly item is PRESENTED for an answer without its premise being re-checked, so settled subjects keep getting asked (2026-07-25, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
-- The open-work record is navigable in bounded reads via a GENERATED seek index — the remaining sliver is the skill that still says "read it in full" (2026-07-25, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (duplicated-guard lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (smoke-dedup lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (backlog triage + clearance lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
