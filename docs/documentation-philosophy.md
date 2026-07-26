@@ -61,7 +61,7 @@ not just its contents:
 ## Enforcement
 
 - **Mechanical (hard):** `scripts/check-doc-manifest.mjs` (in `verify:release`) fails the build if
-  any tracked `docs/**/*.md` isn't registered in the routing table — strays/dated docs can't merge.
+  any tracked `*.md` anywhere in the repo isn't registered in the routing table — strays/dated docs can't merge.
 - **Routine (soft, nightly):** the doc-review routine reviews every doc against this philosophy on
   the two perspectives defined in [`doc-review-guidelines.md`](doc-review-guidelines.md) — items
   *within* a doc (fit + staleness) and the doc *set* (does each doc belong / can it be condensed).

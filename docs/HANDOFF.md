@@ -126,13 +126,8 @@ doc's own header forbids. Durable traps belong in
   quarantine); they appear in the roadmap below like any other entry. Records:
   [`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) ·
   [`g4-g5-g6-premise-check-2026-07-16.md`](reviews/g4-g5-g6-premise-check-2026-07-16.md).
-- **Backlog budget: the FILE total is a shrink-only ratchet; per-entry is a plain budget.** The
-  per-entry ratchet was retired — it taxed correctness, refusing a verified factual fix for costing 14
-  bytes. An entry may now grow provided its file shrinks. `node scripts/check-backlog-budget.mjs` has
-  the live figures (UTF-8 BYTES — agrees with `wc -c`); never hand-carry a size into a doc. Run
-  `--update-baseline` only at the END of a lap, and only after entries were CLOSED. ⚠ Never run it to
-  make a GROWN file pass — that raises the ceiling, which is the one thing the gate exists to prevent.
-  Pay for a new entry by condensing another.
+- **Backlog budget:** run `node scripts/check-backlog-budget.mjs` for the live figures; the two open
+  defects in its ratchet are tracked in [`open-bugs.md`](backlog/open-bugs.md).
 
 ---
 
@@ -151,7 +146,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 106 open item(s).
+> `verify:checks` and at commit). 102 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -174,7 +169,6 @@ its SPEC intact.
 - Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED). · [`open-bugs.md`](backlog/open-bugs.md)
 - Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane. · [`open-bugs.md`](backlog/open-bugs.md)
-- ⬇ LIVE-CONFIRMED (re-dogfood 2026-07-21): the proxy-lane drop reason names an internal function, and no populate command exists (medium, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -193,9 +187,8 @@ its SPEC intact.
 - Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium). · [`open-bugs.md`](backlog/open-bugs.md)
-- A stale prior-run shared confirmation suppresses the proxy populate trigger while Gate-0 still pends (claude-worker dogfood 2026-07-16, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - `AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an unmeasured estimate, and the lane cannot currently measure it (low, live-gated; the rest of the 2026-07-17 feedback-gap residuals are closed — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`). · [`open-bugs.md`](backlog/open-bugs.md)
-- claude-worker lane residuals — three symptoms of ONE defect: identity is decided somewhere other than where it is known (2026-07-16, low-medium, deferred deliberately). · [`open-bugs.md`](backlog/open-bugs.md)
+- claude-worker lane residuals — two symptoms of ONE defect: identity is decided somewhere other than where it is known (2026-07-16, low-medium, deferred deliberately). · [`open-bugs.md`](backlog/open-bugs.md)
 - A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -233,7 +226,6 @@ its SPEC intact.
 - Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]). · [`open-bugs.md`](backlog/open-bugs.md)
 - Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the code site). · [`open-bugs.md`](backlog/open-bugs.md)
-- Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable (low). · [`open-bugs.md`](backlog/open-bugs.md)
 - External shared-logic audit V1–V7 residuals · [`open-bugs.md`](backlog/open-bugs.md)
 - Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06). · [`open-bugs.md`](backlog/open-bugs.md)
 - Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -241,7 +233,6 @@ its SPEC intact.
 - SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns. · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound. · [`open-bugs.md`](backlog/open-bugs.md)
 - Selective-deepening convergence — live validation env-bound. · [`open-bugs.md`](backlog/open-bugs.md)
-- The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 - A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing. · [`open-bugs.md`](backlog/open-bugs.md)
 - ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25). · [`open-bugs.md`](backlog/open-bugs.md)
 

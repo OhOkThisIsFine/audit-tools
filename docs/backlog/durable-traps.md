@@ -50,19 +50,27 @@ the trap and the fix when it fires.
   during the 2026-07-19 classification pass. Delete by matching the entry's TEXT, and after any scripted
   edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
 
-- **The offload lane is reliable per-ITEM and unreliable in BULK (2026-07-24, friction:
-  inefficient-feeding).** Classifying 101 backlog entries: every bulk shape failed — two whole-file
-  calls at `max_tokens: 48000` ran 28+ min with no first byte, four ~40KB chunks were killed at the
-  Bash 10-minute cap, and a 105KB three-file trace died with `ECONNRESET`. One entry per call (1–3KB,
-  ~10s) succeeded 94/101. The failure is size-correlated and looks exactly like a dead lane or a weak
-  model, which is the misdiagnosis [[offload-lane-failures-are-usually-the-caller]] warns about — it is
-  neither, it is the request shape. Split to the natural per-item unit, pool ~6-wide, retry on a
-  DIFFERENT alias, and size `max_tokens` to the per-item output (1200 truncated 7 long entries; 4000
-  cleared them). Full recipe: [[nim-offload-reliable-unit-is-one-entry]].
-  ⚠ The **dead-lane** half is now mechanical, not remembered: `~/.claude/llm-call.mjs` probes
-  `/v1/models` before every request and exits 3 naming the restart command, so a dead proxy costs one
-  round-trip instead of N identical `ECONNREFUSED`s misread as model failure. That helper is OUTSIDE the
-  repo — no test here guards it; re-add the preflight if the file is ever reset.
+- **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
+  identical to a weak or dead model** ([[offload-lane-failures-are-usually-the-caller]], twice over).
+  Separate failures, separate remedies; decide which axis you are on before changing anything.
+  **SIZE:** failure is size-correlated (48KB+ single calls: no first byte in 28 min; 105KB:
+  `ECONNRESET`; 1–3KB per item: 94/101). Split to the natural per-item unit and size `max_tokens` to the
+  per-item output — [[nim-offload-reliable-unit-is-one-entry]].
+  **CONCURRENCY:** fan-out at 3, 10 and 12 all degraded (429s, or schema-valid empty documents, or never
+  returning). Ceiling **≤2 concurrent per model**, escalating backoff, **resumable** driver (two writers
+  to one output file clobber each other). ⚠ The size lap's "pool ~6-wide" PREDATES this — do not use it.
+  On this axis the endpoint really is the cause, and `finish_reason` is `undefined`, not `length`.
+  Scope is ad-hoc scripts only: audit-tools' own dispatch is paced by declared
+  `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
+  [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
+  ⚠ **Never hand-rotate `model` per batch/retry** — `~/.audit-code/litellm-config.yaml` owns retries +
+  same-tier `fallbacks`; caller-side rotation crosses capability tiers and silently downgrades the call.
+  ⚠ Rank is not latency: rank-1 `glm-5.2` returned nothing in >15min where `deepseek-v4-flash` answered
+  in seconds. Rank-1 is no default for a blocking call.
+  ⚠ Dead-lane detection is mechanical: `~/.claude/llm-call.mjs` probes `/v1/models` and exits 3 naming
+  the restart command. That helper is OUTSIDE the repo — re-add the preflight if it is ever reset.
+  **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
+  returns an empty document instead of refusing loudly.
 
 - **The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).** A call passed
   `timeout: 1800000` for a long offload run and was killed at exactly 10m00s — the excess is
@@ -158,26 +166,6 @@ the trap and the fix when it fires.
   part of its output, not the most — the opposite of the intuition that a quote is checkable proof.
   ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
   failure — confident output with fake support.)
-
-- **The LiteLLM/NIM offload lane rate-limits hard above ~2 concurrent requests per model (2026-07-23
-  remedy update).** A 10-batch fan-out at concurrency 10 (and again at 3) returned
-  `litellm.RateLimitError … Error code: 429` on nearly every batch. **Use for any hand-written bulk
-  driver:** concurrency ≤2 *per model*, escalating backoff, and a **resumable** driver (skip
-  already-processed items, merge into the output file) — a long fan-out will lose batches, and two
-  concurrent writers to one output file will clobber each other's progress. **Do NOT hand-rotate the
-  `model` per batch/retry** — that half of the original remedy was superseded on 2026-07-23:
-  `~/.audit-code/litellm-config.yaml` now declares `router_settings.num_retries: 2` plus same-tier
-  `fallbacks` chains for all 13 aliases, and the config comment fixes the contract — roster-level
-  fallback lives in the proxy config, not in each caller's retry loop. Caller-side rotation now also
-  crosses capability tiers (the old list mixed rank 1 with rank 10), silently downgrading the call.
-  Fallbacks cover single-model burst throttling, not aggregate account throughput, so the ≤2 ceiling
-  still applies. Scope is now ad-hoc scripts only: audit-tools' own dispatch is paced by the declared
-  `quota.max_concurrent: 2` / `requests_per_minute: 15` on the `nim-*-single-shot` sources in
-  `~/.audit-code/sources-declared.json`, and `laneWorkerKindConflict` refuses agentic workers on any
-  `burst_limited` lane. Distinct from [[offload-lane-failures-are-usually-the-caller]]: this one
-  really is the endpoint, and `finish_reason` is `undefined` (not `length`) because the body is an
-  error, not a completion. Record:
-  [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
 
 - **`codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate,
   not by each spawn site.** The shell-trap guard refuses the trap only for commands the HOST runs. In
@@ -462,14 +450,6 @@ the trap and the fix when it fires.
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-
-- **Ratchet the backlog baseline LAST, once, at the end of a lap.**
-  `node scripts/check-backlog-budget.mjs --update-baseline` run mid-lap and then followed by more
-  deletions leaves `tests/shared/backlog-budget-unit.test.mjs` asserting a recorded FILE ceiling that
-  no longer equals the live file — it goes red and reads exactly like a code regression (it cost a
-  full-suite investigation once). ⚠ Never run `--update-baseline` to make a GROWN file pass: that
-  raises the ceiling, which is the one thing the gate exists to prevent. (Only files are ratcheted;
-  an over-budget entry is amnestied by NAME, so no entry edit can trip this.)
 
 ## Doc-set hygiene (enforced)
 

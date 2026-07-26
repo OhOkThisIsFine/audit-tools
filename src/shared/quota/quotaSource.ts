@@ -145,7 +145,7 @@ export interface QuotaSource {
   probeUsage?(providerModelKey: string): Promise<QuotaProbeResult>;
   /**
    * Resolve the ACCOUNT identity this source reads for a provider, from its
-   * credential — never guessed (see docs/quota-dispatch-design.md §5). Used to
+   * credential — never guessed (see spec/quota-dispatch-design.md §5). Used to
    * stamp the account segment into the pool key so two same-provider accounts
    * form distinct pools. Returns null when the source doesn't handle the provider,
    * the credential is absent/unreadable, or the provider carries no account id.

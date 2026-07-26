@@ -61,8 +61,6 @@ export const DOC_MANIFEST = [
     files: [
       "docs/documentation-philosophy.md",
       "docs/project-philosophy.md",
-      "docs/backlog-remediation-design.md",
-      "docs/quota-dispatch-design.md",
       "docs/glossary-ids.md",
       "docs/end-of-sprint-report-template.md",
     ],
@@ -150,10 +148,6 @@ export const DOC_MANIFEST = [
         "dated review / plan / diagnosis / dogfood records — excluded BY CONSTRUCTION. Each is a one-off record of what was decided on a day, never a timeless concept; the durable outcome lives in `spec/`, the backlog, or project memory. This pattern replaced a 21.5k-character exhaustive list that grew every lap",
       ],
       [
-        "docs/model-capability-ranking-sources.md",
-        "dated market survey whose numbers go stale by design — the durable consumption-pattern decision belongs in the backlog + memory; a dated record that does not live under `docs/reviews/`",
-      ],
-      [
         ".audit-tools/audit-report.md",
         "runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
       ],
@@ -179,10 +173,6 @@ export const DOC_MANIFEST = [
       ".github/copilot-instructions.md",
       ".github/prompts/audit-code.prompt.md",
       ".github/prompts/remediate-code.prompt.md",
-      "skills/audit-code/SKILL.md",
-      "skills/audit-code/audit-code.prompt.md",
-      "skills/remediate-code/SKILL.md",
-      "skills/remediate-code/remediate-code.prompt.md",
     ],
     check:
       "ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — governed by renderer drift " +
@@ -191,6 +181,23 @@ export const DOC_MANIFEST = [
       "`tests/remediate/install-repo-assets.test.ts`). Review the canonical source, not the generated copy; a " +
       "diff = a drift-test/renderer gap, not a doc edit.",
     autoApply: "**No — renderer-owned.**",
+  },
+  {
+    type: "canonical loader bodies",
+    files: [
+      "skills/audit-code/SKILL.md",
+      "skills/audit-code/audit-code.prompt.md",
+      "skills/remediate-code/SKILL.md",
+      "skills/remediate-code/remediate-code.prompt.md",
+    ],
+    check:
+      "HAND-AUTHORED sources, not generated output — the arrow points OUT of `skills/`: the renderer drift " +
+      "tests read these as the canonical body and assert the `.agent/**` and `.github/**` copies equal a fresh " +
+      "render of them, and `scripts/audit/postinstall.mjs` copies one outward as its literal prompt source. " +
+      "Nothing writes into `skills/`. Review them like any other doc — in particular the CLI invocations and " +
+      "flag literals they carry, which no other reviewer checks. Run `npm test` after editing (the drift tests " +
+      "will fail until the generated copies are re-rendered).",
+    autoApply: "Yes — with the renderer drift tests re-run.",
   },
   {
     type: "meta-tooling / dev-workflow",

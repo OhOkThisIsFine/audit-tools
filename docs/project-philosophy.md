@@ -222,7 +222,7 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
 - **Two-tier dependency policy.** Import vetted pure-JS libs for correctness-sensitive parsing/schema/lock
   (`smol-toml`, `yaml`); own only tiny domain bits; wrap parsers so malformed input degrades to empty.
 *(home: Own-vs-acquire → `CLAUDE.md` → Preferences (promoted), with the open live-spawn track in
-`docs/backlog.md` + the F5 module contract in `docs/backlog-remediation-design.md`; Two-tier dependency
+`docs/backlog.md` + the F5 module contract in `spec/backlog-remediation-design.md`; Two-tier dependency
 policy → `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-acquire)*
 
 ## A11. Quota & token policy (product behavior)
@@ -231,7 +231,7 @@ policy → `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-a
   `estimateTokensFromBytes` is the standard; learned RPM/TPM limits authoritative.
 - **Quota awareness must pace, not just observe** — don't burn the window in parallel and all hit the wall
   at once; quota death is a retryable pause, not a failure. Red line: never IDE-GUI automation.
-*(home: `spec/audit/dispatch-admission-control.md`, `docs/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
+*(home: `spec/audit/dispatch-admission-control.md`, `spec/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
 
 ---
 

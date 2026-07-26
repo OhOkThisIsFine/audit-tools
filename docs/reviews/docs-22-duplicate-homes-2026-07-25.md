@@ -47,7 +47,7 @@ edit there is escalate-only, but this recommendation does not require one.
 
 ## 22e — quota / dispatch canon · **needs the owner; both self-declare**
 
-`docs/quota-dispatch-design.md:1-2` — "The single source of truth for *who tracks which quota and why*".
+`spec/quota-dispatch-design.md:1-2` — "The single source of truth for *who tracks which quota and why*".
 `spec/audit/dispatch-admission-control.md:3` — "This is the design of record for the dispatch/quota model".
 The scopes are adjacent, not identical: quota *tracking* vs dispatch *admission against* a ledger. But
 the second sentence claims the whole "dispatch/quota model", which swallows the first.

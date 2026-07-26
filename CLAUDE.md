@@ -188,8 +188,11 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `tool-input-guard.mjs` (PreToolUse Edit/Write/Agent — raw control bytes in written content, Agent
   `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
   `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`, a stale git
-  `index.lock`/`shallow.lock`, and offload-lane liveness so a down proxy is a known constraint at lap start
-  rather than a mid-lap stall),
+  `index.lock`/`shallow.lock`, offload-lane liveness so a down proxy is a known constraint at lap start
+  rather than a mid-lap stall, and — the one leg that MUTATES the filesystem — reaping agent worktrees
+  that are an ancestor of a main ref, idle ≥6h, and clean),
+  `nightly-surface.mjs` (SessionStart — surfaces the nightly routine's open items),
+  `friction-stop-gate.mjs` (Stop — the blocking friction-walk backstop; `process.exit(2)`),
   `question-philosophy-gate.mjs` (PreToolUse AskUserQuestion + Stop — a question is about to reach the owner,
   so THE BRIEF in `docs/project-philosophy.md` is EXTRACTED, never copied, and injected once per session; it
   does not suppress asking — *ask on ambiguity* still holds, and the retry goes through),

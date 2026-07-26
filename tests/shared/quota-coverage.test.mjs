@@ -2,7 +2,7 @@
  * Proactive-quota coverage classification + the unestablished-environment nudge:
  * an unsupported host provider is surfaced as `unestablished` (a loud, self-healing
  * signal) instead of silently degrading to reactive 429. See
- * docs/quota-dispatch-design.md §4.
+ * spec/quota-dispatch-design.md §4.
  */
 
 import { test, afterEach, expect } from "vitest";

@@ -186,7 +186,7 @@ their tests in the same commit. Kept live: `normalizeCheckpointValue`, `Normaliz
   pre-emptively staled). A slice-protected edge defers to the post-re-derive slice compare; safe
   under PRIORITY ordering (upstream obligations run first, staleness re-derives per drain
   iteration). Regression-pinned in `tests/audit/dependency-slices.test.mjs`.
-- **The O2↔F1↔D8 seam line in `docs/backlog-remediation-design.md` was updated** to the as-built
+- **The O2↔F1↔D8 seam line in `spec/backlog-remediation-design.md` was updated** to the as-built
   shape (deterministic normal forms + host-judged step + persisted baseline; no in-process judge
   callback, no verdict cache) — the recorded planned consumer follows the new mechanism.
 

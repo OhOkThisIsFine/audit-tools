@@ -5,7 +5,8 @@ by LLM judgment or by asking the operator — never silently routed around. Repl
 at the admission capability floor.
 
 Sequencing decision: fix the composition FIRST, ranker second — the invariant must hold whether or not a
-ranker ever lands. Context: [`model-capability-ranking-sources.md`](../model-capability-ranking-sources.md).
+ranker ever lands. Context: the 2026-07-18 model-capability-ranking source survey, since retired — its
+durable outcome is the memory note [[capability-evidence-is-an-obligation]].
 
 **Revised after independent adversarial review** (v1 → v2). The review REFUTED three v1 claims; the
 corrections are folded in below and the superseded reasoning is kept where it explains why v2 differs.

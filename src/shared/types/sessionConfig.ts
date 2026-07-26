@@ -544,7 +544,7 @@ export interface DispatchableSource {
    * account: its own `.credentials.json`; a second Codex `auth.json`). The
    * source's quota probe + account id are read from here, so the source forms a
    * pool keyed on its OWN `(transport, account)` — distinct budget from the host's
-   * same-transport pool (docs/quota-dispatch-design.md §5b). Omit when the source
+   * same-transport pool (spec/quota-dispatch-design.md §5b). Omit when the source
    * shares the host's account.
    */
   credentials_path?: string;

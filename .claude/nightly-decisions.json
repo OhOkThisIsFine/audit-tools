@@ -264,5 +264,110 @@
     "subject": "Philosophy conformance: HANDOFF still carries a be-careful warning that its own backlog entry records as having failed",
     "path": "docs/HANDOFF.md",
     "decided_at": "2026-07-26T15:05:23.493Z"
+  },
+  "3683c7ee81710c94": {
+    "disposition": "settled",
+    "answer": "Move both docs to spec/ and fix the guard / gate.",
+    "subject": "Doc-set condensation: two design specs live in docs/ while the philosophy routes design specs to spec/ — and the path-based routing is why nothing noticed",
+    "path": "docs/quota-dispatch-design.md",
+    "decided_at": "2026-07-26T15:06:29.043Z"
+  },
+  "b65ff0bcca7bb685": {
+    "disposition": "settled",
+    "answer": "Generate docs/nightly-routine-prompt.md from nightly-routine.md + doc-review-guidelines.md, following the philosophy-brief and HANDOFF-roadmap pattern, so the facts have one home.",
+    "subject": "Doc-set condensation: the nightly prompt is a second home for facts that already have one, kept honest by a precedence rule instead of by single-sourcing",
+    "path": "docs/nightly-routine-prompt.md",
+    "decided_at": "2026-07-26T15:06:38.345Z"
+  },
+  "8657aaec746c142f": {
+    "disposition": "settled",
+    "answer": "Retire docs/model-capability-ranking-sources.md outright — the consumption-pattern decision it produced is already recorded elsewhere — and delete its bespoke manifest row.",
+    "subject": "Existence review: a dated survey that names its own retirement condition is the last file holding a bespoke manifest exemption",
+    "path": "docs/model-capability-ranking-sources.md",
+    "decided_at": "2026-07-26T15:07:21.484Z"
+  },
+  "47086e76d3fac438": {
+    "disposition": "settled",
+    "answer": "Fitting the project philosophy - we should do mechanically what can be done best mechanically, and we should involve LLM judgement in situations where that judgement will raise the quality of the result. Keep the worktree reaper, have an LLM review unregistered orphan directories, and delete the entry.",
+    "subject": "The worktree reaper SHIPPED and the entry says the mechanism is missing — but deleting the entry loses the orphan-directory half",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:09:42.361Z"
+  },
+  "dcac857f4b11e099": {
+    "disposition": "settled",
+    "answer": "Delete the entry. The populate trigger already keys on the per-run Gate-0 artifact, which is exactly the Property the entry demanded. Do not re-anchor its citation.",
+    "subject": "This entry's premise is CLOSED at HEAD — the populate trigger already keys on the Gate-0 artifact it demands",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:10:19.611Z"
+  },
+  "a85c5e0afe680471": {
+    "disposition": "settled",
+    "answer": "Let's create that third value and include it in classification so the spec is correct.",
+    "subject": "Malformed-result entry: property (a) is fully shipped and (b) is two-thirds shipped — trim to the real remainder, or close it",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:12:23.085Z"
+  },
+  "fcdbfdde282cf2a4": {
+    "disposition": "settled",
+    "answer": "Confirmed — delete the \"Ad-hoc Agent fan-out has no per-agent ledger\" entry, executing the recorded 2026-07-25 decision that the host-fan-out entry subsumes it.",
+    "subject": "An owner decision recorded in the backlog instructs closing a second entry; that entry is still open",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:12:50.014Z"
+  },
+  "3d5ac0871e30ffd3": {
+    "disposition": "settled",
+    "answer": "Merge all three into a single entry, folding the two unique properties into its body rather than keeping separate entries.",
+    "subject": "One shared sub-claim is stated in three backlog entries — but two of the three also carry unique properties a merge would destroy",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:13:14.109Z"
+  },
+  "a4e27bb59aa97976": {
+    "disposition": "settled",
+    "answer": "Keep the two backlog entries separate — they are distinct defects (baseline-binds-to-worktree false RED; --update-baseline raising a grown ceiling) — and delete the durable-traps and HANDOFF restatements.",
+    "subject": "The budget-ratchet trap has four homes — but the two backlog entries are TWO DISTINCT DEFECTS, not two halves of one",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:13:40.436Z"
+  },
+  "5f8878d1e3126a4a": {
+    "disposition": "settled",
+    "answer": "Consolidate the three offload-lane entries into one durable-traps entry with two explicitly named axes — payload SIZE and CONCURRENCY — rather than arbitrating a concurrency number.",
+    "subject": "Three offload-lane entries look like one contradictory trap — they are two different axes, and the \"1 vs 2\" conflict mostly dissolves",
+    "path": "docs/backlog/durable-traps.md",
+    "decided_at": "2026-07-26T15:14:18.054Z"
+  },
+  "8e0e2a693acf04ed": {
+    "disposition": "settled",
+    "answer": "Rewrite the eleven titles to state only the remaining OPEN work, moving shipped context into the entry bodies. Do not widen the status-token gate.",
+    "subject": "Eleven backlog TITLES carry a SHIPPED marker, and each renders three times because both generators copy titles verbatim",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T15:14:44.382Z"
+  },
+  "a4147efe3fc66cd1": {
+    "disposition": "settled",
+    "answer": "Do not build the anchor half. Measure the quote-verification half alone over 20 live offload replies — both its true-positive rate and its closed-set false-positive surface — and bring the numbers back before anything ships.",
+    "subject": "Offload-lane fabrication is real and recurring — but the proposed citation checker catches 0 of the 3 incidents, so the question is whether a mechanical check is the right shape at all",
+    "path": "~/.claude/llm-call.mjs",
+    "decided_at": "2026-07-26T15:17:06.804Z"
+  },
+  "5004af843c274506": {
+    "disposition": "settled",
+    "answer": "Approved. Add a sentence to the ~/.claude/llm-call.mjs system prompt stating that inlined content is line-numbered, conditional on the lineNumbers flag so it is not asserted under --no-line-numbers.",
+    "subject": "Uncontested one-liner: the offload helper numbers every inlined line but never tells the model they are line numbers",
+    "path": "~/.claude/llm-call.mjs",
+    "decided_at": "2026-07-26T15:17:44.571Z"
+  },
+  "b73a32e2dceb884a": {
+    "disposition": "settled",
+    "answer": "Wire smoke:linked-audit-code and smoke:linked-remediate-code into verify:release (they are slow). Do not build the general script-reachability gate — one incident is not a pattern; revisit if it recurs.",
+    "subject": "Two smoke scripts are still run by nothing, six days after the property was written down — wire them, and decide separately about a gate",
+    "path": "package.json",
+    "decided_at": "2026-07-26T15:18:32.946Z"
+  },
+  "3ba976efda50a723": {
+    "disposition": "settled",
+    "answer": "Give friction-stop-gate.mjs a real contract test alongside the other two Stop gates — spawn the process, assert its exit codes and its fail-open behaviours, and assert its wiring in settings.json.",
+    "subject": "The only blocking Stop hook with no behavioural test — its coverage never runs it",
+    "path": ".claude/hooks/friction-stop-gate.mjs",
+    "decided_at": "2026-07-26T15:19:07.719Z"
   }
 }

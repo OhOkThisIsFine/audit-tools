@@ -235,12 +235,14 @@ Phase 2. If Phase 3 produces no blocked items, Phase 3b is skipped.
 - Run end-to-end tests if an `e2e_command` was detected in Phase 1. Because
   individual per-finding refactors may be interdependent, e2e tests run once
   after all findings are resolved rather than per-block. A failure here
-  hard-errors the run: the code changes are complete but not shippable until
-  the e2e issue is investigated. E2e failures do not re-enter triage because
-  they are not attributable to a single item.
+  transitions the run back to triage — it does not throw. The code changes are
+  complete but not shippable until the e2e issue is investigated, and triage is
+  where that investigation is scheduled.
 - Render `remediation-report.md` from the durable item records.
-- Remove `.audit-tools/remediation/` and any scratch files, logs, or
-  branches created only to support remediation.
+- Remove `.audit-tools/remediation/` and any scratch files, logs, or branches
+  created only to support remediation — but ONLY after a fully-green close
+  (combined tests passed, e2e passed, closing actions completed, nothing
+  blocked). Otherwise the artifacts directory is preserved for diagnosis.
 - Execute the confirmed closing action. The fixed enumeration is:
   `commit`, `push`, `open-pr`, `publish`, `tag`, `merge-to-base`, `none`, `custom`.
   `merge-to-base` lands the run as a single revertable `--no-ff` merge into the

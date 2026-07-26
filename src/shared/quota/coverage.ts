@@ -4,7 +4,7 @@ import type { QuotaProbeStatus, QuotaSource } from "./quotaSource.js";
 /**
  * Whether audit-tools has PROACTIVE quota tracking wired for a host provider —
  * the explicit signal that replaces silently falling back to reactive 429 in an
- * as-yet-unsupported environment (docs/quota-dispatch-design.md §4):
+ * as-yet-unsupported environment (spec/quota-dispatch-design.md §4):
  *
  *  - `established`   — a proactive QuotaSource in code covers this provider. The
  *                      live-vs-missing-creds split is the orthogonal
