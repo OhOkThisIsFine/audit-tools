@@ -69,7 +69,9 @@ change. A recommendation that reappears nightly is the shape that taught the old
 digest to be ignored.
 
 **Its suggestions are LEADS, at the same bar as a backlog entry claiming to be
-shipped.** The 2026-07-25 pass triaged twelve: five were already shipped (the
+shipped.** The 2026-07-25 pass
+([`insights-triage-2026-07-25.md`](reviews/insights-triage-2026-07-25.md)) triaged
+twelve: five were already shipped (the
 report's window opens before the fix landed), three were debatable, four were
 real. One recommended re-adding a retry policy for a failure mode whose root
 cause had been found and fixed two days earlier. Every suggestion is therefore
