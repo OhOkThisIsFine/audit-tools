@@ -47,5 +47,12 @@
     "subject": "The open-bugs file is still over budget, and the two entries that discuss it prescribe different fixes",
     "path": "docs/backlog/open-bugs.md",
     "decided_at": "2026-07-26T00:24:40.947Z"
+  },
+  "4752a4d7524dd394": {
+    "disposition": "settled",
+    "answer": "Already fixed at HEAD: AuditorSelf.provider is typed HostProviderName = Exclude<ProviderName,\"claude-worker\"> (auditorDescriptor.ts:32, sessionConfig.ts:26), matching assertHostProviderName. The docblock states the property. No change needed; operator-guide.md:153-164 is correct as written.",
+    "subject": "PREMISE REFUTED — the operator guide was right; the residual is a type looser than its own validator",
+    "path": "src/shared/types/auditorDescriptor.ts",
+    "decided_at": "2026-07-26T00:33:19.903Z"
   }
 }

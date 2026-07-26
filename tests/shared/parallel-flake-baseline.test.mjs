@@ -23,7 +23,9 @@ import {
   environmentKey,
   loadClassOf,
   mergeObservations,
+  RECORD_ENV_VAR,
   readBaseline,
+  recordingEnabled,
   updateFlakeBaseline,
   writeBaselineIfChanged,
 } from "../../scripts/shared/vitest-timing-reporter.mjs";
@@ -290,7 +292,9 @@ test("a failure recorded by THIS run cannot explain itself", () => {
   // happens to land on.
   const path = tempBaselinePath();
   const files = wholeSuite(fakeFile("/repo/tests/audit/heavy.test.mjs", [["detects the cycle", "fail"]], "fail"));
-  const first = updateFlakeBaseline({ files, environment: ENV, baselinePath: path });
+  // `recording: true` because this case is about the MERGE ordering, which only
+  // observable once a write happens. The gate itself is pinned separately below.
+  const first = updateFlakeBaseline({ files, environment: ENV, baselinePath: path, recording: true });
 
   expect(first.load).toBe("parallel");
   expect(first.classified).toEqual([
@@ -304,4 +308,56 @@ test("a failure recorded by THIS run cannot explain itself", () => {
   expect(readBaseline(path).environments[environmentKey(ENV)].tests).toHaveProperty(
     "tests/audit/heavy.test.mjs > detects the cycle",
   );
+});
+
+// ─── The write is a deliberate act, not a side effect of running tests ──────
+//
+// The record used to be written by EVERY run. That is fail-open in the one
+// direction it exists to close: a development run is red exactly when you are
+// mid-change, so an in-progress regression got filed as evidence in the artifact
+// that decides what counts as a known flake — and staged by a routine
+// `git add -A`. Observed three times; the last recorded two genuine regressions,
+// one of them as `parallel_flaky`, the status that explains a red away.
+
+test("an ordinary run does NOT write the baseline, even having observed a failure", () => {
+  const path = tempBaselinePath();
+  const files = wholeSuite(fakeFile("/repo/tests/audit/heavy.test.mjs", [["detects the cycle", "fail"]], "fail"));
+  const result = updateFlakeBaseline({ files, environment: ENV, baselinePath: path, recording: false });
+
+  expect(result.wrote).toBe(false);
+  expect(() => readFileSync(path, "utf8")).toThrow();
+  // Not silently dropped — the run says what it saw and how to record it.
+  expect(result.pendingObservations).toBe(true);
+});
+
+test("classification still runs when recording is off — reading is safe, writing is not", () => {
+  const path = tempBaselinePath();
+  const files = wholeSuite(fakeFile("/repo/tests/audit/heavy.test.mjs", [["detects the cycle", "fail"]], "fail"));
+  const result = updateFlakeBaseline({ files, environment: ENV, baselinePath: path, recording: false });
+
+  // The whole diagnostic value of the record is on the READ side; gating the
+  // write must not cost it.
+  expect(result.classified).toEqual([
+    {
+      testId: "tests/audit/heavy.test.mjs > detects the cycle",
+      recordedStatus: null,
+      classification: "unrecognized",
+    },
+  ]);
+});
+
+test("a green run reports nothing pending, so the notice cannot become background noise", () => {
+  const path = tempBaselinePath();
+  const result = updateFlakeBaseline({ files: wholeSuite(), environment: ENV, baselinePath: path, recording: false });
+  expect(result.wrote).toBe(false);
+  expect(result.pendingObservations).toBe(false);
+});
+
+test("recording is opt-in through one named env var, and only the exact value enables it", () => {
+  expect(RECORD_ENV_VAR).toBe("AUDIT_TOOLS_RECORD_FLAKE_BASELINE");
+  expect(recordingEnabled({})).toBe(false);
+  expect(recordingEnabled({ [RECORD_ENV_VAR]: "" })).toBe(false);
+  expect(recordingEnabled({ [RECORD_ENV_VAR]: "0" })).toBe(false);
+  expect(recordingEnabled({ [RECORD_ENV_VAR]: "true" })).toBe(false);
+  expect(recordingEnabled({ [RECORD_ENV_VAR]: "1" })).toBe(true);
 });

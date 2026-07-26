@@ -18,31 +18,6 @@
   mitigation until then: run `verify:checks`, not `check`, before pushing anything that changes a
   validated shape.
 
-- **The parallel-flake baseline RECORDS failures seen during ordinary development, so an in-progress
-  red gets written into the artifact that decides what counts as a known flake (2026-07-25, medium,
-  friction: tool-should-decide).** Landing a contract change turned 31 tests red for one run; the suite
-  wrote all 31 into `scripts/shared/test-flake-baseline.json` as `status: "unproven"`, and they were
-  staged by a routine `git add -A`. They pass now, so the entries were pure noise — but the same
-  mechanism would happily record a REAL regression as a recognized flake, which is precisely the
-  fail-open the baseline exists to prevent ([[false-red-is-as-corrosive-as-false-green]]). Caught only
-  by reading the staged diff.
-  ⚠ **RE-HIT 2026-07-25, and this time the recorded failures were GENUINE.** Adding the seek-index gate
-  broke two `handoff-roadmap.test.mjs` cases (one real behaviour change, one a fixture cascade); both
-  were written into the baseline as `status: "unproven"` and staged by a routine `git add -A`, then
-  reverted by hand. The first hit recorded noise; this one recorded actual regressions — the fail-open
-  is no longer hypothetical. Property: the baseline is written by an explicit, deliberate
-  re-baselining action on a GREEN tree — never as a side effect of a development test run. Same family
-  as `--update-baseline` raising a grown file's ceiling, below.
-
-- **`api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low).** The
-  `openai-compatible` source branch refuses a `NAME=value` string with a named reason
-  (`auditorSources.ts:467-476`), but `readProxyDeclaration` accepts any non-empty string (`:291`), and
-  both `resolveProxyLane` (`:636`) and the `claude-worker` reach branch (`:547`) then look the
-  malformed string up as a variable name and report it as merely *unset* — the misleading symptom the
-  validated branch exists to prevent. Property: one validator guards every site that reads a credential
-  reference; the check belongs to the FIELD, not to one of its readers.
-  [[fix-the-defect-class-not-the-named-instance]] [[validator-guards-every-field-caller-reads]]
-
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
   "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary
@@ -592,7 +567,7 @@
   `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).**
   `verifySourceReach` refuses an inline `api_key` because possession is not reach, and its own comment
   names that quarantine as the only catcher for the always-passes lane it is refusing
-  (`src/shared/providers/auditorSources.ts:390-394`) — the catcher does not exist. A lane whose key was
+  (`src/shared/providers/auditorSources.ts:425-429`) — the catcher does not exist. A lane whose key was
   revoked or whose endpoint died still verifies (env var present, launcher on PATH) and is re-admitted
   every run; under cost-first routing (λ=0) a stale free-tier declaration then takes EVERY packet first
   and fails them all. Open property: a source that fails reactively (oversize / 402 / tool-corruption)

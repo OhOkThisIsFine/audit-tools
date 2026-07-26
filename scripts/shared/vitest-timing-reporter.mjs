@@ -333,12 +333,45 @@ export function writeBaselineIfChanged(path, record) {
   }
 }
 
+/** The env var that opts a run in to WRITING the baseline. */
+export const RECORD_ENV_VAR = "AUDIT_TOOLS_RECORD_FLAKE_BASELINE";
+
+/**
+ * Is this run allowed to WRITE the tracked baseline?
+ *
+ * Recording used to happen on every run, which made the record fail-open in the
+ * one direction it exists to close. An ordinary development run is red precisely
+ * when you are mid-change, and those reds were written straight into the artifact
+ * that decides what counts as a known flake — then staged by a routine
+ * `git add -A`. Observed three times: twice recording pure noise, and once
+ * recording two genuine regressions, one of them as `parallel_flaky` (the status
+ * that actively EXPLAINS AWAY a red).
+ *
+ * So the write is now a deliberate act on a tree you have decided is green, not a
+ * side effect of running tests. Classification against the PRIOR record is
+ * unaffected and still runs on every suite — reading the record is what makes a
+ * known flake legible, and only writing it is dangerous.
+ * [[false-red-is-as-corrosive-as-false-green]]
+ */
+export function recordingEnabled(env = process.env) {
+  return env[RECORD_ENV_VAR] === "1";
+}
+
 /**
  * The whole baseline step for one run: classify against the PRIOR record, then
  * merge this run's observations into it. The ordering is the invariant — a
  * failure recorded by this very run must not be able to explain itself.
+ *
+ * `recording` gates the WRITE only. When it is off and this run did observe
+ * something new, the result carries `pendingObservations: true` so the reporter
+ * can say so rather than silently discarding it.
  */
-export function updateFlakeBaseline({ files, environment, baselinePath = FLAKE_BASELINE_PATH }) {
+export function updateFlakeBaseline({
+  files,
+  environment,
+  baselinePath = FLAKE_BASELINE_PATH,
+  recording = recordingEnabled(),
+}) {
   const load = loadClassOf({ fileCount: files.length, workers: environment.workers });
   const record = readBaseline(baselinePath);
   const observations = collectObservations(files);
@@ -347,8 +380,14 @@ export function updateFlakeBaseline({ files, environment, baselinePath = FLAKE_B
   const merged = mergeObservations({ record, environment, load, observations });
   // Nothing learned → the tracked file is not created, rewritten, or touched.
   const changed = serializeBaseline(merged) !== serializeBaseline(record);
-  const wrote = changed && writeBaselineIfChanged(baselinePath, merged);
-  return { environment: environmentKey(environment), load, classified, wrote };
+  const wrote = recording && changed && writeBaselineIfChanged(baselinePath, merged);
+  return {
+    environment: environmentKey(environment),
+    load,
+    classified,
+    wrote,
+    pendingObservations: changed && !recording,
+  };
 }
 
 export default class TimingReporter {
@@ -409,6 +448,13 @@ export default class TimingReporter {
         }
         lines.push(`     ${unrecognized.length} UNRECOGNIZED — these stay RED:`);
         for (const c of unrecognized) lines.push(`       - ${c.testId}${c.recordedStatus ? ` (recorded: ${c.recordedStatus})` : ""}`);
+      }
+      if (flake.pendingObservations) {
+        lines.push(
+          `     this run saw something the baseline does not record — NOT written.` +
+            ` Re-baseline deliberately on a tree you have decided is green:` +
+            ` \`npm run test:rebaseline-flakes\`.`,
+        );
       }
     } catch (error) {
       lines.push(`   parallel-flake baseline skipped: ${error?.message ?? error}`);

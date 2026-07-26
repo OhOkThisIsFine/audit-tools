@@ -215,6 +215,31 @@ export interface ProxyDeclaration {
 }
 
 /** `readProxyDeclaration`'s outcome: the lane, or why it is absent. */
+/**
+ * `api_key_env` names an environment VARIABLE; it never carries the value. A
+ * declaration that pastes `NAME=value` (or the secret itself) used to be
+ * accepted verbatim by every reader and then reported as `unset var
+ * "NAME=value"` — which reads as a missing env var and sends the operator to
+ * their shell instead of to the typo.
+ *
+ * The check belongs to the FIELD, not to one of its readers: it previously
+ * guarded only the `openai-compatible` source branch while `readProxyDeclaration`
+ * accepted any non-empty string, so the proxy lane and the expanded
+ * `claude-worker` sources both inherited the misleading symptom the validated
+ * branch exists to prevent. Returns a precise reason, or `null` when the name is
+ * well formed. [[validator-guards-every-field-caller-reads]]
+ */
+export function invalidEnvVarNameReason(field: string, value: string): string | null {
+  const name = value.trim();
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+  return (
+    `${field} "${name}" is not an environment variable NAME` +
+    (value.includes("=")
+      ? " — it looks like a NAME=value pair; declare only the NAME (the value belongs in the environment)."
+      : " (expected letters, digits and underscores, not starting with a digit).")
+  );
+}
+
 export interface ProxyDeclarationResult {
   declaration: ProxyDeclaration | null;
   /** Present only when a `proxy` key EXISTS but is malformed (never thrown). */
@@ -226,8 +251,11 @@ export interface ProxyDeclarationResult {
  * {@link readSourceDeclaration}: an absent / unparseable file or a missing key is
  * simply `{declaration: null}`; a PRESENT-but-malformed block degrades to lane-absent
  * WITH a reason (surfaced via `resolveAmbientSources`' `dropped[]`), never a throw.
- * Malformed optional knobs (`top_k` / `cost_per_mtok` / `api_key_env`) are dropped
+ * Malformed optional TUNING knobs (`top_k` / `cost_per_mtok`) are dropped
  * individually — a bad tuning value must not cost the operator the whole lane.
+ * `api_key_env` is deliberately NOT in that set: it is a credential reference,
+ * and dropping it silently leaves the lane looking unauthenticated so the
+ * failure surfaces far downstream with a reason that no longer names the typo.
  *
  * Rejection: if a `repair_proxy` key exists, it is not recognized and surfaces a
  * dropped reason telling the operator what key to use instead (never silent ignore).
@@ -289,6 +317,13 @@ export function readProxyDeclaration(
     declaration.cost_per_mtok = cost_per_mtok;
   }
   if (typeof api_key_env === "string" && api_key_env.trim().length > 0) {
+    // NOT dropped-individually like the tuning knobs above. `api_key_env` is a
+    // CREDENTIAL REFERENCE: silently discarding a malformed one leaves the lane
+    // looking unauthenticated and fails much further downstream, where the
+    // reason no longer names the typo. Fail the lane here, with the same
+    // precise text the `openai-compatible` branch uses.
+    const bad = invalidEnvVarNameReason("proxy.api_key_env", api_key_env);
+    if (bad !== null) return { declaration: null, reason: bad };
     declaration.api_key_env = api_key_env.trim();
   }
   if (typeof burst_limited === "boolean") {
@@ -459,21 +494,12 @@ export function verifySourceReach(
             "openai-compatible source has no api_key_env (declare no_auth: true if the endpoint genuinely takes no credential).",
         };
       }
-      // `api_key_env` is an env var NAME. A declaration carrying `NAME=value`
-      // (or the value itself) used to be accepted verbatim and then reported as
-      // "unset var \"NAME=value\"" — which reads as a missing env var and sends
-      // the operator to their shell instead of to the typo. A `=` or whitespace
-      // in an env NAME is never right, so say so precisely.
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source.api_key_env.trim())) {
-        return {
-          verified: false,
-          reason:
-            `api_key_env "${source.api_key_env.trim()}" is not an environment variable NAME` +
-            (source.api_key_env.includes("=")
-              ? " — it looks like a NAME=value pair; declare only the NAME (the value belongs in the environment)."
-              : " (expected letters, digits and underscores, not starting with a digit)."),
-        };
-      }
+      // Single-sourced with `readProxyDeclaration` — see
+      // {@link invalidEnvVarNameReason}. This branch used to own the only copy
+      // of the rule, which is how the other two readers inherited the symptom it
+      // exists to prevent.
+      const badName = invalidEnvVarNameReason("api_key_env", source.api_key_env);
+      if (badName !== null) return { verified: false, reason: badName };
       if (!(env[source.api_key_env] ?? "").trim()) {
         return {
           verified: false,

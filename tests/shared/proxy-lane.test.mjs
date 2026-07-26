@@ -105,6 +105,43 @@ describe("readProxyDeclaration — tolerant shape", () => {
     expect(result.declaration).toEqual({ endpoint: PROXY });
   });
 
+  // `api_key_env` is a CREDENTIAL REFERENCE, not a tuning knob. The NAME rule
+  // used to live only in the `openai-compatible` reach branch, so this reader
+  // accepted `NAME=value` verbatim and the proxy lane (plus every expanded
+  // claude-worker source) then reported it as merely an unset var — the exact
+  // misleading symptom the validated branch exists to prevent.
+  describe("api_key_env is validated HERE, not only by one of its readers", () => {
+    for (const bad of ["NVIDIA_API_KEY=sk-live", "has space", "9LEADING_DIGIT", "sk-live-abc123"]) {
+      it(`refuses ${JSON.stringify(bad)} and names the typo rather than the env`, () => {
+        const result = readProxyDeclaration(
+          deps({ declaration: { proxy: { endpoint: PROXY, api_key_env: bad } } }),
+        );
+        // The lane is refused, not silently de-credentialed: a declaration that
+        // kept `{endpoint}` would look unauthenticated and fail much further
+        // downstream, where the reason no longer names the typo.
+        expect(result.declaration).toBeNull();
+        expect(result.reason).toContain("proxy.api_key_env");
+        expect(result.reason).toContain("environment variable NAME");
+        expect(result.reason).not.toMatch(/unset or empty/u);
+      });
+    }
+
+    it("says NAME=value pair explicitly when the value was pasted in", () => {
+      const result = readProxyDeclaration(
+        deps({ declaration: { proxy: { endpoint: PROXY, api_key_env: "K=v" } } }),
+      );
+      expect(result.reason).toContain("NAME=value pair");
+    });
+
+    it("accepts a well-formed NAME", () => {
+      const result = readProxyDeclaration(
+        deps({ declaration: { proxy: { endpoint: PROXY, api_key_env: " NVIDIA_API_KEY " } } }),
+      );
+      expect(result.declaration).toEqual({ endpoint: PROXY, api_key_env: "NVIDIA_API_KEY" });
+      expect(result.reason).toBeUndefined();
+    });
+  });
+
   it("REGRESSION PIN (iii): legacy repair_proxy key → loud dropped reason", () => {
     // PRE-SWAP: repair_proxy was parsed as the lane declaration.
     // POST-SWAP: repair_proxy is explicitly retired, surfaces a dropped reason.

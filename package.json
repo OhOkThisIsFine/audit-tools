@@ -79,7 +79,8 @@
     "check:constitutional-doc-paths": "node scripts/shared/generate-constitutional-doc-paths.mjs --check",
     "check:handoff-roadmap": "node scripts/shared/generate-handoff-roadmap.mjs --check",
     "check:backlog-status": "node scripts/check-backlog-status-tokens.mjs",
-    "check:backlog-index": "node scripts/shared/generate-backlog-index.mjs --check"
+    "check:backlog-index": "node scripts/shared/generate-backlog-index.mjs --check",
+    "test:rebaseline-flakes": "node scripts/shared/rebaseline-flakes.mjs"
   },
   "engines": {
     "node": ">=20"

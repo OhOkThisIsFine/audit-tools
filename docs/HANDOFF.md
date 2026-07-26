@@ -208,7 +208,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 104 open item(s).
+> `verify:checks` and at commit). 102 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -217,8 +217,6 @@ its SPEC intact.
 ### Open bugs & frictions — the working queue
 
 - A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI (2026-07-25, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
-- The parallel-flake baseline RECORDS failures seen during ordinary development, so an in-progress red gets written into the artifact that decides what counts as a known flake (2026-07-25, medium, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
-- `api_key_env` NAME validation guards ONE of THREE sites that read it (2026-07-25, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined, not unwrapped. · [`open-bugs.md`](backlog/open-bugs.md)
 - CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree (2026-07-22, low, revisit on live evidence only). · [`open-bugs.md`](backlog/open-bugs.md)
