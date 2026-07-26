@@ -445,6 +445,17 @@
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
 
+- **Friction walk (duplicated-guard lap, 2026-07-25):** (1) **inefficient-feeding (medium):** the
+  triage's per-entry `Paths:` are MODEL-INVENTED for entries whose prose names no file —
+  `src/scheduler/populate.ts`, `src/review/mapCache.ts`, `src/pinning-gate.ts` and others do not exist —
+  so a path column that reads like evidence is a routing guess. Two of the three entries worked this lap
+  had to be located by grep anyway. Property: a generated triage should emit a path only when it can be
+  resolved against the tree, and mark the rest `unresolved`. (2) **tool-should-decide (low):** the
+  backlog seek-index and the HANDOFF roadmap are two separate generators, each with its own commit-gate
+  refusal, so a single backlog edit costs two blocked commits to learn both are stale. One `npm run
+  regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
+  this lap.
+
 - **Friction walk (smoke-dedup lap, 2026-07-25):** (1) **tool-should-decide (medium):**
   `smoke:linked-audit-code` is in no gate — `verify:checks` runs only the packaged smokes — so it had
   drifted BROKEN at HEAD unnoticed: its finalize loop returned at `present_report` status `ready` and
@@ -563,16 +574,16 @@
   first-wins, loser reported rather than dropped.
 
 - **A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).** Mid-lap an `Edit` on `docs/backlog.md` failed with "String to replace not found" on a paragraph I had authored minutes earlier — a hook had normalized `vs` → `vs.` in it. The Edit tool's own hint ("tried swapping \uXXXX escapes") points at encoding, not at a hook rewrite, so the natural next move is re-reading the whole file to hunt an invisible character. Cost a re-read + a retry. Property to hold: a hook that rewrites a file the agent is mid-edit on should announce the rewrite (or the tool should re-anchor), rather than presenting as a mysterious mismatch. Cheap mitigation until then: after a "not found" on text you just wrote, suspect a normalizer and `grep` the anchor before re-reading the file.
-  **SPEC — a hook that rewrites a file must announce the rewrite; the editing tool is not ours to change.**
-  Recurred again this session, on this very entry: an exact-match edit failed while a full re-read showed
-  byte-identical text, so the mismatch was invisible and the only escape was shrinking the anchor until it
-  matched. The cost is never the retry — it is that the failure impersonates an encoding problem, and the
-  tool's own hint points at character escapes, sending the agent hunting for something that is not there.
-  The fix belongs in the hook, which we own: when it rewrites a file, it says so, so the next mismatch is
-  self-explaining. ⚠ Do not pursue lint-aware patch semantics inside the editor — that is someone else's
-  tool and a large mechanism to avoid a one-line announcement. ⚠ And do not "fix" it by disabling the hook
-  during agent edits: suppressing enforcement to make editing convenient is the wrong direction and
-  teaches the same workaround on every other surface.
+  **⚠ The SPEC that stood here is UNBUILDABLE AS WRITTEN — premise falsified at HEAD 2026-07-25.** It said
+  "a hook that rewrites a file must announce the rewrite", but no such rewriter exists: nothing in
+  `.claude/hooks/` (nor the single global hook) writes into `docs/` — every hook write is a state
+  marker/journal under the state dir, and the one tree-rewriting mechanism, the pre-commit gate's
+  staged-snapshot round-trip, restores byte-identically and already announces an interrupted one. So the
+  observed mismatch has no hook to announce it, and the remaining suspect is the editing tool's own
+  matching, which this entry correctly says is not ours to change. **Before rebuilding this: name the
+  process that rewrote the bytes, or close the entry.** ⚠ Still standing: do not pursue lint-aware patch
+  semantics inside the editor, and do not "fix" it by disabling a gate during agent edits. Working
+  mitigation: after a "not found" on text you just wrote, `grep` the anchor instead of re-reading the file.
   **Property to hold:** a file mutated underneath an agent mid-edit is announced, never silent.
 
 - **Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).** `tests/remediate/session-config-load.test.ts` red-greens `loadRemediateSessionConfig`, and every remediate site routes through it today, but a FUTURE call site that inlines `resolveSessionConfig(intent, null)` instead of using the loader fails no test (verified by experiment: reverting a call site to `null` left both files green). Same for audit's two ambient sites. The loader makes the right thing the easy thing; it does not make the wrong thing impossible. Property to hold: a production caller cannot resolve a session config without a descriptor — e.g. make the descriptor a required parameter and give the two legitimate "resolve no pool" callers an explicit `noPoolDescriptor()`, so `null` stops being the path of least resistance.
