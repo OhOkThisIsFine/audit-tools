@@ -233,7 +233,7 @@ its SPEC intact.
 - Selective-deepening convergence — live validation env-bound. · [`open-bugs.md`](backlog/open-bugs.md)
 - The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 - A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing. · [`open-bugs.md`](backlog/open-bugs.md)
-- ID minting is not routed through the one registry. · [`open-bugs.md`](backlog/open-bugs.md)
+- ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25). · [`open-bugs.md`](backlog/open-bugs.md)
 
 ### Open tracks — in flight
 

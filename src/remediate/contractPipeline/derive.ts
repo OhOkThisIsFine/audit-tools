@@ -34,6 +34,7 @@ import {
   readObligationChangeClassification,
 } from "./changeClassification.js";
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
+import { obligationId } from "./idRegistry.js";
 import { payloadSemanticHash } from "./artifactStore.js";
 import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
 
@@ -92,12 +93,11 @@ export function deriveObligationLedger(
   const baselineSymbols = buildBaselineSymbolCorpus(finalizedModuleContracts);
 
   for (const mod of finalized.module_contracts) {
-    const base = slug(mod.name) || "module";
 
     // Contract-conformance obligation — represents the module even when it
     // declares no invariants/failure modes (structural kind → not testable).
     obligations.push({
-      id: mintUniqueId(usedIds, `OBL-${base}-contract`),
+      id: mintUniqueId(usedIds, obligationId(mod.name, "contract")),
       description:
         `Implement module "${mod.name}" per its finalized contract ` +
         `(inputs: ${fmtList(mod.inputs)} → outputs: ${fmtList(mod.outputs)}; ` +
@@ -111,7 +111,7 @@ export function deriveObligationLedger(
 
     mod.invariants.forEach((invariant, i) => {
       obligations.push({
-        id: mintUniqueId(usedIds, `OBL-${base}-inv-${i + 1}`),
+        id: mintUniqueId(usedIds, obligationId(mod.name, `inv-${i + 1}`)),
         description: invariant,
         kind: "invariant",
         depends_on: [],
@@ -124,7 +124,7 @@ export function deriveObligationLedger(
 
     mod.failure_modes.forEach((failureMode, j) => {
       obligations.push({
-        id: mintUniqueId(usedIds, `OBL-${base}-fail-${j + 1}`),
+        id: mintUniqueId(usedIds, obligationId(mod.name, `fail-${j + 1}`)),
         description: `Handle failure mode: ${failureMode}`,
         kind: "behavioral",
         depends_on: [],
@@ -732,13 +732,6 @@ function fmtList(items: string[]): string {
   return items.length > 0 ? items.join(", ") : "none";
 }
 
-/** Lowercase, hyphenate, trim — a stable, readable id fragment from a name. */
-function slug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 function strArray(value: unknown): string[] {
   return Array.isArray(value)

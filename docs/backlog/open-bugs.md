@@ -1080,7 +1080,10 @@
   review ran — require a non-fallback finding set, or block synthesis on an auto-completed-empty pass.
   Lifted from `spec/contract-authoring-determinism-design.md`; its S8 section states the design.
 
-- **ID minting is not routed through the one registry.** `goal_id` / module / obligation ids are still
-  minted outside `src/remediate/contractPipeline/idRegistry.ts`, so the single-authority property the S4
-  design asserts is not enforced. **Property to hold:** every minted id passes through the registry, so
-  uniqueness and format are mechanical, not per-call-site care. Lifted from the same spec.
+- **ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25).**
+  Obligation ids now mint through `obligationId`/`moduleSlug` in
+  `src/remediate/contractPipeline/idRegistry.ts` (the encoder and its phase/write-scope decoders were two
+  identical implementations plus a "MUST stay in lockstep" comment), and uniqueness is the shared
+  `mintUniqueId`. What is left: `goal_id` is not minted at all — it is read verbatim off the LLM envelope
+  (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
+  minted by the registry or validated on the way in.

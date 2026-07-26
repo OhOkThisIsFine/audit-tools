@@ -62,3 +62,30 @@ export function isBlockId(value: string): boolean {
 export function fromBlockId(value: string): string | null {
   return isBlockId(value) ? value.slice(CP_BLOCK_PREFIX.length) : null;
 }
+
+/** The one prefix every derived obligation id carries. */
+export const OBLIGATION_PREFIX = "OBL-";
+
+/**
+ * Lowercase-hyphenate a module name into the id fragment obligation ids encode.
+ *
+ * The ENCODER (`derive.ts`, minting `OBL-<slug>-…`) and the DECODERS (phase
+ * resolution, write-scope inheritance) must agree exactly, or an obligation
+ * resolves to no module and its node silently loses its phase and file scope.
+ * They previously agreed by way of two identical implementations and a comment
+ * saying they must stay in lockstep — a drift test made of memory. One
+ * implementation, here with the rest of the id authority, cannot drift.
+ */
+export function moduleSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "");
+}
+
+/**
+ * Mint a derived obligation id from a module name and a suffix — the ONLY place
+ * the `OBL-<slug>-<suffix>` shape is applied, so the decoders above are matching
+ * a format with a single author. Callers still pass the result through
+ * `mintUniqueId` for collision disambiguation.
+ */
+export function obligationId(moduleName: string, suffix: string): string {
+  return `${OBLIGATION_PREFIX}${moduleSlug(moduleName) || "module"}-${suffix}`;
+}

@@ -111,7 +111,7 @@
 - `open-bugs.md:1043` — Selective-deepening convergence — live validation env-bound.
 - `open-bugs.md:1065` — The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding).
 - `open-bugs.md:1075` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
-- `open-bugs.md:1083` — ID minting is not routed through the one registry.
+- `open-bugs.md:1083` — ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

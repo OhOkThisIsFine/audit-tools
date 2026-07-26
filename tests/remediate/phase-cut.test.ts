@@ -17,6 +17,7 @@ import {
   moduleSlug,
   type PhaseCutModule,
 } from "../../src/remediate/contractPipeline/phaseCut.js";
+import { obligationId } from "../../src/remediate/contractPipeline/idRegistry.js";
 import { buildNextContractPipelineStep } from "../../src/remediate/steps/contractPipeline.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
@@ -181,6 +182,22 @@ describe("module_phase map + phaseOrdinalForObligations (node→phase key)", () 
   it("moduleSlug matches the obligation-ledger id fragment", () => {
     expect(moduleSlug("Auth Service")).toBe("auth-service");
     expect(moduleSlug("core")).toBe("core");
+  });
+
+  // The encoder and the decoder are the same module now, so this asserts the
+  // PROPERTY (a minted id resolves back to its module) rather than comparing two
+  // implementations that a lockstep comment used to keep honest.
+  it("an id minted by obligationId decodes back to its own module", () => {
+    const names = ["Auth Service", "core", "UI/Shell", "auth"];
+    const slugToOrdinal = new Map(names.map((n, i) => [moduleSlug(n), i]));
+    names.forEach((name, i) => {
+      for (const suffix of ["contract", "inv-1", "fail-2"]) {
+        expect(
+          phaseOrdinalForObligations([obligationId(name, suffix)], slugToOrdinal, 99),
+          `${name} / ${suffix}`,
+        ).toBe(i);
+      }
+    });
   });
 
   it("resolves a node's phase from its obligation ids by module slug", () => {

@@ -18,6 +18,8 @@
  * cyclic module never front-runs a real foundation it transitively needs).
  */
 
+import { OBLIGATION_PREFIX } from "./idRegistry.js";
+
 /** One module + the names of the other modules it depends on (its foundations). */
 export interface PhaseCutModule {
   name: string;
@@ -125,14 +127,12 @@ export function derivePhaseCut(modules: PhaseCutModule[]): PhaseCut {
 }
 
 /**
- * Lowercase-hyphenate a module name into the id fragment the obligation-ledger
- * derivation uses (`OBL-<slug>-…`). MUST stay in lockstep with `slug` in
- * `derive.ts` — single-sourced here so the node→phase mapping decodes the exact
- * fragment the ledger encoded. (Both reduce to lowercase, non-alphanumeric→`-`.)
+ * The id fragment obligation ids encode — re-exported from the id registry,
+ * which owns both this and the mint that produces `OBL-<slug>-…`, so encoder and
+ * decoder cannot drift. Kept exported here because this module is where the
+ * node→phase decoders live and import it from.
  */
-export function moduleSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+export { moduleSlug } from "./idRegistry.js";
 
 /**
  * Resolve the phase ordinal for an implementation-DAG node from the obligation
@@ -157,8 +157,8 @@ export function phaseOrdinalForObligations(
   let max = -1;
   let matchedAny = false;
   for (const id of obligationIds) {
-    if (!id.startsWith("OBL-")) continue;
-    const rest = id.slice(4);
+    if (!id.startsWith(OBLIGATION_PREFIX)) continue;
+    const rest = id.slice(OBLIGATION_PREFIX.length);
     for (const slug of slugsByLength) {
       if (rest === slug || rest.startsWith(`${slug}-`)) {
         max = Math.max(max, slugToOrdinal.get(slug) ?? 0);
