@@ -75,5 +75,124 @@
     "subject": "Two open items are written out as full specs in BOTH HANDOFF and the backlog",
     "path": "docs/HANDOFF.md",
     "decided_at": "2026-07-26T00:59:55.636Z"
+  },
+  "5e2d0d8da4e33edc": {
+    "disposition": "settled",
+    "answer": "backend-identity-axes.md owns the exclusion grammar; unified-dispatch-worker-model.md and operator-guide.md now point at it. Gate compare key row corrected to backendIdentity (service:model, else bare service). Shipped 80b59b7b.",
+    "subject": "Two specs still give opposite answers on the exclusion grammar; only one matches the shipped code",
+    "path": "spec/unified-dispatch-worker-model.md",
+    "decided_at": "2026-07-26T02:39:37.034Z"
+  },
+  "b42bfc339605632c": {
+    "disposition": "settled",
+    "answer": "backend-identity-axes.md owns the exclusion grammar; unified-dispatch-worker-model.md and operator-guide.md now point at it. Gate compare key row corrected to backendIdentity (service:model, else bare service). Shipped 80b59b7b.",
+    "subject": "The gate-compare-key row was REFUSED for auto-apply — its fallback is still live and the paragraph below it would contradict any fix",
+    "path": "spec/unified-dispatch-worker-model.md",
+    "decided_at": "2026-07-26T02:39:37.086Z"
+  },
+  "1520a17c7282322b": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The manifest cell still calls a salvage record \"currently load-bearing\" and points into a backlog section that no longer exists",
+    "path": "docs/doc-review-guidelines.md",
+    "decided_at": "2026-07-26T02:39:37.137Z"
+  },
+  "16c518f14d62ba29": {
+    "disposition": "settled",
+    "answer": "Retire the 9router doc (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
+    "subject": "A tracked doc sits in no manifest row, and the gate meant to prevent that structurally cannot see it",
+    "path": "examples/9router-harness-proxy-setup.md",
+    "decided_at": "2026-07-26T02:39:37.188Z"
+  },
+  "c3bcc992b3794a9a": {
+    "disposition": "settled",
+    "answer": "Retire the 9router doc (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
+    "subject": "examples/README has a pointer that no longer resolves, an incomplete contents list, and half its body is spec prose",
+    "path": "examples/README.md",
+    "decided_at": "2026-07-26T02:39:37.238Z"
+  },
+  "c27fc2430cedcede": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The philosophy map states a design its own canonical home records as REFUTED, and cites a memory file that does not exist",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-07-26T02:39:37.299Z"
+  },
+  "722b143c8f45cc06": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The manifest's \"excluded\" row is one 21,565-character table cell covering 51 dated records — and it grew again",
+    "path": "docs/doc-review-guidelines.md",
+    "decided_at": "2026-07-26T02:39:37.351Z"
+  },
+  "4caf44c5efa14013": {
+    "disposition": "settled",
+    "answer": "Rewritten to settled invariants at backend-identity-axes.md. Shipped 80b59b7b.",
+    "subject": "Six spec passages still describe shipped work in plan tense (\"becomes\", \"must satisfy\", \"Ship a …\")",
+    "path": "spec/audit-workflow-design.md",
+    "decided_at": "2026-07-26T02:39:37.406Z"
+  },
+  "7e13a673dfb730fe": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The README's public philosophy reads deterministic-by-default and hedges an invariant the project states absolutely",
+    "path": "README.md",
+    "decided_at": "2026-07-26T02:39:37.463Z"
+  },
+  "d7d782cbefca16d6": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "Four small corrections that each need a wording choice rather than a token swap",
+    "path": "spec/contract-authoring-determinism-design.md",
+    "decided_at": "2026-07-26T02:39:37.518Z"
+  },
+  "928c6e644fef1f56": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "A shipped fix is documented as making a defect \"impossible\"; tracing it shows the defect is still live",
+    "path": "src/shared/providers/sharedProviderConfirmation.ts",
+    "decided_at": "2026-07-26T02:39:37.570Z"
+  },
+  "4027a6670bd4477c": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "How should a staged migration record its shipped stages — delete them, or keep ✅ markers?",
+    "path": "docs/backlog/forward-tracks.md",
+    "decided_at": "2026-07-26T02:39:37.619Z"
+  },
+  "67580078935b53d4": {
+    "disposition": "settled",
+    "answer": "Stage 3 is now a one-line KNOWN-WRONG pointer. Convention: delete shipped stages, keep known-wrong visible. Shipped 80b59b7b.",
+    "subject": "A migration stage sits in the queue looking pending, while the next line says it was refuted",
+    "path": "docs/backlog/forward-tracks.md",
+    "decided_at": "2026-07-26T02:39:37.671Z"
+  },
+  "aa691b57778496f8": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "A decided item is parked in the working queue, and deleting it would erase the only record that it was declined",
+    "path": "docs/backlog/forward-tracks.md",
+    "decided_at": "2026-07-26T02:39:37.733Z"
+  },
+  "e75a2245f7fb15dd": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The entry about the file being too big hand-carries a measurement that goes stale every time the file is edited",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-07-26T02:39:37.785Z"
+  },
+  "45162da1a55c3672": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "Offload lane: the schema flag SHIPPED; line numbers and the truncation signal are still live (and one is a 5-day-old entry)",
+    "path": "C:/Users/ethan/.claude/llm-call.mjs",
+    "decided_at": "2026-07-26T02:39:37.839Z"
+  },
+  "977a34da5036752c": {
+    "disposition": "settled",
+    "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
+    "subject": "The fix that stopped false REDs can turn a real failure GREEN in the release gate",
+    "path": "scripts/shared/vitestGateVerdict.mjs",
+    "decided_at": "2026-07-26T02:39:37.892Z"
   }
 }
