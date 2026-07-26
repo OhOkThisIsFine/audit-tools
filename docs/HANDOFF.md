@@ -9,16 +9,30 @@
 
 ## Live state
 
+- **⚠ The whole backlog was mechanically TRIAGED 2026-07-25 — read the triage before opening a lap.**
+  Every open entry was classified one-per-offload-call:
+  [`backlog-triage-2026-07-25.md`](reviews/backlog-triage-2026-07-25.md). Counts at the time: ~60
+  actionable, 22 live-run-blocked, 18 flagged owner-decision, 2 accepted residuals. ⚠ **The verdicts are
+  ADVISORY, not conclusions** — the lane over-flags `owner_decision_needed` (its habitual hedge is
+  "schedule a discussion"), and most of those 18 state their own resolution already. Verify a row against
+  HEAD before working it ([[backlog-prose-decays-verify-against-head]]); this lap found three entries
+  whose premise was already fixed at HEAD.
+
+- **▶ NEXT: keep working the actionable queue.** Use the seek index in
+  [`backlog.md`](backlog.md) — every entry now carries a `file:line` anchor, so read the index once and
+  jump with an offset read rather than paging the file blind.
+
 - **⚠ EVERY owner call in the backlog was answered 2026-07-25. The decisions are recorded IN their
-  entries — do not re-ask them.** Thirteen items were blocked on the owner rather than on code; each now
-  carries an `⚠ OWNER DECISION 2026-07-25` paragraph naming the option taken and, where it matters, what
-  that decision does NOT settle. Two remain owner-OWNED and no lap can close them: the A7 GUI host
-  checklist (a human at Antigravity / OpenCode / VS Code) and the dogfood run below.
-  ⚠ Three decisions carry a trap worth reading before building: the per-site pinning gate's
-  diff-derived site list does NOT solve its second property (test names are still author-supplied);
-  Slice-3's lease-sized-to-work decision does NOT settle the accept-time claim move, which the owner was
-  explicitly unsure about; and contract-pipeline (b) narrows the whole-artifact-rewrite invariant, so it
-  must be scoped to rejections naming specific fields.
+  entries — do not re-ask them.** Two further owner calls were settled late on 2026-07-25 and are
+  likewise recorded in their entries: the backlog gets a **generated index, not a split** (shipped), and
+  the **Slice-3 claim STAYS at dispatch time** (moving it to accept time reopens the double-dispatch
+  window the claim exists to close). The nightly queue's own determinations live in
+  `.claude/nightly-decisions.json` — settled by subject, so they are never re-asked.
+  Two remain owner-OWNED and no lap can close them: the A7 GUI host checklist (a human at
+  Antigravity / OpenCode / VS Code) and the dogfood run below.
+  ⚠ Two decision traps worth reading before building: the per-site pinning gate's diff-derived site list
+  does NOT solve its second property (test names are still author-supplied); and contract-pipeline (b)
+  narrows the whole-artifact-rewrite invariant, so it must be scoped to rejections naming specific fields.
 
 - **⚠ `reviewed_clean` is a NEW hard contract on every zero-finding AuditResult (`e6b3f7b1`).** An empty
   `findings` array is refused unless the result also sets `reviewed_clean: true`, and the flag is refused
@@ -26,10 +40,10 @@
   the gate, not a regression. Rationale: a lane that errors or truncates emits output identical to a
   careful clean review, so a broken lane read as a weak one.
 
-- **▶ NEXT: the dogfood self-audit (owner: run it AFTER the code fixes land).** ~15 `⬇ LIVE-run watch`
-  items are blocked only on evidence from a real run — including the per-node token estimate below,
-  which still has none. Do not start it mid-fix: a commit re-stales the planning chain and regresses the
-  run to `charter_extraction`.
+- **The dogfood self-audit is the OWNER's, in a separate conversation, after the code fixes land**
+  (decided 2026-07-25). ~22 `⬇ LIVE-run watch` entries are blocked only on evidence from it — including
+  the per-node token estimate, which still has none. A lap must land what it can WITHOUT the run and not
+  start one: a commit mid-run re-stales the planning chain and regresses it to `charter_extraction`.
 
 - **⚠ Four refusals landed earlier on 2026-07-25 (`11bbb8f2`, `9732b1ed`, `df80e55b`) — all intended; a session
   that does not expect them reads each as a fault.**
