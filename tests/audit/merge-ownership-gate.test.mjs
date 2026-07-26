@@ -465,7 +465,7 @@ test("mergeAndIngest partial wave: with NO attempted-packets sidecar the pre-fix
 
     await expect(
       mergeAndIngest({ runId: RUN_ID, artifactsDir }),
-    ).rejects.toThrow(/missing or invalid|blocked before ingestion/i);
+    ).rejects.toThrow(/blocked before ingestion/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -506,7 +506,7 @@ test("mergeAndIngest FLW-COR-003: a round where EVERY attempted worker died rele
 
     await expect(
       mergeAndIngest({ runId: RUN_ID, artifactsDir }),
-    ).rejects.toThrow(/missing or invalid|blocked before ingestion/i);
+    ).rejects.toThrow(/blocked before ingestion/i);
 
     // FLW-COR-003, the HOST half. Merge is the ONLY claim release for the two
     // host claimers (`cmdPrepareDispatch`, `renderSemanticReviewStep`) — the

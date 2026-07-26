@@ -100,12 +100,22 @@ const MISSING = (task_id) => ({
   errors: ["Missing audit result for assigned task."],
   kind: "missing",
 });
-const INVALID = (task_id) => ({ task_id, errors: ["Invalid JSON: boom"], kind: "invalid" });
+const UNPARSEABLE = (task_id) => ({
+  task_id,
+  errors: ["Invalid JSON: boom"],
+  kind: "unparseable",
+});
+const CONTRACT_MISMATCH = (task_id) => ({
+  task_id,
+  errors: ["Result lens does not match assigned task"],
+  kind: "contract_mismatch",
+});
 const PACKETS = new Map([
   ["a", "pkt-1"],
   ["b", "pkt-2"],
   ["inflight", "pkt-planned"],
   ["badjson", "pkt-run"],
+  ["badcontract", "pkt-run"],
   ["vanished", "pkt-run"],
 ]);
 
@@ -129,11 +139,21 @@ test("partitionUnattemptedMissing: a MISSING result whose packet WAS attempted s
   expect(failing.map((f) => f.task_id)).toEqual(["a"]);
 });
 
-test("partitionUnattemptedMissing: an INVALID result is terminal even when its packet was not attempted", () => {
-  // A result ARRIVED and failed validation. Whatever the attempted set says,
+test("partitionUnattemptedMissing: an unparseable result is terminal even when its packet was not attempted", () => {
+  // A result ARRIVED and failed parsing. Whatever the attempted set says,
   // deferring it would hide a real failure behind "not dispatched".
   const { failing, deferred } = partitionUnattemptedMissing(
-    [INVALID("a")],
+    [UNPARSEABLE("a")],
+    PACKETS,
+    new Set(),
+  );
+  expect(deferred).toEqual([]);
+  expect(failing.map((f) => f.task_id)).toEqual(["a"]);
+});
+
+test("partitionUnattemptedMissing: a CONTRACT_MISMATCH result is terminal even when its packet was not attempted", () => {
+  const { failing, deferred } = partitionUnattemptedMissing(
+    [CONTRACT_MISMATCH("a")],
     PACKETS,
     new Set(),
   );
@@ -143,7 +163,7 @@ test("partitionUnattemptedMissing: an INVALID result is terminal even when its p
 
 test("partitionUnattemptedMissing: a NULL attempted set defers nothing (an unrecorded round must not swallow failures)", () => {
   const { failing, deferred } = partitionUnattemptedMissing(
-    [MISSING("a"), INVALID("b")],
+    [MISSING("a"), UNPARSEABLE("b")],
     PACKETS,
     null,
   );
@@ -161,14 +181,23 @@ test("partitionUnattemptedMissing: a task with no result-map packet id stays fai
   expect(failing.map((f) => f.task_id)).toEqual(["orphan"]);
 });
 
-test("partitionUnattemptedMissing: partitions a mixed round — unattempted deferred, arrived-and-invalid failing, attempted-but-empty failing", () => {
+test("partitionUnattemptedMissing: partitions a mixed round — unattempted deferred, arrived failures terminal, attempted-but-empty failing", () => {
   const { failing, deferred } = partitionUnattemptedMissing(
-    [MISSING("inflight"), INVALID("badjson"), MISSING("vanished")],
+    [
+      MISSING("inflight"),
+      UNPARSEABLE("badjson"),
+      CONTRACT_MISMATCH("badcontract"),
+      MISSING("vanished"),
+    ],
     PACKETS,
     new Set(["pkt-run"]), // "pkt-planned" was never attempted
   );
   expect(deferred).toEqual(["inflight"]);
-  expect(failing.map((f) => f.task_id).sort()).toEqual(["badjson", "vanished"]);
+  expect(failing.map((f) => f.task_id).sort()).toEqual([
+    "badcontract",
+    "badjson",
+    "vanished",
+  ]);
 });
 
 // ── The attempted record is CUMULATIVE per run (adversarial-review catch). ───

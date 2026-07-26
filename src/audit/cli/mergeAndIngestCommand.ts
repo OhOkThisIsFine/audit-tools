@@ -324,15 +324,16 @@ export function partitionByOwnership<T extends { task_id: string }>(
  * A dispatched task that did not reach `passing` this round.
  *
  * `kind` is the discriminator the in-flight deferral below turns on, and it is
- * carried explicitly rather than sniffed from the error text: `"invalid"` means
- * a result ARRIVED and failed parse/contract validation (a real, terminal
- * failure), while `"missing"` means no result file exists yet for a task we
- * dispatched — which is a failure only if nobody is still working on it.
+ * carried explicitly rather than sniffed from the error text: `"unparseable"`
+ * means an arrived result was not valid JSON, `"contract_mismatch"` means valid
+ * JSON did not satisfy the assigned AuditResult contract, and `"missing"` means
+ * no result file exists yet for a task we dispatched — which is a failure only
+ * if nobody is still working on it.
  */
 export interface FailingTask {
   task_id: string;
   errors: string[];
-  kind: "missing" | "invalid";
+  kind: "missing" | "unparseable" | "contract_mismatch";
 }
 
 /**
@@ -361,8 +362,8 @@ export interface FailingTask {
  * is no evidence either way — defer nothing and preserve the pre-fix
  * classification rather than silently swallowing failures.
  *
- * `"invalid"` never defers: a result that ARRIVED and failed validation is
- * terminal no matter who dispatched it.
+ * `"unparseable"` and `"contract_mismatch"` never defer: a result that ARRIVED
+ * and failed parsing or validation is terminal no matter who dispatched it.
  */
 export function partitionUnattemptedMissing(
   failingTasks: readonly FailingTask[],
@@ -476,7 +477,7 @@ export async function validateAndCollectResults(
           failing.push({
             task_id: task.task_id,
             errors: [`Invalid JSON: ${(e as Error).message}`],
-            kind: "invalid",
+            kind: "unparseable",
           });
           continue;
         }
@@ -563,7 +564,11 @@ export async function validateAndCollectResults(
     } else {
       // A result ARRIVED (from disk or a recovery fallback) and failed
       // validation — terminal regardless of claim state.
-      failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors, kind: "invalid" });
+      failing.push({
+        task_id: taskId ?? task.task_id,
+        errors: resultErrors,
+        kind: "contract_mismatch",
+      });
     }
   }
 
@@ -636,7 +641,7 @@ export async function groundPassingFindings(
 export interface MergeAndIngestResult {
   /** The summary object the CLI prints as its sole stdout JSON payload. */
   summary: Record<string, unknown>;
-  /** True when at least one dispatched task result was missing or invalid. */
+  /** True when at least one dispatched task result failed for any FailingTask kind. */
   has_failures: boolean;
 }
 
@@ -925,7 +930,7 @@ export async function mergeAndIngest(params: {
     // exit-1 half of the partial-wave lie (the straggler merge that follows
     // would have landed those results).
     throw new Error(
-      `All ${failing.length} assigned task result(s) were missing or invalid; blocked before ingestion. See ${failedTasksPath}`,
+      `All ${failing.length} assigned task result(s) were missing, unparseable, or contract-mismatched; blocked before ingestion. See ${failedTasksPath}`,
     );
   }
 

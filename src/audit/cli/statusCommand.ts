@@ -5,6 +5,7 @@ import type { AuditTask } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import { loadRunLedger } from "../supervisor/runLedger.js";
 import { getArtifactsDir } from "./args.js";
+import type { FailingTask } from "./mergeAndIngestCommand.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -107,11 +108,11 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   }
 
   // 4. Surface failed-tasks.json from the most recent run that has one
-  let failedTasks: Array<{ task_id: string; errors: string[] }> | null = null;
+  let failedTasks: FailingTask[] | null = null;
   for (const runDirName of runDirs) {
     const failedTasksPath = join(runsDir, runDirName, "failed-tasks.json");
     try {
-      const raw = await readJsonFile<Array<{ task_id: string; errors: string[] }>>(
+      const raw = await readJsonFile<FailingTask[]>(
         failedTasksPath,
       );
       if (Array.isArray(raw) && raw.length > 0) {

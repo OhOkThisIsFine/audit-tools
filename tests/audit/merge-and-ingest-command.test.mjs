@@ -135,6 +135,7 @@ test("cmdMergeAndIngest blocks (throws + writes failed-tasks.json) when every as
     const ids = failed.map((f) => f.task_id).sort();
     expect(ids).toEqual(["u1:security", "u2:correctness"]);
     for (const entry of failed) {
+      expect(entry.kind).toBe("missing");
       expect(entry.errors.some((e) => /missing audit result/i.test(e)), `expected a missing-result error for ${entry.task_id}`).toBeTruthy();
     }
   });
@@ -201,6 +202,7 @@ test("cmdMergeAndIngest discards a STALE completion marker when a pending task h
     );
     const failed = JSON.parse(await readFile(failedTasksPath, "utf8"));
     expect(failed.map((f) => f.task_id)).toEqual(["u9:security"]);
+    expect(failed[0].kind).toBe("contract_mismatch");
   });
 });
 
@@ -284,9 +286,38 @@ test("validateAndCollectResults rejects a duplicate task_id at ingest (dedup via
 
     expect(passing.map((r) => r.task_id), "exactly one copy may ingest").toEqual(["t1"]);
     expect(failing.length).toBe(1);
+    expect(failing[0].kind).toBe("contract_mismatch");
     expect(
       failing[0].errors.some((e) => /duplicate audit result/i.test(e)),
       `expected a duplicate-task_id rejection, got: ${JSON.stringify(failing[0].errors)}`,
     ).toBeTruthy();
+  });
+});
+
+test("validateAndCollectResults classifies malformed JSON as unparseable", async () => {
+  await withTempDir("merge-ingest-cmd-", async (dir) => {
+    const task = {
+      task_id: "t1",
+      unit_id: "u",
+      pass_id: "p",
+      lens: "security",
+      file_paths: ["src/a.ts"],
+    };
+    const resultPath = join(dir, "malformed.json");
+    await writeFile(resultPath, "{not-json", "utf8");
+
+    const { passing, failing } = await validateAndCollectResults(
+      [task],
+      new Map([
+        ["t1", { result_path: resultPath, task_id: "t1", packet_id: "pkt" }],
+      ]),
+      new Map(),
+      new Map(),
+    );
+
+    expect(passing).toEqual([]);
+    expect(failing).toHaveLength(1);
+    expect(failing[0].kind).toBe("unparseable");
+    expect(failing[0].errors[0]).toMatch(/invalid json/i);
   });
 });
