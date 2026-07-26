@@ -387,7 +387,7 @@
   (`CODEX_THREAD_ID` → `resolveConversationHostProvider` → dedup) lost its end-to-end pin when
   `demote-same-agent-guard.test.mjs` died; the new D1 tests use explicit `host_provider` only.
 
-- **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
+- **Pre-existing back-compat fold survives, now against standing policy (2026-07-18; re-verified at HEAD 2026-07-26 — NOT low).** `src/shared/quota/apiPool.ts` (`openAiCompatibleSource` + the fold below it) and `src/shared/types/sessionConfig.ts` (the `sources` doc comment) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the no-legacy rule this fold should be deleted and the block treated as a plain source declaration. ⚠ Re-tagged from `low`: deleting the fold RETIRES the `openai_compatible` config block as a declaration surface, which is an operator-facing config change plus two bridge legs (`sourceProviderConfig` and the block→source fold) that must keep carrying `no_auth` — run `/design-check` first, and expect the same silent-ignore hazard the inline-`api_key` retirement hit ([[deleting-a-field-is-not-retiring-it]]): the validator passes unknown keys, so a deleted block goes silently ignored unless it is explicitly refused.
 
 - **"The free model can't handle reasoning work" is a MYTH built from unset request parameters — check
   `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).** Two apparent
@@ -731,6 +731,23 @@
   stale records — the ancestry probe is the corrective, so revisit only if a case escapes it.
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
+
+- **Friction walk (contract-sweep producer lap, 2026-07-26):** (1) **tool-should-decide (medium):**
+  `scripts/` is a whole tracked tree covered by NO tsconfig — `tsconfig.json` includes `["src"]`,
+  `tsconfig.test.json` includes `["src","tests"]` with `checkJs:false`. Nothing
+  anywhere says "this tree is uncompiled and unchecked"; it is discoverable only by reading both
+  configs and noticing an absence. Open property: the set of tracked source trees NOT reached by any
+  typechecker should be stated mechanically, not inferred from what the include arrays omit.
+  (2) **ambiguous-direction (low):** the backlog entry's own stopgap ("run `verify:checks`, not
+  `check`, before pushing") steers the reader toward widening the pre-commit hook — the expensive wrong
+  fix, since the legs that caught it repack the package. The cheap right fix was to validate at the
+  construction site. A stopgap phrased as a habit reads as the intended remedy; entries should mark a
+  stopgap as a stopgap.
+  (3) **inefficient-feeding (low):** the offload lane's design-refutation call returned correct SHAPE
+  with fabricated CONTENT (a `root.buildConfig` flag that does not exist, and a `.md` doc named as the
+  failing test file) — the known fabrication trap, but it costs most in exactly this call, where the
+  whole point is an independent verdict. Refutation-shaped offload output needs its citations
+  mechanically resolved before it is read, or it is worse than no second lane.
 
 - **Friction walk (inline-api_key retirement lap, 2026-07-26):** (1) **tool-should-decide (medium):**
   a test fixture declaring `api_key_env` whose env var is UNSET drops the lane silently, and the drop

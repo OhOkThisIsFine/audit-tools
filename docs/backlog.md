@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 151 entr(y/ies) indexed.
+> and at commit). 152 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -51,7 +51,7 @@
 - `open-bugs.md:338` — SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no operator-runnable refresh.
 - `open-bugs.md:365` — Ranked-pool composition — live-wave watch + the absolute-floor question (mechanism shipped R3-3 `c0cf7e9b` 2026-07-21; residue only).
 - `open-bugs.md:382` — H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).
-- `open-bugs.md:390` — Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).
+- `open-bugs.md:390` — Pre-existing back-compat fold survives, now against standing policy (2026-07-18; re-verified at HEAD 2026-07-26 — NOT low).
 - `open-bugs.md:392` — "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).
 - `open-bugs.md:416` — A nightly item is PRESENTED for an answer without its premise being re-checked, so settled subjects keep getting asked (2026-07-25, medium, friction: inefficient-feeding).
 - `open-bugs.md:434` — Friction walk (duplicated-guard lap, 2026-07-25):
@@ -87,31 +87,32 @@
 - `open-bugs.md:723` — Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).
 - `open-bugs.md:725` — Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open).
 - `open-bugs.md:733` — Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).
-- `open-bugs.md:735` — Friction walk (inline-api_key retirement lap, 2026-07-26):
-- `open-bugs.md:747` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:761` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:782` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:794` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
-- `open-bugs.md:805` — Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).
-- `open-bugs.md:807` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
-- `open-bugs.md:828` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
-- `open-bugs.md:832` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
-- `open-bugs.md:854` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
-- `open-bugs.md:867` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
-- `open-bugs.md:886` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
-- `open-bugs.md:895` — Design-review independence — solo `design_review_contract` is the one pass the host judges itself (2026-07-24, low; the old "second-driver hazard" framing is REFUTED).
-- `open-bugs.md:916` — Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the code site).
-- `open-bugs.md:942` — Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable (low).
-- `open-bugs.md:951` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:968` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
-- `open-bugs.md:982` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1004` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1019` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1033` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1052` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1074` — The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding).
-- `open-bugs.md:1084` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
-- `open-bugs.md:1092` — ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:735` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:752` — Friction walk (inline-api_key retirement lap, 2026-07-26):
+- `open-bugs.md:764` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:778` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:799` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:811` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
+- `open-bugs.md:822` — Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).
+- `open-bugs.md:824` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
+- `open-bugs.md:845` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
+- `open-bugs.md:849` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
+- `open-bugs.md:871` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
+- `open-bugs.md:884` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
+- `open-bugs.md:903` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
+- `open-bugs.md:912` — Design-review independence — solo `design_review_contract` is the one pass the host judges itself (2026-07-24, low; the old "second-driver hazard" framing is REFUTED).
+- `open-bugs.md:933` — Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the code site).
+- `open-bugs.md:959` — Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable (low).
+- `open-bugs.md:968` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:985` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
+- `open-bugs.md:999` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1021` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1036` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1050` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1069` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1091` — The offload lane is SINGLE-CONCURRENCY and fails soft, so a fan-out reads as model incapacity (2026-07-24, medium, friction: inefficient-feeding).
+- `open-bugs.md:1101` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
+- `open-bugs.md:1109` — ID minting is not routed through the one registry — RESIDUAL only (re-verified at HEAD 2026-07-25).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

@@ -151,7 +151,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 105 open item(s).
+> `verify:checks` and at commit). 106 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -183,7 +183,7 @@ its SPEC intact.
 - SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no operator-runnable refresh. · [`open-bugs.md`](backlog/open-bugs.md)
 - Ranked-pool composition — live-wave watch + the absolute-floor question (mechanism shipped R3-3 `c0cf7e9b` 2026-07-21; residue only). · [`open-bugs.md`](backlog/open-bugs.md)
 - H2+H4 collapse residual pins (2026-07-18, low, from review h2c3). · [`open-bugs.md`](backlog/open-bugs.md)
-- Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low). · [`open-bugs.md`](backlog/open-bugs.md)
+- Pre-existing back-compat fold survives, now against standing policy (2026-07-18; re-verified at HEAD 2026-07-26 — NOT low). · [`open-bugs.md`](backlog/open-bugs.md)
 - "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high). · [`open-bugs.md`](backlog/open-bugs.md)
 - A nightly item is PRESENTED for an answer without its premise being re-checked, so settled subjects keep getting asked (2026-07-25, medium, friction: inefficient-feeding). · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (duplicated-guard lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
@@ -219,6 +219,7 @@ its SPEC intact.
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open). · [`open-bugs.md`](backlog/open-bugs.md)
 - Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19). · [`open-bugs.md`](backlog/open-bugs.md)
+- Friction walk (contract-sweep producer lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (inline-api_key retirement lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (touched_files load-gate lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (fourth backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
