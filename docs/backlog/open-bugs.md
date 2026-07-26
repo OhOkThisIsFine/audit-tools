@@ -729,6 +729,18 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19).** Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **Friction walk (inline-api_key retirement lap, 2026-07-26):** (1) **tool-should-decide (medium):**
+  a test fixture declaring `api_key_env` whose env var is UNSET drops the lane silently, and the drop
+  reason never reaches the assertion — six tests across three files failed as
+  `expected 0 to be greater than 0` and "no API key" on a config-shape migration, with nothing pointing
+  at the unset var. The lane drop is correct behaviour; the friction is that a test-time drop is
+  indistinguishable from the defect under test. Open property: a source dropped for an unresolvable
+  credential should surface its reason where the assertion can see it.
+  (2) **inefficient-feeding (low):** the retirement's real hazard (unknown config keys pass the
+  validator untouched, so deleting a field leaves a pasted key SILENTLY dropped) is a property of
+  `validateSessionConfig` that no doc states — both review lanes had to rediscover it from source.
+  The validator's own contract is the place to say it.
+
 - **Friction walk (touched_files load-gate lap, 2026-07-25):** (1) **tool-should-decide (medium):** a
   fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts:109`)
   makes `check:tests` inert for that fixture — it hid blocks missing a REQUIRED contract field from the

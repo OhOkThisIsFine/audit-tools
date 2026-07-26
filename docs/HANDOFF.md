@@ -40,6 +40,12 @@
   the run and must not start one: a commit mid-run re-stales the planning chain and regresses it to
   `charter_extraction`. Recipe is in the collapsed section below.
 
+- **⚠ A credential is NAMED, never pasted — inline `api_key` is retired on both declaration shapes.**
+  A config carrying one is REFUSED at validation with an actionable message; that refusal is the
+  load-bearing half, because the validator ignores unknown keys and a merely-deleted field would leave
+  a pasted key silently dropped and the source launching keyless. Old ledger state carrying an
+  `::inline:<hash>` credential segment stays readable as opaque history — never reject that prefix.
+
 - **⚠ `reviewed_clean` is a hard contract on every zero-finding `AuditResult`.** An empty `findings`
   array is REFUSED unless the result also sets `reviewed_clean: true`, and the flag is refused ALONGSIDE
   findings. A worker or fixture written against the older contract fails validation — that is the gate,
@@ -145,7 +151,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 104 open item(s).
+> `verify:checks` and at commit). 105 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -213,6 +219,7 @@ its SPEC intact.
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open). · [`open-bugs.md`](backlog/open-bugs.md)
 - Node-worktree guard — accepted residuals only (each low, on-evidence-only; the guard itself shipped v0.34.19). · [`open-bugs.md`](backlog/open-bugs.md)
+- Friction walk (inline-api_key retirement lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (touched_files load-gate lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (fourth backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (second backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
