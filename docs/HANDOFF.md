@@ -84,19 +84,20 @@ doc's own header forbids. Durable traps belong in
 - **Release:** `npm run release:patch:publish`; recover a bad attempt with
   `gh release delete vX.Y.Z --cleanup-tag` + forward-bump. Run `npm run verify:release` locally before
   tagging — the local pre-tag gate is only `check`.
-- **End every lap by checking CI on `main`.** `ci` and `audit-code-test-suite` were red for ~a dozen
-  laps while every lap reported "green": the pre-commit hook gates `npm run check` (plus
-  `test:doc-contract` / `check:doc-manifest` when the staged set touches docs), and laps
-  verified with build + check + vitest — none of which include `verify:checks`
-  ([[lap-green-must-match-ci-evidence]]). A local "N failed" must be resolved to NAMED files before
-  being waved at as the known-flaky baseline.
-  ⚠ **Neither `gh` endpoint is dependably up — try BOTH before concluding anything.** The per-workflow
-  form (`actions/workflows/<wf>.yml/runs`) was previously the reliable one and the generic form flaky;
-  on 2026-07-19 that inverted — the per-workflow endpoint returned HTTP 503 repeatedly while
-  `actions/runs?per_page=N` (filter by `head_sha` yourself) answered immediately. Treat a 503 from
-  either as "ask the other one", never as "CI is unavailable", and never as a reason to skip the check.
-  Also expect superseded runs to show `cancelled` — a newer push cancels the older run by concurrency,
-  which is normal and is not a failure.
+- **CI on `main` is checked BY THE CLOSEOUT GATE, not by remembering.** The gate names any workflow
+  whose latest completed run failed (`scripts/shared/ciRedWorkflows.mjs` holds the verdict; the hook
+  makes the call). The rule used to live here as an instruction and failed twice anyway — red for ~a
+  dozen laps once, and again 2026-07-25 when `ci` stayed green across three commits while
+  `audit-code-test-suite`, the only workflow that runs vitest, was red
+  ([[lap-green-must-match-ci-evidence]]). **A green local suite does not clear a red workflow** — the
+  pre-commit hook gates `check`, and laps verify build + check + vitest, none of which is
+  `verify:checks`. A local "N failed" must still be resolved to NAMED files before being waved at as
+  the known-flaky baseline.
+  ⚠ The gate fails OPEN — no `gh`, no auth, no network, or a 503 all read as "cannot tell", so silence
+  from it is not evidence of green. Neither `gh` endpoint is dependably up: try BOTH before concluding
+  anything. The per-workflow form (`actions/workflows/<wf>.yml/runs`) was the reliable one until
+  2026-07-19, when it began returning 503 while `actions/runs?per_page=N` (filter by `head_sha`
+  yourself) answered immediately.
 - **Branch-strand trap (bit twice):** a remediation run leaves you checked out on its worktree branch —
   commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit strands.
 - **Never pass `isolation: "worktree"` to the Agent tool** when dispatching a remediate-code/audit-code
