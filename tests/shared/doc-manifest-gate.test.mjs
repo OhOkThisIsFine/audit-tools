@@ -10,7 +10,9 @@
 // Each case pins one hole that was live at 0e2eb67b:
 //   • reach   — the tracked listing could not see markdown outside `docs/`, so
 //               `examples/9router-harness-proxy-setup.md` was tracked, in ZERO
-//               rows, and nothing caught it.
+//               rows, and nothing caught it. That file has since been retired;
+//               the reach pin names only structurally durable paths, because a
+//               pin on a deletable doc goes red when the deletion is CORRECT.
 //   • globs   — any pattern containing `*` was DISCARDED, so the `spec/**/*.md`
 //               row matched nothing and 22 spec docs were unrouted.
 //   • prose   — the registered set was regexed out of the whole guidelines file,
@@ -185,8 +187,11 @@ describe('the live manifest reconciles against the whole tracked tree', () => {
 
   it('reach extends past `docs/` — the files the old listing could not see', () => {
     // `git ls-files 'docs/*.md' 'docs/**/*.md'` saw none of these.
+    // Pin only STRUCTURALLY durable files. This list named a transient doc
+    // (`examples/9router-harness-proxy-setup.md`, the hole's original instance);
+    // retiring it in 80b59b7b turned a correct deletion into a red suite, because
+    // a pin on a doc that is allowed to be deleted tests the doc, not the reach.
     for (const outside of [
-      'examples/9router-harness-proxy-setup.md',
       'spec/audit/audit-goals.md',
       'CLAUDE.md',
       'src/audit/README.md',
