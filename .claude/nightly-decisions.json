@@ -194,5 +194,26 @@
     "subject": "The fix that stopped false REDs can turn a real failure GREEN in the release gate",
     "path": "scripts/shared/vitestGateVerdict.mjs",
     "decided_at": "2026-07-26T02:39:37.892Z"
+  },
+  "a1a8dbf9de278566": {
+    "disposition": "settled",
+    "answer": "Owner: all three docs get an entry. audit-workflow-design gains a flow line, artifact-contract gains intent-equivalence-verdict.json, audit-goals names the gate in the judgment list (attested, additive). Shipped f6cd5b86.",
+    "subject": "The DD-9 intent-equivalence gate shipped but is documented in no spec/audit doc — where does it get written down?",
+    "path": "spec/audit/executor-catalog.md",
+    "decided_at": "2026-07-26T02:46:04.523Z"
+  },
+  "5a097c71dc0127a1": {
+    "disposition": "settled",
+    "answer": "Owner approved 22b/22d/22e as recommended in docs/reviews/docs-22-duplicate-homes-2026-07-25.md; 22a dissolved (different questions, compatible answers), 22c closed in 80b59b7b. Shipped f6cd5b86.",
+    "subject": "Doc-set condensation: five concepts each have two or three homes, and four have already drifted",
+    "path": "docs/audit-pkg/product.md",
+    "decided_at": "2026-07-26T02:46:04.573Z"
+  },
+  "8744b76810576e4b": {
+    "disposition": "settled",
+    "answer": "ALREADY SHIPPED - verified at source 2026-07-25. src/shared/io/schemaVersion.ts owns the policy pair (discardOnSchemaVersionMismatch for regenerable state, throwOnSchemaVersionMismatch for costly/authored), 8 consumers, and check:version-gates is wired into verify:checks reporting 12 persisted payloads read back under a version check, 0 unchecked. proxyCatalog.ts is compliant via an inline check with documented discard semantics. Owner had approved the tool-written-regenerable scope; no work needed. Caught by /design-check before implementation.",
+    "subject": "State written by an older version is still read under new semantics, and a green test suite cannot see it",
+    "path": "src/shared/io/",
+    "decided_at": "2026-07-26T02:47:02.900Z"
   }
 }

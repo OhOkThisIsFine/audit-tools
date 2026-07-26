@@ -18,24 +18,18 @@
   "schedule a discussion"), and it cannot check HEAD. Verify a premise before working it — the same
   2026-07-25 walkthrough that found 15 of 21 nightly items already fixed also opened three triage
   entries whose premise was already fixed ([[backlog-prose-decays-verify-against-head]]).
-  **The next code lap is sol-3:** tool-written state carries no version stamp, so state written by an
-  older version is read under new semantics and a green suite cannot see it — only `proxyCatalog.ts` is
-  stamped. Build one shared `readVersionedJson` in `src/shared/io/` for tool-written regenerable state
-  (unrecognised version ⇒ treat as absent and rebuild); operator-authored config stays on the loud
-  validator. [[schema-version-read-policy]] [[validate-before-migrate-ordering]]
 
 - **⚠ Every owner call in the backlog is ANSWERED, recorded in the entry that owns it — do not re-ask.**
   Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
   never re-raised; `node scripts/nightly/answer.mjs --list` shows what is genuinely still open.
   Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
-  ⚠ **Re-verify a nightly item against HEAD before working OR presenting it.** Walking the queue on
-  2026-07-25 found 15 of 21 already fixed, several by the same day's laps — the queue serves an item
-  until it is ANSWERED, never re-testing the premise. Three remain: **docs-1** (three docs omit the
-  intent-equivalence gate; one is `spec/audit/audit-goals.md`, CONSTITUTIONAL → its entry is the
-  owner's), **docs-22** (recommendations written up in
-  [`docs-22-duplicate-homes-2026-07-25.md`](reviews/docs-22-duplicate-homes-2026-07-25.md) — 22a
-  dissolves, 22b/22d applyable once approved, 22e is a genuine authorship choice), and **sol-3**.
+  ⚠ **The nightly queue is EMPTY as of 2026-07-25 — all 21 walked with the owner and answered.**
+  Re-verify an item against HEAD before working OR presenting it: 16 of the 21 were already fixed,
+  several by the same day's laps, because the queue serves an item until it is ANSWERED and never
+  re-tests the premise ([[queue-items-must-be-rechecked-at-presentation]]). The last one, `sol-3`,
+  survived to owner approval and was caught only by `/design-check` one step before its code was
+  written — `src/shared/io/schemaVersion.ts` already owned the policy.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does
   NOT solve its second property (expected-failing test names are still author-supplied, so a naive build
   relocates the claim instead of removing it); and contract-pipeline (b) narrows the
