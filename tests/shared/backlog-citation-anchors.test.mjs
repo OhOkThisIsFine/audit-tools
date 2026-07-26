@@ -40,7 +40,7 @@ const ANCHORED_ENTRIES = [
     /** `path:from-to` tokens the entry must carry, each proven against the cited range. */
     anchors: [
       {
-        token: "src/shared/providers/auditorSources.ts:425-429",
+        token: "src/shared/providers/auditorSources.ts:448-452",
         evidence: [
           /\*\*Inline `api_key` is refused\.\*\*/,
           /only catcher \(the reactive `lies reachably`[\s\S]{0,24}quarantine\) is G5, not yet built/,

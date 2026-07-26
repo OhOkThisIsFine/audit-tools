@@ -625,7 +625,7 @@
   `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).**
   `verifySourceReach` refuses an inline `api_key` because possession is not reach, and its own comment
   names that quarantine as the only catcher for the always-passes lane it is refusing
-  (`src/shared/providers/auditorSources.ts:425-429`) — the catcher does not exist. A lane whose key was
+  (`src/shared/providers/auditorSources.ts:448-452`) — the catcher does not exist. A lane whose key was
   revoked or whose endpoint died still verifies (env var present, launcher on PATH) and is re-admitted
   every run; under cost-first routing (λ=0) a stale free-tier declaration then takes EVERY packet first
   and fails them all. Open property: a source that fails reactively (oversize / 402 / tool-corruption)
