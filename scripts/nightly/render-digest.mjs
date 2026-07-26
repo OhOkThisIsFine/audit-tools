@@ -86,6 +86,10 @@ pre { background:color-mix(in srgb, var(--fg) 6%, transparent); border:1px solid
       cursor:pointer; background:var(--card); color:var(--fg); }
 .btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
 .btn.ghost { color:var(--muted); }
+.options { margin:.7rem 0 0; }
+.opt-label { color:var(--muted); font-size:.8rem; margin:0 0 .35rem; }
+.btn.opt { text-align:left; max-width:100%; white-space:normal; }
+.answer-form.hidden { display:none; }
 .btn:disabled { opacity:.5; cursor:default; }
 .btn-row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 .status { color:var(--muted); font-size:.82rem; }
@@ -117,9 +121,13 @@ export function renderItemCore(item) {
   );
   parts.push(`<p class="meta">${meta.join(' &middot; ')}</p>`);
 
+  // Every disclosure starts CLOSED. An item is scanned before it is read: the
+  // title plus the options are the decision surface, and an auto-expanded
+  // explanation on 22 items turns the page into a wall that has to be scrolled
+  // past rather than a list that can be worked.
   if (item.eli5) {
     parts.push(
-      `<details class="eli5" open><summary>In plain terms</summary><div class="body">${inline(item.eli5)}</div></details>`,
+      `<details class="eli5"><summary>In plain terms</summary><div class="body">${inline(item.eli5)}</div></details>`,
     );
   }
   if (item.question) parts.push(`<div class="q">${inline(item.question)}</div>`);
@@ -135,6 +143,25 @@ export function renderItemCore(item) {
   return parts.join('\n');
 }
 
+// The options an item offers, as real buttons. An item that poses a choice must
+// render that choice as something clickable — a question whose answers exist
+// only as prose makes the reader compose an answer the routine already knows how
+// to phrase, which is friction the routine can simply remove.
+//
+// Each button carries the exact answer text it will record, so pressing it is
+// never a guess about what is being agreed to. `Something else` reveals the free
+// text box for an answer no option covers.
+export function renderOptions(item) {
+  const options = Array.isArray(item.options) ? item.options.filter((o) => o && o.label && o.answer) : [];
+  if (options.length === 0) return '';
+  const buttons = options.map(
+    (o, i) =>
+      `<button class="btn opt${i === 0 ? ' primary' : ''}" data-act="settled" data-answer="${esc(o.answer)}" ` +
+      `title="${esc(o.answer)}">${inline(o.label)}</button>`,
+  );
+  return `<div class="options"><div class="opt-label">Choose one:</div><div class="btn-row">${buttons.join('')}</div></div>`;
+}
+
 export function itemClass(item, extra = '') {
   const stale = Number(item.nights_open) >= 5;
   return `item${stale ? ' stale' : ''}${extra ? ' ' + extra : ''}`;
@@ -143,13 +170,14 @@ export function itemClass(item, extra = '') {
 // Static-mode item: the shared core plus a copy-ready command, kept only as the
 // zero-process fallback. The primary, buttoned path is the interactive review.
 function renderStaticItem(item) {
-  return (
-    `<article class="${itemClass(item)}" id="item-${esc(item.id)}">\n` +
-    renderItemCore(item) +
-    `\n<div class="answer">To answer with buttons, launch the review (below). Or from a shell: ` +
-    `<code>node scripts/nightly/answer.mjs ${esc(item.id)} "your answer"</code></div>\n` +
-    `</article>`
-  );
+  const options = Array.isArray(item.options) ? item.options.filter((o) => o && o.label) : [];
+  const opts =
+    options.length > 0
+      ? `\n<div class="options"><div class="opt-label">Options:</div><ul class="evidence">` +
+        options.map((o) => `<li>${inline(o.label)}</li>`).join('') +
+        `</ul></div>`
+      : '';
+  return `<article class="${itemClass(item)}" id="item-${esc(item.id)}">\n${renderItemCore(item)}${opts}\n</article>`;
 }
 
 export function renderShell(title, inner) {
@@ -224,14 +252,13 @@ export function renderBody({ items, applied, skipped }, renderOne) {
 
 export function renderDigest(state) {
   const hint =
-    'This is a read-only snapshot. To answer with buttons and a text box, launch the interactive review: ' +
-    '<code>npm run nightly:review</code>';
+    'Read-only archive copy. The answerable version &mdash; same items, with a button per option &mdash; ' +
+    'is what the nightly run opens for you.';
   const head = renderHeader(state, state.items.length > 0 ? hint : '');
   const body = renderBody(state, renderStaticItem);
   const footer = `<footer>
-Answers are recorded in <code>.claude/nightly-decisions.json</code> against the subject, so a settled
-question is never asked again (a later edit to that prose legitimately re-opens it).<br>
-Interactive review with buttons: <code>npm run nightly:review</code> &middot; contract: <code>docs/nightly-routine.md</code>.
+Answers are recorded against the SUBJECT, so a settled question is never asked again (a later edit to
+that prose legitimately re-opens it). Contract: <code>docs/nightly-routine.md</code>.
 </footer>`;
   return renderShell('Nightly maintenance — audit-tools', `${head}\n${body}\n${footer}`);
 }
@@ -267,5 +294,21 @@ if (process.argv[1] && process.argv[1].endsWith('render-digest.mjs')) {
 
   console.log(`nightly digest: ${open.length} open item(s) → ${DIGEST_RELPATH}`);
   if (settled.length > 0) console.log(`  (${settled.length} suppressed: already settled in .claude/nightly-decisions.json)`);
-  if (args.includes('--open')) openInBrowser(out);
+
+  // --open opens the ANSWERABLE surface, not the read-only file. Opening the
+  // static snapshot handed the owner a page whose options were prose and whose
+  // only affordance was a command to type — so the buttons existed but the thing
+  // that actually opened did not have them. The snapshot stays as the record.
+  if (args.includes('--open')) {
+    if (open.length === 0) {
+      openInBrowser(out);
+    } else {
+      const serve = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'serve.mjs');
+      spawn(process.execPath, [serve, '--root', root], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }).unref();
+    }
+  }
 }

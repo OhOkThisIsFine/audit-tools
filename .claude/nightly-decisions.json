@@ -215,5 +215,54 @@
     "subject": "State written by an older version is still read under new semantics, and a green test suite cannot see it",
     "path": "src/shared/io/",
     "decided_at": "2026-07-26T02:47:02.900Z"
+  },
+  "9b044e8702bc5058": {
+    "disposition": "settled",
+    "answer": "Approved. Correct docs/documentation-philosophy.md — \"any tracked `docs/**/*.md`\" becomes \"any tracked `*.md` anywhere in the repo\" — and file the constitutional-doc attestation with the same staged tree.",
+    "subject": "Constitutional doc: the manifest gate reaches the WHOLE repo, but the philosophy still says docs/** — a one-phrase fix that needs an attested override",
+    "path": "docs/documentation-philosophy.md",
+    "decided_at": "2026-07-26T15:00:57.915Z"
+  },
+  "4b0ca1335b8261f0": {
+    "disposition": "settled",
+    "answer": "Approved. One attested edit to spec/remediate/remediation-goals.md correcting both sentences to the shipped behaviour: e2e failure transitions to triage rather than hard-erroring, and the artifacts directory is preserved unless the run is fully green.",
+    "subject": "Constitutional goals doc: two adjacent sentences are contradicted by the code AND by the sister spec — one attested edit fixes both",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-07-26T15:01:33.311Z"
+  },
+  "9faa390f0d3aa846": {
+    "disposition": "settled",
+    "answer": "Add intent-equivalence-verdict.json to ARTIFACT_DEFINITIONS, making the \"structurally parallel to critical-flow-fallback\" rationale actually true.",
+    "subject": "The DD-9 row you approved three commits ago rests on a parallel that does not hold — its sibling IS a registry entry and it is not",
+    "path": "spec/audit/artifact-contract.md",
+    "decided_at": "2026-07-26T15:02:39.500Z"
+  },
+  "059a6b158ff82464": {
+    "disposition": "settled",
+    "answer": "Split the manifest row: .agent/** and .github/** stay renderer-owned, and the four skills/** loader bodies get their own reviewable row, since they are the canonical source rather than generated output.",
+    "subject": "Four hand-authored loader bodies are filed as \"generated, do not review\" — but they ARE the source, so nothing reviews them",
+    "path": "skills/audit-code/audit-code.prompt.md",
+    "decided_at": "2026-07-26T15:03:13.982Z"
+  },
+  "e6af2ebe051dc436": {
+    "disposition": "settled",
+    "answer": "Replace the prohibition in docs/nightly-routine-prompt.md with the helper invocation. The helper already supplies the task-shaped schema, non-strict decoding, an explicit max_tokens and a truncation exit code.",
+    "subject": "This routine's own prompt bans the offload helper and asks for a hand-rolled POST that reimplements it — two other homes say the opposite",
+    "path": "docs/nightly-routine-prompt.md",
+    "decided_at": "2026-07-26T15:03:37.213Z"
+  },
+  "60798a0bf788f168": {
+    "disposition": "settled",
+    "answer": "Add friction-stop-gate.mjs and nightly-surface.mjs to the CLAUDE.md guard enumeration, and name the worktree-reaping leg in the session-start-guards description. Leave \"the two session-lifecycle gates\" unchanged — it correctly describes the test file scope.",
+    "subject": "Instruction-file edit: the guard inventory names five hooks and misses two registered ones, including a blocking Stop gate and the only leg that deletes files",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-07-26T15:04:02.213Z"
+  },
+  "e9a80773304e82ef": {
+    "disposition": "settled",
+    "answer": "We need to fix this in tooling, not decide whether or not to leave it as a note. Plan a fix.",
+    "subject": "Philosophy conformance: HANDOFF still carries a be-careful warning that its own backlog entry records as having failed",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-07-26T15:05:23.493Z"
   }
 }

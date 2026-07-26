@@ -145,9 +145,25 @@ describe('digest render', () => {
     expect(html).toMatch(/&lt;img src=x/);
   });
 
-  it('points to the interactive review for buttoned answers', () => {
+  // The digest is a decision surface, not a document. Two properties keep it
+  // that way, and both regressed once: every disclosure must start CLOSED (22
+  // auto-expanded explanations is a wall to scroll past, not a list to work),
+  // and the digest must never answer "how do I respond to this?" with a command
+  // to type — the options are buttons.
+  it('starts every disclosure closed', () => {
+    const html = renderDigest({
+      items: [item({ eli5: 'A plain-language explanation.', evidence: ['file.ts:1 — a fact'] })],
+      applied: [],
+      skipped: [],
+    });
+    expect(html).toMatch(/In plain terms/);
+    expect(html).not.toMatch(/<details[^>]*\sopen[\s>]/);
+  });
+
+  it('never tells the reader to run a command to answer', () => {
     const html = renderDigest({ items: [item({ id: 'BKL-7' })], applied: [], skipped: [] });
-    expect(html).toMatch(/nightly:review/);
+    expect(html).not.toMatch(/nightly:review/);
+    expect(html).not.toMatch(/answer\.mjs/);
   });
 
   it('renders an expandable ELI5 block when the item carries one', () => {
@@ -331,6 +347,45 @@ describe('interactive review server — the buttoned surface', () => {
     expect(html).toMatch(/data-act="settled"/);
     expect(html).toMatch(/data-act="wontfix"/);
     expect(html).toMatch(/In plain terms/);
+  });
+
+  // An item that poses a choice must render that choice as something pressable,
+  // carrying the EXACT text it will record — otherwise the owner is composing an
+  // answer the routine already knows how to phrase, and a button press is a
+  // guess about what it agreed to.
+  it('renders one button per option, each carrying the answer it will record', async () => {
+    writeOpenItems(root, {
+      items: [
+        item({
+          id: 'DOC-1',
+          options: [
+            { label: 'Correct it', answer: 'Approved. Correct the phrase and file the attestation.' },
+            { label: 'Leave it', answer: 'Leave the sentence as written.' },
+          ],
+        }),
+      ],
+    });
+    await start();
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).toMatch(/data-answer="Approved\. Correct the phrase and file the attestation\."/);
+    expect(html).toMatch(/data-answer="Leave the sentence as written\."/);
+    expect(html).toMatch(/Something else/);
+  });
+
+  it('settles with an option answer verbatim, so the ledger records what was pressed', async () => {
+    const key = subjectKey('a.md', 'one');
+    const chosen = 'Leave the sentence as written.';
+    writeOpenItems(root, {
+      items: [item({ id: 'DOC-1', subject_key: key, options: [{ label: 'Leave it', answer: chosen }] })],
+    });
+    await start();
+    const r = await fetch(`${base}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'DOC-1', answer: chosen, disposition: 'settled' }),
+    });
+    expect(r.status).toBe(200);
+    expect(readDecisions(root)[key].answer).toBe(chosen);
   });
 
   it('records an answer via POST and reports the remaining open count', async () => {

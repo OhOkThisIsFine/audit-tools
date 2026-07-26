@@ -18,21 +18,27 @@ import {
   partitionBySettled,
   LEG_TITLES,
 } from './items.mjs';
-import { esc, renderItemCore, itemClass, renderShell, renderHeader, renderBody, openInBrowser } from './render-digest.mjs';
+import { esc, renderItemCore, renderOptions, itemClass, renderShell, renderHeader, renderBody, openInBrowser } from './render-digest.mjs';
 
 // One item, interactive: the shared core plus a text box and two buttons wired
 // to POST /answer. `data-*` carries the id to the handler; no inline handlers,
 // so a doc quote in the item text can never smuggle script.
 function renderInteractiveItem(item) {
+  const hasOptions = Array.isArray(item.options) && item.options.length > 0;
   return (
     `<article class="${itemClass(item)}" id="item-${esc(item.id)}" data-id="${esc(item.id)}">\n` +
     renderItemCore(item) +
-    `\n<div class="answer answer-form">` +
+    renderOptions(item) +
+    `\n<div class="btn-row" style="margin-top:.6rem">` +
+    (hasOptions ? `<button class="btn ghost" data-act="reveal">Something else…</button>` : '') +
+    `<button class="btn ghost" data-act="wontfix-quick">Won't fix</button>` +
+    `<span class="status" id="status-${esc(item.id)}"></span>` +
+    `</div>` +
+    `<div class="answer answer-form${hasOptions ? ' hidden' : ''}" id="form-${esc(item.id)}">` +
     `<textarea id="ans-${esc(item.id)}" placeholder="Your answer — including &quot;keep it as is&quot;, which is a real answer and stops the re-ask."></textarea>` +
     `<div class="btn-row">` +
     `<button class="btn primary" data-act="settled">Settle</button>` +
     `<button class="btn ghost" data-act="wontfix">Won't fix</button>` +
-    `<span class="status" id="status-${esc(item.id)}"></span>` +
     `</div></div>\n</article>`
   );
 }
@@ -47,11 +53,30 @@ document.addEventListener('click', async (e) => {
   if (!btn) return;
   const card = btn.closest('.item');
   const id = card.getAttribute('data-id');
-  const disposition = btn.getAttribute('data-act');
-  const ta = document.getElementById('ans-' + id);
+  const act = btn.getAttribute('data-act');
   const status = document.getElementById('status-' + id);
-  const answer = (ta.value || '').trim();
-  if (!answer) { status.textContent = 'An answer is required.'; status.className = 'status err'; return; }
+
+  // "Something else" only reveals the free-text box; it records nothing.
+  if (act === 'reveal') {
+    const form = document.getElementById('form-' + id);
+    if (form) { form.classList.remove('hidden'); const t = document.getElementById('ans-' + id); if (t) t.focus(); }
+    return;
+  }
+
+  // An option button carries the exact answer it records, so one click is a
+  // complete decision. Everything else falls back to the text box.
+  const preset = btn.getAttribute('data-answer');
+  let answer, disposition;
+  if (preset) {
+    answer = preset; disposition = 'settled';
+  } else if (act === 'wontfix-quick') {
+    answer = "Won't fix."; disposition = 'wontfix';
+  } else {
+    const ta = document.getElementById('ans-' + id);
+    answer = ((ta && ta.value) || '').trim();
+    disposition = act === 'wontfix' ? 'wontfix' : 'settled';
+    if (!answer) { status.textContent = 'An answer is required.'; status.className = 'status err'; return; }
+  }
   status.textContent = 'Saving...'; status.className = 'status';
   card.querySelectorAll('button').forEach((b) => (b.disabled = true));
   try {
@@ -62,7 +87,15 @@ document.addEventListener('click', async (e) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed to save.');
     const form = card.querySelector('.answer-form');
-    form.innerHTML = '<p class="settled-note">Settled (' + disposition + '). This subject will not be raised again.</p>';
+    if (form) form.remove();
+    const opts = card.querySelector('.options');
+    if (opts) opts.remove();
+    const rows = card.querySelectorAll('.btn-row');
+    rows.forEach((r) => r.remove());
+    const note = document.createElement('p');
+    note.className = 'settled-note';
+    note.textContent = 'Settled (' + disposition + '): ' + answer;
+    card.appendChild(note);
     card.classList.add('settled');
     const pill = document.getElementById('open-count');
     if (pill) pill.textContent = String(data.open_count);
@@ -82,19 +115,20 @@ function renderReviewPage(root) {
   const state = readOpenItems(root);
   const { open } = partitionBySettled(state.items, readDecisions(root));
   const hint =
-    'Click <strong>Settle</strong> to record your answer, or <strong>Won’t fix</strong> to close it as not-doing. ' +
+    'Press the option you want &mdash; each button records that exact answer and the item collapses. ' +
+    '<strong>Something else…</strong> opens a text box, and <strong>Won’t fix</strong> closes an item as not-doing. ' +
     'Either way the subject is settled for good. Open items remaining: <strong id="open-count">' +
     open.length +
     '</strong>.';
   const head = renderHeader({ ...state, items: open }, hint);
   const doneBanner =
     `<p class="sub" id="all-done" style="display:${open.length === 0 ? 'block' : 'none'}">` +
-    'Everything is answered. You can close this tab (Ctrl-C in the terminal to stop the server).</p>';
+    'Everything is answered. Just close this tab &mdash; the review shuts itself down when idle.</p>';
   const body = renderBody({ ...state, items: open }, renderInteractiveItem);
   const footer = `<footer>
-Answers are recorded in <code>.claude/nightly-decisions.json</code> against the subject, so a settled
-question is never asked again (a later edit to that prose legitimately re-opens it).<br>
-This review is served locally on 127.0.0.1. Stop it with Ctrl-C when you are done.
+Answers are recorded against the SUBJECT, so a settled question is never asked again (a later edit to
+that prose legitimately re-opens it).<br>
+Served locally on 127.0.0.1; it shuts itself down once you stop using it. Close the tab when you are done.
 </footer>`;
   return renderShell('Nightly review — audit-tools', `${head}\n${doneBanner}\n${body}\n${footer}${CLIENT_SCRIPT}`);
 }
@@ -180,12 +214,26 @@ if (process.argv[1] && process.argv[1].endsWith('serve.mjs')) {
   }
 
   const server = createNightlyReviewServer(root);
+
+  // Idle shutdown. The nightly run launches this DETACHED, so there is no
+  // terminal to Ctrl-C — a server that only stopped on a keystroke would be a
+  // process the owner has no way to reach. Every request resets the clock, so it
+  // survives a long read and exits once the tab is closed.
+  const IDLE_MS = Number(process.env.NIGHTLY_REVIEW_IDLE_MS || 4 * 60 * 60 * 1000);
+  let idleTimer;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => server.close(() => process.exit(0)), IDLE_MS);
+    idleTimer.unref?.();
+  };
+  server.on('request', resetIdle);
+
   // Port 0 → an ephemeral free port; 127.0.0.1 → never network-exposed.
   server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
     const url = `http://127.0.0.1:${port}/`;
     console.log(`Nightly review: ${open.length} open item(s) → ${url}`);
-    console.log('  Answer with the buttons; Ctrl-C here when you are done.');
+    resetIdle();
     if (!args.includes('--no-open')) openInBrowser(url);
   });
 }
