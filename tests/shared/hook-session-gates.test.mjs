@@ -11,9 +11,10 @@
 // inside the session.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
+import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, delimiter } from 'node:path';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const QUESTION_GATE = join(REPO_ROOT, '.claude', 'hooks', 'question-philosophy-gate.mjs');
@@ -230,5 +231,137 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
   it('ignores a non-Stop event', () => {
     const payload = { hook_event_name: 'PreToolUse', tool_name: 'Bash', session_id: sid('notstop') };
     expect(runHook(CLOSEOUT_GATE, payload, { root: repo }).code).toBe(0);
+  });
+
+  // The WIRING, not just the predicate: a gate whose mechanism is tested but whose
+  // call path is not is a gate that can silently stop reporting.
+  describe('CI-on-main evidence', () => {
+    // POSIX only, and not an arbitrary exclusion: a PATH-shadowing fake `gh` is
+    // not constructible on win32. Node's plain spawn cannot execute a `.cmd`, so
+    // it walks past the shim and finds the real gh.exe — and the only way to stop
+    // that is to strip PATH, which also removes the `git` this gate runs first.
+    // CI is ubuntu, so the wiring is covered where it is enforced. (The win32
+    // shim path itself is handled in the hook by the ENOENT shell retry.)
+    const posixOnly = process.platform === 'win32' ? it.skip : it;
+
+    const fakeGh = (binDir, stdout, exitCode = 0) => {
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(
+        join(binDir, 'gh'),
+        `#!/bin/sh\n${stdout ? `cat <<'JSON'\n${stdout}\nJSON\n` : ''}exit ${exitCode}\n`,
+        { mode: 0o755 },
+      );
+      return { PATH: `${binDir}${delimiter}${process.env.PATH}` };
+    };
+
+    posixOnly('NAMES the red workflow when the latest run on main failed', () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'ghred-'));
+      const json = JSON.stringify([
+        { workflowName: 'ci', status: 'completed', conclusion: 'success', createdAt: '2026-07-26T02:00:00Z' },
+        {
+          workflowName: 'audit-code-test-suite',
+          status: 'completed',
+          conclusion: 'failure',
+          createdAt: '2026-07-26T02:00:00Z',
+        },
+      ]);
+      const { code, stderr } = runHook(CLOSEOUT_GATE, stop(sid('cired')), {
+        root: repo,
+        env: fakeGh(binDir, json),
+      });
+      expect(code).toBe(2);
+      expect(stderr).toContain('CI is RED on main');
+      expect(stderr).toContain('audit-code-test-suite');
+      // The green sibling must not be reported — an over-broad red trains the
+      // reader to wave at it.
+      expect(stderr).not.toMatch(/^ {6}ci$/m);
+      rmSync(binDir, { recursive: true, force: true });
+    });
+
+    posixOnly('says NOTHING about CI when gh is unavailable — cannot tell is not "fine"', () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'ghfail-'));
+      const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('cifail')), {
+        root: repo,
+        env: fakeGh(binDir, '', 1),
+      });
+      expect(stderr).not.toContain('CI is RED');
+      rmSync(binDir, { recursive: true, force: true });
+    });
+  });
+});
+
+// The lap rule "end every lap by checking CI on main" is enforced here rather
+// than remembered. These pin the verdict; the gate does the network call.
+describe('latestFailedWorkflows: reading ONE workflow is not reading CI', () => {
+  const run = (workflowName, conclusion, createdAt, status = 'completed') => ({
+    workflowName,
+    status,
+    conclusion,
+    createdAt,
+  });
+
+  it('reports a workflow that is red while a SIBLING workflow is green', () => {
+    // The exact 2026-07-25 shape: `ci` green throughout, the suite red.
+    expect(
+      latestFailedWorkflows([
+        run('ci', 'success', '2026-07-26T02:00:00Z'),
+        run('audit-code-test-suite', 'failure', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual(['audit-code-test-suite']);
+  });
+
+  it('does not report a failure a LATER run turned green', () => {
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'failure', '2026-07-26T01:00:00Z'),
+        run('suite', 'success', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('still reports a workflow whose newest run went red after a green one', () => {
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'success', '2026-07-26T01:00:00Z'),
+        run('suite', 'failure', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual(['suite']);
+  });
+
+  it('treats `cancelled` as routine supersession, never as red', () => {
+    expect(latestFailedWorkflows([run('suite', 'cancelled', '2026-07-26T02:00:00Z')])).toEqual([]);
+  });
+
+  it('does not let a NEWER cancelled run mask an older failure', () => {
+    // The load-bearing case: a cancelled run carries no signal, so it must be
+    // skipped outright rather than becoming the workflow's newest verdict — which
+    // would silently clear a red main. Asserting only "a lone cancelled is not
+    // red" passes whether or not the rule exists.
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'failure', '2026-07-26T01:00:00Z'),
+        run('suite', 'cancelled', '2026-07-26T02:00:00Z'),
+      ]),
+    ).toEqual(['suite']);
+  });
+
+  it('lets an in-flight run neither red nor CLEAR a workflow', () => {
+    // The pending run must not launder the older failure into a pass.
+    expect(
+      latestFailedWorkflows([
+        run('suite', 'failure', '2026-07-26T01:00:00Z'),
+        run('suite', null, '2026-07-26T02:00:00Z', 'in_progress'),
+      ]),
+    ).toEqual(['suite']);
+    // ...and a still-running job carrying a conclusion is not a verdict either.
+    // Without the status rule this reports red for a run that has not finished.
+    expect(latestFailedWorkflows([run('suite', 'failure', '2026-07-26T02:00:00Z', 'in_progress')])).toEqual([]);
+  });
+
+  it('degrades to "cannot tell" on junk rather than inventing a verdict', () => {
+    expect(latestFailedWorkflows(null)).toEqual([]);
+    expect(latestFailedWorkflows([null, {}, run('', 'failure', '2026-07-26T02:00:00Z')])).toEqual([]);
+    // An unparseable timestamp must not sort as newest.
+    expect(latestFailedWorkflows([run('suite', 'failure', 'not-a-date')])).toEqual([]);
   });
 });

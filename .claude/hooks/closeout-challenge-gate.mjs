@@ -24,6 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
@@ -143,6 +144,52 @@ try {
   }
 } catch {
   /* memory store absent on this box → skip */
+}
+
+// CI on the default branch. The lap rule says to check it by hand at every
+// close-out; a rule that depends on remembering is the thing this project moves
+// into tooling. Reading one workflow is not reading CI — `ci` stayed green for
+// three commits while the suite that actually runs vitest was red.
+try {
+  const ghArgs = [
+    'run',
+    'list',
+    '--branch',
+    'main',
+    '--limit',
+    '20',
+    '--json',
+    'workflowName,status,conclusion,createdAt',
+  ];
+  const ghOpts = {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 15_000,
+    windowsHide: true,
+  };
+  let r = spawnSync('gh', ghArgs, ghOpts);
+  // win32: `gh` may be a `.cmd`/`.ps1` shim, which bare spawn does NOT resolve —
+  // the same trap resolveWindowsShimSpawnCommand handles in src. Every arg here
+  // is a fixed literal, so the shell retry carries no interpolation.
+  if (r.error?.code === 'ENOENT' && process.platform === 'win32') {
+    r = spawnSync('gh', ghArgs, { ...ghOpts, shell: true });
+  }
+  // No gh, not authed, no network, rate-limited, a 503 from either endpoint —
+  // every one of those is "cannot tell", never "CI is fine".
+  if (r.status === 0 && r.stdout) {
+    const red = latestFailedWorkflows(JSON.parse(r.stdout));
+    if (red.length > 0) {
+      findings.push(
+        `CI is RED on main — the latest completed run of ${red.length} workflow(s) FAILED:\n` +
+          red.map((n) => `      ${n}`).join('\n') +
+          `\n      A green local suite does not clear this: the workflows do not run the same set. ` +
+          `Resolve to NAMED failing files before calling the lap green.`,
+      );
+    }
+  }
+} catch {
+  /* gh absent / bad JSON / spawn fault → cannot tell, so say nothing */
 }
 
 try {
