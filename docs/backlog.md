@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 150 entr(y/ies) indexed.
+> and at commit). 151 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -157,38 +157,39 @@
 - `durable-traps.md:111` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
 - `durable-traps.md:118` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
 - `durable-traps.md:126` — Global `fetch` cannot outlast a long reasoning call — undici's 300s `headersTimeout` is measured to the FIRST byte and `globalThis.fetch` cannot be told otherwise (2026-07-20, low; remedy corrected 2026-07-24).
-- `durable-traps.md:145` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
-- `durable-traps.md:156` — The LiteLLM/NIM offload lane rate-limits hard above ~2 concurrent requests per model (2026-07-23 remedy update).
-- `durable-traps.md:176` — `codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate, not by each spawn site.
-- `durable-traps.md:188` — LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).
-- `durable-traps.md:198` — A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).
-- `durable-traps.md:211` — The free offload lane is the local LiteLLM proxy — it must be RUNNING, and the model must be one of its aliases.
-- `durable-traps.md:224` — After an unattended run, `git diff` the tracked docs before committing.
-- `durable-traps.md:237` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
-- `durable-traps.md:259` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:265` — A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.
-- `durable-traps.md:273` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
-- `durable-traps.md:290` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
-- `durable-traps.md:301` — Remediate-code worktree branches strand commits off main.
-- `durable-traps.md:303` — `.gitignore` artifact-tree re-include structure (don't flatten it).
-- `durable-traps.md:311` — Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`
-- `durable-traps.md:316` — Wall-clock peak-concurrency tests are latency-fragile.
-- `durable-traps.md:331` — One test runner: vitest
-- `durable-traps.md:345` — Don't mask the test exit code with a REDIRECT.
-- `durable-traps.md:353` — Global `-g` install BLOCKS `postinstall`
-- `durable-traps.md:363` — A global junction to a LIVE working tree silently shadows a registry install.
-- `durable-traps.md:369` — PowerShell
-- `durable-traps.md:379` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
-- `durable-traps.md:395` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
-- `durable-traps.md:410` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
-- `durable-traps.md:417` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
-- `durable-traps.md:422` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:433` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
-- `durable-traps.md:435` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:437` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:445` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:453` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:460` — Ratchet the backlog baseline LAST, once, at the end of a lap.
+- `durable-traps.md:145` — `$TMPDIR` is UNSET in the Bash tool, so `"$TMPDIR/x"` writes to the shell's install dir (2026-07-25, low).
+- `durable-traps.md:151` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
+- `durable-traps.md:162` — The LiteLLM/NIM offload lane rate-limits hard above ~2 concurrent requests per model (2026-07-23 remedy update).
+- `durable-traps.md:182` — `codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate, not by each spawn site.
+- `durable-traps.md:194` — LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).
+- `durable-traps.md:204` — A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).
+- `durable-traps.md:217` — The free offload lane is the local LiteLLM proxy — it must be RUNNING, and the model must be one of its aliases.
+- `durable-traps.md:230` — After an unattended run, `git diff` the tracked docs before committing.
+- `durable-traps.md:243` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
+- `durable-traps.md:265` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
+- `durable-traps.md:271` — A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.
+- `durable-traps.md:279` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
+- `durable-traps.md:296` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
+- `durable-traps.md:307` — Remediate-code worktree branches strand commits off main.
+- `durable-traps.md:309` — `.gitignore` artifact-tree re-include structure (don't flatten it).
+- `durable-traps.md:317` — Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`
+- `durable-traps.md:322` — Wall-clock peak-concurrency tests are latency-fragile.
+- `durable-traps.md:337` — One test runner: vitest
+- `durable-traps.md:351` — Don't mask the test exit code with a REDIRECT.
+- `durable-traps.md:359` — Global `-g` install BLOCKS `postinstall`
+- `durable-traps.md:369` — A global junction to a LIVE working tree silently shadows a registry install.
+- `durable-traps.md:375` — PowerShell
+- `durable-traps.md:385` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
+- `durable-traps.md:401` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
+- `durable-traps.md:416` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
+- `durable-traps.md:423` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
+- `durable-traps.md:428` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
+- `durable-traps.md:439` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
+- `durable-traps.md:441` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:443` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:451` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:459` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:466` — Ratchet the backlog baseline LAST, once, at the end of a lap.
 
 <!-- END GENERATED SEEK INDEX -->
 
