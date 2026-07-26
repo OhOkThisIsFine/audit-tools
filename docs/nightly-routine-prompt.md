@@ -86,8 +86,32 @@ LEG 3 — RECURRING-PROBLEM SOLUTIONS
     .audit-tools/nightly/proposals/<id>/ so the owner approves in one step. Tests go under
     tests/ — vitest excludes .claude/**, so a test beside a hook never runs.
 
+LEG 3b — THE WEEKLY /insights PASS (runs weekly, NOT nightly)
+16. DUE? Read .audit-tools/nightly/insights-last-run.json. Due if it is absent, or its `ran_at`
+    is 7+ days old. NOT due → skip silently; this is not a skipped leg and does not go in the
+    digest's skipped list. Due but it fails → that DOES go in the skipped list.
+17. RUN IT as a nested non-interactive session, from the repo root:
+      MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' claude -p "/insights"
+    ⚠ Both env vars are load-bearing under Git Bash: without them the leading slash is rewritten
+    to C:/Program Files/Git/insights and the nested session answers "no such slash command",
+    which reads exactly like the feature not existing. It exists. Alternatively use the
+    PowerShell tool, which does not mangle. It takes minutes (it analyses every session not
+    already cached in ~/.claude/usage-data/facets/) — run it in the background, do not raise the
+    Bash timeout past its 600000ms clamp. It prints the path of the HTML report it wrote.
+18. TRIAGE every suggestion against HEAD before it becomes a proposal. A suggestion is a LEAD at
+    the same bar as a backlog entry claiming to be shipped — the report's window reaches back
+    weeks, so it routinely recommends work that has already landed, INCLUDING re-adding a
+    mechanism this repo deliberately retired. Check the retirement direction specifically.
+    Classify each: already-shipped (name where it lives; drop it), debatable (escalate as a
+    digest item), or genuinely open (a leg-3 proposal, with the recurrence evidence the report
+    gives you — friction counts across distinct sessions and dates).
+19. PROPOSE ONLY, exactly as leg 3 — land nothing from this pass. Then write the stamp:
+    .audit-tools/nightly/insights-last-run.json = { "ran_at": "<ISO>", "report_path": "<path>",
+    "suggestions_total": N, "already_shipped": N, "debatable": N, "open": N }. Write it ONLY on
+    a successful run, so a failure leaves the pass due tomorrow instead of parking it a week.
+
 OUTPUT
-16. Write .audit-tools/nightly/open-items.json — the machine contract behind the digest.
+20. Write .audit-tools/nightly/open-items.json — the machine contract behind the digest.
     Each item: { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
     evidence[], proposal?, patch_path? }.
     - `title` = the one-line summary (front-loaded, not a summary of your investigation).
@@ -100,8 +124,8 @@ OUTPUT
     the SUBJECT (the prose in question), never on your wording of the question, or the owner's
     answer will not stick. Write it via writeOpenItems() so nights_open carries forward. Include
     `applied` (what you changed) and `skipped` (any leg or scope you could NOT cover, with the reason).
-17. Render + open the digest:  node scripts/nightly/render-digest.mjs --open
-18. SILENT ON CLEAN: nothing applied and nothing open → no digest churn, no notification.
+21. Render + open the digest:  node scripts/nightly/render-digest.mjs --open
+22. SILENT ON CLEAN: nothing applied and nothing open → no digest churn, no notification.
     But NEVER silent on skipped: a quiet digest must mean "all clear", never "did not look".
 
 INVARIANTS: verify from code, never from prose; no code anchor → a question for the owner,

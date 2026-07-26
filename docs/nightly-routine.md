@@ -47,6 +47,38 @@ owner approves in one step rather than re-deriving the work.
 Prefer the fix that removes the trap over the guard that catches it. A guard is
 what you build when the trap cannot be designed away.
 
+#### The weekly `/insights` pass
+
+`/insights` analyses the host's own session history — `~/.claude/usage-data/`,
+where `session-meta/*.json` carries per-session tool counts and `facets/*.json`
+carries a `friction_counts` map and a `friction_detail` line — and emits an HTML
+report of suggestions. That is leg 3's signal measured from the outside: friction
+counted across sessions rather than inferred from what happened to get written
+down. So it belongs to this leg, not to a fourth one.
+
+It runs **weekly, not nightly**, gated on a stamp at
+`.audit-tools/nightly/insights-last-run.json`. A stamp, not a cron weekday,
+because the cadence must survive a missed or failed night — a weekday test
+silently skips a fortnight when the Tuesday run dies. Due means the stamp is
+absent or its `ran_at` is seven or more days old.
+
+Two reasons it is not nightly. The analysis pass costs primary quota for every
+session not already cached in `facets/`, and — the real one — its suggestions are
+drawn from a window that reaches back weeks, so night-over-night they barely
+change. A recommendation that reappears nightly is the shape that taught the old
+digest to be ignored.
+
+**Its suggestions are LEADS, at the same bar as a backlog entry claiming to be
+shipped.** The 2026-07-25 pass triaged twelve: five were already shipped (the
+report's window opens before the fix landed), three were debatable, four were
+real. One recommended re-adding a retry policy for a failure mode whose root
+cause had been found and fixed two days earlier. Every suggestion is therefore
+verified against HEAD before it becomes a proposal, and leg 3's propose-only
+bound applies unchanged — the pass lands nothing.
+
+Being *not due* is not a skipped leg and does not go in the digest's skipped
+list. Being due and failing to run does.
+
 ## Where it runs — locally, not in the cloud
 
 The routine runs as a local scheduled task on the owner's box

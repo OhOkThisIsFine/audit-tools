@@ -72,6 +72,15 @@ the trap and the fix when it fires.
   a hung backend, which is the same misdiagnosis class as
   [[offload-lane-failures-are-usually-the-caller]].
 
+- **Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).** `claude -p "/insights"`
+  through the Bash tool reached the nested session as `C:/Program Files/Git/insights`, which answered
+  "there is no such slash command" — and that reads exactly like the feature not existing. It does exist
+  (it is registered in `claude.exe`). Any argument that must survive as a literal `/word` — a slash
+  command passed to a nested `claude -p`, a container path, a `curl` URL path — needs
+  `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` or the PowerShell tool. The failure is silent: the
+  callee reports a sensible-sounding error about the mangled value, so the wrong conclusion is the
+  DEFAULT one. Verify a "that command does not exist" answer against the binary before believing it.
+
 - **Concurrent agent sessions can share the ONE primary checkout (2026-07-23).** Two live
   sessions worked `C:\Code\audit-tools` simultaneously: files changed under each other mid-turn,
   and one session's staged WIP was committed + pushed by the sibling (correctly). Foreign
