@@ -17,7 +17,7 @@ Bounded and pre-implementation. It ends with a failing test, not with code.
 
 Skip for trivial mechanical edits (a typo, a message string, a test rename); say so in one line and go.
 Run it when the change touches loop-core (the paths in
-[`src/shared/loopCorePaths.ts`](../../src/shared/loopCorePaths.ts) — the same set the commit
+[`src/shared/loopCorePaths.ts`](../../../src/shared/loopCorePaths.ts) — the same set the commit
 attestation gate keys on), a shared contract under `src/shared`, dispatch/quota/rolling behaviour, an
 artifact shape, or anything whose blast radius you cannot state in one sentence.
 
@@ -29,11 +29,11 @@ contained change, the full three questions below for loop-core.
 The question "has this already been decided against?" is answered from the repo, not from memory.
 Gather, with the file tools:
 
-- **Standing decisions** — the *Preferences & standing decisions* and *Conventions & invariants*
-  sections of [`CLAUDE.md`](../../CLAUDE.md). These are where retirements live as prose
+- **Standing decisions** — the *Preferences & standing decisions*, *Conventions & invariants* and
+  *Commands* sections of [`CLAUDE.md`](../../../CLAUDE.md). These are where retirements live as prose
   (`KNOWN_MODEL_LIMITS`, the hardcoded host-model id, `--production` knip, the node:test split).
-- **Durable traps** — [`docs/backlog/durable-traps.md`](../../docs/backlog/durable-traps.md), and the
-  open items in [`docs/backlog/open-bugs.md`](../../docs/backlog/open-bugs.md) that name the same
+- **Durable traps** — [`docs/backlog/durable-traps.md`](../../../docs/backlog/durable-traps.md), and the
+  open items in [`docs/backlog/open-bugs.md`](../../../docs/backlog/open-bugs.md) that name the same
   files. An entry that already describes your plan is the answer.
 - **The removal itself** — `git log --oneline -S'<symbol>'` for the mechanism you are about to add
   back, and `git log --oneline --grep=retire --grep=revert --grep=delete -i -20`. A symbol that was

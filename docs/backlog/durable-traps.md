@@ -177,7 +177,7 @@ the trap and the fix when it fires.
   `burst_limited` lane. Distinct from [[offload-lane-failures-are-usually-the-caller]]: this one
   really is the endpoint, and `finish_reason` is `undefined` (not `length`) because the body is an
   error, not a completion. Record:
-  [`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md).
+  [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
 
 - **`codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate,
   not by each spawn site.** The shell-trap guard refuses the trap only for commands the HOST runs. In

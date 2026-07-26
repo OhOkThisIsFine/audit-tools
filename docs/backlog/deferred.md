@@ -43,7 +43,7 @@
   `verify()` from the same `INSTALL_HOST_DEFINITIONS` table the deploy uses. Live headless dispatch is
   the `RUN_PROVIDER_MATRIX_E2E=1` e2e, which covers `codex`/`opencode`/`openai-compatible` only — `agy`
   and `claude-worker` still have no live-dispatch row. **Remaining (a human at a GUI host, not code):**
-  run the release-time checklist in [`host-validation.md`](../spec/host-validation.md) — three GUI rows
+  run the release-time checklist in [`host-validation.md`](../../spec/host-validation.md) — three GUI rows
   (Antigravity / OpenCode / VS Code), now for BOTH `/audit-code` and `/remediate-code`. Every checkbox
   is still unticked and both Notes sections are empty, so no release has recorded a pass.
 

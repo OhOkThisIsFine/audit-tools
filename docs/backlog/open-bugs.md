@@ -24,7 +24,7 @@
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
   "M dispatched-but-in-flight" and asserted entanglement with the claim-lease machinery; the primary
-  record ([`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md) #14 + the run-state section)
+  record ([`re-dogfood-2026-07-21.md`](../reviews/re-dogfood-2026-07-21.md) #14 + the run-state section)
   says the tasks were **undispatched** — never granted. Reading the backlog entry first produced a
   claim-liveness discriminator that was wrong and had to be replaced after existing tests refuted it.
   Same family as [[backlog-prose-decays-verify-against-head]] but sharper: the decay was not staleness
@@ -47,7 +47,7 @@
 - **CLI-worker write-scope — four accepted residuals of the SHIPPED review-snapshot worktree
   (2026-07-22, low, revisit on live evidence only).** The enforcement itself is closed and
   single-homed: mechanism + rationale live in `src/shared/providers/reviewSnapshot.ts`'s docblock and
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #8, contract-tested
+  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #8, contract-tested
   in `tests/shared/review-snapshot.test.mjs`. What stays open: (a) git REFS are shared through the
   worktree link — a hostile worker can still `branch -D` / `push` / `gc` shared state (git refuses
   deleting a branch checked out in any worktree and push needs creds, so this is far narrower than the
@@ -69,8 +69,8 @@
   HIGH after a 2026-07-24 code trace).** The in-process rolling driver sweeps its claims at drive end
   and on the empty-plan round (`releaseOwnedTaskClaims`, commit `681df1f5`).
   ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do NOT
-  implement it.** The shared claim site already sweeps the over-claim (`dispatch.ts:481-492`), leaving
-  only the EMITTED in-flight set — which is exactly what the lease is FOR (`dispatch.ts:129-135`: the
+  implement it.** The shared claim site already sweeps the over-claim (`src/audit/cli/dispatch.ts:481-492`), leaving
+  only the EMITTED in-flight set — which is exactly what the lease is FOR (`src/audit/cli/dispatch.ts:129-135`: the
   claim spans an out-of-process worker run with no heartbeat, and `prepare-dispatch` returns before the
   workers run, so "the workers all died" is never observable host-side). And merge already releases the
   whole `failing` set including attempted-but-missing (`mergeAndIngestCommand.ts:885-909`); only
@@ -78,7 +78,7 @@
   **What remains (low):** an attempted-and-dead host round holds its emitted claims until a merge runs,
   bounded by the lease — designed behaviour; revisit only on live evidence of the lease outliving a dead
   round. The "zero-granted round pauses the drain" half is VERIFIED HOLDING; nothing open. Record:
-  [`re-dogfood-endgame-2026-07-22.md`](reviews/re-dogfood-endgame-2026-07-22.md).
+  [`re-dogfood-endgame-2026-07-22.md`](../reviews/re-dogfood-endgame-2026-07-22.md).
 
 - **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
   `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes
@@ -87,7 +87,7 @@
   `resolveAmbientSources` and at the `collectDispatchableSources` chokepoint; `deriveWorkerKind`
   fixed-kind transports made override-proof; LiteLLM same-tier `router_settings.fallbacks`
   configured — mechanism + review record:
-  [`worker-kind-pool-class-rule-2026-07-23.md`](reviews/worker-kind-pool-class-rule-2026-07-23.md)).
+  [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md)).
   What remains is the productive endpoint for the proxy lane: when the proxy declares
   `burst_limited`, its expanded claude-worker (agentic) lanes are correctly refused with reasons —
   so the lane yields zero capacity until the operator hand-declares single-shot
@@ -117,14 +117,14 @@
   UNPARKED** so yield can gate eligibility against ground truth ([`deferred.md`](deferred.md)).
   (3) **Widen the deepening net** to low-priority zero-finding results — OPEN, wants (2)'s calibration
   for the threshold. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
+  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #4c/#4d.
 - **RESIDUAL of the shipped DD-9 + charter slice-staleness pair (2026-07-23, low, accepted —
   revisit on live evidence).** The pair itself SHIPPED (intent-equivalence gate wired as the
   `intent_equivalence_current` obligation — `nextStep.ts` PRIORITY slot between
   `intent_checkpoint_current` and `charter_extraction_current` — with
   `artifact_metadata.intent_baseline` as the intent entry's revision authority; per-edge dependency
   slices for `charter_register.json` in `src/audit/orchestrator/dependencySlices.ts`; mechanism
-  record: [`intent-gate-charter-slice-design-2026-07-23.md`](reviews/intent-gate-charter-slice-design-2026-07-23.md)).
+  record: [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md)).
   Accepted residuals:
   (a) over-stale: `charter_clarification` / `systemic_challenge` keep WHOLE-ARTIFACT
   `repo_manifest` edges (`dependencyMap.ts:119,:131`; `DEPENDENCY_SLICE_PROJECTIONS` registers
@@ -149,7 +149,7 @@
   unexplained same-packet re-grant. Properties: (a) results are parse- and
   AuditResult-contract-checked at result-write or pre-merge; (b) the merge's "missing or invalid"
   names WHICH per task (file absent vs parse error vs contract mismatch). Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #12.
+  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #12.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from
   weaker models when the true answer is empty.** Two of four delta-mining calls (minimax-m3)
@@ -167,13 +167,13 @@
   ("no submission supplied; settled the register with no deltas"), so a dead miner and a clean one are
   indistinguishable. `CharterDeltaSubmissionSchema` is `.strict()`, so the affirmation must be added to
   the schema rather than passed through. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #4.
+  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #4.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
   completion cleanup removes the friction dir before the session stop-gate's close-out walk runs
   against it.** Ordering property: the close-out walk is part of run completion — cleanup preserves
   (or the close step completes) the friction record before archiving. Record:
-  [`re-dogfood-friction-2026-07-22.md`](reviews/re-dogfood-friction-2026-07-22.md) #13.
+  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #13.
   ⚠ **Three findings from the reverted attempt — a naive "exempt friction/ from the rm" does NOT work
   and introduces a regression.** (1) The audit half's completion cleanup is `promoteFinalAuditReport`
   (`src/audit/io/artifacts.ts:465`, called from `nextStepHelpers.ts:417` and
@@ -191,7 +191,7 @@
   defect the audit side just fixed?** Audit's completion livelock (claims released only at merge →
   failed rounds starve every later runId for the 20-min lease) is fixed by `releaseOwned` at drive
   end. Remediate claims implement nodes through its own registry (`rollingSession.ts`,
-  `acceptNode.ts`) with ONE release site visible (`rollingSession.ts:494`); verify whether a failed
+  `acceptNode.ts`) with TWO release sites visible (`rollingSession.ts:721` and `:744`); verify whether a failed
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
 
@@ -267,12 +267,12 @@
   (2026-07-21, low).** The dispatch prompt wants per-result `{input_tokens, output_tokens}`; Claude
   Code's subagent tool reports only a TOTAL. An honest host must skip the stamp, so calibration
   stays at cold-start batches (3, then 2, of 62 — observed). Accept `{total_tokens}` and calibrate
-  on it. Record: [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
+  on it. Record: [`re-dogfood-2026-07-21.md`](../reviews/re-dogfood-2026-07-21.md).
 
 - **LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS
   (2026-07-21, low).** This run's challenge arrived as "round 10" with 11 prior improvements from
   earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
-  [`re-dogfood-2026-07-21.md`](reviews/re-dogfood-2026-07-21.md).
+  [`re-dogfood-2026-07-21.md`](../reviews/re-dogfood-2026-07-21.md).
 
 - **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Step 2
   ran 4 adversarial rounds; each spawned FRESH agents that re-grepped the same `tokens_per_pct` /
@@ -320,7 +320,7 @@
   so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
   A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch, reachable from NO ref at HEAD.
   The independent review that exercised it named both fail-open shapes
-  ([`account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md),
+  ([`account-metering-round2-independent-review-2026-07-19.md`](../reviews/account-metering-round2-independent-review-2026-07-19.md),
   *The evidence apparatus is itself fail-open*): it measured *"the suite went red"*, not *"a test
   asserting THIS behavior went red"*; and a hand-written site list declared 7 sites against ≥11
   substantive hunks, so "all N pinned" was literally true and materially misleading.
@@ -344,8 +344,8 @@
   applied on exactly the wrong side.
   ⚠ **Half SHIPPED 2026-07-25 and the shipped half is WRITE-ONLY.** `readProxyCatalog` derives
   `age_ms`/`stale`/`stale_reason` and refuses an unparseable `fetched_at`, but nothing branches on the
-  verdict: `populateProxyCatalogIfMissing` (`auditorSources.ts:354`) still short-circuits on a cache of
-  ANY age and `resolveProxyLane` (`:653`) folds sources in without surfacing `stale_reason`. Give the
+  verdict: `populateProxyCatalogIfMissing` (`auditorSources.ts:407`) still short-circuits on a cache of
+  ANY age and `resolveProxyLane` (`:641`) folds sources in without surfacing `stale_reason`. Give the
   follow-up `auditorSources.ts`, or this reads closed while unchanged
   ([[write-only-data-looks-authoritative]]).
   **Two properties to hold:** (a) the age rule applies where staleness does damage — the read path either
@@ -375,9 +375,9 @@
   `no_capable_pool` wall the relative rule exists to prevent (step E calls it structural/permanent →
   livelock), so it is only worth deciding against a ranked run's numbers. (c) Ranker freshness is
   Track 2's cache-age rule (hand-run generation, ages silently) — not tracked separately here.
-  Records: [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md)
+  Records: [`capability-evidence-salvage-2026-07-20.md`](../reviews/capability-evidence-salvage-2026-07-20.md)
   (landing gate MET carries the full mechanism),
-  [`nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
+  [`nim-dispatch-single-pool-2026-07-19.md`](../reviews/nim-dispatch-single-pool-2026-07-19.md).
 
 - **H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).** (a) The attended same-agent
   SPLIT semantics (blessed in the plan record: engine partition + host-subagent remainder on one meter,
@@ -447,11 +447,8 @@
   drifted BROKEN at HEAD unnoticed: its finalize loop returned at `present_report` status `ready` and
   then asserted `complete`, because the friction-attestation branch was added to the packaged copy only.
   A script that is never run is not a gate; it is a doc that claims to be one. Property: every
-  `smoke:*` npm script belongs to some gate, or is deleted. (2) **inefficient-feeding (low):** the two
-  audit smokes were 1,910 lines at ~90% duplication, so answering "what does the smoke flow assert"
-  cost two full-file reads of near-identical text. Now single-homed in
-  `scripts/audit/smoke-audit-flow.mjs` (+ `scripts/shared/{smoke-process,spawn-shell}.mjs`); the win32
-  spawn shim went from FIVE identical copies to one. (3) **ambiguous-direction:** none this lap.
+  `smoke:*` npm script belongs to some gate, or is deleted. (2) **ambiguous-direction:** none this
+  lap.
 
 - **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium,
   the lap's biggest cost):** the offload triage was first run on `glm-5.2` — rank 1, a heavy reasoning
@@ -466,13 +463,7 @@
   `}`, but ONLY after `finish_reason === "stop"`, so a truncated body cannot be laundered into a
   valid-looking record. The general property is unbuilt: schema non-adherence is a per-alias trait the
   roster does not record, so every new caller rediscovers it.
-  (3) **tool-should-decide (guard defect) — FIXED, mechanism in the code + `hook-trap-guards.test.mjs`.**
-  A guard's advertised escape must work in the form it advertises: all three `shell-trap-guard` bypasses
-  read the HOOK's env, so an inline prefix never reached them. Now one `bypassEnabled` helper. The fix's
-  live check then found the sharper half — the guard's own harness inherited `process.env`, so a bypass
-  exported in the shell disabled the rule under test; the harness scrubs them now. Same class as the
-  ambient-`PATH` red in [`durable-traps.md`](durable-traps.md).
-  (4) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
+  (3) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
   (`api_key_env` type narrowing, the leaked tool-call XML, the doc-path typo) — the standing
   verify-against-HEAD rule caught them, but only after each was opened. The triage lane cannot check
   HEAD, so its `actionable_now` verdict is a routing signal and never a work order.
@@ -482,7 +473,7 @@
   instances, same class):** two entries had paraphrased their own incident until the MECHANISM
   inverted, and each would have produced a wrong fix if worked from the entry alone — FLW-COR-003
   prescribed "release claims on every path that claims" when the lease must SPAN out-of-process
-  workers (`dispatch.ts:129-136`), and the `analyzerDeps` entry reported a live `npm install` that
+  workers (`src/audit/cli/dispatch.ts:129-136`), and the `analyzerDeps` entry reported a live `npm install` that
   no test makes (stub `run`; the E404 is stub-authored text). Both were caught only by tracing
   source. The template already says to link the primary record rather than retell it; what is still
   missing is anything that ENFORCES it. [[backlog-prose-decays-verify-against-head]]
@@ -518,7 +509,7 @@
   because nothing needed it. This is the reader that justifies it, so settle the two together rather than
   adding a parallel identity channel beside a dormant one.
 
-- **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).** The dispatch-blocking defect was found BY the run, and committing its fix changed the audited tree → staleness cascade correctly marked the whole planning chain stale → the 313-packet run regressed to charter_extraction, so every LLM planning step re-runs before dispatch is reattempted. Semantics are right (DAG is truth); the cost is structural to dogfooding-by-self-audit. Two tool slivers worth considering: (a) the resume emitted ~30 identical `{"kind":"staleness",...}` lines in one invocation (recompute spin — dedupe the log line per drain); (b) an active run whose frontier goes stale could say so explicitly ("run X invalidated by upstream staleness: <artifacts>") instead of silently re-planning from charter_extraction with run_id null.
+- **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).** The dispatch-blocking defect was found BY the run, and committing its fix changed the audited tree → staleness cascade correctly marked the whole planning chain stale → the 313-packet run regressed to charter_extraction, so every LLM planning step re-runs before dispatch is reattempted. Semantics are right (DAG is truth); the cost is structural to dogfooding-by-self-audit. One tool sliver worth considering: an active run whose frontier goes stale could say so explicitly ("run X invalidated by upstream staleness: <artifacts>") instead of silently re-planning from charter_extraction with run_id null.
   **SPEC — keep the cascade, ANNOUNCE it. Do not narrow staleness to make dogfooding cheaper.** The
   regression to first-planning-step is correct: the audited tree changed, so the planning derived from it
   is genuinely invalid, and the dependency graph is the source of truth. Any mechanism that spares a
@@ -526,8 +517,7 @@
   correctness rule the whole design rests on.
   What is actually wrong is that a large, expensive, correct action happens SILENTLY and looks like
   malfunction. The run should state that it was invalidated, by which upstream artifacts, and what it is
-  therefore re-deriving — one message, at the moment it happens. The duplicated staleness log lines are
-  the same defect in miniature: repeated identical output in place of one clear statement.
+  therefore re-deriving — one message, at the moment it happens.
   **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
   who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 
@@ -574,14 +564,14 @@
 
 - **Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).** `tests/remediate/session-config-load.test.ts` red-greens `loadRemediateSessionConfig`, and every remediate site routes through it today, but a FUTURE call site that inlines `resolveSessionConfig(intent, null)` instead of using the loader fails no test (verified by experiment: reverting a call site to `null` left both files green). Same for audit's two ambient sites. The loader makes the right thing the easy thing; it does not make the wrong thing impossible. Property to hold: a production caller cannot resolve a session config without a descriptor — e.g. make the descriptor a required parameter and give the two legitimate "resolve no pool" callers an explicit `noPoolDescriptor()`, so `null` stops being the path of least resistance.
 
-- **A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).** `acceptNode.ts` (962) / `worktreeLifecycle.ts` (923) / `writeScope.ts` (496) / `verifyCommands.ts` (274) / `acceptReconcile.ts` (190) are not dispatch: `executeNodeInWorktree` (`acceptNode.ts:883`) is called only by the **driver** `driveRollingImplementDispatch` (`nextStep.ts:1130`, call at `:1346`), never by `prepareImplementDispatch` (`marshal.ts:234-513`), which ends having written `dispatch-plan.json` (`:426`) + `dispatch-quota.json` (`:510`). ⚠ Correcting the old entry's absolute: prepare is not worktree-*free* — it reaches two landing symbols, `ensureRemediationBranchCheckedOut` (`:342`) and `worktreePath` (`:405`, prompt rooting) — but it creates, verifies and merges nothing, so the stage boundary holds and those two imports are exactly what an import-graph test would catch. They live under `dispatch/` only because the barrel (`dispatch.ts:49-136`) aggregated them; `acceptNodeWorktree` even takes a base-branch lock (`acceptNode.ts:434`) — pure serialization, zero dispatch content. `marshal.ts` itself fuses two stages: prepare (`:234-513`) and the landing merge `mergeImplementResults` (`:596-1561`). Symmetrically on the audit side, `prepareDispatchArtifacts` (`src/audit/cli/dispatch.ts:187-881`) both *decides* and *renders the prompt* — lens defs (`:293-294`), knip/analyzer anchor indices (`:517`,`:524`), source-reading anchor extraction (`:560` → `dispatch/packetPrompt.ts:123-161`), `buildPacketPrompt` + `writeFile` (`:580-581`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** The assembly-unification lap this was told not to bundle with has SHIPPED (shared `buildHostPoolPreamble`, `src/shared/quota/hostPool.ts:149`, consumed by `quotaPool.ts:135` + `waveScheduling.ts:160`), so the re-home is unblocked. ⚠ Loop-core: `src/remediate/steps/dispatch/` is a `LOOP_CORE_PATTERNS` directory prefix (`src/shared/loopCorePaths.ts:41`) — a new `steps/land/` prefix must land in the canonical list with `.claude/hooks/loop-core-patterns.mjs` regenerated in the same commit (`npm run check:loop-core-patterns`), or the parity test goes red. Record: [`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) §3.
+- **A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).** `acceptNode.ts` (962) / `worktreeLifecycle.ts` (923) / `writeScope.ts` (496) / `verifyCommands.ts` (274) / `acceptReconcile.ts` (190) are not dispatch: `executeNodeInWorktree` (`acceptNode.ts:883`) is called only by the **driver** `driveRollingImplementDispatch` (`nextStep.ts:1130`, call at `:1346`), never by `prepareImplementDispatch` (`marshal.ts:234-513`), which ends having written `dispatch-plan.json` (`:426`) + `dispatch-quota.json` (`:510`). ⚠ Correcting the old entry's absolute: prepare is not worktree-*free* — it reaches two landing symbols, `ensureRemediationBranchCheckedOut` (`:342`) and `worktreePath` (`:405`, prompt rooting) — but it creates, verifies and merges nothing, so the stage boundary holds and those two imports are exactly what an import-graph test would catch. They live under `dispatch/` only because the barrel (`dispatch.ts:49-136`) aggregated them; `acceptNodeWorktree` even takes a base-branch lock (`acceptNode.ts:434`) — pure serialization, zero dispatch content. `marshal.ts` itself fuses two stages: prepare (`:234-513`) and the landing merge `mergeImplementResults` (`:596-1561`). Symmetrically on the audit side, `prepareDispatchArtifacts` (`src/audit/cli/dispatch.ts:187-881`) both *decides* and *renders the prompt* — lens defs (`:293-294`), knip/analyzer anchor indices (`:517`,`:524`), source-reading anchor extraction (`:560` → `dispatch/packetPrompt.ts:123-161`), `buildPacketPrompt` + `writeFile` (`:580-581`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** The assembly-unification lap this was told not to bundle with has SHIPPED (shared `buildHostPoolPreamble`, `src/shared/quota/hostPool.ts:149`, consumed by `quotaPool.ts:135` + `waveScheduling.ts:160`), so the re-home is unblocked. ⚠ Loop-core: `src/remediate/steps/dispatch/` is a `LOOP_CORE_PATTERNS` directory prefix (`src/shared/loopCorePaths.ts:41`) — a new `steps/land/` prefix must land in the canonical list with `.claude/hooks/loop-core-patterns.mjs` regenerated in the same commit (`npm run check:loop-core-patterns`), or the parity test goes red. Record: [`dispatch-fork-assessment-2026-07-16.md`](../reviews/dispatch-fork-assessment-2026-07-16.md) §3.
 
 
-- **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `dispatch.ts:219-230` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
+- **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `src/audit/cli/dispatch.ts:278-289` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
 
 - **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo,
   and it outranks the descriptor (2026-07-16, medium).** `resolveHostModel` (`limits.ts:56-71`)
-  resolves `explicit ?? block_quota.host_model ?? env`, then `hostPool.ts:156` keys
+  resolves `explicit ?? block_quota.host_model ?? env`, then `hostPool.ts:164` keys
   `quotaModelKeySegment = hostModel ?? input.hostModelId` — so a repo-committed field beats the
   descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates
   [[capability-is-per-auditor-not-per-audit]], and the shared-assembly lift moved that precedence into
@@ -593,7 +583,7 @@
   **Property:** anything naming WHO is running belongs to the auditor and is never persisted in the
   shared repo; anything keyed by a model NAME is shared config and is.
   **⚠ The rest of the original claim is REFUTED — do NOT "fix" it.** Nothing writes
-  `quota`/`block_quota`; they are operator-authored (`packetFilter.ts:259` documents `quota.models` as
+  `quota`/`block_quota`; they are operator-authored (`packetFilter.ts:243` documents `quota.models` as
   the override mechanism). `quota.models[<model>]` is keyed by model NAME, so every auditor on that
   model shares the window by design — inheriting is CORRECT, and `limits.ts:115` beating discovery is
   the intended escape hatch. It only ever looked wrong because the identity above it resolved wrongly.
@@ -679,7 +669,7 @@
   defect recurring. Same class as the landing-stage-misfiled-as-dispatch entry — both are module boundaries
   drawn by history rather than by role, and both are fixed by moving code rather than by tuning a list.
 
-- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md:201-206`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
+- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md:201-206`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
   ⚠ **OWNER DECISION 2026-07-25 on (1):** require a **`gated by:` clause** on any spec statement of an
   ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
   not re-admit the status vocabulary `design-docs-declarative.test.mjs` bans. The lint's doc set widens
@@ -687,7 +677,7 @@
 
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
-- **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1634`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1663`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
+- **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1639`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1669`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
   ⚠ **OWNER DECISION 2026-07-25 — BOTH calls answered YES.** (a) Planning phases BECOME dispatchable to
   a non-host pool; it is the only half that cannot currently route to a $0 pool, and every one of its
   ~9-11 round-trips bills before the first implement dispatch. (b) A targeted in-place repair IS admitted
@@ -695,14 +685,14 @@
   rejection whose issue set names specific fields — a rewrite stays the fallback whenever the repair
   target is not unambiguous, or the invariant erodes into "patch whatever looks wrong".
 
-- **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with only a flood of identical `{"kind":"staleness",...}` lines and no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat (or the staleness spam should collapse to one line) so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
+- **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 
 - **⬇ LIVE-run watch only — unified routing A–G (shipped 2026-07-17, 6 attested loop-core commits).**
   On a fresh conversation-first self-audit, watch: small pools take fitting packets; an oversized packet
   SKIPS (no 413); a 429 on pool A leaves pool B dispatchable; a zero-grant renders its honest cause.
   Mechanism and the refuted "HOST-ONLY" premise live in
-  [`host-fanout-premise-refuted-2026-07-17.md`](reviews/host-fanout-premise-refuted-2026-07-17.md) +
-  [`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md),
+  [`host-fanout-premise-refuted-2026-07-17.md`](../reviews/host-fanout-premise-refuted-2026-07-17.md) +
+  [`unified-dispatch-routing-design-2026-07-17.md`](../reviews/unified-dispatch-routing-design-2026-07-17.md),
   not here. [[grep-the-writers-before-believing-inheritance]]
 
 - **SPEC — probe the local OpenAI-compatible ENDPOINT, the way CLI providers are probed on PATH.** The
@@ -720,11 +710,11 @@
 
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 
-- **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts:123-136`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `coordinator.ts:227` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`rollingDispatch.ts:1741` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts:226-236`; the two-mode split is documented at `admissionLoop.ts:887-896`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts:2309`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
+- **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](../reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts:123-136`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `src/shared/dispatch/coordinator.ts:242` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`src/shared/dispatch/rollingDispatch.ts:1773` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts:226-236`; the two-mode split is documented at `admissionLoop.ts:887-896`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts:2309`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
 
 - **Accept-latch residuals (family SHIPPED 2026-07-23; two low items stay open).** Mechanism, the
   REFUTED "rollback to session-recorded base" premise, and the disposition of a/c/d live in
-  [`accept-latch-family-mechanisms-2026-07-23.md`](reviews/accept-latch-family-mechanisms-2026-07-23.md).
+  [`accept-latch-family-mechanisms-2026-07-23.md`](../reviews/accept-latch-family-mechanisms-2026-07-23.md).
   Open: (1) a rolling-dispatched node whose accept sidecar is ABSENT at merge (runId-mismatch chaos) is
   indistinguishable from the interim main-tree path and closes unverified — needs a rolling-path marker
   independent of sidecar presence; (2) the sidecar's monotonic `merged:true` guard still blanket-preserves
@@ -848,7 +838,7 @@
 
 - **Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).**
   Only the host-subagent grant PERSISTS leases (`grantLeases:true` → `runs/<runId>/dispatch-quota.json`);
-  the in-process rolling engine reconciles per packet on success OR failure (`rollingDispatch.ts:1209`),
+  the in-process rolling engine reconciles per packet on success OR failure (`src/shared/dispatch/rollingDispatch.ts:1243`),
   so the leak class is host-path only. Release is wired at every normal exit — merge
   (`mergeAndIngestCommand.ts:667`, ahead of the idempotency replay), the dispatch wall/pause
   (`dispatch.ts:807`), and the fan-out chokepoints (`hostFanoutGate.ts`, which additionally
@@ -909,26 +899,22 @@
   It also subsumes the "Ad-hoc Agent fan-out has no per-agent ledger" entry below — close that one with
   this.
 
-- **Design-review independence — solo `design_review_contract` is the one pass the host judges itself
-  (2026-07-24, low; the old "second-driver hazard" framing is REFUTED).** ⚠ The prior prose called the
-  advance command in the solo branch the same double-driver bug fixed for `design_review_parallel` in
-  `e6b580d0`. It is not, and acting on it would strand the run: that prompt is the HOST's own step
-  prompt (`writeCurrentStep` at `nextStepCommand.ts:766` → `steps/current-prompt.md`, no packet file,
-  no `access` block), so `Then run: <next-step>` at `:745` is CORRECT — `e6b580d0`'s own message says
-  so verbatim ("the solo design_review_contract branch keeps its advance ... not a dispatched packet").
-  The hazard is specific to the parallel branch's real worker packet
-  (`incoming/design-review-contract-prompt.md`, `:659`), which is advance-free and pinned by
-  `tests/audit/next-step.test.mjs:167`.
-  **What is actually open is independence.** `design_review_parallel` dispatches the contract review to
-  a subagent (`:667`) and solo `design_review_conceptual` dispatches through `prepareConceptualDispatch`
-  (`:806`), but solo `design_review_contract` (`:723-782`, reached whenever only the contract pass is
-  missing or re-staled — `nextStepHelpers.ts:1017`) has the host run the adversarial contract review
-  itself, over artifacts the host drove — vs [[delegate-adversarial-phases-to-separate-agent]].
-  Property: no design-review pass is judged by the agent that drove the work under review, on any of the
-  three branches. Mechanism: mirror the parallel branch — write the `renderContractReviewPrompt` body
-  (advance-free) to the contract prompt path, keep the advance in the host's dispatch instruction, add
-  the `contract_prompt` artifact path and the `access` read/write paths, and extend the existing
-  parallel-branch assertion to the solo step.
+- **Design-review independence — the solo contract branch is pinned by a shared helper, not by a test
+  (2026-07-24, low).** ⚠ BOTH of this entry's earlier framings are FALSIFIED at HEAD and must not be
+  acted on: the "second-driver hazard" reading (that the solo branch's advance is the same double-driver
+  bug fixed for `design_review_parallel` in `e6b580d0`), and the "the host judges itself" reading (that
+  solo `design_review_contract` renders the adversarial review into the host's own step prompt with no
+  packet file and no `access` block). Solo and parallel now dispatch through ONE helper,
+  `prepareContractDispatch` (`src/audit/cli/nextStepCommand.ts:275-319`), whose docblock states both
+  properties — INDEPENDENCE (the pass is always dispatched to a subagent) and ADVANCE-FREE (the packet
+  carries no `next-step`, so no worker becomes a second driver). The solo branch calls it at `:801` and
+  writes the packet/results artifact paths plus the `access` read/write paths at `:841-846`.
+  Property: no design-review pass is judged by the agent that drove the work under review, and no
+  dispatched packet carries the orchestrator advance — on any of the three branches.
+  What is open is only the PIN: `tests/audit/next-step.test.mjs:161-181` asserts the advance-free worker
+  packet and the host-side advance for `design_review_parallel` ONLY; the `design_review_contract` case
+  (`:183-189`) writes the findings file and asserts nothing, so a future rewrite of that branch off the
+  shared helper would not be caught. Extend the parallel-branch assertion to the solo step.
 
 - **Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the
   code site).** The scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
@@ -961,7 +947,7 @@
   mid-edit leaves nothing to resume from. Property: every dispatched unit of work is recoverable from
   a record outside the dying context. (Harness/workflow property — no single file owns it.)
   ⚠ The former sliver (a) of this entry is CLOSED and its premise was stale twice over: `llm read` is
-  RETIRED, and the health probe it asked for shipped — `.claude/hooks/session-start-guards.mjs:110-138`
+  RETIRED, and the health probe it asked for shipped — `.claude/hooks/session-start-guards.mjs:223-259`
   probes the lane and prints `OFFLOAD LANE DOWN` with the restart command at lap start. Only the
   *then-route* half was never built, and nothing has asked for it since.
 
@@ -998,7 +984,7 @@
 
 - **Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).** The
   rework shipped; the design of record is
-  [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
+  [`spec/audit/dispatch-admission-control.md`](../../spec/audit/dispatch-admission-control.md)
   ([[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]]) — read it for
   what landed, not `docs/HANDOFF.md` (immediate-next-only by design; the "T5 forward tracks" section
   this entry used to point at is long gone).
@@ -1049,7 +1035,7 @@
 
 - **Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is WIRED on both drivers —
-  `src/audit/cli/rollingAuditDispatch.ts:453` and `src/remediate/steps/nextStep.ts:1212-1229` both route
+  `src/audit/cli/rollingAuditDispatch.ts:453` and `src/remediate/steps/nextStep.ts:1240-1257` both route
   `onEscalation` into the single `captureStepBoundaryFriction` chokepoint. Coverage is ASYMMETRIC, not
   end-to-end on both: the shared engine half (recordLimit → escalate → early strand, pool N+1 never
   attempted) is pinned in `tests/shared/rollingDispatch.test.mjs:979` with NO friction assertion, and only
@@ -1059,7 +1045,7 @@
   `HostSessionQuotaSource` escalation unit. Two open halves: **(a) bounded** — add the remediate parity
   test (`driveRollingImplementDispatch` with `poolsOverride` of ≥4 pools and a `dispatchNode` returning
   `rate_limited` with a parseable session-limit string; assert a `quota_escalation:` friction in
-  `friction/<runId>.json`), red-green by deleting the `onEscalation` block at `nextStep.ts:1214`;
+  `friction/<runId>.json`), red-green by deleting the `onEscalation` block at `nextStep.ts:1242`;
   **(b) live validation** on a real rate-limited run stays env-bound. [[meta-audit-friction-must-be-tool-enforced]]
   - **⬇ Live-run watch** (same wall run as quota-aware dispatch): when a packet escalates across pools at
     the wall, a **`quota_escalation` friction event** must be captured at the step boundary — check the

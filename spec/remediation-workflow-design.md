@@ -234,14 +234,15 @@ DAG promotion carries real metadata, never placeholder values — downstream ris
 classification, dispatch allowlists, and `checkAffectedFileIntegrity` all depend
 on it:
 
-- `affected_files` ← the node's `filesLikelyTouched`, sourced from the finalized
-  module contract's file scope, flowing through the whole chain (contract → DAG
+- `affected_files` ← `deriveNodeFiles(node)`: the node's declared `output_files`
+  (write scope) first, else `files_likely_touched`, else the owning module
+  contract's file scope — flowing through the whole chain (contract → DAG
   node → finding → dispatch access).
 - `lens` / `severity` ← derived from obligation kinds and contract content (an
   `invariant` obligation on a trust boundary is a higher tier than a structural
   cleanup); Path A nodes inherit their source finding's lens/severity.
 - DAG nodes carry `preconditions` (upstream contracts' declared outputs),
-  `expectedChanges`, and `verification` obligations from the ledger.
+  `expected_changes`, and `verification` obligations from the ledger.
 - **Write-scope vs read-scope are distinct.** `affected_files` is write-scope
   (declared outputs); read-scope is neighbor-contract + integration files.
   Create-new-file / greenfield nodes always receive a non-empty read context so

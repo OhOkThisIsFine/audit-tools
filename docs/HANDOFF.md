@@ -111,7 +111,7 @@ doc's own header forbids. Durable traps belong in
   anything. The per-workflow form (`actions/workflows/<wf>.yml/runs`) was the reliable one until
   2026-07-19, when it began returning 503 while `actions/runs?per_page=N` (filter by `head_sha`
   yourself) answered immediately.
-- **Branch-strand trap (bit twice):** a remediation run leaves you checked out on its worktree branch —
+- **Branch-strand trap (bit three times):** a remediation run leaves you checked out on its worktree branch —
   commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit strands.
 - **Never pass `isolation: "worktree"` to the Agent tool** when dispatching a remediate-code/audit-code
   implement node — the dispatch plan already names the correct worktree; a second one strands the
@@ -231,7 +231,7 @@ its SPEC intact.
 - A2b unmatched-quota fallback — two residuals (each low, documented at the code site). · [`open-bugs.md`](backlog/open-bugs.md)
 - Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track). · [`open-bugs.md`](backlog/open-bugs.md)
 - Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]). · [`open-bugs.md`](backlog/open-bugs.md)
-- Design-review independence — solo `design_review_contract` is the one pass the host judges itself (2026-07-24, low; the old "second-driver hazard" framing is REFUTED). · [`open-bugs.md`](backlog/open-bugs.md)
+- Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the code site). · [`open-bugs.md`](backlog/open-bugs.md)
 - Ad-hoc Agent fan-out has no per-agent ledger, so a session-limit mid-edit death is unrecoverable (low). · [`open-bugs.md`](backlog/open-bugs.md)
 - External shared-logic audit V1–V7 residuals · [`open-bugs.md`](backlog/open-bugs.md)
@@ -253,7 +253,7 @@ its SPEC intact.
 
 ### Forward tracks — design-level directions
 
-- Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)). · [`forward-tracks.md`](backlog/forward-tracks.md)
+- Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Generate the executor↔artifact mapping from the registries (anti-drift). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood). · [`forward-tracks.md`](backlog/forward-tracks.md)

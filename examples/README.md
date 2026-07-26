@@ -31,7 +31,7 @@ Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cu
 - **`catalog/sources-declared.json`** — the machine-level declaration (`~/.audit-code/sources-declared.json`)
   of backends this box owns, including the optional `proxy` lane; see below.
 
-### `../catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
+### `catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
 
 **This is no longer a session-config.** Dispatch sources are per-auditor CAPABILITY, not repo intent, so
 `sources[]` was removed from the persisted session-config type and the file moved to

@@ -15,7 +15,7 @@
 Ready) and LiteLLM is confirmed retirable. But `git grep -il 9router -- src/` returns NOTHING — the
 sprint was docs + external config only ([`9router-routing-sprint-handoff-2026-07-23.md`](../reviews/9router-routing-sprint-handoff-2026-07-23.md),
 design of record [`host-routed-dispatch-design-2026-07-23.md`](../reviews/host-routed-dispatch-design-2026-07-23.md)).
-Everything still RUNS on LiteLLM: `~/.claude/llm-call.mjs:73` hardcodes `:4000`, two
+Everything still RUNS on LiteLLM: `~/.claude/llm-call.mjs:97,:115` hardcode `:4000`, two
 `~/.audit-code/sources-declared.json` entries point at `:4000`, and `proxyCatalog.ts:163` reads
 `infoObj.litellm_provider`.
 ⚠ **Three gaps measured against the live 9router that the plan does not record, and (c) is a
@@ -37,7 +37,7 @@ close (1): that is the banned shape; map prefixes to canonical models.dev ids in
 <details><summary>Superseded: original LiteLLM stand-up + validation scope (2026-07-18, kept for the endpoint contract it names)</summary>
 
 **(a)–(e) all VALIDATED live 2026-07-18** — LiteLLM 1.91.1 on `127.0.0.1:4000` fronting NVIDIA NIM,
-9 aliases across tiers; record: [`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](reviews/litellm-proxy-live-validation-2026-07-18.md).
+9 aliases across tiers; record: [`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](../reviews/litellm-proxy-live-validation-2026-07-18.md).
 Config lives at `~/.audit-code/litellm-config.yaml`. One defect found + fixed (proxy lane never
 reach-verified its own `api_key_env`). **Still open on this track:** dispatch through the proxy under
 a real audit wave (packets validated only to the completion boundary), and quota/rate-limit behavior
@@ -86,7 +86,7 @@ followed" is otherwise indistinguishable from a bug.
 
 
 
-- **Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).** The Gate-0 bypass (fixed v0.33.11) was one symptom of a naming defect: `provider` names TWO concepts (the adapter that carries a request vs. the vendor that serves the model), `endpoint` holds TWO shapes (URL vs. launcher command), and every downstream keyspace had to independently rediscover which it needed. Quota got it right, the gate got it wrong for months, and a proposed "one identity function" fix would have been fail-OPEN. The spec settles the vocabulary and the axis each question binds to; the invariant is **co-locate and name, do not unify**.
+- **Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)).** The Gate-0 bypass (fixed v0.33.11) was one symptom of a naming defect: `provider` names TWO concepts (the adapter that carries a request vs. the vendor that serves the model), `endpoint` holds TWO shapes (URL vs. launcher command), and every downstream keyspace had to independently rediscover which it needed. Quota got it right, the gate got it wrong for months, and a proposed "one identity function" fix would have been fail-OPEN. The spec settles the vocabulary and the axis each question binds to; the invariant is **co-locate and name, do not unify**.
   **Staged migration — each stage atomic + green on its own (atomic-replace ordering invariant).**
   The vocabulary rename + chokepoint normalization, the co-located projections in
   `src/shared/providers/identity.ts`, and the axis-explicit exclusion grammar with its capacity
@@ -166,8 +166,8 @@ followed" is otherwise indistinguishable from a bug.
     machine-level in `~/.audit-code/sources-declared.json`, NOT the repo session-config, which cannot
     represent it — G2 put `sources`/`provider` in `DISPATCH_INVENTORY_FIELDS`, stripped from the persisted
     `RepoSessionIntent` (`src/shared/types/sessionConfig.ts`). Its key must be an `api_key_env`
-    (`OPENCODE_ZEN_API_KEY=public`); an inline `api_key` is refused by `verifySourceReach` as not
-    ambient-verifiable (`src/shared/providers/auditorSources.ts`). Declared-free demotion is wired: a pool
+    (`OPENCODE_ZEN_API_KEY=public`); the inline `api_key` field is RETIRED — a config carrying one is
+    refused at validation (`src/shared/validation/sessionConfig.ts:141-155`). Declared-free demotion is wired: a pool
     declared `0` that reports a positive cost is demoted out of free-first for the run and fires a
     `declared_cost_drift` friction event (`src/shared/friction/stepBoundaryCapture.ts`).
     **vertex-trial → deferred** (needs the operator's GCP $300-trial SA JSON). **Remaining = live
@@ -244,7 +244,7 @@ followed" is otherwise indistinguishable from a bug.
 - **Cross-provider quota — live-endpoint confirmation.** Per-provider mappings validated against
   live-shaped fixtures; confirming each source against its **real** endpoint (Claude/Codex live; Copilot/
   Antigravity gated→degrade) is environment-bound. Per-provider recipes:
-  [`cross-provider-quota-matrix.md`](../spec/cross-provider-quota-matrix.md). Red line: self-monitoring
+  [`cross-provider-quota-matrix.md`](../../spec/cross-provider-quota-matrix.md). Red line: self-monitoring
   own-provider only, never IDE-GUI automation.
   - **⬇ Live-run watch** (run under each provider whose IDE/CLI you have — Codex CLI is available now):
     the provider's `QuotaSource` must return **live numbers off its real endpoint**, not the fixture/degrade
@@ -304,7 +304,7 @@ followed" is otherwise indistinguishable from a bug.
   ([[concurrency-is-declared-or-absent-never-learned]]). ⚠ **OWNER DECISION 2026-07-25 (companion move
   SETTLED): the claim STAYS at dispatch time.** Relocating it to accept time reopens the double-dispatch
   window the claim exists to close — the lease must span the out-of-process worker run, which is the same
-  property FLW-COR-003 established (`dispatch.ts:129-136`). Lease SIZING is the whole fix; claim TIMING is
+  property FLW-COR-003 established (`src/audit/cli/dispatch.ts:129-136`). Lease SIZING is the whole fix; claim TIMING is
   not in play. Do not re-raise it.
 
 - **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).

@@ -60,7 +60,8 @@ Ordered by (impact × determinism-feasibility). Each names the plug-in point.
 - **Plug-in:** in `buildNextContractPipelineStep`, gate the dispatch for these phases — instead of
   emitting an LLM phase, compute the artifact and `writeContractArtifact(...)` (mirror the
   `cyclic_seam_resolution` no-cycles write), then recurse. Deriver = pure function in
-  `contractPipeline/derive.ts` (next to `deriveNodeModelTier`).
+  `contractPipeline/derive.ts`; the template is `deriveNodeModelTier` in
+  `validation/contractPipelineGates.ts`.
 - **Effect:** removes the three largest hand-authored artifacts; weak *and* strong models skip
   them; they can never disagree with the validators. Where judgment remains (assertion text, node
   descriptions), emit a skeleton with only those blank (→ S3) and ask the model for just the slots.
@@ -99,11 +100,12 @@ only judgment slots blank — and gives the worker a **write-time validator** (t
   tokens on boilerplate. This is the core "both weak and strong" lever.
 
 ### S4 — Single ID authority
-`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry, currently scoped to the
-one relationship that caused the recurring "Unknown finding_id" merge trap: the `CP-BLOCK-`
-block-id ↔ bare-node-id bijection (`ensureNodeId`/`toBlockId`/`fromBlockId`). Consolidating
-`goal_id` / module / obligation ID minting (today minted ad hoc via `mintUniqueId` in
-`contractPipeline/derive.ts`) under the same authority is still open.
+`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry owning two relationships:
+the `CP-BLOCK-` block-id ↔ bare-node-id bijection (`ensureNodeId`/`toBlockId`/`fromBlockId`) that
+caused the recurring "Unknown finding_id" merge trap, and the derived obligation-id shape
+(`OBLIGATION_PREFIX`/`moduleSlug`/`obligationId`). Consolidating `goal_id` / module ID minting
+(still disambiguated ad hoc via `mintUniqueId`, `src/shared/ids.ts`) under the same authority is
+still open.
 - **Plug-in:** new `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
   `obligation_ledger` derivation, `promoteImplementationDagToExtractedPlan`'s `CP-BLOCK-` prefix)
   and the consumers (`buildBlockAliasMap`/`collapseItemResults`/`mergeImplementResults`).
