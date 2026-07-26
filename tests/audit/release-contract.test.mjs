@@ -244,8 +244,24 @@ test("linked and packaged smoke contracts preserve operator diagnostics and isol
   expect(packagedScript).toMatch(/function createIsolatedNpmEnv/);
   expect(packagedScript).toMatch(/normalizedKey === "node_auth_token"/);
   expect(packagedScript).toMatch(/normalizedKey === "npm_token"/);
-  expect(packagedScript).toMatch(/\[smoke:packaged\] success:/);
-  expect(linkedScript).toMatch(/\[smoke:linked\] success:/);
+  // Each smoke declares its own label and reports success through the shared
+  // logger; the `[smoke:<label>] success:` line itself is emitted by
+  // scripts/shared/smoke-process.mjs, which is the single home for the prefix.
+  expect(packagedScript).toMatch(/const SMOKE_LABEL = "packaged";/);
+  expect(linkedScript).toMatch(/const SMOKE_LABEL = "linked";/);
+  for (const script of [packagedScript, linkedScript]) {
+    expect(script).toMatch(/createSmokeLog\(SMOKE_LABEL\)/);
+    expect(script).toMatch(/log\.success\(/);
+  }
+  const smokeProcess = normalizeLineEndings(
+    await readText("scripts/shared/smoke-process.mjs"),
+  );
+  expect(smokeProcess, "smoke log lines must stay label-prefixed").toMatch(
+    /`\[smoke:\$\{smokeLabel\}\]`/,
+  );
+  expect(smokeProcess, "a failed command must report its exit code, command and cwd").toMatch(
+    /failed with exit code \$\{code\}/,
+  );
   expect(linkedScript).toMatch(/label: "npm link"/);
 
   expect(packagingDoc).toMatch(/AUDIT_CODE_VERBOSE=1 npm run smoke:packaged-audit-code/);

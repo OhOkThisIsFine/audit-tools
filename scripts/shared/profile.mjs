@@ -18,6 +18,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveSpawn } from "./spawn-shell.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
@@ -26,24 +27,6 @@ const profileDir = resolve(repoRoot, ".audit-tools-profile");
 /** Round milliseconds to one-decimal seconds for display. */
 export function toSeconds(ms) {
   return Math.round(ms / 100) / 10;
-}
-
-function quoteForCmd(arg) {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-// Route `.cmd`/`.bat` (npm, npx, gh shims on Windows) through the command shell so
-// they resolve reliably — same wrap as scripts/release-and-publish.mjs.
-function resolveSpawn(command, args) {
-  if (!(process.platform === "win32" && /\.(cmd|bat)$/i.test(command))) {
-    return { command, args };
-  }
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
-  };
 }
 
 /** `npm` → `npm.cmd` on win32. */

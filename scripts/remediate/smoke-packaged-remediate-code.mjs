@@ -6,29 +6,13 @@ import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { resolveSmokeTarball } from "../shared/smoke-tarball.mjs";
+import { resolveSpawn } from "../shared/spawn-shell.mjs";
 
 const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const packageVersion = JSON.parse(
   readFileSync(join(pkgRoot, "package.json"), "utf8"),
 ).version;
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-
-function quoteForCmd(arg) {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-function resolveSpawn(command, args) {
-  if (!(process.platform === "win32" && /\.(cmd|bat)$/i.test(command))) {
-    return { command, args };
-  }
-
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
-  };
-}
 
 function spawnNpm(args, options) {
   const resolved = resolveSpawn(npm, args);

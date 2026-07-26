@@ -29,6 +29,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveSpawn } from "./spawn-shell.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CACHE_MANIFEST = "pack-manifest.json";
@@ -132,24 +133,6 @@ function pruneCache(cacheDir, keepFilename) {
       rmSync(join(cacheDir, entry), { force: true });
     }
   }
-}
-
-function quoteForCmd(arg) {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-// Route the win32 `npm.cmd` shim through the command shell so it resolves reliably —
-// the same wrap scripts/shared/profile.mjs and the smokes use.
-function resolveSpawn(command, args) {
-  if (!(process.platform === "win32" && /\.(cmd|bat)$/iu.test(command))) {
-    return { command, args };
-  }
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
-  };
 }
 
 // `npm publish --dry-run` leaks dry-run flags, registry overrides and auth tokens into

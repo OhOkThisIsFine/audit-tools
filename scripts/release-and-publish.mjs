@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 
 import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
 import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
+import { resolveSpawn } from "./shared/spawn-shell.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -61,22 +62,6 @@ function getRemoteName() {
   if (remotes.includes("origin")) return "origin";
   if (remotes.length > 0 && remotes[0].length > 0) return remotes[0];
   throw new Error("No git remotes found.");
-}
-
-function quoteForCmd(arg) {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-function resolveSpawn(command, args) {
-  if (!(process.platform === "win32" && /\.(cmd|bat)$/i.test(command))) {
-    return { command, args };
-  }
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
-  };
 }
 
 function sleep(ms) {

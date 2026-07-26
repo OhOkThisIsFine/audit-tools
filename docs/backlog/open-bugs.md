@@ -8,15 +8,15 @@
 
 
 - **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
-  (2026-07-25, medium, friction: inefficient-feeding).** Adding the `reviewed_clean` affirmation, the
-  fixture sweep globbed `tests/**` and went fully green: build, check, check:tests and the whole vitest
-  run. But two synthetic-result generators live in `scripts/audit/smoke-{packaged,linked}-audit-code.mjs`,
-  so `verify:checks` — which the pre-commit hook does NOT run — failed in release CI with 17 errors on a
-  commit that was locally green in four ways ([[lap-green-must-match-ci-evidence]]). Property: the set of
-  files a contract sweep must cover is derivable from the contract (every construction site of the type),
-  not from where tests happen to live — grep the TYPE across the whole repo, never one tree. Cheap
-  mitigation until then: run `verify:checks`, not `check`, before pushing anything that changes a
-  validated shape.
+  (2026-07-25, medium, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep
+  globbed `tests/**` and went green four ways locally; two synthetic-result generators lived in
+  `scripts/audit/smoke-{packaged,linked}-audit-code.mjs`, so `verify:checks` — which the pre-commit hook
+  does NOT run — failed release CI ([[lap-green-must-match-ci-evidence]]). **Narrowed 2026-07-25:** the
+  two generators are now ONE, in `scripts/audit/smoke-audit-flow.mjs`, whose docblock states the rule at
+  the construction site. What stays open is the general property: the files a contract sweep must cover
+  are derivable from the contract (every construction site of the type), not from where tests live — and
+  nothing enforces that. Until then run `verify:checks`, not `check`, before pushing a validated-shape
+  change.
 
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
@@ -433,6 +433,17 @@
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
+
+- **Friction walk (smoke-dedup lap, 2026-07-25):** (1) **tool-should-decide (medium):**
+  `smoke:linked-audit-code` is in no gate — `verify:checks` runs only the packaged smokes — so it had
+  drifted BROKEN at HEAD unnoticed: its finalize loop returned at `present_report` status `ready` and
+  then asserted `complete`, because the friction-attestation branch was added to the packaged copy only.
+  A script that is never run is not a gate; it is a doc that claims to be one. Property: every
+  `smoke:*` npm script belongs to some gate, or is deleted. (2) **inefficient-feeding (low):** the two
+  audit smokes were 1,910 lines at ~90% duplication, so answering "what does the smoke flow assert"
+  cost two full-file reads of near-identical text. Now single-homed in
+  `scripts/audit/smoke-audit-flow.mjs` (+ `scripts/shared/{smoke-process,spawn-shell}.mjs`); the win32
+  spawn shim went from FIVE identical copies to one. (3) **ambiguous-direction:** none this lap.
 
 - **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium,
   the lap's biggest cost):** the offload triage was first run on `glm-5.2` — rank 1, a heavy reasoning
