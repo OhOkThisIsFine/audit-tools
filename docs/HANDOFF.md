@@ -63,6 +63,11 @@
   per-lane result quality. Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
   SPEC in [`deferred.md`](backlog/deferred.md).
 
+- **⚠ DELIBERATE, not an oversight: `src/` changes are landed on `main` but NOT released.** The owner
+  held the publish this lap. Unlike the usual docs-only resting state below, the diff IS non-empty
+  (`apiKeyEnvReachReason`, the obligation-id registry extraction), so the next release picks them up —
+  check the diff command below rather than assuming "docs only".
+
 - **Current version = `package.json`** (authoritative): v0.34.33, live on npm. HEAD sits AHEAD of the
   tag, and that is the normal resting state — docs, specs, tests and hooks land without a release. Read
   "nothing pending" off the DIFF, not off the commit count:
