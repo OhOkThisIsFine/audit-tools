@@ -57,7 +57,7 @@
   per-lane result quality. Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
   SPEC in [`deferred.md`](backlog/deferred.md).
 
-- **Current version = `package.json`** (authoritative): v0.34.32, live on npm; main is released to HEAD
+- **Current version = `package.json`** (authoritative): v0.34.33, live on npm; main is released to HEAD
   with nothing pending.
 
 **Per-release shipped detail is `git log` and the `docs/reviews/` records — deliberately not restated
