@@ -822,15 +822,11 @@ review attestation.
 
 **This report is the map, not the edit — nothing in it has been applied.**
 
-It has no entry in the program of record yet. `docs/backlog/forward-tracks.md` is its home, and the
-entry should be ONE line pointing here, never a restatement of the findings (the backlog carries a
-per-entry size budget, and a second copy of a 9,400-line analysis would decay against this one).
-
-It was deliberately not added on 2026-07-28: a concurrent session was mid-refactor of
-`scripts/shared/generate-handoff-roadmap.mjs`, changing the generated section from *every open item*
-to *`▶`-pinned entries only*. Adding a backlog entry forces a `docs/HANDOFF.md` regeneration, which
-would have overwritten that in-flight work with the old generator's output. **Add the entry once
-that refactor lands** — and pin it with `▶` only if it is genuinely the next thing to do.
+Tracked in the program of record as **Track 2.5** in
+[`forward-tracks.md`](../backlog/forward-tracks.md) — a pointer to this file, never a restatement
+(the backlog carries a per-entry size budget, and a second copy of this analysis would decay against
+it). Deliberately **unpinned**: `docs/HANDOFF.md` generates from `▶`-pinned entries only, and this is
+a map to draw from rather than the next thing to do.
 
 ⚠ Two claims elsewhere in the repo are FALSE against HEAD and are corrected by this review; fix them
 whether or not the deletions happen:
