@@ -66,6 +66,23 @@ cache, and it should be resolved the same way rather than invented separately. R
 distinct project outside this repo; only its freshness touches audit-tools, and only through the cache
 whose read path already needs an age rule.
 
+**Track 2.5 — Slim-down: ~9,400 removable lines, mapped and ranked in
+[`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md). Nothing applied.**
+Deliberately a pointer, not a summary — the report carries 48 items with per-item mechanisms and
+corrected estimates, and a second copy here would decay against it. Confidence is **9 CONFIRMED /
+7 PARTIAL / 32 UNVERIFIED**; the UNVERIFIED set is grep-backed leads, so re-confirm before deleting.
+**The structural finding, which outlives any single deletion:** 56% of the total is whole modules
+built, tested, exported and never wired, and **neither knip mode can report that class** — knip finds
+unused *exports*, and a barrel re-export or a same-subgraph test counts as a consumer. Whole-file
+orphan detection over the relative-import graph, filtered to "referenced only from `tests/`", found
+all of it in one pass; that belongs beside the manual `knip --production` sweep as a periodic check
+(report §4.7). [[orphan-modules-are-invisible-to-both-knip-modes]]
+⚠ Two claims elsewhere are FALSE against HEAD and worth fixing regardless of whether the deletions
+happen: this file asserts the F3/O3/F4 emit-validate-repair seam is live (it has zero importers in
+`src/`), and `CLAUDE.md` documents `resolveHostConcurrencyLimit` as dispatch concurrency machinery
+(zero call sites in `src/` — definition, one unconsumed re-export, and its own tests).
+Unpinned on purpose: this is a map to draw from, not the next thing to do.
+
 **Track 3 — Gate-0 operator-confirmed priority order fallback (UX enhancement when no ranks exist).**
 Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists to `SharedProviderConfirmation.provider_pool[].cost_order` + host/source pools; dispatch reads it back via `readConfirmedCostPositions()` and applies it as rung-1 of costRank. What's MISSING is prompt clarity + fallback when no external ranks exist. (a) Gate-0 should explicitly surface that `cost_order` is the operator's **DISPATCH PRIORITY ORDER** — distinct from `exclude[]`/`include[]` (binary gating). (b) When no ranker has populated prices, Gate-0 should default-suggest an ordering by tier (`frontier > capable > fast > unknown`). (c) Operator can accept, reorder manually, or exclude pools — all decisions persist to shared confirmation. (d) Dispatch routing must be explicit: operator priority order is rung 1 of costRank, below capability floor ∧ available ∧ quota headroom. 
 **Both design questions resolved.**
