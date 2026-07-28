@@ -51,8 +51,8 @@ the staleness DAG (see dependency-map.md).
 | `graph_bundle.json` | JSON | Dependency/call graph, with optional external-analyzer edge enrichment. |
 | `surface_manifest.json` | JSON | Public API surface and exports. |
 | `critical_flows.json` | JSON | Identified critical execution/data flows. |
-| `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. |
-| `intent-equivalence-verdict.json` | JSON | Durable host input: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. |
+| `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. REGISTERED in `ARTIFACT_DEFINITIONS` and a declared leaf of the staleness DAG — the file itself is the durable input. |
+| `intent-equivalence-verdict.json` | JSON | **Transient host submission** — NOT registered, NOT a staleness-DAG participant: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. Staged under `incoming/`, validated, consumed and DELETED; the accepted judgment is materialized into `artifact_metadata.intent_baseline`, which is the revision authority. Per DD-9 no verdict-pair cache is persisted, so the executor writes no artifact — do not "fix" its absence from the registry by adding a row. |
 | `flow_coverage.json` | JSON | Coverage of critical flows by ingested results. |
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |

@@ -144,17 +144,15 @@
   per-pair.
 
 - **A spec row's category prefix is load-bearing enough to manufacture work — and one was false
-  (2026-07-28, low, TRACED — one owner go outstanding).** `spec/audit/artifact-contract.md` labels both
+  (2026-07-28, low, RESOLVED; the open half is the class).** `spec/audit/artifact-contract.md` labelled both
   `critical-flow-fallback.json` and `intent-equivalence-verdict.json` `Durable host input:`, though
   only the first is registered and a staleness-DAG leaf; the second is staged under `incoming/`,
   consumed, deleted, and materialized into `artifact_metadata.intent_baseline`. Nightly `docs-3`
   correctly inferred "register it for consistency" from the shared label, colliding with DD-9's
-  deliberate no-verdict-pair-cache retirement. The fix is to relabel the row **Transient host
-  submission** and make the durable row state its registry+DAG membership explicitly; no runtime or
-  registry change. ⚠ **NOT APPLIED** — `artifact-contract.md` is constitutional and the owner asked
-  for a traced recommendation, not a decision; attesting here would manufacture an owner call. The
-  exact replacement rows, the apply command, and both endpoint traces are in
-  `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
+  deliberate no-verdict-pair-cache retirement. FIXED by relabelling the row **Transient host
+  submission** and making the durable row state its registry+DAG membership explicitly (owner-approved,
+  attested — `artifact-contract.md` is constitutional); no runtime or registry change. Both endpoint
+  traces: `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
   **Open property (the class, not this instance):** a category prefix in a normative table is read as
   a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
   only if a second instance appears — one occurrence is not yet a pattern.

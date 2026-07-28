@@ -60,12 +60,16 @@ should be argued on its own evidence, not inherited from this collision.
 
 No runtime change. No registry change.
 
-## ⚠ AWAITING OWNER GO — the spec edit is NOT applied
+## APPLIED — owner approved 2026-07-28
 
-`spec/audit/artifact-contract.md` is a constitutional doc. The pre-commit gate refused this edit,
-and the refusal is correct: the owner asked for a traced recommendation, and has not decided it.
-Attesting an owner decision here would manufacture one — which is the exact thing that record
-exists to prevent. Escalated rather than applied.
+`spec/audit/artifact-contract.md` is a constitutional doc, so this edit was escalated rather than
+applied on the first pass: the pre-commit gate refused it, and that refusal was correct — the owner
+had asked for a traced recommendation, not a decision, and attesting then would have manufactured
+an owner call. The owner subsequently approved the edit in conversation ("Go ahead with your spec
+edit"), and it landed with an attestation citing that decision.
+
+The escalation path is retained below because it is the reusable part: the exact replacement rows
+and the apply command.
 
 Note the gate's own warning deserves an answer, because it names this shape: *"editing one to match
 current code destroys the thing the code is measured against."* The claim here is that this is a
@@ -74,17 +78,16 @@ cache; `artifact-contract.md`'s label contradicts DD-9. The code is corroboratio
 retirement was honored, not the authority being deferred to. That reasoning is also easy to
 construct after the fact, which is why it is the owner's call and not mine.
 
-**The exact two-row replacement, ready to apply on your go** (`spec/audit/artifact-contract.md`,
-Analysis table, lines 54-55):
+**The two-row replacement that was applied** (`spec/audit/artifact-contract.md`, Analysis table):
 
 ```
 | `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. REGISTERED in `ARTIFACT_DEFINITIONS` and a declared leaf of the staleness DAG — the file itself is the durable input. |
 | `intent-equivalence-verdict.json` | JSON | **Transient host submission** — NOT registered, NOT a staleness-DAG participant: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. Staged under `incoming/`, validated, consumed and DELETED; the accepted judgment is materialized into `artifact_metadata.intent_baseline`, which is the revision authority. Per DD-9 no verdict-pair cache is persisted, so the executor writes no artifact — do not "fix" its absence from the registry by adding a row. |
 ```
 
-Apply with:
+Constitutional edits land via:
 
 ```
-node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> --attester-class human \
-  --owner-decision "<your call, and that it was escalated in this record>"
+node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> --attester-class <agent|human> \
+  --owner-decision "<the owner's call, and where it was escalated>"
 ```
