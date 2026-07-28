@@ -708,6 +708,23 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck
+  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 148 of 588 test files because
+  `tsconfig.test.json` sets `checkJs: false`, so every `.mjs` test is excluded. Converting a file to
+  `.ts` brings it under the gate automatically — `.ts` is already checked — so no config ratchet, no
+  exclude list, and no aspirational state: coverage rises exactly as fast as conversion does.
+  ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list.** It was the
+  obvious interim step and the numbers kill it — the flip yields **8,903 errors across 451 of 440
+  tracked `.mjs` files**, i.e. essentially all of them, so the exclude list would cover the entire
+  tree and buy zero coverage today while leaving a 451-entry config to rot. It also dirties 28 `.ts`
+  files, because typing the `.mjs` imports propagates errors into their consumers. Dominant classes:
+  TS7006 implicit-any params (2,442), TS2345 argument types (1,219), TS5097 `.ts` import specifiers
+  (911), TS18048 possibly-undefined (821).
+  **Property:** the gate's reach is stated as a number wherever it is claimed, so "the test tree is
+  typechecked" can never again read as covering the whole tree
+  ([`durable-traps.md`](durable-traps.md) carries the narrowed claim).
+  Convert highest-value first: the files whose green is load-bearing for loop-core.
+
 - **Name the two test-enforced traps that are now deletable (2026-07-28, low).** The deletion rule in
   `CLAUDE.md` and [`durable-traps.md`](durable-traps.md) is rephrased to cover test-enforcement as well
   as hook-enforcement, and the two half-closed claims are narrowed — but the settled answer also called

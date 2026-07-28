@@ -451,6 +451,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   silently re-certifies the sentence around the citation. Dropping the number is strictly better than
   false precision.
 
+- **A backlog entry's bold title must not contain `**` — even inside backticks.** The roadmap/seek-index
+  title parser terminates the title at the first `**` it meets, so a title mentioning a glob like
+  `` `tests/**` `` renders truncated ("Convert `tests/") in BOTH generated docs, silently. Seen
+  2026-07-28. Write the glob in prose, or drop it to the entry body.
+
 ## Doc-set hygiene (enforced)
 
 
