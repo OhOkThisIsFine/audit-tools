@@ -1,5 +1,5 @@
-import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { auditToolsWorktreesDir } from "../io/auditToolsPaths.js";
 
@@ -51,6 +51,22 @@ function snapshotPath(root: string, runId: string): string {
   return join(auditToolsWorktreesDir(root), `review-${safe}`);
 }
 
+/**
+ * Filesystem-identity key for comparing a caller-supplied root with Git's
+ * `--show-toplevel` result. Resolve symlinks / short names when possible and
+ * case-fold on Windows, where Git commonly changes drive-letter/path casing.
+ */
+function canonicalPathKey(path: string): string {
+  let canonical: string;
+  try {
+    canonical = realpathSync(path);
+  } catch {
+    canonical = resolve(path);
+  }
+  const normalized = canonical.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   // child_process is resolved LAZILY, at first git call — never at module load.
   // This module rides the shared barrel into test files that partially mock
@@ -77,7 +93,13 @@ export async function createReviewSnapshot(
     // already inside a `.audit-tools` tree), and this function's contract is
     // degrade-with-reason, never throw.
     const path = snapshotPath(root, runId);
-    await git(root, ["rev-parse", "--is-inside-work-tree"]);
+    const top = await git(root, ["rev-parse", "--show-toplevel"]);
+    if (canonicalPathKey(top) !== canonicalPathKey(root)) {
+      throw new Error(
+        `Refusing to create a review snapshot: the git top-level for ${root} is ${top}, ` +
+          "not the target root itself; creating a worktree would escape into an ancestor repository.",
+      );
+    }
     await removeReviewSnapshot(root, runId);
     await git(root, ["worktree", "add", "--detach", path, "HEAD"]);
     return { path };
@@ -92,23 +114,45 @@ export async function createReviewSnapshot(
 /**
  * Best-effort removal (drive end / pre-create sweep). A worker straggler
  * holding the cwd can EBUSY the removal on Windows — degrade to a plain
- * recursive delete + `git worktree prune` so the registration never dangles;
- * a still-failing delete is left for the next drive's pre-create sweep.
+ * recursive delete, then retry the SAME path-scoped `git worktree remove`.
+ * Never use global `git worktree prune`: another node can be between deleting
+ * and recreating its own directory while its registration is still live, and a
+ * global prune silently drops that sibling's admin entry. A still-failing
+ * delete/registration is left for the next drive's pre-create sweep.
+ * `runGit` is a narrow test seam for forcing the first-remove failure; normal
+ * callers omit it and use the module's real Git runner.
  */
-export async function removeReviewSnapshot(root: string, runId: string): Promise<void> {
+export async function removeReviewSnapshot(
+  root: string,
+  runId: string,
+  runGit: (cwd: string, args: string[]) => Promise<string> = git,
+): Promise<void> {
   let path: string;
   try {
     path = snapshotPath(root, runId);
   } catch {
     return; // drifted root — nothing was ever created there
   }
-  if (!existsSync(path)) return;
+  // A vanished directory can still have a prunable registration. Address the
+  // exact path even when the directory is absent; returning here would strand
+  // the registration and make the next `worktree add` at this path fail.
+  if (!existsSync(path)) {
+    try {
+      await runGit(root, ["worktree", "remove", "--force", path]);
+    } catch {
+      /* best-effort: no registration, non-git root, or a still-busy admin entry */
+    }
+    return;
+  }
   try {
-    await git(root, ["worktree", "remove", "--force", path]);
+    await runGit(root, ["worktree", "remove", "--force", path]);
   } catch {
     try {
       await rm(path, { recursive: true, force: true });
-      await git(root, ["worktree", "prune"]);
+      // The first remove can fail because Git could not delete an EBUSY
+      // directory. Once the plain delete succeeds, the same command clears the
+      // now-missing registration without touching any sibling.
+      await runGit(root, ["worktree", "remove", "--force", path]);
     } catch {
       /* leftover swept by the next createReviewSnapshot */
     }

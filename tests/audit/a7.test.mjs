@@ -133,3 +133,15 @@ test("verify:release runs verify:hosts ahead of the publish smoke steps", () => 
   // The script itself must exist and point at the real runner.
   expect(pkg.scripts["verify:hosts"], "verify:hosts must invoke the verify-hosts runner script").toBe("node scripts/audit/verify-hosts.mjs");
 });
+
+test("verify:release retains both linked-install smoke contracts", () => {
+  const pkg = readPackageJson();
+  const verifyRelease = pkg.scripts["verify:release"];
+  expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
+  expect(verifyRelease, "verify:release must run the linked audit-code smoke").toMatch(
+    /\bnpm run smoke:linked-audit-code\b/,
+  );
+  expect(verifyRelease, "verify:release must run the linked remediate-code smoke").toMatch(
+    /\bnpm run smoke:linked-remediate-code\b/,
+  );
+});
