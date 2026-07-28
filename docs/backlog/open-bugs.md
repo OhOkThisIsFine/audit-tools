@@ -143,6 +143,19 @@
   round — verdicts are materialized into the baseline (`intentEquivalenceExecutor.ts`), never cached
   per-pair.
 
+- **OWNER CALL — is `intent-equivalence-verdict.json` a durable attestation or a staging-only host
+  input?** Nightly `docs-3` approved registering it in `ARTIFACT_DEFINITIONS`, but `/design-check`
+  found the approval's missing retirement evidence: the DD-9 design explicitly says “No verdict-pair
+  cache is persisted” (`intent-gate-charter-slice-design-2026-07-23.md:97-99`), and `6c9c6b21`
+  deleted the cache/lock choreography. Runtime matches that decision: `nextStepCommand.ts` writes the
+  file under `incoming/`; `nextStepHelpers.ts` validates then unlinks it; the executor materializes the
+  accepted judgment into `artifact_metadata.intent_baseline` and reports `artifacts_written: []`.
+  A registry entry alone is decorative, while persisting the raw verdict changes the retired contract.
+  Decide explicitly: (a) supersede the no-cache decision and persist accepted live-pair verdicts as
+  **audit attestations only** (never replay authority, no staleness-DAG edge; baseline stays authoritative),
+  or (b) keep staging-only behavior and correct `spec/audit/artifact-contract.md` to mark the row
+  non-registry. Do not implement the earlier answer until this collision is resolved.
+
 - **⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
   malformed-JSON result file — result validity must be checked mechanically, never trusted from
   the worker's claim.** The merge correctly rejected it, but the failure surfaced only as an
@@ -220,18 +233,6 @@
   expectations — they encode real Anthropic list prices and are the thing that caught it.
   Both halves were attempted and reverted in this lap (`548380df` → restored); nothing is
   half-applied at HEAD.
-
-- **Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide).**
-  Worktrees survive from prior agent runs, plus unregistered orphan dirs. **Cleared by hand 2026-07-24 —
-  the MECHANISM is still missing**, so it recurs on the next agent run.
-  Property: a completed worktree is reaped by whatever created it, or by a periodic prune over those whose
-  HEAD is an ancestor of `main` with a clean tree.
-  ⚠ **Not every stale worktree is a duplicate**, so a blanket `git worktree remove` without the
-  ancestor+clean check silently destroys work: of four cleared by hand three were ancestors of `main`,
-  the fourth a superseded ALTERNATIVE kept as `archive/nodehttpfetch-alternative-9820b7e9`.
-  ⚠ The entry's original "their `dist/` pollutes every repo-wide grep" clause was **FALSIFIED**
-  (2026-07-24, two probes): those paths are all gitignored, so `rg`/`git grep` cannot see them. The
-  surviving lesson is a search-tool trap, now in [`durable-traps.md`](durable-traps.md).
 
 - **LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.** Root cause of
   the observed `UND_ERR_HEADERS_TIMEOUT` storm (9 observations across glm-5.2, deepseek-v4-pro,
@@ -706,6 +707,32 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **Friction walk (nightly-determinations lap, 2026-07-26):**
+  (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /
+  26k-token document that exceeds the Read cap, so enumerating it needs a hand-written `node -e`. Worse,
+  it is STALE by construction — `answer.mjs --list` correctly reported zero open while the file still
+  listed all 22, because answering writes to `.claude/nightly-decisions.json` and never reconciles the
+  queue file. **Property:** the queue's on-disk form is enumerable in one bounded read AND reflects the
+  settled ledger, or the two disagree and the file is the one an agent finds first.
+  (2) **tool-should-decide (medium):** an ANSWERED determination is free prose with no machine-readable
+  work shape, so executing 22 of them meant re-reading each item's evidence to rediscover the target
+  file and edit. The item already knows its `path` and its options; the answer should carry the
+  actionable target, not require a second derivation from the eli5 text.
+  (3) **ambiguous-direction (low):** the backlog-17 answer folded an OPEN actionable property (the
+  offload lane states its concurrency nowhere a caller reads it, and returns an empty document instead
+  of refusing) into `durable-traps.md`, whose own header says it is standing reference and NOT work —
+  so consolidating it dropped it off the generated roadmap. Executed as answered; flagged because the
+  destination silently changes an item's status.
+  (4) **tool-should-decide (low):** a delegated Codex worker, asked to make one type change, also
+  appended an unrelated `durable-traps.md` entry about an `rtk` binary this project retired 2026-07-22.
+  Reverted. **Property:** offloaded work needs its DIFF scope-checked, not just its result verified —
+  a worker's out-of-scope edit lands silently in a doc nobody diffs.
+  (5) **tool-should-decide (medium, fixed this lap):** the remediation worktree test pinned “no global
+  `git worktree prune`” in ONE lifecycle file, while `reviewSnapshot.ts` still executed the same
+  sibling-clobbering command. Replaced it with path-scoped removal and widened the source invariant over
+  all tracked `src/` files. **Property:** a cross-cutting forbidden command is scanned across its whole
+  production reach, not asserted at the first file where the incident happened.
+
 - **Friction walk (contract-sweep producer lap, 2026-07-26):** (1) **tool-should-decide (medium):**
   `scripts/` is a whole tracked tree covered by NO tsconfig — `tsconfig.json` includes `["src"]`,
   `tsconfig.test.json` includes `["src","tests"]` with `checkJs:false`. Nothing
@@ -793,7 +820,28 @@
   `empty_pool`, and never a terminal strand. If a large node now refuses everywhere, that is the honest
   estimate working; check the pool's declared `context_tokens` before treating it as a regression.
 
-- **Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium).** `ensureRemediationBranchCheckedOut` silently switches the primary checkout onto `remediation/<runId>` at implement-dispatch prepare, and any subsequent `git commit` from that checkout (docs, closeouts) strands off main — HANDOFF has warned since the second bite and the warning did not prevent the third (recovered same-session via branch reset + temp-worktree cherry-pick; the very next doc edit then nearly landed on the run-base version of this file). "Verify HEAD before committing" is host discretion, which this project bans as a fix. Candidate mechanisms: the dispatch/accept flow operates the remediation branch through a dedicated linked worktree (primary checkout stays on main), or a repo-local pre-commit guard refuses a commit on a `remediation/*` branch whose staged set is docs/spec-only (almost certainly meant for main). Either makes the strand impossible rather than remembered-about.
+- **Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).**
+  `ensureRemediationBranchCheckedOut` currently checks the primary checkout out at
+  `remediation/<runId>` during implement-dispatch, so later main-bound work can strand on the run branch.
+  Commit `a7bc93fc` added a useful **Claude-only** refusal in `.claude/hooks/pre-commit-gate.mjs`: a
+  docs/spec-only commit on `remediation/*` is blocked. That closes the three observed Claude-shell
+  incidents, but it is not the host/IDE-agnostic endpoint — Codex, an IDE, or direct Git bypasses the
+  Claude `PreToolUse` registration, and the primary checkout still moves.
+
+  **Plan — remove the state transition instead of adding another guard.** Give each remediation run a
+  locked, run-level **landing worktree** checked out at `remediation/<runId>`. Prepare/accept merges node
+  commits into that landing root; the primary checkout remains on its original base branch for the whole
+  run. Close merges the run ref from the primary root, then removes the landing worktree path-scoped.
+  Keep the landing root outside the per-node `.audit-tools/worktrees` namespace (or teach
+  `nodeWorktreeGuard` its distinct role), and hold a run lock so the session-start reaper cannot mistake a
+  clean, landed-but-not-closed root for garbage. Never substitute a real Git hook: it is install-state,
+  bypassable, and still only catches the bad transition after it happened.
+
+  **Red-first contract:** in a real temporary repo starting on `main`, prepare implement dispatch; assert
+  the primary root is still on `main`, `remediation/<runId>` is checked out only in the landing worktree,
+  accepted node commits reach that ref, and close merges it from the unchanged primary root. This is a
+  loop-core atomic replacement (new landing lifecycle + deletion of the primary-checkout switch in one
+  commit), with the normal independent review/attestation gate.
 
 - **"Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).**
   The step prompt tells the host to hand the rolling loop to one dedicated dispatcher subagent, but worker

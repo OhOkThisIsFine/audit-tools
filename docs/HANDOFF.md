@@ -19,17 +19,18 @@
   2026-07-25 walkthrough that found 15 of 21 nightly items already fixed also opened three triage
   entries whose premise was already fixed ([[backlog-prose-decays-verify-against-head]]).
 
-- **⚠ Every owner call in the backlog is ANSWERED, recorded in the entry that owns it — do not re-ask.**
+- **▶ NEXT / OWNER CALL: settle the `intent-equivalence-verdict.json` retirement collision.**
+  Nightly `docs-3` approved registry persistence, but `/design-check` found the DD-9 design explicitly
+  retired a persisted verdict-pair cache; current runtime stages, materializes into
+  `artifact_metadata.intent_baseline`, then unlinks the raw verdict. Choose durable audit attestation
+  (never replay authority, no DAG edge) or keep the staging-only contract. Full evidence and both exact
+  endpoints live in [`open-bugs.md`](backlog/open-bugs.md); do not implement the earlier answer first.
+
+- **⚠ Every prior owner call is ANSWERED; only the newly reopened collision above needs a decision.**
   Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
   never re-raised; `node scripts/nightly/answer.mjs --list` shows what is genuinely still open.
   Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
-  ⚠ **The nightly queue is EMPTY as of 2026-07-25 — all 21 walked with the owner and answered.**
-  Re-verify an item against HEAD before working OR presenting it: 16 of the 21 were already fixed,
-  several by the same day's laps, because the queue serves an item until it is ANSWERED and never
-  re-tests the premise ([[queue-items-must-be-rechecked-at-presentation]]). The last one, `sol-3`,
-  survived to owner approval and was caught only by `/design-check` one step before its code was
-  written — `src/shared/io/schemaVersion.ts` already owned the policy.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does
   NOT solve its second property (expected-failing test names are still author-supplied, so a naive build
   relocates the claim instead of removing it); and contract-pipeline (b) narrows the
@@ -111,8 +112,6 @@ doc's own header forbids. Durable traps belong in
   anything. The per-workflow form (`actions/workflows/<wf>.yml/runs`) was the reliable one until
   2026-07-19, when it began returning 503 while `actions/runs?per_page=N` (filter by `head_sha`
   yourself) answered immediately.
-- **Branch-strand trap (bit three times):** a remediation run leaves you checked out on its worktree branch —
-  commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit strands.
 - **Never pass `isolation: "worktree"` to the Agent tool** when dispatching a remediate-code/audit-code
   implement node — the dispatch plan already names the correct worktree; a second one strands the
   subagent's edits where `accept-node` can't see them.
@@ -146,7 +145,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 102 open item(s).
+> `verify:checks` and at commit). 103 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -162,12 +161,12 @@ its SPEC intact.
 - LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes instead of agentic ones that all drop. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace): a lane can return success-shaped EMPTY results and nothing in routing notices. · [`open-bugs.md`](backlog/open-bugs.md)
 - DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted). · [`open-bugs.md`](backlog/open-bugs.md)
+- OWNER CALL — is `intent-equivalence-verdict.json` a durable attestation or a staging-only host input? · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from weaker models when the true answer is empty. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it. · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release defect the audit side just fixed? · [`open-bugs.md`](backlog/open-bugs.md)
 - Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED). · [`open-bugs.md`](backlog/open-bugs.md)
-- Stale agent worktrees are never pruned (2026-07-24, low, friction: tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
 - LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low). · [`open-bugs.md`](backlog/open-bugs.md)
@@ -212,12 +211,13 @@ its SPEC intact.
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch — two low residuals stay open. · [`open-bugs.md`](backlog/open-bugs.md)
 - Node-worktree guard — accepted residuals only (each low, on-evidence-only). · [`open-bugs.md`](backlog/open-bugs.md)
+- Friction walk (nightly-determinations lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (contract-sweep producer lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (inline-api_key retirement lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (touched_files load-gate lap, 2026-07-25): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (fourth backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (second backlog-clearance lap, 2026-07-24): · [`open-bugs.md`](backlog/open-bugs.md)
-- Branch-strand trap has bitten THREE times — needs a tool-enforced fix, not a HANDOFF warning (2026-07-22, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
+- Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned). · [`open-bugs.md`](backlog/open-bugs.md)
 - "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium). · [`open-bugs.md`](backlog/open-bugs.md)
 - NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch). · [`open-bugs.md`](backlog/open-bugs.md)
 - Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug). · [`open-bugs.md`](backlog/open-bugs.md)
