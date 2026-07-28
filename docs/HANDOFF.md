@@ -80,10 +80,7 @@
   Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs. SPEC in
   [`forward-tracks.md`](backlog/forward-tracks.md).
 
-- **▶ A publish is HELD by the owner, not forgotten** — landed `src/` work is waiting on their go. The
-  diff command below is what says whether anything is publishable; do not assume "docs only".
-
-- **Current version = `package.json`** (authoritative): v0.34.33, live on npm. HEAD sits AHEAD of the
+- **Current version = `package.json`** (authoritative): v0.34.34, live on npm. HEAD sits AHEAD of the
   tag, and that is the normal resting state — docs, specs, tests and hooks land without a release. Read
   "nothing pending" off the DIFF, not off the commit count:
   `git diff --name-only $(git describe --tags --abbrev=0 --match 'v*')..HEAD -- src/ package.json`
