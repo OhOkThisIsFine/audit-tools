@@ -54,9 +54,9 @@
   checkout-to-main incident class); (b) on a DIRTY tree workers review HEAD while `file_line_counts`
   hints are stamped from the real tree, and the ingest net is TWO-tier, not a flat reject: only a
   divergence past BOTH `LINE_COUNT_DIVERGENCE_ABS_FLOOR` and `_RATIO` hard-rejects
-  (`auditResults.ts:29-43,:820-844`); a smaller one is an advisory warning +
+  (`auditResults.ts`); a smaller one is an advisory warning +
   `coverage_total_lines_mismatch` friction and the result IS ingested
-  (`mergeAndIngestCommand.ts:539-560`), leaving HEAD-vs-dirt drift to be caught only by quote
+  (`mergeAndIngestCommand.ts`), leaving HEAD-vs-dirt drift to be caught only by quote
   grounding — which runs against the real root (`:784`) and marks such findings `ungrounded`, i.e.
   surfaced, not dropped. Accepted because audits normally run on committed state; (c) a transient
   `worktree add` failure on a genuine git root degrades identically to the non-git case (same stderr +
@@ -69,11 +69,11 @@
   2026-07-24 code trace).** The fix SHIPPED: the in-process rolling driver sweeps its claims at drive end
   and on the empty-plan round (`releaseOwnedTaskClaims`, commit `681df1f5`).
   ⚠ **The "release on EVERY path that claims" property is REFUTED at HEAD (2026-07-25) — do NOT
-  implement it.** The shared claim site already sweeps the over-claim (`src/audit/cli/dispatch.ts:481-492`), leaving
-  only the EMITTED in-flight set — which is exactly what the lease is FOR (`src/audit/cli/dispatch.ts:129-135`: the
+  implement it.** The shared claim site already sweeps the over-claim (`src/audit/cli/dispatch.ts`), leaving
+  only the EMITTED in-flight set — which is exactly what the lease is FOR (`src/audit/cli/dispatch.ts`: the
   claim spans an out-of-process worker run with no heartbeat, and `prepare-dispatch` returns before the
   workers run, so "the workers all died" is never observable host-side). And merge already releases the
-  whole `failing` set including attempted-but-missing (`mergeAndIngestCommand.ts:885-909`); only
+  whole `failing` set including attempted-but-missing (`mergeAndIngestCommand.ts`); only
   `deferred` is deliberately retained. Same inversion this file recorded at its 2026-07-18 friction walk.
   **What remains (low):** an attempted-and-dead host round holds its emitted claims until a merge runs,
   bounded by the lease — designed behaviour; revisit only on live evidence of the lease outliving a dead
@@ -127,14 +127,14 @@
   record: [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md)).
   Accepted residuals:
   (a) over-stale: `charter_clarification` / `systemic_challenge` keep WHOLE-ARTIFACT
-  `repo_manifest` edges (`dependencyMap.ts:119,:131`; `DEPENDENCY_SLICE_PROJECTIONS` registers
+  `repo_manifest` edges (`dependencyMap.ts`; `DEPENDENCY_SLICE_PROJECTIONS` registers
   `charter_register.json` alone) — a member slice was REFUTED for challenge at HEAD (it consumes the
   total file count and grounds against the complete path set) and clarification's consumption is
   unverified; they still re-fire on unrelated manifest churn (cheap steps). Slicing them needs a
   verified consumption trace first. (b) under-stale, and NARROWER than the first draft of this entry
   claimed: `charterReadFileSlice` compares content for consensus members ∪ every `isDocIntentFile`
   path (`doc_only` status **OR** `.md/.markdown/.adoc/.rst/.txt` — single-sourced at
-  `buildStructureDecomposition.ts:31` so it can never be narrower than the decomposition's own doc
+  `buildStructureDecomposition.ts` so it can never be narrower than the decomposition's own doc
   universe; pinned by `tests/audit/dependency-slices.test.mjs`), PLUS the complete sorted path list,
   so every add / delete / rename fires regardless of classification. What stays outside is a
   content-only edit to a file that is neither a consensus member nor doc-extensioned nor `doc_only`
@@ -177,7 +177,7 @@
   so a model can say "none" without inventing a row.
   ⚠ **The AUDIT-RESULT half of this shipped 2026-07-25** as `reviewed_clean` (see the success-shaped-empty
   entry above) and is the pattern to copy. The DELTA path is untouched and is the sharper case:
-  `charterDeltaExecutor.ts:36-63` treats a MISSING submission and an explicitly-empty one identically
+  `charterDeltaExecutor.ts` treats a MISSING submission and an explicitly-empty one identically
   ("no submission supplied; settled the register with no deltas"), so a dead miner and a clean one are
   indistinguishable. `CharterDeltaSubmissionSchema` is `.strict()`, so the affirmation must be added to
   the schema rather than passed through. Record:
@@ -190,14 +190,14 @@
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #13.
   ⚠ **Three findings from the reverted attempt — a naive "exempt friction/ from the rm" does NOT work
   and introduces a regression.** (1) The audit half's completion cleanup is `promoteFinalAuditReport`
-  (`src/audit/io/artifacts.ts:465`, called from `nextStepHelpers.ts:417` and
-  `advanceAuditCommand.ts:69,105`), NOT `cleanupStaleArtifactsDir` — the latter runs at the START of
+  (`src/audit/io/artifacts.ts`, called from `nextStepHelpers.ts` and
+  `advanceAuditCommand.ts`), NOT `cleanupStaleArtifactsDir` — the latter runs at the START of
   the next advance, so patching it changes nothing at completion. (2) The remediate half's stop-gate is
   MARKER-gated: `.claude/hooks/friction-stop-gate.mjs` requires a recent `state.json` before it reads
   `friction/` at all, and a fully-green close deletes `state.json` — so preserving the record alone
   still leaves the gate skipping the area. (3) Preserving `friction/` across cleanups REGRESSES the
-  audit side, where the run id is the hardcoded literal `"run"` (`nextStepHelpers.ts:416,:2696`,
-  `executorRunners.ts:223`, `operatorHandoff.ts:381`): every run shares one `friction/run.json`, so a
+  audit side, where the run id is the hardcoded literal `"run"` (`nextStepHelpers.ts`,
+  `executorRunners.ts`, `operatorHandoff.ts`): every run shares one `friction/run.json`, so a
   prior run's complete record permanently satisfies both the blocking close-out and the hook's
   `anyComplete` check. A real fix must address the run-id collision first.
 
@@ -205,7 +205,7 @@
   defect the audit side just fixed?** Audit's completion livelock (claims released only at merge →
   failed rounds starve every later runId for the 20-min lease) is fixed by `releaseOwned` at drive
   end. Remediate claims implement nodes through its own registry (`rollingSession.ts`,
-  `acceptNode.ts`) with TWO release sites visible (`rollingSession.ts:721` and `:744`); verify whether a failed
+  `acceptNode.ts`) with TWO release sites visible (`rollingSession.ts` and `:744`); verify whether a failed
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
 
@@ -331,7 +331,7 @@
   read path accepts cached data of ANY age, so the freshness concept is applied on exactly the wrong
   side. ⚠ **Half SHIPPED 2026-07-25, WRITE-ONLY:** `readProxyCatalog` derives `age_ms`/`stale`/
   `stale_reason`, but nothing branches on the verdict — `populateProxyCatalogIfMissing`
-  (`auditorSources.ts:407`) still short-circuits on any age and `resolveProxyLane` (`:641`) folds
+  (`auditorSources.ts`) still short-circuits on any age and `resolveProxyLane` (`:641`) folds
   sources in without surfacing `stale_reason` ([[write-only-data-looks-authoritative]]).
   **Properties to hold:**
   (a) the age rule applies where staleness does damage — the read path revalidates against the live
@@ -465,7 +465,7 @@
   instances, same class):** two entries had paraphrased their own incident until the MECHANISM
   inverted, and each would have produced a wrong fix if worked from the entry alone — FLW-COR-003
   prescribed "release claims on every path that claims" when the lease must SPAN out-of-process
-  workers (`src/audit/cli/dispatch.ts:129-136`), and the `analyzerDeps` entry reported a live `npm install` that
+  workers (`src/audit/cli/dispatch.ts`), and the `analyzerDeps` entry reported a live `npm install` that
   no test makes (stub `run`; the E404 is stub-authored text). Both were caught only by tracing
   source. The template already says to link the primary record rather than retell it; what is still
   missing is anything that ENFORCES it. [[backlog-prose-decays-verify-against-head]]
@@ -549,14 +549,14 @@
 
 - **Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).** `tests/remediate/session-config-load.test.ts` red-greens `loadRemediateSessionConfig`, and every remediate site routes through it today, but a FUTURE call site that inlines `resolveSessionConfig(intent, null)` instead of using the loader fails no test (verified by experiment: reverting a call site to `null` left both files green). Same for audit's two ambient sites. The loader makes the right thing the easy thing; it does not make the wrong thing impossible. Property to hold: a production caller cannot resolve a session config without a descriptor — e.g. make the descriptor a required parameter and give the two legitimate "resolve no pool" callers an explicit `noPoolDescriptor()`, so `null` stops being the path of least resistance.
 
-- **A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).** `acceptNode.ts` (962) / `worktreeLifecycle.ts` (923) / `writeScope.ts` (496) / `verifyCommands.ts` (274) / `acceptReconcile.ts` (190) are not dispatch: `executeNodeInWorktree` (`acceptNode.ts:883`) is called only by the **driver** `driveRollingImplementDispatch` (`nextStep.ts:1130`, call at `:1346`), never by `prepareImplementDispatch` (`marshal.ts:234-513`), which ends having written `dispatch-plan.json` (`:426`) + `dispatch-quota.json` (`:510`). ⚠ Correcting the old entry's absolute: prepare is not worktree-*free* — it reaches two landing symbols, `ensureRemediationBranchCheckedOut` (`:342`) and `worktreePath` (`:405`, prompt rooting) — but it creates, verifies and merges nothing, so the stage boundary holds and those two imports are exactly what an import-graph test would catch. They live under `dispatch/` only because the barrel (`dispatch.ts:49-136`) aggregated them; `acceptNodeWorktree` even takes a base-branch lock (`acceptNode.ts:434`) — pure serialization, zero dispatch content. `marshal.ts` itself fuses two stages: prepare (`:234-513`) and the landing merge `mergeImplementResults` (`:596-1561`). Symmetrically on the audit side, `prepareDispatchArtifacts` (`src/audit/cli/dispatch.ts:187-881`) both *decides* and *renders the prompt* — lens defs (`:293-294`), knip/analyzer anchor indices (`:517`,`:524`), source-reading anchor extraction (`:560` → `dispatch/packetPrompt.ts:123-161`), `buildPacketPrompt` + `writeFile` (`:580-581`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** The assembly-unification lap this was told not to bundle with has SHIPPED (shared `buildHostPoolPreamble`, `src/shared/quota/hostPool.ts:149`, consumed by `quotaPool.ts:135` + `waveScheduling.ts:160`), so the re-home is unblocked. ⚠ Loop-core: `src/remediate/steps/dispatch/` is a `LOOP_CORE_PATTERNS` directory prefix (`src/shared/loopCorePaths.ts:41`) — a new `steps/land/` prefix must land in the canonical list with `.claude/hooks/loop-core-patterns.mjs` regenerated in the same commit (`npm run check:loop-core-patterns`), or the parity test goes red. Record: [`dispatch-fork-assessment-2026-07-16.md`](../reviews/dispatch-fork-assessment-2026-07-16.md) §3.
+- **A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).** `acceptNode.ts` (962) / `worktreeLifecycle.ts` (923) / `writeScope.ts` (496) / `verifyCommands.ts` (274) / `acceptReconcile.ts` (190) are not dispatch: `executeNodeInWorktree` (`acceptNode.ts`) is called only by the **driver** `driveRollingImplementDispatch` (`nextStep.ts`, call at `:1346`), never by `prepareImplementDispatch` (`marshal.ts`), which ends having written `dispatch-plan.json` (`:426`) + `dispatch-quota.json` (`:510`). ⚠ Correcting the old entry's absolute: prepare is not worktree-*free* — it reaches two landing symbols, `ensureRemediationBranchCheckedOut` (`:342`) and `worktreePath` (`:405`, prompt rooting) — but it creates, verifies and merges nothing, so the stage boundary holds and those two imports are exactly what an import-graph test would catch. They live under `dispatch/` only because the barrel (`dispatch.ts`) aggregated them; `acceptNodeWorktree` even takes a base-branch lock (`acceptNode.ts`) — pure serialization, zero dispatch content. `marshal.ts` itself fuses two stages: prepare (`:234-513`) and the landing merge `mergeImplementResults` (`:596-1561`). Symmetrically on the audit side, `prepareDispatchArtifacts` (`src/audit/cli/dispatch.ts`) both *decides* and *renders the prompt* — lens defs (`:293-294`), knip/analyzer anchor indices (`:517`,`:524`), source-reading anchor extraction (`:560` → `dispatch/packetPrompt.ts`), `buildPacketPrompt` + `writeFile` (`:580-581`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** The assembly-unification lap this was told not to bundle with has SHIPPED (shared `buildHostPoolPreamble`, `src/shared/quota/hostPool.ts`, consumed by `quotaPool.ts` + `waveScheduling.ts`), so the re-home is unblocked. ⚠ Loop-core: `src/remediate/steps/dispatch/` is a `LOOP_CORE_PATTERNS` directory prefix (`src/shared/loopCorePaths.ts`) — a new `steps/land/` prefix must land in the canonical list with `.claude/hooks/loop-core-patterns.mjs` regenerated in the same commit (`npm run check:loop-core-patterns`), or the parity test goes red. Record: [`dispatch-fork-assessment-2026-07-16.md`](../reviews/dispatch-fork-assessment-2026-07-16.md) §3.
 
 
-- **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `src/audit/cli/dispatch.ts:278-289` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
+- **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts` and `quotaCommand.ts` swallow an invalid session-config to `{}` ("using defaults") while `src/audit/cli/dispatch.ts` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
 
 - **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo,
-  and it outranks the descriptor (2026-07-16, medium).** `resolveHostModel` (`limits.ts:56-71`)
-  resolves `explicit ?? block_quota.host_model ?? env`, then `hostPool.ts:164` keys
+  and it outranks the descriptor (2026-07-16, medium).** `resolveHostModel` (`limits.ts`)
+  resolves `explicit ?? block_quota.host_model ?? env`, then `hostPool.ts` keys
   `quotaModelKeySegment = hostModel ?? input.hostModelId` — so a repo-committed field beats the
   descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates
   [[capability-is-per-auditor-not-per-audit]], and the shared-assembly lift moved that precedence into
@@ -564,20 +564,20 @@
   **SPEC — settled, and the distinction is what each field is keyed BY.** A repo-committed host-model
   field is IDENTITY (who is driving) → a second auditor inherits the first's identity and meters a
   window it does not own. **Fix = move `block_quota.host_model` → `self.model_id` only**, and narrow
-  the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`).
+  the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts`).
   **Property:** anything naming WHO is running belongs to the auditor and is never persisted in the
   shared repo; anything keyed by a model NAME is shared config and is.
   **⚠ The rest of the original claim is REFUTED — do NOT "fix" it.** Nothing writes
-  `quota`/`block_quota`; they are operator-authored (`packetFilter.ts:243` documents `quota.models` as
+  `quota`/`block_quota`; they are operator-authored (`packetFilter.ts` documents `quota.models` as
   the override mechanism). `quota.models[<model>]` is keyed by model NAME, so every auditor on that
-  model shares the window by design — inheriting is CORRECT, and `limits.ts:115` beating discovery is
+  model shares the window by design — inheriting is CORRECT, and `limits.ts` beating discovery is
   the intended escape hatch. It only ever looked wrong because the identity above it resolved wrongly.
   `quota.default_context_tokens` / `reserved_output_tokens` and the `block_quota` context/output fields
-  (`plan.ts:47-51`) are policy → stay on intent. Also stale: G4's "may fold into G2" — G2 shipped and
+  (`plan.ts`) are policy → stay on intent. Also stale: G4's "may fold into G2" — G2 shipped and
   did not fold it.
-  **⚠ Separately real, still open, and NOT a gate on the above:** `resolveSessionConfig.ts:86-116` maps
+  **⚠ Separately real, still open, and NOT a gate on the above:** `resolveSessionConfig.ts` maps
   none of the `self.*` capability fields; they reach dispatch hand-threaded through
-  `nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48` and `quotaCommand.ts:38` — a parallel
+  `nextStepCommand.ts`, `prepareDispatchCommand.ts` and `quotaCommand.ts` — a parallel
   channel worth collapsing on its own merits. An earlier claim that this "MUST collapse in the same
   commit as any shared-assembly lift" was WRONG and the 2026-07-16 lift shipped without it.
   Detail: [`g4-g5-g6-premise-check-2026-07-16.md`](../reviews/g4-g5-g6-premise-check-2026-07-16.md).
@@ -585,7 +585,7 @@
 - **A declared source that verified reach and then lies at dispatch is never ejected — the reactive
   `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).**
   `verifySourceReach`'s own comment names that quarantine as the catcher the reach gate does not have
-  (`src/shared/providers/auditorSources.ts:456-458`) — the catcher does not exist. Retiring inline
+  (`src/shared/providers/auditorSources.ts`) — the catcher does not exist. Retiring inline
   `api_key` closed the always-passes lane that used to be refused here, but not this one. A lane whose key was
   revoked or whose endpoint died still verifies (env var present, launcher on PATH) and is re-admitted
   every run; under cost-first routing (λ=0) a stale free-tier declaration then takes EVERY packet first
@@ -638,7 +638,7 @@
   environments but not all, so a source running inside its own host is not always blocked — a gap in (b)
   above, and it closes when the self-spawn concept is separated and made to enumerate its environments.
 
-- **The reconciliation gate is silently disabled if the two confirmation artifacts split (G3 A′ review 2026-07-16, tool-should-decide, low).** The obligation gates on the per-tool SEAM (`has(bundle.provider_confirmation)`, `state.ts:142-143`) while the gate's delta early-outs on the SHARED artifact (`readSharedProviderConfirmation(root)`, `nextStepCommand.ts`). They are written together only under `if (root)`, so seam-present + shared-absent (a root-less promotion, or an operator deleting the shared file) ⇒ obligation satisfied AND delta `[]` ⇒ the gate never fires for the run, and `resolveExcludedProviders` also finds no policy ⇒ a newly-reachable backend routes unconfirmed. Narrow (needs the pair to split) but silent. Property to hold: the gate's CONFIRMED operand and the obligation's presence check must key on the same artifact, or a split must be loud. [[dispatch-policy-vs-reach-cut]]
+- **The reconciliation gate is silently disabled if the two confirmation artifacts split (G3 A′ review 2026-07-16, tool-should-decide, low).** The obligation gates on the per-tool SEAM (`has(bundle.provider_confirmation)`, `state.ts`) while the gate's delta early-outs on the SHARED artifact (`readSharedProviderConfirmation(root)`, `nextStepCommand.ts`). They are written together only under `if (root)`, so seam-present + shared-absent (a root-less promotion, or an operator deleting the shared file) ⇒ obligation satisfied AND delta `[]` ⇒ the gate never fires for the run, and `resolveExcludedProviders` also finds no policy ⇒ a newly-reachable backend routes unconfirmed. Narrow (needs the pair to split) but silent. Property to hold: the gate's CONFIRMED operand and the obligation's presence check must key on the same artifact, or a split must be loud. [[dispatch-policy-vs-reach-cut]]
 
 - **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` includes `src/audit/orchestrator/` (so 2a-ii's Finding-A fix in `advanceTypes.ts`/`executorRunners.ts`/`intakeExecutors.ts` correctly demanded attestation) but NOT `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts` — where the CORE 2a-ii dispatch-inventory READ switch lives. A dispatch-substrate edit confined to those cli emitters (plausible for 2a-iii's loader wiring) would ship WITHOUT the attestation backstop. Endpoint (owner call): either add the audit cli dispatch-emitters to `src/shared/loopCorePaths.ts` (`.mjs` list is generated), or accept them as cli-glue and rely on the reviewer catching it. Not auto-expanded — widening the set makes every edit to the big `nextStepCommand.ts` require attestation, a real friction tax to weigh. **G1 (`e7b593ac`) is a concrete SECOND instance:** a breaking dispatch-handshake transport change spanning `args.ts`/`prompts.ts`/`nextStepCommand.ts`/`semanticReviewStep.ts`/`prepareDispatchCommand.ts`/`quotaCommand.ts` shipped attestation-free (none are loop-core by path). An independent review WAS done by discipline (and caught a real roster-validation-drop regression) — so the reviewer-catches-it fallback held, but only because the author chose to run it. Reinforces the owner-call endpoint above.
   **SPEC — move the CODE, do not widen the pattern list. The owner call dissolves.** The choice was framed
@@ -654,7 +654,7 @@
   defect recurring. Same class as the landing-stage-misfiled-as-dispatch entry — both are module boundaries
   drawn by history rather than by role, and both are fixed by moving code rather than by tuning a list.
 
-- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md:201-206`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
+- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
   ⚠ **OWNER DECISION 2026-07-25 on (1):** require a **`gated by:` clause** on any spec statement of an
   ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
   not re-admit the status vocabulary `design-docs-declarative.test.mjs` bans. The lint's doc set widens
@@ -662,7 +662,7 @@
 
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
-- **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts:1639`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1669`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
+- **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1669`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
   ⚠ **OWNER DECISION 2026-07-25 — BOTH calls answered YES.** (a) Planning phases BECOME dispatchable to
   a non-host pool; it is the only half that cannot currently route to a $0 pool, and every one of its
   ~9-11 round-trips bills before the first implement dispatch. (b) A targeted in-place repair IS admitted
@@ -696,7 +696,7 @@
 
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 
-- **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](../reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts:123-136`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `src/shared/dispatch/coordinator.ts:242` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`src/shared/dispatch/rollingDispatch.ts:1773` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts:226-236`; the two-mode split is documented at `admissionLoop.ts:887-896`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts:2309`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
+- **Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).** Design of record: [`spec/dispatch-jit-claims.md`](../../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at the launch moment); build sequencing in [`docs/reviews/unified-dispatch-routing-design-2026-07-17.md`](../reviews/unified-dispatch-routing-design-2026-07-17.md). **The claim leg is effectively satisfied and its old framing ("drop `poolId` from claims") is now WRONG** — `ClaimRegistry.claim` decides exclusivity on presence+staleness alone and never consults `poolId` (`src/shared/quota/claimRegistry.ts`), no consumer reads the stored value (`partitionByOwnership` reads only `ownerToken`), and the field has since become the DRIVER identity that `claimMany`'s same-owner re-grant (`:152-176`) and `releaseOwned`'s owner-scoped release (`:210-224`) depend on, so deleting it would regress the completion-livelock fix. What is left there is naming hygiene only: rename `poolId` → `ownerId` and have `src/shared/dispatch/coordinator.ts` pass a driver id instead of `pool.id` (today a write-only value). **Genuinely open:** (a) **JIT reservation on the HOST path** — the in-process engine already reserves at launch (`src/shared/dispatch/rollingDispatch.ts` `admitAgainstLedger` immediately before `dispatchOnePacket`), but the host path still grants a whole wave's leases at plan time (`finalizeDispatchQuota({ grantLeases: true })`, `hostFanoutGate.ts`; the two-mode split is documented at `admissionLoop.ts`), so a host grant can go stale between plan and launch; (b) **host-path convergence** — the headless (`nextStepHelpers.ts`) and A-8 hybrid (`:2419`) arms are still a branch pair (routing-design H2; H4's `shouldDemotePrimaryInProcess` is already gone from `src/`). [[relax-dispatch-source-forcing]]
 
 - **Accept-latch — two low residuals stay open.** The family SHIPPED 2026-07-23. Mechanism, the
   REFUTED "rollback to session-recorded base" premise, and the disposition of a/c/d live in
@@ -795,7 +795,7 @@
   The validator's own contract is the place to say it.
 
 - **Friction walk (touched_files load-gate lap, 2026-07-25):** (1) **tool-should-decide (medium):** a
-  fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts:109`)
+  fixture helper ending in `as RemediationState` (`tests/remediate/helpers/nextStepHarness.ts`)
   makes `check:tests` inert for that fixture — it hid blocks missing a REQUIRED contract field from the
   gate added to catch exactly that. Property: a fixture must not be able to cast away a contract's
   required keys — `satisfies`, or a builder that cannot omit them.
@@ -902,24 +902,24 @@
 
 - **Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).**
   Only the host-subagent grant PERSISTS leases (`grantLeases:true` → `runs/<runId>/dispatch-quota.json`);
-  the in-process rolling engine reconciles per packet on success OR failure (`src/shared/dispatch/rollingDispatch.ts:1243`),
+  the in-process rolling engine reconciles per packet on success OR failure (`src/shared/dispatch/rollingDispatch.ts`),
   so the leak class is host-path only. Release is wired at every normal exit — merge
-  (`mergeAndIngestCommand.ts:667`, ahead of the idempotency replay), the dispatch wall/pause
-  (`dispatch.ts:807`), and the fan-out chokepoints (`hostFanoutGate.ts`, which additionally
+  (`mergeAndIngestCommand.ts`, ahead of the idempotency replay), the dispatch wall/pause
+  (`dispatch.ts`), and the fan-out chokepoints (`hostFanoutGate.ts`, which additionally
   reconciles-before-regrant so a re-run next-step can't orphan the prior family's lease ids). A wave
   KILLED mid-flight (stopped drain, dead dispatcher, fleet session-death) reaches none of them, so its
   leases free only via `DISPATCH_LEASE_TTL_MS` (20 min) while `admitBatch` keeps counting them:
-  `countByPool` is seeded from the ledger's distinct live lease ids (`admissionLoop.ts:669-686`) and
+  `countByPool` is seeded from the ledger's distinct live lease ids (`admissionLoop.ts`) and
   `:741` refuses `cap_reached` with `headroom_before: null` — the ledger is never reached, which is why
   the wall reads as phantom. Sharper than when logged: the uncalibrated cold-start cap is now
-  `COLD_START_PROBE_BATCH = 1` (`scheduler.ts:353`), so ONE orphaned lease walls a calibrating pool.
+  `COLD_START_PROBE_BATCH = 1` (`scheduler.ts`), so ONE orphaned lease walls a calibrating pool.
   Residual (open, low): a startup sweep releasing leases whose owning run is demonstrably dead. Blocked
   on the DISCRIMINATOR, not the code — `ReservationLease` carries no owner (leaseId/cost/poolId/
   expiresAt; the pid inside `mintLeaseId` is incidental and is *always* dead on the host path, since the
   granting CLI exits before the workers run), and "a newer run exists" is not death under co-located /
   multi-agent runs that JOIN one run. Safe-by-construction shape: sweep only lease ids readable from
   this artifact dir's own `dispatch-quota.json` files, keyed on a run-terminal signal.
-  `reclaimExpired()` (`reservationLedger.ts:403`) is unwired and only drops already-expired leases, so
+  `reclaimExpired()` (`reservationLedger.ts`) is unwired and only drops already-expired leases, so
   it does not close this.
 
 - **A2b unmatched-quota fallback — two residuals (each low, documented at the code site).**
@@ -969,13 +969,13 @@
   bug fixed for `design_review_parallel` in `e6b580d0`), and the "the host judges itself" reading (that
   solo `design_review_contract` renders the adversarial review into the host's own step prompt with no
   packet file and no `access` block). Solo and parallel now dispatch through ONE helper,
-  `prepareContractDispatch` (`src/audit/cli/nextStepCommand.ts:275-319`), whose docblock states both
+  `prepareContractDispatch` (`src/audit/cli/nextStepCommand.ts`), whose docblock states both
   properties — INDEPENDENCE (the pass is always dispatched to a subagent) and ADVANCE-FREE (the packet
   carries no `next-step`, so no worker becomes a second driver). The solo branch calls it at `:801` and
   writes the packet/results artifact paths plus the `access` read/write paths at `:841-846`.
   Property: no design-review pass is judged by the agent that drove the work under review, and no
   dispatched packet carries the orchestrator advance — on any of the three branches.
-  What is open is only the PIN: `tests/audit/next-step.test.mjs:161-181` asserts the advance-free worker
+  What is open is only the PIN: `tests/audit/next-step.test.mjs` asserts the advance-free worker
   packet and the host-side advance for `design_review_parallel` ONLY; the `design_review_contract` case
   (`:183-189`) writes the findings file and asserts nothing, so a future rewrite of that branch off the
   shared helper would not be caught. Extend the parallel-branch assertion to the solo step.
@@ -1000,7 +1000,7 @@
   - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
     only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
     surfaces to the operator despite the summary existing for exactly that purpose.
-  - (d) **Grounding corpora still use `ls-files` without `-z`** (`findingGrounding.ts:108`,
+  - (d) **Grounding corpora still use `ls-files` without `-z`** (`findingGrounding.ts`,
     `contractPipelineGates.ts` ~1034): non-ASCII tracked paths arrive C-quoted (`core.quotePath`), so citations
     to such paths fail grounding while the disposition (which uses `-z`) keeps them in scope.
   - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
@@ -1090,17 +1090,17 @@
 
 - **Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is WIRED on both drivers —
-  `src/audit/cli/rollingAuditDispatch.ts:453` and `src/remediate/steps/nextStep.ts:1240-1257` both route
+  `src/audit/cli/rollingAuditDispatch.ts` and `src/remediate/steps/nextStep.ts` both route
   `onEscalation` into the single `captureStepBoundaryFriction` chokepoint. Coverage is ASYMMETRIC, not
   end-to-end on both: the shared engine half (recordLimit → escalate → early strand, pool N+1 never
-  attempted) is pinned in `tests/shared/rollingDispatch.test.mjs:979` with NO friction assertion, and only
+  attempted) is pinned in `tests/shared/rollingDispatch.test.mjs` with NO friction assertion, and only
   the AUDIT driver's full chain through to the written `friction/<runId>.json` record is pinned
   (`tests/audit/rolling-audit-dispatch.test.mjs` §5). Nothing under `tests/remediate` asserts a
-  `quota_escalation` friction — `tests/remediate/quota-scheduler.test.ts:483` pins only the
+  `quota_escalation` friction — `tests/remediate/quota-scheduler.test.ts` pins only the
   `HostSessionQuotaSource` escalation unit. Two open halves: **(a) bounded** — add the remediate parity
   test (`driveRollingImplementDispatch` with `poolsOverride` of ≥4 pools and a `dispatchNode` returning
   `rate_limited` with a parseable session-limit string; assert a `quota_escalation:` friction in
-  `friction/<runId>.json`), red-green by deleting the `onEscalation` block at `nextStep.ts:1242`;
+  `friction/<runId>.json`), red-green by deleting the `onEscalation` block at `nextStep.ts`;
   **(b) live validation** on a real rate-limited run stays env-bound. [[meta-audit-friction-must-be-tool-enforced]]
   - **⬇ Live-run watch** (same wall run as quota-aware dispatch): when a packet escalates across pools at
     the wall, a **`quota_escalation` friction event** must be captured at the step boundary — check the

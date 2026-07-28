@@ -126,7 +126,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   caller lives; the original "always use `node:http`" advice is now wrong for two of the three cases:
   (a) **in-repo** — `undici` is a runtime dep (`^7.28.0`, added v0.34.27), so build an `Agent` whose
   `headersTimeout`/`bodyTimeout` follow the declared deadline and pass it as `dispatcher`. That is what
-  shipped (`src/shared/providers/openAiCompatibleProvider.ts:61,:84-92`) and hand-rolling a `node:http`
+  shipped (`deadlineBoundFetch` in `src/shared/providers/openAiCompatibleProvider.ts`) and hand-rolling a `node:http`
   transport there was deliberately rejected — undici IS Node's fetch implementation, pure JS, and HTTP
   transport is correctness-sensitive enough to acquire rather than own.
   (b) **the offload helper is already fixed** — `~/.claude/llm-call.mjs` POSTs via `node:http` with a
@@ -357,11 +357,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`,
   knip or vitest — so it fails the gate loudly, not silently.** Both smokes run inside `verify:checks`
-  (`package.json:49`, which `verify:release` and `prepublishOnly` wrap and CI's `gate` job runs); each
+  (the `verify:checks` script in `package.json`, which `verify:release` and `prepublishOnly` wrap and CI's `gate` job runs); each
   does `npm pack` then `npm install --no-package-lock <tarball>` into a temp dir, so only
   `dependencies` are present. Two ways to break the tarball that pass every local check: (1) a
   production runtime `import` declared as a `devDependency` — devDeps are present in dev + the vitest
-  suite, and knip's issue-type whitelist (`knip.json:12`) excludes the dependency checks, so only the
+  suite, and knip's `include` issue-type whitelist in `knip.json` excludes the dependency checks, so only the
   packaged smoke hits `ERR_MODULE_NOT_FOUND` (when you add an `import` to any `src/` module that lands
   in `dist/` on a production path, confirm the package is under `dependencies`; bit once 2026-07-04 by
   `zod-to-json-schema` in `src/audit/contracts/workerSchemas.ts` — now correctly a `dependency`);
@@ -409,7 +409,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
   `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
 
-- **`pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).** The gate filters shell statements with `isGitSubcommand('commit')` and returns at `commitSubCmds.length === 0` (`.claude/hooks/pre-commit-gate.mjs:187,190`), so `git merge`, `git rebase --continue`, `git cherry-pick`, `git revert` and `git am` skip *every* leg — `npm run check`, the doc-contract subset, `check:doc-manifest`, and the loop-core attestation. Seen as stray-doc failures on all three merge commits of the v0.34.7 queue (main red until `0c6a5a6d` registered the docs). **The original remedy — "run the doc-manifest check in the `ci` workflow too" — is a no-op and always was:** `ci.yml` runs `npm run verify:checks` (`.github/workflows/ci.yml:119`), which already contains `check:doc-manifest` (`package.json:49`), and `docs/**` has been a trigger path since `214f601e` (2026-07-19). CI is what *reports* the red; the gate that is missing is the LOCAL one. Real fix: widen the gate's detection to the commit-creating subcommand set — then delete this entry per the hook-enforcement policy.
+- **`pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).** The gate filters shell statements with `isGitSubcommand('commit')` and returns at `commitSubCmds.length === 0` (both in `runGate`, `.claude/hooks/pre-commit-gate.mjs`), so `git merge`, `git rebase --continue`, `git cherry-pick`, `git revert` and `git am` skip *every* leg — `npm run check`, the doc-contract subset, `check:doc-manifest`, and the loop-core attestation. Seen as stray-doc failures on all three merge commits of the v0.34.7 queue (main red until `0c6a5a6d` registered the docs). **The original remedy — "run the doc-manifest check in the `ci` workflow too" — is a no-op and always was:** `ci.yml`'s `gate` job runs `npm run verify:checks`, which already contains `check:doc-manifest`, and `docs/**` has been a trigger path since `214f601e` (2026-07-19). CI is what *reports* the red; the gate that is missing is the LOCAL one. Real fix: widen the gate's detection to the commit-creating subcommand set — then delete this entry per the hook-enforcement policy.
 
 - **A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).** `dist/`, `.claude/*` and `.audit-tools/*/*` are gitignored, so `rg` and `git grep` — the project's default search tools — provably cannot see a worktree's or a build tree's output. `grep -r` and PowerShell `Select-String -Recurse` honour no ignore file, so they hit `dist/**` and report deleted code as still referenced. Verified twice by probe. When checking whether a symbol is truly dead, use the ignore-aware tool; a `grep -r` hit inside `dist/` is the compiled copy of the very code you deleted, not a caller.
 
@@ -439,6 +439,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `checkJs: false`, which silently excludes every `.mjs` test, so the sweep that found those fixtures
   could only ever have found them in the `.ts` quarter of the tree. The remaining 419 files carry the
   same class, undetected. Do not read "the test tree is typechecked now" as closed.
+
+- **Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.**
+  Line numbers across the backlog drifted repo-wide while the symbol names beside them still resolved,
+  so hand-bumping them was a treadmill that bought nothing. 77 suffixes were dropped 2026-07-28.
+  ⚠ **Do not "repair" a drifted number by auto-resolving it to the nearest declaration.** Tried and
+  rejected the same day: a nearest-enclosing-declaration pass over the 44 open-bugs citations returned
+  local variables (`preamble`, `shell`, `state`, `summary`) for most of them and resolved one past the
+  end of a file it had matched by basename. Applying it would have swapped an honest stale number for
+  a confident wrong symbol — the [[backlog-prose-decays-verify-against-head]] class, where re-anchoring
+  silently re-certifies the sentence around the citation. Dropping the number is strictly better than
+  false precision.
 
 ## Doc-set hygiene (enforced)
 

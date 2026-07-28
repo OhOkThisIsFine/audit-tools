@@ -199,11 +199,15 @@ ordering matters).
   (`readQuotaState`/`recordWaveOutcome`), same `withFileLock`, keyed by
   `resourceKey` (the dispatch-quota schema's `in_flight_tokens`,
   `remaining_token_budget`).
-- **Audit and remediate are at parity.** Both resolve driver identity through
-  the shared `resolveHostProviderName`: remediate calls it directly
-  (`src/remediate/steps/nextStep.ts`); audit calls it via the thin
-  `resolveHostDispatchProviderName` wrapper (`src/audit/cli/rollingAuditDispatch.ts`),
-  which falls back to it once the in-process-dispatch case is ruled out.
+- **Audit and remediate are at parity, through one shared function — not two paths
+  kept in step.** Driver identity resolves via `resolveHostDispatchProviderName`,
+  which lives in `src/shared/providers/providerPathGuard.ts`: it returns the
+  conversation host for a headless primary and otherwise delegates to
+  `resolveHostProviderName`. Both orchestrators call that same function
+  (`src/remediate/steps/dispatch/waveScheduling.ts`,
+  `src/audit/cli/semanticReviewStep.ts`); `src/audit/cli/rollingAuditDispatch.ts` only
+  RE-EXPORTS it. There is no audit-side wrapper and no per-mode fallback to keep
+  aligned — the hoist removed the asymmetry rather than documenting it.
 - **There is no precomputed `max_concurrent_agents`** — the dispatch prompt drives
   the admission loop; fan-out width is emergent.
 

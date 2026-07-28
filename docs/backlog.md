@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 147 entr(y/ies) indexed.
+> and at commit). 148 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -186,6 +186,7 @@
 - `durable-traps.md:416` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
 - `durable-traps.md:424` — A typecheck sweep's error count is not final until you re-run it.
 - `durable-traps.md:432` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:443` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
 
 <!-- END GENERATED SEEK INDEX -->
 

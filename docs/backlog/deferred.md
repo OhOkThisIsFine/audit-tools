@@ -27,7 +27,7 @@
   Content-hash staleness still means a cosmetic reword can cascade an expensive
   re-emit, but the class is far narrower at HEAD than "nothing has been built": provenance fields are
   stripped from the canonical hash per artifact and the narrative arrays are canonicalized
-  (`NON_SEMANTIC_FIELDS_BY_ARTIFACT` / `canonicalizeNarrativeArrays`, `artifactFreshness.ts:23`);
+  (`NON_SEMANTIC_FIELDS_BY_ARTIFACT` / `canonicalizeNarrativeArrays`, `artifactFreshness.ts`);
   `charter_register.json` compares per-EDGE dependency slices instead of whole upstream hashes
   (`dependencySlices.ts`); and the bounded semantic judgment itself is the DD-9 intent-equivalence
   gate — `intent_equivalence_current` in `PRIORITY`, `intentEquivalenceExecutor.ts` +
