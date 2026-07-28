@@ -28,7 +28,13 @@
 
 - **⚠ Every prior owner call is ANSWERED; only the newly reopened collision above needs a decision.**
   Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
-  never re-raised; `node scripts/nightly/answer.mjs --list` shows what is genuinely still open.
+  never re-raised.
+  ⚠ **`answer.mjs --list` reports what has been ANSWERED, never what has been DONE — an empty queue is
+  not an empty work list.** A determination is marked `settled` the moment the owner replies; nothing
+  checks that the answered work landed, and the item is never raised again. On 2026-07-28 the list
+  read "No open nightly items" while twelve answers had no corresponding change anywhere. Diff the
+  settled subjects against HEAD before trusting it — the standing entry is in
+  [`open-bugs.md`](backlog/open-bugs.md).
   Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does
@@ -145,7 +151,7 @@ its SPEC intact.
 > by re-wording this list; prefix a title with `▶` in the backlog to pin it to *Next up*.
 > [`durable-traps.md`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 103 open item(s).
+> `verify:checks` and at commit). 104 open item(s).
 
 ### ▶ Next up — pinned in the backlog
 
@@ -211,6 +217,7 @@ its SPEC intact.
 - Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24). · [`open-bugs.md`](backlog/open-bugs.md)
 - Accept-latch — two low residuals stay open. · [`open-bugs.md`](backlog/open-bugs.md)
 - Node-worktree guard — accepted residuals only (each low, on-evidence-only). · [`open-bugs.md`](backlog/open-bugs.md)
+- Twelve settled nightly answers were never executed, and the queue reports them as closed (2026-07-28, medium, tool-should-decide). · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (nightly-determinations lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (contract-sweep producer lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)
 - Friction walk (inline-api_key retirement lap, 2026-07-26): · [`open-bugs.md`](backlog/open-bugs.md)

@@ -707,6 +707,26 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **Twelve settled nightly answers were never executed, and the queue reports them as closed
+  (2026-07-28, medium, tool-should-decide).** `answer.mjs --list` reported "No open nightly items"
+  while only 2 of 18 determinations settled 17:39–17:47 had landed. `settled` is written the moment
+  the owner replies; nothing links an answer to a diff, and a settled subject is never raised again,
+  so an answered-but-unexecuted item is invisible forever.
+  **Property:** a determination is not retired from the queue until a change referencing it lands —
+  or the ledger distinguishes `answered` from `done` and `--list` reports both.
+  ⚠ Two of the eighteen "answers" were *questions back to the owner*, not decisions (the `.mjs`→`.ts`
+  test conversion; whether the offload lane needs serializing beyond NIM). Both are recorded `settled`
+  with no executable answer — so the disposition must also admit "answered with a counter-question".
+  **The outstanding twelve**, each with its owner answer, are enumerated in
+  `docs/reviews/dirty-tree-and-nightly-answer-reconciliation-2026-07-28.md`. Not yet started:
+  the approved-but-nonexistent `scripts/check-doc-links.mjs` gate + the five dead links it closes;
+  the `~/.claude/llm-call.mjs` `--schema`-position fix; the `src/shared/quota/apiPool.ts` dropped-lane
+  fix; the HANDOFF generator revert to immediate-next-only; `spec/audit/dependency-map.md`,
+  `spec/audit/dispatch-admission-control.md`, `spec/contract-authoring-determinism-design.md`,
+  `spec/backend-identity-axes.md`, `spec/host-validation.md`; and the `deferred.md` /
+  `durable-traps.md` sweeps (the citation-policy and shipped-entry deletions landed for
+  `open-bugs.md` only).
+
 - **Friction walk (nightly-determinations lap, 2026-07-26):**
   (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /
   26k-token document that exceeds the Read cap, so enumerating it needs a hand-written `node -e`. Worse,
