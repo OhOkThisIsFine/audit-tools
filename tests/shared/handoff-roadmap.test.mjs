@@ -99,13 +99,15 @@ describe('ordering — derived from document structure, nothing dropped', () => 
       ['deferred.md', '- **parked one.** b'],
     ]);
 
-  it('orders by (source rank, position in file)', () => {
-    const groups = collectRoadmap(sources());
+  it('orders PINNED entries by (source rank, position in file)', () => {
+    const s = sources();
+    // One pin per source, deliberately out of source order in the files, so the
+    // assertion below can only pass if source rank is what orders them.
+    s.set('deferred.md', [`- **${PIN_MARKER} pinned parked.** b`, '', '- **parked one.** b'].join('\n'));
+    s.set('open-bugs.md', ['- **bug one.** b', '', `- **${PIN_MARKER} pinned bug.** b`].join('\n'));
+    const groups = collectRoadmap(s);
     expect(groups.map((g) => g.items.map((i) => i.title))).toEqual([
-      ['bug one.', 'bug two.'],
-      ['Track 1 — t1.'],
-      ['fwd one.'],
-      ['parked one.'],
+      [`${PIN_MARKER} pinned bug.`, `${PIN_MARKER} pinned parked.`],
     ]);
     // Source order is the roadmap's ordering spine — pin it explicitly.
     expect(ROADMAP_SOURCES.map((s) => `${s.file}${s.section ? `#${s.section}` : ''}`)).toEqual([
@@ -116,10 +118,15 @@ describe('ordering — derived from document structure, nothing dropped', () => 
     ]);
   });
 
-  it('no "Next up" group exists while nothing is pinned — an empty head would read as "nothing is next"', () => {
+  it('the "Next up" group ALWAYS exists, empty included — an absent section reads as "the generator never ran"', () => {
+    // Inverts the previous contract deliberately. While the block listed every open
+    // item, an empty head was misleading and was suppressed. Now the block IS the
+    // head, so suppressing it would erase the section entirely and make "nothing is
+    // pinned" indistinguishable from a generator that did not run.
     const groups = collectRoadmap(sources());
-    expect(groups.some((g) => g.heading.includes('Next up'))).toBe(false);
-    expect(groups[0].heading).toMatch(/Open bugs/);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].heading).toContain('Next up');
+    expect(groups[0].items).toEqual([]);
   });
 
   it(`a \`${PIN_MARKER}\` prefix hoists an entry to the top, keeping document order among the pinned`, () => {
@@ -140,9 +147,20 @@ describe('ordering — derived from document structure, nothing dropped', () => 
     expect(all.filter((t) => t === `${PIN_MARKER} pinned bug.`)).toHaveLength(1);
   });
 
-  it('every entry reaches the roadmap — selection is not a filter', () => {
+  it('selection IS a filter — an unpinned entry never reaches HANDOFF', () => {
+    // The reverse of the earlier contract, and the point of the change: HANDOFF is
+    // the immediate next step, not an index of open work. All five fixture entries
+    // are unpinned, so none may appear; they remain in the backlog, which is their
+    // one home, reachable by the seek index.
     const groups = collectRoadmap(sources());
-    expect(groups.flatMap((g) => g.items)).toHaveLength(5);
+    expect(groups.flatMap((g) => g.items)).toHaveLength(0);
+
+    // ...and pinning exactly one lets exactly that one through.
+    const s = sources();
+    s.set('open-bugs.md', ['- **bug one.** b', '', `- **${PIN_MARKER} pinned bug.** b`].join('\n'));
+    expect(collectRoadmap(s).flatMap((g) => g.items).map((i) => i.title)).toEqual([
+      `${PIN_MARKER} pinned bug.`,
+    ]);
   });
 });
 
@@ -156,14 +174,19 @@ describe('rendering — a pointer, never a restated spec', () => {
     expect(out.endsWith(END_MARKER)).toBe(true);
   });
 
-  it('states the count and the excluded source, so neither is a silent decision', () => {
+  it('states the pinned count and points at the backlog for the full set', () => {
     const out = renderRoadmap(groups);
-    expect(out).toMatch(/1 open item\(s\)/);
-    expect(out).toContain('durable-traps.md');
+    expect(out).toMatch(/1 pinned item\(s\)/);
+    // The block must say where everything else lives, or a reader takes it for the
+    // whole open set — the exact misreading this scoping change exists to prevent.
+    expect(out).toContain('Every open item lives in');
+    expect(out).toContain('backlog.md');
   });
 
-  it('an empty group says so rather than rendering as absent', () => {
-    expect(renderRoadmap([{ heading: 'G', items: [] }])).toMatch(/\*\(none open\)\*/);
+  it('an empty block STATES that nothing is pinned rather than rendering as absent', () => {
+    const out = renderRoadmap([{ heading: 'G', items: [] }]);
+    expect(out).toMatch(/nothing pinned/);
+    expect(out).toMatch(/no immediate next step is set/);
   });
 });
 
@@ -200,10 +223,19 @@ describe('the live tree', () => {
     const fresh = spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(sources)));
     expect(fresh).toBe(onDisk);
 
-    // The check must be able to FAIL, or it is decoration: drop one backlog
-    // entry and the rendered roadmap must stop matching.
+    // The check must be able to FAIL, or it is decoration. The mutation has to touch
+    // something that REACHES the block: now that only pinned entries are emitted,
+    // removing an arbitrary backlog entry changes nothing and the control would be
+    // inert — silently passing forever. So un-pin a pinned entry instead.
+    const pinnedFile = ROADMAP_SOURCES.map((s) => s.file).find((f) =>
+      sources.get(f).includes(`- **${PIN_MARKER}`),
+    );
+    expect(
+      pinnedFile,
+      'the live backlog must pin at least one entry, or this drift control cannot fire',
+    ).toBeDefined();
     const drifted = new Map(sources);
-    drifted.set('deferred.md', sources.get('deferred.md').replace(/^- \*\*/m, 'x- **'));
+    drifted.set(pinnedFile, sources.get(pinnedFile).replaceAll(`- **${PIN_MARKER}`, '- **'));
     expect(spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(drifted)))).not.toBe(onDisk);
   });
 

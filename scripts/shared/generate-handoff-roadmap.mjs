@@ -16,16 +16,23 @@
 // the file that holds its spec. Nothing in the generated block restates a spec,
 // so there is no second copy left to drift.
 //
-// ORDER SIGNAL — deliberately derived, not declared. An entry's rank is
-// (source rank, position in its file): the source order is the fixed
-// `ROADMAP_SOURCES` list below, and within a source the entries appear in
-// document order. Re-prioritising therefore means MOVING the entry inside its
-// backlog file — a single-home edit in the doc that already owns the item. The
-// one optional override is `PIN_MARKER`: an entry whose bold title begins with
-// `▶` is hoisted into a "Next up" group ahead of everything else, preserving
-// document order among the pinned. Zero entries carry it today; it exists so the
-// curated head this doc used to hand-maintain can be restored with a
-// one-character edit per item rather than a marker on all ~110.
+// SCOPE — IMMEDIATE NEXT ONLY. The generated block carries the entries PINNED
+// with `PIN_MARKER` (`▶`) and nothing else. It once emitted every open item, ~110
+// of them, which made HANDOFF a second index competing with `docs/backlog.md`'s
+// seek index and rebuilt the "read HANDOFF to see everything" habit the split
+// backlog exists to end. `CLAUDE.md` scopes this doc to the immediate next step;
+// the exhaustive list contradicted its own header.
+//
+// Selection is therefore DECLARED, not derived: prefix an entry's bold title with
+// `▶` in the backlog file that owns it. That is a one-character single-home edit
+// in the doc that already holds the item, so promoting the next piece of work
+// never means editing HANDOFF. Order among the pinned stays document order
+// (source rank from `ROADMAP_SOURCES`, then position in file), so a pinned set
+// larger than one still has a stable sequence.
+//
+// An EMPTY block is a valid, meaningful state — "nothing is pinned" — and says so
+// in words rather than rendering as an absent section, which would be
+// indistinguishable from a generator that never ran.
 //
 //   node scripts/shared/generate-handoff-roadmap.mjs           # write
 //   node scripts/shared/generate-handoff-roadmap.mjs --check    # verify only
@@ -190,11 +197,22 @@ export function collectRoadmap(sources) {
     }
     groups.push({ heading: src.heading, items: kept });
   }
-  // The pinned group leads; it is omitted entirely when nothing is pinned, so an
-  // empty head never reads as "nothing is next".
-  return pinned.length > 0
-    ? [{ heading: `${PIN_MARKER} Next up — pinned in the backlog`, items: pinned }, ...groups]
-    : groups;
+  // IMMEDIATE-NEXT-ONLY. `CLAUDE.md` and this doc's own header scope HANDOFF to the
+  // immediate next step; an exhaustive 100+ item list is a second index competing
+  // with `docs/backlog.md`'s seek index, and it re-created the "read HANDOFF to see
+  // everything" habit the split backlog exists to end. `groups` is therefore
+  // DISCARDED: only pinned entries are emitted.
+  //
+  // The unpinned set is not lost — it is in the backlog, which is its one home, and
+  // reachable by the seek index. Pinning is a one-character edit on the entry's bold
+  // title in the backlog file that owns it, so promoting the next item never means
+  // editing HANDOFF.
+  //
+  // Always ONE group, even when empty: an absent section reads as "the generator did
+  // not run", while an explicit empty one states that nothing is pinned. That is the
+  // affirmation half — a success-shaped empty must say so.
+  void groups;
+  return [{ heading: `${PIN_MARKER} Next up — pinned in the backlog`, items: pinned }];
 }
 
 const linkFor = (file) => `[\`${file}\`](backlog/${file})`;
@@ -216,7 +234,7 @@ export function renderRoadmap(groups) {
       (g) =>
         `### ${g.heading}\n\n` +
         (g.items.length === 0
-          ? `*(none open)*\n`
+          ? `*(nothing pinned — no immediate next step is set. Every open item is in [\`docs/backlog/\`](backlog/).)*\n`
           : g.items
               .map((i) => `- ${liftTitle(i.title, i.file)} · ${linkFor(i.file)}\n`)
               .join("")),
@@ -227,13 +245,15 @@ export function renderRoadmap(groups) {
     `${BEGIN_MARKER}\n` +
     `\n` +
     `> **This list is GENERATED from [\`docs/backlog/\`](backlog/) — do not hand-edit it.**\n` +
+    `> It is the IMMEDIATE NEXT work only, never the full open set. Prefix an entry's bold title with\n` +
+    `> \`${PIN_MARKER}\` in the backlog file that owns it and it appears here; empty means nothing is\n` +
+    `> pinned, which is a statement rather than an omission.\n` +
+    `> **Every open item lives in [\`docs/backlog/\`](backlog/)**, reachable by the seek index in\n` +
+    `> [\`backlog.md\`](backlog.md) — this block is not a second index of it.\n` +
     `> Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that\n` +
     `> holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.\n` +
-    `> **Order = the entry's position in its backlog file.** Re-prioritise by MOVING the entry, never\n` +
-    `> by re-wording this list; prefix a title with \`${PIN_MARKER}\` in the backlog to pin it to *Next up*.\n` +
-    `> [\`durable-traps.md\`](backlog/durable-traps.md) is excluded on purpose — standing reference, not work.\n` +
     `> Regenerate: \`node scripts/shared/generate-handoff-roadmap.mjs\` (\`--check\` gates it in\n` +
-    `> \`verify:checks\` and at commit). ${total} open item(s).\n` +
+    `> \`verify:checks\` and at commit). ${total} pinned item(s).\n` +
     `\n` +
     body +
     `\n${END_MARKER}`
