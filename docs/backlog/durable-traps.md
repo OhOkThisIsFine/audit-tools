@@ -63,11 +63,13 @@ the trap and the fix when it fires.
   Scope is ad-hoc scripts only: audit-tools' own dispatch is paced by declared
   `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
-  ⚠ **Never hand-rotate `model` per batch/retry** — `~/.audit-code/litellm-config.yaml` owns retries +
-  same-tier `fallbacks`; caller-side rotation crosses capability tiers and silently downgrades the call.
+  ⚠ **Never hand-rotate `model` per batch/retry** — the proxy owns retries and same-tier fallbacks
+  (`~/.llm-relay/config.json` since the 2026-07-28 LiteLLM retirement); caller-side rotation crosses
+  capability tiers and silently downgrades the call.
   ⚠ Rank is not latency: rank-1 `glm-5.2` returned nothing in >15min where `deepseek-v4-flash` answered
-  in seconds. Rank-1 is no default for a blocking call.
-  ⚠ Dead-lane detection is mechanical: `~/.claude/llm-call.mjs` probes `/v1/models` and exits 3 naming
+  in seconds. Rank-1 is no default for a blocking call. Re-confirmed 2026-07-28: an 836-line analytical
+  call to `nim/z-ai/glm-5.2` died `HTTP 504 backend timed out` where small probes answered instantly.
+  ⚠ Dead-lane detection is mechanical: `~/.claude/llm-call.mjs` probes `/health` and exits 3 naming
   the restart command. That helper is OUTSIDE the repo — re-add the preflight if it is ever reset.
   **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
   returns an empty document instead of refusing loudly.
@@ -97,24 +99,6 @@ the trap and the fix when it fires.
   is mid-flight on it. Full protocol: memory [[concurrent-sessions-share-the-checkout]]. No
   tooling fix proposed yet; if a collision ever loses work, the mechanical form is a session
   lease/marker in `.claude/hooks/.state/`.
-
-- **`litellm` crashes at import whenever pydantic-core drifts off pydantic's EXACT pin (2026-07-23,
-  re-verified 2026-07-24).** `pydantic` pins `pydantic-core==<exact>` (today: pydantic 2.13.4 →
-  `pydantic-core==2.46.4`), so any independent bump of pydantic-core — a manual upgrade, or a
-  transitive install pulling a newer core — hard-breaks `import litellm`, and the offload lane has no
-  fallback when the proxy won't start. The 2026-07-23 instance was core 2.47.0 against a pin of
-  2.46.4; that instance is RESOLVED on this box (2.46.4 installed, `import litellm` clean). Same
-  env-rot family as prior site-packages breakage.
-  ⚠ **Do not copy a version number out of this entry as the fix.** `pip install pydantic-core==2.46.4`
-  is correct only while pydantic pins that core, and becomes the skew-*creating* command after a
-  pydantic upgrade. Version-agnostic remedy — read the pin, then satisfy it:
-  `python -c "import importlib.metadata as m; print([r for r in m.requires('pydantic') if 'core' in r])"`,
-  or `python -m pip install --force-reinstall pydantic` to re-pull the matching pair.
-  Candidate (hook-shaped per the durable-trap policy — a `litellm --config …` start IS detectable at a
-  Bash tool call): a proxy-start preflight comparing installed pydantic-core against pydantic's
-  declared pin. ⚠ It must compare that PAIR specifically — `pip check`'s exit code is useless as the
-  gate here: it already exits 1 on this box for 7 unrelated mismatches (databricks-sdk, datasets,
-  litellm/importlib-metadata, markitdown, omegaconf, sympy, transformers) and reports no pydantic line.
 
 - **The pre-commit gate scans the WHOLE command string — including commit-message text — for the
   hooksPath/no-verify bypass tokens (2026-07-21).** A commit whose message names the literal tokens
@@ -179,16 +163,6 @@ the trap and the fix when it fires.
   `tests/shared/spawnLoggedCommand.test.mjs`; the `"ignore"` default — the branch a `worker_command` of
   `["codex","exec",…]` actually takes — has no test.
 
-- **LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).** The proxy's
-  startup banner contains non-cp1252 characters, so `show_banner()` raises
-  `UnicodeEncodeError: 'charmap' codec can't encode…` and FastAPI reports only
-  `Application startup failed. Exiting.` — the encoding cause is buried far up the traceback. Launch with
-  `PYTHONIOENCODING=utf-8 PYTHONUTF8=1 litellm --config … --port 4000`. Two adjacent install traps hit the
-  same lap: a bare `pip install litellm` lacks the proxy deps (`ImportError: No module named 'backoff'` →
-  needs `pip install 'litellm[proxy]'`), and a mismatched `pydantic-core` (2.47.0 vs the required 2.46.4)
-  fails the import with a `SystemError` before any of that. Working config:
-  `~/.audit-code/litellm-config.yaml`.
-
 - **A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).**
   `~/.audit-code/sources-declared.json` is operator-authored machine config that no repo test ever reads
   (tests inject `readDeclarationFile`), so a stale key survives a fully green suite. Only `repair_proxy`
@@ -202,17 +176,22 @@ the trap and the fix when it fires.
   `nextStepCommand.ts` prints nothing). So the lived symptom is "the lane is gone" plus one easily-missed
   stderr line. After any transport-contract change, re-read the declaration file by hand.
 
-- **The free offload lane is the local LiteLLM proxy — it must be RUNNING, and the model must be one of
-  its aliases.** `llm-worker-tools` (`llm read`/`llm write`) is retired; requests go to
-  `127.0.0.1:4000` (see `~/.claude/CLAUDE.md` → *Offload lane*). Two consequences: (a) unlike the old
-  CLI there is no standalone fallback — `~/.claude/llm-call.mjs` POSTs that one endpoint and exits 1 on
-  any non-2xx, so a failing offload means "start the proxy", not "the backend is broken"; (b) the model
-  must name a LiteLLM alias — `curl -s 127.0.0.1:4000/v1/models` is the authoritative roster (generated
-  into `~/.audit-code/litellm-config.yaml`; `glm-5.2` is rank 1) — never a raw NIM catalog id and never
-  `haiku`. A wrong name is loud, not silent: `HTTP 400 … Invalid model name passed in model=…`. Mind the
-  invocation shape, which differs by consumer: `llm-call.mjs` takes the alias as its FIRST POSITIONAL
-  argument (`--schema` is its only flag), while `--model <alias>` is the *worker/provider* form
-  (claude-worker, codex, agy) — so `llm-call.mjs --model glm-5.2 …` sends `model="--model"` and 400s.
+- **The free offload lane is the local `llm-relay` proxy — it must be RUNNING, and the model must be
+  NAMESPACED (LiteLLM retired 2026-07-28).** Requests go to `127.0.0.1:8791` (see `~/.claude/CLAUDE.md`
+  → *Offload lane*); start it with a bare `llm-relay`. Three consequences:
+  (a) there is no standalone fallback — `~/.claude/llm-call.mjs` POSTs that one endpoint, preflights
+  `/health`, and exits 3 when nothing is listening, so a failing offload means "start the relay", not
+  "the backend is broken".
+  (b) ⚠ **A non-namespaced model does NOT error — it silently downgrades.** The model must be
+  `<provider>/<model>` (`nim/z-ai/glm-5.2`, rank 1 at SWE-bench 42%). A bare alias — including the
+  old LiteLLM form `glm-5.2` — falls through to `routing.default`, which is
+  `nim/meta/llama-3.1-70b-instruct`: verified 2026-07-28, HTTP **200** with a plausible answer and the
+  substitution visible only in the response's `model` field. This is the opposite of the old LiteLLM
+  failure mode (a loud `HTTP 400 Invalid model name`), so the habit that was safe there is now a silent
+  quality cap. `llm-relay models [-p nim]` is the authoritative roster; routing lives in
+  `~/.llm-relay/config.json`. **Read the `model` field of the response when quality looks off.**
+  (c) invocation shape differs by consumer: `llm-call.mjs` takes the model as its FIRST POSITIONAL
+  argument, while `--model <spec>` is the *worker/provider* form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
 
 - **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance

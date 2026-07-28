@@ -247,7 +247,7 @@ its SPEC intact.
 
 ### Open tracks — in flight
 
-- Track 1 — LiteLLM → 9router migration. Infrastructure and decision are DONE; the CODE migration is 0% started, and three measured API gaps re-order the plan (re-verified 2026-07-24). · [`forward-tracks.md`](backlog/forward-tracks.md)
+- Track 1 — Proxy-catalog enrichment has no source. LiteLLM is RETIRED (2026-07-28); the local lane is now `llm-relay` on `127.0.0.1:8791`, and it serves NEITHER catalog endpoint. · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Track 2 — Ranker contract. ⚠ The "design a contract" framing is SUPERSEDED — the contract already exists and is in use. · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Track 3 — Gate-0 operator-confirmed priority order fallback (UX enhancement when no ranks exist). · [`forward-tracks.md`](backlog/forward-tracks.md)
 

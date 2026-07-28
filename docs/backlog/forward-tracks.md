@@ -9,30 +9,34 @@
 ## Open tracks
 
 
-**Track 1 — LiteLLM → 9router migration. Infrastructure and decision are DONE; the CODE migration is
-0% started, and three measured API gaps re-order the plan (re-verified 2026-07-24).**
-9router 0.5.40 is live on `127.0.0.1:20128` (176 models, 21 id prefixes, `9router-autostart` task
-Ready) and LiteLLM is confirmed retirable. But `git grep -il 9router -- src/` returns NOTHING — the
-sprint was docs + external config only ([`9router-routing-sprint-handoff-2026-07-23.md`](../reviews/9router-routing-sprint-handoff-2026-07-23.md),
-design of record [`host-routed-dispatch-design-2026-07-23.md`](../reviews/host-routed-dispatch-design-2026-07-23.md)).
-Everything still RUNS on LiteLLM: `~/.claude/llm-call.mjs:97,:115` hardcode `:4000`, two
-`~/.audit-code/sources-declared.json` entries point at `:4000`, and `proxyCatalog.ts:163` reads
-`infoObj.litellm_provider`.
-⚠ **Three gaps measured against the live 9router that the plan does not record, and (c) is a
-PREREQUISITE for (a), not a parallel task:** (1) 9router serves **no `/model/info`** — every
-`/api/*` is 401 and `/v1/models` carries only `{id,object,owned_by,capabilities}`, so
-`adaptProxyModelInfo`'s whole input (`max_input_tokens`, `input_cost_per_token`,
-`output_cost_per_token`, `mode`, `supports_tool_calls`) has NO unauthenticated 9router equivalent.
-Cost feeds costRank rung 2 — the default λ=0 operating point — and context caps feed the fit gate, so
-"re-point `proxyCatalog` at `/v1/models`" alone silently drops both. (2) There are **21** id prefixes
-(`cc/ ag/ cx/ kr/ nvidia/ gemini/ groq/ ds/ …`), not the 3 the plan names, so the models.dev mapping
-gap is ~7× wider — and it is what would have to supply the cost/context the proxy no longer
-advertises. (3) `NineRouterQuotaSource` is blocked on provisioning a key: `/api/usage` returns 401
-and the handoff records that no API key exists yet. Non-gap: `/health/liveliness` 404s, already
-covered by the existing `/v1/models` liveness fallback.
-**Property:** starting, stopping or swapping the proxy changes zero audit-tools source — so the
-migration is a re-point plus adapters, never a fork. ⚠ Do NOT hand-maintain a prefix→price table to
-close (1): that is the banned shape; map prefixes to canonical models.dev ids instead.
+**Track 1 — Proxy-catalog enrichment has no source. LiteLLM is RETIRED (2026-07-28); the local lane is
+now `llm-relay` on `127.0.0.1:8791`, and it serves NEITHER catalog endpoint.**
+The retirement itself is DONE and needed zero audit-tools source change — the property held exactly as
+predicted. Re-pointed: `~/.claude/llm-call.mjs` (now `:8791`, `/health` preflight, namespaced model
+specs), `.claude/hooks/session-start-guards.mjs` (probes `:8791/health`), and the three
+`nim-*-single-shot` entries in `~/.audit-code/sources-declared.json` (verified 2026-07-28: all three
+route to their intended model, no downgrade). Backup: `sources-declared.json.bak-pre-litellm-retirement`.
+
+⚠ **What is now OPEN is the same gap (1) previously measured against 9router — it applies to llm-relay
+too (measured 2026-07-28).** llm-relay returns 404 for `/v1/models`, `/model/info` AND
+`/health/liveliness` ("path not supported for an openai backend"); it fronts its registry on `/registry`
+and `/telemetry` instead. So `adaptProxyModelInfo`'s whole input (`max_input_tokens`,
+`input_cost_per_token`, `output_cost_per_token`, `mode`, `supports_tool_calls`) has no source, and the
+roster cannot be enumerated at all. Cost feeds costRank rung 2 (the default λ=0 operating point) and
+context caps feed the fit gate, so both silently degrade.
+**Consequence already applied:** the generic `proxy` auto-discovery block was REMOVED from
+`sources-declared.json` — against llm-relay it can only ever drop itself with
+`GET …/v1/models returned no models or was unreachable`. The lane is now carried entirely by the three
+explicit per-model sources. Discovery is what regressed; dispatch is unaffected.
+**Non-gap:** the degradation is graceful and reasoned, not a crash — `populateProxyCatalog` never throws
+(`{written:false, reason}`), `/model/info` 404 degrades to roster-only, and the dropped lane surfaces a
+named reason.
+**The decision this track now needs:** whether to teach `proxyCatalog` an llm-relay `/registry` adapter,
+map prefixes to canonical models.dev ids for the cost/context half, or accept explicit-source-only
+declaration and delete the discovery path. ⚠ Do NOT hand-maintain a prefix→price table to close this —
+that is the banned shape.
+**Property (still holds):** starting, stopping or swapping the proxy changes zero audit-tools source —
+so any migration is a re-point plus adapters, never a fork.
 
 <details><summary>Superseded: original LiteLLM stand-up + validation scope (2026-07-18, kept for the endpoint contract it names)</summary>
 
