@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 146 entr(y/ies) indexed.
+> and at commit). 147 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -85,32 +85,33 @@
 - `open-bugs.md:699` — Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).
 - `open-bugs.md:701` — Accept-latch — two low residuals stay open.
 - `open-bugs.md:709` — Node-worktree guard — accepted residuals only (each low, on-evidence-only).
-- `open-bugs.md:711` — Twelve settled nightly answers were never executed, and the queue reports them as closed (2026-07-28, medium, tool-should-decide).
-- `open-bugs.md:731` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:757` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:774` — Friction walk (inline-api_key retirement lap, 2026-07-26):
-- `open-bugs.md:786` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:800` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:821` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:833` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
-- `open-bugs.md:844` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
-- `open-bugs.md:867` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
-- `open-bugs.md:888` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
-- `open-bugs.md:892` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
-- `open-bugs.md:914` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
-- `open-bugs.md:927` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
-- `open-bugs.md:946` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
-- `open-bugs.md:955` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
-- `open-bugs.md:972` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:998` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:1015` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
-- `open-bugs.md:1029` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1051` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1066` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1080` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1099` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1121` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
-- `open-bugs.md:1129` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:711` — Name the two test-enforced traps that are now deletable (2026-07-28, low).
+- `open-bugs.md:722` — Twelve settled nightly answers were never executed, and the queue reports them as closed (2026-07-28, medium, tool-should-decide).
+- `open-bugs.md:742` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:768` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:785` — Friction walk (inline-api_key retirement lap, 2026-07-26):
+- `open-bugs.md:797` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:811` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:832` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:844` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
+- `open-bugs.md:855` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
+- `open-bugs.md:878` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
+- `open-bugs.md:899` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
+- `open-bugs.md:903` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
+- `open-bugs.md:925` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
+- `open-bugs.md:938` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
+- `open-bugs.md:957` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
+- `open-bugs.md:966` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
+- `open-bugs.md:983` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:1009` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:1026` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
+- `open-bugs.md:1040` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1062` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1077` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1091` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1110` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1132` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
+- `open-bugs.md:1140` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -143,48 +144,48 @@
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 
-- `durable-traps.md:13` — A local test RED can be an ambient-PATH artifact, not a regression.
-- `durable-traps.md:20` — agy's headless lane is INERT until `~/.gemini/antigravity-cli/settings.json` grants tool permissions — and the grammar is `tool(target)` (verified live 2026-07-25).
-- `durable-traps.md:33` — A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).
-- `durable-traps.md:41` — An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).
-- `durable-traps.md:47` — Never delete from a backlog file by LINE NUMBER.
-- `durable-traps.md:53` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
-- `durable-traps.md:77` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
-- `durable-traps.md:85` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
-- `durable-traps.md:94` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
-- `durable-traps.md:103` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
-- `durable-traps.md:110` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
-- `durable-traps.md:118` — Global `fetch` cannot outlast a long reasoning call — undici's 300s `headersTimeout` is measured to the FIRST byte and `globalThis.fetch` cannot be told otherwise (2026-07-20, low; remedy corrected 2026-07-24).
-- `durable-traps.md:137` — `$TMPDIR` is UNSET in the Bash tool, so `"$TMPDIR/x"` writes to the shell's install dir (2026-07-25, low).
-- `durable-traps.md:143` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
-- `durable-traps.md:154` — `codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate, not by each spawn site.
-- `durable-traps.md:166` — A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).
-- `durable-traps.md:179` — The free offload lane is the local `llm-relay` proxy — it must be RUNNING, and the model must be NAMESPACED (LiteLLM retired 2026-07-28).
-- `durable-traps.md:197` — After an unattended run, `git diff` the tracked docs before committing.
-- `durable-traps.md:210` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
-- `durable-traps.md:232` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:238` — A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.
-- `durable-traps.md:246` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
-- `durable-traps.md:263` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
-- `durable-traps.md:274` — Remediate-code worktree branches strand commits off main.
-- `durable-traps.md:276` — `.gitignore` artifact-tree re-include structure (don't flatten it).
-- `durable-traps.md:284` — Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`
-- `durable-traps.md:289` — Wall-clock peak-concurrency tests are latency-fragile.
-- `durable-traps.md:304` — One test runner: vitest
-- `durable-traps.md:318` — Don't mask the test exit code with a REDIRECT.
-- `durable-traps.md:326` — Global `-g` install BLOCKS `postinstall`
-- `durable-traps.md:336` — A global junction to a LIVE working tree silently shadows a registry install.
-- `durable-traps.md:342` — PowerShell
-- `durable-traps.md:352` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
-- `durable-traps.md:368` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
-- `durable-traps.md:383` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
-- `durable-traps.md:390` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
-- `durable-traps.md:395` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:406` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
-- `durable-traps.md:408` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:410` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:418` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:426` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:16` — A local test RED can be an ambient-PATH artifact, not a regression.
+- `durable-traps.md:23` — agy's headless lane is INERT until `~/.gemini/antigravity-cli/settings.json` grants tool permissions — and the grammar is `tool(target)` (verified live 2026-07-25).
+- `durable-traps.md:36` — A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).
+- `durable-traps.md:44` — An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).
+- `durable-traps.md:50` — Never delete from a backlog file by LINE NUMBER.
+- `durable-traps.md:56` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
+- `durable-traps.md:80` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
+- `durable-traps.md:88` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
+- `durable-traps.md:97` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
+- `durable-traps.md:106` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
+- `durable-traps.md:113` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
+- `durable-traps.md:121` — Global `fetch` cannot outlast a long reasoning call — undici's 300s `headersTimeout` is measured to the FIRST byte and `globalThis.fetch` cannot be told otherwise (2026-07-20, low; remedy corrected 2026-07-24).
+- `durable-traps.md:140` — `$TMPDIR` is UNSET in the Bash tool, so `"$TMPDIR/x"` writes to the shell's install dir (2026-07-25, low).
+- `durable-traps.md:146` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
+- `durable-traps.md:157` — `codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate, not by each spawn site.
+- `durable-traps.md:172` — A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).
+- `durable-traps.md:185` — The free offload lane is the local `llm-relay` proxy — it must be RUNNING, and the model must be NAMESPACED (LiteLLM retired 2026-07-28).
+- `durable-traps.md:203` — After an unattended run, `git diff` the tracked docs before committing.
+- `durable-traps.md:216` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
+- `durable-traps.md:238` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
+- `durable-traps.md:244` — A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.
+- `durable-traps.md:252` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
+- `durable-traps.md:269` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
+- `durable-traps.md:280` — Remediate-code worktree branches strand commits off main.
+- `durable-traps.md:282` — `.gitignore` artifact-tree re-include structure (don't flatten it).
+- `durable-traps.md:290` — Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`
+- `durable-traps.md:295` — Wall-clock peak-concurrency tests are latency-fragile.
+- `durable-traps.md:310` — One test runner: vitest
+- `durable-traps.md:324` — Don't mask the test exit code with a REDIRECT.
+- `durable-traps.md:332` — Global `-g` install BLOCKS `postinstall`
+- `durable-traps.md:342` — A global junction to a LIVE working tree silently shadows a registry install.
+- `durable-traps.md:348` — PowerShell
+- `durable-traps.md:358` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
+- `durable-traps.md:374` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
+- `durable-traps.md:389` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
+- `durable-traps.md:396` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
+- `durable-traps.md:401` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
+- `durable-traps.md:412` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
+- `durable-traps.md:414` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:416` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:424` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:432` — An untypechecked fixture can sit inert for months while its suite reads green.
 
 <!-- END GENERATED SEEK INDEX -->
 

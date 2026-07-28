@@ -177,9 +177,15 @@ instead of a rewrite. Trivial mechanical edits skip it.
 - **PowerShell JSON generation is statement-safe.** Assign `foreach` output to a var first, then pipe to `ConvertTo-Json`.
 - **Extractors emit stable, content-derived array order.** Any artifact array field must be ordered by a stable key derived from content (e.g. path-sort), never filesystem / `readdir` / iteration order. `stableStringify` preserves array order, so an incidentally-ordered array silently churns the artifact's content hash on every re-extraction → cascades phantom staleness down the dependency DAG → redundant (expensive) downstream LLM re-runs. Any new extractor emitting an incidentally-ordered array is a latent churn source.
 - **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits.
-- **Durable traps are hook-enforced, not remembered.** A trap that can be detected at a tool call is refused
-  there, and its backlog entry is DELETED rather than restated (two copies decay independently; the guard
-  states the trap and the fix when it fires). Current guards in `.claude/hooks/`:
+- **Durable traps are MECHANICALLY enforced, not remembered.** A trap that can be enforced is enforced,
+  and its backlog entry is DELETED rather than restated (two copies decay independently; the mechanism
+  states the trap and the fix when it fires). Enforcement is a **hook** when the trap is detectable at a
+  tool call, and a **contract test** when it is instead a property of the tree — a test is equally
+  binding and equally self-describing, so it earns the same deletion. A trap enforced only *partly* is
+  NOT deletable: state the uncovered half outright, or the covered half reads as a close (two live
+  examples in [`durable-traps.md`](docs/backlog/durable-traps.md) — direct `child_process.spawn` calls
+  bypassing the stdin-closing substrate, and the 419 `.mjs` test files `checkJs:false` excludes from
+  `check:tests`). Current guards in `.claude/hooks/`:
   `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
   `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and
   `mktemp`; a live backtick, which command-substitutes inside double quotes too, so markdown backticks in a

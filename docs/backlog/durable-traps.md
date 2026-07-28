@@ -6,9 +6,12 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-A trap that can be detected at a tool call is enforced by a hook in `.claude/hooks/` and its
-entry is DELETED here rather than restated: two copies decay independently, and the guard states
-the trap and the fix when it fires.
+A trap that can be MECHANICALLY enforced is enforced, and its entry is DELETED here rather than
+restated: two copies decay independently, and the mechanism states the trap and the fix when it
+fires. Enforcement is a hook in `.claude/hooks/` when the trap is detectable at a tool call, and a
+contract test when it is a property of the tree instead — a test is equally binding and equally
+self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
+*partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
 - **A local test RED can be an ambient-PATH artifact, not a regression.** `INV-shared-core-14`
   stubbed only two provider constructors while auto-resolution walks the real `PATH`, so it passed in CI
@@ -157,11 +160,14 @@ the trap and the fix when it fires.
   and it closes stdin on both branches: `stdio[0]` is `"ignore"` when no `stdinText` is supplied, and a
   pipe that is `.end()`ed immediately when one is. Every CLI provider — codex, claude-code, claude-worker,
   agy, opencode, worker-command, subprocess-template — routes through it, so no provider carries (or
-  needs) stdin handling of its own. The failure mode returns only if new code calls `child_process.spawn`
-  directly, because Node's default stdio leaves the child's stdin an open pipe → the silent
-  exit-0/empty-output hang. Weak spot: only the `stdinText` pipe branch is asserted in
-  `tests/shared/spawnLoggedCommand.test.mjs`; the `"ignore"` default — the branch a `worker_command` of
-  `["codex","exec",…]` actually takes — has no test.
+  needs) stdin handling of its own.
+  ⚠ **HALF-CLOSED, and the open half is the likelier one.** Nothing prevents new code from calling
+  `child_process.spawn` DIRECTLY, where Node's default stdio leaves the child's stdin an open pipe →
+  the silent exit-0/empty-output hang. Routing through the substrate is a convention here, not an
+  enforced invariant: no gate refuses a direct spawn in `src/`. And only the `stdinText` pipe branch
+  is asserted in `tests/shared/spawnLoggedCommand.test.mjs` — the `"ignore"` default, which is the
+  branch a `worker_command` of `["codex","exec",…]` actually takes, has no test. So the substrate is
+  correct and unproven, and bypassing it is undetected.
 
 - **A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).**
   `~/.audit-code/sources-declared.json` is operator-authored machine config that no repo test ever reads
@@ -429,6 +435,10 @@ the trap and the fix when it fires.
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
+  ⚠ **HALF-CLOSED — `check:tests` reaches 141 of 560 test files.** `tsconfig.test.json` sets
+  `checkJs: false`, which silently excludes every `.mjs` test, so the sweep that found those fixtures
+  could only ever have found them in the `.ts` quarter of the tree. The remaining 419 files carry the
+  same class, undetected. Do not read "the test tree is typechecked now" as closed.
 
 ## Doc-set hygiene (enforced)
 

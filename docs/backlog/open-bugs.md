@@ -708,6 +708,17 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
+- **Name the two test-enforced traps that are now deletable (2026-07-28, low).** The deletion rule in
+  `CLAUDE.md` and [`durable-traps.md`](durable-traps.md) is rephrased to cover test-enforcement as well
+  as hook-enforcement, and the two half-closed claims are narrowed — but the settled answer also called
+  for DELETING the two entries that a contract test now fully enforces, and those two were not
+  identified with enough confidence to remove. Deleting the wrong trap destroys knowledge that is
+  expensive to re-derive, so nothing was removed.
+  **Property:** an entry deleted as "enforced" must name the enforcing hook or test, so the claim is
+  checkable at deletion time instead of resting on the deleter's recall. Do this by walking
+  `tests/shared/hook-trap-guards.test.mjs` and `tests/shared/hook-session-gates.test.mjs` case by case
+  and matching each against the trap entry it closes; a trap with no matching case stays.
+
 - **Twelve settled nightly answers were never executed, and the queue reports them as closed
   (2026-07-28, medium, tool-should-decide).** `answer.mjs --list` reported "No open nightly items"
   while only 2 of 18 determinations settled 17:39–17:47 had landed. `settled` is written the moment
