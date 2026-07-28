@@ -815,3 +815,26 @@ an explicit decision, not a mechanical merge:
 Every loop-core commit (`src/shared/loopCorePaths.ts` covers `contractPipeline.ts`, `nextStep.ts`,
 `src/shared/dispatch/`, `src/audit/orchestrator/rollingDispatch.ts`) needs a fresh, staged-tree-bound
 review attestation.
+
+---
+
+## Tracking
+
+**This report is the map, not the edit — nothing in it has been applied.**
+
+It has no entry in the program of record yet. `docs/backlog/forward-tracks.md` is its home, and the
+entry should be ONE line pointing here, never a restatement of the findings (the backlog carries a
+per-entry size budget, and a second copy of a 9,400-line analysis would decay against this one).
+
+It was deliberately not added on 2026-07-28: a concurrent session was mid-refactor of
+`scripts/shared/generate-handoff-roadmap.mjs`, changing the generated section from *every open item*
+to *`▶`-pinned entries only*. Adding a backlog entry forces a `docs/HANDOFF.md` regeneration, which
+would have overwritten that in-flight work with the old generator's output. **Add the entry once
+that refactor lands** — and pin it with `▶` only if it is genuinely the next thing to do.
+
+⚠ Two claims elsewhere in the repo are FALSE against HEAD and are corrected by this review; fix them
+whether or not the deletions happen:
+- `docs/backlog/forward-tracks.md` asserts the F3/O3/F4 emit-validate-repair seam is live. It has
+  zero importers in `src/` (§2.1).
+- `CLAUDE.md:129` documents `resolveHostConcurrencyLimit` as dispatch concurrency machinery. It has
+  zero call sites in `src/` — definition, one unconsumed re-export, and its own tests.
