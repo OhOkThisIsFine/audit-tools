@@ -375,49 +375,63 @@
     "answer": "The generator should revert to immediate-next-only. If there is no immediate-next priority item, then the handoff should be empty.",
     "subject": "Instruction-file edit: CLAUDE.md still orders HANDOFF kept \"immediate-next-only\", but the generator that owns HANDOFF makes it the all-open roadmap",
     "path": "CLAUDE.md",
-    "decided_at": "2026-07-28T17:39:03.398Z"
+    "decided_at": "2026-07-28T17:39:03.398Z",
+    "completed_at": "2026-07-28T20:22:57.776Z",
+    "completed_ref": "8bb3652b — HANDOFF generator is pinned-only"
   },
   "5d3d0f461dbf6b69": {
     "disposition": "settled",
     "answer": "Investigate which choice (add the row to the table, or change the code so the acquisition executor is not a second writer) makes the most sense with the code, and with the project's philosophy. As you've presented the question, I don't know enough to decide.",
     "subject": "Normative dependency map: the producer table is missing a writer its own prose says exists",
     "path": "spec/audit/dependency-map.md",
-    "decided_at": "2026-07-28T17:40:25.794Z"
+    "decided_at": "2026-07-28T17:40:25.794Z",
+    "completed_at": "2026-07-28T20:22:57.118Z",
+    "completed_ref": "f83f97a0 — producer table names the acquisition executor"
   },
   "1daf3cce50e2c28f": {
     "disposition": "settled",
     "answer": "Rewrite the passage.",
     "subject": "Normative dispatch spec still describes an audit/remediate asymmetry that a shared hoist removed",
     "path": "spec/audit/dispatch-admission-control.md",
-    "decided_at": "2026-07-28T17:40:46.399Z"
+    "decided_at": "2026-07-28T17:40:46.399Z",
+    "completed_at": "2026-07-28T20:22:57.168Z",
+    "completed_ref": "c396a99f — asymmetry passage rewritten"
   },
   "dc1adfdb187ddff6": {
     "disposition": "settled",
     "answer": "Fix them together with the check:doc-links gate.",
     "subject": "Five dead relative links at HEAD — three of them created by last run's own doc moves, and a ready-to-apply gate would end the class",
     "path": "spec/backlog-remediation-design.md",
-    "decided_at": "2026-07-28T17:41:07.228Z"
+    "decided_at": "2026-07-28T17:41:07.228Z",
+    "completed_at": "2026-07-28T20:22:57.220Z",
+    "completed_ref": "3414181c — check-doc-links gate + all 8 dead links fixed"
   },
   "63a1c1c696e70e11": {
     "disposition": "settled",
     "answer": "Fix this.",
     "subject": "One-word path fix: the adapters live under src/audit/adapters, not src/adapters",
     "path": "spec/contract-authoring-determinism-design.md",
-    "decided_at": "2026-07-28T17:41:21.405Z"
+    "decided_at": "2026-07-28T17:41:21.405Z",
+    "completed_at": "2026-07-28T20:22:57.269Z",
+    "completed_ref": "17ab9acd — src/adapters -> src/audit/adapters"
   },
   "5de3d8979dda42dc": {
     "disposition": "settled",
     "answer": "De-status to timeless.",
     "subject": "Status-noise in two specs: dated \"fixed on <date>\" fragments in docs that are supposed to be timeless",
     "path": "spec/backend-identity-axes.md",
-    "decided_at": "2026-07-28T17:41:36.977Z"
+    "decided_at": "2026-07-28T17:41:36.977Z",
+    "completed_at": "2026-07-28T20:22:57.318Z",
+    "completed_ref": "17ab9acd — de-statused to the timeless rule"
   },
   "7c5c3ad211b90208": {
     "disposition": "settled",
     "answer": "We should either fold it into release.md or move it to a non-spec home. Whichever makes the most sense with the rest of the project.",
     "subject": "Existence review: spec/host-validation.md is a per-release checklist to fill in, not a durable design",
     "path": "spec/host-validation.md",
-    "decided_at": "2026-07-28T17:42:25.838Z"
+    "decided_at": "2026-07-28T17:42:25.838Z",
+    "completed_at": "2026-07-28T20:22:57.368Z",
+    "completed_ref": "f83f97a0 — folded into docs/audit-pkg/release.md"
   },
   "f35c57a582cf8074": {
     "disposition": "settled",
@@ -431,35 +445,45 @@
     "answer": "Fix them.",
     "subject": "Status-noise cluster: an entry that opens \"No longer deferred\" is still in the deferred file, and a 40-line closed-tail wraps one line of work",
     "path": "docs/backlog/deferred.md",
-    "decided_at": "2026-07-28T17:42:57.261Z"
+    "decided_at": "2026-07-28T17:42:57.261Z",
+    "completed_at": "2026-07-28T20:22:57.418Z",
+    "completed_ref": "17ab9acd — A2 moved deferred -> forward-tracks, de-statused"
   },
   "a1cb3f0b9aaccc8d": {
     "disposition": "settled",
     "answer": "Drop bare line numbers. Repair by pointing them at the appropriate symbols.",
     "subject": "Citation policy: line numbers across the backlog have drifted repo-wide while symbol names still resolve — hand-bumping them is a treadmill",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-28T17:43:26.612Z"
+    "decided_at": "2026-07-28T17:43:26.612Z",
+    "completed_at": "2026-07-28T20:22:57.469Z",
+    "completed_ref": "c396a99f — 77 bare line numbers dropped across all four backlog files"
   },
   "4d15fb0f3aa75c88": {
     "disposition": "settled",
     "answer": "Yes, and rephrase the rule.",
     "subject": "Two traps are now test-enforced — but the deletion rule says \"detected at a tool call\", and a test is not that",
     "path": "docs/backlog/durable-traps.md",
-    "decided_at": "2026-07-28T17:43:51.065Z"
+    "decided_at": "2026-07-28T17:43:51.065Z",
+    "completed_at": "2026-07-28T20:22:57.521Z",
+    "completed_ref": "4fc9feaa — rule rephrased to mechanical enforcement"
   },
   "61a3cda2c52b91ae": {
     "disposition": "settled",
     "answer": "Confirmed. Narrow.",
     "subject": "Two \"this is guarded now\" claims are half-closes — the uncovered halves are direct spawns and the 419 untypechecked test files",
     "path": "docs/backlog/durable-traps.md",
-    "decided_at": "2026-07-28T17:44:07.162Z"
+    "decided_at": "2026-07-28T17:44:07.162Z",
+    "completed_at": "2026-07-28T20:22:57.571Z",
+    "completed_ref": "4fc9feaa — both half-closes narrowed"
   },
   "08b89354e0699713": {
     "disposition": "settled",
     "answer": "Approved.",
     "subject": "Ready to apply: a link-resolution gate with tests, catching 100% of a class that has recurred on three dates — including three links last run created itself",
     "path": "scripts/check-doc-links.mjs",
-    "decided_at": "2026-07-28T17:44:20.896Z"
+    "decided_at": "2026-07-28T17:44:20.896Z",
+    "completed_at": "2026-07-28T20:22:57.620Z",
+    "completed_ref": "3414181c — gate built, wired, 21 tests"
   },
   "7773a4ad11a40762": {
     "disposition": "settled",
@@ -473,20 +497,26 @@
     "answer": "Yes, change it.",
     "subject": "The offload helper only reads --schema in leading position — put it anywhere else and the call silently runs unschema'd",
     "path": "~/.claude/llm-call.mjs",
-    "decided_at": "2026-07-28T17:45:11.707Z"
+    "decided_at": "2026-07-28T17:45:11.707Z",
+    "completed_at": "2026-07-28T20:22:57.671Z",
+    "completed_ref": "llm-call.mjs — flags accepted in any position, -- terminator, unknown flag refused"
   },
   "aa66ed41f0e624e7": {
     "disposition": "settled",
     "answer": "Yes, go ahead.",
     "subject": "A dropped dispatch lane is a stderr line, not a value — the strongest recurrence in the store, and the fix already exists on the sibling path",
     "path": "src/shared/quota/apiPool.ts",
-    "decided_at": "2026-07-28T17:46:31.658Z"
+    "decided_at": "2026-07-28T17:46:31.658Z",
+    "completed_at": "2026-07-28T20:22:57.723Z",
+    "completed_ref": "b693ae94 — {sources,dropped}; design-check run + attested"
   },
   "b8324f01711c7d84": {
     "disposition": "settled",
     "answer": "Clarify this one for me. The local offload proxy shouldn't need to be serialized. Only NIM has been giving us issues, but other dispatch targets don't need to be serialized, unless I'm missing something.",
     "subject": "The offload lane is strictly serial by convention only — a concurrent fan-out returns schema-valid empty documents",
     "path": "~/.claude/CLAUDE.md",
-    "decided_at": "2026-07-28T17:47:35.636Z"
+    "decided_at": "2026-07-28T17:47:35.636Z",
+    "completed_at": "2026-07-28T20:22:57.826Z",
+    "completed_ref": "narrowed in project memory: serialization is per-BACKEND (NIM), not lane-wide"
   }
 }

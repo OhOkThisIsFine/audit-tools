@@ -42,8 +42,10 @@ const ANCHORED_ENTRIES = [
       {
         // Re-pointed when inline `api_key` was RETIRED: the entry used to cite the
         // refusal comment, but deleting the shape does not build the quarantine, so the
-        // anchor now names the comment that states the gap that actually remains.
-        token: "src/shared/providers/auditorSources.ts:456-458",
+        // evidence below names the comment that states the gap that actually remains.
+        // The token lost its line range when line numbers were retired from the backlog;
+        // the `evidence` regexes are what pin the claim now.
+        token: "src/shared/providers/auditorSources.ts",
         evidence: [
           /That does NOT close the quarantine gap itself/,
           /key was revoked or whose[\s\S]{0,32}endpoint died still verifies here/,
@@ -133,17 +135,25 @@ function sourceFilesMentioning(pattern) {
   return hits.sort();
 }
 
-/** The source text a `path:from-to` citation token points at, 1-indexed and inclusive. */
+/**
+ * The source text a citation token points at.
+ *
+ * Tokens are FILE paths, not `path:from-to` ranges. Line numbers were retired from
+ * the backlog (owner decision, 2026-07-28): they drifted repo-wide while the symbol
+ * names beside them still resolved, so bumping them by hand was a treadmill that
+ * bought nothing. The property this file guards is unchanged, and it is the part
+ * that mattered — a citation must point at code that still says what the entry
+ * claims — so the evidence is matched against the whole cited FILE. That is
+ * strictly more robust: an edit ABOVE the claim can no longer break the anchor,
+ * while an edit that DELETES the claim still fails, which is the case worth having.
+ */
 function citedRange(token) {
-  const m = /^(.+):(\d+)-(\d+)$/.exec(token);
-  expect(m, `"${token}" is not a path:from-to citation`).not.toBeNull();
-  const [, path, from, to] = m;
-  const lines = readFileSync(join(REPO_ROOT, path), "utf8").split(/\r?\n/);
   expect(
-    lines.length,
-    `${path} has ${lines.length} lines — the citation's range ends past the end of the file.`,
-  ).toBeGreaterThanOrEqual(Number(to));
-  return lines.slice(Number(from) - 1, Number(to)).join("\n");
+    /^[^:]+$/.test(token),
+    `"${token}" carries a line suffix — a backlog citation names a file (and a symbol ` +
+      `in prose), never a line range. See docs/backlog/durable-traps.md.`,
+  ).toBe(true);
+  return readFileSync(join(REPO_ROOT, token), "utf8");
 }
 
 describe("a backlog entry's code citation still points at the code it cites", () => {

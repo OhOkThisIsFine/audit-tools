@@ -264,11 +264,28 @@ Answer with the buttons in `npm run nightly:review`, or from a shell:
 ```bash
 node scripts/nightly/answer.mjs <ID> "the answer"      # settle it
 node scripts/nightly/answer.mjs <ID> --wontfix "why"   # settle as not-doing
-node scripts/nightly/answer.mjs --list                 # open ids
+node scripts/nightly/answer.mjs <ID> --question "..."  # an answer that asks BACK — stays open
+node scripts/nightly/answer.mjs --done <KEY> "<ref>"   # the answered work LANDED
+node scripts/nightly/answer.mjs --list                 # unanswered + answered-but-not-done
 ```
 
 Rules that make the ledger trustworthy:
 
+- **ANSWERED is not DONE, and `--list` reports both.** Settling records the
+  owner's REPLY; it does not claim the work exists. Mark the work landed
+  separately with `--done <subject-key> "<commit|note>"`. This is the defect that
+  made twelve answers invisible on 2026-07-28 — `--list` said "No open nightly
+  items" while none of their work was in the tree, and a settled subject is never
+  re-raised, so nothing would ever have surfaced them again.
+- **An answer that asks a question BACK is not an answer** — record it with
+  `--question` and the item stays open. Two of that night's eighteen were exactly
+  this shape, filed as settled, which made them unaskable while carrying nothing
+  executable.
+- **Subjects answered before 2026-07-28 are grandfathered** — completion tracking
+  did not exist, so their landing state is unknown by construction. `--list`
+  COUNTS them and does not enumerate them: reporting ~50 unknowable subjects as
+  outstanding would be a false RED, which trains the reader to skip the list
+  exactly like the false GREEN it replaced.
 - **An answer is mandatory.** An empty settle would suppress a question while
   recording nothing about why — the shape that makes a ledger useless a month
   later.

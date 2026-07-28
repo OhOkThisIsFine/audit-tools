@@ -81,16 +81,76 @@ export function readDecisions(root) {
 export function recordDecision(root, key, { answer, disposition, subject, path, note } = {}) {
   if (!key) throw new Error('recordDecision: a subject key is required');
   const decisions = readDecisions(root);
+  const prior = decisions[key];
   decisions[key] = {
     disposition: disposition || 'settled',
     answer: answer ?? '',
-    subject: subject ?? decisions[key]?.subject ?? '',
-    path: path ?? decisions[key]?.path ?? '',
+    subject: subject ?? prior?.subject ?? '',
+    path: path ?? prior?.path ?? '',
     ...(note ? { note } : {}),
+    // Completion is carried forward, never reset by a re-answer: an owner
+    // clarifying an answer must not silently un-land work that already shipped.
+    ...(prior?.completed_at ? { completed_at: prior.completed_at, completed_ref: prior.completed_ref ?? '' } : {}),
     decided_at: new Date().toISOString(),
   };
   writeJson(decisionsPath(root), decisions);
   return decisions;
+}
+
+/**
+ * Mark a settled subject's WORK as landed. Separate from `recordDecision`
+ * because answering and doing are separate acts, and conflating them is what
+ * made twelve answered items invisible on 2026-07-28: `--list` reported "No
+ * open nightly items" while none of their work existed.
+ *
+ * `ref` is whatever makes the claim checkable later — a commit sha, a PR, or a
+ * short "verified already true at HEAD".
+ */
+export function recordCompletion(root, key, ref) {
+  const decisions = readDecisions(root);
+  const entry = decisions[key];
+  if (!entry) throw new Error(`recordCompletion: no settled subject "${key}"`);
+  decisions[key] = {
+    ...entry,
+    completed_at: new Date().toISOString(),
+    completed_ref: String(ref ?? '').trim(),
+  };
+  writeJson(decisionsPath(root), decisions);
+  return decisions;
+}
+
+// Completion tracking began on this date. Everything settled BEFORE it has no
+// completion record and never could have — its work may well have shipped. Those
+// are reported as a count, not enumerated: listing 70 unknowable subjects as
+// outstanding is a false RED, which trains the reader to skip the list exactly
+// like the false GREEN it replaced.
+export const COMPLETION_TRACKING_SINCE = '2026-07-28';
+
+/**
+ * Subjects the owner has ANSWERED but whose work is not recorded as landed —
+ * the class the ledger used to hide entirely.
+ *
+ * `wontfix` and `question` are excluded for opposite reasons: a wontfix has no
+ * work to land by definition, and a `question` was never an answer at all — it
+ * stays in the open list instead.
+ *
+ * Returns `{ actionable, grandfathered }`: actionable was settled under
+ * completion tracking and genuinely has no landing record; grandfathered
+ * predates the mechanism and is a count only.
+ */
+export function answeredNotDone(decisions, since = COMPLETION_TRACKING_SINCE) {
+  const pending = Object.entries(decisions ?? {})
+    .filter(([, d]) => d && d.disposition === 'settled' && !d.completed_at)
+    .map(([key, d]) => ({ key, ...d }));
+  const actionable = [];
+  const grandfathered = [];
+  for (const d of pending) {
+    // Absent/unparseable `decided_at` is treated as OLD, never as actionable: a
+    // malformed record must not manufacture work.
+    const at = typeof d.decided_at === 'string' ? d.decided_at.slice(0, 10) : '';
+    (at && at >= since ? actionable : grandfathered).push(d);
+  }
+  return { actionable, grandfathered };
 }
 
 export function readOpenItems(root) {
@@ -149,7 +209,12 @@ export function partitionBySettled(items, decisions) {
   const open = [];
   const settled = [];
   for (const item of items) {
-    if (item.subject_key && decisions[item.subject_key]) settled.push(item);
+    const decision = item.subject_key ? decisions[item.subject_key] : undefined;
+    // A `question` disposition is the owner asking something BACK, not an
+    // answer — the item stays open. Recording those as settled is how two of
+    // the eighteen determinations on 2026-07-28 became unaskable while
+    // carrying no executable answer.
+    if (decision && decision.disposition !== 'question') settled.push(item);
     else open.push(item);
   }
   return { open, settled };

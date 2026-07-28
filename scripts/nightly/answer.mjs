@@ -13,9 +13,27 @@
 // Usage:
 //   node scripts/nightly/answer.mjs <ID> "the answer"      # settle one item
 //   node scripts/nightly/answer.mjs <ID> --wontfix "why"   # settle as not-doing
-//   node scripts/nightly/answer.mjs --list                 # show open ids
+//   node scripts/nightly/answer.mjs <ID> --question "..."  # an answer that asks BACK — stays open
+//   node scripts/nightly/answer.mjs --done <KEY> "<ref>"   # the answered work LANDED
+//   node scripts/nightly/answer.mjs --list                 # open ids + answered-but-not-done
 //   node scripts/nightly/answer.mjs --settled              # show settled subjects
-import { readOpenItems, readDecisions, recordDecision, partitionBySettled, DECISIONS_RELPATH } from './items.mjs';
+//
+// ⚠ ANSWERED IS NOT DONE. Settling records the owner's REPLY; it does not claim
+// the work exists. `--list` therefore reports both what is unanswered and what is
+// answered-but-unlanded. On 2026-07-28 it said "No open nightly items" while
+// twelve answers had no corresponding change anywhere in the tree, because the
+// ledger could not tell the two apart — and a settled subject is never re-raised,
+// so that work was invisible rather than merely pending.
+import {
+  readOpenItems,
+  readDecisions,
+  recordDecision,
+  recordCompletion,
+  answeredNotDone,
+  COMPLETION_TRACKING_SINCE,
+  partitionBySettled,
+  DECISIONS_RELPATH,
+} from './items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const argv = process.argv.slice(2);
@@ -34,19 +52,59 @@ if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
     'Usage:\n' +
       '  node scripts/nightly/answer.mjs <ID> "the answer"\n' +
       '  node scripts/nightly/answer.mjs <ID> --wontfix "why"\n' +
+      '  node scripts/nightly/answer.mjs <ID> --question "what you need answered"  (stays OPEN)\n' +
+      '  node scripts/nightly/answer.mjs --done <SUBJECT_KEY> "<commit|note>"\n' +
       '  node scripts/nightly/answer.mjs --list | --settled',
   );
   process.exit(0);
 }
 
 if (argv[0] === '--list') {
-  if (open.length === 0) {
-    console.log('No open nightly items.');
+  const { actionable, grandfathered } = answeredNotDone(decisions);
+  if (open.length === 0 && actionable.length === 0) {
+    console.log('No open nightly items, and every tracked answer is recorded as done.');
+    if (grandfathered.length > 0) {
+      console.log(
+        `(${grandfathered.length} answered before completion tracking began ${COMPLETION_TRACKING_SINCE} — ` +
+          `landing state unknown by construction, not asserted either way.)`,
+      );
+    }
     process.exit(0);
   }
+  console.log(`UNANSWERED (${open.length}):`);
   for (const item of open) {
-    console.log(`${item.id}\t[${item.leg}]\t${item.nights_open}n\t${item.title}`);
+    console.log(`  ${item.id}\t[${item.leg}]\t${item.nights_open}n\t${item.title}`);
   }
+  // The half the ledger used to hide entirely. Nothing re-raises these: the
+  // subject is settled, so the queue is silent about them forever.
+  if (actionable.length > 0) {
+    console.log(`\nANSWERED, NOT RECORDED AS DONE (${actionable.length}) — nothing will re-raise these:`);
+    for (const d of actionable) {
+      console.log(`  ${d.key}\t${d.path || '(no path)'}\t${(d.subject || '').slice(0, 70)}`);
+    }
+    console.log(`\nVerify each against HEAD, then: node scripts/nightly/answer.mjs --done <KEY> "<ref>"`);
+  }
+  if (grandfathered.length > 0) {
+    console.log(
+      `\n(${grandfathered.length} more were answered before completion tracking began ` +
+        `${COMPLETION_TRACKING_SINCE}; their landing state is unknown by construction and is NOT claimed. ` +
+        `Use --settled to inspect them.)`,
+    );
+  }
+  process.exit(0);
+}
+
+if (argv[0] === '--done') {
+  const key = argv[1];
+  const ref = argv.slice(2).join(' ').trim();
+  if (!key) fail('--done needs a SUBJECT KEY (see --list or --settled).');
+  if (!ref) fail('--done needs a ref: a commit sha, a PR, or "verified already true at HEAD".');
+  try {
+    recordCompletion(ROOT, key, ref);
+  } catch (err) {
+    fail(String(err.message ?? err));
+  }
+  console.log(`Marked ${key} DONE (${ref}) → ${DECISIONS_RELPATH}`);
   process.exit(0);
 }
 
@@ -75,8 +133,15 @@ if (!item) {
 
 const rest = argv.slice(1);
 const wontfixAt = rest.indexOf('--wontfix');
-const disposition = wontfixAt !== -1 ? 'wontfix' : 'settled';
-const answer = (wontfixAt !== -1 ? rest.slice(wontfixAt + 1) : rest).join(' ').trim();
+// `--question` is an answer that asks something BACK. It is recorded (so the
+// exchange is not lost) but does NOT settle the subject, because there is nothing
+// executable in it — `partitionBySettled` keeps it in the open list. Two of the
+// eighteen determinations on 2026-07-28 were exactly this shape and were filed as
+// `settled`, which made them unaskable while carrying no answer anyone could act on.
+const questionAt = rest.indexOf('--question');
+const flagAt = wontfixAt !== -1 ? wontfixAt : questionAt;
+const disposition = wontfixAt !== -1 ? 'wontfix' : questionAt !== -1 ? 'question' : 'settled';
+const answer = (flagAt !== -1 ? rest.slice(flagAt + 1) : rest).join(' ').trim();
 
 if (!answer) {
   // An empty answer would suppress the question while recording nothing about
@@ -94,6 +159,13 @@ recordDecision(ROOT, item.subject_key, {
   path: item.path,
 });
 
-console.log(`Settled ${item.id} (${disposition}) → ${DECISIONS_RELPATH}`);
+console.log(`Recorded ${item.id} (${disposition}) → ${DECISIONS_RELPATH}`);
 console.log(`  subject: ${item.path || '(no path)'} — ${item.title}`);
-console.log('  This subject will not be raised again unless the underlying prose changes.');
+if (disposition === 'question') {
+  console.log('  STAYS OPEN: a counter-question is not an answer, so the item is still raised.');
+} else if (disposition === 'wontfix') {
+  console.log('  This subject will not be raised again unless the underlying prose changes.');
+} else {
+  console.log('  This subject will not be raised again unless the underlying prose changes.');
+  console.log(`  ⚠ Not yet DONE — --list keeps showing it until: --done ${item.subject_key} "<ref>"`);
+}
