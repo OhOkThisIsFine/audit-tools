@@ -284,7 +284,7 @@ export async function buildConfirmedPools(input: {
   // the IDENTICAL pool shapes — the spill topology can't drift. `primaryProviderName`
   // is the ACTUAL configured backend so the unconditional primary fold builds the
   // source for the real provider; remediate's draw admits command-shaped primaries.
-  const { pools: sourcePools, zeroedByExclusion } = await buildSourcePools({
+  const { pools: sourcePools, zeroedByExclusion, dropped } = await buildSourcePools({
     sessionConfig,
     primaryProviderName: actualProviderName,
     quotaSource,
@@ -297,7 +297,7 @@ export async function buildConfirmedPools(input: {
   // Headless: no host pool in the eligible set — the engine drives the source pools.
   // This is the branch where a zeroing is FATAL rather than degrading (there is no
   // host to fall back to), so the fact must survive the early return.
-  if (input.hostCanDispatch === false) return { pools: sourcePools, zeroedByExclusion };
+  if (input.hostCanDispatch === false) return { pools: sourcePools, zeroedByExclusion, dropped };
 
   // D1 cross-class dedup: a folded source colliding with the host's pool identity
   // (same provider+account — attended provider=codex=host) keeps exactly ONE pool.
@@ -307,7 +307,7 @@ export async function buildConfirmedPools(input: {
     // Remediate policy: command-shaped workers are engine-drivable here (H3).
     commandWorkers: true,
   });
-  return { pools: [...dedup.hostPools, ...dedup.sourcePools], zeroedByExclusion };
+  return { pools: [...dedup.hostPools, ...dedup.sourcePools], zeroedByExclusion, dropped };
 }
 
 export async function buildDispatchQuota(

@@ -98,13 +98,13 @@ describe("Gate-0 fold — expanded claude-worker sources reach the roster on the
   });
 
   it("gatherDispatchableSources folds every expanded source (what routes = what is confirmed)", async () => {
-    const gathered = await gatherDispatchableSources(effectiveConfig(), "claude-code");
+    const { sources: gathered } = await gatherDispatchableSources(effectiveConfig(), "claude-code");
     expect(gathered).toEqual(EXPANDED);
   });
 
   it("buildProviderConfirmationRender ranks each expanded source with cost + model attributes", async () => {
     const effective = effectiveConfig();
-    const gathered = await gatherDispatchableSources(effective, "claude-code");
+    const { sources: gathered } = await gatherDispatchableSources(effective, "claude-code");
     const rendered = buildProviderConfirmationRender(
       effective,
       {},
@@ -134,7 +134,7 @@ describe("Gate-0 fold — expanded claude-worker sources reach the roster on the
   });
 
   it("deriveSourcePoolDisplayFromSources shows the expanded rows under their ids", async () => {
-    const gathered = await gatherDispatchableSources(effectiveConfig(), "claude-code");
+    const { sources: gathered } = await gatherDispatchableSources(effectiveConfig(), "claude-code");
     const display = deriveSourcePoolDisplayFromSources(gathered);
     expect(display.map((e) => e.id)).toEqual(EXPANDED.map((s) => s.id));
     expect(display[0].declared_cost_per_mtok).toBe(0);
@@ -316,7 +316,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
 
   it("promoting a confirmation built WITH the sources clears the delta (gate closure)", async () => {
     const effective = effectiveConfig();
-    const gathered = await gatherDispatchableSources(effective, "claude-code");
+    const { sources: gathered } = await gatherDispatchableSources(effective, "claude-code");
     const confirmation = buildSharedProviderConfirmation(
       effective,
       {},

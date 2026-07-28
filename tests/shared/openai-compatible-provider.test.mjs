@@ -1274,7 +1274,7 @@ test("launch refuses a contradictory keyless declaration (no_auth AND a credenti
 test("a keyless legacy openai_compatible block folds into a source that keeps no_auth", () => {
   // The reverse leg of the same bridge: block → DispatchableSource. Dropping the
   // marker here would fail the lane's reach probe and then its launch.
-  const sources = collectDispatchableSources(
+  const { sources } = collectDispatchableSources(
     {
       openai_compatible: {
         base_url: "http://127.0.0.1:4000/v1",

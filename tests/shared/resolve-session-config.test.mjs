@@ -37,7 +37,7 @@ describe("resolveSessionConfig", () => {
     expect(eff.provider).toBeUndefined();
     expect(eff.sources).toBeUndefined();
     // No dispatchable sources resolved — the driver self-drives.
-    expect(collectDispatchableSources(eff, "claude-code")).toEqual([]);
+    expect(collectDispatchableSources(eff, "claude-code").sources).toEqual([]);
   });
 
   test("self.provider → effective provider + host_provider (same attribution identity)", () => {
@@ -70,7 +70,7 @@ describe("resolveSessionConfig", () => {
     expect(eff.sources).toEqual(sources);
     // Host driver ⇒ no primary flat block reconstructed; the pool comes from sources[].
     expect(eff.openai_compatible).toBeUndefined();
-    expect(collectDispatchableSources(eff, "claude-code")).toHaveLength(1);
+    expect(collectDispatchableSources(eff, "claude-code").sources).toHaveLength(1);
     // Intent preserved.
     expect(eff.synthesis).toEqual({ narrative: false });
   });

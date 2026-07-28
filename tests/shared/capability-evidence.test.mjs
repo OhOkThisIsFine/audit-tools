@@ -745,7 +745,7 @@ describe("resolveUnevidencedCapabilityPools: the capability delta", () => {
       const { gatherDispatchableSources } = await import(
         "../../src/shared/quota/apiPool.ts"
       );
-      const gathered = await gatherDispatchableSources(
+      const { sources: gathered } = await gatherDispatchableSources(
         configWith([src(null), src("model-real")]),
         "claude-code",
       );

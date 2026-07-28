@@ -5,6 +5,7 @@ import {
   type ResolvedProviderName,
   type SessionConfig,
 } from "../types/sessionConfig.js";
+import type { DroppedSource } from "../providers/auditorSources.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
 import type { QuotaSource, QuotaProbeResult } from "./quotaSource.js";
@@ -595,6 +596,23 @@ export function primaryInProcessSource(
 }
 
 /**
+ * The gather's full answer: the lanes that route, AND the lanes that did not, each
+ * with an operator-facing reason.
+ *
+ * Deliberately the SAME shape as `resolveAmbientSources`' `ResolvedSourceSet`
+ * (`auditorSources.ts`) and reusing its `DroppedSource`, because the two apply the
+ * same `laneWorkerKindConflict` predicate at two genuinely distinct chokepoints —
+ * ambient resolution, and this one, which descriptor-supplied `sources[]` reach
+ * WITHOUT passing ambient resolution. One shape, so a consumer handles a drop
+ * identically wherever it came from.
+ */
+export interface DispatchableSourceSet {
+  sources: DispatchableSource[];
+  /** Empty when nothing was dropped — never absent, so an unwired call site cannot masquerade as a clean gather. */
+  dropped: DroppedSource[];
+}
+
+/**
  * Every dispatchable backend source configured for a run, in pool order: the explicit
  * `sessionConfig.sources`, the primary in-process backend folded in UNCONDITIONALLY
  * (H2+H4 collapse: the primary is just a source pool — there is no demote flag; which
@@ -602,12 +620,21 @@ export function primaryInProcessSource(
  * single implicit source folded in from a legacy `openai_compatible` block when it
  * isn't the primary provider and isn't already covered by an explicit source of the
  * same id.
+ *
+ * Returns the PAIR `{ sources, dropped }`, mirroring `resolveAmbientSources`
+ * (`auditorSources.ts`), which applies the same `laneWorkerKindConflict` predicate.
+ * A routing-filtered lane must be a value the caller can read, not only a stderr
+ * line: `buildSourcePools` feeds the Gate-0 confirmation display, where a dropped
+ * backend stays VISIBLE and marked so the operator can act on it — the same reason
+ * `excludedBackends` is filtered on the routing side rather than in the gather.
+ * A stderr-only report also self-suppresses after the first (lane, reason) in a
+ * process, so a second gather said nothing at all.
  */
 export function collectDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
   options?: { commandWorkers?: boolean },
-): DispatchableSource[] {
+): DispatchableSourceSet {
   const out: DispatchableSource[] = [...(sessionConfig.sources ?? [])];
   const pushUnique = (source: DispatchableSource): void => {
     const id = dispatchableSourceId(source);
@@ -634,14 +661,20 @@ export function collectDispatchableSources(
   // process cannot prove REACH for, but a structurally storm-prone lane endangers the
   // shared pool and is refused uniformly. In the inner collect, beside the `service`
   // normalize, for the same reason: both functions are exported, so filtering only in
-  // the wrapper would leave a bypass. Loud once per process per lane (stderr), never
-  // silent ([[silent-fail-closed-on-one-draw]] class).
-  const routable = out.filter((source) => {
+  // the wrapper would leave a bypass. The drop is RETURNED (never silent, and never
+  // only on stderr — [[silent-fail-closed-on-one-draw]] class); the stderr line is
+  // kept as a redundant operator signal for callers that ignore `dropped`.
+  const routable: DispatchableSource[] = [];
+  const dropped: DroppedSource[] = [];
+  for (const source of out) {
     const conflict = laneWorkerKindConflict(source);
-    if (conflict === null) return true;
+    if (conflict === null) {
+      routable.push(source);
+      continue;
+    }
+    dropped.push({ id: dispatchableSourceId(source), reason: conflict });
     warnIncompatibleLaneOnce(dispatchableSourceId(source), conflict);
-    return false;
-  });
+  }
   // Normalize `service` ONCE, here, as `declared ?? transport`. Downstream it is never
   // optional, so no consumer has to re-derive it (and none can derive it differently).
   //
@@ -654,7 +687,12 @@ export function collectDispatchableSources(
   // Deliberately in `collectDispatchableSources`, not in the `gatherDispatchableSources`
   // wrapper: both are publicly exported, so normalizing in the wrapper would leave the
   // inner function as a bypass of the invariant.
-  return routable.map((source) => (source.service ? source : { ...source, service: source.transport }));
+  return {
+    sources: routable.map((source) =>
+      source.service ? source : { ...source, service: source.transport },
+    ),
+    dropped,
+  };
 }
 
 /**
@@ -685,7 +723,7 @@ export async function gatherDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
   options?: { commandWorkers?: boolean },
-): Promise<DispatchableSource[]> {
+): Promise<DispatchableSourceSet> {
   return collectDispatchableSources(sessionConfig, primaryProviderName, options);
 }
 
@@ -714,6 +752,13 @@ export interface SourcePoolBuild {
   pools: CapacityPool[];
   /** Non-null ONLY when exclusion rules zeroed a non-empty gathered set. */
   zeroedByExclusion: ExclusionZeroing | null;
+  /**
+   * Lanes the worker-kind × pool-class rule filtered out, each with its reason.
+   * Empty when none — never absent, so an unwired consumer cannot look like a
+   * clean build. Distinct from `zeroedByExclusion`, which is the OPERATOR's own
+   * rules removing reach that existed; these lanes were never routable.
+   */
+  dropped: DroppedSource[];
 }
 
 /**
@@ -751,9 +796,11 @@ export async function buildSourcePools(params: {
   /** Confirmed per-model capability ranks — see {@link resolveDeclaredCapabilityRank}. Required (never optional): the floor fails OPEN, so an unwired call site would be indistinguishable from a working one. `null` is the explicit "no confirmation in scope" answer. */
   capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<SourcePoolBuild> {
-  const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
-    commandWorkers: params.commandWorkers,
-  });
+  const { sources: gathered, dropped } = await gatherDispatchableSources(
+    params.sessionConfig,
+    params.primaryProviderName,
+    { commandWorkers: params.commandWorkers },
+  );
   const excluded = params.excludedBackends;
   const sources = excluded
     ? gathered.filter((source) => !excluded.excludes(source))
@@ -770,6 +817,9 @@ export async function buildSourcePools(params: {
   );
   return {
     pools: foldAccountCooldownAcrossPools(pools),
+    // Carried through so the Gate-0 surface can show a routing-filtered lane the same
+    // way it shows an excluded one — VISIBLE and reasoned, not vanished.
+    dropped,
     // Computed HERE because one line later the pre-filter population is gone: this is
     // the only point in the program that can tell "the operator ruled everything out"
     // apart from "nothing was configured".

@@ -1596,7 +1596,7 @@ export async function resolveUnevidencedCapabilityPools(
     effectiveConfig,
     { env: process.env },
   );
-  const sources = await gatherDispatchableSources(
+  const { sources } = await gatherDispatchableSources(
     effectiveConfig,
     primaryProviderName,
   );

@@ -86,7 +86,7 @@ export async function buildAuditSourcePools(
   // H2+H4 collapse: the configured primary in-process backend is ALWAYS folded in as
   // a source pool (no demote flag) — audit's draw policy admits only the non-command
   // in-process workers (a read-only review packet carries no per-worker command).
-  const { pools: sourcePools, zeroedByExclusion } = await buildSourcePools({
+  const { pools: sourcePools, zeroedByExclusion, dropped } = await buildSourcePools({
     sessionConfig,
     primaryProviderName,
     quotaSource,
@@ -103,6 +103,9 @@ export async function buildAuditSourcePools(
     // Carried through UNCHANGED: the dedup below can only remove a colliding pool, it
     // can never cause the zeroing, so re-deriving the fact here would misattribute it.
     zeroedByExclusion,
+    // Likewise unchanged — a lane the worker-kind rule filtered was never a pool, so
+    // dedup cannot add or remove one.
+    dropped,
   };
 }
 

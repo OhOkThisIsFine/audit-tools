@@ -347,7 +347,7 @@ async function resolveNewlyReachableBackends(
     effectiveConfig,
     { env: process.env },
   );
-  const sources = await gatherDispatchableSources(
+  const { sources } = await gatherDispatchableSources(
     effectiveConfig,
     primaryProviderName,
   );
@@ -1107,7 +1107,13 @@ async function cmdNextStepBody(
     const primaryProviderName = resolveFreshSessionProviderName(undefined, effectiveConfig, {
       env: process.env,
     });
-    const dispatchSources = await gatherDispatchableSources(effectiveConfig, primaryProviderName);
+    const { sources: dispatchSources, dropped: gatherDropped } =
+      await gatherDispatchableSources(effectiveConfig, primaryProviderName);
+    // Same treatment as the resolver drops above, at the OTHER chokepoint: a lane the
+    // worker-kind x pool-class rule filtered is missing from the table with no stated
+    // cause unless it is rendered. Descriptor-supplied `sources[]` reach the gather
+    // WITHOUT passing ambient resolution, so this is not the same set as `onDroppedSources`.
+    for (const d of gatherDropped) droppedSources.push({ id: d.id, reason: d.reason });
     // BL-2: render the table from the operator's CARRIED decision, never from a bare
     // suggestion. Passing no prior/input here made a RE-confirmation display the tool's
     // price-ascending suggestion as though it were current — stale state shown as fact,

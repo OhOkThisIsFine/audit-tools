@@ -370,7 +370,7 @@ export async function runProviderConfirmationAutoComplete(
     const primaryProviderName = resolveFreshSessionProviderName(undefined, sessionConfig, {
       env: process.env,
     });
-    const sources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
+    const { sources } = await gatherDispatchableSources(sessionConfig, primaryProviderName);
     // The zero-match advisory's operand: the reach this gate is actually confirming.
     // Both halves are needed — `sources` carries the endpoints a `host:` rule keys on,
     // and the provider pool carries the CLI/host entries that have no source row at all

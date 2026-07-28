@@ -157,7 +157,7 @@ test("buildHostModelPools stamps the host account (from the host credential) int
 });
 
 test("collectDispatchableSources: explicit sources + legacy openai_compatible folded in when not primary", () => {
-  const got = collectDispatchableSources(
+  const { sources: got } = collectDispatchableSources(
     {
       sources: [{ transport: "codex", endpoint: "codex" }],
       openai_compatible: { base_url: "http://nim/v1", model: "m" },
@@ -170,7 +170,7 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
 
   // When openai-compatible IS the primary, the unconditional primary fold (H2+H4
   // collapse) carries it as a source pool — the primary is just a source now.
-  const primaryFold = collectDispatchableSources(
+  const { sources: primaryFold } = collectDispatchableSources(
     { openai_compatible: { base_url: "x", model: "m" } },
     "openai-compatible",
   );
@@ -179,7 +179,7 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
   expect(primaryFold[0].endpoint).toBe("x");
 
   // Two explicit NIM endpoints → two sources (distinct), no special-casing.
-  const two = collectDispatchableSources(
+  const { sources: two } = collectDispatchableSources(
     {
       sources: [
         { transport: "openai-compatible", endpoint: "http://a/v1", model: "m1" },
@@ -328,7 +328,7 @@ test("collectDispatchableSources: the codex primary ALWAYS folds in as a source 
   const cfg = { codex: { command: "codex", model: "gpt-5" } };
   // Headless and attended alike: the primary is a member source pool of the ONE
   // eligible set (the demote flag is retired — H4).
-  const folded = collectDispatchableSources(cfg, "codex");
+  const { sources: folded } = collectDispatchableSources(cfg, "codex");
   expect(folded.length).toBe(1);
   expect(folded[0].transport).toBe("codex");
 });
@@ -338,7 +338,7 @@ test("collectDispatchableSources: the codex primary ALWAYS folds in as a source 
 test("C1: a legacy openai_compatible.quota converges onto the folded source (legacy fold + primary fold)", () => {
   const quota = { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 };
   // Fold-in path (openai-compatible is NOT the primary).
-  const folded = collectDispatchableSources(
+  const { sources: folded } = collectDispatchableSources(
     { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
     "claude-code",
   );
@@ -355,7 +355,7 @@ test("C1: a legacy openai_compatible.quota converges onto the folded source (leg
 
   // Absent quota stays undefined → the source falls to the conservative floor,
   // exactly as before C1 (no regression for unconfigured operators).
-  const noQuota = collectDispatchableSources(
+  const { sources: noQuota } = collectDispatchableSources(
     { openai_compatible: { base_url: "http://nim/v1", model: "m" } },
     "claude-code",
   );
@@ -364,7 +364,9 @@ test("C1: a legacy openai_compatible.quota converges onto the folded source (leg
 
 test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrencyCap (off the floor)", async () => {
   const quota = { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 };
-  const [source] = collectDispatchableSources(
+  const {
+    sources: [source],
+  } = collectDispatchableSources(
     { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
     "claude-code",
   );
@@ -376,7 +378,9 @@ test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrency
   expect(pool.concurrencyCap).toBe(6);
 
   // Legacy block WITHOUT quota → discoveredLimits null → resolveLimits floor.
-  const [floorSource] = collectDispatchableSources(
+  const {
+    sources: [floorSource],
+  } = collectDispatchableSources(
     { openai_compatible: { base_url: "http://nim/v1", model: "m" } },
     "claude-code",
   );
@@ -389,7 +393,7 @@ test("collectDispatchableSources: openai-compatible primary folds alongside a se
     sources: [{ transport: "codex", endpoint: "codex" }],
     openai_compatible: { base_url: "http://nim/v1", model: "m" },
   };
-  const got = collectDispatchableSources(cfg, "openai-compatible");
+  const { sources: got } = collectDispatchableSources(cfg, "openai-compatible");
   // The explicit codex source + the folded openai-compatible primary, deduped once.
   expect(got.some((s) => s.transport === "codex")).toBeTruthy();
   expect(
@@ -401,7 +405,7 @@ test("collectDispatchableSources: the fold is a no-op for a host-shaped primary 
   const cfg = { openai_compatible: { base_url: "http://nim/v1", model: "m" } };
   // claude-code host + NIM source: the primary fold adds nothing; the legacy fold
   // already carries the NIM source (one, not duplicated).
-  const got = collectDispatchableSources(cfg, "claude-code");
+  const { sources: got } = collectDispatchableSources(cfg, "claude-code");
   expect(got.filter((s) => s.transport === "openai-compatible").length).toBe(1);
 });
 
@@ -495,6 +499,6 @@ test("collectDispatchableSources: an agentic burst-limited source is filtered fr
       },
     ],
   };
-  const out = collectDispatchableSources(cfg, "claude-code");
+  const { sources: out } = collectDispatchableSources(cfg, "claude-code");
   expect(out.map((s) => s.id)).toEqual(["ss-bursty"]);
 });
