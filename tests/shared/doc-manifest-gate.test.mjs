@@ -448,7 +448,7 @@ describe('pre-commit gate — constitutional-doc refusal', () => {
   });
 });
 
-describe('pre-commit gate — the doc-manifest trigger reaches past docs/', () => {
+describe('pre-commit gate — the doc-manifest trigger covers every manifest input', () => {
   let repo;
 
   const git = (args) => execFileSyncHidden('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
@@ -513,6 +513,16 @@ describe('pre-commit gate — the doc-manifest trigger reaches past docs/', () =
     // is how an unregistered `examples/…md` could be staged with nothing to
     // notice. A trigger narrower than its check plants violations for CI.
     writeFile('examples/some-setup.md', '# setup\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/doc-manifest check FAILED/);
+    git(['reset', '--hard', 'HEAD']);
+    git(['clean', '-fd']);
+  });
+
+  it('runs the doc-manifest check when its canonical data source is staged', () => {
+    writeFile('scripts/doc-manifest-data.mjs', 'export const DOC_MANIFEST = [];\n');
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);

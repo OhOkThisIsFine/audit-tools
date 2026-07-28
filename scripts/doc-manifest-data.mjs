@@ -200,6 +200,17 @@ export const DOC_MANIFEST = [
     autoApply: "Yes — with the renderer drift tests re-run.",
   },
   {
+    type: "generated scheduler prompt",
+    files: ["docs/nightly-routine-prompt.md"],
+    check:
+      "WHOLE-FILE GENERATED from `docs/nightly-routine.md` (cross-leg routine) + " +
+      "`docs/doc-review-guidelines.md` (leg-1 rubric) by `scripts/check-nightly-routine-prompt.mjs`. " +
+      "Never hand-edit or resolve a conflict in the target; edit the owning source and regenerate. " +
+      "`check:nightly-routine-prompt` gates byte parity plus its `package.json` check/release wiring " +
+      "in `verify:checks` and at commit.",
+    autoApply: "**No — generator-owned.**",
+  },
+  {
     type: "meta-tooling / dev-workflow",
     files: [
       ".claude/skills/design-check/SKILL.md",
@@ -207,14 +218,10 @@ export const DOC_MANIFEST = [
       ".claude/skills/ship/SKILL.md",
       ".claude/skills/start-lap/SKILL.md",
       "docs/nightly-routine.md",
-      "docs/nightly-routine-prompt.md",
     ],
     check:
-      "Standalone dev-workflow how-to (no generated-asset relationship); do the documented commands/paths " +
-      "still resolve. `nightly-routine-prompt.md` is THIS routine's own scheduler prompt: check its " +
-      "commands/paths/ports resolve (codex invocation, proxy endpoint, memory-store path) — but it is an " +
-      "operational summary of `nightly-routine.md` + this spec, so any CONFLICT is resolved in those files' " +
-      "favor and reported as a finding, never by editing them to match the prompt.",
+      "Standalone dev-workflow how-to and scheduler-prompt SOURCE; do the documented commands/paths " +
+      "still resolve. Changes to `docs/nightly-routine.md` must regenerate the generated scheduler prompt.",
     autoApply: "factual-stale → yes",
   },
   {

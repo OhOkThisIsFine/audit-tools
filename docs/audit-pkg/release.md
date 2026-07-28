@@ -22,6 +22,7 @@ npm run verify:release
 - backlog seek-index parity (`check:backlog-index`)
 - memory-citation check (`check:memory-citations`)
 - README philosophy-brief parity (`check:philosophy-brief`)
+- nightly scheduler-prompt parity (`check:nightly-routine-prompt`)
 - HANDOFF roadmap parity (`check:handoff-roadmap`)
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
@@ -29,9 +30,7 @@ npm run verify:release
 - full automated test suite (`vitest run`)
 - host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
 - packaged-install smoke coverage for both bins (`smoke:packaged-audit-code`, `smoke:packaged-remediate-code`)
-
-Linked-install smoke coverage (`smoke:linked-audit-code`, `smoke:linked-remediate-code`) is available as a
-standalone command but is not part of the `verify:release` chain.
+- linked-install smoke coverage for both bins (`smoke:linked-audit-code`, `smoke:linked-remediate-code`)
 
 For live child-process output while debugging smoke tests:
 

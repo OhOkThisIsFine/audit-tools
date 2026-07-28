@@ -492,7 +492,8 @@ function runGate(committedPaths) {
   }
 
   // 2b. Doc-manifest reconciliation — whenever the STAGED set carries ANY
-  // markdown. `check:doc-manifest` lives in `verify:checks` (the CI gate job),
+  // markdown or the canonical manifest data that renders the guidelines table.
+  // `check:doc-manifest` lives in `verify:checks` (the CI gate job),
   // which no local preflight runs in full, so an unregistered doc rode to CI and
   // burned a release tag three times (v0.33.8, v0.34.4, v0.34.17). The checker
   // enumerates GIT-TRACKED docs — which is exactly why running it here is
@@ -506,7 +507,11 @@ function runGate(committedPaths) {
   // nothing to catch it), so the trigger must widen with it — a trigger narrower
   // than the check it fires plants violations the gate never runs on. Same
   // reasoning as the `paths:` filters in .github/workflows/ci.yml.
-  if (staged.some((p) => /\.md$/i.test(p.replace(/\\/g, '/')))) {
+  const pinsDocManifest = (p) => {
+    const normalized = p.replace(/\\/g, '/');
+    return /\.md$/i.test(normalized) || normalized === 'scripts/doc-manifest-data.mjs';
+  };
+  if (staged.some(pinsDocManifest)) {
     try {
       execSync('npm run check:doc-manifest', {
         cwd: root,
@@ -526,6 +531,42 @@ function runGate(committedPaths) {
           `check that fails RELEASE CI and burns a release tag.\n` +
           `Register the doc (type + reason to exist) in scripts/doc-manifest-data.mjs and re-render with ` +
           `\`node scripts/check-doc-manifest.mjs --write\`, or delete the doc.\n${tail}`,
+      };
+    }
+  }
+
+  // 2b-i. Nightly scheduler prompt ↔ canonical-source parity. The target is
+  // WHOLE-FILE generated from the routine contract plus the leg-1 rubric. The
+  // old target hand-restated both behind a precedence rule and drifted into
+  // banning the shared helper its sources require. Fire on either direction of
+  // drift, on the generator itself, and on package.json (which owns the check
+  // and release-chain wiring); a verify:checks-only gate first fails in release
+  // CI, after the bad second copy has already landed.
+  const nightlyPromptInputs = new Set([
+    'docs/nightly-routine.md',
+    'docs/doc-review-guidelines.md',
+    'docs/nightly-routine-prompt.md',
+    'scripts/check-nightly-routine-prompt.mjs',
+    'package.json',
+  ]);
+  if (staged.some((p) => nightlyPromptInputs.has(p.replace(/\\/g, '/')))) {
+    try {
+      execSync('npm run check:nightly-routine-prompt', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: nightly scheduler prompt check FAILED — commit blocked. ` +
+          `docs/nightly-routine-prompt.md is generated from docs/nightly-routine.md + ` +
+          `docs/doc-review-guidelines.md and may not carry a hand-maintained summary.\n` +
+          `Fix: node scripts/check-nightly-routine-prompt.mjs --write — then re-stage the target.\n${tail}`,
       };
     }
   }

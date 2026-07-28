@@ -6,6 +6,36 @@ covers, what it may change on its own, and how open items reach the owner.
 [`doc-review-guidelines.md`](doc-review-guidelines.md) owns the *rubric* for leg 1
 (how to judge a doc claim); this file owns the routine.
 
+## Start inputs and execution lanes
+
+At the start of every run:
+
+1. Read this file, [`doc-review-guidelines.md`](doc-review-guidelines.md), and
+   [`../CLAUDE.md`](../CLAUDE.md). Review against **local HEAD**. Fetch configured
+   remotes for context, but do not assume one is named `origin` and never replace
+   local HEAD with a remote ref — unpushed code can be the evidence a doc describes.
+2. Load `.claude/nightly-decisions.json` before deciding what to ask. A recorded
+   `subject_key` is settled and never re-raised; when its answer implies work that
+   has not landed, execute that now-unambiguous work under the normal gate.
+3. Load the prior `.audit-tools/nightly/open-items.json` so `first_seen` and
+   `nights_open` carry forward through `writeOpenItems()`.
+
+Use independent lanes wherever they preserve coverage:
+
+- **Codex** has repo access and performs its own source inspection:
+  `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
+  load-bearing; an open stdin makes the process wait indefinitely.
+- **NIM through the local LiteLLM proxy** receives only the files named in its
+  packet and runs **one call at a time**. Use the shared helper with a schema
+  shaped to the task:
+  `node ~/.claude/llm-call.mjs --schema <file> <alias> "<instruction>" <file...>`.
+  The helper owns non-strict decoding, an explicit output cap, line-numbered
+  source, and a nonzero truncation result. Treat every reply as an advisory lead
+  and verify it against source; quoted evidence is especially fallible.
+- If a lane is unavailable, route the work elsewhere. A dead lane may not
+  silently shrink coverage; any coverage that still could not run belongs in
+  the digest's `skipped` list.
+
 ## The three legs
 
 | Leg | Scope | May act alone | Escalates |
@@ -33,6 +63,12 @@ directions. Deletion requires the same code anchor a doc auto-apply requires.
 
 ### Leg 3 — recurring-problem solutions
 
+Read the project memory store
+(`~/.claude/projects/C--Code-audit-tools/memory/`, including its `MEMORY.md`
+index), the global `~/.claude/CLAUDE.md`, backlog *Durable traps* and *Open
+bugs*, and the run's friction records. These are separate recurrence surfaces;
+do not silently narrow the pass to whichever one is easiest to search.
+
 Find problems that keep happening and propose the mechanism that would end them.
 The signal is **recurrence**, and it must be counted, not asserted: how many
 separate memories, backlog entries, or friction records describe the same trap,
@@ -40,9 +76,11 @@ and on how many distinct dates. A one-off is not a pattern.
 
 A proposal carries: the recurrence evidence, the mechanism (hook, gate, contract
 change, or a fix that makes the trap unrepresentable), what it would have caught,
-and its false-positive surface. When it is a hook, write the patch **and its
-red-green tests** to `.audit-tools/nightly/proposals/` and reference it — the
-owner approves in one step rather than re-deriving the work.
+and its false-positive surface. When it is a hook or gate, write the full patch
+**and its red-green tests** to `.audit-tools/nightly/proposals/<id>/` and
+reference it — the owner approves in one step rather than re-deriving the work.
+Tests belong under `tests/`; Vitest excludes `.claude/**`, so a test beside a
+hook never runs.
 
 Prefer the fix that removes the trap over the guard that catches it. A guard is
 what you build when the trap cannot be designed away.
@@ -62,6 +100,22 @@ because the cadence must survive a missed or failed night — a weekday test
 silently skips a fortnight when the Tuesday run dies. Due means the stamp is
 absent or its `ran_at` is seven or more days old.
 
+When due, run `/insights` as a nested non-interactive session from the repo
+root:
+
+```bash
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' claude -p "/insights"
+```
+
+Both environment variables are load-bearing under Git Bash: without them the
+leading slash is rewritten to `C:/Program Files/Git/insights`, and the nested
+session answers "no such slash command", which looks like the feature does not
+exist. The PowerShell tool is an alternative because it does not perform that
+rewrite. The pass takes minutes while it analyses every session not already
+cached in `~/.claude/usage-data/facets/`; run it in the background rather than
+raising the Bash tool's 600000 ms timeout clamp. The command prints the path of
+the HTML report it wrote.
+
 Two reasons it is not nightly. The analysis pass costs primary quota for every
 session not already cached in `facets/`, and — the real one — its suggestions are
 drawn from a window that reaches back weeks, so night-over-night they barely
@@ -77,6 +131,25 @@ real. One recommended re-adding a retry policy for a failure mode whose root
 cause had been found and fixed two days earlier. Every suggestion is therefore
 verified against HEAD before it becomes a proposal, and leg 3's propose-only
 bound applies unchanged — the pass lands nothing.
+
+Classify every suggestion as one of: **already shipped** (name the mechanism at
+HEAD and drop the suggestion), **debatable** (escalate it as a digest item), or
+**genuinely open** (make it a leg-3 proposal with the report's recurrence
+evidence). Check the retirement direction specifically; a stale report can
+recommend re-adding a mechanism that was deliberately removed.
+
+Only after a successful pass, write the stamp:
+
+```text
+.audit-tools/nightly/insights-last-run.json = {
+  "ran_at": "<ISO>", "report_path": "<path>", "suggestions_total": N,
+  "already_shipped": N, "debatable": N, "open": N
+}
+```
+
+The numeric values are that run's real counts. Never write the stamp after a
+failed pass; leaving it absent or old makes the pass due again tomorrow instead
+of parking the failure for a week.
 
 Being *not due* is not a skipped leg and does not go in the digest's skipped
 list. Being due and failing to run does.
@@ -100,6 +173,38 @@ still reviews and still reports, but applies **nothing** and says so in the
 digest's *Not covered* section — reviewing a dirty tree is fine, writing to one
 is how you lose the owner's uncommitted work.
 
+## Machine output contract
+
+Write `.audit-tools/nightly/open-items.json` through `writeOpenItems()`; it is
+the machine contract behind both digest surfaces. Each candidate item has this
+shape:
+
+```text
+{ id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
+  evidence[], proposal?, patch_path? }
+```
+
+- `title` is the front-loaded one-line decision, not a summary of the
+  investigation.
+- `eli5` explains in full sentences, for a non-expert reader, what the
+  doc/backlog claims, what the code does, why they diverge, and what each answer
+  means going forward. Every item gets one; do not substitute internal IDs or
+  symbol-name shorthand.
+- `question` is the specific decision. `evidence[]` records what was verified
+  against code and how.
+
+Compute `subject_key` with `subjectKey(path, subject)` from
+`scripts/nightly/items.mjs`, where `subject` is the prose in question, never the
+routine's wording of `question`. Before persisting, load `readDecisions(root)`
+and select with `partitionBySettled(items, decisions)`; only its `open` half
+belongs in the next items file. A settled answer may make work unambiguous, but
+it never makes the same subject an open question again.
+
+Call `writeOpenItems(root, { items: open, applied, skipped, run })` so
+`first_seen` and `nights_open` carry forward. `applied` says exactly what changed;
+`skipped` names every leg or scope that could not run and why. Never hand-write
+the JSON or discard the previous state before this merge.
+
 ## Surfacing — the digest, not the conversation
 
 Each item carries three layers, so the reader spends only the attention the
@@ -120,6 +225,10 @@ Two surfaces render those items:
   and the item collapses. A `file://` page cannot persist a click, which is why
   answering is a served page rather than the static file — the one command
   starts it, and everything after is buttons. Stop it with Ctrl-C.
+
+After `writeOpenItems()` persists the machine contract, render and open the
+snapshot with `node scripts/nightly/render-digest.mjs --open`. When nothing was
+applied, open, or skipped, stay silent rather than churning the digest.
 
 A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**,
 and only when a subject has not been announced before, pointing at
