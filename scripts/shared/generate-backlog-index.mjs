@@ -42,6 +42,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseBulletEntries, parseTrackEntries, sectionText } from "./generate-handoff-roadmap.mjs";
+import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -115,7 +116,17 @@ export function renderIndex(groups) {
         (g.items.length === 0
           ? `*(none)*\n`
           : g.items
-              .map((i) => `- \`${i.file}:${i.line}\` — ${i.title}\n`)
+              .map(
+                // Lifted VERBATIM from `docs/backlog/<file>` into `docs/backlog.md`
+                // — one directory up — so relative links inside the title must be
+                // re-based, exactly as the roadmap generator does it.
+                (i) =>
+                  `- \`${i.file}:${i.line}\` — ${rebaseRelativeLinks(
+                    i.title,
+                    `docs/backlog/${i.file}`,
+                    "docs/backlog.md",
+                  )}\n`,
+              )
               .join("")),
     )
     .join("\n");

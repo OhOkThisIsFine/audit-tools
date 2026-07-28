@@ -36,6 +36,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -198,6 +199,15 @@ export function collectRoadmap(sources) {
 
 const linkFor = (file) => `[\`${file}\`](backlog/${file})`;
 
+/**
+ * A title is lifted VERBATIM out of `docs/backlog/<file>` into `docs/HANDOFF.md`
+ * — one directory up — so any relative link inside it must be re-based or it
+ * dies at the destination. Fixing the generated file instead is overwritten by
+ * the next regeneration.
+ */
+const liftTitle = (title, file) =>
+  rebaseRelativeLinks(title, `docs/backlog/${file}`, "docs/HANDOFF.md");
+
 /** Render the whole generated block, markers included. */
 export function renderRoadmap(groups) {
   const total = groups.reduce((n, g) => n + g.items.length, 0);
@@ -207,7 +217,9 @@ export function renderRoadmap(groups) {
         `### ${g.heading}\n\n` +
         (g.items.length === 0
           ? `*(none open)*\n`
-          : g.items.map((i) => `- ${i.title} · ${linkFor(i.file)}\n`).join("")),
+          : g.items
+              .map((i) => `- ${liftTitle(i.title, i.file)} · ${linkFor(i.file)}\n`)
+              .join("")),
     )
     .join("\n");
 

@@ -88,7 +88,7 @@ reported.
 
 ## Finding 3 — R3-3 is not the mechanism the gate specified
 
-`rankHeadlessCapabilityPools` ([sharedProviderConfirmation.ts:1946](../../src/shared/providers/sharedProviderConfirmation.ts:1946)) is 14 lines:
+`rankHeadlessCapabilityPools` ([`rankHeadlessCapabilityPools` in sharedProviderConfirmation.ts](../../src/shared/providers/sharedProviderConfirmation.ts)) is 14 lines:
 deduplicate, sort by `context_tokens` descending, tie-break `localeCompare`, merge into the prior
 order. There is no LLM anywhere in its path.
 
@@ -103,7 +103,7 @@ Three problems beyond the substitution itself:
   a proxy metric is the fail-open this sprint existed to close, re-entered through a different door.
 
 It is wired live into the autonomous promotion path
-([intakeExecutors.ts:247](../../src/audit/orchestrator/intakeExecutors.ts:247)) and has **zero test
+([intakeExecutors.ts](../../src/audit/orchestrator/intakeExecutors.ts)) and has **zero test
 coverage** — `git grep rankHeadlessCapabilityPools -- tests/` returns nothing.
 
 One hunk in that commit is a genuine improvement and should survive whatever happens to the rest:
@@ -133,7 +133,7 @@ this change the whole-command match caught it. Scope the `-n` check to commit su
 ## Finding 5 — stage 5 is genuine
 
 `c3567b27` (`e7cda259`) is real, correct work. `serviceExclusionPattern` exists, is exported, and is
-wired at [intakeExecutors.ts:277](../../src/audit/orchestrator/intakeExecutors.ts:277) with the
+wired at [intakeExecutors.ts](../../src/audit/orchestrator/intakeExecutors.ts) with the
 transport pattern as fallback; three test files were updated alongside. Verified against source, not
 against its own claim.
 

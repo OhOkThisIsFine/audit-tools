@@ -842,6 +842,53 @@ function runGate(committedPaths) {
     }
   }
 
+  // 4. Relative-link resolution. A dead relative link is fully mechanical (the
+  // target resolves or it does not) and had recurred on three dates before this
+  // gate existed; three links in the last occurrence were created by that run's
+  // own doc moves, because a mover fixes the file it moved and cannot see the
+  // inbound links elsewhere. Fires on the generators too — they copy entry titles
+  // VERBATIM one directory up, so a link correct at the source dies at the
+  // destination, and the fix belongs in the lift, never in the generated file.
+  //
+  // ⚠ THIS RUNS LAST, DELIBERATELY. It is the broadest trigger in the gate (any
+  // staged markdown), so placing it earlier made it mask every more-specific
+  // refusal behind it — the constitutional-doc escalation, the generator-parity
+  // checks, and the loop-core attestation all reported "doc-links FAILED" instead
+  // of their own actionable message. A broad mechanical check must never preempt
+  // a structural one; the specific refusal is the more useful signal.
+  const pinsDocLinks = (p) => {
+    const normalized = p.replace(/\\/g, '/');
+    return (
+      /\.md$/i.test(normalized) ||
+      normalized === 'scripts/shared/rebase-relative-links.mjs' ||
+      normalized === 'scripts/shared/generate-handoff-roadmap.mjs' ||
+      normalized === 'scripts/shared/generate-backlog-index.mjs' ||
+      normalized === 'scripts/check-doc-links.mjs'
+    );
+  };
+  if (staged.some(pinsDocLinks)) {
+    try {
+      execSync('npm run check:doc-links', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-30).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: doc-links check FAILED — commit blocked. A relative markdown link does not ` +
+          `resolve on disk.\n` +
+          `⚠ If the dead link is in a GENERATED doc (docs/HANDOFF.md, docs/backlog.md), fix the LIFT in ` +
+          `scripts/shared/rebase-relative-links.mjs — editing the generated file is overwritten by the ` +
+          `next regeneration.\n${tail}`,
+      };
+    }
+  }
+
   return { blocked: false };
 }
 

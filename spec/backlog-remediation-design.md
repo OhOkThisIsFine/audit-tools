@@ -2,8 +2,8 @@
 
 Durable design for the backlog-sweep modules and the cross-module seam contracts they
 share. Timeless: the *contracts* and the *verified invariants*, not run status. This doc is
-the **architecture-of-record** — the durable design [`backlog.md`](backlog.md) and
-[`HANDOFF.md`](HANDOFF.md) track their open work against; it does not itself hold
+the **architecture-of-record** — the durable design [`backlog.md`](../docs/backlog.md) and
+[`HANDOFF.md`](../docs/HANDOFF.md) track their open work against; it does not itself hold
 shipped-vs-open status.
 
 ## Modules
@@ -115,7 +115,7 @@ implementation must hold.
 ## Still-gated (not landable on tooling alone)
 
 > The sole genuinely-open item from this doc (D8 prose-staleness narrowing) is tracked as open work in
-> [`backlog/deferred.md`](backlog/deferred.md) (prose-heavy staleness narrowing); this doc is
+> [`backlog/deferred.md`](../docs/backlog/deferred.md) (prose-heavy staleness narrowing); this doc is
 > architecture-of-record, not a status tracker. The F5-consent and
 > Parity notes below are durable rationale — an implemented control and a standing preference — not open
 > backlog items.

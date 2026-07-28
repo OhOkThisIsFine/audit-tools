@@ -253,7 +253,7 @@ its SPEC intact.
 
 ### Forward tracks — design-level directions
 
-- Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)). · [`forward-tracks.md`](backlog/forward-tracks.md)
+- Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Generate the executor↔artifact mapping from the registries (anti-drift). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood). · [`forward-tracks.md`](backlog/forward-tracks.md)

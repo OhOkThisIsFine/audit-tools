@@ -63,6 +63,7 @@ beforeEach(() => {
           "test:doc-contract": "node --version",
           "check:doc-manifest": "node --version",
           "check:handoff-roadmap": "node --version",
+          "check:doc-links": "node --version",
         },
       },
       null,

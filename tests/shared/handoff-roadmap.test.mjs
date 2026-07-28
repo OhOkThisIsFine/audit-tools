@@ -283,6 +283,9 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
             check: 'node -e ""',
             'test:doc-contract': 'node -e ""',
             'check:doc-manifest': 'node -e ""',
+            // Broadest trigger in the same hook; no-op so this suite observes the
+            // roadmap trigger alone.
+            'check:doc-links': 'node -e ""',
             'check:handoff-roadmap': 'node -e "process.exit(1)"',
             // The seek-index gate is a SEPARATE trigger in the same hook and it
             // legitimately owns `docs/backlog.md`. It must succeed here, so that

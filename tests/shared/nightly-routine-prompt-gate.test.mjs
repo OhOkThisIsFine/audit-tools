@@ -183,6 +183,9 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
             check: 'node -e ""',
             "test:doc-contract": 'node -e ""',
             "check:doc-manifest": 'node -e ""',
+            // Broadest trigger in the same hook and it runs LAST; a no-op keeps
+            // these cases about the nightly-prompt trigger alone.
+            "check:doc-links": 'node -e ""',
             "check:nightly-routine-prompt": 'node -e "process.exit(1)"',
           },
         },
