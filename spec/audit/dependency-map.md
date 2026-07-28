@@ -89,8 +89,10 @@ compares.
 `external_analyzer_acquisition.json` is the external-analyzer acquisition marker
 (gitleaks + consent-gated eslint/semgrep/jscpd) — a run-record + staleness anchor
 with no downstream of its own; the findings it produces land in
-`external_analyzer_results.json` (a leaf input to Phase 3, not itself part of
-this table, since nothing declares an upstream dependency for it).
+`external_analyzer_results.json` (a leaf input to Phase 3, absent from THIS
+dependency table because nothing declares an upstream dependency for it — it does
+appear in the producer table below, where the acquisition executor is one of its
+three writers).
 
 ### Phase 3 — planning & execution
 
@@ -196,7 +198,7 @@ truth remains the pair of registries — `EXECUTOR_REGISTRY`
 | `charter_register.json` | `charter_extraction_executor` | `charter_delta_executor` |
 | `charter_clarification.json` | `charter_clarification_executor` | — |
 | `systemic_challenge.json` | `systemic_challenge_executor` | — |
-| `external_analyzer_results.json` | `syntax_resolution_executor` | `external_analyzer_import_executor` (`preferredExecutor` only) |
+| `external_analyzer_results.json` | `syntax_resolution_executor` | `external_analyzer_acquisition_executor` (upserts each tool's normalized findings; declares the artifact ONLY when a tool actually contributed, so an unchanged results array never churns its downstreams), `external_analyzer_import_executor` (`preferredExecutor` only) |
 | `syntax_resolution_status.json` | `syntax_resolution_executor` | — |
 | `scope.json` | `planning_executor` | — |
 | `coverage_matrix.json` | `planning_executor` | `result_ingestion_executor` |
