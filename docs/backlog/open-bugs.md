@@ -143,18 +143,21 @@
   round — verdicts are materialized into the baseline (`intentEquivalenceExecutor.ts`), never cached
   per-pair.
 
-- **OWNER CALL — is `intent-equivalence-verdict.json` a durable attestation or a staging-only host
-  input?** Nightly `docs-3` approved registering it in `ARTIFACT_DEFINITIONS`, but `/design-check`
-  found the approval's missing retirement evidence: the DD-9 design explicitly says “No verdict-pair
-  cache is persisted” (`intent-gate-charter-slice-design-2026-07-23.md:97-99`), and `6c9c6b21`
-  deleted the cache/lock choreography. Runtime matches that decision: `nextStepCommand.ts` writes the
-  file under `incoming/`; `nextStepHelpers.ts` validates then unlinks it; the executor materializes the
-  accepted judgment into `artifact_metadata.intent_baseline` and reports `artifacts_written: []`.
-  A registry entry alone is decorative, while persisting the raw verdict changes the retired contract.
-  Decide explicitly: (a) supersede the no-cache decision and persist accepted live-pair verdicts as
-  **audit attestations only** (never replay authority, no staleness-DAG edge; baseline stays authoritative),
-  or (b) keep staging-only behavior and correct `spec/audit/artifact-contract.md` to mark the row
-  non-registry. Do not implement the earlier answer until this collision is resolved.
+- **A spec row's category prefix is load-bearing enough to manufacture work — and one was false
+  (2026-07-28, low, TRACED — one owner go outstanding).** `spec/audit/artifact-contract.md` labels both
+  `critical-flow-fallback.json` and `intent-equivalence-verdict.json` `Durable host input:`, though
+  only the first is registered and a staleness-DAG leaf; the second is staged under `incoming/`,
+  consumed, deleted, and materialized into `artifact_metadata.intent_baseline`. Nightly `docs-3`
+  correctly inferred "register it for consistency" from the shared label, colliding with DD-9's
+  deliberate no-verdict-pair-cache retirement. The fix is to relabel the row **Transient host
+  submission** and make the durable row state its registry+DAG membership explicitly; no runtime or
+  registry change. ⚠ **NOT APPLIED** — `artifact-contract.md` is constitutional and the owner asked
+  for a traced recommendation, not a decision; attesting here would manufacture an owner call. The
+  exact replacement rows, the apply command, and both endpoint traces are in
+  `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
+  **Open property (the class, not this instance):** a category prefix in a normative table is read as
+  a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
+  only if a second instance appears — one occurrence is not yet a pattern.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
   malformed-JSON result file — result validity must be checked mechanically, never trusted from

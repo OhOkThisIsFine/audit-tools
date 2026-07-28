@@ -19,14 +19,21 @@
   2026-07-25 walkthrough that found 15 of 21 nightly items already fixed also opened three triage
   entries whose premise was already fixed ([[backlog-prose-decays-verify-against-head]]).
 
-- **▶ NEXT / OWNER CALL: settle the `intent-equivalence-verdict.json` retirement collision.**
-  Nightly `docs-3` approved registry persistence, but `/design-check` found the DD-9 design explicitly
-  retired a persisted verdict-pair cache; current runtime stages, materializes into
-  `artifact_metadata.intent_baseline`, then unlinks the raw verdict. Choose durable audit attestation
-  (never replay authority, no DAG edge) or keep the staging-only contract. Full evidence and both exact
-  endpoints live in [`open-bugs.md`](backlog/open-bugs.md); do not implement the earlier answer first.
+- **▶ NEXT: work the twelve settled-but-unexecuted nightly answers** (checkpointed in
+  `.audit-tools/nightly/execution-checkpoint-2026-07-28.md`; the standing entry is in
+  [`open-bugs.md`](backlog/open-bugs.md)). The publish is held deliberately until they land, then
+  ships once.
+  ⚠ **`intent-equivalence-verdict.json` is TRACED, not applied — one owner go outstanding.** Neither
+  side's premise held: no registry row is missing and no design is contradicted; one spec label is
+  false. `artifact-contract.md` calls it a `Durable host input` like `critical-flow-fallback.json`,
+  but only the latter is registered and a DAG leaf — this one is staged, consumed, deleted, and
+  materialized into `artifact_metadata.intent_baseline`, exactly as DD-9 specified. The fix is to
+  relabel it `Transient host submission`; no runtime or registry change. `artifact-contract.md` is
+  constitutional, so the edit needs your decision + an attestation — the exact replacement rows and
+  the command are in [`intent-equivalence-verdict-endpoint-trace-2026-07-28.md`](reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md).
 
-- **⚠ Every prior owner call is ANSWERED; only the newly reopened collision above needs a decision.**
+- **⚠ Every nightly owner call is ANSWERED** — the only decision outstanding is the constitutional
+  attestation named above.
   Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
   never re-raised.
   ⚠ **`answer.mjs --list` reports what has been ANSWERED, never what has been DONE — an empty queue is
@@ -167,7 +174,7 @@ its SPEC intact.
 - LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes instead of agentic ones that all drop. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace): a lane can return success-shaped EMPTY results and nothing in routing notices. · [`open-bugs.md`](backlog/open-bugs.md)
 - DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted). · [`open-bugs.md`](backlog/open-bugs.md)
-- OWNER CALL — is `intent-equivalence-verdict.json` a durable attestation or a staging-only host input? · [`open-bugs.md`](backlog/open-bugs.md)
+- A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, TRACED — one owner go outstanding). · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from weaker models when the true answer is empty. · [`open-bugs.md`](backlog/open-bugs.md)
 - ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it. · [`open-bugs.md`](backlog/open-bugs.md)
