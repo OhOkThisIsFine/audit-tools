@@ -242,6 +242,46 @@ describe("rebaseRelativeLinks — the LIFT carries the rewrite", () => {
   });
 });
 
+describe("check-doc-links — an ignored target is an install artifact, not a dead link", () => {
+  // The gate's verdict must not depend on the machine running it. `existsSync`
+  // made it depend: a link into a GITIGNORED install dir resolved on a box that
+  // had run the installer and 404'd in CI's bare clone — green locally, red on
+  // main, which is the precise failure this gate exists to prevent.
+  // Inverting the fix (dropping the gitIgnored filter) turns the first case red.
+  let repo;
+  beforeAll(() => {
+    repo = makeRepo();
+    write(repo.dir, ".gitignore", ".installed/\n");
+    // Deliberately NOT written to disk — this is the BARE-CLONE state, the only
+    // one that exercises the filter. Writing it would make the link resolve
+    // through `existsSync` and never reach the `missing` branch at all, so the
+    // test would pass with the fix inverted (it did, on the first attempt).
+    write(
+      repo.dir,
+      "AGENTS.md",
+      [
+        "[install-time directive](.installed/generated.md)",
+        "[a genuinely dead link](docs/nope.md)",
+      ].join("\n\n"),
+    );
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "fixture");
+  });
+  afterAll(() => rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("does NOT flag an ABSENT link target that git ignores", () => {
+    const { out } = runChecker(repo.dir);
+    expect(out).not.toContain(".installed/generated.md");
+  });
+
+  it("STILL fails on a genuinely dead link in the same file", () => {
+    // Guards against the filter being over-broad and neutering the gate.
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toContain("docs/nope.md");
+  });
+});
+
 describe("check-doc-links — the real repo is the contract", () => {
   it("THIS repo has zero unresolvable relative links", () => {
     const { code, out } = runChecker(process.cwd());
