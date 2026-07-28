@@ -153,7 +153,7 @@ Tier the grounding by claim type:
   finding ships a command the tool runs (the grep, the failing test, `madge`); the confirmed bit is
   the **tool's run**, not the model's assertion — exactly what disproved the three flags above.
   Bounded/sandboxed/timeout. Deterministic-tool findings (semgrep/eslint/npm-audit via
-  `src/adapters/`) are already grounded this way — generalize it to model-authored findings.
+  `src/audit/adapters/`) are already grounded this way — generalize it to model-authored findings.
 - **Judgment/synthesis (severity, prioritization, "is this important") → not deterministically
   checkable.** Be honest: no anchor proves a taste call. Safeguard = the adversarial cross-check
   already in the pipeline (independent refuter + judge) **plus traceability**: every synthesis claim

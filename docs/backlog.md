@@ -120,26 +120,26 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:93` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
-- `forward-tracks.md:106` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).
-- `forward-tracks.md:121` — Generate the executor↔artifact mapping from the registries (anti-drift).
-- `forward-tracks.md:128` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:136` — Free/cheap "quota-arbitrage" dispatch tier (9router-inspired) — extra SOURCE POOLS on existing machinery, not a new provider engine.
-- `forward-tracks.md:188` — models.dev static window can over-state a specific deployment (carried from W1).
-- `forward-tracks.md:208` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
-- `forward-tracks.md:220` — Tool-enforced dispatch broker with capability-tiered driver.
-- `forward-tracks.md:233` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:248` — Cross-provider quota — live-endpoint confirmation.
-- `forward-tracks.md:259` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
-- `forward-tracks.md:270` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
-- `forward-tracks.md:314` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
+- `forward-tracks.md:91` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:118` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
+- `forward-tracks.md:131` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).
+- `forward-tracks.md:146` — Generate the executor↔artifact mapping from the registries (anti-drift).
+- `forward-tracks.md:153` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:161` — Free/cheap "quota-arbitrage" dispatch tier (9router-inspired) — extra SOURCE POOLS on existing machinery, not a new provider engine.
+- `forward-tracks.md:213` — models.dev static window can over-state a specific deployment (carried from W1).
+- `forward-tracks.md:233` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
+- `forward-tracks.md:245` — Tool-enforced dispatch broker with capability-tiered driver.
+- `forward-tracks.md:258` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:273` — Cross-provider quota — live-endpoint confirmation.
+- `forward-tracks.md:284` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
+- `forward-tracks.md:295` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
+- `forward-tracks.md:339` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
 
 ### [`deferred.md`](backlog/deferred.md)
 
-- `deferred.md:11` — A2 finding-quality oracle — UNPARKED (owner 2026-07-25); corpus is SMALL, PUBLIC, PINNED git repos, not labeled self-audit runs (owner redirect 2026-07-22).
-- `deferred.md:39` — A7 multi-host validation — automated half green, manual GUI half never run.
-- `deferred.md:50` — Manual real-OpenCode validation
-- `deferred.md:53` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
+- `deferred.md:11` — A7 multi-host validation — automated half green, manual GUI half never run.
+- `deferred.md:22` — Manual real-OpenCode validation
+- `deferred.md:25` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 

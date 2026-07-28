@@ -99,7 +99,7 @@ invent an identity.
 | "Does this operator rule drop this source?" | **whichever axis the rule names** | Policy is authored per-axis — see the grammar below. |
 | "Which config block builds this?" | **transport** | The adapter decides the constructor. |
 | "Is this backend me (self-spawn)?" | **transport** | Self-spawn is about the process, not the vendor. |
-| "What does this cost?" | **model**, disambiguated by **service** | The price table is vendor-keyed. Passing the transport here silently yields the cheapest-collision default — fixed 2026-07-19 (both call sites now pass `sourceService(source)`), and inert at HEAD regardless, since the current price snapshot carries no cross-provider collisions. A declared per-source price outranks the table. |
+| "What does this cost?" | **model**, disambiguated by **service** | The price table is vendor-keyed, so a cost question binds to **service**, never transport: passing the transport silently yields the cheapest-collision default. The hazard is latent whenever the price snapshot carries a cross-provider id collision, which is a property of the snapshot rather than of any one release. A declared per-source price outranks the table. |
 
 **Different questions legitimately bind to different axes. That is the domain, not a defect.** The
 instinct to collapse them into "one identity function" is wrong and was tried: it produces either a

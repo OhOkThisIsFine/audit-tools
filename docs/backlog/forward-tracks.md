@@ -88,6 +88,31 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Forward tracks
 
+- **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
+  self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"
+  ([`open-bugs.md`](open-bugs.md)): without ground truth, per-lane yield is a noisy signal and
+  lane quality stays a hand-benching judgement, which the tool-enforced rule forbids. Its affirmation
+  half (`reviewed_clean`) is shipped; the oracle is what lets yield gate ELIGIBILITY. The
+  `score-audit` scorer exists. The REFUTED alternative — hand-labelling a live run's findings into
+  `corpus/<run-id>.labels.json` — must not be re-proposed; it has two structural flaws: (a) labels against our own moving tree ROT — findings reference
+  file:lines that drift within days, so a labeled run is a one-shot number, never a regression
+  gate; (b) labeling only what the tool FOUND measures precision only — misses are invisible, so
+  recall is unmeasurable without ground truth the tool didn't author.
+  **SPEC:** `corpus/` becomes a manifest of pinned public repos — `{repo_url, commit_sha,
+  labels[]}`, each label a ground-truth defect (file, region, kind, evidence — ideally the upstream
+  FIX commit that proves it). Ground truth comes from someone-else-maintained inventories where
+  possible (bugs fixed in later upstream commits; CVE-tagged pre-fix versions; suites like
+  Defects4J / BugsInPy) per the synced-not-forked table principle; hand-authored labels are a
+  bounded one-time cost per repo and never rot (the SHA is pinned). `score-audit` gains a
+  corpus-repo mode: clone at the pinned SHA (hermetic state via `AUDIT_CODE_STATE_DIR`), run the
+  audit ($0 NIM lanes make this per-release cheap), match findings against labels → precision AND
+  recall as a repeatable release-time gate. Prefer small-but-REAL repos (real libraries at pre-fix
+  commits) over purely synthetic bug suites — synthetic-only corpora overestimate transfer. Rust /
+  Ruby pins double as clippy/rubocop analyzer targets (toolchain availability still gates the live
+  spawn). **Scope honesty:** this measures finding QUALITY; pipeline-at-scale behavior (charters
+  over 1000+ components, quota walls, deepening) stays validated by dogfood runs. The re-dogfood
+  run's hand-label is optional large-target calibration, never a blocker for this.
+
 
 
 - **Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)).** The Gate-0 bypass (fixed v0.33.11) was one symptom of a naming defect: `provider` names TWO concepts (the adapter that carries a request vs. the vendor that serves the model), `endpoint` holds TWO shapes (URL vs. launcher command), and every downstream keyspace had to independently rediscover which it needed. Quota got it right, the gate got it wrong for months, and a proposed "one identity function" fix would have been fail-OPEN. The spec settles the vocabulary and the axis each question binds to; the invariant is **co-locate and name, do not unify**.

@@ -8,34 +8,6 @@
 
 
 
-- **A2 finding-quality oracle — UNPARKED (owner 2026-07-25); corpus is SMALL, PUBLIC, PINNED git
-  repos, not labeled self-audit runs (owner redirect 2026-07-22).**
-  ⚠ **No longer deferred.** Funded as the mechanical answer to "a lane can return success-shaped EMPTY
-  results" ([`open-bugs.md`](open-bugs.md)): without ground truth, per-lane yield is a noisy signal and
-  lane quality stays a hand-benching judgement, which the tool-enforced rule forbids. Its affirmation
-  half (`reviewed_clean`) shipped 2026-07-25; the oracle is what lets yield gate ELIGIBILITY. Move to
-  the working queue when the lap opens. The `score-audit` scorer is built; the prior
-  plan (hand-label a live run's findings into `corpus/<run-id>.labels.json`) has two structural
-  flaws the redirect fixes: (a) labels against our own moving tree ROT — findings reference
-  file:lines that drift within days, so a labeled run is a one-shot number, never a regression
-  gate; (b) labeling only what the tool FOUND measures precision only — misses are invisible, so
-  recall is unmeasurable without ground truth the tool didn't author.
-  **SPEC:** `corpus/` becomes a manifest of pinned public repos — `{repo_url, commit_sha,
-  labels[]}`, each label a ground-truth defect (file, region, kind, evidence — ideally the upstream
-  FIX commit that proves it). Ground truth comes from someone-else-maintained inventories where
-  possible (bugs fixed in later upstream commits; CVE-tagged pre-fix versions; suites like
-  Defects4J / BugsInPy) per the synced-not-forked table principle; hand-authored labels are a
-  bounded one-time cost per repo and never rot (the SHA is pinned). `score-audit` gains a
-  corpus-repo mode: clone at the pinned SHA (hermetic state via `AUDIT_CODE_STATE_DIR`), run the
-  audit ($0 NIM lanes make this per-release cheap), match findings against labels → precision AND
-  recall as a repeatable release-time gate. Prefer small-but-REAL repos (real libraries at pre-fix
-  commits) over purely synthetic bug suites — synthetic-only corpora overestimate transfer. Rust /
-  Ruby pins double as clippy/rubocop analyzer targets (toolchain availability still gates the live
-  spawn). **Scope honesty:** this measures finding QUALITY; pipeline-at-scale behavior (charters
-  over 1000+ components, quota walls, deepening) stays validated by dogfood runs. The re-dogfood
-  run's 1480-finding hand-label is DEMOTED from oracle-blocker to optional large-target
-  calibration.
-
 - **A7 multi-host validation — automated half green, manual GUI half never run.** Both no-drift gates
   are in `verify:release` and pass: `npm run verify:hosts` (`scripts/audit/verify-hosts.mjs`) and
   `npm run verify:remediate-hosts`, each deploying every host in `INSTALL_HOST_ORDER`

@@ -74,9 +74,9 @@
   to Opus. The service→vendor-id mapping is a PREREQUISITE, not a follow-up. Do NOT "fix" it by editing
   `cost-rank.test.mjs`'s expectations — they encode real list prices and are what caught it.
 
-- **A2 oracle corpus is UNPARKED** (superseding the earlier park) — funded as the mechanical answer to
-  per-lane result quality. Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-  SPEC in [`deferred.md`](backlog/deferred.md).
+- **A2 oracle corpus is funded, not deferred** — the mechanical answer to per-lane result quality.
+  Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs. SPEC in
+  [`forward-tracks.md`](backlog/forward-tracks.md).
 
 - **▶ A publish is HELD by the owner, not forgotten** — landed `src/` work is waiting on their go. The
   diff command below is what says whether anything is publishable; do not assume "docs only".
@@ -140,9 +140,9 @@ doc's own header forbids. Durable traps belong in
 
 ## ▶ Roadmap — every open item, in order
 
-**Owner redirect 2026-07-23: stabilize audit-tools before A2.** The active track is
-**runtime-loop defects**, not the A2 oracle corpus — A2 is PARKED under *Deferred / waiting* below,
-its SPEC intact.
+**Standing priority: stabilize audit-tools before A2.** The active track is **runtime-loop
+defects**, not the A2 oracle corpus. A2 is funded and its SPEC is intact
+([`forward-tracks.md`](backlog/forward-tracks.md)) — it is simply not the current track.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
@@ -253,6 +253,7 @@ its SPEC intact.
 
 ### Forward tracks — design-level directions
 
+- A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs. · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16). · [`forward-tracks.md`](backlog/forward-tracks.md)
 - Generate the executor↔artifact mapping from the registries (anti-drift). · [`forward-tracks.md`](backlog/forward-tracks.md)
@@ -269,7 +270,6 @@ its SPEC intact.
 
 ### Deferred / waiting — blocked on data, a live run, credentials or a toolchain
 
-- A2 finding-quality oracle — UNPARKED (owner 2026-07-25); corpus is SMALL, PUBLIC, PINNED git repos, not labeled self-audit runs (owner redirect 2026-07-22). · [`deferred.md`](backlog/deferred.md)
 - A7 multi-host validation — automated half green, manual GUI half never run. · [`deferred.md`](backlog/deferred.md)
 - Manual real-OpenCode validation · [`deferred.md`](backlog/deferred.md)
 - Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low). · [`deferred.md`](backlog/deferred.md)
