@@ -535,6 +535,51 @@ function runGate(committedPaths) {
     }
   }
 
+  // 2b-ii. Guard-reach reconciliation — UNCONDITIONAL, deliberately. The check
+  // reconciles the whole tracked tree against the guard registry
+  // (scripts/guard-reach-data.mjs), and tree membership changes on ANY staged
+  // add/delete/rename while wiring changes ride package.json, settings.json or
+  // a hook edit — a trigger list would have to name all of that and would drift
+  // narrower than the check (the exact trap 2b documents above). The check is
+  // ~1s against the materialized snapshot; the typecheck leg above already
+  // costs an order of magnitude more on every commit.
+  // Repos that don't wire the script (the contract tests' fixture repos) skip
+  // with an ANNOUNCED fail-open. A commit deleting the script from this repo's
+  // package.json therefore skips too — a gate cannot report its own deletion
+  // (same accepted property as the doc-manifest leg); the announcement is what
+  // keeps the skip from reading as a pass.
+  let hasGuardReachScript = false;
+  try {
+    hasGuardReachScript = Boolean(
+      JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.['check:guard-reach'],
+    );
+  } catch {
+    // unreadable package.json — the typecheck leg above already dealt with worse
+  }
+  if (!hasGuardReachScript) {
+    noteFailOpen('check:guard-reach is not wired in this repo — guard-reach leg SKIPPED');
+  } else
+  try {
+    execSync('npm run check:guard-reach', {
+      cwd: root,
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 60_000,
+      windowsHide: true,
+    });
+  } catch (err) {
+    const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+    return {
+      blocked: true,
+      message:
+        `pre-commit gate: guard-reach check FAILED — commit blocked. A tracked file is claimed by no ` +
+        `guard row, a guard is wired into no gate, or a hook/check script landed outside the registry ` +
+        `(scripts/guard-reach-data.mjs). This is a verify:checks gate — unfixed it fails release CI.\n` +
+        `Register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or ` +
+        `'declared-gap' with the reason), then retry.\n${tail}`,
+    };
+  }
+
   // 2b-i. Nightly scheduler prompt ↔ canonical-source parity. The target is
   // WHOLE-FILE generated from the routine contract plus the leg-1 rubric. The
   // old target hand-restated both behind a precedence rule and drifted into
