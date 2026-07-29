@@ -21,24 +21,12 @@
   2026-07-25 walkthrough that found 15 of 21 nightly items already fixed also opened three triage
   entries whose premise was already fixed ([[backlog-prose-decays-verify-against-head]]).
 
-- **▶ NEXT: work the twelve settled-but-unexecuted nightly answers** (checkpointed in
-  `.audit-tools/nightly/execution-checkpoint-2026-07-28.md`; the standing entry is in
-  [`open-bugs.md`](backlog/open-bugs.md)). The publish is held deliberately until they land, then
-  ships once.
-  **`intent-equivalence-verdict.json` is SETTLED** — neither side's premise held: no registry row was
-  missing and no design was contradicted; one spec label was false. It is relabelled `Transient host
-  submission` (owner-approved, attested); no runtime or registry change
-  ([trace](reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md)).
-
 - **⚠ Every owner call is ANSWERED — nothing is waiting on a decision.**
   Nightly-queue determinations live in `.claude/nightly-decisions.json`, settled by SUBJECT so they are
-  never re-raised.
-  ⚠ **`answer.mjs --list` reports what has been ANSWERED, never what has been DONE — an empty queue is
-  not an empty work list.** A determination is marked `settled` the moment the owner replies; nothing
-  checks that the answered work landed, and the item is never raised again. On 2026-07-28 the list
-  read "No open nightly items" while twelve answers had no corresponding change anywhere. Diff the
-  settled subjects against HEAD before trusting it — the standing entry is in
-  [`open-bugs.md`](backlog/open-bugs.md).
+  never re-raised. The ledger now separates ANSWERED from DONE: `answer.mjs --list` reports both, and
+  a determination leaves the list only via `--done <key> <ref>` naming the landing (or `--question`
+  for a counter-question). Answers settled before that tracking began are `--settled` history and make
+  no landing claim.
   Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does

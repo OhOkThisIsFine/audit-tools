@@ -434,14 +434,6 @@
   regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
   this lap.
 
-- **Friction walk (smoke-dedup lap, 2026-07-25):** (1) **tool-should-decide (medium):**
-  `smoke:linked-audit-code` is in no gate — `verify:checks` runs only the packaged smokes — so it had
-  drifted BROKEN at HEAD unnoticed: its finalize loop returned at `present_report` status `ready` and
-  then asserted `complete`, because the friction-attestation branch was added to the packaged copy only.
-  A script that is never run is not a gate; it is a doc that claims to be one. Property: every
-  `smoke:*` npm script belongs to some gate, or is deleted. (2) **ambiguous-direction:** none this
-  lap.
-
 - **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium,
   the lap's biggest cost):** the offload triage was first run on `glm-5.2` — rank 1, a heavy reasoning
   model — for a mechanical classification, at ~4 min/entry (~7h for the file) before the alias was
@@ -736,26 +728,6 @@
   `tests/shared/hook-trap-guards.test.mjs` and `tests/shared/hook-session-gates.test.mjs` case by case
   and matching each against the trap entry it closes; a trap with no matching case stays.
 
-- **Twelve settled nightly answers were never executed, and the queue reports them as closed
-  (2026-07-28, medium, tool-should-decide).** `answer.mjs --list` reported "No open nightly items"
-  while only 2 of 18 determinations settled 17:39–17:47 had landed. `settled` is written the moment
-  the owner replies; nothing links an answer to a diff, and a settled subject is never raised again,
-  so an answered-but-unexecuted item is invisible forever.
-  **Property:** a determination is not retired from the queue until a change referencing it lands —
-  or the ledger distinguishes `answered` from `done` and `--list` reports both.
-  ⚠ Two of the eighteen "answers" were *questions back to the owner*, not decisions (the `.mjs`→`.ts`
-  test conversion; whether the offload lane needs serializing beyond NIM). Both are recorded `settled`
-  with no executable answer — so the disposition must also admit "answered with a counter-question".
-  **The outstanding twelve**, each with its owner answer, are enumerated in
-  `docs/reviews/dirty-tree-and-nightly-answer-reconciliation-2026-07-28.md`. Not yet started:
-  the approved-but-nonexistent `scripts/check-doc-links.mjs` gate + the five dead links it closes;
-  the `~/.claude/llm-call.mjs` `--schema`-position fix; the `src/shared/quota/apiPool.ts` dropped-lane
-  fix; the HANDOFF generator revert to immediate-next-only; `spec/audit/dependency-map.md`,
-  `spec/audit/dispatch-admission-control.md`, `spec/contract-authoring-determinism-design.md`,
-  `spec/backend-identity-axes.md`, `spec/host-validation.md`; and the `deferred.md` /
-  `durable-traps.md` sweeps (the citation-policy and shipped-entry deletions landed for
-  `open-bugs.md` only).
-
 - **Friction walk (nightly-determinations lap, 2026-07-26):**
   (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /
   26k-token document that exceeds the Read cap, so enumerating it needs a hand-written `node -e`. Worse,
@@ -851,10 +823,7 @@
   per-node token estimate entry described the defect correctly and the fix it prescribed would have
   regressed the run. An entry should state the property, not the mechanism, precisely because the
   mechanism is the part that does not survive contact ([[backlog-item-states-invariant-not-fix-mechanism]]).
-  (2) **tool-should-decide (low):** `check-backlog-budget --update-baseline` will happily RAISE a
-  grown file's ceiling — the exact move the gate exists to prevent, one flag away from the legitimate
-  ratchet. It should refuse to raise, or require an explicit `--raise-ceiling`.
-  (3) **inefficient-feeding (low):** a background `npm test … | tail -N` writes NOTHING to its output
+  (2) **inefficient-feeding (low):** a background `npm test … | tail -N` writes NOTHING to its output
   file until the whole run ends, because `tail` buffers to EOF — so a long suite cannot be progress-
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
@@ -1017,9 +986,6 @@
   - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
     only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
     surfaces to the operator despite the summary existing for exactly that purpose.
-  - (d) **Grounding corpora still use `ls-files` without `-z`** (`findingGrounding.ts`,
-    `contractPipelineGates.ts` ~1034): non-ASCII tracked paths arrive C-quoted (`core.quotePath`), so citations
-    to such paths fail grounding while the disposition (which uses `-z`) keeps them in scope.
   - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
     lack run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
 
