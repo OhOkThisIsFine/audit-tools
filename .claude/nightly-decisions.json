@@ -528,7 +528,9 @@
     "answer": "Make everything .ts - the .mjs holdouts will be fixed presently.",
     "subject": "Instruction-file edit: CLAUDE.md still tells every agent the audit tests are `.mjs` — the glob now matches zero files",
     "path": "CLAUDE.md",
-    "decided_at": "2026-07-29T14:42:11.565Z"
+    "decided_at": "2026-07-29T14:42:11.565Z",
+    "completed_at": "2026-07-29T15:01:24.518Z",
+    "completed_ref": "commit 1d4a81fc — CLAUDE.md layout table, single-test command, runner paragraph now .ts"
   },
   "ada5d88bac4ea867": {
     "disposition": "settled",
@@ -598,7 +600,9 @@
     "answer": "Same as the nightly item. Also, delete the backup stuff for me.",
     "subject": "The design-check skill's independent-refutation lane runs a retired helper — so the refutation step silently no-ops",
     "path": ".claude/skills/design-check/SKILL.md",
-    "decided_at": "2026-07-29T14:48:44.011Z"
+    "decided_at": "2026-07-29T14:48:44.011Z",
+    "completed_at": "2026-07-29T15:01:37.906Z",
+    "completed_ref": "commit 1d4a81fc — SKILL.md step 3 routes via the llm-relay dispatch ladder; ~/.claude/backups/llm-call.mjs.retired-2026-07-28 deleted and the ~/.claude/CLAUDE.md restore-pointer trimmed"
   },
   "80768a9c94ab0065": {
     "disposition": "settled",
