@@ -740,6 +740,20 @@
   `transport: "claude-code"` fixtures, so it is the ONE tranche file deliberately left `.mjs` until this
   is settled — converting it first would force either a union widening or a fixture-masking cast.
 
+- **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
+  (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15
+  background agents were live on the tree — it reads uncommitted paths as an unclean close and cannot
+  see in-flight background work, so a deliberate wait state consumed both of the session's challenges
+  before the real closeout. The gate needs a live-background-work signal before spending a challenge.
+  (2) **inefficient-feeding (low):** `.audit-tools/nightly/open-items.json` was STALE at
+  presentation — all 17 surfaced items were already answered AND recorded done in the decisions
+  ledger (`answer.mjs --list` had the truth); the surface artifact predated the answering commits.
+  `nightly-surface.mjs` should re-check the ledger at presentation and suppress settled items —
+  the [[queue-items-must-be-rechecked-at-presentation]] class, now on the surface artifact itself.
+  (3) **environment (memory, not repo):** the offload agent-type path (`pool/<name>` frontmatter)
+  404s through the harness while tier-mapped offload works — host-level (llm-relay/headroom),
+  tracked in project memory.
+
 - **Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):**
   (1) **inefficient-feeding (medium):** execution state lived only in an untracked checkpoint
   (`.audit-tools/nightly/execution-checkpoint-2026-07-28.md`) while HANDOFF, the backlog entry and
