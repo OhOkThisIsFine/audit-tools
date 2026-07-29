@@ -184,7 +184,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
   binding and equally self-describing, so it earns the same deletion. A trap enforced only *partly* is
   NOT deletable: state the uncovered half outright, or the covered half reads as a close (two live
   examples in [`durable-traps.md`](docs/backlog/durable-traps.md) — direct `child_process.spawn` calls
-  bypassing the stdin-closing substrate, and the 419 `.mjs` test files `checkJs:false` excludes from
+  bypassing the stdin-closing substrate, and the 372 `.mjs` test files `checkJs:false` excludes from
   `check:tests`). Current guards in `.claude/hooks/`:
   `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
   `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and

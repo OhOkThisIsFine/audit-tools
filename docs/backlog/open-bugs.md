@@ -701,41 +701,44 @@
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
 - **▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck
-  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 147 of 564 test files
-  (`find tests -name "*.test.*"`; 417 `.mjs` remain excluded by `checkJs: false`). Converting a file
-  to `.ts` brings it under the gate automatically — `.ts` is already checked — so no config ratchet,
-  no exclude list, and no aspirational state: coverage rises exactly as fast as conversion does.
-  The vitest `include` globs are single-sourced in `tests/helpers/testFileContract.ts` and enforced
-  by `tests/shared/test-suite-visibility.test.ts` (a test file the globs cannot see, or an
-  `.mjs`/`.ts` twin pair, is a RED test — so a rename can never silently leave the suite).
-  First five landed (the loop-core quota set: loop-core-paths, apiPool-model-routing,
-  compositeQuotaSource, capacity, claim-lease) and each surfaced real hidden drift — required
-  params the untyped callers omitted (`capabilityRanks`, roster window fields, `accountKey`) — so
-  the ratchet is catching contract gaps, not just annotating.
+  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 192 of 564 test files
+  (`find tests -name "*.test.*"`; 372 `.mjs` remain excluded by `checkJs: false`). Converting a file
+  brings it under the gate automatically — no config ratchet, no exclude list; coverage rises exactly
+  as fast as conversion does. The vitest `include` globs are single-sourced in
+  `tests/helpers/testFileContract.ts` and enforced by `tests/shared/test-suite-visibility.test.ts`
+  (an unmatched file or an `.mjs`/`.ts` twin pair is a RED test — a rename can never silently leave
+  the suite). Every batch so far surfaced real fixture drift against the live contracts, so the
+  ratchet is catching gaps, not just annotating. `dispatchable-sources.test.mjs` is the one
+  deliberate holdout — blocked on the `buildAccountScopedQuotaSource` entry above. Remaining: the
+  rest of `tests/shared`, then `tests/audit` (`shared-tests-invariants.test.mjs` stays `.mjs` by
+  design — a `.ts` guard cannot detect its own exclusion). Per-lap semantics check:
+  `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits, before commit — review
+  ONLY the files it flags.
   ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
   handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
-  ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list.** It was the
-  obvious interim step and the numbers kill it — the flip yields **8,903 errors across 451 of 440
-  tracked `.mjs` files**, i.e. essentially all of them, so the exclude list would cover the entire
-  tree and buy zero coverage today while leaving a 451-entry config to rot. It also dirties 28 `.ts`
-  files, because typing the `.mjs` imports propagates errors into their consumers. Dominant classes:
-  TS7006 implicit-any params (2,442), TS2345 argument types (1,219), TS5097 `.ts` import specifiers
-  (911), TS18048 possibly-undefined (821).
+  ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the flip
+  yields 8,903 errors across essentially every `.mjs` file, so the exclude list would cover the whole
+  tree, buy zero coverage, and leave a 451-entry config to rot (it also dirties 28 `.ts` consumers).
   **Property:** the gate's reach is stated as a number wherever it is claimed, so "the test tree is
   typechecked" can never again read as covering the whole tree
   ([`durable-traps.md`](durable-traps.md) carries the narrowed claim).
   Convert highest-value first: the files whose green is load-bearing for loop-core.
 
-- **Name the two test-enforced traps that are now deletable (2026-07-28, low).** The deletion rule in
-  `CLAUDE.md` and [`durable-traps.md`](durable-traps.md) is rephrased to cover test-enforcement as well
-  as hook-enforcement, and the two half-closed claims are narrowed — but the settled answer also called
-  for DELETING the two entries that a contract test now fully enforces, and those two were not
-  identified with enough confidence to remove. Deleting the wrong trap destroys knowledge that is
-  expensive to re-derive, so nothing was removed.
-  **Property:** an entry deleted as "enforced" must name the enforcing hook or test, so the claim is
-  checkable at deletion time instead of resting on the deleter's recall. Do this by walking
-  `tests/shared/hook-trap-guards.test.mjs` and `tests/shared/hook-session-gates.test.mjs` case by case
-  and matching each against the trap entry it closes; a trap with no matching case stays.
+- **`buildAccountScopedQuotaSource` names retired transports and misses the live one (2026-07-28,
+  medium, loop-core).** The switch in `src/shared/quota/compositeQuotaSource.ts`
+  (`buildAccountScopedQuotaSource`) scopes a per-account quota source by `source.transport`, with arms
+  `"claude"`/`"claude-code"` → ClaudeOAuth and `"codex"` → Codex. Neither Claude arm is a member of
+  `DISPATCHABLE_TRANSPORTS` (`src/shared/types/sessionConfig.ts`), and the sole production caller —
+  `buildSourcePool`'s account-scoping step in `src/shared/quota/apiPool.ts` — passes a union-typed
+  `DispatchableSource`, so both arms are unreachable; meanwhile `"claude-worker"`, the union's actual
+  Claude-CLI dispatch class, has NO arm and silently takes the `default` fallback, so a claude-worker
+  source declaring its own `credentials_path` never probes ITS credential's usage/account. **Open
+  property:** a second-account claude-worker source must form its pool from its own credential (the
+  function's stated §5b intent), or the fallback must be shown deliberate — and the dead arms go either
+  way. Loop-core (`src/shared/quota/`): needs `/design-check` + review attestation.
+  Found by the `.ts`-conversion ratchet: `tests/shared/dispatchable-sources.test.mjs` constructs
+  `transport: "claude-code"` fixtures, so it is the ONE tranche file deliberately left `.mjs` until this
+  is settled — converting it first would force either a union widening or a fixture-masking cast.
 
 - **Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):**
   (1) **inefficient-feeding (medium):** execution state lived only in an untracked checkpoint
@@ -1097,7 +1100,7 @@
   `src/audit/cli/rollingAuditDispatch.ts` and `src/remediate/steps/nextStep.ts` both route
   `onEscalation` into the single `captureStepBoundaryFriction` chokepoint. Coverage is ASYMMETRIC, not
   end-to-end on both: the shared engine half (recordLimit → escalate → early strand, pool N+1 never
-  attempted) is pinned in `tests/shared/rollingDispatch.test.mjs` with NO friction assertion, and only
+  attempted) is pinned in `tests/shared/rollingDispatch.test.ts` with NO friction assertion, and only
   the AUDIT driver's full chain through to the written `friction/<runId>.json` record is pinned
   (`tests/audit/rolling-audit-dispatch.test.mjs` §5). Nothing under `tests/remediate` asserts a
   `quota_escalation` friction — `tests/remediate/quota-scheduler.test.ts` pins only the

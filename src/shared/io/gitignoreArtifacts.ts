@@ -74,6 +74,10 @@ export const PUBLIC_TREE_IGNORE = ".audit-tools/" as const;
  * CONTENTS level (the per-level star globs in PRIVATE_TREE_PATTERNS) — never the
  * dir itself — and the dirs holding tracked files are re-included so git
  * descends into them.
+ *
+ * Field diagnosis: if deliverables ever become un-trackable, the cause is a stray
+ * blanket `.audit-tools/` line OUTSIDE the managed markers (user lines outside the
+ * block are deliberately never touched) — delete it; the managed block owns the tree.
  */
 export const DELIVERABLE_REINCLUDES: readonly string[] = [
   `!.audit-tools/${AUDIT_REPORT_FILENAME}`,

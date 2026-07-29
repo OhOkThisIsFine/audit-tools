@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 150 entr(y/ies) indexed.
+> and at commit). 147 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -85,33 +85,33 @@
 - `open-bugs.md:693` — Accept-latch — two low residuals stay open.
 - `open-bugs.md:701` — Node-worktree guard — accepted residuals only (each low, on-evidence-only).
 - `open-bugs.md:703` — ▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck ratchet (2026-07-28, medium, owner-approved).
-- `open-bugs.md:729` — Name the two test-enforced traps that are now deletable (2026-07-28, low).
-- `open-bugs.md:740` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
-- `open-bugs.md:752` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:778` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:795` — Friction walk (inline-api_key retirement lap, 2026-07-26):
-- `open-bugs.md:807` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:821` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:842` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:851` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
-- `open-bugs.md:862` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
-- `open-bugs.md:885` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
-- `open-bugs.md:906` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
-- `open-bugs.md:910` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
-- `open-bugs.md:932` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
-- `open-bugs.md:945` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
-- `open-bugs.md:964` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
-- `open-bugs.md:973` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
-- `open-bugs.md:990` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:1013` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:1030` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
-- `open-bugs.md:1044` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1066` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1081` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1095` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1114` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1136` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
-- `open-bugs.md:1144` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:727` — `buildAccountScopedQuotaSource` names retired transports and misses the live one (2026-07-28, medium, loop-core).
+- `open-bugs.md:743` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
+- `open-bugs.md:755` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:781` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:798` — Friction walk (inline-api_key retirement lap, 2026-07-26):
+- `open-bugs.md:810` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:824` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:845` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:854` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
+- `open-bugs.md:865` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
+- `open-bugs.md:888` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
+- `open-bugs.md:909` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
+- `open-bugs.md:913` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
+- `open-bugs.md:935` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
+- `open-bugs.md:948` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
+- `open-bugs.md:967` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
+- `open-bugs.md:976` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
+- `open-bugs.md:993` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:1016` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:1033` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
+- `open-bugs.md:1047` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1069` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1084` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1098` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1117` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1139` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
+- `open-bugs.md:1147` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -165,30 +165,27 @@
 - `durable-traps.md:207` — After an unattended run, `git diff` the tracked docs before committing.
 - `durable-traps.md:220` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
 - `durable-traps.md:242` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:248` — A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.
-- `durable-traps.md:256` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
-- `durable-traps.md:273` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
-- `durable-traps.md:284` — Remediate-code worktree branches strand commits off main.
-- `durable-traps.md:286` — `.gitignore` artifact-tree re-include structure (don't flatten it).
-- `durable-traps.md:294` — Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`
-- `durable-traps.md:299` — Wall-clock peak-concurrency tests are latency-fragile.
-- `durable-traps.md:314` — One test runner: vitest
-- `durable-traps.md:328` — Don't mask the test exit code with a REDIRECT.
-- `durable-traps.md:336` — Global `-g` install BLOCKS `postinstall`
-- `durable-traps.md:346` — A global junction to a LIVE working tree silently shadows a registry install.
-- `durable-traps.md:352` — PowerShell
-- `durable-traps.md:362` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
-- `durable-traps.md:378` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
-- `durable-traps.md:393` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
-- `durable-traps.md:400` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
-- `durable-traps.md:405` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:416` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
-- `durable-traps.md:418` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:420` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:428` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:436` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:447` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
-- `durable-traps.md:458` — A backlog entry's bold title must not contain `
+- `durable-traps.md:248` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
+- `durable-traps.md:265` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
+- `durable-traps.md:276` — Remediate-code worktree branches strand commits off main.
+- `durable-traps.md:278` — Wall-clock peak-concurrency tests are latency-fragile.
+- `durable-traps.md:293` — One test runner: vitest
+- `durable-traps.md:307` — Don't mask the test exit code with a REDIRECT.
+- `durable-traps.md:315` — Global `-g` install BLOCKS `postinstall`
+- `durable-traps.md:325` — A global junction to a LIVE working tree silently shadows a registry install.
+- `durable-traps.md:331` — PowerShell
+- `durable-traps.md:341` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
+- `durable-traps.md:357` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
+- `durable-traps.md:372` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
+- `durable-traps.md:379` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
+- `durable-traps.md:384` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
+- `durable-traps.md:395` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
+- `durable-traps.md:397` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:399` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:407` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:415` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:427` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
+- `durable-traps.md:438` — A backlog entry's bold title must not contain `
 
 <!-- END GENERATED SEEK INDEX -->
 

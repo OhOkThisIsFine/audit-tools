@@ -245,14 +245,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
   failed on seeing the advisory. Observed 2026-07-08.
 
-- **A remediate test file must not re-declare `makeState` *standalone* — wrap the shared helper instead.**
-  `INV-remediate-tests-03` (`tests/remediate/remediate-tests-invariants.test.ts`) fails any test file that
-  declares a top-level `makeState` without also importing `./test-helpers`. A **wrapper** over the shared
-  `makeState({ plan: {...}, items: {...} })` (`tests/remediate/test-helpers.ts`) is allowed and is the normal
-  pattern — several files add file-specific defaults on top of it. `step-utils.test.ts` is the one hardcoded
-  exception (genuinely different signature). Fires at `npm test` / CI, not at the tool call.
-  Observed 2026-07-08 (a new `access-memory.test.ts` tripped it; it now wraps the shared helper).
-
 - **`tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.**
   Rank 1 in every profiled run that lists it (`.audit-tools-profile/vitest-history.ndjson`), 285-470s file
   wall. It drives the full multi-phase audit flow in-process — the CLI handlers are imported and called
@@ -282,19 +274,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   robustness*).
 
 - **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktrees; accepted work is cherry-picked onto `remediation/<runId>` (`remediationBranchName`, `src/remediate/steps/dispatch/worktreeLifecycle.ts`) and the MAIN checkout is switched to that branch and left there (`ensureRemediationBranchCheckedOut`). By DEFAULT the branch is never auto-merged — the base branch is left untouched for review — so any doc or code fix applied inside a remediate run never reaches main unless explicitly merged. Effect: a review pass that reads main (e.g. the nightly docs leg) still sees the unfixed prose and legitimately re-raises the finding. The nightly decisions ledger *can* silence it permanently (subject-keyed, `scripts/nightly/items.mjs` + `answer.mjs`), but settling is the wrong move here — the fix exists, it just isn't on main. **Opt-in fix (B5, shipped):** select the `merge-to-base` closing action at the confirm step — close checks out the recorded base and `--no-ff` merges `remediation/<runId>` into it, aborting the merge and restoring the remediation branch on conflict so the base is left exactly as it was (`src/remediate/phases/close.ts`). **Caveat — merge-to-base can silently no-op:** the target is read from the `remediation-base-branch.json` sidecar, which is written ONLY when the branch is FIRST created. A run launched from a detached HEAD, or one that REUSES a `remediation/<runId>` branch left by a prior run, has no recorded base; the action then returns `skipped` ("merge manually") rather than guessing a target. So check the closing result — and after any run that touches docs/code you want on main, `git branch --no-merged main --list 'remediation/*'` and merge the survivors by hand before the next review pass.
-
-- **`.gitignore` artifact-tree re-include structure (don't flatten it).** The managed block ignores the
-  `.audit-tools/` runtime tree at the CONTENTS level (`.audit-tools/*`, `.audit-tools/*/*`) and re-includes the
-  tracked deliverables + `*/agent-feedback.jsonl` — never as a blanket `.audit-tools/` dir-ignore, because git
-  cannot re-include a file under an excluded directory. Private ⇒ deliverables tracked; public ⇒ blanket-ignore.
-  Single-sourced in `src/shared/io/gitignoreArtifacts.ts` (`renderGitignoreBlock`), idempotent against the
-  committed block. If you ever see deliverables un-trackable, it's a stray blanket `.audit-tools/` line OUTSIDE
-  the managed markers — delete it, the managed block owns the tree.
-
-- **Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`**, never a
-  bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
-  can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
-  is fine — distinct name, no source collision.)
 
 - **Wall-clock peak-concurrency tests are latency-fragile.** The rolling-driver integration tests assert
   `peak == N` by dispatching N nodes with a short `setTimeout` and reading the max simultaneous in-flight
@@ -439,10 +418,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-  ⚠ **HALF-CLOSED — `check:tests` reaches 141 of 560 test files.** `tsconfig.test.json` sets
-  `checkJs: false`, which silently excludes every `.mjs` test, so the sweep that found those fixtures
-  could only ever have found them in the `.ts` quarter of the tree. The remaining 419 files carry the
-  same class, undetected. Do not read "the test tree is typechecked now" as closed.
+  ⚠ **HALF-CLOSED — `check:tests` reaches 192 of 564 test files.** `tsconfig.test.json` sets
+  `checkJs: false`, which silently excludes every `.mjs` test, so a fixture sweep can only ever find
+  this class in the converted part of the tree. The remaining 372 `.mjs` files carry the
+  same class, undetected — the conversion ratchet (open-bugs) is the closure path. Do not read
+  "the test tree is typechecked now" as closed until that count is zero.
 
 - **Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.**
   Line numbers across the backlog drifted repo-wide while the symbol names beside them still resolved,

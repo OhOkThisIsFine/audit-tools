@@ -147,6 +147,20 @@ test("friction sidecar ignored at any depth UNDER the artifact tree (anchored, n
   expect(!pat.startsWith("**/"), "friction pattern is NOT a bare any-depth glob (would shadow src/shared/friction/)").toBeTruthy();
 });
 
+test("class rule: NO tool-managed ignore pattern is a bare any-depth glob — every one is anchored", () => {
+  // An unanchored `**/<name>/` regenerates on every ensure/postinstall and can
+  // shadow a same-named SOURCE dir (a bare `**/friction/` once dropped a new file
+  // under `src/shared/friction/` from a node merge, which a file-level edit can't
+  // fix). The friction case above pins the one live instance; this pins the CLASS,
+  // so a future tool-managed pattern can't reintroduce the shape.
+  for (const pat of [...ALWAYS_IGNORE_PATTERNS, ...PRIVATE_TREE_PATTERNS, PUBLIC_TREE_IGNORE]) {
+    expect(
+      !pat.startsWith("**/"),
+      `bare any-depth glob would shadow a same-named source dir: ${pat}`,
+    ).toBeTruthy();
+  }
+});
+
 test("patterns are OS-agnostic — forward slashes, LF only", () => {
   const block = renderGitignoreBlock("public");
   expect(!block.includes("\\"), "no backslashes").toBeTruthy();

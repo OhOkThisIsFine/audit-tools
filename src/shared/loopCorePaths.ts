@@ -10,7 +10,7 @@
 //
 // The `.mjs` hook cannot import this TypeScript module (it runs under plain
 // node, pre-build), so it re-declares the same pattern list; a parity test
-// (`tests/shared/loop-core-paths.test.mjs`) pins the two lists byte-equal so they
+// (`tests/shared/loop-core-paths.test.ts`) pins the two lists byte-equal so they
 // can never drift. Keep the array below the ONE canonical definition — edit here,
 // and the parity test forces the hook to follow.
 //

@@ -107,13 +107,13 @@ test("INV-shared-tests-02: no .test.mjs file imports node:test, jest, mocha, or 
 // can be located in the test suite. Regression-locking this prevents the schema
 // guard from being accidentally deleted.
 
-test("INV-shared-tests-03: shared-core-invariants.test.mjs exists and covers schema drift (INV-shared-core-01)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.mjs");
-  expect(existsSync(filePath), "shared-core-invariants.test.mjs must exist in tests/ — INV-shared-tests-03 (schema invariant coverage)").toBeTruthy();
+test("INV-shared-tests-03: shared-core-invariants.test.ts exists and covers schema drift (INV-shared-core-01)", () => {
+  const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.ts");
+  expect(existsSync(filePath), "shared-core-invariants.test.ts must exist in tests/ — INV-shared-tests-03 (schema invariant coverage)").toBeTruthy();
   const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-core-01"), "shared-core-invariants.test.mjs must contain INV-shared-core-01 (schema drift detection) — INV-shared-tests-03").toBeTruthy();
+  expect(content.includes("INV-shared-core-01"), "shared-core-invariants.test.ts must contain INV-shared-core-01 (schema drift detection) — INV-shared-tests-03").toBeTruthy();
   // Must reference the actual schema files under audit-code/schemas.
-  expect(content.includes("finding.schema.json") || content.includes("audit_result.schema.json"), "shared-core-invariants.test.mjs must reference at least one audit-code schema file — INV-shared-tests-03").toBeTruthy();
+  expect(content.includes("finding.schema.json") || content.includes("audit_result.schema.json"), "shared-core-invariants.test.ts must reference at least one audit-code schema file — INV-shared-tests-03").toBeTruthy();
 });
 
 test("INV-shared-tests-03: validateAuditFindingsReport is importable and validates contract_version", async () => {
@@ -129,11 +129,11 @@ test("INV-shared-tests-03: validateAuditFindingsReport is importable and validat
 // INV-shared-quota-06 (file lock token contract) must be covered. Regression-locking
 // this prevents the lock-token clobber guard from being silently removed.
 
-test("INV-shared-tests-04: shared-quota-invariants.test.mjs exists and covers lock token invariant (INV-shared-quota-06)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.mjs");
-  expect(existsSync(filePath), "shared-quota-invariants.test.mjs must exist — INV-shared-tests-04 (lock invariant coverage)").toBeTruthy();
+test("INV-shared-tests-04: shared-quota-invariants.test.ts exists and covers lock token invariant (INV-shared-quota-06)", () => {
+  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.ts");
+  expect(existsSync(filePath), "shared-quota-invariants.test.ts must exist — INV-shared-tests-04 (lock invariant coverage)").toBeTruthy();
   const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-quota-06"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-06 (lock token contract) — INV-shared-tests-04").toBeTruthy();
+  expect(content.includes("INV-shared-quota-06"), "shared-quota-invariants.test.ts must cover INV-shared-quota-06 (lock token contract) — INV-shared-tests-04").toBeTruthy();
   // Must reference acquireLock / releaseLock.
   expect(content.includes("acquireLock") && content.includes("releaseLock"), "INV-shared-quota-06 tests must exercise acquireLock and releaseLock — INV-shared-tests-04").toBeTruthy();
 });
@@ -151,11 +151,11 @@ test("INV-shared-tests-04: fileLock.ts exports acquireLock, releaseLock, withFil
 // INV-shared-quota-10 (parallel recordWaveOutcome convergence) and
 // INV-shared-quota-01 (host-limit partitioning) must both be covered.
 
-test("INV-shared-tests-05: shared-quota-invariants.test.mjs covers concurrency invariants (INV-shared-quota-01 and -10)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.mjs");
+test("INV-shared-tests-05: shared-quota-invariants.test.ts covers concurrency invariants (INV-shared-quota-01 and -10)", () => {
+  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.ts");
   const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-quota-01"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-01 (host limit partitioning) — INV-shared-tests-05").toBeTruthy();
-  expect(content.includes("INV-shared-quota-10"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-10 (parallel recordWaveOutcome convergence) — INV-shared-tests-05").toBeTruthy();
+  expect(content.includes("INV-shared-quota-01"), "shared-quota-invariants.test.ts must cover INV-shared-quota-01 (host limit partitioning) — INV-shared-tests-05").toBeTruthy();
+  expect(content.includes("INV-shared-quota-10"), "shared-quota-invariants.test.ts must cover INV-shared-quota-10 (parallel recordWaveOutcome convergence) — INV-shared-tests-05").toBeTruthy();
 });
 
 test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit correctly (spot-check)", async () => {
@@ -186,10 +186,10 @@ test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit 
 // ── INV-shared-tests-06: Cycle detection invariant coverage is present ────────
 // INV-shared-core-07 (obligation cycle detection at construction) must be covered.
 
-test("INV-shared-tests-06: shared-core-invariants.test.mjs covers obligation cycle detection (INV-shared-core-07)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.mjs");
+test("INV-shared-tests-06: shared-core-invariants.test.ts covers obligation cycle detection (INV-shared-core-07)", () => {
+  const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.ts");
   const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-core-07"), "shared-core-invariants.test.mjs must cover INV-shared-core-07 (cycle detection at construction) — INV-shared-tests-06").toBeTruthy();
+  expect(content.includes("INV-shared-core-07"), "shared-core-invariants.test.ts must cover INV-shared-core-07 (cycle detection at construction) — INV-shared-tests-06").toBeTruthy();
   expect(content.includes("cycle"), "INV-shared-core-07 tests must contain the word 'cycle' — INV-shared-tests-06").toBeTruthy();
 });
 
