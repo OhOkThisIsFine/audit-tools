@@ -169,7 +169,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `child_process.spawn` DIRECTLY, where Node's default stdio leaves the child's stdin an open pipe →
   the silent exit-0/empty-output hang. Routing through the substrate is a convention here, not an
   enforced invariant: no gate refuses a direct spawn in `src/`. And only the `stdinText` pipe branch
-  is asserted in `tests/shared/spawnLoggedCommand.test.mjs` — the `"ignore"` default, which is the
+  is asserted in `tests/shared/spawnLoggedCommand.test.ts` — the `"ignore"` default, which is the
   branch a `worker_command` of `["codex","exec",…]` actually takes, has no test. So the substrate is
   correct and unproven, and bypassing it is undetected.
 
@@ -212,7 +212,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the code anchor is re-verified against HEAD before any write (`docs/nightly-routine.md` → *Safety*),
   but that is the routine's own contract, not a gate — no hook compares a tracked doc against its
   committed version, and the only mechanical pin on `CLAUDE.md` is the one file-lock sentence in
-  `tests/audit/file-lock-doc-sync.test.mjs`. Bit once (2026-07-10) under the old branch-snapshot-keyed
+  `tests/audit/file-lock-doc-sync.test.ts`. Bit once (2026-07-10) under the old branch-snapshot-keyed
   doc-review auto-apply, which was replaced 2026-07-23 by the subject-keyed durable decisions ledger
   (`253e3851`); the reconcile-against-HEAD tool fix that used to be tracked under *Open bugs* shipped
   with it.
@@ -245,7 +245,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
   failed on seeing the advisory. Observed 2026-07-08.
 
-- **`tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.**
+- **`tests/audit/audit-code-completion.test.ts` is the slowest file in the whole suite, not just in audit.**
   Rank 1 in every profiled run that lists it (`.audit-tools-profile/vitest-history.ndjson`), 285-470s file
   wall. It drives the full multi-phase audit flow in-process — the CLI handlers are imported and called
   directly, not subprocess-spawned — and `HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000` is a PER-TEST timeout on
@@ -283,9 +283,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
   ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
   (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.) Same class:
-  `tests/shared/rollingDispatch.test.mjs` "re-dispatches immediately on result arrival" passes in
+  `tests/shared/rollingDispatch.test.ts` "re-dispatches immediately on result arrival" passes in
   isolation but intermittently reads `2` for `3` under full-suite load — it is sensitive to ambient
-  scheduler/FS load, not just dispatch-path latency. `tests/shared/nightly-routine.test.mjs` spins up
+  scheduler/FS load, not just dispatch-path latency. `tests/shared/nightly-routine.test.ts` spins up
   real HTTP servers (the interactive-review contract), which adds transient load that nudges it over
   its window; the durable fix is to widen that test's delay well past worst-case, not to thin the
   server tests (CI's 4-way shard already lowers the per-shard load).
@@ -390,7 +390,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
   `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
-  `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
+  `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.ts`.)
 
 - **`pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).** The gate filters shell statements with `isGitSubcommand('commit')` and returns at `commitSubCmds.length === 0` (both in `runGate`, `.claude/hooks/pre-commit-gate.mjs`), so `git merge`, `git rebase --continue`, `git cherry-pick`, `git revert` and `git am` skip *every* leg — `npm run check`, the doc-contract subset, `check:doc-manifest`, and the loop-core attestation. Seen as stray-doc failures on all three merge commits of the v0.34.7 queue (main red until `0c6a5a6d` registered the docs). **The original remedy — "run the doc-manifest check in the `ci` workflow too" — is a no-op and always was:** `ci.yml`'s `gate` job runs `npm run verify:checks`, which already contains `check:doc-manifest`, and `docs/**` has been a trigger path since `214f601e` (2026-07-19). CI is what *reports* the red; the gate that is missing is the LOCAL one. Real fix: widen the gate's detection to the commit-creating subcommand set — then delete this entry per the hook-enforcement policy.
 

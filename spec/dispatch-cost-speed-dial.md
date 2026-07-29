@@ -65,8 +65,9 @@ declared ⇒ effectively sequential" for the conversation host. Reusing that one
 the speed rank crowns the default zero-declaration host as fastest and lets it monopolize the wave at
 λ=1 — the exact opposite of the dial's intent (a real defect, caught in adversarial review).
 
-**`deriveThroughputConcurrency(pool)`** (higher = faster), keyed on the host-vs-source discriminator
-`DispatchCapacityPoolSummary.is_conversation_host` (auto — a pool built from a backend
+**`deriveThroughputConcurrency({ isConversationHost, hostActiveSubagents, sourceConcurrencyCap })`**
+(higher = faster), keyed on the host-vs-source discriminator — which `admissionPoolsFromSummaries`
+projects from `DispatchCapacityPoolSummary.is_conversation_host` (auto — a pool built from a backend
 `CapacityPool.source` is a source; one without is the host):
 
 - **Backend source** — an endpoint that accepts concurrent requests: `source.quota.max_concurrent` when

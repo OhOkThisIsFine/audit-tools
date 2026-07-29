@@ -166,7 +166,7 @@
 - `durable-traps.md:207` — After an unattended run, `git diff` the tracked docs before committing.
 - `durable-traps.md:220` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
 - `durable-traps.md:242` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:248` — `tests/audit/audit-code-completion.test.mjs` is the slowest file in the whole suite, not just in audit.
+- `durable-traps.md:248` — `tests/audit/audit-code-completion.test.ts` is the slowest file in the whole suite, not just in audit.
 - `durable-traps.md:265` — Codex CLI can burn a long wall-clock on large read-heavy audit packets.
 - `durable-traps.md:276` — Remediate-code worktree branches strand commits off main.
 - `durable-traps.md:278` — Wall-clock peak-concurrency tests are latency-fragile.
@@ -216,7 +216,7 @@ or to catch it failing. Pick a run config from this matrix; watch the items it l
 | Run config | Items it exercises (watch their ⬇ lines) |
 |---|---|
 | **Any** live audit, any provider | Selective-deepening convergence · knip `files`/`dependencies` dead-code leads |
-| **Metered provider + LARGE target** — this is what exercises the wall (`AUDIT_TOOLS_LIVE_QUOTA=1` only enables the live-credential test probe in `tests/audit/inv2.test.mjs`, it does not force a production wall) | Quota-aware dispatch · M-QUOTA friction escalation · pre-wall pacing · retryable resume |
+| **Metered provider + LARGE target** — this is what exercises the wall (`AUDIT_TOOLS_LIVE_QUOTA=1` only enables the live-credential test probe in `tests/audit/inv2.test.ts`, it does not force a production wall) | Quota-aware dispatch · M-QUOTA friction escalation · pre-wall pacing · retryable resume |
 | **Codex backend** (`--provider codex`; Codex CLI is a nested-agent host) | Y-dispatcher driver selection · cross-provider quota (Codex live endpoint) |
 | **openai-compatible / NIM backend** (`RUN_NIM_E2E=1` for the gated e2e) | openai-compatible dispatch pool · CE-004 emit-time-constraint build opportunity |
 | **Rust or Ruby target repo** | clippy (cargo) + rubocop (bundle) live spawn |

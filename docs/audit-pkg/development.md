@@ -23,7 +23,7 @@ shipped-sprint archive — that history lives in git + project memory.
 npm install
 npm run check
 npm test
-npx vitest run tests/audit/next-step.test.mjs
+npx vitest run tests/audit/next-step.test.ts
 npm run verify:release
 ```
 

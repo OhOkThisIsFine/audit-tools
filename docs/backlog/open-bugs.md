@@ -14,7 +14,7 @@
   **Narrowed 2026-07-26 (AuditResult is CLOSED):** `scripts/` is covered by neither tsconfig, so the
   producer could not fail on a contract it never consulted. `buildSyntheticResults` now validates its own
   output through `validateAuditResults` and throws on any error, and
-  `tests/audit/smoke-producer-contract.test.mjs` gates both that refusal and the single-construction-site
+  `tests/audit/smoke-producer-contract.test.ts` gates both that refusal and the single-construction-site
   claim its docblock used to merely assert. What stays open is the GENERALIZATION to the other validated
   contract types: coverage should be derivable from the contract (every construction site of the type),
   not from where tests live. Not yet designed — the doc-manifest data+refusal shape (`2adc716c`) is the
@@ -48,7 +48,7 @@
   low).** The review-snapshot worktree SHIPPED; the enforcement itself is closed and
   single-homed: mechanism + rationale live in `src/shared/providers/reviewSnapshot.ts`'s docblock and
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #8, contract-tested
-  in `tests/shared/review-snapshot.test.mjs`. What stays open: (a) git REFS are shared through the
+  in `tests/shared/review-snapshot.test.ts`. What stays open: (a) git REFS are shared through the
   worktree link — a hostile worker can still `branch -D` / `push` / `gc` shared state (git refuses
   deleting a branch checked out in any worktree and push needs creds, so this is far narrower than the
   checkout-to-main incident class); (b) on a DIRTY tree workers review HEAD while `file_line_counts`
@@ -112,7 +112,7 @@
   RETURNED, so "this lane under-reports" is inexpressible except by hand.
   **Owner call TAKEN 2026-07-25 — three legs.** (1) **AFFIRMATION — SHIPPED:** a zero-finding
   `AuditResult` must set `reviewed_clean: true`, and the flag is refused alongside findings so it cannot
-  decay into boilerplate (`validateResultFindings`; pinned in `validation-remediation.test.mjs`). That
+  decay into boilerplate (`validateResultFindings`; pinned in `validation-remediation.test.ts`). That
   separates a BROKEN lane from a weak one — what made the agy 0-for-2 unreadable. (2) **A2 oracle
   UNPARKED** so yield can gate eligibility against ground truth ([`deferred.md`](deferred.md)).
   (3) **Widen the deepening net** to low-priority zero-finding results — OPEN, wants (2)'s calibration
@@ -135,7 +135,7 @@
   claimed: `charterReadFileSlice` compares content for consensus members ∪ every `isDocIntentFile`
   path (`doc_only` status **OR** `.md/.markdown/.adoc/.rst/.txt` — single-sourced at
   `buildStructureDecomposition.ts` so it can never be narrower than the decomposition's own doc
-  universe; pinned by `tests/audit/dependency-slices.test.mjs`), PLUS the complete sorted path list,
+  universe; pinned by `tests/audit/dependency-slices.test.ts`), PLUS the complete sorted path list,
   so every add / delete / rename fires regardless of classification. What stays outside is a
   content-only edit to a file that is neither a consensus member nor doc-extensioned nor `doc_only`
   — e.g. spec prose living inside a `.ts` the Stated pass reads. Widen `charterReadFileSlice` if a
@@ -224,7 +224,7 @@
   | `claude-opus-4-8` | **0.85** | 10.00 |
 
   So after a refresh the flat table ranks **opus as the cheapest model in the roster**, below haiku —
-  and cost-first routing (λ=0) would send every packet to it. `tests/shared/cost-rank.test.mjs` caught
+  and cost-first routing (λ=0) would send every packet to it. `tests/shared/cost-rank.test.ts` caught
   this as 11 failures on CI shard 1 (both Node versions); the pre-collision snapshot happens to carry
   anthropic's own prices, which is why the stale file looked correct. **The refresh is therefore
   gated on the second-order mismatch, not merely followed by it:** `byProvider` is keyed by models.dev
@@ -587,7 +587,7 @@
   [`g4-g5-g6-premise-check-2026-07-16.md`](../reviews/g4-g5-g6-premise-check-2026-07-16.md).
 
 - **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression
-  (2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a
+  (2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.ts` fails in a
   full `vitest run` and passes alone; a second failure ROTATES between runs (seen: `wave-scheduler`,
   `next-step`, `quota-state` — all heavy, all pass alone). Per the test-failure protocol these are test
   bugs (timeout under worker contention / shared state dirs), not code regressions. ⚠ The 2026-07-16
@@ -646,10 +646,10 @@
   defect recurring. Same class as the landing-stage-misfiled-as-dispatch entry — both are module boundaries
   drawn by history rather than by role, and both are fixed by moving code rather than by tuning a list.
 
-- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.ts`](../../tests/audit/design-docs-declarative.test.ts), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
+- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.ts`](../../tests/audit/design-docs-declarative.test.ts), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.ts`, `audit-orchestrator-invariants.test.ts` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
   ⚠ **OWNER DECISION 2026-07-25 on (1):** require a **`gated by:` clause** on any spec statement of an
   ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
-  not re-admit the status vocabulary `design-docs-declarative.test.mjs` bans. The lint's doc set widens
+  not re-admit the status vocabulary `design-docs-declarative.test.ts` bans. The lint's doc set widens
   to the spec files carrying endpoint statements. (2) and (3) are unchanged and still open.
 
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
@@ -847,7 +847,7 @@
   helper can detect this: an instruction containing enumerated sub-questions (`A.`/`B.`/`1.`) under the
   default schema should warn (or refuse) at call time, since the shape mismatch is decidable from the
   prompt. (2) **tool-should-decide (medium):** the backlog budget baseline is bound to the LIVE file, so
-  ratcheting mid-lap and then deleting more entries turns `backlog-budget-unit.test.mjs` RED in a way
+  ratcheting mid-lap and then deleting more entries turns `backlog-budget-unit.test.ts` RED in a way
   that reads as a code regression — it cost a full-suite investigation here. Either ratchet only at
   commit time (a hook), or have the test compare against the COMMITTED file rather than the worktree.
   (3) **ambiguous-direction (low):** a backlog entry can name a property whose honest implementation is
@@ -1005,7 +1005,7 @@
   writes the packet/results artifact paths plus the `access` read/write paths at `:841-846`.
   Property: no design-review pass is judged by the agent that drove the work under review, and no
   dispatched packet carries the orchestrator advance — on any of the three branches.
-  What is open is only the PIN: `tests/audit/next-step.test.mjs` asserts the advance-free worker
+  What is open is only the PIN: `tests/audit/next-step.test.ts` asserts the advance-free worker
   packet and the host-side advance for `design_review_parallel` ONLY; the `design_review_contract` case
   (`:183-189`) writes the findings file and asserts nothing, so a future rewrite of that branch off the
   shared helper would not be caught. Extend the parallel-branch assertion to the solo step.
@@ -1040,7 +1040,7 @@
     `~/.config/opencode/opencode.json` on upgrade (the wrapper/install path DOES migrate it → `'ask'`;
     pinned deliberate by remediate's COR-fc1f12a6 tests). Full closure: mirror the wrapper's
     `withoutManagedBroadBashWildcard` migration into `scripts/{audit,remediate}/postinstall.mjs`.
-  - **(from V5) path-guard blind spots.** `tests/shared/audit-tools-path-guard.test.mjs` cannot see
+  - **(from V5) path-guard blind spots.** `tests/shared/audit-tools-path-guard.test.ts` cannot see
     template-literal construction (no live occurrence today) and its allowlist honesty check is
     substring-only. Tighten if a violation ever sneaks past. Also low: `validateArtifacts`'s unused
     `root="."` default now yields an absolute (not relative) report path — no live call site hits it.
@@ -1122,7 +1122,7 @@
   end-to-end on both: the shared engine half (recordLimit → escalate → early strand, pool N+1 never
   attempted) is pinned in `tests/shared/rollingDispatch.test.ts` with NO friction assertion, and only
   the AUDIT driver's full chain through to the written `friction/<runId>.json` record is pinned
-  (`tests/audit/rolling-audit-dispatch.test.mjs` §5). Nothing under `tests/remediate` asserts a
+  (`tests/audit/rolling-audit-dispatch.test.ts` §5). Nothing under `tests/remediate` asserts a
   `quota_escalation` friction — `tests/remediate/quota-scheduler.test.ts` pins only the
   `HostSessionQuotaSource` escalation unit. Two open halves: **(a) bounded** — add the remediate parity
   test (`driveRollingImplementDispatch` with `poolsOverride` of ≥4 pools and a `dispatchNode` returning
@@ -1145,8 +1145,8 @@
   `packetPrompt.ts` "MUST be exactly … do NOT use the packet_id" directive is now the belt, not the
   braces. A third variant (worker omits per-finding `lens` → hard reject → re-queue forever) is closed by
   `defaultFindingLensFromResult` (`src/audit/validation/auditResults.ts`). Unit-covered:
-  `tests/audit/content-key-seam.test.mjs`, `tests/audit/ledger.test.mjs`,
-  `tests/audit/idempotency-sibling-collision.test.mjs`. **Still open:** confirmation on a real
+  `tests/audit/content-key-seam.test.ts`, `tests/audit/ledger.test.ts`,
+  `tests/audit/idempotency-sibling-collision.test.ts`. **Still open:** confirmation on a real
   deepening-capable run. If a run wedges, the recovery is `audit-code force-synthesis` (stamps a
   tool-owned `operator_forced` terminal over the pending ids and synthesizes from the intact ledger) —
   never hand-edit gitignored run state, which the state machine overwrites and which cascades stale

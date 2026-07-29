@@ -235,7 +235,7 @@ followed" is otherwise indistinguishable from a bug.
   `claude-opus-4-8` = 200k vs `claude-opus-4-8@default` = 1M). A headless host that reports the bare id but
   serves the 200k deployment therefore sizes packets off a ~5× window. The guards that actually hold are
   (a) discovered capability and explicit `quota.models` both outranking the static rung (`limits.ts`, pinned in
-  `tests/shared/model-statics.test.mjs`), and (b) the per-pool fit gates — `context_cap_tokens`
+  `tests/shared/model-statics.test.ts`), and (b) the per-pool fit gates — `context_cap_tokens`
   (`resolveSourceContextWindowTokens`, `src/shared/quota/apiPool.ts`), the packer clamp in
   `deriveOverridePackerBudget`, and the `oversized_packet` warning in `src/audit/cli/dispatch/packetFilter.ts`
   (which fires at `medium` confidence — it suppresses only at `low`). `BLOCK_SAFETY_MARGIN` is NOT a guard

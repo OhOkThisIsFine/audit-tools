@@ -51,7 +51,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
   parallel jobs — `gate` (`verify:checks`: control-bytes + version-gates + loop-core-patterns +
-  constitutional-doc-paths + deadcode + doc-manifest + philosophy-brief + handoff-roadmap +
+  constitutional-doc-paths + deadcode + doc-manifest + doc-links + philosophy-brief +
+  nightly-routine-prompt + handoff-roadmap +
   backlog-index + memory-citations + backlog-budget + backlog-status + check:tests +
   build [subsumes typecheck] + host verifies + pack:smoke + both packaged `smoke:*`)
   plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job

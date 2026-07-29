@@ -7,7 +7,7 @@
 > authority lives.
 >
 > **Rule.** Every identifier *family* (prefix) referenced from `src/**/*.ts` MUST have an
-> entry here. A guard test (`tests/shared/id-glossary.test.mjs`) scans the source tree and
+> entry here. A guard test (`tests/shared/id-glossary.test.ts`) scans the source tree and
 > fails if a new family prefix appears in code without a glossary entry. New *individual* ids inside an
 > existing family do not need their own row, but the load-bearing ones are enumerated under their
 > family for quick lookup; inline the one-sentence statement at the primary definition site so the id

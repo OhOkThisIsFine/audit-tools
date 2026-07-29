@@ -26,6 +26,7 @@ npm run verify:release
 - HANDOFF roadmap parity (`check:handoff-roadmap`)
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
+- relative-link resolution gate (`check:doc-links`)
 - single-tarball pack smoke (`pack:smoke`)
 - full automated test suite (`vitest run`)
 - host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
@@ -61,18 +62,18 @@ row becomes a backlog item.
 Codex and `agy` are headless CLIs, so they are correctly absent from the GUI-host
 table below and their live dispatch is automated instead of listed here — see the
 `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix e2e in
-`tests/audit/provider-matrix-dispatch-e2e.test.mjs` (supersedes the former
+`tests/audit/provider-matrix-dispatch-e2e.test.ts` (supersedes the former
 per-provider `RUN_CODEX_E2E=1` gate). Run it at release with a live backend
 present:
 
 ```
-RUN_PROVIDER_MATRIX_E2E=1 npx vitest run tests/audit/provider-matrix-dispatch-e2e.test.mjs
+RUN_PROVIDER_MATRIX_E2E=1 npx vitest run tests/audit/provider-matrix-dispatch-e2e.test.ts
 ```
 
 Coverage gap: that e2e currently exercises only `codex` / `opencode` /
 `openai-compatible`. `agy` and `claude-worker` have **no live-dispatch e2e coverage**
 yet — until a row is added for each, their real dispatch is unverified by any
-automated gate (`claude-worker`'s existing test, `tests/shared/claude-worker-provider.test.mjs`,
+automated gate (`claude-worker`'s existing test, `tests/shared/claude-worker-provider.test.ts`,
 is a local-mock-HTTP-server unit test of transport/argv/env, not a live-dispatch e2e).
 
 ### How to run a row

@@ -23,7 +23,7 @@ Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cu
 - **`session-config/`** — repo-persisted **intent only** (`RepoSessionIntent`): scope, synthesis,
   analyzers, quota *policy*. Dispatch-inventory fields (`provider`, `sources`, per-backend launch
   blocks) are rejected at load — they are per-auditor capability and never live in the repo. Every
-  fixture here is validated by `tests/shared/examples-session-config.test.mjs`, so an example that
+  fixture here is validated by `tests/shared/examples-session-config.test.ts`, so an example that
   stops loading fails the suite.
 - **`auditor-descriptor/`** — the per-invocation `--auditor <json>` handshake: `self` (the driving
   agent's provider identity, model scalars, subagent capabilities) plus optional explicit `sources[]`

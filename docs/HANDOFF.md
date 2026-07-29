@@ -35,7 +35,8 @@
   whole-artifact-rewrite invariant, so it must be scoped to rejections naming specific fields.
 
 - **The dogfood self-audit is the OWNER's, in a separate conversation, after the code fixes land.**
-  ~22 `⬇ LIVE-run watch` entries are blocked only on evidence from it. A lap lands what it can WITHOUT
+  14 `⬇ LIVE-run watch` entries are blocked only on evidence from it (9 in `open-bugs.md`, 5 in
+  `forward-tracks.md`). A lap lands what it can WITHOUT
   the run and must not start one: a commit mid-run re-stales the planning chain and regresses it to
   `charter_extraction`. Recipe is in the collapsed section below.
 
@@ -62,7 +63,7 @@
   rewrites the flat table, whose entry for a colliding id is the CHEAPEST across providers by
   construction, so `claude-opus-4-8` ranks below haiku and cost-first routing at λ=0 sends every packet
   to Opus. The service→vendor-id mapping is a PREREQUISITE, not a follow-up. Do NOT "fix" it by editing
-  `cost-rank.test.mjs`'s expectations — they encode real list prices and are what caught it.
+  `cost-rank.test.ts`'s expectations — they encode real list prices and are what caught it.
 
 - **A2 oracle corpus is funded, not deferred** — the mechanical answer to per-lane result quality.
   Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs. SPEC in

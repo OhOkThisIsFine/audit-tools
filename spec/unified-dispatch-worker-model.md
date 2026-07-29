@@ -43,7 +43,7 @@ endpoint fronting a roster of backends, and a kind-1 worker is launched with `AN
 pointed at it, so the Claude harness's `/v1/messages` traffic lands on a non-Claude backend.
 
 **The declaration is implementation-agnostic by contract.** The `proxy` block is machine-level and
-operator-owned (`{endpoint, api_key_env?, top_k?, cost_per_mtok?}`); *any* proxy that answers the
+operator-owned (`{endpoint, api_key_env?, top_k?, cost_per_mtok?, burst_limited?}`); *any* proxy that answers the
 discovery contract qualifies — `GET /v1/models` for the roster, `GET /model/info` for cost/context
 enrichment (degrading gracefully when absent). The tool names no proxy product anywhere in code or
 contract; which implementation is listening at the endpoint is invisible to dispatch, and swapping
