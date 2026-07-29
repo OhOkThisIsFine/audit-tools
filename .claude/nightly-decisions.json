@@ -663,7 +663,9 @@
     "answer": "Make guard reach declared data reconciled against the tracked tree, accepting one scope declaration per existing guard as the one-time cost.",
     "subject": "A gate's reach is narrower than its name six times over — and an uncovered half looks exactly like a covered one",
     "path": ".claude/hooks/pre-commit-gate.mjs",
-    "decided_at": "2026-07-29T14:52:09.126Z"
+    "decided_at": "2026-07-29T14:52:09.126Z",
+    "completed_at": "2026-07-29T17:50:49.419Z",
+    "completed_ref": "3cd3dbc1 — scripts/guard-reach-data.mjs + scripts/check-guard-reach.mjs + check:guard-reach in verify:checks + unconditional pre-commit leg; contract test tests/shared/guard-reach-gate.test.ts"
   },
   "ad9cf82a02d2a9ed": {
     "disposition": "settled",
