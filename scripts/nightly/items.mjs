@@ -165,12 +165,89 @@ export function readOpenItems(root) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Premise probes (determination ea4e616f). An item's premise is a fact about
+// the CODE, but the queue holds the item until it is ANSWERED — a fact about
+// the conversation. Nothing used to re-test the premise in between, so on
+// 2026-07-25 fifteen of twenty-one surfaced items were already fixed at HEAD.
+// A probe pins the premise mechanically: the literal strings the item quotes,
+// verified at CREATION (the premise must be true when the item is written) and
+// re-evaluated at PRESENTATION (a premise that vanished closes the item as
+// resolved instead of asking the owner). Accepted trade-offs, decided with the
+// determination: a rename mis-closes, a partial fix mis-holds.
+
+/**
+ * Evaluate one item's probes against the tree at `root`.
+ * Returns `{ status, probes }` where status is:
+ *   'unprobed'  — no well-formed probes (legacy item; never auto-closed)
+ *   'resolved'  — every probe string is ABSENT (missing file counts: deleted
+ *                 code IS a vanished premise)
+ *   'open'      — at least one probe still present, or a read failed for any
+ *                 reason other than the file being absent (fail-open:
+ *                 infrastructure trouble must never auto-close an item)
+ */
+export function evaluateProbes(root, item) {
+  const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
+  const probes = raw.filter(
+    (p) =>
+      p &&
+      typeof p.file === 'string' &&
+      p.file.trim() !== '' &&
+      typeof p.contains === 'string' &&
+      p.contains.trim() !== '',
+  );
+  if (probes.length === 0) return { status: 'unprobed', probes: [] };
+
+  const evaluated = probes.map((p) => {
+    let state;
+    try {
+      state = readFileSync(join(root, p.file), 'utf8').includes(p.contains) ? 'present' : 'absent';
+    } catch (err) {
+      state = err && err.code === 'ENOENT' ? 'absent' : 'error';
+    }
+    return { file: p.file, contains: p.contains, state };
+  });
+
+  if (evaluated.some((p) => p.state === 'error')) return { status: 'open', probes: evaluated };
+  const status = evaluated.every((p) => p.state === 'absent') ? 'resolved' : 'open';
+  return { status, probes: evaluated };
+}
+
 // Persist this run's items, carrying `first_seen` forward from the previous run
 // so `nights_open` is real. An item that has been open for many nights is the
 // signal the old channel destroyed by repeating everything identically: it means
 // either the owner cannot action it as posed, or it should never have been
 // asked. The digest surfaces that count rather than hiding it in repetition.
+//
+// Every item must carry PASSING premise probes: a probe that fails at write
+// time means the premise is not true at HEAD — the item is either mis-quoted
+// or describes something already fixed (a carried-over item whose premise
+// vanished overnight is the second case: drop it as resolved, don't re-write
+// it). Refusal is the load-bearing half; without it a probe-less item would
+// ride the store forever immune to auto-close.
 export function writeOpenItems(root, { items, applied = [], skipped = [], run = null }) {
+  for (const item of items) {
+    const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
+    const { status, probes } = evaluateProbes(root, item);
+    if (probes.length === 0) {
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no premise_probes ` +
+          `(need [{file, contains}, ...] quoting literal strings from the code the item is about; ` +
+          `${raw.length > 0 ? 'the probes present are malformed' : 'none were supplied'})`,
+      );
+    }
+    const failing = probes.filter((p) => p.state !== 'present');
+    if (failing.length > 0) {
+      const detail = failing.map((p) => `${p.file} [${p.state}] "${p.contains.slice(0, 60)}"`).join('; ');
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe that does not pass at HEAD ` +
+          `(${detail}). The premise must be TRUE at creation (status here: ${status}). ` +
+          `If this item was carried from a previous run, its premise is gone — drop it as resolved. ` +
+          `Otherwise fix the probe to quote the exact current text.`,
+      );
+    }
+  }
+
   const previous = readOpenItems(root);
   const seenBefore = new Map(previous.items.map((it) => [it.subject_key, it]));
   const today = new Date().toISOString().slice(0, 10);
@@ -203,21 +280,32 @@ export function nightsBetween(fromDate, toDate) {
   return Math.max(1, Math.round((b - a) / 86_400_000) + 1);
 }
 
-// Drop items whose subject the owner has already settled. Returns both halves so
-// a caller can report what it suppressed rather than silently swallowing it.
-export function partitionBySettled(items, decisions) {
+// Drop items whose subject the owner has already settled, and — when a `root`
+// is supplied — items whose premise probes have all vanished from the tree
+// (the code the item is about no longer exists, so there is nothing to ask).
+// Returns every bucket so a caller can REPORT what it suppressed rather than
+// silently swallowing it: `{ open, settled, resolved }`.
+export function partitionBySettled(items, decisions, root) {
   const open = [];
   const settled = [];
+  const resolved = [];
   for (const item of items) {
     const decision = item.subject_key ? decisions[item.subject_key] : undefined;
     // A `question` disposition is the owner asking something BACK, not an
     // answer — the item stays open. Recording those as settled is how two of
     // the eighteen determinations on 2026-07-28 became unaskable while
     // carrying no executable answer.
-    if (decision && decision.disposition !== 'question') settled.push(item);
-    else open.push(item);
+    if (decision && decision.disposition !== 'question') {
+      settled.push(item);
+    } else if (root && evaluateProbes(root, item).status === 'resolved') {
+      // Presentation-time premise check: probe-less legacy items come back
+      // 'unprobed' and stay open; read errors come back 'open' (fail-open).
+      resolved.push(item);
+    } else {
+      open.push(item);
+    }
   }
-  return { open, settled };
+  return { open, settled, resolved };
 }
 
 export function readViewed(root) {

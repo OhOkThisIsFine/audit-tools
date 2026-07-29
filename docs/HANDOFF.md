@@ -26,10 +26,11 @@
   never re-raised. The ledger now separates ANSWERED from DONE: `answer.mjs --list` reports both, and
   a determination leaves the list only via `--done <key> <ref>` naming the landing (or `--question`
   for a counter-question). Answers settled before that tracking began are `--settled` history and make
-  no landing claim. **Two answered determinations remain UNEXECUTED** (both approved builds, each a
-  full lap with a design pass first): the nightly/triage **premise probe** (`ea4e616f` — probe at
-  creation AND presentation) and **guard reach as declared data** (`ec64d159` — the
-  check:doc-manifest manifest-as-data shape over every guard).
+  no landing claim. **One answered determination remains UNEXECUTED** (an approved build, a full lap
+  with a design pass first): **guard reach as declared data** (`ec64d159` — the check:doc-manifest
+  manifest-as-data shape over every guard). The premise probe (`ea4e616f`) shipped: creation-time
+  refusal in `writeOpenItems`, presentation-time auto-close in `partitionBySettled`, triage records
+  stamped `premise: holds|partial|gone|unprobed` on every regeneration.
   Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does

@@ -29,8 +29,18 @@ try {
   const state = readOpenItems(ROOT);
   if (state.items.length === 0) process.exit(0);
 
-  const { open } = partitionBySettled(state.items, readDecisions(ROOT));
-  if (open.length === 0) process.exit(0);
+  // Passing ROOT makes this the presentation-time premise check: an item whose
+  // probe strings have all vanished from the tree is RESOLVED, not surfaced —
+  // the fix already landed, so there is nothing to ask. Reported as a count so
+  // the suppression is visible rather than silent.
+  const { open, resolved } = partitionBySettled(state.items, readDecisions(ROOT), ROOT);
+  const resolvedNote = resolved.length > 0 ? `, ${resolved.length} auto-closed (premise gone)` : '';
+  if (open.length === 0) {
+    if (resolved.length > 0) {
+      process.stdout.write(`nightly: 0 open${resolvedNote}\n`);
+    }
+    process.exit(0);
+  }
 
   // "New" = a subject the owner has not seen in a digest yet. An item that is
   // merely still open is NOT new — re-announcing it is the nagging this hook
@@ -46,6 +56,7 @@ try {
     `nightly: ${fresh.length} new item${fresh.length === 1 ? '' : 's'} (${legs})` +
       `${open.length > fresh.length ? `, ${open.length} open total` : ''}` +
       `${stuck > 0 ? `, ${stuck} open 5+ nights` : ''}` +
+      resolvedNote +
       ` → review with buttons: \`npm run nightly:review\` (or read ${DIGEST_RELPATH})\n`,
   );
 

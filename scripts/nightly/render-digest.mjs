@@ -285,7 +285,7 @@ if (process.argv[1] && process.argv[1].endsWith('render-digest.mjs')) {
   const root = rootFlag !== -1 ? args[rootFlag + 1] : process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   const state = readOpenItems(root);
-  const { open, settled } = partitionBySettled(state.items, readDecisions(root));
+  const { open, settled, resolved } = partitionBySettled(state.items, readDecisions(root), root);
   const html = renderDigest({ ...state, items: open });
 
   const out = join(root, DIGEST_RELPATH);
@@ -294,6 +294,7 @@ if (process.argv[1] && process.argv[1].endsWith('render-digest.mjs')) {
 
   console.log(`nightly digest: ${open.length} open item(s) → ${DIGEST_RELPATH}`);
   if (settled.length > 0) console.log(`  (${settled.length} suppressed: already settled in .claude/nightly-decisions.json)`);
+  if (resolved.length > 0) console.log(`  (${resolved.length} auto-closed: premise no longer in the tree)`);
 
   // --open opens the ANSWERABLE surface, not the read-only file. Opening the
   // static snapshot handed the owner a page whose options were prose and whose

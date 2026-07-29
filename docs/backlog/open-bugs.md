@@ -412,23 +412,16 @@
   single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
   cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
-- **A nightly item is PRESENTED for an answer without its premise being re-checked, so settled subjects
-  keep getting asked (2026-07-25, medium, friction: inefficient-feeding).** Walking the 21 open items with
-  the owner, 15 were already fixed at HEAD — docs-13, 16, 17, 18, 21, 24, 25a/b/d, backlog-2, 3, 5, 6,
-  sol-1, sol-2 — several by the same day's laps. An item stays open until it is ANSWERED, and nothing
-  re-tests the premise between generation and presentation, so the queue reports work that no longer
-  exists and the owner pays the reading cost. ⚠ **A nightly re-verification pass does NOT fix this** (owner,
-  2026-07-25): these were created and resolved on the same day, so a nightly sweep never sees the window.
-  Property: an item's premise is re-checked at PRESENTATION time — when it is surfaced or answered — and an
-  item whose premise no longer holds is closed as resolved rather than asked. Same class as
-  [[insights-report-recommended-a-retired-fix]], one layer earlier: that one generated a stale
-  recommendation, this one keeps serving stale recommendations after the fact.
-
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
+
+- **Friction walk (premise-probe lap, 2026-07-29):** (1) **ambiguous-direction:** none. (2)
+  **tool-should-decide (fixed in-lap):** offload agent types died on `pool/<name>` frontmatter
+  pins; re-pointed to tier names (memory: subagent-offload-tier-path-works-pool-pin-broken).
+  (3) **inefficient-feeding:** none — recon and refutation ran on free lanes without failures.
 
 - **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
   the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
@@ -437,8 +430,7 @@
   the Bash tool's `$TMPDIR` is unset under Git Bash on win32, so `> "$TMPDIR/x.log"` degrades to
   `/x.log` → permission denied; `/tmp` works. (3) **inefficient-feeding:** none new — the offload
   tier path carried 9 subagents (six doc edits, condensation draft, adversarial verify, loop-core
-  review) with zero relay-side failures; per-agent pin paths remain dead through the harness
-  (memory: subagent-offload-tier-path-works-pool-pin-broken). (4) **tool-should-decide (small,
+  review) with zero relay-side failures. (4) **tool-should-decide (small,
   cost: one burned tag v0.34.40):** a doc edit has no edit-time surface naming the TESTS that
   assert its content — `nightly-routine.md`'s approved lane swap was green through every local
   doc gate and failed release CI on `nightly-routine-prompt-gate.test.ts`, which pinned the
@@ -751,8 +743,8 @@
   verification Read. Display artifact of the harness Grep tool, not the repo; logged in
   [`durable-traps.md`](durable-traps.md).
   (2) **inefficient-feeding (low):** the nightly surface presented all 18 items as open while the
-  owner was answering them in a parallel session on the shared checkout — the stale-at-presentation
-  class already answered as the sol-2 probe (re-check the ledger at presentation).
+  owner was answering them in a parallel session on the shared checkout — the sol-2 class, since
+  mechanized (premise probes).
   (3) **ambiguous-direction:** none — the backlog entry stated its open property even-handedly
   ("or the fallback must be shown deliberate"), which is exactly what let recon settle it without an
   owner round-trip.
@@ -765,13 +757,11 @@
   (Reproduced identically on the 2026-07-28 conversion fleet lap: both challenges again spent on
   deliberate mid-fleet pauses, zero left for the actual close.)
   (2) **inefficient-feeding (low):** `.audit-tools/nightly/open-items.json` was STALE at
-  presentation — all 17 surfaced items were already answered AND recorded done in the decisions
-  ledger (`answer.mjs --list` had the truth); the surface artifact predated the answering commits.
-  `nightly-surface.mjs` should re-check the ledger at presentation and suppress settled items —
-  the [[queue-items-must-be-rechecked-at-presentation]] class, now on the surface artifact itself.
-  (3) **environment (memory, not repo):** the offload agent-type path (`pool/<name>` frontmatter)
-  404s through the harness while tier-mapped offload works — host-level (llm-relay/headroom),
-  tracked in project memory.
+  presentation — all 17 surfaced items already answered and done in the ledger; the
+  [[queue-items-must-be-rechecked-at-presentation]] class, since mechanized (premise probes +
+  live-ledger partition).
+  (3) **environment (memory, not repo):** offload agent-type `pool/<name>` pins 404 through the
+  harness — fixed 2026-07-29 (tier-name frontmatter); project memory has the detail.
 
 - **Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):**
   (1) **inefficient-feeding (medium):** execution state lived only in an untracked checkpoint

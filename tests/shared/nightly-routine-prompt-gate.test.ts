@@ -283,7 +283,8 @@ describe("nightly scheduler prompt live parity", () => {
     expect(target).toContain(
       "{ id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,",
     );
-    expect(target).toContain("partitionBySettled(items, decisions)");
+    expect(target).toContain("partitionBySettled(items, decisions, root)");
+    expect(target).toContain("premise_probes[]");
     expect(target).toContain("writeOpenItems(root, { items: open, applied, skipped, run })");
   });
 

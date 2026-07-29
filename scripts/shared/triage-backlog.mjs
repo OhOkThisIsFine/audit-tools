@@ -21,7 +21,18 @@
 // run continues rather than restarting. Errored rows are NOT skipped — delete
 // them from the file and re-run to retry, optionally on a stronger alias.
 //
-//   TRIAGE_MODEL=<alias>       default gpt-oss-120b; glm-5.2 for retries
+// PREMISE PROBES (determination ea4e616f). Each verdict carries
+// `premise_probes` — literal strings the ENTRY quotes, tied to the paths it
+// names. The model only ever sees the entry text, so the probes are the
+// entry's own claims; THIS script holds the repo access and evaluates them
+// mechanically, stamping `premise: holds|partial|gone|unprobed` on every
+// record. Every invocation also RE-evaluates the stored records first —
+// regenerating the triage is the presentation event for this lifecycle, so a
+// record whose quoted code has since vanished reads `premise: "gone"` rather
+// than surviving as a stale verdict.
+//
+//   TRIAGE_MODEL=<spec>        default pool/fast (llm-relay spec: pool/<name>
+//                              or <provider>/<model>); pool/coding for retries
 //   TRIAGE_CONCURRENCY=<n>     default 3
 //
 // ⚠ ALIAS CHOICE IS THE WHOLE COST. `glm-5.2` (rank 1) spent ~4 min per entry on
@@ -39,11 +50,24 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { evaluateProbes } from '../nightly/items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = process.argv[2] || join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
-const MODEL = process.env.TRIAGE_MODEL || 'gpt-oss-120b';
+// llm-relay on :8791 — the LiteLLM proxy this script was born against (:4000)
+// was retired 2026-07-28, which left the whole lane dead transport.
+const MODEL = process.env.TRIAGE_MODEL || 'pool/fast';
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
+
+// Map the shared evaluator's item-level view onto a per-record stamp. `partial`
+// is surfaced separately from `holds` because a half-vanished premise is
+// exactly the "verify against HEAD before working it" case.
+function premiseStamp(rec) {
+  const { status, probes } = evaluateProbes(ROOT, rec);
+  if (status === 'unprobed') return 'unprobed';
+  if (status === 'resolved') return 'gone';
+  return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
+}
 
 function chunk(file) {
   const text = fs.readFileSync(join(ROOT, 'docs', 'backlog', file), 'utf8');
@@ -70,7 +94,7 @@ const SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'verdict', 'why', 'action', 'effort', 'code_paths'],
+    required: ['title', 'verdict', 'why', 'action', 'effort', 'code_paths', 'premise_probes'],
     properties: {
       title: { type: 'string', description: 'the entry title, condensed to <=90 chars' },
       verdict: {
@@ -87,6 +111,20 @@ const SCHEMA = {
       action: { type: 'string', description: 'the single concrete change to make, or the exact question to ask the owner' },
       effort: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
       code_paths: { type: 'array', items: { type: 'string' }, description: 'source paths the entry names' },
+      premise_probes: {
+        type: 'array',
+        description:
+          'literal strings the ENTRY quotes as existing in the tree, each tied to the repo-relative path the entry names for it; empty only when the entry quotes nothing checkable',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['file', 'contains'],
+          properties: {
+            file: { type: 'string', description: 'repo-relative path the entry names' },
+            contains: { type: 'string', description: 'a literal fragment the entry quotes from that file' },
+          },
+        },
+      },
     },
   },
 };
@@ -100,13 +138,18 @@ Verdicts:
 - accepted_residual_no_work: the entry explicitly says the residual is ACCEPTED and no work is wanted.
 - already_shipped_or_stale: the entry says the mechanism SHIPPED / was REFUTED / FALSIFIED with nothing left open.
 
-Be strict. Prefer actionable_now when a property to hold is stated and the fix site is named.`;
+Be strict. Prefer actionable_now when a property to hold is stated and the fix site is named.
+
+premise_probes: for each code fragment the entry QUOTES as currently existing (a symbol, a string, a
+line), emit { file, contains } with the repo-relative path the entry ties it to. Quote the fragment
+VERBATIM from the entry — you cannot see the repo, so never invent content. Prefer fragments whose
+disappearance would mean the entry is done. Emit [] only when the entry quotes nothing checkable.`;
 
 function post(body) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req = http.request(
-      { host: '127.0.0.1', port: 4000, path: '/v1/chat/completions', method: 'POST',
+      { host: '127.0.0.1', port: 8791, path: '/v1/chat/completions', method: 'POST',
         headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } },
       (res) => {
         let buf = '';
@@ -121,12 +164,22 @@ function post(body) {
   });
 }
 
+// Re-evaluate the premise of every stored record before doing anything else:
+// running this script IS the presentation event for triage verdicts, so a
+// record whose quoted code vanished since the last run must read
+// `premise: "gone"` now, not carry last week's stamp.
 const done = new Set();
 if (fs.existsSync(OUT)) {
+  const kept = [];
   for (const l of fs.readFileSync(OUT, 'utf8').split('\n')) {
     if (!l.trim()) continue;
-    try { done.add(JSON.parse(l).id); } catch {}
+    try {
+      const rec = JSON.parse(l);
+      done.add(rec.id);
+      kept.push(rec.error ? rec : { ...rec, premise: premiseStamp(rec) });
+    } catch {}
   }
+  fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
 }
 
 const queue = entries.filter((e) => !done.has(e.id));
@@ -156,11 +209,12 @@ async function worker() {
     const end = raw.lastIndexOf('}');
     if (start < 0 || end <= start) throw new Error('no JSON object in response');
     rec = { id: e.id, file: e.file, ...JSON.parse(raw.slice(start, end + 1)) };
+    rec.premise = premiseStamp(rec);
   } catch (err) {
     rec = { id: e.id, file: e.file, error: String(err.message || err) };
   }
   fs.appendFileSync(OUT, JSON.stringify(rec) + '\n');
-  process.stderr.write(`${e.id} -> ${rec.verdict || 'ERR:' + rec.error}\n`);
+  process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
   }
 }
 

@@ -190,7 +190,7 @@ shape:
 
 ```text
 { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
-  options[], evidence[], proposal?, patch_path? }
+  options[], evidence[], premise_probes[], proposal?, patch_path? }
 ```
 
 - `title` is the front-loaded one-line decision, not a summary of the
@@ -210,13 +210,28 @@ shape:
   contract did not list the field the renderer already supported. Offer the real
   alternatives including the do-nothing one; the free-text box behind
   *Something else…* stays available for an answer the routine did not anticipate.
+- `premise_probes[]` is `{ file, contains }` pairs — repo-relative path plus a
+  literal string quoted from that file's **current** content, pinning the fact
+  the item is about (the stale prose, the code line that contradicts it).
+  **Every item carries at least one, and every probe must pass when the item is
+  written** — `writeOpenItems()` refuses the batch otherwise, because a probe
+  that fails at creation means the premise is mis-quoted or already fixed. At
+  presentation, `partitionBySettled` re-evaluates: an item ALL of whose probe
+  strings have vanished is auto-closed as `resolved` instead of surfaced — an
+  answered queue is a fact about the conversation, and the probe is what makes
+  the queue track the CODE (on 2026-07-25, 15 of 21 surfaced items were already
+  fixed at HEAD). Accepted trade-offs: a rename mis-closes, a partial fix
+  mis-holds; pick probe strings accordingly — quote the exact fragment whose
+  disappearance would mean the item is done, not a symbol name likely to
+  survive the fix.
 
 Compute `subject_key` with `subjectKey(path, subject)` from
 `scripts/nightly/items.mjs`, where `subject` is the prose in question, never the
 routine's wording of `question`. Before persisting, load `readDecisions(root)`
-and select with `partitionBySettled(items, decisions)`; only its `open` half
-belongs in the next items file. A settled answer may make work unambiguous, but
-it never makes the same subject an open question again.
+and select with `partitionBySettled(items, decisions, root)`; only its `open`
+half belongs in the next items file (`settled` subjects are answered, `resolved`
+ones have no premise left in the tree). A settled answer may make work
+unambiguous, but it never makes the same subject an open question again.
 
 Call `writeOpenItems(root, { items: open, applied, skipped, run })` so
 `first_seen` and `nights_open` carry forward. `applied` says exactly what changed;

@@ -45,7 +45,7 @@ function fail(message) {
 
 const state = readOpenItems(ROOT);
 const decisions = readDecisions(ROOT);
-const { open } = partitionBySettled(state.items, decisions);
+const { open, resolved } = partitionBySettled(state.items, decisions, ROOT);
 
 if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
   console.log(
@@ -63,6 +63,9 @@ if (argv[0] === '--list') {
   const { actionable, grandfathered } = answeredNotDone(decisions);
   if (open.length === 0 && actionable.length === 0) {
     console.log('No open nightly items, and every tracked answer is recorded as done.');
+    if (resolved.length > 0) {
+      console.log(`(${resolved.length} auto-closed — the code each one quoted is no longer in the tree.)`);
+    }
     if (grandfathered.length > 0) {
       console.log(
         `(${grandfathered.length} answered before completion tracking began ${COMPLETION_TRACKING_SINCE} — ` +
@@ -74,6 +77,14 @@ if (argv[0] === '--list') {
   console.log(`UNANSWERED (${open.length}):`);
   for (const item of open) {
     console.log(`  ${item.id}\t[${item.leg}]\t${item.nights_open}n\t${item.title}`);
+  }
+  if (resolved.length > 0) {
+    console.log(
+      `\nAUTO-CLOSED (${resolved.length}) — the code each item quoted is no longer in the tree, so there is nothing to ask:`,
+    );
+    for (const item of resolved) {
+      console.log(`  ${item.id}\t[${item.leg}]\t${item.title}`);
+    }
   }
   // The half the ledger used to hide entirely. Nothing re-raises these: the
   // subject is settled, so the queue is silent about them forever.
@@ -129,6 +140,12 @@ const item = open.find((it) => it.id === id) || state.items.find((it) => it.id =
 if (!item) {
   const known = open.map((it) => it.id).join(', ') || '(none open)';
   fail(`Unknown item id "${id}". Open ids: ${known}\nRun --list to see them.`);
+}
+// The `state.items` fallback deliberately reaches settled AND auto-resolved
+// items — re-answering (clarifying) a subject is legitimate. But an answer to
+// an auto-closed item should know it is one: the premise is already gone.
+if (resolved.some((it) => it.id === id)) {
+  console.log(`note: ${id} was auto-closed — the code it quoted is no longer in the tree. Recording anyway.`);
 }
 
 const rest = argv.slice(1);

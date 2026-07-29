@@ -113,13 +113,16 @@ document.addEventListener('click', async (e) => {
 
 function renderReviewPage(root) {
   const state = readOpenItems(root);
-  const { open } = partitionBySettled(state.items, readDecisions(root));
+  const { open, resolved } = partitionBySettled(state.items, readDecisions(root), root);
   const hint =
     'Press the option you want &mdash; each button records that exact answer and the item collapses. ' +
     '<strong>Something else…</strong> opens a text box, and <strong>Won’t fix</strong> closes an item as not-doing. ' +
     'Either way the subject is settled for good. Open items remaining: <strong id="open-count">' +
     open.length +
-    '</strong>.';
+    '</strong>.' +
+    (resolved.length > 0
+      ? ` (${resolved.length} auto-closed &mdash; the code each one quoted is no longer in the tree.)`
+      : '');
   const head = renderHeader({ ...state, items: open }, hint);
   const doneBanner =
     `<p class="sub" id="all-done" style="display:${open.length === 0 ? 'block' : 'none'}">` +
@@ -167,11 +170,18 @@ export function createNightlyReviewServer(root) {
         // question, which is exactly the untrustworthy-ledger shape), and the
         // disposition is constrained.
         const state = readOpenItems(root);
-        const { open } = partitionBySettled(state.items, readDecisions(root));
+        const { open, resolved } = partitionBySettled(state.items, readDecisions(root), root);
         const item = open.find((it) => it.id === id);
         if (!item) {
+          const wasResolved = resolved.some((it) => it.id === id);
           res.writeHead(404, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: `unknown or already-settled item "${id}"` }));
+          res.end(
+            JSON.stringify({
+              error: wasResolved
+                ? `item "${id}" auto-closed — its premise is no longer in the tree`
+                : `unknown or already-settled item "${id}"`,
+            }),
+          );
           return;
         }
         if (typeof answer !== 'string' || !answer.trim()) {
@@ -186,7 +196,7 @@ export function createNightlyReviewServer(root) {
           subject: item.title,
           path: item.path,
         });
-        const remaining = partitionBySettled(readOpenItems(root).items, readDecisions(root)).open.length;
+        const remaining = partitionBySettled(readOpenItems(root).items, readDecisions(root), root).open.length;
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, disposition: disp, open_count: remaining }));
         return;
@@ -207,9 +217,11 @@ if (process.argv[1] && process.argv[1].endsWith('serve.mjs')) {
   const rootFlag = args.indexOf('--root');
   const root = rootFlag !== -1 ? args[rootFlag + 1] : process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-  const { open } = partitionBySettled(readOpenItems(root).items, readDecisions(root));
+  const { open, resolved } = partitionBySettled(readOpenItems(root).items, readDecisions(root), root);
   if (open.length === 0) {
-    console.log('No open nightly items to review.');
+    console.log(
+      `No open nightly items to review.${resolved.length > 0 ? ` (${resolved.length} auto-closed — premise gone.)` : ''}`,
+    );
     process.exit(0);
   }
 

@@ -28,10 +28,15 @@ const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
 const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
 
+// Every fixture item carries a probe against this file, because writeOpenItems
+// refuses an item whose premise is not verifiably true at creation.
+const PROBE_FILE = 'src-probe.txt';
+
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'nightly-'));
   mkdirSync(join(root, '.claude'), { recursive: true });
+  writeFileSync(join(root, PROBE_FILE), 'const ANCHOR_PRESENT = 1;\n');
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -40,6 +45,11 @@ afterEach(() => {
 interface NightlyItemOption {
   label: string;
   answer: string;
+}
+
+interface NightlyPremiseProbe {
+  file: string;
+  contains: string;
 }
 
 interface NightlyItemFixture {
@@ -54,6 +64,7 @@ interface NightlyItemFixture {
   nights_open?: number;
   eli5?: string;
   options?: NightlyItemOption[];
+  premise_probes?: NightlyPremiseProbe[];
 }
 
 const item = (over: Partial<NightlyItemFixture> = {}): NightlyItemFixture => ({
@@ -64,6 +75,7 @@ const item = (over: Partial<NightlyItemFixture> = {}): NightlyItemFixture => ({
   question: 'Should this stay?',
   evidence: ['grep found zero hits'],
   subject_key: subjectKey('spec/foo.md', 'the claim prose'),
+  premise_probes: [{ file: PROBE_FILE, contains: 'ANCHOR_PRESENT' }],
   ...over,
 });
 
@@ -152,6 +164,66 @@ describe('decisions ledger — a settled subject is never re-asked', () => {
     const stored = readDecisions(root)[it1.subject_key];
     expect(stored.answer).toMatch(/deliberate anchor/);
     expect(stored.decided_at).toBeTruthy();
+  });
+});
+
+// The premise-probe contract (determination ea4e616f): an item quotes literal
+// strings from the code it is about; the strings are verified at CREATION (the
+// premise must be true when the item is written) and re-evaluated at
+// PRESENTATION (a vanished premise closes the item instead of asking the
+// owner). 15 of 21 items walked on 2026-07-25 were already fixed at HEAD — the
+// queue held them because "answered" is a conversation fact, not a code fact.
+describe('premise probes — an item whose quoted code has vanished closes itself', () => {
+  it('resolves an item ALL of whose probe strings have vanished, instead of surfacing it', () => {
+    const gone = item({ premise_probes: [{ file: PROBE_FILE, contains: 'REMOVED_BY_A_FIX' }] });
+    const { open, resolved } = partitionBySettled([gone], readDecisions(root), root);
+    expect(resolved).toHaveLength(1);
+    expect(open).toHaveLength(0);
+  });
+
+  it('keeps an item open while ANY probe string is still present — a partial fix mis-holds by design', () => {
+    const half = item({
+      premise_probes: [
+        { file: PROBE_FILE, contains: 'ANCHOR_PRESENT' },
+        { file: PROBE_FILE, contains: 'REMOVED_BY_A_FIX' },
+      ],
+    });
+    const { open, resolved } = partitionBySettled([half], readDecisions(root), root);
+    expect(open).toHaveLength(1);
+    expect(resolved).toHaveLength(0);
+  });
+
+  it('treats a missing file as a vanished premise — deleted code resolves the item', () => {
+    const gone = item({ premise_probes: [{ file: 'deleted-module.ts', contains: 'anything' }] });
+    const { resolved } = partitionBySettled([gone], readDecisions(root), root);
+    expect(resolved).toHaveLength(1);
+  });
+
+  it('fails OPEN on a probe read error — infrastructure trouble never auto-closes an item', () => {
+    mkdirSync(join(root, 'a-directory'), { recursive: true });
+    const weird = item({ premise_probes: [{ file: 'a-directory', contains: 'x' }] });
+    const { open, resolved } = partitionBySettled([weird], readDecisions(root), root);
+    expect(open).toHaveLength(1);
+    expect(resolved).toHaveLength(0);
+  });
+
+  it('grandfathers a probe-less legacy item as open — never auto-closed', () => {
+    const legacy = item();
+    delete legacy.premise_probes;
+    const { open, resolved } = partitionBySettled([legacy], readDecisions(root), root);
+    expect(open).toHaveLength(1);
+    expect(resolved).toHaveLength(0);
+  });
+
+  it('writeOpenItems refuses an item carrying no probes', () => {
+    const bare = item();
+    delete bare.premise_probes;
+    expect(() => writeOpenItems(root, { items: [bare] })).toThrow(/premise_probes/);
+  });
+
+  it('writeOpenItems refuses a probe whose string is not in the tree — the premise must be true at creation', () => {
+    const stale = item({ premise_probes: [{ file: PROBE_FILE, contains: 'NOT_IN_THE_FILE' }] });
+    expect(() => writeOpenItems(root, { items: [stale] })).toThrow(/premise/i);
   });
 });
 
