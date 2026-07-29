@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 149 entr(y/ies) indexed.
+> and at commit). 150 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -85,32 +85,33 @@
 - `open-bugs.md:693` — Accept-latch — two low residuals stay open.
 - `open-bugs.md:701` — Node-worktree guard — accepted residuals only (each low, on-evidence-only).
 - `open-bugs.md:703` — ▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck ratchet (2026-07-28, medium, owner-approved).
-- `open-bugs.md:720` — Name the two test-enforced traps that are now deletable (2026-07-28, low).
-- `open-bugs.md:731` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:757` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:774` — Friction walk (inline-api_key retirement lap, 2026-07-26):
-- `open-bugs.md:786` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:800` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:821` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:830` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
-- `open-bugs.md:841` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
-- `open-bugs.md:864` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
-- `open-bugs.md:885` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
-- `open-bugs.md:889` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
-- `open-bugs.md:911` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
-- `open-bugs.md:924` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
-- `open-bugs.md:943` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
-- `open-bugs.md:952` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
-- `open-bugs.md:969` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:992` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:1009` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
-- `open-bugs.md:1023` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1045` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1060` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1074` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1093` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1115` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
-- `open-bugs.md:1123` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:729` — Name the two test-enforced traps that are now deletable (2026-07-28, low).
+- `open-bugs.md:740` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
+- `open-bugs.md:752` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:778` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:795` — Friction walk (inline-api_key retirement lap, 2026-07-26):
+- `open-bugs.md:807` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:821` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:842` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:851` — ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).
+- `open-bugs.md:862` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
+- `open-bugs.md:885` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
+- `open-bugs.md:906` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
+- `open-bugs.md:910` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
+- `open-bugs.md:932` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
+- `open-bugs.md:945` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
+- `open-bugs.md:964` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
+- `open-bugs.md:973` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
+- `open-bugs.md:990` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:1013` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:1030` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
+- `open-bugs.md:1044` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1066` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1081` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1095` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1114` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1136` — A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review finding nothing.
+- `open-bugs.md:1144` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

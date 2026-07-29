@@ -1,8 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
+import { vitestIncludeGlobs } from "./tests/helpers/testFileContract.js";
 
 // Single-package layout: one vitest runner for all three areas.
-// remediate = `.test.ts`; audit + shared = `.test.mjs` (migrated off node:test).
+// remediate = `.test.ts`; audit + shared admit `.test.mjs` AND `.test.ts` while
+// the file-by-file conversion is in flight. The include globs are DERIVED from
+// `tests/helpers/testFileContract.ts` — the same rule list the visibility guard
+// (`tests/shared/test-suite-visibility.test.ts`) enforces against the tree, so a
+// test file the runner cannot see is a red test, never a silent green.
 const sharedSrc = fileURLToPath(new URL("./src/shared", import.meta.url));
 
 export default defineConfig({
@@ -13,11 +18,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: [
-      "tests/remediate/**/*.test.ts",
-      "tests/audit/**/*.test.mjs",
-      "tests/shared/**/*.test.mjs",
-    ],
+    include: vitestIncludeGlobs(),
     // Machine-global state-dir hermeticity: point AUDIT_CODE_STATE_DIR at a
     // per-worker temp dir so no test (in-process or spawned CLI) reads/writes the
     // box's live ~/.audit-code. See tests/helpers/state-dir-setup.mjs.

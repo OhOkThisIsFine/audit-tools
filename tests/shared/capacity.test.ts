@@ -1,18 +1,22 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-
-const {
+import {
   computeDispatchCapacity,
   summarizeDispatchCapacityPools,
-} = await import("../../src/shared/quota/capacity.ts");
+  type CapacityPool,
+} from "../../src/shared/quota/capacity.js";
+import type { HostConcurrencyLimit } from "../../src/shared/quota/types.js";
 
-function hostLimit(n) {
+function hostLimit(n: number): HostConcurrencyLimit {
   return { active_subagents: n, source: "cli_flags", description: "test host limit" };
 }
 
-function hostPool(id, overrides = {}) {
+function hostPool(id: string, overrides: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id,
+    // Each test pool is an independent backend: it meters alone (the required
+    // accountKey partitions account-scoped allowances; distinct = no folding).
+    accountKey: id,
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,

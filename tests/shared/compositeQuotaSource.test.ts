@@ -1,14 +1,14 @@
 import { test, afterEach, expect, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
-
-const { CompositeQuotaSource, buildQuotaSource } = await import("../../src/shared/quota/compositeQuotaSource.ts");
-const { RunLogger } = await import("../../src/shared/observability/runLog.ts");
+import { mkdtempSync } from "node:fs";
+import { CompositeQuotaSource, buildQuotaSource } from "../../src/shared/quota/compositeQuotaSource.js";
+import { RunLogger } from "../../src/shared/observability/runLog.js";
+import type { QuotaSource, QuotaUsageSnapshot } from "../../src/shared/quota/quotaSource.js";
 
 afterEach(() => vi.restoreAllMocks());
 
-function makeSnapshot(source) {
+function makeSnapshot(source: string): QuotaUsageSnapshot {
   return {
     remaining_pct: null,
     reset_at: null,
@@ -19,15 +19,15 @@ function makeSnapshot(source) {
   };
 }
 
-function snapshotSource(name, snapshot) {
+function snapshotSource(name: string, snapshot: QuotaUsageSnapshot): QuotaSource {
   return { name, queryCurrentUsage: async () => snapshot };
 }
 
-function nullSource(name) {
+function nullSource(name: string): QuotaSource {
   return { name, queryCurrentUsage: async () => null };
 }
 
-function throwingSource(name) {
+function throwingSource(name: string): QuotaSource {
   return {
     name,
     queryCurrentUsage: async () => {
@@ -165,12 +165,12 @@ test("logs a structured error event via RunLogger when a quota source throws", a
   const [evt] = eventSpy.mock.calls[0];
   expect(evt.kind).toBe("error");
   expect(evt.phase).toBe("quota");
-  expect(evt.note.includes("bad-source"), `note should include source name, got: ${evt.note}`).toBeTruthy();
-  expect(evt.note.includes("bad-source boom"), `note should include error message, got: ${evt.note}`).toBeTruthy();
+  expect(evt.note?.includes("bad-source"), `note should include source name, got: ${evt.note}`).toBeTruthy();
+  expect(evt.note?.includes("bad-source boom"), `note should include error message, got: ${evt.note}`).toBeTruthy();
   // OBS-9ae1a228: the note must name the providerModelKey being queried so an
   // operator can tell which provider/model combination triggered the failure.
   expect(
-    evt.note.includes("provider/model"),
+    evt.note?.includes("provider/model"),
     `note should include the providerModelKey, got: ${evt.note}`,
   ).toBeTruthy();
 

@@ -8,26 +8,27 @@
  */
 
 import { test, expect } from "vitest";
+import { buildHostModelPools, buildSourcePool, buildSourcePools } from "../../src/shared/quota/apiPool.js";
+import { parseProviderModelKey } from "../../src/shared/quota/httpQuotaSource.js";
+import type { CapacityPool } from "../../src/shared/quota/capacity.js";
+import type { QuotaSource } from "../../src/shared/quota/quotaSource.js";
+import type { HostModelRosterEntry } from "../../src/shared/quota/scheduler.js";
+import type { DispatchableSource, SessionConfig } from "../../src/shared/types/sessionConfig.js";
 
-const { buildHostModelPools, buildSourcePool, buildSourcePools } = await import(
-  "../../src/shared/quota/apiPool.ts"
-);
-const { parseProviderModelKey } = await import("../../src/shared/quota/httpQuotaSource.ts");
-
-const STUB_QUOTA = { name: "stub", async queryCurrentUsage() { return null; } };
+const STUB_QUOTA: QuotaSource = { name: "stub", async queryCurrentUsage() { return null; } };
 
 /** The invariant under test, stated once. */
-function assertModelMatchesKey(pool) {
+function assertModelMatchesKey(pool: CapacityPool) {
   expect(pool.hostModel, `pool ${pool.id}: hostModel ${pool.hostModel} must equal the model parsed from its quota key`).toBe(parseProviderModelKey(pool.id).model);
 }
 
 test("buildHostModelPools: every per-rank roster pool carries the model its key was derived from", async () => {
   // A 3-rank roster on the same provider — each rank a distinct model. The single
   // scalar hostModel passed in must NOT leak onto the per-rank pools.
-  const roster = [
-    { rank: "small", model_id: "model-small" },
-    { rank: "standard", model_id: "model-standard" },
-    { rank: "deep", model_id: "model-deep" },
+  const roster: HostModelRosterEntry[] = [
+    { rank: "small", context_tokens: 100_000, output_tokens: 8_000, model_id: "model-small" },
+    { rank: "standard", context_tokens: 100_000, output_tokens: 8_000, model_id: "model-standard" },
+    { rank: "deep", context_tokens: 100_000, output_tokens: 8_000, model_id: "model-deep" },
   ];
   const pools = await buildHostModelPools({
     providerName: "claude-code",
@@ -36,9 +37,10 @@ test("buildHostModelPools: every per-rank roster pool carries the model its key 
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
     roster,
+    capabilityRanks: null,
     // The caller builds an account-less per-rank key from the rank's model_id.
     resolve: (entry) => ({
-      poolKey: `claude-code/${entry.model_id}`,
+      poolKey: `claude-code/${entry?.model_id}`,
       discoveredLimits: null,
     }),
   });
@@ -57,6 +59,7 @@ test("buildHostModelPools: scalar/absent handshake (no roster) — null model ma
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
     roster: null,
+    capabilityRanks: null,
     resolve: () => ({ poolKey: "claude-code/*", discoveredLimits: null }),
   });
   expect(pools.length).toBe(1);
@@ -65,8 +68,8 @@ test("buildHostModelPools: scalar/absent handshake (no roster) — null model ma
 });
 
 test("buildSourcePool: a provider-shaped source pool carries the model its key was derived from", async () => {
-  const source = { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m1" };
-  const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
+  const source: DispatchableSource = { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m1" };
+  const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {}, capabilityRanks: null });
   expect(pool.hostModel).toBe("m1");
   assertModelMatchesKey(pool);
 });
@@ -82,7 +85,7 @@ test("buildSourcePool: a provider-shaped source pool carries the model its key w
 
 test("buildSourcePools: a cooldown recorded under one same-account source's key folds onto its sibling's frozen quotaStateEntry", async () => {
   const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  const sessionConfig = {
+  const sessionConfig: SessionConfig = {
     sources: [
       {
         id: "nim-nano",
@@ -115,19 +118,20 @@ test("buildSourcePools: a cooldown recorded under one same-account source's key 
     primaryProviderName: "claude-code",
     quotaSource: STUB_QUOTA,
     quotaEntries,
+    capabilityRanks: null,
   });
   const nano = pools.find((p) => p.id === "nim-nano");
   const superPool = pools.find((p) => p.id === "nim-super");
-  expect(nano.quotaStateEntry?.cooldown_until).toBe(future);
+  expect(nano?.quotaStateEntry?.cooldown_until).toBe(future);
   expect(
-    superPool.quotaStateEntry?.cooldown_until,
+    superPool?.quotaStateEntry?.cooldown_until,
     "nim-super shares nim-nano's (endpoint, api_key_env) account — the cooldown recorded under nim-nano's OWN key must fold onto nim-super's effective entry too",
   ).toBe(future);
 });
 
 test("buildSourcePools: sources with DIFFERENT api_key_env do not fold cooldowns onto each other", async () => {
   const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  const sessionConfig = {
+  const sessionConfig: SessionConfig = {
     sources: [
       {
         id: "source-a",
@@ -157,10 +161,11 @@ test("buildSourcePools: sources with DIFFERENT api_key_env do not fold cooldowns
     primaryProviderName: "claude-code",
     quotaSource: STUB_QUOTA,
     quotaEntries,
+    capabilityRanks: null,
   });
   const sourceB = pools.find((p) => p.id === "source-b");
   expect(
-    sourceB.quotaStateEntry?.cooldown_until ?? null,
+    sourceB?.quotaStateEntry?.cooldown_until ?? null,
     "a different api_key_env is a different account — source-a's cooldown must not fold onto source-b",
   ).toBe(null);
 });

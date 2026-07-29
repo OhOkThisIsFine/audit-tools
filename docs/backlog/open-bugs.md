@@ -701,10 +701,19 @@
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
 - **▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck
-  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 148 of 588 test files because
-  `tsconfig.test.json` sets `checkJs: false`, so every `.mjs` test is excluded. Converting a file to
-  `.ts` brings it under the gate automatically — `.ts` is already checked — so no config ratchet, no
-  exclude list, and no aspirational state: coverage rises exactly as fast as conversion does.
+  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 147 of 564 test files
+  (`find tests -name "*.test.*"`; 417 `.mjs` remain excluded by `checkJs: false`). Converting a file
+  to `.ts` brings it under the gate automatically — `.ts` is already checked — so no config ratchet,
+  no exclude list, and no aspirational state: coverage rises exactly as fast as conversion does.
+  The vitest `include` globs are single-sourced in `tests/helpers/testFileContract.ts` and enforced
+  by `tests/shared/test-suite-visibility.test.ts` (a test file the globs cannot see, or an
+  `.mjs`/`.ts` twin pair, is a RED test — so a rename can never silently leave the suite).
+  First five landed (the loop-core quota set: loop-core-paths, apiPool-model-routing,
+  compositeQuotaSource, capacity, claim-lease) and each surfaced real hidden drift — required
+  params the untyped callers omitted (`capabilityRanks`, roster window fields, `accountKey`) — so
+  the ratchet is catching contract gaps, not just annotating.
+  ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
+  handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
   ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list.** It was the
   obvious interim step and the numbers kill it — the flip yields **8,903 errors across 451 of 440
   tracked `.mjs` files**, i.e. essentially all of them, so the exclude list would cover the entire
@@ -727,6 +736,18 @@
   checkable at deletion time instead of resting on the deleter's recall. Do this by walking
   `tests/shared/hook-trap-guards.test.mjs` and `tests/shared/hook-session-gates.test.mjs` case by case
   and matching each against the trap entry it closes; a trap with no matching case stays.
+
+- **Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):**
+  (1) **inefficient-feeding (medium):** execution state lived only in an untracked checkpoint
+  (`.audit-tools/nightly/execution-checkpoint-2026-07-28.md`) while HANDOFF, the backlog entry and
+  the answer queue all still said the opposite — reconciling cost a full re-verification of every
+  claim against HEAD. Property: when a lap executes tracked work, the tracked record updates in the
+  SAME commit, or the next reader re-derives everything.
+  (2) **ambiguous-direction (low):** the nightly deletion item's "two durable rules would be
+  orphaned" caveat named rules that did not map onto the three entries being deleted — each had to
+  be independently located and verified untouched. Advisory imprecision, consistent with the
+  standing "triage verdicts are advisory" rule.
+  (3) **tool-should-decide: none this lap.**
 
 - **Friction walk (nightly-determinations lap, 2026-07-26):**
   (1) **inefficient-feeding (medium):** `.audit-tools/nightly/open-items.json` is a single 659-line /

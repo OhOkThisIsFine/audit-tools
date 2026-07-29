@@ -43,13 +43,24 @@ test("INV-shared-tests-01: all files in tests/ with .test.mjs extension are at t
   expect(testFiles.length > 0, "tests/ must contain at least one .test.mjs file").toBeTruthy();
 });
 
-test("INV-shared-tests-01: vitest config picks up the shared .test.mjs glob", () => {
+test("INV-shared-tests-01: vitest config derives its include from the single-sourced test-file contract, and that contract covers the shared suite", async () => {
   const configPath = resolve(TESTS_DIR, "../../vitest.config.ts");
   expect(existsSync(configPath), "vitest.config.ts must exist at the repo root").toBeTruthy();
   const config = readFileSync(configPath, "utf8");
-  // Single runner: vitest picks up all three areas. The shared suite is included
-  // via the `tests/shared/**/*.test.mjs` glob (node:test was retired).
-  expect(config.includes("tests/shared/**/*.test.mjs"), `vitest.config.ts must include the glob 'tests/shared/**/*.test.mjs' — INV-shared-tests-01`).toBeTruthy();
+  // The include globs are DATA in tests/helpers/testFileContract.ts; the config must
+  // consume that source (linkage pin), never re-hardcode a list that can narrow
+  // silently. Tree-vs-globs matching is enforced by test-suite-visibility.test.ts —
+  // but that guard is itself a .test.ts file, so it cannot detect its own exclusion;
+  // THIS assertion deliberately lives in a .test.mjs file to close that hole.
+  expect(
+    config.includes("vitestIncludeGlobs()"),
+    "vitest.config.ts must derive `include` from vitestIncludeGlobs() (tests/helpers/testFileContract.ts) — INV-shared-tests-01",
+  ).toBeTruthy();
+  const { vitestIncludeGlobs } = await import("../helpers/testFileContract.ts");
+  const globs = vitestIncludeGlobs();
+  // Both extensions stay admitted while the .mjs → .ts conversion is in flight.
+  expect(globs).toContain("tests/shared/**/*.test.mjs");
+  expect(globs).toContain("tests/shared/**/*.test.ts");
 });
 
 // ── INV-shared-tests-02: Test files use the single canonical runner (vitest) ──

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LOOP_CORE_PATTERNS, isLoopCorePath } from "../../src/shared/index.ts";
+import { LOOP_CORE_PATTERNS, isLoopCorePath } from "audit-tools/shared";
 
 describe("loopCorePaths — the single-sourced loop-core path set", () => {
   it("matches dispatch/quota/rolling/engine shared substrate (dir prefixes)", () => {
@@ -31,7 +31,7 @@ describe("loopCorePaths — the single-sourced loop-core path set", () => {
     expect(isLoopCorePath("src/audit/reporting/scoreTokens.ts")).toBe(false);
     expect(isLoopCorePath("src/remediate/intake.ts")).toBe(false);
     expect(isLoopCorePath("docs/backlog.md")).toBe(false);
-    expect(isLoopCorePath("tests/shared/loop-core-paths.test.mjs")).toBe(false);
+    expect(isLoopCorePath("tests/shared/loop-core-paths.test.ts")).toBe(false);
     // A file that merely shares a prefix segment but is not under the dir.
     expect(isLoopCorePath("src/remediate/steps/nextStepHelpers.ts")).toBe(false);
   });

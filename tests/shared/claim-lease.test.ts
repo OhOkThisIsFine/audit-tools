@@ -1,5 +1,5 @@
 /**
- * claim-lease.test.mjs
+ * claim-lease.test.ts
  *
  * Slice 1 of multi-agent cooperative runs (spec/multi-ide-concurrent-runs-design.md):
  * the claimWithBackoff (OD1 bounded backoff) + withClaimHeartbeat (OD3 layer 1:
@@ -10,15 +10,34 @@ import { test, expect } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.ts");
-const { claimWithBackoff, withClaimHeartbeat, DEFAULT_CLAIM_BACKOFF_MS } =
-  await import("../../src/shared/quota/claimLease.ts");
+import { ClaimRegistry, type ClaimResult } from "../../src/shared/quota/claimRegistry.js";
+import {
+  claimWithBackoff,
+  withClaimHeartbeat,
+  DEFAULT_CLAIM_BACKOFF_MS,
+} from "../../src/shared/quota/claimLease.js";
 
 async function tempRegistry() {
   const dir = await mkdtemp(join(tmpdir(), "claim-lease-"));
   const registry = new ClaimRegistry(join(dir, "node-claims.json"));
   return { dir, registry, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+/** Narrow a ClaimResult to its acquired arm, failing the test loudly otherwise. */
+function acquiredToken(r: ClaimResult): string {
+  if (!r.acquired) throw new Error(`expected an acquired claim, but it is held by ${r.heldBy}`);
+  return r.ownerToken;
+}
+
+/** Minimal deterministic timer fakes for ClaimHeartbeatOptions' injectable factory. */
+function fakeTimers(capture: (cb: () => void) => void) {
+  return {
+    setIntervalFn: ((cb: () => void) => {
+      capture(cb);
+      return { unref() {} };
+    }) as unknown as typeof setInterval,
+    clearIntervalFn: (() => {}) as unknown as typeof clearInterval,
+  };
 }
 
 test("releaseOwned releases only the caller's own claims, never a peer's", async () => {
@@ -40,7 +59,7 @@ test("releaseOwned releases only the caller's own claims, never a peer's", async
 test("claimWithBackoff acquires an unheld node on the first attempt", async () => {
   const { registry, cleanup } = await tempRegistry();
   try {
-    const sleeps = [];
+    const sleeps: number[] = [];
     const res = await claimWithBackoff(registry, "n1", {
       poolId: "p",
       sleepFn: async (ms) => void sleeps.push(ms),
@@ -57,16 +76,16 @@ test("claimWithBackoff exhausts the backoff then returns not-acquired when held"
   try {
     // A peer holds it with a live (freshly heartbeated) claim.
     const held = await registry.claim("n1", "peer");
-    expect(held.acquired).toBe(true);
+    const heldToken = acquiredToken(held);
 
-    const sleeps = [];
+    const sleeps: number[] = [];
     const res = await claimWithBackoff(registry, "n1", {
       poolId: "p",
       backoffMs: [1, 2, 3],
       sleepFn: async (ms) => void sleeps.push(ms),
     });
     expect(res.acquired).toBe(false);
-    expect(res.heldBy).toBe(held.ownerToken);
+    expect(res).toMatchObject({ heldBy: heldToken });
     expect(sleeps, "waited through the full backoff before giving up").toEqual([1, 2, 3]);
   } finally {
     await cleanup();
@@ -77,14 +96,15 @@ test("claimWithBackoff picks up a node freed mid-backoff", async () => {
   const { registry, cleanup } = await tempRegistry();
   try {
     const held = await registry.claim("n1", "peer");
-    const sleeps = [];
+    const heldToken = acquiredToken(held);
+    const sleeps: number[] = [];
     // Release the peer's claim on the first backoff wait, so the 2nd attempt wins.
     const res = await claimWithBackoff(registry, "n1", {
       poolId: "p",
       backoffMs: [1, 1, 1],
       sleepFn: async (ms) => {
         sleeps.push(ms);
-        if (sleeps.length === 1) await registry.release("n1", held.ownerToken);
+        if (sleeps.length === 1) await registry.release("n1", heldToken);
       },
     });
     expect(res.acquired).toBe(true);
@@ -107,19 +127,14 @@ test("withClaimHeartbeat refreshes a held claim and runs fn to completion", asyn
     const held = await registry.claim("n1", "me");
     let ticks = 0;
     // Deterministic fake timer: capture the callback, fire it manually.
-    let fired;
-    const fakeSetInterval = (cb) => {
-      fired = cb;
-      return { unref() {} };
-    };
-    const fakeClearInterval = () => {};
+    let fired: (() => void) | undefined;
     const out = await withClaimHeartbeat(
       registry,
       "n1",
-      held.ownerToken,
-      { intervalMs: 10, setIntervalFn: fakeSetInterval, clearIntervalFn: fakeClearInterval },
+      acquiredToken(held),
+      { intervalMs: 10, ...fakeTimers((cb) => (fired = cb)) },
       async () => {
-        fired(); // simulate one heartbeat tick during execution
+        fired!(); // simulate one heartbeat tick during execution
         await new Promise((r) => setTimeout(r, 5));
         ticks++;
         return "done";
@@ -136,9 +151,8 @@ test("claimMany grants only free nodes; a second peer gets the disjoint remainde
   const { dir, cleanup } = await tempRegistry();
   try {
     const path = join(dir, "task-claims.json");
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const peerA = new CR(path);
-    const peerB = new CR(path);
+    const peerA = new ClaimRegistry(path);
+    const peerB = new ClaimRegistry(path);
 
     const a = await peerA.claimMany(["t1", "t2", "t3", "t4"], "A");
     expect(a.granted.sort()).toEqual(["t1", "t2", "t3", "t4"]);
@@ -156,8 +170,7 @@ test("claimMany re-grants the SAME pool's own live claims (idempotent re-partiti
   const { dir, cleanup } = await tempRegistry();
   try {
     const path = join(dir, "task-claims.json");
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const reg = new CR(path);
+    const reg = new ClaimRegistry(path);
 
     // Run "R1" claims its partition, then re-runs the SAME partition (e.g. a
     // second prepare-dispatch within one audit run before ingest): it must
@@ -179,8 +192,7 @@ test("claimMany re-grant ROTATES the token even though the granted set is unchan
   const { dir, cleanup } = await tempRegistry();
   try {
     const path = join(dir, "task-claims.json");
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const reg = new CR(path);
+    const reg = new ClaimRegistry(path);
 
     const first = await reg.claimMany(["t1", "t2"], "R1");
     expect(first.granted.sort()).toEqual(["t1", "t2"]);
@@ -208,8 +220,7 @@ test("listLiveClaims filters stale records by the registry's own staleMs window 
   const { dir, cleanup } = await tempRegistry();
   try {
     let clock = 1_000;
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const reg = new CR(join(dir, "live-claims.json"), () => clock, 10_000);
+    const reg = new ClaimRegistry(join(dir, "live-claims.json"), () => clock, 10_000);
 
     const stale = await reg.claim("t-stale", "A");
     clock = 12_000; // t-stale is now past the 10s window
@@ -221,7 +232,7 @@ test("listLiveClaims filters stale records by the registry's own staleMs window 
 
     const liveOnly = await reg.listLiveClaims();
     expect(Object.keys(liveOnly), "live snapshot drops the stale record").toEqual(["t-live"]);
-    expect(liveOnly["t-live"].ownerToken).toBe(live.ownerToken);
+    expect(liveOnly["t-live"].ownerToken).toBe(acquiredToken(live));
   } finally {
     await cleanup();
   }
@@ -231,8 +242,7 @@ test("clear removes claims unconditionally (no token) and reports the count", as
   const { dir, cleanup } = await tempRegistry();
   try {
     const path = join(dir, "task-claims.json");
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const reg = new CR(path);
+    const reg = new ClaimRegistry(path);
     await reg.claimMany(["t1", "t2", "t3"], "A");
 
     const removed = await reg.clear(["t1", "t3", "missing"]);
@@ -253,8 +263,7 @@ test("ClaimRegistry honors a per-registry stale window (OD3 long lease)", async 
     const now = () => clock;
     // Long lease: 10_000ms window on a registry pointed at the same file.
     const longPath = join(dir, "long-claims.json");
-    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
-    const reg = new CR(longPath, now, 10_000);
+    const reg = new ClaimRegistry(longPath, now, 10_000);
 
     const mine = await reg.claim("t1", "peerA");
     expect(mine.acquired).toBe(true);
@@ -277,30 +286,27 @@ test("withClaimHeartbeat fires onRevoked when the claim was reclaimed by a peer"
   const { registry, cleanup } = await tempRegistry();
   try {
     const mine = await registry.claim("n1", "me");
+    const mineToken = acquiredToken(mine);
     // Force-steal: overwrite with a peer's fresh claim via a stale-window trick —
     // simplest is to release mine and let a peer take it, so my token no longer owns.
-    await registry.release("n1", mine.ownerToken);
+    await registry.release("n1", mineToken);
     await registry.claim("n1", "peer");
 
     let revoked = false;
-    let fired;
+    let fired: (() => void) | undefined;
     const out = await withClaimHeartbeat(
       registry,
       "n1",
-      mine.ownerToken, // no longer the owner
+      mineToken, // no longer the owner
       {
         intervalMs: 10,
-        setIntervalFn: (cb) => {
-          fired = cb;
-          return { unref() {} };
-        },
-        clearIntervalFn: () => {},
+        ...fakeTimers((cb) => (fired = cb)),
         onRevoked: () => {
           revoked = true;
         },
       },
       async () => {
-        fired(); // heartbeat tick observes we no longer own it
+        fired!(); // heartbeat tick observes we no longer own it
         // give the async heartbeat().then() a turn to resolve
         await new Promise((r) => setTimeout(r, 20));
         return "finished-anyway";
