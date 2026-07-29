@@ -22,12 +22,12 @@ import type { CapabilityTier } from "../providers/providerConfirmation.js";
  *
  * 1.1.0 — additive cost-first-routing fields on ConfirmedPoolEntry
  * (`model_id`, `blended_price_usd_per_mtok`, `cost_order`). See
- * spec/cost-first-routing.md.
+ * spec/dispatch-quota.md.
  */
 export const PROVIDER_CONFIRMATION_RESULT_VERSION = "1.1.0" as const;
 
 // ---------------------------------------------------------------------------
-// Interactive Gate-0 operator input (spec/cost-first-routing.md — Gate-0)
+// Interactive Gate-0 operator input (spec/dispatch-quota.md — Gate-0)
 // ---------------------------------------------------------------------------
 
 /**
@@ -116,7 +116,7 @@ export interface ProviderConfirmationInput {
   host_models?: HostRosterModel[];
   /**
    * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator's durable operating point
-   * on the cost-vs-throughput frontier (spec/dispatch-cost-speed-dial.md). 0 (default)
+   * on the cost-vs-throughput frontier (spec/dispatch-quota.md). 0 (default)
    * = cost-first (today's behavior); 1 = throughput-first. Out-of-range values clamp
    * to [0, 1]; omit to keep the cost-first default. Persisted on the shared
    * confirmation and applied by `admitBatch` at every dispatch.
@@ -307,7 +307,7 @@ export interface ConfirmedPoolEntry {
   self_spawn_blocked?: boolean;
   /**
    * Representative model id this entry is priced/ordered by (cost-first routing;
-   * spec/cost-first-routing.md). For a configured API pool it is the configured
+   * spec/dispatch-quota.md). For a configured API pool it is the configured
    * model; for a host-reported roster entry it is that roster model. Absent when
    * the concrete model is not knowable at confirmation time (e.g. a CLI backend
    * whose roster arrives only at the dispatch handshake).

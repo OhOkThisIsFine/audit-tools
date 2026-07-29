@@ -147,7 +147,7 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
  * authenticates as a different account than the host (its `credentials_path`). The
  * returned source probes usage + resolves the account id from THAT file, so the
  * source forms a pool keyed on its own `(transport, account)` — a distinct budget
- * from the host's same-transport pool (spec/quota-dispatch-design.md §5b). Falls back
+ * from the host's same-transport pool (spec/dispatch-quota.md §5b). Falls back
  * to the shared source when no per-source credential is declared, or the transport has
  * no per-account proactive endpoint (only `codex` exposes one today — a direct CLI
  * whose `auth.json` carries the account).

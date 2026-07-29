@@ -1,5 +1,5 @@
 // Output-envelope packet cost — the reservation amount the admission ledger leases
-// for one packet (spec/audit/dispatch-admission-control.md, Resolved decision 1).
+// for one packet (spec/dispatch-quota.md, Resolved decision 1).
 //
 // A packet's INPUT cost is deterministic (`estimateTokensFromBytes`), but its
 // OUTPUT (the findings) is unknown until generated, and output is frequently the

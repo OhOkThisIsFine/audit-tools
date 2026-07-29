@@ -1,4 +1,4 @@
-// Interactive Gate-0 provider-confirmation step (spec/cost-first-routing.md —
+// Interactive Gate-0 provider-confirmation step (spec/dispatch-quota.md —
 // follow-ups a/b/c). Covers the two hermetic halves of the flow: (1) the
 // host-facing prompt render surfaces the priced pool + the input contract; (2) the
 // executor consumes a seeded operator input and PROMOTES it into both canonical

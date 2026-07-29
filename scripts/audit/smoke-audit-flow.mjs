@@ -131,7 +131,7 @@ async function advanceToDispatchReady(runNextStep, root, log) {
     }
     if (step.step_kind === "provider_confirmation") {
       // Accept the tool's suggested cost ordering verbatim (the interactive Gate-0
-      // step; spec/cost-first-routing.md). Writing the input is the "operator has
+      // step; spec/dispatch-quota.md). Writing the input is the "operator has
       // acted" signal that lets the run proceed.
       await writeFile(
         step.artifact_paths.provider_confirmation_input,

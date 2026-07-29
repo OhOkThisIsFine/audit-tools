@@ -1,5 +1,5 @@
 // Host-path admission loop — the tool-side "grant the admitted set" primitive of
-// the dispatch admission-control model (spec/audit/dispatch-admission-control.md).
+// the dispatch admission-control model (spec/dispatch-quota.md).
 //
 // The in-process rolling engine (rollingDispatch.ts) admits ONE packet at a time
 // continuously; this is its host-subagent-path analog: at a dispatch step the tool
@@ -98,7 +98,7 @@ export interface AdmissionPool {
    * pool-class-aware by {@link deriveThroughputConcurrency} at the build site — a
    * backend source's uncapped default is `+Infinity` (parallel) while the conversation
    * host's unspecified default is `1` (sequential), so `declaredCap`'s ambiguous `null`
-   * sentinel is NOT reused for the rank. See spec/dispatch-cost-speed-dial.md.
+   * sentinel is NOT reused for the rank. See spec/dispatch-quota.md.
    */
   throughputConcurrency: number;
   /** Largest packet cost this pool can fit (context window − output). */
@@ -118,7 +118,7 @@ export interface AdmissionPool {
 
 /**
  * Derive a pool's throughput rank (effective parallelism) pool-class-aware — the fix
- * for the `declaredCap == null` ambiguity (spec/dispatch-cost-speed-dial.md): the same
+ * for the `declaredCap == null` ambiguity (spec/dispatch-quota.md): the same
  * "no cap" sentinel means opposite speeds on the two pool classes, so throughput cannot
  * be read off `declaredCap` alone.
  *
@@ -148,9 +148,9 @@ export function deriveThroughputConcurrency(params: {
  * how a pool maps to an {@link AdmissionPool}. Every field is derived here once:
  * budget (optimistic `+Infinity` when no live ceiling), the hard in-flight cap
  * (`declaredCap` — host subagent budget OR endpoint `max_concurrent`), cost rank
- * (with the operator-confirmed position as rung 1; spec/cost-first-routing.md), the
+ * (with the operator-confirmed position as rung 1; spec/dispatch-quota.md), the
  * capability tier ordinal, the throughput rank (pool-class-aware concurrency;
- * spec/dispatch-cost-speed-dial.md), and the context-window fit ceiling.
+ * spec/dispatch-quota.md), and the context-window fit ceiling.
  */
 export function admissionPoolsFromSummaries(
   summaries: readonly DispatchCapacityPoolSummary[],
@@ -197,7 +197,7 @@ export function admissionPoolsFromSummaries(
 /**
  * One constraint's evaluation, serialized for the persisted explain artifact —
  * the wire form of the ledger's {@link ConstraintOutcome} (legibility invariant,
- * spec/audit/dispatch-admission-control.md Resolved decision 3).
+ * spec/dispatch-quota.md Resolved decision 3).
  *
  * `headroom_before: null` means UNBOUNDED, not unknown — a cold-start pool with
  * no real ceiling computes `headroomBefore = +Infinity`, which `JSON.stringify`
@@ -379,7 +379,7 @@ export interface AdmitBatchInput {
   leaseTtlMs?: number;
   /**
    * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator-set operating point on the
-   * cost-vs-throughput frontier among capable pools (spec/dispatch-cost-speed-dial.md).
+   * cost-vs-throughput frontier among capable pools (spec/dispatch-quota.md).
    * λ=0 (default) is pure cost-first — byte-identical to the pre-dial ordering. λ=1 is
    * pure throughput (fastest-capable-first). 0<λ<1 blends the two axes' ordinals.
    * Out-of-range values clamp to [0, 1].
@@ -612,7 +612,7 @@ function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
  * λ=0 (or a single candidate) ⇒ the exact pre-dial cost-first order. Otherwise blend
  * the two axes' ORDINALS within this candidate set — a $/Mtok cost value cannot be
  * linearly mixed with a tokens/min rate, so each axis contributes its dense integer
- * rank, keeping a well-defined total order (spec/dispatch-cost-speed-dial.md).
+ * rank, keeping a well-defined total order (spec/dispatch-quota.md).
  */
 function orderCandidates(pools: AdmissionPool[], bias: number): AdmissionPool[] {
   const ordered = pools.slice();

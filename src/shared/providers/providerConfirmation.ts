@@ -225,7 +225,7 @@ export async function queryProviderQuota(
 
 /**
  * The representative model id a provider is priced/ordered by at Gate-0 (cost-first
- * routing; spec/cost-first-routing.md). Only the providers that carry a configured
+ * routing; spec/dispatch-quota.md). Only the providers that carry a configured
  * model in session config are knowable here — a host-native model roster and a CLI
  * backend's model arrive only at the dispatch handshake, so those return `undefined`
  * and are priced deterministically at dispatch instead. Never hardcodes a model

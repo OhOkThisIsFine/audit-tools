@@ -478,7 +478,7 @@ export interface RollingDispatchConfig<TPacket> {
     result: RollingDispatchResult<TPacket>,
   ) => void;
   /**
-   * Shared token-reservation ledger (spec/audit/dispatch-admission-control.md, the
+   * Shared token-reservation ledger (spec/dispatch-quota.md, the
    * proactive admission layer). When supplied, every dispatched packet LEASES its
    * output-envelope cost against the account-keyed ledger BEFORE dispatch and
    * reconciles the lease on completion — so two co-located dispatch loops pointed at
@@ -1106,7 +1106,7 @@ export function createRollingDispatcher<TPacket>(
 
   /**
    * Admission gate over the shared reservation ledger (proactive admission layer,
-   * spec/audit/dispatch-admission-control.md). Reserves the packet's output-envelope
+   * spec/dispatch-quota.md). Reserves the packet's output-envelope
    * cost against `slot.poolId`'s live budget BEFORE dispatch, atomically under the
    * ledger lock so a co-located peer's in-flight leases are visible and optimism is
    * bounded by ONE budget.

@@ -326,13 +326,13 @@ export async function buildDispatchQuota(
   grantLeases: boolean,
   quotaStateEntry?: QuotaStateEntry | null,
   /**
-   * Operator-confirmed cost ordering (rung 1 of costRank; spec/cost-first-routing.md),
+   * Operator-confirmed cost ordering (rung 1 of costRank; spec/dispatch-quota.md),
    * keyed by model id → 0-based confirmed position. Absent ⇒ price then tier.
    */
   confirmedCostPositions?: Map<string, number> | null,
   /**
    * Operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the Gate-0
-   * confirmation (spec/dispatch-cost-speed-dial.md). 0/absent ⇒ cost-first (default).
+   * confirmation (spec/dispatch-quota.md). 0/absent ⇒ cost-first (default).
    */
   dispatchBias?: number,
 ): Promise<RemediationDispatchQuota> {

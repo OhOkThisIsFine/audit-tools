@@ -12,7 +12,7 @@ Each backend gets the best achievable `QuotaSource` feeding the shared contract:
 `queryCurrentUsage(providerModelKey) → QuotaUsageSnapshot { remaining_pct (0–1 fraction),
 reset_at, … }`. Signal preference, always: **proactive endpoint > reactive headers on a
 completion > reactive dated-limit error > local consumption estimate**. How that signal governs
-dispatch is [`audit/dispatch-admission-control.md`](audit/dispatch-admission-control.md)'s concern
+dispatch is [`dispatch-quota.md`](dispatch-quota.md)'s concern
 (admission over the shared quota ledger, with the per-pool token-budget substrate folded in), not
 this matrix's.
 
@@ -264,6 +264,7 @@ enterprise-managed seats**; needs Plan-read OAuth) → reactive 429 at call time
 consumption estimate vs plan cap (Pro 300/mo, Pro+ 1500/mo; reset 1st of month UTC).
 
 **Citations:** `imspsycho/copilot-api` `get-copilot-usage.ts` (endpoint + `QuotaDetail` fields),
+<!-- doc-citation-exempt: third-party repo path — src/index.ts lives in fgonzalezurriola/opencode-copilot-usage -->
 `fgonzalezurriola/opencode-copilot-usage` `src/index.ts` (endpoint + parses `premium_interactions`),
 DeepWiki `microsoft/vscode-copilot-chat` 2.3 (token-exchange `limited_user_quotas`, SecretStorage),
 GitHub Docs billing/usage + copilot-cli config-dir; community #178117 (stability caveat).
@@ -460,5 +461,6 @@ today. The OpenCode broker's `google` row stays reactive unless an OAuth (not AP
 `core/contentGenerator.ts` (auth-mode routing); deprecation **verified** at
 `developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals`; API-key
 reactive-only `ai.google.dev/gemini-api/docs/rate-limits`; shape corroboration `steipete/CodexBar`
+<!-- doc-citation-exempt: third-party repo path — docs/gemini.md lives in steipete/CodexBar -->
 `docs/gemini.md` (several issues report `cloudcode-pa` 403/SERVICE_DISABLED for project-ineligible
 accounts → degrade cleanly).

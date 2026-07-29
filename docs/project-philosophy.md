@@ -231,7 +231,7 @@ policy → `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-a
   `estimateTokensFromBytes` is the standard; learned RPM/TPM limits authoritative.
 - **Quota awareness must pace, not just observe** — don't burn the window in parallel and all hit the wall
   at once; quota death is a retryable pause, not a failure. Red line: never IDE-GUI automation.
-*(home: `spec/audit/dispatch-admission-control.md`, `spec/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
+*(home: `spec/dispatch-quota.md`, `spec/dispatch-quota.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
 
 ---
 

@@ -86,7 +86,7 @@ answer and have **no corresponding change at HEAD or in the tree**:
 | HANDOFF is the all-open roadmap, not immediate-next-only | revert generator to immediate-next-only; empty if no priority item | `scripts/shared/generate-handoff-roadmap.mjs` | not started |
 | Dead relative links (5 at HEAD, 3 self-inflicted) | build the approved `check:doc-links` gate, fix together | `scripts/check-doc-links.mjs` | **file does not exist** |
 | Dependency-map producer table missing a writer | investigate which of add-the-row / stop-the-second-writer fits | `spec/audit/dependency-map.md` | not started |
-| Dispatch spec describes an asymmetry a shared hoist removed | rewrite the passage | `spec/audit/dispatch-admission-control.md` | not started |
+| Dispatch spec describes an asymmetry a shared hoist removed | rewrite the passage | `spec/dispatch-quota.md` | not started |
 | `src/adapters` → `src/audit/adapters` | fix | `spec/contract-authoring-determinism-design.md` | not started |
 | Dated "fixed on <date>" fragments in timeless specs | de-status to timeless | `spec/backend-identity-axes.md` | not started |
 | Per-release checklist living in `spec/` | fold into `release.md` or move to a non-spec home | `spec/host-validation.md` | not started |

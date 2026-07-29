@@ -640,12 +640,12 @@ export async function prepareDispatchArtifacts(params: {
     }))
     .sort((a, b) => b.complexity - a.complexity);
   // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
-  // shared Gate-0 confirmation (spec/cost-first-routing.md). Best-effort — an absent
+  // shared Gate-0 confirmation (spec/dispatch-quota.md). Best-effort — an absent
   // or unreadable confirmation ⇒ costRank falls to real price then tier. G3: the
   // ordering is POLICY and is no longer discarded when reach shifts.
   const confirmedCostPositions = await readConfirmedCostPositions(params.root);
   // Cost↔speed dial: the operator's durable operating point from the same Gate-0
-  // confirmation (spec/dispatch-cost-speed-dial.md). Absent ⇒ 0 (cost-first default).
+  // confirmation (spec/dispatch-quota.md). Absent ⇒ 0 (cost-first default).
   const dispatchBias = await readConfirmedDispatchBias(params.root);
   const { dispatchQuotaPath, waveSchedule, dispatchCapacity, admission } = await finalizeDispatchQuota({
     runId,

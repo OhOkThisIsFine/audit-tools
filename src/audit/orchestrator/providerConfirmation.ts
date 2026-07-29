@@ -73,7 +73,7 @@ export function confirmProviders(
     schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
     confirmed_at: new Date().toISOString(),
     // Cost-first routing: annotate each entry with its representative model price
-    // + cost_order (spec/cost-first-routing.md). Read at dispatch as rung 1 of
+    // + cost_order (spec/dispatch-quota.md). Read at dispatch as rung 1 of
     // costRank. Uses the real sessionConfig so a configured API/CLI model is
     // priceable here; an operator `input.cost_order` overrides the suggestion.
     provider_pool: annotateConfirmedPool(pool, sessionConfig, input).provider_pool,

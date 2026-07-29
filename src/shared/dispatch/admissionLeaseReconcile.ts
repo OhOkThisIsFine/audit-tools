@@ -5,7 +5,7 @@ import type { DispatchAdmission } from "./admissionLoop.js";
 /**
  * Reconcile (free) the reservation-ledger leases a dispatch grant took for a run's
  * granted set — the "reconcile at result-ingest" half of admission control
- * (spec/audit/dispatch-admission-control.md). Once the host has reported the granted
+ * (spec/dispatch-quota.md). Once the host has reported the granted
  * set's results those reservations are no longer in flight, so their budget returns
  * to the shared account for the NEXT grant.
  *

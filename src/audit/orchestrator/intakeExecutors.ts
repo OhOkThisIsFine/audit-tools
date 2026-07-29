@@ -199,7 +199,7 @@ export async function runProviderConfirmationAutoComplete(
         )
       : {});
   // Interactive Gate-0: the host may have submitted an operator ordering + host
-  // roster to `provider-confirmation.input.json` (spec/cost-first-routing.md).
+  // roster to `provider-confirmation.input.json` (spec/dispatch-quota.md).
   // Absent ⇒ the tool's price-ascending suggestion (headless / no-operator path).
   const rawInput = artifactsDir
     ? await readProviderConfirmationInput(artifactsDir)

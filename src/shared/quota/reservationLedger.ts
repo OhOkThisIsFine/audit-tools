@@ -6,7 +6,7 @@ import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
 import { getQuotaStatePath } from "./state.js";
 
 // Shared, lock-guarded token-reservation ledger — the proactive layer of the
-// dispatch admission-control model (spec/audit/dispatch-admission-control.md).
+// dispatch admission-control model (spec/dispatch-quota.md).
 // This is the ClaimRegistry pattern generalized from TASK claiming to QUOTA
 // claiming: instead of `nodeId → single claim`, it holds `resourceKey → leases[]`,
 // where a lease reserves an estimated token cost against a shared rate-limit meter

@@ -1332,7 +1332,7 @@ export {
   mostCapableTier,
 } from "./dispatch/tierRank.js";
 
-// Cost-first routing engine (real price → costRank; spec/cost-first-routing.md).
+// Cost-first routing engine (real price → costRank; spec/dispatch-quota.md).
 export {
   COST_BLEND_INPUT_WEIGHT,
   COST_BLEND_OUTPUT_WEIGHT,

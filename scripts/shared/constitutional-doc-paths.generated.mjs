@@ -14,10 +14,10 @@ export const CONSTITUTIONAL_DOC_PATHS = [
   "spec/audit/artifact-contract.md",
   "spec/audit/audit-goals.md",
   "spec/audit/dependency-map.md",
-  "spec/audit/dispatch-admission-control.md",
   "spec/audit/entrypoint-contract.md",
   "spec/audit/executor-catalog.md",
   "spec/audit/orchestration-policy.md",
+  "spec/dispatch-quota.md",
   "spec/remediate/remediation-goals.md",
 ];
 

@@ -1,7 +1,7 @@
 /**
  * reservation-ledger.test.ts
  *
- * The proactive token-reservation ledger (spec/audit/dispatch-admission-control.md).
+ * The proactive token-reservation ledger (spec/dispatch-quota.md).
  * Generalizes the ClaimRegistry pattern from task-claiming to quota-claiming:
  * resourceKey -> token leases, budget-gated admission under withFileLock, leases
  * expire so a crashed consumer never strands budget, reconcile frees on completion,

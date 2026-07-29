@@ -188,7 +188,7 @@ pause on a **provider confirmation** step (Gate-0). The tool auto-detects the
 provider pool it can dispatch to, prices each candidate, and proposes a cost
 ordering (cheapest capable first). You confirm, reorder, or amend it. The
 mechanism behind the ordering is documented in
-[`spec/cost-first-routing.md`](../../spec/cost-first-routing.md); this section is
+[`spec/dispatch-quota.md`](../../spec/dispatch-quota.md); this section is
 only how to respond to the step.
 
 ### When it fires

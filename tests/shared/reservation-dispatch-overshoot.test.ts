@@ -14,7 +14,7 @@ import type { CapacityPool } from "../../src/shared/quota/capacity.js";
 import type { SessionConfig } from "../../src/shared/types/sessionConfig.js";
 
 // Wiring test for the reservation-ledger admission layer in the rolling dispatch
-// engine (spec/audit/dispatch-admission-control.md). Exercises the spec's central
+// engine (spec/dispatch-quota.md). Exercises the spec's central
 // validation criterion: two CO-LOCATED dispatch loops sharing one account budget
 // (same ledger file, same `provider#account/model` resourceKey) never collectively
 // exceed that budget — no 429-storm from independent optimistic estimates.

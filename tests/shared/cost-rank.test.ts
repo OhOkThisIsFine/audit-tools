@@ -1,4 +1,4 @@
-// Cost-first routing engine (spec/cost-first-routing.md).
+// Cost-first routing engine (spec/dispatch-quota.md).
 //
 // Locks the three-rung costRank resolution: operator-confirmed position (rung 1)
 // < real models.dev blended price (rung 2) < tier-ordinal fallback (rung 3),

@@ -76,7 +76,7 @@ export function sourceService(source: {
  *
  * The key indexing `quota-state.json` entries and gating sources. Quota is billed
  * per-ACCOUNT, so two same-account-provider pairs must NOT alias to one pool (see
- * `spec/quota-dispatch-design.md` §5). Format: `provider[#account]/model`. The account
+ * `spec/dispatch-quota.md` §5). Format: `provider[#account]/model`. The account
  * segment is OMITTED when null, so a single-account run keeps the legacy
  * `provider/model` key (no migration). The `model` tail may itself contain `/`;
  * provider + account live in the head before the first `/`.

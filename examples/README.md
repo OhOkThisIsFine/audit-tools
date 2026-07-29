@@ -55,7 +55,7 @@ using the `openai-compatible` shape pointed at opencode's public ZEN endpoint. T
 
 `cost_per_mtok: 0` declares the source free. Declared cost wins pricing precedence for a source and is
 backed by reactive verification, so a "free" tier that starts billing is demoted for the rest of the run —
-the ranking rule lives in [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), and the drift
+the ranking rule lives in [`spec/dispatch-quota.md`](../spec/dispatch-quota.md), and the drift
 event is documented at its code site (`src/shared/friction/stepBoundaryCapture.ts`,
 `declared_cost_drift`). Cost is declared per **source** (`sources[].cost_per_mtok`); the legacy singleton
 `openai_compatible` provider block has no cost field.

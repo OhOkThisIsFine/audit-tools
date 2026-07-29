@@ -85,7 +85,7 @@ Everything layered on top of that atomic decision is a distinction to delete:
 5. **Delete the mode distinctions** — `proxy_transport` trigger, headless-vs-hybrid gate,
    `IN_PROCESS_*_PROVIDERS` sets (audit ×2 + remediate), the two divergent dispatch entry points — collapse
    into the one availability+headroom+capability decision (the [[relax-dispatch-source-forcing]] /
-   `spec/dispatch-jit-claims.md` direction).
+   `spec/dispatch-quota.md` direction).
 
 ## Precise root cause (post-recon, source-verified)
 The fit-check is **not missing — it is silently no-op'd**, and settle is **reason-blind and collective**:

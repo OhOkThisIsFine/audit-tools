@@ -79,7 +79,7 @@ function mergePartialTerminals(
  * per-dispatch lock overhead and no co-located coordination that couldn't gate on
  * anything anyway. A metered provider that reports usage gets the full ledger:
  * reserve-before-dispatch under lock (co-located double-count prevention) + budget
- * gating. See spec/audit/dispatch-admission-control.md.
+ * gating. See spec/dispatch-quota.md.
  */
 export function resolveLedgerBudgets(input: {
   pools: CapacityPool[];

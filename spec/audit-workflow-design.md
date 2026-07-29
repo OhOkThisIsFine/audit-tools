@@ -295,7 +295,7 @@ plan/dispatch seam).
 The rolling/admission-control model — one-at-a-time admission against a live
 per-pool budget, emergent concurrency, the shared account-keyed reservation
 ledger, and folded-in ingestion — is specified in
-[`audit/dispatch-admission-control.md`](audit/dispatch-admission-control.md).
+[`dispatch-quota.md`](dispatch-quota.md).
 This section covers only what is unique to the audit side: how the
 task-affinity graph is partitioned into packets, how packets are risk-routed
 across model tiers, and prompt caching.

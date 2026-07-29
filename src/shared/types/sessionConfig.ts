@@ -543,7 +543,7 @@ export interface DispatchableSource {
    * different account than the host (e.g. a second Codex account: its own
    * `auth.json`). The source's quota probe + account id are read from here, so the
    * source forms a pool keyed on its OWN `(transport, account)` — distinct budget
-   * from the host's same-transport pool (spec/quota-dispatch-design.md §5b). Only
+   * from the host's same-transport pool (spec/dispatch-quota.md §5b). Only
    * `codex` has a per-account proactive probe today
    * (`buildAccountScopedQuotaSource`); proxy-fronted and bare-API-key transports
    * derive a local account identity instead (`deriveAccountKey` — the §5b

@@ -341,7 +341,7 @@ test("ANTI-OVER-ADMISSION GUARD: unknown (+Infinity) budget never admits more th
   expect(res.blocked.length).toBe(5 - COLD_START_PROBE_BATCH);
 });
 
-// ── Cost↔speed dispatch dial (spec/dispatch-cost-speed-dial.md) ──────────────
+// ── Cost↔speed dispatch dial (spec/dispatch-quota.md) ──────────────
 // Throughput = effective PARALLELISM (throughputConcurrency): higher = faster,
 // +Infinity = hardware-parallel. Derived pool-class-aware (see the
 // deriveThroughputConcurrency block below); here it is set explicitly per pool.

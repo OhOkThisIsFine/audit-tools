@@ -331,8 +331,8 @@ gate while any call-site change trips it.
 `tests/shared/providerConfirmation.test.mjs:238-254` (the type-only slot tests),
 `tests/audit/provider-confirmation-gate.test.mjs:207` + `tests/audit/dc2.test.mjs` (the only
 `readSharedProviderConfirmation` / `currentProviderRoster` consumers),
-`docs/audit-pkg/operator-guide.md:205-256`, `spec/cost-first-routing.md:87-95`,
-`spec/dispatch-cost-speed-dial.md:123-128`, `src/shared/index.ts:1400-1401` (knip).
+`docs/audit-pkg/operator-guide.md:205-256`, `spec/dispatch-quota.md:87-95`,
+`spec/dispatch-quota.md:123-128`, `src/shared/index.ts:1400-1401` (knip).
 
 **Spec amendment (PHASE it — do NOT strike it):** `spec/unified-dispatch-worker-model.md:283-284` says
 `DispatchPolicy` persists on the intent. That is an **owner-approved endpoint** (panel synthesis `:39`,

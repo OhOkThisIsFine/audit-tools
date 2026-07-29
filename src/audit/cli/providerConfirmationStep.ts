@@ -7,7 +7,7 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "audit-tools/shared";
 
 /**
  * Render the host-facing prompt for the interactive `provider_confirmation` step
- * (Gate-0, cost-first routing — spec/cost-first-routing.md). Shows the priced,
+ * (Gate-0, cost-first routing — spec/dispatch-quota.md). Shows the priced,
  * suggested provider pool (ascending cost) and asks the host to confirm it, or to
  * submit an operator reorder / exclusion / host-model roster by writing
  * `provider-confirmation.input.json`. Writing that file (even to accept the

@@ -89,7 +89,7 @@ export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.0.0" as const;
 /**
  * Clamp an operator-supplied cost↔speed dispatch bias (λ) to [0, 1], or `undefined`
  * when it is absent/non-finite. Single-sourced so parse-time and read-time agree.
- * (spec/dispatch-cost-speed-dial.md).
+ * (spec/dispatch-quota.md).
  */
 export function clampDispatchBias(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -276,7 +276,7 @@ export interface SharedProviderConfirmation {
   source_pool_cost_order?: SourcePoolCostEntry[];
   /**
    * Operator-confirmed cost↔speed dispatch bias (λ) ∈ [0, 1], the durable operating
-   * point on the cost-vs-throughput frontier (spec/dispatch-cost-speed-dial.md). Read
+   * point on the cost-vs-throughput frontier (spec/dispatch-quota.md). Read
    * back at dispatch by `readConfirmedDispatchBias` and applied by `admitBatch`. Absent
    * ⇒ the cost-first default (λ=0), so a confirmation written before this field existed
    * (or a headless run) behaves exactly as before.
@@ -447,7 +447,7 @@ export function buildProviderConfirmationRender(
   }
 
   // Cost-first routing: annotate with representative model price + cost_order,
-  // read at dispatch as rung 1 of costRank (spec/cost-first-routing.md). When an
+  // read at dispatch as rung 1 of costRank (spec/dispatch-quota.md). When an
   // operator input is present its ordering wins and its host roster is priced.
   // `env` is threaded rather than left to `process.env`: host-provider resolution
   // falls through to env detection when `host_provider` is unset, and an injected-env
@@ -1421,7 +1421,7 @@ function warnConfirmationRejected(raw: unknown, root: string): void {
 
 /**
  * Read the operator-confirmed cost ordering (rung 1 of costRank; see
- * spec/cost-first-routing.md) from the shared Gate-0 confirmation as a model-keyed
+ * spec/dispatch-quota.md) from the shared Gate-0 confirmation as a model-keyed
  * `Map<model_id, cost_order>` for the dispatch build sites. Single-sourced so audit
  * and remediate honor it identically. Best-effort and never throws: an absent
  * `root` or a missing/malformed confirmation yields an empty map — dispatch then
@@ -1634,7 +1634,7 @@ export async function resolveUnevidencedCapabilityPools(
 
 /**
  * Read the operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the shared
- * Gate-0 confirmation for the dispatch build sites (spec/dispatch-cost-speed-dial.md).
+ * Gate-0 confirmation for the dispatch build sites (spec/dispatch-quota.md).
  * Single-sourced so audit and remediate apply the identical operating point.
  * Best-effort and never throws: an absent `root`, a missing/malformed confirmation,
  * or an absent field all yield the cost-first default `0`.
@@ -1653,7 +1653,7 @@ export async function readConfirmedDispatchBias(
 }
 
 // ---------------------------------------------------------------------------
-// Interactive Gate-0 operator input (spec/cost-first-routing.md — Gate-0)
+// Interactive Gate-0 operator input (spec/dispatch-quota.md — Gate-0)
 // ---------------------------------------------------------------------------
 
 /** File name of the host-written Gate-0 input under the audit artifacts dir. */

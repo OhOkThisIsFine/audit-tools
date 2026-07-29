@@ -1930,7 +1930,7 @@ export function buildAuditObligations(
     // promotes it into both canonical artifacts (per-tool seam + shared
     // confirmation). Headless (`advanceAudit`, no CLI) never reaches here and
     // auto-completes with the tool's price-ascending suggestion. See
-    // spec/cost-first-routing.md.
+    // spec/dispatch-quota.md.
     {
       id: "provider_confirmation",
       derive: deriveObligationState("provider_confirmation", gate),

@@ -50,7 +50,7 @@ export const DispatchQuotaContractSchema = z
     /**
      * Admission control: the tool GRANTS the affordable admitted set
      * (cost-first-capable, ledger-leased) — the granted set's size is the emergent
-     * admission width. See spec/audit/dispatch-admission-control.md.
+     * admission width. See spec/dispatch-quota.md.
      */
     admission: DispatchAdmissionSchema,
     cooldown_until: z.string().nullable(),

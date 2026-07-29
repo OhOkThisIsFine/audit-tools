@@ -151,7 +151,7 @@ export function estimateSlotTokens(slot: BrokeredDispatchSlot): number {
  * Capability is DECLARED, never inferred: there is no observational evidence that
  * can lift a host off the floor. (The former "any recorded safe concurrency
  * bucket lifts the host" branch was a learned-concurrency inference — see
- * `spec/audit/dispatch-admission-control.md`.)
+ * `spec/dispatch-quota.md`.)
  */
 export function classifyCapableHost(input: {
   providerName: ResolvedProviderName;

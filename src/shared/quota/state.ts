@@ -552,7 +552,7 @@ export function computeBackoffCooldownMs(consecutive429Count: number): number {
  * (`source.quota.max_concurrent` → `CapacityPool.concurrencyCap`) or ABSENT, in
  * which case quota headroom and rate limits are the only throttle. Inferring a
  * safe concurrency from an outcome stream is a category error — see
- * `spec/audit/dispatch-admission-control.md`.
+ * `spec/dispatch-quota.md`.
  */
 export async function recordWaveOutcome(
   providerModelKey: string,

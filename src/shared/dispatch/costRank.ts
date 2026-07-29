@@ -2,7 +2,7 @@
  * Cost-first routing engine — the single authority for a dispatch pool's
  * `costRank` (the cheapest-capable-first sort key consumed by `admitBatch`).
  *
- * Design of record: `spec/cost-first-routing.md`. In brief, `costRank` used to
+ * Design of record: `spec/dispatch-quota.md`. In brief, `costRank` used to
  * be `tierRank(pool.rank)` — a tier ORDINAL doubling as both cost and capability
  * signal. This module makes cost a real, independent axis resolved top-down over
  * three rungs (mirroring `resolveLimits`):

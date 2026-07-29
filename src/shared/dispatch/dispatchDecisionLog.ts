@@ -1,6 +1,6 @@
 /**
  * In-process engine decision log — the dispatch-time half of the legibility
- * invariant (spec/audit/dispatch-admission-control.md, Resolved decision 3:
+ * invariant (spec/dispatch-quota.md, Resolved decision 3:
  * every dispatch decision leaves a deterministic, mechanistic trace).
  *
  * The host-path grant persists its decisions in the dispatch-quota artifact's

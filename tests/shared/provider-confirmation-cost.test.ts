@@ -1,5 +1,5 @@
 // Gate-0 cost-first annotation + the confirmation→dispatch cost link
-// (spec/cost-first-routing.md). Locks that: (1) a configured API/CLI model is
+// (spec/dispatch-quota.md). Locks that: (1) a configured API/CLI model is
 // priced + given a suggested cost_order at confirmation; (2) an unpriceable entry
 // degrades safely (null price, no model_id, still ordered); (3) the persisted
 // confirmation round-trips into a model-keyed position map the dispatch build
@@ -361,7 +361,7 @@ describe("parseProviderConfirmationInput — degrade-safe", () => {
 
 // -----------------------------------------------------------------------------
 // Cost↔speed dispatch dial — Gate-0 bias capture + read-back
-// (spec/dispatch-cost-speed-dial.md)
+// (spec/dispatch-quota.md)
 // -----------------------------------------------------------------------------
 
 describe("clampDispatchBias", () => {

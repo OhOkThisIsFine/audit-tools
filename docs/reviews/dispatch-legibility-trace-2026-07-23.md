@@ -2,7 +2,7 @@
 
 Closes the backlog item *"Dispatch legibility: a deterministic mechanistic trace for EVERY dispatch
 decision"* (owner goal 2026-07-22; subsumed the 2026-07-19 `AdmissionGrant.resource_key` partiality
-entry). Spec authority: `spec/audit/dispatch-admission-control.md` → Resolved decision 3.
+entry). Spec authority: `spec/dispatch-quota.md` → Resolved decision 3.
 
 ## Mechanism
 
