@@ -438,7 +438,9 @@
     "answer": "Delete them.",
     "subject": "Three entries are code-proven shipped and should be deleted outright — held back only by the dirty tree",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-28T17:42:38.831Z"
+    "decided_at": "2026-07-28T17:42:38.831Z",
+    "completed_at": "2026-07-29T01:00:15.554Z",
+    "completed_ref": "76a447f0 — three shipped entries deleted from open-bugs.md; durable rules verified un-orphaned (FLW-COR-003 warning untouched, sweep-the-reach property lives in the producers entry)"
   },
   "f72897049c87b2b6": {
     "disposition": "settled",
@@ -490,7 +492,9 @@
     "answer": "What makes the most sense here? I'm tempted to say \"convert the .mjs tests to .ts over time\" but if you have objections I'd like to hear them.",
     "subject": "The test-tree typecheck gate typechecks 141 of 560 test files — checkJs:false silently excludes every .mjs test",
     "path": "tsconfig.test.json",
-    "decided_at": "2026-07-28T17:44:55.535Z"
+    "decided_at": "2026-07-28T17:44:55.535Z",
+    "completed_at": "2026-07-29T01:00:15.603Z",
+    "completed_ref": "58572304 — checkJs flip measured (8,903 errors) and rejected; the .mjs-to-.ts conversion is the ratchet, pinned as the roadmap next item in open-bugs.md"
   },
   "cfb35c8dca10d60b": {
     "disposition": "settled",
