@@ -16,6 +16,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(__dirname, "..", "..");
 // Audit tests live in tests/audit/ after the single-package collapse.
 const TESTS_DIR = join(PACKAGE_ROOT, "tests", "audit");
+// The dist-import scans cover EVERY test area, not just tests/audit: a dist
+// import typechecks against whatever stale dist/ exists locally and only fails
+// on a fresh tree (CI runs check:tests before build) — auditor-sources.test.ts
+// in tests/shared shipped exactly that and burned the v0.34.36 release run.
+const ALL_TEST_DIRS = ["audit", "shared", "remediate"].map((area) =>
+  join(PACKAGE_ROOT, "tests", area),
+);
 
 // ── INV-audit-tests-01: No test file imports from dist/ at module load time ──
 // A test that does `import("../../dist/audit/foo.js")` at the module's top level will
@@ -49,9 +56,10 @@ const DIST_IMPORT_ALLOWLIST = new Set([
 const DIST_IMPORT_PATTERN = /(?:import\s*\(\s*["']\.\.\/dist\/|from\s+["']\.\.\/dist\/|=\s*require\s*\(\s*["']\.\.\/dist\/)/;
 
 test("INV-audit-tests-01: no test file imports from dist/ at module load time (outside allowlist)", () => {
-  const testFiles = readdirSync(TESTS_DIR).filter((f) => f.endsWith(".test.mjs") || f.endsWith(".test.ts"));
   const violations = [];
-  for (const file of testFiles) {
+  for (const dir of ALL_TEST_DIRS) {
+    const testFiles = readdirSync(dir).filter((f) => f.endsWith(".test.mjs") || f.endsWith(".test.ts"));
+    for (const file of testFiles) {
     if (DIST_IMPORT_ALLOWLIST.has(file)) {
       continue;
     }
@@ -59,7 +67,7 @@ test("INV-audit-tests-01: no test file imports from dist/ at module load time (o
     if (file === "audit-tests-invariants.test.ts") {
       continue;
     }
-    const src = readFileSync(join(TESTS_DIR, file), "utf8");
+    const src = readFileSync(join(dir, file), "utf8");
     // Check each line; skip pure comment lines so pattern descriptions don't fire
     const hasDistImport = src
       .split("\n")
@@ -67,6 +75,7 @@ test("INV-audit-tests-01: no test file imports from dist/ at module load time (o
       .some((line) => DIST_IMPORT_PATTERN.test(line));
     if (hasDistImport) {
       violations.push(file);
+    }
     }
   }
   expect(violations, `These test files import from dist/ — they will silently pass on stale builds. ` +
@@ -84,12 +93,14 @@ test("INV-audit-tests-01: no test file imports from dist/ at module load time (o
 const SHARED_DIST_IMPORT_PATTERN = /(?:from ["']\.\.\/\.\.\/shared\/dist\/|import\(["']\.\.\/\.\.\/shared\/dist\/)/;
 
 test("INV-audit-tests-02: no test file uses a relative path into shared/dist/", () => {
-  const testFiles = readdirSync(TESTS_DIR).filter((f) => f.endsWith(".test.mjs") || f.endsWith(".test.ts"));
   const violations = [];
-  for (const file of testFiles) {
-    const src = readFileSync(join(TESTS_DIR, file), "utf8");
-    if (SHARED_DIST_IMPORT_PATTERN.test(src)) {
-      violations.push(file);
+  for (const dir of ALL_TEST_DIRS) {
+    const testFiles = readdirSync(dir).filter((f) => f.endsWith(".test.mjs") || f.endsWith(".test.ts"));
+    for (const file of testFiles) {
+      const src = readFileSync(join(dir, file), "utf8");
+      if (SHARED_DIST_IMPORT_PATTERN.test(src)) {
+        violations.push(file);
+      }
     }
   }
   expect(violations, `These test files use relative paths into shared/dist/ — they bypass the workspace contract. ` +

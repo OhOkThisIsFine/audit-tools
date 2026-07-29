@@ -7,13 +7,13 @@ import {
   resolveSourceDeclarationPath,
   verifySourceReach,
   type AmbientSourceDeps,
-} from "../../dist/shared/providers/auditorSources.js";
-import { resolveSessionConfig } from "../../dist/shared/config/resolveSessionConfig.js";
+} from "../../src/shared/providers/auditorSources.js";
+import { resolveSessionConfig } from "../../src/shared/config/resolveSessionConfig.js";
 import type {
   DispatchableSource,
   RepoSessionIntent,
-} from "../../dist/shared/types/sessionConfig.js";
-import type { AuditorDescriptor } from "../../dist/shared/types/auditorDescriptor.js";
+} from "../../src/shared/types/sessionConfig.js";
+import type { AuditorDescriptor } from "../../src/shared/types/auditorDescriptor.js";
 
 /**
  * Narrow the discriminated `verifySourceReach` result to its `reason`-carrying
