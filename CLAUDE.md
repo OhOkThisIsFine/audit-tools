@@ -30,7 +30,7 @@ The `src/shared` area (imported as `audit-tools/shared`) single-sources step con
 | Source area | bin / slash command | Role |
 |---|---|---|
 | `src/shared` | — | Contracts, IO, quota, provider types, validation. Imported as `audit-tools/shared`. |
-| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: vitest (`tests/audit/*.test.mjs`). |
+| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: vitest (`tests/audit/*.test.ts`). |
 | `src/remediate` | `remediate-code` / `/remediate-code` | Remediation orchestrator. Tests: vitest (`tests/remediate/*.test.ts`). |
 
 ## Commands
@@ -44,15 +44,15 @@ npm run check                     # typecheck only (no emit)
 npm run check:tests               # typecheck the TEST tree too (tsconfig.test.json; in verify:checks)
 npm test                          # build + vitest (audit + shared + remediate)
 
-npx vitest run tests/audit/<file>.test.mjs           # single audit test
+npx vitest run tests/audit/<file>.test.ts            # single audit test
 npx vitest run tests/remediate/<file>.test.ts        # single remediate test
 ```
 
-One runner: **vitest** across all three areas (`tests/audit`, `tests/shared`, `tests/remediate`).
-The node:test split was retired — audit/shared `.test.mjs` files now use vitest `test`/`describe`/`it`
-+ `expect`; `node:assert/strict` is still permitted as an assertion library (it runs fine under
-vitest) for the control-flow assertions (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that
-have no clean `expect` equivalent.
+One runner: **vitest** across all three areas (`tests/audit`, `tests/shared`, `tests/remediate`),
+all `.test.ts` except the one permanent holdout `tests/shared/shared-tests-invariants.test.mjs`
+(a `.ts` guard cannot detect its own exclusion from the typecheck gate). `node:assert/strict` is
+still permitted as an assertion library (it runs fine under vitest) for the control-flow assertions
+(`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent.
 
 **Always run `npm install` first** in a fresh clone or worktree — missing `node_modules` → `audit-tools/shared` resolves a stale `dist/` → misleading "no exported member" type errors.
 

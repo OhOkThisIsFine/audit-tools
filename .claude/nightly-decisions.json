@@ -522,5 +522,131 @@
     "decided_at": "2026-07-28T17:47:35.636Z",
     "completed_at": "2026-07-28T20:22:57.826Z",
     "completed_ref": "narrowed in project memory: serialization is per-BACKEND (NIM), not lane-wide"
+  },
+  "ce1190ed6e1c8f51": {
+    "disposition": "settled",
+    "answer": "Make everything .ts - the .mjs holdouts will be fixed presently.",
+    "subject": "Instruction-file edit: CLAUDE.md still tells every agent the audit tests are `.mjs` — the glob now matches zero files",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-07-29T14:42:11.565Z"
+  },
+  "ada5d88bac4ea867": {
+    "disposition": "settled",
+    "answer": "Modify the phrasing so as not to specify whether it's cost- or speed- or anything else- first. Dispatch is customizable.",
+    "subject": "Constitutional spec states dispatch is cost-first, but the code blends cost and speed at any bias above zero",
+    "path": "spec/audit/dispatch-admission-control.md",
+    "decided_at": "2026-07-29T14:43:19.396Z"
+  },
+  "372a45c7db4037fb": {
+    "disposition": "settled",
+    "answer": "Apply `tests/audit/inv2.test.mjs` -> `tests/audit/inv2.test.ts` under a constitutional-doc override record.",
+    "subject": "One-word path fix blocked by the constitutional gate: `inv2.test.mjs` is `inv2.test.ts`",
+    "path": "spec/audit/dispatch-admission-control.md",
+    "decided_at": "2026-07-29T14:43:25.336Z"
+  },
+  "c59e6d4c40c8b7a1": {
+    "disposition": "settled",
+    "answer": "De-status all five passages: decision history to git log or a docs/reviews record, the backlog pointer to the backlog.",
+    "subject": "De-status the admission spec: five decision-log and past-run fragments in a doc that is supposed to be timeless",
+    "path": "spec/audit/dispatch-admission-control.md",
+    "decided_at": "2026-07-29T14:44:06.893Z"
+  },
+  "48dc85b91b2810d1": {
+    "disposition": "settled",
+    "answer": "Rewrite the seven plan-voice passages as present-tense standing design, dropping the Unchanged section and the backlog pointer.",
+    "subject": "This spec still reads as the implementation plan it once was — seven change-log passages, and the changes all shipped",
+    "path": "spec/audit-workflow-design.md",
+    "decided_at": "2026-07-29T14:44:19.495Z"
+  },
+  "604b318450d36f66": {
+    "disposition": "settled",
+    "answer": "Strip the dated stamps and the action item in place, without creating a separate reviews record.",
+    "subject": "The quota matrix is half design, half lab notebook — seven dated run-evidence and action-item passages",
+    "path": "spec/cross-provider-quota-matrix.md",
+    "decided_at": "2026-07-29T14:44:47.519Z"
+  },
+  "c233d37a316f81b9": {
+    "disposition": "settled",
+    "answer": "Delete the legacy Finding/Item/Block planning source and its unset-`source` third case from the goals doc, under a constitutional-doc override.",
+    "subject": "The remediation goals doc still describes a planning phase that was deleted as dead code",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-07-29T14:45:21.206Z"
+  },
+  "8e52315686984b1f": {
+    "disposition": "settled",
+    "answer": "Correct all three: HANDOFF is immediate-next-only (pinned entries), docs/backlog.md is a router plus seek index, and drop host-validation from the spec list.",
+    "subject": "The doc-homes table is wrong about three of its own homes — HANDOFF, backlog.md, and a spec that no longer exists",
+    "path": "docs/documentation-philosophy.md",
+    "decided_at": "2026-07-29T14:45:27.709Z"
+  },
+  "4232e3e170678a17": {
+    "disposition": "settled",
+    "answer": "Repoint the live-spawn track from docs/backlog.md to docs/backlog/forward-tracks.md.",
+    "subject": "A philosophy pointer still sends the reader to `docs/backlog.md` for a track that moved to `forward-tracks.md`",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-07-29T14:45:51.255Z"
+  },
+  "979bce8dff1452b5": {
+    "disposition": "settled",
+    "answer": "Drop serialization - that never should have been in there anyway. Rather than writing up something about llm-relay, just activate the /llm-relay skill. That will make it easier to change later if necessary.",
+    "subject": "The routine's second review lane is a command that no longer exists — and this run had to route around it",
+    "path": "docs/nightly-routine.md",
+    "decided_at": "2026-07-29T14:47:06.520Z"
+  },
+  "1c859f6298bd3b07": {
+    "disposition": "settled",
+    "answer": "Same as the nightly item. Also, delete the backup stuff for me.",
+    "subject": "The design-check skill's independent-refutation lane runs a retired helper — so the refutation step silently no-ops",
+    "path": ".claude/skills/design-check/SKILL.md",
+    "decided_at": "2026-07-29T14:48:44.011Z"
+  },
+  "80768a9c94ab0065": {
+    "disposition": "settled",
+    "answer": "Retire the ClaimRegistry lock-split from the spec — exclusivity already ignores poolId and two paths now depend on it.",
+    "subject": "The stated remaining work is to strip `poolId` from claims — but `poolId` has since become the owner identity two paths depend on",
+    "path": "spec/dispatch-jit-claims.md",
+    "decided_at": "2026-07-29T14:49:39.818Z"
+  },
+  "031c11094b302c36": {
+    "disposition": "settled",
+    "answer": "Fold the routing three plus quota-dispatch-design and dispatch-jit-claims into one dispatch/quota spec.",
+    "subject": "Doc-set condensation: eight specs describe one routing model, and they already cross-reference each other to stay coherent",
+    "path": "spec/",
+    "decided_at": "2026-07-29T14:49:57.550Z"
+  },
+  "604751bd121b3509": {
+    "disposition": "settled",
+    "answer": "Approve the gate, with an HTML-comment exemption marker on the line above the exempt citation.",
+    "subject": "Ready to spec: a gate that fails when a doc cites a repo path in backticks that no longer exists — measured at 5 real false positives",
+    "path": "scripts/check-doc-code-citations.mjs",
+    "decided_at": "2026-07-29T14:50:34.096Z"
+  },
+  "ea4e616fcc5a7e55": {
+    "disposition": "settled",
+    "answer": "Approve the probe. The probe should also run upon creation to make sure it's pointing at the correct, existing items.",
+    "subject": "Highest-recurrence trap in the store: a queued item holds until it is ANSWERED, which is a fact about the conversation, not the code",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-07-29T14:51:41.281Z"
+  },
+  "ec64d15951778874": {
+    "disposition": "settled",
+    "answer": "Make guard reach declared data reconciled against the tracked tree, accepting one scope declaration per existing guard as the one-time cost.",
+    "subject": "A gate's reach is narrower than its name six times over — and an uncovered half looks exactly like a covered one",
+    "path": ".claude/hooks/pre-commit-gate.mjs",
+    "decided_at": "2026-07-29T14:52:09.126Z"
+  },
+  "ad9cf82a02d2a9ed": {
+    "disposition": "settled",
+    "answer": "Report unknown keys as a loud warning naming each one, without failing the load.",
+    "subject": "Deleting a field is not retiring it: the config validator ignores unknown keys, so every retirement needs its own bespoke refusal — or degrades in silence",
+    "path": "src/shared/validation/sessionConfig.ts",
+    "decided_at": "2026-07-29T14:52:26.079Z"
+  },
+  "1620dd4f4efff866": {
+    "disposition": "settled",
+    "answer": "Carry the affirmation contract to both the charter-delta submission and the design-review auto-complete path.",
+    "subject": "The affirmation contract that closed success-shaped-empty for AuditResult was never carried to the two executors that can still auto-complete on nothing",
+    "path": "src/audit/orchestrator/charterDeltaExecutor.ts",
+    "decided_at": "2026-07-29T14:52:37.768Z"
   }
 }
