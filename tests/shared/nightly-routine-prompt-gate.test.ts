@@ -262,12 +262,15 @@ describe("nightly scheduler prompt live parity", () => {
     expect(target).toBe(renderNightlyRoutinePrompt(routine, guidelines));
   });
 
-  it("carries the approved helper invocation and no longer bans it", () => {
+  it("names the /llm-relay skill as the second lane and carries no retired helper", () => {
     const target = readFileSync(join(REPO_ROOT, TARGET_PROMPT), "utf8");
-    expect(target).toContain(
-      'node ~/.claude/llm-call.mjs --schema <file> <alias> "<instruction>" <file...>',
-    );
-    expect(target).not.toMatch(/Do NOT use ~\/\.claude\/llm-call\.mjs/i);
+    // Owner determination 979bce8d: the second independent lane is reached by
+    // activating the /llm-relay skill — the skill owns routing mechanics, this
+    // prompt never restates them. The retired llm-call.mjs helper (and the
+    // one-call-at-a-time serialization rule that rode with it) must not resurface.
+    expect(target).toContain("`/llm-relay`");
+    expect(target).not.toMatch(/llm-call\.mjs/);
+    expect(target).not.toMatch(/one call at a time/i);
     expect(target).not.toMatch(/POST directly with a TASK-SHAPED json_schema/i);
   });
 

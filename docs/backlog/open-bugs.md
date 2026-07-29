@@ -438,7 +438,12 @@
   `/x.log` → permission denied; `/tmp` works. (3) **inefficient-feeding:** none new — the offload
   tier path carried 9 subagents (six doc edits, condensation draft, adversarial verify, loop-core
   review) with zero relay-side failures; per-agent pin paths remain dead through the harness
-  (memory: subagent-offload-tier-path-works-pool-pin-broken).
+  (memory: subagent-offload-tier-path-works-pool-pin-broken). (4) **tool-should-decide (small,
+  cost: one burned tag v0.34.40):** a doc edit has no edit-time surface naming the TESTS that
+  assert its content — `nightly-routine.md`'s approved lane swap was green through every local
+  doc gate and failed release CI on `nightly-routine-prompt-gate.test.ts`, which pinned the
+  retired helper invocation verbatim. Grep tests for a doc's path/content before shipping a
+  contract-bearing doc edit; the durable fix would be a declared doc→test consumer map.
 
 - **Friction walk (duplicated-guard lap, 2026-07-25):** (1) **inefficient-feeding (medium):** the
   triage's per-entry `Paths:` are MODEL-INVENTED for entries whose prose names no file —
