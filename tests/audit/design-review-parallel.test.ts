@@ -156,6 +156,24 @@ test("runDesignReviewAutoComplete (conceptual pass): sets conceptual_reviewed=tr
   expect(Array.isArray(da.conceptual_findings)).toBeTruthy();
 });
 
+// An auto-completed pass is UNREVIEWED, not clean — the stamp distinguishes it
+// from a genuinely-reviewed empty finding set downstream.
+test("runDesignReviewAutoComplete stamps the auto_completed flag per pass", () => {
+  const contractOnly = runDesignReviewAutoComplete(
+    minimalBundle({ contract_reviewed: false, conceptual_reviewed: false }),
+    "contract",
+  ).updated.design_assessment;
+  requireDefined(contractOnly, "design assessment");
+  expect(contractOnly.contract_auto_completed).toBe(true);
+  expect(contractOnly.conceptual_auto_completed).toBeUndefined();
+
+  const both = runDesignReviewAutoComplete(minimalBundle(), "both").updated
+    .design_assessment;
+  requireDefined(both, "design assessment");
+  expect(both.contract_auto_completed).toBe(true);
+  expect(both.conceptual_auto_completed).toBe(true);
+});
+
 test("runDesignReviewAutoComplete (both): sets contract_reviewed and conceptual_reviewed to true with empty findings arrays", () => {
   const bundle = minimalBundle();
   const result = runDesignReviewAutoComplete(bundle, "both");

@@ -139,6 +139,33 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
     expect(reg.subsystems.map((s) => s.node_id)).toEqual(["src/a.ts"]);
   });
 
+  // A dead miner and a clean one used to be the same event on this path. The
+  // settle now records the distinction: deltas are UNMINED, not affirmed-clean.
+  test("a deltas_pending settle WITHOUT a submission is marked UNMINED on the register", () => {
+    const run = runCharterDeltaExecutor(bundleWith(), undefined);
+    const reg = run.updated.charter_register!;
+    expect(reg.validation_issues.join()).toContain("without a miner submission");
+    expect(reg.validation_issues.join()).toContain("UNMINED");
+  });
+
+  test("a not-pending settle carries NO dead-miner mark (nothing was awaited)", () => {
+    const bundle = bundleWith({
+      charter_register: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        target: "charter",
+        ceiling: { rung: "shallow" },
+        status: "omitted",
+        subsystems: [],
+        goal_graph: { nodes: [], edges: [] },
+        deltas: [],
+        findings: [],
+        validation_issues: [],
+      },
+    });
+    const run = runCharterDeltaExecutor(bundle, undefined);
+    expect(run.updated.charter_register!.validation_issues).toHaveLength(0);
+  });
+
   test("a register not awaiting deltas is settled unchanged (deltas_pending false)", () => {
     const bundle = bundleWith({
       charter_register: {
@@ -153,7 +180,7 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
         validation_issues: [],
       },
     });
-    const run = runCharterDeltaExecutor(bundle, { subsystems: [] });
+    const run = runCharterDeltaExecutor(bundle, { subsystems: [], no_deltas: true });
     expect(run.updated.charter_register!.deltas_pending).toBe(false);
     expect(run.updated.charter_register!.status).toBe("omitted");
   });

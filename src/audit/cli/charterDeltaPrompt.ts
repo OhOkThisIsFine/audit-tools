@@ -33,7 +33,9 @@ export function renderCharterDeltaPrompt(
           ...charterLines,
         ];
       })
-    : ["- (no subsystems carry charters — submit an empty `subsystems` array)"];
+    : [
+        "- (no subsystems carry charters — submit `{ \"subsystems\": [], \"no_deltas\": true }`)",
+      ];
 
   return [
     "# Design review — charter delta-mining (conceptual, teleological)",
@@ -79,6 +81,11 @@ export function renderCharterDeltaPrompt(
     "  }",
     "}",
     "```",
+    "",
+    "**If you genuinely found NO deltas anywhere**, affirm it explicitly:",
+    "`\"no_deltas\": true` on the submission (an empty submission WITHOUT the",
+    "affirmation is refused — a silent empty result is indistinguishable from a",
+    "miner that never ran). Never set `no_deltas` alongside deltas.",
     "",
     "**goal_graph schema (validated — use these exact fields, no others):**",
     "- `nodes[]`: each is `{ node_id, premise_height, statement }`. `node_id` is a",

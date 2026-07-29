@@ -537,63 +537,81 @@
     "answer": "Modify the phrasing so as not to specify whether it's cost- or speed- or anything else- first. Dispatch is customizable.",
     "subject": "Constitutional spec states dispatch is cost-first, but the code blends cost and speed at any bias above zero",
     "path": "spec/audit/dispatch-admission-control.md",
-    "decided_at": "2026-07-29T14:43:19.396Z"
+    "decided_at": "2026-07-29T14:43:19.396Z",
+    "completed_at": "2026-07-29T15:41:59.536Z",
+    "completed_ref": "commit 1b664155"
   },
   "372a45c7db4037fb": {
     "disposition": "settled",
     "answer": "Apply `tests/audit/inv2.test.mjs` -> `tests/audit/inv2.test.ts` under a constitutional-doc override record.",
     "subject": "One-word path fix blocked by the constitutional gate: `inv2.test.mjs` is `inv2.test.ts`",
     "path": "spec/audit/dispatch-admission-control.md",
-    "decided_at": "2026-07-29T14:43:25.336Z"
+    "decided_at": "2026-07-29T14:43:25.336Z",
+    "completed_at": "2026-07-29T15:41:59.585Z",
+    "completed_ref": "commit 1b664155"
   },
   "c59e6d4c40c8b7a1": {
     "disposition": "settled",
     "answer": "De-status all five passages: decision history to git log or a docs/reviews record, the backlog pointer to the backlog.",
     "subject": "De-status the admission spec: five decision-log and past-run fragments in a doc that is supposed to be timeless",
     "path": "spec/audit/dispatch-admission-control.md",
-    "decided_at": "2026-07-29T14:44:06.893Z"
+    "decided_at": "2026-07-29T14:44:06.893Z",
+    "completed_at": "2026-07-29T15:41:59.633Z",
+    "completed_ref": "commit 1b664155"
   },
   "48dc85b91b2810d1": {
     "disposition": "settled",
     "answer": "Rewrite the seven plan-voice passages as present-tense standing design, dropping the Unchanged section and the backlog pointer.",
     "subject": "This spec still reads as the implementation plan it once was — seven change-log passages, and the changes all shipped",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-07-29T14:44:19.495Z"
+    "decided_at": "2026-07-29T14:44:19.495Z",
+    "completed_at": "2026-07-29T15:41:59.778Z",
+    "completed_ref": "commit 71af9bad"
   },
   "604b318450d36f66": {
     "disposition": "settled",
     "answer": "Strip the dated stamps and the action item in place, without creating a separate reviews record.",
     "subject": "The quota matrix is half design, half lab notebook — seven dated run-evidence and action-item passages",
     "path": "spec/cross-provider-quota-matrix.md",
-    "decided_at": "2026-07-29T14:44:47.519Z"
+    "decided_at": "2026-07-29T14:44:47.519Z",
+    "completed_at": "2026-07-29T15:41:59.828Z",
+    "completed_ref": "commit 71af9bad"
   },
   "c233d37a316f81b9": {
     "disposition": "settled",
     "answer": "Delete the legacy Finding/Item/Block planning source and its unset-`source` third case from the goals doc, under a constitutional-doc override.",
     "subject": "The remediation goals doc still describes a planning phase that was deleted as dead code",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-07-29T14:45:21.206Z"
+    "decided_at": "2026-07-29T14:45:21.206Z",
+    "completed_at": "2026-07-29T15:41:59.930Z",
+    "completed_ref": "commit f8f07e3b"
   },
   "8e52315686984b1f": {
     "disposition": "settled",
     "answer": "Correct all three: HANDOFF is immediate-next-only (pinned entries), docs/backlog.md is a router plus seek index, and drop host-validation from the spec list.",
     "subject": "The doc-homes table is wrong about three of its own homes — HANDOFF, backlog.md, and a spec that no longer exists",
     "path": "docs/documentation-philosophy.md",
-    "decided_at": "2026-07-29T14:45:27.709Z"
+    "decided_at": "2026-07-29T14:45:27.709Z",
+    "completed_at": "2026-07-29T15:41:59.979Z",
+    "completed_ref": "commit f8f07e3b"
   },
   "4232e3e170678a17": {
     "disposition": "settled",
     "answer": "Repoint the live-spawn track from docs/backlog.md to docs/backlog/forward-tracks.md.",
     "subject": "A philosophy pointer still sends the reader to `docs/backlog.md` for a track that moved to `forward-tracks.md`",
     "path": "docs/project-philosophy.md",
-    "decided_at": "2026-07-29T14:45:51.255Z"
+    "decided_at": "2026-07-29T14:45:51.255Z",
+    "completed_at": "2026-07-29T15:42:00.030Z",
+    "completed_ref": "commit f8f07e3b"
   },
   "979bce8dff1452b5": {
     "disposition": "settled",
     "answer": "Drop serialization - that never should have been in there anyway. Rather than writing up something about llm-relay, just activate the /llm-relay skill. That will make it easier to change later if necessary.",
     "subject": "The routine's second review lane is a command that no longer exists — and this run had to route around it",
     "path": "docs/nightly-routine.md",
-    "decided_at": "2026-07-29T14:47:06.520Z"
+    "decided_at": "2026-07-29T14:47:06.520Z",
+    "completed_at": "2026-07-29T15:41:59.882Z",
+    "completed_ref": "commit 71af9bad"
   },
   "1c859f6298bd3b07": {
     "disposition": "settled",
@@ -609,21 +627,27 @@
     "answer": "Retire the ClaimRegistry lock-split from the spec — exclusivity already ignores poolId and two paths now depend on it.",
     "subject": "The stated remaining work is to strip `poolId` from claims — but `poolId` has since become the owner identity two paths depend on",
     "path": "spec/dispatch-jit-claims.md",
-    "decided_at": "2026-07-29T14:49:39.818Z"
+    "decided_at": "2026-07-29T14:49:39.818Z",
+    "completed_at": "2026-07-29T15:41:59.681Z",
+    "completed_ref": "commit 1b664155"
   },
   "031c11094b302c36": {
     "disposition": "settled",
     "answer": "Fold the routing three plus quota-dispatch-design and dispatch-jit-claims into one dispatch/quota spec.",
     "subject": "Doc-set condensation: eight specs describe one routing model, and they already cross-reference each other to stay coherent",
     "path": "spec/",
-    "decided_at": "2026-07-29T14:49:57.550Z"
+    "decided_at": "2026-07-29T14:49:57.550Z",
+    "completed_at": "2026-07-29T15:41:59.730Z",
+    "completed_ref": "commit 1b664155"
   },
   "604751bd121b3509": {
     "disposition": "settled",
     "answer": "Approve the gate, with an HTML-comment exemption marker on the line above the exempt citation.",
     "subject": "Ready to spec: a gate that fails when a doc cites a repo path in backticks that no longer exists — measured at 5 real false positives",
     "path": "scripts/check-doc-code-citations.mjs",
-    "decided_at": "2026-07-29T14:50:34.096Z"
+    "decided_at": "2026-07-29T14:50:34.096Z",
+    "completed_at": "2026-07-29T15:42:00.078Z",
+    "completed_ref": "commit 3e52df46"
   },
   "ea4e616fcc5a7e55": {
     "disposition": "settled",
@@ -644,7 +668,9 @@
     "answer": "Report unknown keys as a loud warning naming each one, without failing the load.",
     "subject": "Deleting a field is not retiring it: the config validator ignores unknown keys, so every retirement needs its own bespoke refusal — or degrades in silence",
     "path": "src/shared/validation/sessionConfig.ts",
-    "decided_at": "2026-07-29T14:52:26.079Z"
+    "decided_at": "2026-07-29T14:52:26.079Z",
+    "completed_at": "2026-07-29T15:42:00.126Z",
+    "completed_ref": "commit 78bcdc86"
   },
   "1620dd4f4efff866": {
     "disposition": "settled",

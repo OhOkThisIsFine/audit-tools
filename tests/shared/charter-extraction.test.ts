@@ -277,8 +277,35 @@ describe("assembleCharters / assembleDeltas — determinism + goal graph", () =>
   test("CharterDeltaSubmissionSchema defaults subsystem deltas to []", () => {
     const parsed = CharterDeltaSubmissionSchema.parse({
       subsystems: [{ node_id: "a.ts" }],
+      no_deltas: true,
     });
     expect(parsed.subsystems[0].deltas).toEqual([]);
+  });
+
+  // Success-shaped-empty closed for the delta miner: "found nothing" must be
+  // AFFIRMED, so a dead miner (which submits nothing) can never read as clean —
+  // the reviewed_clean contract carried to the charter-delta submission.
+  test("a zero-delta submission is REFUSED without the no_deltas affirmation", () => {
+    const parsed = CharterDeltaSubmissionSchema.safeParse({
+      subsystems: [{ node_id: "a.ts" }],
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(JSON.stringify(parsed.error.issues)).toMatch(/no_deltas/);
+    }
+  });
+
+  test("no_deltas alongside mined deltas is contradictory and REFUSED", () => {
+    const parsed = CharterDeltaSubmissionSchema.safeParse({
+      subsystems: [
+        {
+          node_id: "a.ts",
+          deltas: [{ pair: ["stated", "revealed"], summary: "gap" }],
+        },
+      ],
+      no_deltas: true,
+    });
+    expect(parsed.success).toBe(false);
   });
 
   test("CharterDeltaSubmissionSchema rejects an unknown top-level key (strict)", () => {

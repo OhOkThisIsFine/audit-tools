@@ -193,13 +193,13 @@ judge — not a reviewer lacking the project's vocabulary. The restorations:
 - **Ground the output (general; = S7 applied to the reviewer).** Conceptual/contract
   findings require component-level evidence, enforced at ingest by `groundDesignFinding`
   (`src/shared/validation/designFindingGrounding.ts`), called from `nextStepHelpers.ts`.
-- **Gate it — an open item.** The review-completion flags are still booleans;
-  `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can mark a pass
-  `contract_reviewed`/`conceptual_reviewed: true` with `contract_findings`/`conceptual_findings: []`
-  and no LLM call ever having run — there is no guard distinguishing "a real review found nothing"
-  from "auto-completed empty."
-  **Fix needed:** require a real (non-fallback) finding set, or block synthesis when the pass
-  auto-completed empty — "no systemic review happened" must not pass silently.
+- **Gate it — half closed.** An auto-completed pass now stamps
+  `contract_auto_completed`/`conceptual_auto_completed` on the assessment
+  (`runDesignReviewAutoComplete`, `src/audit/orchestrator/structureExecutors.ts`; cleared when a
+  real submission is ingested), so "a real review found nothing" and "auto-completed empty" are
+  DISTINGUISHABLE on the artifact. The open half: no consumer acts on the stamp yet — synthesis
+  and obligation derivation still read only the `*_reviewed` booleans, so an auto-completed-empty
+  pass still passes downstream silently until a consumer blocks or annotates on the stamp.
 
 **Synthesis — why S8 is the exception to S1–S7.** The conceptual review is the **one place to lean
 *into* judgment, not toward determinism**. Architectural insight is irreducibly tier-3 (S7) — you

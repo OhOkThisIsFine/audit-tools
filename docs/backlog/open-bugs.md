@@ -182,14 +182,12 @@
   ⚠ **The "negative-finding lint at ingest" candidate is REFUTED (built + reverted 2026-07-25).** A
   regex classifier over summaries measured 8 false DROPS and 5 false KEEPS on ~25 realistic inputs; a
   dropped delta never reaches synthesis, so it fails silently and worse than the filler it replaces.
-  Take the mechanical route: **a schema-legal `no_deltas: true` / explicitly-empty submission path**,
-  so a model can say "none" without inventing a row.
-  ⚠ **The AUDIT-RESULT half of this shipped 2026-07-25** as `reviewed_clean` (see the success-shaped-empty
-  entry above) and is the pattern to copy. The DELTA path is untouched and is the sharper case:
-  `charterDeltaExecutor.ts` treats a MISSING submission and an explicitly-empty one identically
-  ("no submission supplied; settled the register with no deltas"), so a dead miner and a clean one are
-  indistinguishable. `CharterDeltaSubmissionSchema` is `.strict()`, so the affirmation must be added to
-  the schema rather than passed through. Record:
+  ⚠ **The mechanical route SHIPPED (both halves).** `reviewed_clean` on zero-finding AuditResults
+  (2026-07-25), and the DELTA path: `CharterDeltaSubmissionSchema` requires `no_deltas: true` on a
+  zero-delta submission (refused alongside deltas), and a `deltas_pending` register settled with NO
+  submission is marked UNMINED via a register validation issue — a dead miner and a clean mine are
+  now distinct events. What this LIVE watch still covers: whether the affirmation path actually
+  stops weaker models from inventing filler rows on a real run. Record:
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #4.
 
 - **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
@@ -1156,12 +1154,13 @@
     number of rounds; the run reaches synthesis on its own. FAIL = orphaned pending `deepening:*` tasks, the
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, run `force-synthesis` to unwedge and note the round count here.
-- **A design-review pass can auto-complete EMPTY, and nothing distinguishes that from a real review
-  finding nothing.** `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can
-  mark a pass `contract_reviewed: true` / `conceptual_reviewed: true` with `contract_findings` /
-  `conceptual_findings: []` and no LLM call ever having run. A vacuous green and a genuine clean bill are
-  indistinguishable downstream. **Property to hold:** a review pass is satisfiable only by evidence a real
-  review ran — require a non-fallback finding set, or block synthesis on an auto-completed-empty pass.
+- **A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped,
+  the acting half is open.** An auto-completed/quota-skipped pass stamps
+  `contract_auto_completed`/`conceptual_auto_completed` on the assessment (cleared on genuine ingest,
+  carried across re-extraction), so a vacuous green is distinguishable ON THE ARTIFACT. Still open:
+  no consumer reads the stamp — synthesis and obligation derivation act only on the `*_reviewed`
+  booleans, so an auto-completed-empty pass still flows downstream silently. **Property to hold:**
+  synthesis blocks or loudly annotates when a pass it consumes carries the auto-completed stamp.
   Lifted from `spec/contract-authoring-determinism-design.md`; its S8 section states the design.
 
 - **`goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD

@@ -217,10 +217,18 @@ export function runDesignAssessmentExecutor(
     if (previous.contract_reviewed) {
       designAssessment.contract_reviewed = true;
       designAssessment.contract_findings = previous.contract_findings ?? [];
+      // Carry the auto-complete stamp too — re-extraction must not launder an
+      // unreviewed pass into a clean one.
+      if (previous.contract_auto_completed) {
+        designAssessment.contract_auto_completed = true;
+      }
     }
     if (previous.conceptual_reviewed) {
       designAssessment.conceptual_reviewed = true;
       designAssessment.conceptual_findings = previous.conceptual_findings ?? [];
+      if (previous.conceptual_auto_completed) {
+        designAssessment.conceptual_auto_completed = true;
+      }
     }
     // Backward-compat: legacy artifacts only have `reviewed` / `review_findings`.
     if (previous.reviewed && !previous.contract_reviewed && !previous.conceptual_reviewed) {
@@ -290,11 +298,21 @@ export function runDesignReviewAutoComplete(
 
   const updated = { ...existing };
 
+  // An auto-completed pass is UNREVIEWED, not clean — stamp the distinction so
+  // downstream readers never take the empty findings as a clean bill of health.
+  // Per-pass, and never retroactive: a pass a real submission already satisfied
+  // keeps its genuine standing.
   if (pass === "contract" || pass === "both") {
+    if (!(existing.contract_reviewed === true && existing.contract_auto_completed !== true)) {
+      updated.contract_auto_completed = true;
+    }
     updated.contract_reviewed = true;
     updated.contract_findings = existing.contract_findings ?? [];
   }
   if (pass === "conceptual" || pass === "both") {
+    if (!(existing.conceptual_reviewed === true && existing.conceptual_auto_completed !== true)) {
+      updated.conceptual_auto_completed = true;
+    }
     updated.conceptual_reviewed = true;
     updated.conceptual_findings = existing.conceptual_findings ?? [];
   }

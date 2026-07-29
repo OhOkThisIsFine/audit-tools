@@ -93,8 +93,35 @@ export const CharterDeltaSubmissionSchema = z
   .object({
     subsystems: z.array(CharterDeltaSubsystemInputSchema).default([]),
     goal_graph: GoalGraphSchema.optional(),
+    /**
+     * Explicit clean affirmation — "I mined every subsystem and found no deltas."
+     * REQUIRED when the submission carries zero deltas, and REFUSED alongside any
+     * delta, so a dead miner (which submits nothing) can never be mistaken for a
+     * clean one (same contract as `reviewed_clean` on a zero-finding AuditResult).
+     */
+    no_deltas: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const deltaCount = value.subsystems.reduce((n, s) => n + s.deltas.length, 0);
+    if (deltaCount === 0 && value.no_deltas !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["no_deltas"],
+        message:
+          "a submission with zero deltas must affirm `no_deltas: true` — an empty result " +
+          "without the affirmation is indistinguishable from a miner that never ran.",
+      });
+    }
+    if (deltaCount > 0 && value.no_deltas === true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["no_deltas"],
+        message:
+          "`no_deltas: true` alongside mined deltas is contradictory — drop the flag or the deltas.",
+      });
+    }
+  });
 export type CharterDeltaSubmission = z.infer<typeof CharterDeltaSubmissionSchema>;
 
 // ── Assembled register (the persisted, gated product) ──────────────────────────

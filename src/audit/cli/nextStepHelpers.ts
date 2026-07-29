@@ -112,6 +112,14 @@ export async function stampDesignReviewSkipped(
   const path = join(artifactsDir, "design_assessment.json");
   const reviewedAt = new Date().toISOString();
   const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
+  // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
+  // it closes was never reviewed, and the stamp must say so. Per-pass, because
+  // the skip can fire when only ONE pass is outstanding — a pass a real
+  // submission already satisfied must NOT be retro-stamped unreviewed.
+  const contractGenuine =
+    existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
+  const conceptualGenuine =
+    existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
   const assessment: DesignAssessment = {
     ...(existing ?? { generated_at: reviewedAt, findings: [] }),
     findings: existing?.findings ?? [],
@@ -119,6 +127,8 @@ export async function stampDesignReviewSkipped(
     conceptual_findings: existing?.conceptual_findings ?? [],
     contract_reviewed: true,
     conceptual_reviewed: true,
+    ...(contractGenuine ? {} : { contract_auto_completed: true }),
+    ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
   };
   await writeJsonFile(path, assessment);
   // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
@@ -915,6 +925,8 @@ export async function handleDesignReviewBranch(
     if (existing) {
       existing.review_findings = groundDesignFindings(legacyResult.value, bundle.repo_manifest);
       existing.reviewed = true;
+      delete existing.contract_auto_completed;
+      delete existing.conceptual_auto_completed;
       existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
         (r) => r.pass !== "legacy",
       );
@@ -946,6 +958,7 @@ export async function handleDesignReviewBranch(
   } else if (contractResult.status === "ok" && existing) {
     existing.contract_findings = groundDesignFindings(contractResult.value, bundle.repo_manifest);
     existing.contract_reviewed = true;
+    delete existing.contract_auto_completed;
     existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
       (r) => r.pass !== "contract",
     );
@@ -957,6 +970,7 @@ export async function handleDesignReviewBranch(
   } else if (conceptualResult.status === "ok" && existing) {
     existing.conceptual_findings = groundDesignFindings(conceptualResult.value, bundle.repo_manifest);
     existing.conceptual_reviewed = true;
+    delete existing.conceptual_auto_completed;
     existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
       (r) => r.pass !== "conceptual",
     );

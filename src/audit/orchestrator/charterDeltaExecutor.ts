@@ -37,8 +37,25 @@ export function runCharterDeltaExecutor(
     // Nothing to mine (or nothing to mine it FROM): settle the register so the
     // obligation is satisfied without a host turn. Preserve whatever deltas/
     // findings/goal_graph it already carries (normally empty).
+    // A `deltas_pending` register settled with NO submission is a DEAD-MINER
+    // settle, not a clean mine (a clean mine affirms `no_deltas: true` on its
+    // submission). Record the distinction on the register so downstream readers
+    // never mistake "no miner ran" for "mined clean".
+    const deadMinerSettle = register !== undefined && register.deltas_pending === true && !submission;
     const settled: CharterRegister = register
-      ? { ...register, generated_at, deltas_pending: false }
+      ? {
+          ...register,
+          generated_at,
+          deltas_pending: false,
+          ...(deadMinerSettle
+            ? {
+                validation_issues: [
+                  ...register.validation_issues,
+                  "deltas settled without a miner submission — deltas here are UNMINED, not affirmed-clean (a clean mine submits `no_deltas: true`).",
+                ],
+              }
+            : {}),
+        }
       : {
           generated_at,
           target: "charter",
@@ -58,7 +75,8 @@ export function runCharterDeltaExecutor(
         ? "Charter delta-mining omitted (no charter register to mine)."
         : register.deltas_pending !== true
           ? "Charter delta-mining omitted (register not awaiting deltas)."
-          : "Charter delta-mining: no submission supplied; settled the register with no deltas.",
+          : "Charter delta-mining: no submission supplied; settled the register with " +
+            "UNMINED deltas (not affirmed-clean — recorded as a register validation issue).",
     };
   }
 
