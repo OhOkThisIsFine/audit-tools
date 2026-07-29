@@ -36,13 +36,11 @@ Use independent lanes wherever they preserve coverage:
 - **Codex** has repo access and performs its own source inspection:
   `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
   load-bearing; an open stdin makes the process wait indefinitely.
-- **NIM through the local LiteLLM proxy** receives only the files named in its
-  packet and runs **one call at a time**. Use the shared helper with a schema
-  shaped to the task:
-  `node ~/.claude/llm-call.mjs --schema <file> <alias> "<instruction>" <file...>`.
-  The helper owns non-strict decoding, an explicit output cap, line-numbered
-  source, and a nonzero truncation result. Treat every reply as an advisory lead
-  and verify it against source; quoted evidence is especially fallible.
+- **The second independent lane** is reached by activating the `/llm-relay`
+  skill — it owns the current offload/dispatch mechanics (pools, tier mapping,
+  peer-CLI lanes), so this doc never restates routing details that would drift.
+  Treat every reply as an advisory lead and verify it against source; quoted
+  evidence is especially fallible.
 - If a lane is unavailable, route the work elsewhere. A dead lane may not
   silently shrink coverage; any coverage that still could not run belongs in
   the digest's `skipped` list.

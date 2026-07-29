@@ -345,27 +345,16 @@ synthesis narrative.
 
 ## Synthesis narrative (always runs)
 
-`synthesis_narrative_current` becomes a proper `host_delegation` executor.
-Always fires; never skipped unless running headless (auto-complete writes
+`synthesis_narrative_current` is a `host_delegation` executor. Always fires;
+never skipped unless running headless (auto-complete writes
 `status: "omitted"` so headless runs still terminate cleanly).
 
 Host agent receives the findings and produces themes, executive summary, and
 top risks, and WRITES the result to disk itself (the worker-writes-the-file
 pattern established under *Design review → Structured output*).
 
-The existing `synthesisNarrativePrompt.ts` is kept; the change is adding the
-host_delegation wrapper and executor registration.
-
----
-
-## Unchanged
-
-- Runtime validation (step order and behavior)
-- Synthesis executor (deterministic, unchanged)
-- Mandatory lens set: `security`, `correctness`, `reliability`, `data_integrity`
-- Gitignore guard logic (root-ignored, share-exceeded guards)
-- Auditor hard file grants (scoped access declarations per packet)
-- Graph context is per-packet, not per-task (already correct)
+`synthesisNarrativePrompt.ts` builds the prompt; the host_delegation wrapper
+and executor registration integrate it into the step dispatch.
 
 ---
 
@@ -385,7 +374,7 @@ shared between the two tools — implement once, in `audit-tools/shared`:
   never thread verbatim into worker prompts) is the rule in both tools; the
   interpretation logic is a shared concern.
 - **Findings contract as remediation seed.** Remediation's contract pipeline
-  now consumes `audit-findings.json` to seed goal normalization (both-paths
+  consumes `audit-findings.json` to seed goal normalization (both-paths
   design). The findings contract must stay rich enough for that: stable IDs,
   affected files with line evidence, lens/severity, theme links — kept rich
   enough to seed remediation through any audit-side refactor.
@@ -398,9 +387,7 @@ shared between the two tools — implement once, in `audit-tools/shared`:
 
 ## Hardening decisions
 
-Surfaced while planning the implementation of this redesign through independent
-critic→judge rounds. Audit-relevant items (the remediation companion carries the
-full set):
+Audit-relevant items (the remediation companion carries the full set):
 
 - **Consumer-neutral dispatch terminal.** The shared rolling engine's empty-pool
   / no-progress-livelock terminal must not assume a `close` phase (that is
@@ -416,9 +403,7 @@ full set):
   the confirmed pool empties, that state is entered; re-discovery surfaces only
   genuinely-new providers and never re-offers a Gate-1 settled exclusion. A no-progress
   livelock guard bounds oscillation (N pauses without net new capacity → consumer
-  terminal). The pause-lifecycle shell is per-consumer, not itself shared; unifying it
-  across audit + remediation beyond the shared admission math is tracked as open work in
-  `docs/backlog.md`.
+  terminal). The pause-lifecycle shell is per-consumer, not itself shared.
 - **Per-clause `free_form_intent` escape hatch.** The interpreter decomposes a
   compound intent into clauses and assesses each clause's encodability
   independently; any clause it cannot encode as priority/lens/scope signals
@@ -426,8 +411,7 @@ full set):
   question and carried as an explicit machine-checkable constraint — even when
   sibling clauses encode cleanly. Detection keys on per-clause encodability, not
   total-encoding-failure.
-- **Pinned shared APIs + integration checkpoint.** The three shared APIs
-  (rolling dispatch engine — the shared admission decision, `computeDispatchAdmission`;
-  Gate-0/Gate-1 provider confirmation; free_form_intent
-  interpreter) are pinned/versioned seam contracts; wire them through one real
-  consumer (audit-code) end-to-end and validate before the full fan-out.
+- **Pinned shared APIs.** The three shared APIs (rolling dispatch engine — the
+  shared admission decision, `computeDispatchAdmission`; Gate-0/Gate-1 provider
+  confirmation; free_form_intent interpreter) are pinned/versioned seam
+  contracts.

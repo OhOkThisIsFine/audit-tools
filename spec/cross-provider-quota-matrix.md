@@ -20,12 +20,12 @@ this matrix's.
 
 | Backend | Best signal | Endpoint / source | Token source | Confidence |
 |---|---|---|---|---|
-| **Claude** (shipped) | proactive GET | `api.anthropic.com/api/oauth/usage` | `~/.claude/.credentials.json` | HIGH (live-confirmed) |
-| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (live-confirmed — 200, shape matches) |
+| **Claude** | proactive GET | `api.anthropic.com/api/oauth/usage` | `~/.claude/.credentials.json` | HIGH |
+| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH |
 | **OpenCode** | **federates** (no own quota) | per-provider, via its stored tokens | `~/.local/share/opencode/auth.json` | HIGH |
 | **Antigravity** (Gemini) | proactive POST (med) / dated-error (high) | `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` (or LS over localhost) | `%APPDATA%/Antigravity/User/globalStorage/state.vscdb` | MED proactive / HIGH reactive |
 | **Gemini CLI** (OAuth/Code-Assist) | **proactive POST** | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` → `buckets[].{remainingFraction,resetTime}` | `~/.gemini/oauth_creds.json` | HIGH shape — but individual tiers **deprecated on gemini-cli 2026-06-18**; Std/Ent only (see §6) |
-| **VS Code Copilot** | **proactive GET** | `api.github.com/copilot_internal/user` | DPAPI SecretStorage (`state.vscdb`) / `gh`/`copilot` CLI | HIGH endpoint / MED token (live-shape PENDING — see §4 note) |
+| **VS Code Copilot** | **proactive GET** | `api.github.com/copilot_internal/user` | DPAPI SecretStorage (`state.vscdb`) / `gh`/`copilot` CLI | HIGH endpoint / MED token |
 | Gemini raw API | reactive only | 429 `RESOURCE_EXHAUSTED` + `RetryInfo` | API key | HIGH (Google staff: no proactive header) |
 | **NVIDIA NIM — hosted** | reactive only | 429 + `Retry-After` on `/v1/chat/completions` (no `X-RateLimit-*`, no credits GET) | `NVIDIA_API_KEY` env (`nvapi-…`) | HIGH (no proactive surface — official API ref documents none) |
 | **NVIDIA NIM — self-hosted** | **unbounded-local** | none (local GPU pool; `/v1/metrics` is perf telemetry, not quota) | `NVIDIA_API_KEY` / none | HIGH (vLLM-passthrough metrics carry no quota) |
@@ -39,7 +39,7 @@ this matrix's.
 
 ---
 
-## 0. Claude (shipped) — credential resolution
+## 0. Claude — credential resolution
 
 The reference analog every other provider below is measured against. The signal:
 `ClaudeOAuthQuotaSource` probes the undocumented `GET api.anthropic.com/api/oauth/usage`
@@ -104,13 +104,6 @@ GET https://chatgpt.com/backend-api/wham/usage
 primary_window (5h), secondary_window (weekly) }, credits, additional_rate_limits[] }`.
 Each window (`RateLimitWindowSnapshot`): `{ used_percent (0–100), limit_window_seconds,
 reset_after_seconds, reset_at (unix sec) }`. (Codex-API-key auth instead → `{base}/api/codex/usage`.)
-
-**✓ LIVE-CONFIRMED** (`CodexQuotaSource` production path + raw probe): real 200,
-top-level keys `[user_id, account_id, email, plan_type, rate_limit, code_review_rate_limit,
-additional_rate_limits, credits, spend_control, rate_limit_reached_type, promo, referral_beacon,
-rate_limit_reset_credits]`; `rate_limit.{primary,secondary}_window` carried `used_percent / reset_at /
-reset_after_seconds / limit_window_seconds` exactly as parsed; most-constraining-window pick worked
-(`secondary used_percent:100` → `remaining_pct:0`, `reset_at` Jun 19). The mapping is validated against reality.
 
 **Local tier (no call):** `~/.codex/auth.json tokens.id_token` (JWT) → claim
 `https://api.openai.com/auth.chatgpt_plan_type` (= "plus") + `chatgpt_account_id`,
@@ -259,12 +252,10 @@ the **Copilot CLI** `~/.copilot/config.json` (plaintext `gho_/ghu_` when keychai
 `%AppData%\GitHub CLI` on Windows, `~/.config/gh` on macOS/Linux, `$GH_CONFIG_DIR` override — the code
 resolves this via `resolveGhHostsPath` (not a hardcoded `~/.config/gh`, which was an OS-portability bug).
 
-**Live-confirm — PENDING where no file-reachable token exists.** When there is no Copilot CLI
-(`~/.copilot` absent) and `gh` stores its token in the **OS keyring** (`hosts.yml` has none) with a token
-lacking `copilot` scope (`gist, read:org, repo, workflow`), `CopilotQuotaSource` correctly
-degrades to null (degrade path ✓). The response-shape mapping stays fixture-tested only — re-confirm where a
-Copilot token is file-reachable: `GH_COPILOT_TOKEN`/`GH_TOKEN` env, the Copilot CLI config, or `gh` with
-file/insecure storage. (The keyring itself is out of scope for a read-only probe.)
+**When no Copilot token is file-reachable:** if there is no Copilot CLI (`~/.copilot` absent) and `gh`
+stores its token in the **OS keyring** (`hosts.yml` has none) with a token lacking `copilot` scope
+(`gist, read:org, repo, workflow`), `CopilotQuotaSource` degrades to null. (The keyring itself is out
+of scope for a read-only probe.)
 
 **Degrade:** `copilot_internal/user` → reuse the token-exchange envelope
 `GET copilot_internal/v2/token` → `limited_user_quotas.chat` + `chat_enabled` (coarse, free-tier)
@@ -281,9 +272,6 @@ GitHub Docs billing/usage + copilot-cli config-dir; community #178117 (stability
 
 ## Security / ToS notes
 
-- **Antigravity token (action):** the Antigravity research subagent decoded an OAuth token
-  fragment from `antigravityUnifiedStateSync.oauthToken` into its transcript (self-reported).
-  **Rotate by signing out/in to Antigravity.**
 - **Read-only token use only** — Bearer to the provider's own host, never log/transmit/persist.
   All probes are GET/read; never refresh-and-rewrite a 3rd-party cred store from a quota probe
   (would risk breaking the host CLI's auth chain) — degrade instead, like `ClaudeOAuthQuotaSource`.
@@ -432,7 +420,7 @@ construct a plain `GoogleGenAI` → raw API, NO quota endpoint (reactive-only = 
 `{ access_token, refresh_token, id_token, expiry_date }`. Encrypted-storage variant (FORCE_ENCRYPTED_FILE
 flag) → unreadable → degrade. Secondary path: `$GOOGLE_APPLICATION_CREDENTIALS`.
 
-**Probe (proactive — shape source-verified, NOT live-probed here):**
+**Probe (proactive):**
 ```
 POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota
   Authorization: Bearer <access_token>;  body {"project":"<id>"}   # or {} if unknown
@@ -452,7 +440,7 @@ documented 60 rpm + 1,000 model-req/day. Refresh (host-owned, on 401): `oauth2.g
 **Degrade:** retrieveUserQuota → `loadCodeAssist` tier+cap only (no live remaining) → 429
 `RESOURCE_EXHAUSTED` + `RetryInfo.retryDelay`. API-key/Vertex tiers: reactive from the start.
 
-**⛔ DEPRECATION (verified against Google's primary source):** *"Starting June 18, 2026,
+**⛔ DEPRECATION:** *"Starting June 18, 2026,
 Gemini Code Assist IDE extensions will stop serving requests for the Gemini Code Assist for
 individuals, Google AI Pro, and Google AI Ultra tiers."* — both IDE extensions AND the Gemini CLI are
 affected; Standard/Enterprise subscriptions are unaffected; consumers are migrated to the **Antigravity
@@ -472,5 +460,5 @@ today. The OpenCode broker's `google` row stays reactive unless an OAuth (not AP
 `core/contentGenerator.ts` (auth-mode routing); deprecation **verified** at
 `developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals`; API-key
 reactive-only `ai.google.dev/gemini-api/docs/rate-limits`; shape corroboration `steipete/CodexBar`
-`docs/gemini.md`. **Could NOT live-probe** the real `retrieveUserQuota` 200 here — mark fixture/source-
-shape only (several issues report `cloudcode-pa` 403/SERVICE_DISABLED for project-ineligible accounts → degrade cleanly).
+`docs/gemini.md` (several issues report `cloudcode-pa` 403/SERVICE_DISABLED for project-ineligible
+accounts → degrade cleanly).
