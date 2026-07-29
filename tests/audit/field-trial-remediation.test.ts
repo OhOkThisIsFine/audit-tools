@@ -1,0 +1,877 @@
+import { test, expect } from "vitest";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { importSourceModule } from "./helpers/sourceImport.mjs";
+import type {
+  AuditTask,
+  CoverageFileRecord,
+  CoverageMatrix,
+  Finding,
+} from "../../src/audit/types.js";
+import type { AuditReportModel } from "../../src/audit/reporting/synthesis.js";
+
+const { validateAuditResults }: typeof import(
+  "../../src/audit/validation/auditResults.js"
+) = await importSourceModule(
+  "src/validation/auditResults.ts",
+);
+const { buildAuditReportModel }: typeof import(
+  "../../src/audit/reporting/synthesis.js"
+) = await importSourceModule(
+  "src/reporting/synthesis.ts",
+);
+const { buildRequeuePayload }: typeof import(
+  "../../src/audit/orchestrator/requeueCommand.js"
+) = await importSourceModule(
+  "src/orchestrator/requeueCommand.ts",
+);
+const { buildChunkedAuditTasks }: typeof import(
+  "../../src/audit/orchestrator/taskBuilder.js"
+) = await importSourceModule(
+  "src/orchestrator/taskBuilder.ts",
+);
+const { initializeCoverageFromPlan }: typeof import(
+  "../../src/audit/orchestrator/planning.js"
+) = await importSourceModule(
+  "src/orchestrator/planning.ts",
+);
+const { autoCompleteTrivialCoverage }: typeof import(
+  "../../src/audit/orchestrator/trivialAudit.js"
+) = await importSourceModule(
+  "src/orchestrator/trivialAudit.ts",
+);
+const { loadSessionConfig }: typeof import(
+  "../../src/audit/supervisor/sessionConfig.js"
+) = await importSourceModule(
+  "src/supervisor/sessionConfig.ts",
+);
+
+function requireDefined<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function requireFirstFinding(
+  report: AuditReportModel,
+  message: string,
+): asserts report is AuditReportModel & {
+  findings: [Finding, ...Finding[]];
+} {
+  if (report.findings.length === 0) {
+    throw new Error(message);
+  }
+}
+
+test("validateAuditResults reports field-level evidence type errors instead of crashing", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Object evidence",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Evidence payload shape is wrong.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+            evidence: [{ excerpt: "bad", line_reference: "src/api/auth.ts:1" }],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+  );
+
+  expect(issues.some(
+      (issue) =>
+        issue.field === "findings[0].evidence[0]" &&
+        /must be a string, got object/i.test(issue.message),
+    )).toBeTruthy();
+});
+
+test("validateAuditResults treats total_lines as advisory (S7) but still flags spans outside declared coverage", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Out of range evidence",
+            category: "security",
+            severity: "medium",
+            confidence: "high",
+            lens: "security",
+            summary: "The finding points at lines the worker did not claim to read.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+            evidence: ["src/api/auth.ts:12 - cited outside file coverage"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: { "src/api/auth.ts": 12 },
+    },
+  );
+
+  // S7: a total_lines mismatch is now an advisory WARNING, not a gating error —
+  // findings are grounded by quote-and-verify, not by attesting a line count.
+  expect(issues.some(
+      (issue) =>
+        issue.field === "file_coverage[0].total_lines" &&
+        issue.severity === "warning" &&
+        /does not match the current line count/i.test(issue.message),
+    )).toBeTruthy();
+  // The cited-span-within-declared-coverage check is unchanged (still an error).
+  expect(issues.some(
+      (issue) =>
+        issue.field === "findings[0].affected_files[0]" &&
+        /falls outside the declared file_coverage/i.test(issue.message),
+    )).toBeTruthy();
+});
+
+test("validateAuditResults rejects task metadata drift and out-of-scope coverage", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "wrong-unit",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [
+          { path: "src/api/auth.ts", total_lines: 10 },
+          { path: "src/other.ts", total_lines: 5 },
+        ],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Boundary drift",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "performance",
+            summary: "The finding tries to escape the assigned task boundary.",
+            affected_files: [{ path: "src/other.ts" }],
+            evidence: ["src/other.ts:1 - outside the assigned review packet"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: {
+        "src/api/auth.ts": 10,
+        "src/other.ts": 5,
+      },
+    },
+  );
+
+  expect(issues.some(
+      (issue) =>
+        issue.field === "unit_id" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    )).toBeTruthy();
+  expect(issues.some(
+      (issue) =>
+        issue.field === "pass_id" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    )).toBeTruthy();
+  expect(issues.some(
+      (issue) =>
+        issue.field === "lens" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    )).toBeTruthy();
+  expect(issues.some(
+      (issue) =>
+        issue.field === "file_coverage[1].path" &&
+        issue.severity === "error" &&
+        /not listed in the task file_paths/i.test(issue.message),
+    )).toBeTruthy();
+  expect(issues.some(
+      (issue) =>
+        issue.field === "findings[0].lens" &&
+        /must match the assigned task lens/i.test(issue.message),
+    )).toBeTruthy();
+  expect(issues.some(
+      (issue) =>
+        issue.field === "findings[0].affected_files[0].path" &&
+        /not in the declared assigned file_coverage/i.test(issue.message),
+    )).toBeTruthy();
+});
+
+test("validateAuditResults accepts zero-line file coverage for empty files", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-empty",
+        unit_id: "unit-empty",
+        pass_id: "pass:reliability",
+        lens: "reliability",
+        file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
+        findings: [],
+        reviewed_clean: true,
+      },
+    ],
+    [
+      {
+        task_id: "task-empty",
+        unit_id: "unit-empty",
+        pass_id: "pass:reliability",
+        lens: "reliability",
+        file_paths: ["src/empty.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: { "src/empty.ts": 0 },
+    },
+  );
+
+  expect(issues).toEqual([]);
+});
+
+test("buildAuditReportModel omits pending runtime placeholder noise and builds deterministic work blocks", () => {
+  const report = buildAuditReportModel({
+    results: [
+      {
+        task_id: "task-1",
+        unit_id: "src-api-auth",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Missing audit trail",
+            category: "security",
+            severity: "medium",
+            confidence: "medium",
+            lens: "security",
+            summary: "Authentication events are not captured consistently.",
+            affected_files: [
+              { path: "src/api/auth.ts", line_start: 2, line_end: 8 },
+            ],
+            evidence: ["src/api/auth.ts:2 - no log emitted"],
+          },
+        ],
+      },
+    ],
+    unitManifest: {
+      units: [
+        {
+          unit_id: "src-api-auth",
+          name: "src-api-auth",
+          files: ["src/api/auth.ts"],
+          required_lenses: ["security"],
+        },
+      ],
+    },
+    runtimeValidationReport: {
+      results: [
+        {
+          task_id: "runtime:unit:src-api-auth",
+          status: "pending",
+          summary: "Deterministic runtime validation has not executed yet.",
+        },
+      ],
+    },
+  });
+
+  expect(report.findings.length).toBe(1);
+  expect(report.work_blocks.length).toBe(1);
+  requireFirstFinding(report, "expected one report finding");
+  if (!report.findings[0].evidence) {
+    throw new Error("expected report finding evidence");
+  }
+  expect(report.findings[0].evidence.some((entry) =>
+      /has not executed yet/i.test(entry),
+    )).toBe(false);
+});
+
+test("buildRequeuePayload skips flow requeue duplicates when file coverage is already complete", () => {
+  const payload = buildRequeuePayload(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "partial",
+          required_lenses: ["security", "reliability"],
+          completed_lenses: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          id: "auth-session",
+          name: "Auth session",
+          paths: ["src/api/auth.ts"],
+          entrypoints: ["src/api/auth.ts"],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          flow_id: "auth-session",
+          status: "pending",
+          paths: ["src/api/auth.ts"],
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  expect(payload.tasks.length).toBe(1);
+  if (!payload.tasks[0]) {
+    throw new Error("expected one requeue task");
+  }
+  expect(payload.tasks[0].task_id).toBe("requeue:reliability:src/api/auth.ts");
+});
+
+test("buildRequeuePayload dedupeByScope merges a file task and flow task sharing a lens+file signature", () => {
+  // The file still needs `security`, and the same file in a critical flow also
+  // still needs `security`. The file requeue task and the flow requeue task
+  // therefore resolve to the identical `lens:sorted(file_paths)` signature
+  // (security:src/api/auth.ts) and dedupeByScope must collapse them to one
+  // task — while file_task_count / flow_task_count still report the per-source
+  // counts before the cross-source merge.
+  const payload = buildRequeuePayload(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          id: "auth-session",
+          name: "Auth session",
+          paths: ["src/api/auth.ts"],
+          entrypoints: ["src/api/auth.ts"],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          flow_id: "auth-session",
+          status: "pending",
+          paths: ["src/api/auth.ts"],
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  // Cross-source signatures collide -> exactly one merged task.
+  expect(payload.tasks.length).toBe(1);
+  // Per-source counts reflect the pre-merge totals (one file task, one flow task).
+  expect(payload.file_task_count).toBe(1);
+  expect(payload.flow_task_count).toBe(1);
+});
+
+test("initializeCoverageFromPlan derives per-file required lenses instead of unit unions", () => {
+  const coverage = initializeCoverageFromPlan(
+    {
+      repository: { name: "fixture" },
+      generated_at: "2026-04-22T00:00:00Z",
+      files: [
+        { path: "src/api/auth.ts", language: "ts", size_bytes: 10 },
+        { path: "infra/deploy.yml", language: "yaml", size_bytes: 10 },
+      ],
+    },
+    {
+      units: [
+        {
+          unit_id: "mixed-unit",
+          name: "mixed-unit",
+          files: ["src/api/auth.ts", "infra/deploy.yml"],
+          required_lenses: ["security", "config_deployment"],
+        },
+      ],
+    },
+    {
+      files: [
+        { path: "src/api/auth.ts", status: "included" },
+        { path: "infra/deploy.yml", status: "included" },
+      ],
+    },
+  );
+
+  const authCoverage = requireDefined(
+    coverage.files.find((file) => file.path === "src/api/auth.ts"),
+    "expected auth coverage",
+  );
+  const deployCoverage = requireDefined(
+    coverage.files.find((file) => file.path === "infra/deploy.yml"),
+    "expected deploy coverage",
+  );
+
+  expect(authCoverage.required_lenses).toEqual([
+    "security",
+    "correctness",
+    "reliability",
+    "observability",
+    "tests",
+  ]);
+  expect(deployCoverage.required_lenses).toEqual([
+    "reliability",
+    "operability",
+    "config_deployment",
+  ]);
+});
+
+test("buildChunkedAuditTasks claims critical-flow files without overlapping unit blocks", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/lib/session.ts",
+          unit_ids: ["src-lib"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+        {
+          path: "infra/deploy.yml",
+          unit_ids: ["infra-deploy"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/api/auth.ts": 4,
+      "src/lib/session.ts": 8,
+      "infra/deploy.yml": 5,
+    },
+    {
+      critical_flows: {
+        flows: [
+          {
+            id: "auth-session",
+            name: "Auth session",
+            paths: ["src/api/auth.ts", "src/lib/session.ts"],
+            entrypoints: ["src/api/auth.ts"],
+            concerns: ["security"],
+          },
+        ],
+      },
+    },
+  );
+
+  expect(tasks.map((task) => ({
+      task_id: task.task_id,
+      lens: task.lens,
+      file_paths: task.file_paths,
+    }))).toEqual([
+      {
+        task_id: "flow:auth-session:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts", "src/lib/session.ts"],
+      },
+      {
+        task_id: "infra-deploy:security",
+        lens: "security",
+        file_paths: ["infra/deploy.yml"],
+      },
+    ]);
+});
+
+// TST-6ef02f3b: intent_priority_boost elevates low→medium and medium→high, but
+// NEVER over-promotes an already-high lens. Also verifies boost has no effect on
+// lenses not in the boost set.
+test("buildChunkedAuditTasks intent_priority_boost elevates priority one tier without exceeding high", () => {
+  const coverage: CoverageMatrix = {
+    files: [
+      {
+        path: "src/main.ts",
+        unit_ids: ["src-main"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["maintainability", "security", "correctness"],
+        completed_lenses: [],
+      },
+    ],
+  };
+  const lineIndex = { "src/main.ts": 20 };
+
+  // Boost maintainability (normally low priority) and security (already high-ish).
+  // Do NOT boost correctness — it should remain at its base priority.
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {
+    intent_priority_boost: ["maintainability", "security"],
+  });
+
+  const byLens: Record<string, AuditTask["priority"]> = {};
+  for (const t of tasks) {
+    byLens[t.lens] = t.priority;
+  }
+
+  // maintainability base = low → after boost = medium
+  expect(byLens["maintainability"], "low→medium boost for maintainability").toBe("medium");
+
+  // security base = medium (standard) or high (sensitive) → boost caps at high; must not exceed high
+  expect(byLens["security"] === "high" || byLens["security"] === "medium", `security priority must be high or medium after boost, got ${byLens["security"]}`).toBeTruthy();
+
+  // correctness is NOT boosted — must remain at its base priority (not elevated)
+  if (byLens["correctness"]) {
+    expect(byLens["correctness"] !== "high", "unboosted correctness must not be elevated to high").toBeTruthy();
+  }
+});
+
+test("buildChunkedAuditTasks already-high priority lens stays at high when boosted", () => {
+  const coverage: CoverageMatrix = {
+    files: [
+      {
+        path: "src/auth.ts",
+        unit_ids: ["src-auth"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["security"],
+        completed_lenses: [],
+      },
+    ],
+  };
+  const lineIndex = { "src/auth.ts": 10 };
+
+  // Boost security — even if base is already "high", boost must not create "critical" or exceed "high".
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {
+    intent_priority_boost: ["security"],
+  });
+
+  const secTask = requireDefined(
+    tasks.find((t) => t.lens === "security"),
+    "expected security task",
+  );
+  expect(secTask, "security task should exist").toBeTruthy();
+  if (!secTask.priority) {
+    throw new Error("expected security task priority");
+  }
+  expect(["low", "medium", "high"].includes(secTask.priority), `priority must be one of the valid values; got ${secTask.priority}`).toBeTruthy();
+  // "high" is the ceiling; boosting an already-high task must not break it
+  expect(secTask.priority, "no over-promotion beyond high").not.toBe("critical");
+});
+
+test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/a.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/b.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/c.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/a.ts": 700,
+      "src/b.ts": 700,
+      "src/c.ts": 700,
+    },
+    {
+      max_task_lines: 1500,
+    },
+  );
+
+  expect(tasks.map((task) => ({
+      task_id: task.task_id,
+      file_paths: task.file_paths,
+      tags: task.tags,
+    }))).toEqual([
+      {
+        task_id: "src-unit:correctness:part-1",
+        file_paths: ["src/a.ts", "src/b.ts"],
+        tags: ["line_budget_split"],
+      },
+      {
+        task_id: "src-unit:correctness:part-2",
+        file_paths: ["src/c.ts"],
+        tags: ["line_budget_split"],
+      },
+    ]);
+});
+
+test("buildChunkedAuditTasks splits an oversized file into its own large_file task", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/big.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/small.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/big.ts": 600,
+      "src/small.ts": 50,
+    },
+    // Threshold below the big file's line count so it splits out on its own,
+    // while keeping the aggregate budget high enough that the remaining small
+    // file is NOT a budget split.
+    { file_split_threshold: 100, max_task_lines: 3000 },
+  );
+
+  const bigTask = requireDefined(
+    tasks.find((t) => t.task_id === "src-unit:correctness:src/big.ts"),
+    "expected oversized-file task",
+  );
+  const smallTask = requireDefined(
+    tasks.find((t) => t.task_id === "src-unit:correctness"),
+    "expected small-file task",
+  );
+
+  // The oversized file is emitted as its own task containing only that file.
+  expect(bigTask, "oversized file should get its own task").toBeTruthy();
+  expect(bigTask.file_paths).toEqual(["src/big.ts"]);
+  if (!bigTask.tags) {
+    throw new Error("expected oversized-file task tags");
+  }
+  expect(bigTask.tags.includes("large_file")).toBeTruthy();
+
+  // The remaining small file is grouped in a separate (non-large-file) task.
+  expect(smallTask, "small file should get its own budget task").toBeTruthy();
+  expect(smallTask.file_paths).toEqual(["src/small.ts"]);
+  expect(!(smallTask.tags ?? []).includes("large_file")).toBeTruthy();
+
+  expect(tasks.length).toBe(2);
+});
+
+function makeTrivialFiles(
+  authLenses: string[] = ["security", "correctness"],
+): CoverageFileRecord[] {
+  return [
+    {
+      path: ".gitignore",
+      unit_ids: ["repo-root"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: ["correctness"],
+      completed_lenses: [],
+    },
+    {
+      path: "pkg/__init__.py",
+      unit_ids: ["pkg"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: ["correctness"],
+      completed_lenses: [],
+    },
+    {
+      path: "src/api/auth.ts",
+      unit_ids: ["src-api-auth"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: authLenses,
+      completed_lenses: [],
+    },
+  ];
+}
+
+test("buildChunkedAuditTasks excludes trivial audit files from tasks", () => {
+  const tasks = buildChunkedAuditTasks(
+    { files: makeTrivialFiles() },
+    {
+      ".gitignore": 2,
+      "pkg/__init__.py": 1,
+      "src/api/auth.ts": 4,
+    },
+  );
+
+  expect(tasks.length).toBe(2);
+  expect(tasks.every((task) => task.file_paths.includes("src/api/auth.ts"))).toBeTruthy();
+});
+
+test("autoCompleteTrivialCoverage marks trivial files as excluded", () => {
+  const coverage = { files: makeTrivialFiles(["security"]) };
+
+  const skipped = autoCompleteTrivialCoverage(coverage, {
+    ".gitignore": 2,
+    "pkg/__init__.py": 1,
+    "src/api/auth.ts": 4,
+  });
+
+  expect(skipped).toEqual([".gitignore", "pkg/__init__.py"]);
+  expect(coverage.files[0].audit_status).toBe("excluded");
+  expect(coverage.files[1].audit_status).toBe("excluded");
+  expect(coverage.files[2].audit_status).toBe("pending");
+});
+
+test("loadSessionConfig writes a default repo-local session config when missing", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    const config = await loadSessionConfig(artifactsDir);
+
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    );
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig reads and returns a pre-existing intent config without clobbering it", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    // G2: the persisted config is a RepoSessionIntent — no dispatch fields (provider
+    // now rides the --auditor descriptor). Use an intent field to pin the read.
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({ timeout_ms: 45000 }),
+      "utf8",
+    );
+    const config = await loadSessionConfig(artifactsDir);
+    expect(config.timeout_ms).toBe(45000);
+    // File must not have been overwritten to a default value.
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    );
+    expect(persisted.timeout_ms).toBe(45000);
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig returns a partial intent config as a plain object", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    // Only one intent field is set; all other fields are absent.
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({ synthesis: { narrative: false } }),
+      "utf8",
+    );
+    const config = await loadSessionConfig(artifactsDir);
+    expect(config.synthesis?.narrative).toBe(false);
+    // The returned object must be a plain object (not null, not a string).
+    expect(typeof config).toBe("object");
+    expect(config !== null).toBeTruthy();
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig handles malformed JSON in the config file", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      "{not json}",
+      "utf8",
+    );
+    // loadSessionConfig must throw — it must not silently swallow a parse error.
+    await assert.rejects(
+      loadSessionConfig(artifactsDir),
+      (err) => {
+        if (!(err instanceof Error)) {
+          return false;
+        }
+        expect(err instanceof Error, "expected an Error to be thrown for malformed JSON").toBeTruthy();
+        // The io layer wraps JSON.parse errors with the path in the message.
+        expect(err.message.toLowerCase().includes("json") ||
+            err.message.includes("session-config.json"), `expected error message to reference JSON or the config file, got: ${err.message}`).toBeTruthy();
+        return true;
+      },
+    );
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});

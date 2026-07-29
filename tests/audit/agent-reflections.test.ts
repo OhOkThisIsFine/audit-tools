@@ -1,0 +1,32 @@
+import { test, expect } from "vitest";
+import type { RenderableAuditReport } from "../../src/audit/reporting/synthesis.js";
+
+// Parse/aggregate/render unit coverage lives with the module in
+// audit-tools/shared (tests/agent-reflections.test.mjs there); this file keeps
+// the audit-code integration surface: the report renderer's reflections option.
+const { renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
+
+test("renderAuditReportMarkdown includes a Process Feedback section only when reflections are supplied", () => {
+  const base: RenderableAuditReport = {
+    summary: {
+      finding_count: 0,
+      work_block_count: 0,
+      severity_breakdown: {},
+      audited_file_count: 0,
+      excluded_file_count: 0,
+      runtime_validation_status_breakdown: {},
+    },
+    findings: [],
+    work_blocks: [],
+  };
+
+  const withReflections = renderAuditReportMarkdown(base, {
+    reflections: [
+      { task_id: "A", instruction_clarity: "clear", severity: "info", tool_friction: ["minor"] },
+    ],
+  });
+  expect(withReflections).toMatch(/## Process Feedback/);
+
+  const without = renderAuditReportMarkdown(base, {});
+  expect(without).not.toMatch(/## Process Feedback/);
+});

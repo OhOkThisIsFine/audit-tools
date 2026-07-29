@@ -176,7 +176,7 @@ export const DOC_MANIFEST = [
     ],
     check:
       "ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — governed by renderer drift " +
-      "tests (`tests/audit/host-asset-renderer-drift.test.mjs`, " +
+      "tests (`tests/audit/host-asset-renderer-drift.test.ts`, " +
       "`tests/remediate/host-bootstrap-descriptors-remediate.test.ts`, " +
       "`tests/remediate/install-repo-assets.test.ts`). Review the canonical source, not the generated copy; a " +
       "diff = a drift-test/renderer gap, not a doc edit.",

@@ -142,11 +142,10 @@ defects**, not the A2 oracle corpus. A2 is funded and its SPEC is intact
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 2 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck ratchet (2026-07-28, medium, owner-approved). · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

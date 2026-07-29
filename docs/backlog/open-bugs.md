@@ -646,7 +646,7 @@
   defect recurring. Same class as the landing-stage-misfiled-as-dispatch entry — both are module boundaries
   drawn by history rather than by role, and both are fixed by moving code rather than by tuning a list.
 
-- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.mjs`](../../tests/audit/design-docs-declarative.test.mjs), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
+- **Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.** (1) **ambiguous-direction (HIGH):** a spec stating an ENDPOINT without marking what GATES it reads as a flat contradiction of the code, and invites a later agent to "fix" the spec to match the implementation (one G3 draft proposed striking an owner-approved decision on exactly that basis). The one instance is phase-qualified by hand (`spec/unified-dispatch-worker-model.md`); nothing enforces it. The only spec-prose lint, [`design-docs-declarative.test.ts`](../../tests/audit/design-docs-declarative.test.ts), covers two design docs and BANS the status vocabulary a phase marker needs, so this cannot be another banned-phrase row. Owner call: a marker grammar a lint can check (a required `gated by:` clause on any endpoint statement?) that does not re-admit status prose, and whether the lint's doc set widens. [[spec-degradation-and-doc-staleness]] (2) **inefficient-feeding (HIGH):** dated `docs/reviews/*.md` plans read as self-sufficient, so an agent entering from HANDOFF's ▶ section plans from the PLAN and never opens the design of record — the plan carries the mechanism, the spec carries the GOAL (owner, of prior laps: *"agents keep forgetting the actual goals"*). Fix direction: a mandatory goal-restatement header on dated plan docs (checkable in `scripts/check-doc-manifest.mjs`), or spec-first pointer ordering in HANDOFF. (3) **tool-should-decide (medium):** three of four G3 drafts specced a gate that would never fire, each caught only by an agent tracing the call path. Neighbouring lints exist (`executor-registry-sync.test.mjs`, `audit-orchestrator-invariants.test.mjs` INV-03) but the two reachability properties are unchecked: a satisfy-predicate with no transition back to unsatisfied, and an executor consuming an input without invalidating it. Both are predicates over opaque `derive`/`execute` closures, so the open question is a checkable encoding (declared `consumes`/`invalidates` fields?) before any lint can exist. [[gate-must-be-traced-not-designed]]
   ⚠ **OWNER DECISION 2026-07-25 on (1):** require a **`gated by:` clause** on any spec statement of an
   ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
   not re-admit the status vocabulary `design-docs-declarative.test.mjs` bans. The lint's doc set widens
@@ -700,25 +700,24 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck
-  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 310 of 564 test files
-  (`find tests -name "*.test.*"`; 254 `.mjs` remain excluded by `checkJs: false`). Converting a file
-  brings it under the gate automatically — no config ratchet, no exclude list; coverage rises exactly
-  as fast as conversion does. The vitest `include` globs are single-sourced in
-  `tests/helpers/testFileContract.ts` and enforced by `tests/shared/test-suite-visibility.test.ts`
-  (an unmatched file or an `.mjs`/`.ts` twin pair is a RED test — a rename can never silently leave
-  the suite). Every batch so far surfaced real fixture drift against the live contracts, so the
-  ratchet is catching gaps, not just annotating (the 2026-07-28 tests/shared tranche alone forced
-  five types-only src/scripts widenings where a declared type undersold a tested tolerance).
-  `dispatchable-sources.test.mjs` is the one
-  deliberate holdout — blocked on the `buildAccountScopedQuotaSource` entry above. **tests/shared is
-  otherwise COMPLETE.** Remaining: `tests/audit` (252 files; `shared-tests-invariants.test.mjs` stays
-  `.mjs` by design — a `.ts` guard cannot detect its own exclusion). Per-lap semantics check:
-  `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits, before commit — review
-  ONLY the files it flags.
+- **Test-tree `.mjs`→`.ts` conversion: COMPLETE except one blocked holdout (2026-07-28).**
+  `check:tests` reaches 562 of 564 test files (`find tests -name "*.test.*"`). The two `.mjs`
+  remaining are BOTH deliberate: `tests/shared/dispatchable-sources.test.mjs` (blocked on the
+  `buildAccountScopedQuotaSource` entry above — converting it first would force a union widening or
+  a fixture-masking cast) and `tests/shared/shared-tests-invariants.test.mjs` (permanent — a `.ts`
+  guard cannot detect its own exclusion). Converting the holdout when its blocker settles brings it
+  under the gate automatically; no config ratchet exists. The vitest `include` globs stay
+  single-sourced in `tests/helpers/testFileContract.ts`, enforced by
+  `tests/shared/test-suite-visibility.test.ts`. The ratchet's yield across both tranches: dozens of
+  real fixture-drift repairs (missing required fields, stale field names, enum values that never
+  existed — `status: "planning"`, `"passed"`, `"audit"`) and six types-only src/scripts widenings
+  where a declared type undersold a tested tolerance. Per-lap semantics check for any future
+  conversion: `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits, before
+  commit — review ONLY the files it flags.
   ⚠ Offloaded workers' self-reported "scoped typecheck clean" can be STALE under concurrent-tranche
-  churn (two stragglers surfaced only on the quiet-tree re-run) — the central full-tree
-  `check:tests` after the fleet drains is load-bearing, not a formality.
+  churn, and a quota-killed worker can leave a renamed-but-unconverted file that its report never
+  mentions — the central full-tree `check:tests` + a remaining-`.mjs` sweep after the fleet drains
+  are load-bearing, not formalities (both caught real gaps in the 2026-07-28 tranches).
   ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
   handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
   ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the flip
