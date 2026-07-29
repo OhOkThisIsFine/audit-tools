@@ -654,7 +654,9 @@
     "answer": "Approve the probe. The probe should also run upon creation to make sure it's pointing at the correct, existing items.",
     "subject": "Highest-recurrence trap in the store: a queued item holds until it is ANSWERED, which is a fact about the conversation, not the code",
     "path": "scripts/nightly/items.mjs",
-    "decided_at": "2026-07-29T14:51:41.281Z"
+    "decided_at": "2026-07-29T14:51:41.281Z",
+    "completed_at": "2026-07-29T16:50:31.706Z",
+    "completed_ref": "841de620 — creation refusal in writeOpenItems, presentation auto-close in partitionBySettled, triage premise stamps"
   },
   "ec64d15951778874": {
     "disposition": "settled",
