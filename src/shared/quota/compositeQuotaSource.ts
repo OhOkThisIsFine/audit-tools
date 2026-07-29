@@ -1,4 +1,5 @@
 import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import type { DispatchableTransport } from "../types/sessionConfig.js";
 import { resolveAccountIdSafe } from "./quotaSource.js";
 import { LearnedQuotaSource } from "./learnedQuotaSource.js";
 import { ClaudeOAuthQuotaSource } from "./claudeOAuthQuotaSource.js";
@@ -148,21 +149,38 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
  * source forms a pool keyed on its own `(transport, account)` — a distinct budget
  * from the host's same-transport pool (spec/quota-dispatch-design.md §5b). Falls back
  * to the shared source when no per-source credential is declared, or the transport has
- * no per-account proactive endpoint (only Claude/Codex expose one).
+ * no per-account proactive endpoint (only `codex` exposes one today — a direct CLI
+ * whose `auth.json` carries the account).
+ *
+ * The switch is EXHAUSTIVE over {@link DispatchableTransport} so adding a transport
+ * forces a classification here: credential-probed, or deliberately on the fallback.
+ * Every non-codex transport falls back BY DESIGN — they are bare-API-key or
+ * proxy-fronted lanes with no credential handshake, whose account identity is
+ * `deriveAccountKey`'s local `(service, endpoint, api_key_env)` derivation (the §5b
+ * exception). `claude-worker` specifically: its launcher spawns through a required
+ * proxy overlay with a fresh isolated `CLAUDE_CONFIG_DIR` and never consumes
+ * `credentials_path`, so a Claude OAuth probe here would claim an account identity
+ * the spawn does not authenticate as.
  */
 export function buildAccountScopedQuotaSource(
-  source: { transport: string; credentials_path?: string },
+  source: { transport: DispatchableTransport; credentials_path?: string },
   fallback: QuotaSource,
 ): QuotaSource {
   const credentialsPath = source.credentials_path;
   if (!credentialsPath) return fallback;
   switch (source.transport) {
-    case "claude":
-    case "claude-code":
-      return new ClaudeOAuthQuotaSource({ credentialsPath });
     case "codex":
       return new CodexQuotaSource({ credentialsPath });
-    default:
+    case "openai-compatible":
+    case "opencode":
+    case "worker-command":
+    case "subprocess-template":
+    case "agy":
+    case "claude-worker":
       return fallback;
+    default: {
+      const exhaustive: never = source.transport;
+      return exhaustive;
+    }
   }
 }

@@ -709,24 +709,19 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **Test-tree `.mjs`→`.ts` conversion: COMPLETE except one blocked holdout (2026-07-28).**
-  `check:tests` reaches 562 of 564 test files (`find tests -name "*.test.*"`). The two `.mjs`
-  remaining are BOTH deliberate: `tests/shared/dispatchable-sources.test.mjs` (blocked on the
-  `buildAccountScopedQuotaSource` entry above — converting it first would force a union widening or
-  a fixture-masking cast) and `tests/shared/shared-tests-invariants.test.mjs` (permanent — a `.ts`
-  guard cannot detect its own exclusion). Converting the holdout when its blocker settles brings it
-  under the gate automatically; no config ratchet exists. The vitest `include` globs stay
+- **Test-tree `.mjs`→`.ts` conversion: COMPLETE at its floor (2026-07-29).**
+  `check:tests` reaches 563 of 564 test files (`find tests -name "*.test.*"`). The one `.mjs`
+  remaining is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts`
+  guard cannot detect its own exclusion). No config ratchet exists; the vitest `include` globs stay
   single-sourced in `tests/helpers/testFileContract.ts`, enforced by
-  `tests/shared/test-suite-visibility.test.ts`. The ratchet's yield across both tranches: dozens of
+  `tests/shared/test-suite-visibility.test.ts`. The ratchet's yield across the tranches: dozens of
   real fixture-drift repairs (missing required fields, stale field names, enum values that never
-  existed — `status: "planning"`, `"passed"`, `"audit"`) and six types-only src/scripts widenings
-  where a declared type undersold a tested tolerance. Per-lap semantics check for any future
-  conversion: `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits, before
-  commit — review ONLY the files it flags.
-  ⚠ Offloaded workers' self-reported "scoped typecheck clean" can be STALE under concurrent-tranche
-  churn, and a quota-killed worker can leave a renamed-but-unconverted file that its report never
-  mentions — the central full-tree `check:tests` + a remaining-`.mjs` sweep after the fleet drains
-  are load-bearing, not formalities (both caught real gaps in the 2026-07-28 tranches).
+  existed — `status: "planning"`, `"passed"`, `"audit"`), six types-only src/scripts widenings
+  where a declared type undersold a tested tolerance, and one real loop-core defect
+  (the dead `buildAccountScopedQuotaSource` claude arms — settled 2026-07-29, exhaustive switch +
+  §5b contract pins in `tests/shared/dispatchable-sources.test.ts`). Per-lap semantics check for any
+  future conversion: `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits,
+  before commit — review ONLY the files it flags.
   ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
   handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
   ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the flip
@@ -735,23 +730,6 @@
   **Property:** the gate's reach is stated as a number wherever it is claimed, so "the test tree is
   typechecked" can never again read as covering the whole tree
   ([`durable-traps.md`](durable-traps.md) carries the narrowed claim).
-  Convert highest-value first: the files whose green is load-bearing for loop-core.
-
-- **`buildAccountScopedQuotaSource` names retired transports and misses the live one (2026-07-28,
-  medium, loop-core).** The switch in `src/shared/quota/compositeQuotaSource.ts`
-  (`buildAccountScopedQuotaSource`) scopes a per-account quota source by `source.transport`, with arms
-  `"claude"`/`"claude-code"` → ClaudeOAuth and `"codex"` → Codex. Neither Claude arm is a member of
-  `DISPATCHABLE_TRANSPORTS` (`src/shared/types/sessionConfig.ts`), and the sole production caller —
-  `buildSourcePool`'s account-scoping step in `src/shared/quota/apiPool.ts` — passes a union-typed
-  `DispatchableSource`, so both arms are unreachable; meanwhile `"claude-worker"`, the union's actual
-  Claude-CLI dispatch class, has NO arm and silently takes the `default` fallback, so a claude-worker
-  source declaring its own `credentials_path` never probes ITS credential's usage/account. **Open
-  property:** a second-account claude-worker source must form its pool from its own credential (the
-  function's stated §5b intent), or the fallback must be shown deliberate — and the dead arms go either
-  way. Loop-core (`src/shared/quota/`): needs `/design-check` + review attestation.
-  Found by the `.ts`-conversion ratchet: `tests/shared/dispatchable-sources.test.mjs` constructs
-  `transport: "claude-code"` fixtures, so it is the ONE tranche file deliberately left `.mjs` until this
-  is settled — converting it first would force either a union widening or a fixture-masking cast.
 
 - **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
   (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15

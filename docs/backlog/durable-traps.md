@@ -418,13 +418,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-  ⚠ **CLOSED to its floor — `check:tests` reaches 562 of 564 test files.** `tsconfig.test.json`
-  sets `checkJs: false`, which silently excludes any `.mjs` test. The 2 files still outside the gate
-  are both deliberate: `tests/shared/dispatchable-sources.test.mjs` (blocked on the
-  `buildAccountScopedQuotaSource` open-bugs entry; converts when that settles) and
-  `tests/shared/shared-tests-invariants.test.mjs` (permanent — a `.ts` guard cannot detect its own
-  exclusion). 562 is therefore the honest current ceiling, and 563 the eventual one — "the test tree
-  is typechecked" carries exactly that asterisk, no larger.
+  ⚠ **CLOSED to its floor — `check:tests` reaches 563 of 564 test files.** `tsconfig.test.json`
+  sets `checkJs: false`, which silently excludes any `.mjs` test. The 1 file still outside the gate
+  is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts` guard cannot
+  detect its own exclusion). 563 is therefore the honest ceiling — "the test tree is typechecked"
+  carries exactly that asterisk, no larger.
 
 - **Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.**
   Line numbers across the backlog drifted repo-wide while the symbol names beside them still resolved,
