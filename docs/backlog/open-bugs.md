@@ -731,6 +731,18 @@
   typechecked" can never again read as covering the whole tree
   ([`durable-traps.md`](durable-traps.md) carries the narrowed claim).
 
+- **Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29):**
+  (1) **tool-should-decide (low):** the Grep tool's content output rendered `/**` and `//` comment
+  markers as `\**` / `\ ` in `apiPool.ts`, indistinguishable from real file corruption — cost a
+  verification Read. Display artifact of the harness Grep tool, not the repo; logged in
+  [`durable-traps.md`](durable-traps.md).
+  (2) **inefficient-feeding (low):** the nightly surface presented all 18 items as open while the
+  owner was answering them in a parallel session on the shared checkout — the stale-at-presentation
+  class already answered as the sol-2 probe (re-check the ledger at presentation).
+  (3) **ambiguous-direction:** none — the backlog entry stated its open property even-handedly
+  ("or the fallback must be shown deliberate"), which is exactly what let recon settle it without an
+  owner round-trip.
+
 - **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
   (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15
   background agents were live on the tree — it reads uncommitted paths as an unclean close and cannot

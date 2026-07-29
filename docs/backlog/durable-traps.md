@@ -404,6 +404,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   predicate is not a style problem — deduping one is correctness work
   ([[five-copies-of-a-guard-hid-two-bugs]]).
 
+- **The Grep tool's content output can mangle comment markers with a BACKSLASH.** It rendered
+  `apiPool.ts`'s JSDoc openers and `//` line comments as `\**` / `\ ` (observed 2026-07-29) — a
+  harness display artifact that reads exactly like file corruption. Verify with a Read of the same
+  lines before diagnosing corruption or "fixing" the file.
+
 - **A typecheck sweep's error count is not final until you re-run it.** Clearing the test tree for
   `check:tests` (`tsconfig.test.json`, `allowJs`; wired into `verify:checks`) surfaced ~20 errors
   beyond the initial count — TS unmasks a second error on the same object literal only once its
