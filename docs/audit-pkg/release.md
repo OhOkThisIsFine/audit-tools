@@ -27,6 +27,7 @@ npm run verify:release
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
 - relative-link resolution gate (`check:doc-links`)
+- backticked repo-path citation gate (`check:doc-code-citations`)
 - single-tarball pack smoke (`pack:smoke`)
 - full automated test suite (`vitest run`)
 - host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
