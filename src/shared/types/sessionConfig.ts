@@ -867,6 +867,144 @@ export const DISPATCH_INVENTORY_FIELDS = [
 export type DispatchInventoryField = (typeof DISPATCH_INVENTORY_FIELDS)[number];
 
 /**
+ * Compile-bound known-key lists for the record shapes the session-config
+ * validator walks. The validator warns (never errors) on any key outside the
+ * shape's list, so a typo'd or RETIRED field is loudly named instead of being
+ * silently ignored — deleting a field from a type is not retiring it; without
+ * this, the operator believes the declaration is live while the lane quietly
+ * runs without it.
+ *
+ * Each literal is checked in BOTH directions: `satisfies Record<keyof T, 0>`
+ * demands every key of the type (a field added to the type fails to compile
+ * until listed) and the excess-property check refuses keys the type does not
+ * carry — so the lists cannot drift from the types they mirror. (Same
+ * single-sourcing shape as {@link DISPATCH_INVENTORY_FIELDS}.)
+ */
+export const SESSION_CONFIG_KEYS = Object.keys({
+  provider: 0,
+  host_provider: 0,
+  timeout_ms: 0,
+  ui_mode: 0,
+  host_can_dispatch_subagents: 0,
+  autonomous_mode: 0,
+  subprocess_template: 0,
+  claude_code: 0,
+  claude_worker: 0,
+  codex: 0,
+  opencode: 0,
+  openai_compatible: 0,
+  vscode_task: 0,
+  antigravity: 0,
+  agy: 0,
+  sources: 0,
+  agent_task_batch_size: 0,
+  parallel_workers: 0,
+  block_quota: 0,
+  quota: 0,
+  observability: 0,
+  synthesis: 0,
+  analyzers: 0,
+  external_acquisition: 0,
+  graph: 0,
+  dispatch: 0,
+  design_review: 0,
+} satisfies Record<keyof SessionConfig, 0>) as readonly string[];
+
+export const DISPATCHABLE_SOURCE_KEYS = Object.keys({
+  id: 0,
+  transport: 0,
+  endpoint: 0,
+  model: 0,
+  api_key_env: 0,
+  no_auth: 0,
+  worker_kind: 0,
+  burst_limited: 0,
+  service: 0,
+  parameters: 0,
+  quota: 0,
+  cost_per_mtok: 0,
+  credentials_path: 0,
+  account: 0,
+  capability_rank: 0,
+} satisfies Record<keyof DispatchableSource, 0>) as readonly string[];
+
+export const QUOTA_MODEL_LIMITS_KEYS = Object.keys({
+  context_tokens: 0,
+  output_tokens: 0,
+  requests_per_minute: 0,
+  input_tokens_per_minute: 0,
+  output_tokens_per_minute: 0,
+  max_concurrent: 0,
+} satisfies Record<keyof QuotaModelLimits, 0>) as readonly string[];
+
+export const OPENAI_COMPATIBLE_CONFIG_KEYS = Object.keys({
+  base_url: 0,
+  model: 0,
+  api_key_env: 0,
+  no_auth: 0,
+  headers: 0,
+  temperature: 0,
+  max_output_tokens: 0,
+  response_format_json: 0,
+  guided_json: 0,
+  include_referenced_files: 0,
+  referenced_files_max: 0,
+  referenced_file_byte_cap: 0,
+  referenced_files_total_byte_cap: 0,
+  quota: 0,
+} satisfies Record<keyof OpenAiCompatibleConfig, 0>) as readonly string[];
+
+export const CLAUDE_CODE_CONFIG_KEYS = Object.keys({
+  command: 0,
+  extra_args: 0,
+  dangerously_skip_permissions: 0,
+  prompt_flag: 0,
+} satisfies Record<keyof ClaudeCodeConfig, 0>) as readonly string[];
+
+export const CODEX_CONFIG_KEYS = Object.keys({
+  command: 0,
+  sandbox_mode: 0,
+  model: 0,
+  extra_args: 0,
+} satisfies Record<keyof CodexConfig, 0>) as readonly string[];
+
+export const OPENCODE_CONFIG_KEYS = Object.keys({
+  command: 0,
+  extra_args: 0,
+} satisfies Record<keyof OpenCodeConfig, 0>) as readonly string[];
+
+export const AGY_CONFIG_KEYS = Object.keys({
+  command: 0,
+  extra_args: 0,
+  dangerously_skip_permissions: 0,
+  model: 0,
+} satisfies Record<keyof AgyConfig, 0>) as readonly string[];
+
+export const TEMPLATE_PROVIDER_CONFIG_KEYS = Object.keys({
+  command_template: 0,
+  env: 0,
+} satisfies Record<keyof SubprocessTemplateConfig, 0> &
+  Record<keyof VSCodeTaskConfig, 0> &
+  Record<keyof AntigravityConfig, 0>) as readonly string[];
+
+export const SYNTHESIS_CONFIG_KEYS = Object.keys({
+  narrative: 0,
+} satisfies Record<keyof SynthesisConfig, 0>) as readonly string[];
+
+export const DISPATCH_CONFIG_KEYS = Object.keys({
+  confirm_threshold: 0,
+  max_packets: 0,
+  risk_mass_budget: 0,
+  routing_tiers: 0,
+  rolling_engine: 0,
+} satisfies Record<keyof DispatchConfig, 0>) as readonly string[];
+
+export const DISPATCH_ROUTING_TIERS_KEYS = Object.keys({
+  deep_at: 0,
+  standard_at: 0,
+} satisfies Record<keyof DispatchRoutingTiers, 0>) as readonly string[];
+
+/**
  * The `dispatch` sub-config as it appears on {@link RepoSessionIntent}: the fan-out
  * INTENT knobs (confirm_threshold / max_packets / risk_mass_budget / routing_tiers)
  * WITHOUT `rolling_engine`, which is per-auditor dispatch capability carried on the

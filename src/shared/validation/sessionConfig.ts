@@ -15,11 +15,23 @@
 
 import { readOptionalJsonFile } from "../io/json.js";
 import {
+  AGY_CONFIG_KEYS,
   ANALYZER_SETTINGS,
+  CLAUDE_CODE_CONFIG_KEYS,
+  CODEX_CONFIG_KEYS,
+  DISPATCHABLE_SOURCE_KEYS,
   DISPATCHABLE_TRANSPORTS,
+  DISPATCH_CONFIG_KEYS,
   DISPATCH_INVENTORY_FIELDS,
+  DISPATCH_ROUTING_TIERS_KEYS,
+  OPENAI_COMPATIBLE_CONFIG_KEYS,
+  OPENCODE_CONFIG_KEYS,
   PROVIDER_NAMES,
+  QUOTA_MODEL_LIMITS_KEYS,
+  SESSION_CONFIG_KEYS,
   SESSION_UI_MODES,
+  SYNTHESIS_CONFIG_KEYS,
+  TEMPLATE_PROVIDER_CONFIG_KEYS,
   WORKER_KINDS,
   fixedWorkerKindFor,
   laneWorkerKindConflict,
@@ -73,6 +85,7 @@ function validateQuotaModelLimits(
     pushIssue(issues, path, "quota must be a JSON object.");
     return;
   }
+  warnUnknownKeys(value, path, QUOTA_MODEL_LIMITS_KEYS, issues);
   const badFields = new Set<string>();
   for (const key of QUOTA_POSITIVE_INT_FIELDS) {
     const entry = value[key];
@@ -133,10 +146,11 @@ function validateQuotaModelLimits(
  * on every key rotation, orphaning ledger state for what is still one account. With one
  * representation the disagreement is unrepresentable rather than detected.
  *
- * The refusal is the load-bearing half, not the type deletion: unknown keys pass this
- * validator untouched, so a merely-deleted field would leave a pasted key SILENTLY
- * dropped and the source launching keyless while the operator believed it was
- * authenticated. Loud and actionable, exactly like the retired `provider` field above.
+ * The refusal is the load-bearing half, not the type deletion: a merely-deleted field
+ * would leave a pasted key dropped and the source launching keyless while the operator
+ * believed it was authenticated. The generic unknown-key WARNING would still name it,
+ * but a pasted credential deserves an ERROR carrying the actionable rename — loud and
+ * blocking, exactly like the retired `provider` field above.
  */
 function refuseInlineApiKey(
   issues: ValidationIssue[],
@@ -196,6 +210,20 @@ function validateDispatchableSources(
       pushIssue(issues, path, "each source must be a JSON object.");
       return;
     }
+    // Skip keys the explicit refusals below already report (the retired inline
+    // `api_key` always; the retired `provider`/`backend_provider` pair only when
+    // the legacy-shape refusal actually fires), so one bad key never reports twice.
+    const legacyProviderShape =
+      source.transport === undefined && typeof source.provider === "string";
+    warnUnknownKeys(
+      source,
+      path,
+      DISPATCHABLE_SOURCE_KEYS,
+      issues,
+      legacyProviderShape
+        ? ["api_key", "provider", "backend_provider"]
+        : ["api_key"],
+    );
     // Legacy shape, named explicitly rather than left to fail as "transport missing".
     // `provider`/`backend_provider` were renamed to `transport`/`service` because one
     // word carried two unrelated concepts (the adapter that carries a request vs. the
@@ -344,6 +372,40 @@ function pushIssue(
   pushValidationIssue(issues, path, message);
 }
 
+/**
+ * Warn (never error) on every key of `value` outside `knownKeys` — unknown keys
+ * are otherwise silently ignored by this validator, so a typo'd or RETIRED field
+ * leaves the operator believing a declaration is live while the load quietly
+ * drops it. One warning per key, naming it, so the surface is loud without
+ * killing forward-compatibility (an older tool reading a newer config still
+ * loads).
+ *
+ * Keys beginning with `$` (JSON-Schema/editor annotations, e.g. `$schema`) and
+ * `//` (the JSON comment convention) are deliberate operator annotations, never
+ * declarations — skipped silently. `skip` lists keys a call site already
+ * refuses explicitly (e.g. the retired inline `api_key`), so one bad key never
+ * reports twice.
+ */
+function warnUnknownKeys(
+  value: Record<string, unknown>,
+  path: string,
+  knownKeys: readonly string[],
+  issues: ValidationIssue[],
+  skip: readonly string[] = [],
+): void {
+  const known = new Set<string>([...knownKeys, ...skip]);
+  for (const key of Object.keys(value)) {
+    if (known.has(key) || key.startsWith("$") || key.startsWith("//")) continue;
+    pushValidationIssue(
+      issues,
+      path.length > 0 ? `${path}.${key}` : key,
+      `unknown key \`${key}\` is not a recognized field here and is IGNORED at load — ` +
+        `check for a typo or a retired field.`,
+      "warning",
+    );
+  }
+}
+
 function validateStringArray(
   value: unknown,
   path: string,
@@ -414,6 +476,8 @@ function validateTemplateProviderSection(
     return;
   }
 
+  warnUnknownKeys(value, path, TEMPLATE_PROVIDER_CONFIG_KEYS, issues);
+
   if (value.command_template === undefined) {
     if (required) {
       pushIssue(
@@ -440,6 +504,7 @@ function validateAgentProviderSection(
   value: unknown,
   path: string,
   issues: ValidationIssue[],
+  knownKeys: readonly string[],
 ): void {
   if (value === undefined) {
     return;
@@ -449,6 +514,8 @@ function validateAgentProviderSection(
     pushIssue(issues, path, "Provider config must be a JSON object.");
     return;
   }
+
+  warnUnknownKeys(value, path, knownKeys, issues);
 
   if (value.command !== undefined) {
     if (typeof value.command !== "string" || value.command.trim().length === 0) {
@@ -524,6 +591,7 @@ function validateOpenAiCompatibleSection(
     pushIssue(issues, path, "Provider config must be a JSON object.");
     return;
   }
+  warnUnknownKeys(value, path, OPENAI_COMPATIBLE_CONFIG_KEYS, issues, ["api_key"]);
   refuseInlineApiKey(issues, value, path);
   for (const key of ["base_url", "model", "api_key_env"] as const) {
     const entry = value[key];
@@ -639,6 +707,7 @@ function validateRoutingTiers(
     );
     return;
   }
+  warnUnknownKeys(value, "dispatch.routing_tiers", DISPATCH_ROUTING_TIERS_KEYS, issues);
   for (const key of ["deep_at", "standard_at"] as const) {
     const cut = value[key];
     if (
@@ -681,6 +750,8 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     pushIssue(issues, "session_config", "Session config must be a JSON object.");
     return issues;
   }
+
+  warnUnknownKeys(value, "", SESSION_CONFIG_KEYS, issues);
 
   const provider = value.provider;
   if (provider !== undefined) {
@@ -784,10 +855,20 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     issues,
     provider === "antigravity",
   );
-  validateAgentProviderSection(value.claude_code, "claude_code", issues);
-  validateAgentProviderSection(value.codex, "codex", issues);
-  validateAgentProviderSection(value.opencode, "opencode", issues);
-  validateAgentProviderSection(value.agy, "agy", issues);
+  validateAgentProviderSection(
+    value.claude_code,
+    "claude_code",
+    issues,
+    CLAUDE_CODE_CONFIG_KEYS,
+  );
+  validateAgentProviderSection(value.codex, "codex", issues, CODEX_CONFIG_KEYS);
+  validateAgentProviderSection(
+    value.opencode,
+    "opencode",
+    issues,
+    OPENCODE_CONFIG_KEYS,
+  );
+  validateAgentProviderSection(value.agy, "agy", issues, AGY_CONFIG_KEYS);
   validateOpenAiCompatibleSection(
     value.openai_compatible,
     "openai_compatible",
@@ -799,15 +880,18 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
   if (value.synthesis !== undefined) {
     if (!isRecord(value.synthesis)) {
       pushIssue(issues, "synthesis", "synthesis must be a JSON object.");
-    } else if (
-      value.synthesis.narrative !== undefined &&
-      typeof value.synthesis.narrative !== "boolean"
-    ) {
-      pushIssue(
-        issues,
-        "synthesis.narrative",
-        "synthesis.narrative must be a boolean when provided.",
-      );
+    } else {
+      warnUnknownKeys(value.synthesis, "synthesis", SYNTHESIS_CONFIG_KEYS, issues);
+      if (
+        value.synthesis.narrative !== undefined &&
+        typeof value.synthesis.narrative !== "boolean"
+      ) {
+        pushIssue(
+          issues,
+          "synthesis.narrative",
+          "synthesis.narrative must be a boolean when provided.",
+        );
+      }
     }
   }
 
@@ -815,6 +899,7 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     if (!isRecord(value.dispatch)) {
       pushIssue(issues, "dispatch", "dispatch must be a JSON object.");
     } else {
+      warnUnknownKeys(value.dispatch, "dispatch", DISPATCH_CONFIG_KEYS, issues);
       if (
         value.dispatch.confirm_threshold !== undefined &&
         (!Number.isInteger(value.dispatch.confirm_threshold) ||

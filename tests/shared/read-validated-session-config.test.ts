@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   readValidatedRepoSessionIntent,
   validateRepoSessionIntent,
+  validateSessionConfig,
 } from "../../src/shared/validation/sessionConfig.js";
 
 async function withTempConfig<T>(
@@ -112,5 +113,87 @@ describe("validateRepoSessionIntent", () => {
         block_quota: { host_model: "claude" },
       }),
     ).toEqual([]);
+  });
+});
+
+// Deleting a field from a type is not retiring it: the validator used to ignore
+// unknown keys entirely, so a typo'd or retired field left the operator believing
+// a declaration was live while the load silently dropped it. Unknown keys now warn
+// LOUDLY (naming each key) without failing the load — forward-compatibility
+// survives, silence does not.
+describe("unknown-key warnings", () => {
+  function warnings(value: unknown) {
+    return validateSessionConfig(value).filter((i) => i.severity === "warning");
+  }
+
+  test("an unknown top-level key warns by name and does not error", () => {
+    const issues = validateSessionConfig({ timeout_msec: 5000 });
+    expect(issues.filter((i) => i.severity === "error")).toEqual([]);
+    const w = issues.filter((i) => i.severity === "warning");
+    expect(w).toHaveLength(1);
+    expect(w[0]!.path).toBe("timeout_msec");
+    expect(w[0]!.message).toMatch(/unknown key|IGNORED/);
+  });
+
+  test("unknown keys warn at every walked level (source, quota, dispatch, section)", () => {
+    const w = warnings({
+      codex: { comand: "codex" },
+      dispatch: { confirm_treshold: 2 },
+      sources: [
+        {
+          transport: "codex",
+          endpoint: "codex",
+          modle: "gpt",
+          quota: { contexttokens: 100000 },
+        },
+      ],
+    });
+    const paths = w.map((i) => i.path);
+    expect(paths).toContain("codex.comand");
+    expect(paths).toContain("dispatch.confirm_treshold");
+    expect(paths).toContain("sources[0].modle");
+    expect(paths).toContain("sources[0].quota.contexttokens");
+  });
+
+  test("a key with an explicit refusal reports ONCE (error), never error+warning", () => {
+    const issues = validateSessionConfig({
+      sources: [{ transport: "codex", endpoint: "codex", api_key: "sk-paste" }],
+    });
+    const forKey = issues.filter((i) => i.path === "sources[0].api_key");
+    expect(forKey).toHaveLength(1);
+    expect(forKey[0]!.severity).toBe("error");
+    // Same for the legacy provider-shape refusal.
+    const legacy = validateSessionConfig({
+      sources: [{ provider: "codex", endpoint: "codex" }],
+    });
+    expect(
+      legacy.filter((i) => i.path.endsWith(".provider") && i.severity === "warning"),
+    ).toEqual([]);
+  });
+
+  test("$-prefixed and //-prefixed annotation keys are skipped silently", () => {
+    expect(
+      warnings({
+        $schema: "https://example.invalid/schema.json",
+        "// note": "editor annotation",
+        timeout_ms: 1000,
+      }),
+    ).toEqual([]);
+  });
+
+  test("a warning-only config still LOADS (warnings surfaced, not thrown)", async () => {
+    await withTempConfig(
+      JSON.stringify({ timeout_ms: 1000, retired_field: true }),
+      async (path) => {
+        let surfaced: string[] = [];
+        const intent = await readValidatedRepoSessionIntent(path, {
+          onWarnings: (w) => {
+            surfaced = w.map((i) => i.path);
+          },
+        });
+        expect(intent).toBeDefined();
+        expect(surfaced).toContain("retired_field");
+      },
+    );
   });
 });
