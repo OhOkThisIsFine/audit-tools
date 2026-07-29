@@ -187,7 +187,10 @@ function privilegeRank(value: unknown): number {
  * agent's mutating commands — least-privilege is enforced per-agent.
  */
 export function unionOpenCodeBashCeiling(
-  agentBashRuleSets: Array<Record<string, unknown> | null | undefined>,
+  // ReadonlyArray<unknown>: the union tolerates arbitrary garbage per element
+  // (permissionRuleObject degrades non-objects to {}), and the type says so —
+  // callers with shaped rule sets still pass unchanged.
+  agentBashRuleSets: ReadonlyArray<unknown>,
 ): PermissionRule {
   const sets = agentBashRuleSets.map(permissionRuleObject);
 

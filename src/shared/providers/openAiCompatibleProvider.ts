@@ -781,21 +781,28 @@ export function extractReportedCostUsd(json: {
  * planning estimate (mirrors {@link extractReportedCostUsd}).
  */
 export function extractObservedUsage(json: {
-  usage?: {
-    prompt_tokens?: unknown;
-    completion_tokens?: unknown;
-    prompt_tokens_details?: { cached_tokens?: unknown };
-    cache_read_input_tokens?: unknown;
-    cache_creation_input_tokens?: unknown;
-  };
+  // `unknown`: the function tolerates any garbage here (the first line narrows
+  // to object-or-bail), and the type states that real contract — a malformed
+  // backend `usage` is dropped, never thrown on.
+  usage?: unknown;
 }): {
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
 } | undefined {
-  const usage = json.usage;
-  if (usage === undefined || usage === null || typeof usage !== "object") return undefined;
+  const raw = json.usage;
+  if (raw === undefined || raw === null || typeof raw !== "object") return undefined;
+  // Post-guard rebind: `typeof raw === "object"` cannot narrow `unknown` to a
+  // field-bearing record in TS, and every field below is itself `unknown` and
+  // re-validated by toFiniteNonNegative — the assertion adds no trust.
+  const usage = raw as {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
+    cache_read_input_tokens?: unknown;
+    cache_creation_input_tokens?: unknown;
+  };
 
   const inputTokens = toFiniteNonNegative(usage.prompt_tokens);
   const outputTokens = toFiniteNonNegative(usage.completion_tokens);

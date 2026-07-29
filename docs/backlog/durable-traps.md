@@ -418,9 +418,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-  ⚠ **HALF-CLOSED — `check:tests` reaches 192 of 564 test files.** `tsconfig.test.json` sets
+  ⚠ **HALF-CLOSED — `check:tests` reaches 310 of 564 test files.** `tsconfig.test.json` sets
   `checkJs: false`, which silently excludes every `.mjs` test, so a fixture sweep can only ever find
-  this class in the converted part of the tree. The remaining 372 `.mjs` files carry the
+  this class in the converted part of the tree. The remaining 254 `.mjs` files (252 in `tests/audit`
+  plus the two deliberate `tests/shared` holdouts) carry the
   same class, undetected — the conversion ratchet (open-bugs) is the closure path. Do not read
   "the test tree is typechecked now" as closed until that count is zero.
 

@@ -1,0 +1,29 @@
+import { test, describe, it, expect } from "vitest";
+import { prefixValidationIssues } from "../../src/shared/validation/basic.js";
+import type { ValidationIssue } from "../../src/shared/validation/basic.js";
+
+describe("prefixValidationIssues idempotency guard — already-prefixed paths are not double-prefixed", () => {
+  it("an issue whose path equals prefix exactly is returned with path unchanged", () => {
+    const issues: ValidationIssue[] = [{ path: "foo", message: "msg", severity: "error" }];
+    const result = prefixValidationIssues("foo", issues);
+    expect(result[0].path).toBe("foo");
+  });
+
+  it("an issue whose path starts with prefix+'.' is returned with path unchanged", () => {
+    const issues: ValidationIssue[] = [{ path: "foo.bar", message: "msg", severity: "error" }];
+    const result = prefixValidationIssues("foo", issues);
+    expect(result[0].path).toBe("foo.bar");
+  });
+
+  it("an issue with an empty path is returned with path set to prefix", () => {
+    const issues: ValidationIssue[] = [{ path: "", message: "msg", severity: "error" }];
+    const result = prefixValidationIssues("foo", issues);
+    expect(result[0].path).toBe("foo");
+  });
+
+  it("an issue with an unrelated path has prefix+'.' prepended", () => {
+    const issues: ValidationIssue[] = [{ path: "bar", message: "msg", severity: "error" }];
+    const result = prefixValidationIssues("foo", issues);
+    expect(result[0].path).toBe("foo.bar");
+  });
+});

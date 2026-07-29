@@ -205,8 +205,8 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `closeout-challenge-gate.mjs` (Stop — asks "are you sure that was all taken care of, and will the handoff
   be clear for the next agent?" with the mechanical evidence attached: uncommitted work, unpushed commits, a
   HANDOFF that no longer matches the backlog, memory files missing from `MEMORY.md`; capped at 2 per session).
-  Contract-tested in `tests/shared/hook-trap-guards.test.mjs` (shell traps) and
-  `tests/shared/hook-session-gates.test.mjs` (the two session-lifecycle gates) — both under `tests/` because
+  Contract-tested in `tests/shared/hook-trap-guards.test.ts` (shell traps) and
+  `tests/shared/hook-session-gates.test.ts` (the two session-lifecycle gates) — both under `tests/` because
   vitest excludes `.claude/**`, so a test beside a hook never runs in CI. **Adding a hook:** register it in `.claude/settings.json` AND add the
   `!.claude/hooks/<name>` line to `.gitignore` in the SAME commit — the commit gate blocks a settings.json
   that references a hook the commit would not carry.

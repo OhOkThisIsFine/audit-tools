@@ -48,10 +48,10 @@ export class SchemaVersionMismatchError extends Error {
   }
 }
 
-/** The `schema_version`-bearing shape both directions accept. */
-type VersionStamped = { schema_version?: unknown };
-
-function stampedVersion(value: VersionStamped): unknown {
+// Both directions accept ANY object — an unstamped payload is a defined input
+// (discard: stale; throw: mismatch), and the parameter types state that real
+// contract rather than requiring a `schema_version`-bearing shape.
+function stampedVersion(value: object): unknown {
   return (value as Record<string, unknown>).schema_version;
 }
 
@@ -64,7 +64,7 @@ function stampedVersion(value: VersionStamped): unknown {
  * Use for caches, carries, snapshots and derived indexes. For state that cannot
  * be rebuilt, use {@link throwOnSchemaVersionMismatch} instead.
  */
-export function discardOnSchemaVersionMismatch<T extends VersionStamped>(
+export function discardOnSchemaVersionMismatch<T extends object>(
   value: T | undefined | null,
   expected: string,
 ): T | undefined {
@@ -83,7 +83,7 @@ export function discardOnSchemaVersionMismatch<T extends VersionStamped>(
  * {@link discardOnSchemaVersionMismatch} instead.
  */
 export function throwOnSchemaVersionMismatch(
-  value: VersionStamped | undefined | null,
+  value: object | undefined | null,
   artifactName: string,
   expected: string,
 ): void {

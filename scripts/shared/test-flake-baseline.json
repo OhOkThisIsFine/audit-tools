@@ -8,7 +8,7 @@
         "workers": 16
       },
       "tests": {
-        "tests/shared/charter-extraction.test.mjs > assembleDeltas — negative-finding lint (schema-forced filler) > drops a 'fully aligned, no material gap' row": {
+        "tests/shared/charter-extraction.test.ts > assembleDeltas — negative-finding lint (schema-forced filler) > drops a 'fully aligned, no material gap' row": {
           "status": "unproven",
           "evidence": {
             "passedSolo": false,
@@ -16,7 +16,7 @@
             "failedParallel": true
           }
         },
-        "tests/shared/charter-extraction.test.mjs > assembleDeltas — negative-finding lint (schema-forced filler) > drops the observed filler row (agrees / no divergence / negative finding)": {
+        "tests/shared/charter-extraction.test.ts > assembleDeltas — negative-finding lint (schema-forced filler) > drops the observed filler row (agrees / no divergence / negative finding)": {
           "status": "unproven",
           "evidence": {
             "passedSolo": false,
@@ -24,7 +24,7 @@
             "failedParallel": true
           }
         },
-        "tests/shared/handoff-roadmap.test.mjs > the live tree > `--check` is green on the committed tree": {
+        "tests/shared/handoff-roadmap.test.ts > the live tree > `--check` is green on the committed tree": {
           "status": "unproven",
           "evidence": {
             "passedSolo": false,
@@ -32,7 +32,7 @@
             "failedParallel": true
           }
         },
-        "tests/shared/handoff-roadmap.test.mjs > the live tree > docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one": {
+        "tests/shared/handoff-roadmap.test.ts > the live tree > docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one": {
           "status": "unproven",
           "evidence": {
             "passedSolo": false,

@@ -1848,7 +1848,10 @@ export function retainAutoExclusions(
 
 export function carryForwardConfirmationInput(
   input: ProviderConfirmationInput | null,
-  prior: SharedProviderConfirmation | null,
+  // `undefined` is a first-class absent-prior: the `if (!prior)` guard below is
+  // a tested tolerance, and the type states it rather than leaving `undefined`
+  // reachable only from non-TS callers.
+  prior: SharedProviderConfirmation | null | undefined,
   /**
    * R3-3: true when THIS submission is LLM-authored (tool-derived — see
    * `runProviderConfirmationAutoComplete`'s `authoredByLlm`). Governs which

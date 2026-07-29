@@ -17,9 +17,11 @@
 /**
  * Names of workflows whose most recent COMPLETED run concluded in failure.
  *
- * @param {Array<{workflowName?: string, status?: string, conclusion?: string, createdAt?: string}>} runs
+ * @param {Array<{workflowName?: string | null, status?: string | null, conclusion?: string | null, createdAt?: string | null} | null | undefined> | null | undefined} runs
  *   Runs for one branch, any order — as returned by
- *   `gh run list --json workflowName,status,conclusion,createdAt`.
+ *   `gh run list --json workflowName,status,conclusion,createdAt`. Nullable
+ *   throughout: the implementation degrades junk input to "cannot tell" ([])
+ *   rather than throwing, and the type states that real contract.
  * @returns {string[]} Failing workflow names, sorted, de-duplicated.
  */
 export function latestFailedWorkflows(runs) {

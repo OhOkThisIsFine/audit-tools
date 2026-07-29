@@ -701,19 +701,24 @@
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
 - **▶ Convert the test tree from `.mjs` to `.ts`, file by file — the conversion IS the typecheck
-  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 192 of 564 test files
-  (`find tests -name "*.test.*"`; 372 `.mjs` remain excluded by `checkJs: false`). Converting a file
+  ratchet (2026-07-28, medium, owner-approved).** `check:tests` reaches 310 of 564 test files
+  (`find tests -name "*.test.*"`; 254 `.mjs` remain excluded by `checkJs: false`). Converting a file
   brings it under the gate automatically — no config ratchet, no exclude list; coverage rises exactly
   as fast as conversion does. The vitest `include` globs are single-sourced in
   `tests/helpers/testFileContract.ts` and enforced by `tests/shared/test-suite-visibility.test.ts`
   (an unmatched file or an `.mjs`/`.ts` twin pair is a RED test — a rename can never silently leave
   the suite). Every batch so far surfaced real fixture drift against the live contracts, so the
-  ratchet is catching gaps, not just annotating. `dispatchable-sources.test.mjs` is the one
-  deliberate holdout — blocked on the `buildAccountScopedQuotaSource` entry above. Remaining: the
-  rest of `tests/shared`, then `tests/audit` (`shared-tests-invariants.test.mjs` stays `.mjs` by
-  design — a `.ts` guard cannot detect its own exclusion). Per-lap semantics check:
+  ratchet is catching gaps, not just annotating (the 2026-07-28 tests/shared tranche alone forced
+  five types-only src/scripts widenings where a declared type undersold a tested tolerance).
+  `dispatchable-sources.test.mjs` is the one
+  deliberate holdout — blocked on the `buildAccountScopedQuotaSource` entry above. **tests/shared is
+  otherwise COMPLETE.** Remaining: `tests/audit` (252 files; `shared-tests-invariants.test.mjs` stays
+  `.mjs` by design — a `.ts` guard cannot detect its own exclusion). Per-lap semantics check:
   `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits, before commit — review
   ONLY the files it flags.
+  ⚠ Offloaded workers' self-reported "scoped typecheck clean" can be STALE under concurrent-tranche
+  churn (two stragglers surfaced only on the quiet-tree re-run) — the central full-tree
+  `check:tests` after the fleet drains is load-bearing, not a formality.
   ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
   handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
   ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the flip

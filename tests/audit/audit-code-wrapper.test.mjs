@@ -1,5 +1,14 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
+
+// Explicit file-level timeout, not the 120s default. Most cases here pack a real
+// tarball and spawn real subprocesses, taking ~30-100s ALONE — and they are
+// `concurrent`, so under a full-suite run they contend with siblings doing the
+// same and blow past the default with a ROTATING victim (three different tests
+// crossed 120s across three consecutive runs). A test that passes in isolation
+// failing only under load teaches a reader to wave at reds, which is the same
+// corrosion as a false green. A genuine hang still fails here, just later.
+vi.setConfig({ testTimeout: 300_000 });
 import {
   mkdtemp,
   rm,
@@ -677,12 +686,6 @@ test.concurrent("merge-and-ingest accepts packet task result files as the legacy
   });
 });
 
-// Explicit timeout, not the default. This case packs a real tarball and spawns real
-// subprocesses, so it takes ~30s ALONE — and it is `concurrent`, so under a full-suite
-// run it contends with siblings doing the same and blew past the 120s default. That
-// produced a recurring false RED: a test that passes in isolation failing only under
-// load teaches a reader to wave at reds, which is the same corrosion as a false green.
-// A genuine hang still fails here, just later.
 test.concurrent("merge-and-ingest is idempotent on re-run and never truncates results", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
@@ -712,7 +715,7 @@ test.concurrent("merge-and-ingest is idempotent on re-run and never truncates re
     expect(replaySummary.accepted_count).toBe(tasks.length);
     expect(await readFile(resultsPath, "utf8"), "the second merge must not rewrite the transient results file").toBe(mergedAfterFirst);
   });
-}, 300_000);
+});
 
 test.concurrent("merge-and-ingest self-heals a stale completion marker by re-ingesting a stranded on-disk result", async () => {
   await withTempRepo(async (root) => {
