@@ -749,6 +749,8 @@
   background agents were live on the tree — it reads uncommitted paths as an unclean close and cannot
   see in-flight background work, so a deliberate wait state consumed both of the session's challenges
   before the real closeout. The gate needs a live-background-work signal before spending a challenge.
+  (Reproduced identically on the 2026-07-28 conversion fleet lap: both challenges again spent on
+  deliberate mid-fleet pauses, zero left for the actual close.)
   (2) **inefficient-feeding (low):** `.audit-tools/nightly/open-items.json` was STALE at
   presentation — all 17 surfaced items were already answered AND recorded done in the decisions
   ledger (`answer.mjs --list` had the truth); the surface artifact predated the answering commits.
