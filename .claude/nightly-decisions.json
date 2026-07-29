@@ -677,6 +677,8 @@
     "answer": "Carry the affirmation contract to both the charter-delta submission and the design-review auto-complete path.",
     "subject": "The affirmation contract that closed success-shaped-empty for AuditResult was never carried to the two executors that can still auto-complete on nothing",
     "path": "src/audit/orchestrator/charterDeltaExecutor.ts",
-    "decided_at": "2026-07-29T14:52:37.768Z"
+    "decided_at": "2026-07-29T14:52:37.768Z",
+    "completed_at": "2026-07-29T16:01:15.842Z",
+    "completed_ref": "commit fb15de8a"
   }
 }

@@ -430,6 +430,16 @@
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
 
+- **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
+  the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
+  `ea4e616f`, guard-reach-as-declared-data `ec64d159`) are full-lap builds awaiting a design pass,
+  not ambiguities, and stay visible via `answer.mjs --list`. (2) **tool-should-decide (small):**
+  the Bash tool's `$TMPDIR` is unset under Git Bash on win32, so `> "$TMPDIR/x.log"` degrades to
+  `/x.log` → permission denied; `/tmp` works. (3) **inefficient-feeding:** none new — the offload
+  tier path carried 9 subagents (six doc edits, condensation draft, adversarial verify, loop-core
+  review) with zero relay-side failures; per-agent pin paths remain dead through the harness
+  (memory: subagent-offload-tier-path-works-pool-pin-broken).
+
 - **Friction walk (duplicated-guard lap, 2026-07-25):** (1) **inefficient-feeding (medium):** the
   triage's per-entry `Paths:` are MODEL-INVENTED for entries whose prose names no file —
   <!-- doc-citation-exempt: deliberate does-not-exist narrative — the entry records these paths as fabrications -->
