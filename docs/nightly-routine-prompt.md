@@ -192,7 +192,7 @@ shape:
 
 ```text
 { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
-  evidence[], proposal?, patch_path? }
+  options[], evidence[], proposal?, patch_path? }
 ```
 
 - `title` is the front-loaded one-line decision, not a summary of the
@@ -203,6 +203,15 @@ shape:
   symbol-name shorthand.
 - `question` is the specific decision. `evidence[]` records what was verified
   against code and how.
+- `options[]` is the routine's proposed answers — `{ label, answer }` pairs, where
+  `label` is the button text and `answer` is the exact prose that click records.
+  **Every item carries them.** They are the whole point of the answerable surface:
+  a click on a named choice IS the decision, so answering costs a press instead of
+  an essay. An item without them degrades to a bare text box — which is what
+  happened on 2026-07-29, when 18 items shipped with no `options` because this
+  contract did not list the field the renderer already supported. Offer the real
+  alternatives including the do-nothing one; the free-text box behind
+  *Something else…* stays available for an answer the routine did not anticipate.
 
 Compute `subject_key` with `subjectKey(path, subject)` from
 `scripts/nightly/items.mjs`, where `subject` is the prose in question, never the
