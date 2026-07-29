@@ -95,16 +95,11 @@ and [`spec/contract-authoring-determinism-design.md`](../contract-authoring-dete
 this document names the mechanism and owns the output contract it produces, not
 the mechanism's internals.
 
-The Finding → Item → Block mechanism described under Phases below (the
-deterministic/LLM plan phase in `src/remediate/phases/plan.ts`) is the
-**alternate/legacy planning source**. A plan built by the contract pipeline or
-the lean fast path carries a `plan.source` tag recording which mechanism built
-it (`contract_pipeline` for the primary engine, `lean_fast_path` for its
-bounded Path-A shortcut); a plan built by the Finding/Item/Block plan phase
-leaves `source` unset, so its absence is itself the third case — the
-mechanisms are distinguished at the artifact level. Whichever source produced the plan, it
-converges on the same output contract (Finding / Item / Block, `ItemSpec`,
-`TestSpec`) and the same downstream implement→close machinery.
+Every plan carries a `plan.source` tag recording which mechanism built it:
+`contract_pipeline` for the primary engine, or `lean_fast_path` for its
+bounded Path-A shortcut. Whichever source produced the plan, it converges on
+the same output contract (Finding / Item / Block, `ItemSpec`, `TestSpec`) and
+the same downstream implement→close machinery.
 
 ## Phases
 
