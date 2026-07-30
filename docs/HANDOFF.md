@@ -156,7 +156,7 @@ defects**, not the A2 oracle corpus. A2 is funded and its SPEC is intact
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core). · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects. · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->
 

@@ -874,17 +874,6 @@
   file until the whole run ends, because `tail` buffers to EOF — so a long suite cannot be progress-
   monitored and looks hung. Redirect to a file and grep it instead of piping through `tail`.
 
-- **▶ ⬇ LIVE-run watch ONLY — the per-node token estimate is WIRED (2026-07-25, loop-core).** Both fit
-  gates now read `DispatchPlanItem.estimated_input_tokens`, stamped once in `prepareImplementDispatch`
-  at the point the rendered prompt exists; `HYBRID_NODE_TOKEN_ESTIMATE` and `driveRollingDispatch`'s
-  `() => 2000` default are DELETED, and `estimateTokens` is a required option so no caller can silently
-  restore the blindness. The field is required and validator-enforced for implement dispatch.
-  ⚠ **This is the first change that makes the `no_capable_pool` structural-refusal pause REACHABLE in
-  real use, and it has no live evidence yet.** Watch a real frontier: an unplaceable node must reach a
-  RESUMABLE pause naming the real cause (split it, or declare a larger `context_tokens`) — never
-  `empty_pool`, and never a terminal strand. If a large node now refuses everywhere, that is the honest
-  estimate working; check the pool's declared `context_tokens` before treating it as a regression.
-
 - **Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).**
   `ensureRemediationBranchCheckedOut` currently checks the primary checkout out at
   `remediation/<runId>` during implement-dispatch, so later main-bound work can strand on the run branch.
@@ -1177,32 +1166,13 @@
   (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
   minted by the registry or validated on the way in.
 
-- **Dogfood self-audit 2026-07-30 — dispatch/loop defect cluster (one run, one evidence set:
-  `.audit-tools/audit/friction/run.json` + the run's event log).** The `no_capable_pool` watch item
-  PASSED its primary property (honest, resumable pause; est 193,360 tokens vs 136,000 deep budget) —
-  these are the defects attached to that pass, each a live observation, none yet fixed:
-  1. **Re-planning shrink never fires.** Three consecutive `next-step` calls on a blocked oversized
-     packet produced byte-identical `blocked` states; the advertised "let re-planning shrink the
-     packets" recovery has no trigger. The single packet head-of-line blocked all 41 remaining tasks.
-  2. **The blocked prompt's "declare a larger pool" remedy is unreachable for host waves.** A declared
-     source carrying `quota.context_tokens: 1000000` (agy) never enters `capacity_pools` — host-wave
-     fitting consults only the conversation-host roster. Operator hand-ran the packet on the 1M lane;
-     `merge-and-ingest` recovered it by task_id. Property to hold: a remedy a pause names must be
-     reachable from that pause.
-  3. **Session-limit worker deaths strand results and claims.** 22 host workers died at the limit; 8
-     had written results the tool never reconciled until a manual merge; task claims from dead workers
-     held 6 `deepening:*` tasks "live by a peer" across many minutes ([[claim-liveness-is-not-an-inflight-signal]]).
-  4. **agy pool cooled as `rate_limited` after each SUCCESSFUL packet** (2x observed, AGY quota
-     ~untouched) — misclassification starved the free lane and pushed 59/60 first-wave packets onto the
-     priciest host tier at λ=0. The underlying provider message is never surfaced, so the wording
-     cannot be pattern-fixed without first surfacing it.
-  5. **`present_report` false-green promotion.** Final step returned `status: complete` naming the
-     promoted root deliverables while the promotion write never happened — root still held the
-     PREVIOUS audit (1480 findings, pre-run mtime); this run's render (1567) sat only under
-     `.audit-tools/audit/`. Operator promoted by hand. Success-shaped completion.
-  6. **Coverage accounting:** final report says "Fully audited files: 25" after a 60-packet
-     full-tree wave (previous run: 1109) — and 1102 `maintainability` findings appear despite the
-     lens being excluded at intent. Both need a mechanism-level explanation before trust.
-  7. Minor, same run: 29× duplicate staleness events in one call; `merge-and-ingest` exits 2 on
-     full success; Gate-0 delta re-fired 3× late-run with nothing operator-meaningful changed;
-     narrative digest silently truncated to 120 of 1567 findings (log-line only disclosure).
+- **▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.** Primary record:
+  [`reviews/dogfood-run-2026-07-30.md`](../reviews/dogfood-run-2026-07-30.md); the
+  `no_capable_pool` watch PASSED (its watch entry is closed). Properties to hold: (1) re-planning
+  shrink fires on a blocked packet; no head-of-line block of the frontier; (2) a remedy a pause
+  names is reachable from it (declared big pool enters host-wave fitting); (3) worker death
+  reconciles written results and expires claims ([[claim-liveness-is-not-an-inflight-signal]]);
+  (4) a successful packet never cools its pool as rate_limited, and the message is surfaced;
+  (5) `present_report` completes only after the promoted deliverables verifiably exist;
+  (6) report coverage counts and lens exclusions reflect the run; (7) events/exit codes are
+  success-shaped only on success.
