@@ -51,11 +51,14 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
-  parallel jobs — `gate` (`verify:checks`: control-bytes + version-gates + guard-reach + loop-core-patterns +
-  constitutional-doc-paths + deadcode + doc-manifest + doc-links + doc-code-citations + philosophy-brief +
-  nightly-routine-prompt + handoff-roadmap +
-  backlog-index + memory-citations + backlog-budget + backlog-status + check:tests +
-  build [subsumes typecheck] + host verifies + pack:smoke + both packaged `smoke:*`)
+  parallel jobs — `gate`, whose steps are generated from `package.json`:
+
+<!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
+
+`verify:checks` = `check:control-bytes` + `check:version-gates` + `check:guard-reach` + `check:loop-core-patterns` + `check:constitutional-doc-paths` + `check:deadcode` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:nightly-routine-prompt` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:tests` + `build` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
+
+<!-- END gate-enumeration -->
+
   plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
   (`needs: [gate, test]`)
   uploads. The release script then waits for the whole run + npm propagation. **Trusted publishing is

@@ -684,5 +684,50 @@
     "decided_at": "2026-07-29T14:52:37.768Z",
     "completed_at": "2026-07-29T16:01:15.842Z",
     "completed_ref": "commit fb15de8a"
+  },
+  "69602af54445829b": {
+    "disposition": "settled",
+    "answer": "Delete the \"Known residue\" paragraph from spec/unified-dispatch-worker-model.md and the \"Stage 5\" bullet from docs/backlog/forward-tracks.md. The work shipped; a shipped-status note is status-noise and first-writer-wins is already described elsewhere in the spec.",
+    "subject": "Known residue: one backend reachable through SEVERAL transports yields one delta entry carrying one transport’s pattern, so an autonomous fail-closed exclusion drops only that route. Tracked in docs/backlog.md.",
+    "path": "spec/unified-dispatch-worker-model.md",
+    "decided_at": "2026-07-30T15:51:10.759Z",
+    "completed_at": "2026-07-30T15:57:21.687Z",
+    "completed_ref": "this commit — residue paragraph deleted from spec/unified-dispatch-worker-model.md and the Stage 5 bullet from docs/backlog/forward-tracks.md"
+  },
+  "50fb1a3a7d638c3b": {
+    "disposition": "settled",
+    "answer": "Just delete the handoff entry",
+    "subject": "The last approved build — guard reach as declared data (ec64d159) — shipped in 3cd3dbc1: scripts/guard-reach-data.mjs registers every guard, its wiring and its scanned set (uncovered halves stated as data); check:guard-reach reconciles it in verify:checks plus an unconditional pre-commit leg.",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-07-30T15:51:10.761Z",
+    "completed_at": "2026-07-30T15:57:21.688Z",
+    "completed_ref": "this commit — guard-reach narration removed from docs/HANDOFF.md"
+  },
+  "41b0006a30468211": {
+    "disposition": "question",
+    "answer": "I would approve all three fixes, because that's obviously the correct route to go, but I have a question - shouldn't the fix be in llm-relay ?",
+    "subject": "The backlog-triage lane reports every provider error as finish_reason=undefined, retries nothing, and adds errored ids to its own resume set.",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-07-30T15:51:10.763Z",
+    "reply": "You are right about the main one, and I verified it rather than assuming. pool/coding has 14 candidates and gemini-2.5-flash is not even first (glm-5.2 is). I ran 8 sequential calls through pool/coding: two were served by gemini-2.5-flash and six came back as raw 429/503. Not one was served by any of the other 13 candidates. So the pool is not failing over at all, which is its entire stated purpose ('benchmark-ranked with failover'). That is an llm-relay defect and it is the BIGGER half — with working failover the rate limit would mostly never have reached the caller.\n\nBut the three audit-tools defects are independent of it and survive the relay fix:\n\n1. Error surfacing. Even with perfect failover, a fully exhausted pool must still return an error, and reporting it as 'finish_reason=undefined' — discarding a body that literally says 'Please try again in 20.4525s' — is the caller throwing away information it was handed. Not the relay's job.\n2. The resume set adds errored ids to 'done', so a re-run silently retries nothing and exits 0. No relay involvement whatsoever.\n3. Entry ids are positional ('open-bugs#27'), so deleting a backlog entry renumbers every later row. This one bit live during the run.\n\nRevised recommendation, splitting the approval you were inclined to give: do (1), (2) and (3) in audit-tools — they are real bugs regardless. Do NOT add retry/backoff to the triage script; that is the part that genuinely belongs in llm-relay, and duplicating it in the caller would hide the relay bug rather than fix it. I have not filed anything against llm-relay since it is a separate project — say the word and I will.",
+    "replied_at": "2026-07-30T15:53:14.195Z"
+  },
+  "41867ca7c56a3c17": {
+    "disposition": "settled",
+    "answer": "Approve. Add marker-delimited generated blocks to both docs, render from package.json step order through a data module mapping step to its human gloss (same shape as scripts/doc-manifest-data.mjs), and gate byte parity with a check script in verify:checks supporting --write. A gate step with no gloss is a build failure.",
+    "subject": "The verify:checks step list is restated in prose in docs/audit-pkg/release.md and .claude/skills/ship/SKILL.md, hand-maintained against package.json.",
+    "path": ".claude/skills/ship/SKILL.md",
+    "decided_at": "2026-07-30T15:51:10.764Z",
+    "completed_at": "2026-07-30T15:57:21.690Z",
+    "completed_ref": "this commit — scripts/gate-enumeration-data.mjs + check-gate-enumeration.mjs, wired into verify:checks, both docs generated, tests/shared/gate-enumeration-gate.test.ts"
+  },
+  "5938b991779c1cd2": {
+    "disposition": "question",
+    "answer": "Would the best solution not to be to look at diffs? Git records tracked file history, and we can compare old to new versions to see whether something was fixed.",
+    "subject": "evaluateProbes maps ENOENT to state absent, so a probe naming a path that never existed is indistinguishable from a probe whose code vanished, and all-absent means resolved.",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-07-30T15:51:10.765Z",
+    "reply": "Yes — that is better than what I proposed, and it subsumes it. I was going to split one bit (file-missing) from another (text-missing); git answers the sharper question directly, with evidence instead of inference.\n\nTwo things it gives that my version cannot:\n- 'Was this path EVER real?' — 'git log --all --full-history -- <path>' returning empty is a definitive bad-probe verdict. My proposal could only say 'not there now', which is exactly the ambiguity that produced the 44% noise.\n- 'Which commit removed this text?' — 'git log -S<literal> -- <path>' names the commit. An auto-close then cites the commit that closed it, so the claim is checkable later instead of being a silent inference.\n\nIt also retires a trade-off the item contract currently concedes outright: 'a rename mis-closes'. Git's rename detection follows the file, so that concession stops being necessary rather than being documented.\n\nTwo caveats worth building in from the start:\n- A shallow clone has no history to query, so the check must FAIL OPEN — unknown means the item stays open and is surfaced, never auto-closed. An auto-close that depends on clone depth would be a new false-green of exactly the kind this is meant to remove.\n- It does not solve semantic staleness: if the quoted text was rewritten but the underlying bug remains, git says 'removed' and the item still closes wrongly. Same limit as today, just worth not overclaiming.\n\nSo: adopt the git-history version instead of the state split, fail open on missing history. If you want, I will respec sol-3 that way and bring it back rather than treating this as approval to build it.",
+    "replied_at": "2026-07-30T15:53:14.197Z"
   }
 }

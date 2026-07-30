@@ -26,11 +26,7 @@
   never re-raised. The ledger separates ANSWERED from DONE: `answer.mjs --list` reports both, and
   a determination leaves the list only via `--done <key> <ref>` naming the landing (or `--question`
   for a counter-question). Answers settled before that tracking began are `--settled` history and make
-  no landing claim. The last approved build — **guard reach as declared data** (`ec64d159`) — shipped in
-  `3cd3dbc1`: `scripts/guard-reach-data.mjs` registers every guard, its wiring and its scanned set
-  (uncovered halves stated as data); `check:guard-reach` reconciles it in `verify:checks` plus an
-  unconditional pre-commit leg.
-  Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
+  no landing claim.  Two remain owner-OWNED and no lap can close them: the **A7 GUI host checklist** (a human at
   Antigravity / OpenCode / VS Code) and the **dogfood run** below.
   ⚠ Two decision traps to read before building: the per-site pinning gate's diff-derived site list does
   NOT solve its second property (expected-failing test names are still author-supplied, so a naive build

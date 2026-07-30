@@ -20,6 +20,7 @@ import {
   readOpenItems,
   nightsBetween,
   recordViewed,
+  recordReply,
 } from '../../scripts/nightly/items.mjs';
 import { renderInbox, writeInbox } from '../../scripts/nightly/render-inbox.mjs';
 import { ingestAnswers } from '../../scripts/nightly/ingest-answers.mjs';
@@ -380,6 +381,53 @@ describe('inbox ingest — a ticked box becomes a ledger entry', () => {
     const res = ingestAnswers(root, { dryRun: true });
     expect(res.recorded).toHaveLength(1);
     expect(Object.keys(readDecisionsRaw(root))).toHaveLength(0);
+  });
+
+  it('renders an ASK BACK exchange — the question and its reply, above fresh answer boxes', () => {
+    // Without this the item returns looking untouched: the owner's question is
+    // recorded but invisible, and there is nowhere to reply. That makes the loop
+    // one-way, which is not an async conversation.
+    const it1 = item({ id: 'DOC-1' });
+    writeInboxFor([it1]);
+    tick('Ask back');
+    setNote('which of the two paths do you mean?');
+    ingestAnswers(root);
+
+    let md = readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8');
+    expect(md).toContain('You asked back');
+    expect(md).toContain('which of the two paths do you mean?');
+    expect(md).toMatch(/Not answered yet/);
+
+    recordReply(root, it1.subject_key, 'The second one — via the shared core.');
+    writeInbox(root);
+    md = readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8');
+    expect(md).toContain('The second one — via the shared core.');
+    expect(md).not.toMatch(/Not answered yet/);
+    // …and it is still answerable.
+    expect(md).toMatch(/- \[ \] \*\*1\. /);
+  });
+
+  it('refuses an empty reply — it would leave the question looking answered', () => {
+    const it1 = item({ id: 'DOC-1' });
+    writeInboxFor([it1]);
+    tick('Ask back');
+    setNote('a question');
+    ingestAnswers(root);
+    expect(() => recordReply(root, it1.subject_key, '   ')).toThrow(/empty reply/);
+  });
+
+  it('an answer AFTER an ask-back settles it and drops it from the inbox', () => {
+    const it1 = item({ id: 'DOC-1' });
+    writeInboxFor([it1]);
+    tick('Ask back');
+    setNote('a question');
+    ingestAnswers(root);
+    recordReply(root, it1.subject_key, 'here is the answer');
+    writeInbox(root);
+
+    tick('1. Keep it');
+    ingestAnswers(root);
+    expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toMatch(/Nothing to answer/);
   });
 
   it('an untouched inbox records nothing and reports the items as unanswered', () => {

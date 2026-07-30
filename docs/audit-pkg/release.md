@@ -9,31 +9,41 @@ npm ci
 npm run verify:release
 ```
 
-`verify:release` covers:
+`verify:release` runs `verify:checks` first, then the full vitest suite, then both
+linked-install smokes. The `verify:checks` half is generated from `package.json`
+below — in its real order, so this list cannot drift from the gate:
 
-- TypeScript typecheck (`build`)
-- test-tree typecheck (`check:tests`)
+<!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
+
 - raw control-byte gate (`check:control-bytes`)
 - version-gate scan (`check:version-gates`)
 - guard wiring/reach reconciliation (`check:guard-reach`)
 - loop-core pattern-list drift check (`check:loop-core-patterns`)
 - constitutional-doc-path parity (`check:constitutional-doc-paths`)
-- backlog size-budget gate (`check:backlog-budget`)
-- backlog status-token gate (`check:backlog-status`)
-- backlog seek-index parity (`check:backlog-index`)
-- memory-citation check (`check:memory-citations`)
-- README philosophy-brief parity (`check:philosophy-brief`)
-- nightly scheduler-prompt parity (`check:nightly-routine-prompt`)
-- HANDOFF roadmap parity (`check:handoff-roadmap`)
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
 - relative-link resolution gate (`check:doc-links`)
 - backticked repo-path citation gate (`check:doc-code-citations`)
+- gate-enumeration parity (this list) (`check:gate-enumeration`)
+- README philosophy-brief parity (`check:philosophy-brief`)
+- nightly scheduler-prompt parity (`check:nightly-routine-prompt`)
+- HANDOFF roadmap parity (`check:handoff-roadmap`)
+- backlog seek-index parity (`check:backlog-index`)
+- memory-citation check (`check:memory-citations`)
+- backlog size-budget gate (`check:backlog-budget`)
+- backlog status-token gate (`check:backlog-status`)
+- test-tree typecheck (`check:tests`)
+- TypeScript typecheck (`build`)
+- host-install verification (audit) (`verify:hosts`)
+- host-install verification (remediate) (`verify:remediate-hosts`)
 - single-tarball pack smoke (`pack:smoke`)
-- full automated test suite (`vitest run`)
-- host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
-- packaged-install smoke coverage for both bins (`smoke:packaged-audit-code`, `smoke:packaged-remediate-code`)
-- linked-install smoke coverage for both bins (`smoke:linked-audit-code`, `smoke:linked-remediate-code`)
+- packaged-install smoke (audit-code) (`smoke:packaged-audit-code`)
+- packaged-install smoke (remediate-code) (`smoke:packaged-remediate-code`)
+
+<!-- END gate-enumeration -->
+
+…followed by the full automated test suite (`vitest`), then
+`smoke:linked-audit-code` and `smoke:linked-remediate-code`.
 
 For live child-process output while debugging smoke tests:
 

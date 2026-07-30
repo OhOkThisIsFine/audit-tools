@@ -294,10 +294,6 @@ would match nothing at dispatch. Keying the gate on the transport inverts both c
 why it was a gate BYPASS: confirming one backend marked an identically-named model on another as
 approved.
 
-⚠ **Known residue:** one backend reachable through SEVERAL transports yields one delta entry carrying
-one transport's pattern, so an autonomous fail-closed exclusion drops only that route. Tracked in
-`docs/backlog.md`.
-
 ## Honest residuals — loud reactive degrade, NOT guarantees
 
 - A host that **lies reachably** (real endpoint, overstated window, wrong-account key) is caught only

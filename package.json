@@ -48,7 +48,7 @@
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "verify:guards": "node scripts/shared/run-vitest-gate.mjs --retry=2 --exclude \"**/audit-code-completion.test.ts\" --exclude \"**/audit-code-wrapper.test.ts\" --exclude \"**/audit/next-step.test.ts\" --exclude \"**/seam-host-only-next-step.test.ts\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",
-    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:version-gates check:guard-reach check:loop-core-patterns check:constitutional-doc-paths check:deadcode check:doc-manifest check:doc-links check:doc-code-citations check:philosophy-brief check:nightly-routine-prompt check:handoff-roadmap check:backlog-index check:memory-citations check:backlog-budget check:backlog-status check:tests build verify:hosts verify:remediate-hosts pack:smoke smoke:packaged-audit-code smoke:packaged-remediate-code",
+    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:control-bytes check:version-gates check:guard-reach check:loop-core-patterns check:constitutional-doc-paths check:deadcode check:doc-manifest check:doc-links check:doc-code-citations check:gate-enumeration check:philosophy-brief check:nightly-routine-prompt check:handoff-roadmap check:backlog-index check:memory-citations check:backlog-budget check:backlog-status check:tests build verify:hosts verify:remediate-hosts pack:smoke smoke:packaged-audit-code smoke:packaged-remediate-code",
     "verify:release": "npm run verify:checks && node scripts/shared/run-vitest-gate.mjs && npm run smoke:linked-audit-code && npm run smoke:linked-remediate-code",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "check:guard-reach": "node scripts/check-guard-reach.mjs",
@@ -85,7 +85,8 @@
     "check:handoff-roadmap": "node scripts/shared/generate-handoff-roadmap.mjs --check",
     "check:backlog-status": "node scripts/check-backlog-status-tokens.mjs",
     "check:backlog-index": "node scripts/shared/generate-backlog-index.mjs --check",
-    "test:rebaseline-flakes": "node scripts/shared/rebaseline-flakes.mjs"
+    "test:rebaseline-flakes": "node scripts/shared/rebaseline-flakes.mjs",
+    "check:gate-enumeration": "node scripts/check-gate-enumeration.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -56,7 +56,25 @@ records them in the tracked ledger, and does the work.
 
 const esc = (s) => String(s ?? '').replace(/\r/g, '');
 
-function renderItem(item) {
+/**
+ * An item the owner asked BACK on: show their question and the reply, above the
+ * fresh answer boxes. Without this the item returns looking untouched, which
+ * reads as the routine ignoring them.
+ */
+function renderExchange(decision) {
+  if (!decision || decision.disposition !== 'question') return [];
+  const lines = ['### ⤺ You asked back', ''];
+  for (const l of esc(decision.answer).split('\n')) lines.push(`> ${l}`);
+  lines.push('');
+  if (decision.reply) {
+    lines.push('**Answer:**', '', esc(decision.reply), '');
+  } else {
+    lines.push('*(Not answered yet — the next agent to run the routine owes you a reply here.)*', '');
+  }
+  return lines;
+}
+
+function renderItem(item, decision) {
   const opts = Array.isArray(item.options) ? item.options : [];
   const nights = Number(item.nights_open) || 0;
   const age = nights >= 5 ? ` · **open ${nights} nights**` : nights > 0 ? ` · open ${nights} night${nights === 1 ? '' : 's'}` : '';
@@ -80,6 +98,7 @@ function renderItem(item) {
   lines.push('');
   lines.push(esc(item.question));
   lines.push('');
+  lines.push(...renderExchange(decision));
   lines.push('### Your answer');
   lines.push('');
   opts.forEach((o, i) => {
@@ -142,10 +161,10 @@ export function renderInbox({ items, decisions = {}, run = null, applied = [], s
       const group = items.filter((i) => i.leg === leg);
       if (group.length === 0) continue;
       out.push(`\n# ${LEG_TITLES[leg] ?? leg}\n`);
-      for (const item of group) out.push(`\n${renderItem(item)}\n`);
+      for (const item of group) out.push(`\n${renderItem(item, decisions[item.subject_key])}\n`);
     }
     const ungrouped = items.filter((i) => !LEGS.includes(i.leg));
-    for (const item of ungrouped) out.push(`\n${renderItem(item)}\n`);
+    for (const item of ungrouped) out.push(`\n${renderItem(item, decisions[item.subject_key])}\n`);
   }
 
   if (applied.length > 0) {

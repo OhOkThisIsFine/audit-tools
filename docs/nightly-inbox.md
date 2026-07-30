@@ -28,95 +28,6 @@ records them in the tracked ledger, and does the work.
 ---
 
 
-# Documentation
-
-
-<!-- nightly:item key=69602af54445829b -->
-
-## `docs-1` — Backend-identity Stage 5 shipped, but two docs still describe its residue as open — and they point at each other
-
-*Documentation · open 1 night · `spec/unified-dispatch-worker-model.md`*
-
-### In plain terms
-
-Two documents describe a limitation that the code no longer has. The dispatch worker-model spec carries a warning box saying that when one vendor can be reached over several different routes, an automatic "rule this backend out" write only rules out the single route it happened to record — leaving the other routes still usable. That was true once. It is not true now: the code was changed (commit c3567b27, already in the current tree) so the automatic write rules out the vendor itself rather than one route, which covers every route at once. The spec’s sibling document, backend-identity-axes.md, already states the corrected behaviour, so the two specs in the same cluster now contradict each other. Separately, the backlog lists this same work as "Stage 5" under an "Open remainder" heading, phrased as future work that still needs a review attestation — and the spec’s warning box says the residue is "Tracked in docs/backlog.md", which is that very bullet. That is why this is one decision and not two: deleting only the backlog bullet would leave the spec pointing at something that no longer exists, and deleting only the spec note would leave the backlog claiming work that is done. One caveat worth knowing before you answer: the first half of the warning is still literally true — there really is only one delta entry per backend, because the code deliberately keeps the first route it sees. It is the consequence drawn from that fact that is now wrong. So "just delete it" and "rewrite it to say what actually remains" are both defensible, which is why this is your call rather than an automatic fix.
-
-### The question
-
-Stage 5 (fail-closed autonomous write emits the service axis) shipped in c3567b27. Do you want the spec’s "Known residue" warning and the backlog’s "Stage 5" bullet both deleted, or rewritten to state the narrower residual that genuinely remains (one delta entry per backend, first-writer-wins) without the refuted consequence?
-
-### Your answer
-
-- [ ] **1. Delete both** — Delete the "Known residue" paragraph from spec/unified-dispatch-worker-model.md and the "Stage 5" bullet from docs/backlog/forward-tracks.md. The work shipped; a shipped-status note is status-noise and first-writer-wins is already described elsewhere in the spec.
-- [ ] **2. Rewrite both to the real residual** — Keep a note in the spec but rewrite it: state that one backend yields one delta entry (first-writer-wins) and that the autonomous fail-closed write emits the service axis so this does not narrow the exclusion. Delete the backlog Stage 5 bullet, since the work is done and the durable fact now lives in the spec.
-- [ ] **3. Spec only, keep the backlog bullet** — Fix the spec’s residue paragraph and leave the backlog Stage 5 bullet alone — there is remaining work under that entry that the bullet is tracking.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- c3567b27 "backend-identity migration stage 5 — fail-closed autonomous write emits service: axis" is an ancestor of HEAD (git merge-base --is-ancestor confirmed) and touched exactly the files the backlog bullet names: src/audit/orchestrator/intakeExecutors.ts, src/shared/providers/identity.ts, src/shared/providers/sharedProviderConfirmation.ts.
-- serviceExclusionPattern(modelId, service) in src/shared/providers/identity.ts always returns a `service:`-prefixed pattern and can never return null.
-- src/shared/providers/sharedProviderConfirmation.ts sets service_exclusion_pattern unconditionally inside record(), for every recorded backend.
-- src/audit/orchestrator/intakeExecutors.ts consumes it preferentially in the autonomous fail-closed write: `b.service_exclusion_pattern ?? b.exclusion_pattern`.
-- The sibling spec spec/backend-identity-axes.md states the corrected fact outright: "The autonomous fail-closed write emits the service axis, because that is the axis that does not decay." The two specs in one cluster disagree, and the code matches the axes doc.
-- STILL TRUE, and why this is not a plain deletion: record() keeps `if (reachNow.has(identity)) return;` — first-writer-wins, so there genuinely is one delta entry per backend identity. Only the consequence ("drops only that route") is refuted.
-- The spec paragraph says the residue is "Tracked in docs/backlog.md"; the tracking bullet is docs/backlog/forward-tracks.md "Stage 5", which sits under "Open remainder:" and reads as unstarted work ("Touches intakeExecutors.ts → loop-core, attestation required").
-- Reviewer lane surfaced the spec half; an independent adversary lane agreed on both sub-claims and separately flagged the backlog Stage 5 bullet. Verified again by hand against HEAD ccb530d7.
-
-</details>
-
----
-
-
-<!-- nightly:item key=50fb1a3a7d638c3b -->
-
-## `docs-2` — HANDOFF re-narrates a shipped mechanism that CLAUDE.md already owns — changelog creep, or legitimate current state?
-
-*Documentation · open 1 night · `docs/HANDOFF.md`*
-
-### In plain terms
-
-The handoff document has a passage describing the guard-reach mechanism that shipped a few commits ago: which script holds the registry, what it records, and which gates run it. The same mechanism is already described durably in CLAUDE.md, in its "Durable traps are MECHANICALLY enforced" paragraph. So the description now exists in two places, and the two will drift apart over time — the repo’s own documentation philosophy calls that out as "one home per concept". The handoff copy additionally narrates the work as completed and cites two commit hashes, which is the shape its own header explicitly warns against: that header says this section "had twice grown into version-by-version narration, which is the changelog creep this doc’s own header forbids". The reason this is a question rather than an automatic edit is that HANDOFF is the one document in this repo that is *supposed* to hold current state and sequencing — saying "the last approved determination landed, here is where" is arguably exactly its job, not creep. Deciding which of those two readings applies is a judgment about what the handoff is for, so the routine will not make it alone.
-
-### The question
-
-Does this passage count as the changelog creep HANDOFF’s own header forbids — trim it to a pointer at CLAUDE.md and the ledger — or is naming the last landed determination legitimate current-state sequencing that should stay?
-
-### Your answer
-
-- [ ] **1. Trim to a pointer** — Trim it. HANDOFF should say the last determination landed and point at the decisions ledger; the mechanism description belongs only in CLAUDE.md, which already has it. Drop the commit hashes and the re-description.
-- [ ] **2. Keep — this is current state, not creep** — Keep it. Naming the last approved determination and where it landed is what HANDOFF is for, and the commit refs are how the next agent orients. The CLAUDE.md paragraph is the durable rule; this is the sequencing view.
-- [ ] **3. Keep the fact, drop the mechanism restatement** — Keep the sentence naming ec64d159 as landed in 3cd3dbc1, but delete the trailing re-description of what guard-reach-data.mjs does and which gates run it — that half is the duplicated part.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (6) — what was verified against code, and how</summary>
-
-- CLAUDE.md already carries the same mechanism in its "Durable traps are MECHANICALLY enforced" paragraph: "Guard wiring + reach are DECLARED DATA … scripts/guard-reach-data.mjs registers every guard … npm run check:guard-reach … reconciles the registry against the tracked tree."
-- docs/HANDOFF.md’s own header states the section "had twice grown into version-by-version narration, which is the changelog creep this doc’s own header forbids".
-- docs/documentation-philosophy.md forbids changelog/progress creep and states one home per concept.
-- Countervailing: the doc-manifest routes docs/HANDOFF.md as the sanctioned sequencing/current-state view, so a current-state claim there is not automatically status-noise.
-- Both commits are real and are ancestors of HEAD: 3cd3dbc1 landed the registry; 83c56e0d recorded ec64d159 DONE in the determinations ledger.
-- Reviewer lane raised this at medium confidence, explicitly as a judgment call rather than a factual error. No auto-apply was attempted.
-
-</details>
-
----
-
-
 # Recurring-problem solutions
 
 
@@ -133,6 +44,22 @@ Leg 2 of this routine checks every backlog entry against the code to find entrie
 ### The question
 
 Approve fixing the triage lane to surface the provider’s real error, honour the stated retry-after through the existing shared quota error parser, and stop adding errored ids to the resume set?
+
+### ⤺ You asked back
+
+> I would approve all three fixes, because that's obviously the correct route to go, but I have a question - shouldn't the fix be in llm-relay ?
+
+**Answer:**
+
+You are right about the main one, and I verified it rather than assuming. pool/coding has 14 candidates and gemini-2.5-flash is not even first (glm-5.2 is). I ran 8 sequential calls through pool/coding: two were served by gemini-2.5-flash and six came back as raw 429/503. Not one was served by any of the other 13 candidates. So the pool is not failing over at all, which is its entire stated purpose ('benchmark-ranked with failover'). That is an llm-relay defect and it is the BIGGER half — with working failover the rate limit would mostly never have reached the caller.
+
+But the three audit-tools defects are independent of it and survive the relay fix:
+
+1. Error surfacing. Even with perfect failover, a fully exhausted pool must still return an error, and reporting it as 'finish_reason=undefined' — discarding a body that literally says 'Please try again in 20.4525s' — is the caller throwing away information it was handed. Not the relay's job.
+2. The resume set adds errored ids to 'done', so a re-run silently retries nothing and exits 0. No relay involvement whatsoever.
+3. Entry ids are positional ('open-bugs#27'), so deleting a backlog entry renumbers every later row. This one bit live during the run.
+
+Revised recommendation, splitting the approval you were inclined to give: do (1), (2) and (3) in audit-tools — they are real bugs regardless. Do NOT add retry/backoff to the triage script; that is the part that genuinely belongs in llm-relay, and duplicating it in the caller would hide the relay bug rather than fix it. I have not filed anything against llm-relay since it is a separate project — say the word and I will.
 
 ### Your answer
 
@@ -168,53 +95,6 @@ Full proposal: [`.audit-tools/nightly/proposals/P5-triage-lane-masks-429/PROPOSA
 ---
 
 
-<!-- nightly:item key=41867ca7c56a3c17 -->
-
-## `sol-2` — The gate step list is hand-copied into two docs and drifted on two consecutive nights — generate it, the way the README philosophy block already is
-
-*Recurring-problem solutions · open 1 night · `.claude/skills/ship/SKILL.md`*
-
-### In plain terms
-
-The list of checks that make up the release gate lives for real in package.json, as the verify:checks script. It is also written out in prose in two other places: the release guide and the ship skill. Those two copies are maintained by hand, which means every time a new check is added to the gate, both copies silently become wrong and nothing fails — the error only surfaces when a human happens to compare them. That has now happened on two nights in a row. Last night this routine added a missing check:doc-links row to the release guide and missing doc-links and nightly-routine-prompt rows to the ship skill, and recorded that the ship skill "now matches package.json in exact order". Tonight both were stale again, because a new check landed in between. This repo has already solved this exact problem once: the README’s philosophy section used to be a hand-maintained restatement, and CLAUDE.md describes retiring that as replacing "a drift test made of memory, which is the thing this project bans" — it is now generated and parity-gated. The proposal is to do the same here: render both lists from package.json through a small data module that supplies each step’s human-readable gloss, and add a parity gate so a hand-edited list fails the build.
-
-### The question
-
-Approve generating the verify:checks / verify:release step enumerations from package.json with a parity gate, the same pattern as check:philosophy-brief and check:doc-manifest?
-
-### Your answer
-
-- [ ] **1. Approve — generate both, with a gloss data module** — Approve. Add marker-delimited generated blocks to both docs, render from package.json step order through a data module mapping step to its human gloss (same shape as scripts/doc-manifest-data.mjs), and gate byte parity with a check script in verify:checks supporting --write. A gate step with no gloss is a build failure.
-- [ ] **2. Gate only — fail on drift, keep the prose hand-written** — Do not generate the prose. Just add a check that fails when a verify:checks step is named in package.json but appears in neither doc’s list, and leave the wording to a human.
-- [ ] **3. Only the machine-readable list, drop the glosses** — Generate a bare step list from package.json in both docs and drop the per-step human glosses — the script names are self-explanatory enough and a gloss table is more to maintain.
-- [ ] **4. Leave it — the nightly catching it is fine** — Leave it as is. The nightly doc review catches the drift within a day, and that is a cheap enough backstop for a prose list that nothing executes.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P6-gate-enumeration-generated/PROPOSAL.md`](../.audit-tools/nightly/proposals/P6-gate-enumeration-generated/PROPOSAL.md)
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- package.json verify:checks is the single source of truth and currently has 23 steps, with check:guard-reach third, between check:version-gates and check:loop-core-patterns.
-- Tonight, both prose lists omitted check:guard-reach entirely — confirmed by a reviewer lane, an independent adversary lane, and a direct comparison against package.json. Both were fixed as leg-1 stale-factual edits this run.
-- Last night’s applied list recorded the same class of fix twice: "docs/audit-pkg/release.md — the verify:release enumeration gained the missing check:doc-links row" and ".claude/skills/ship/SKILL.md — the verify:checks enumeration gained the missing doc-links and nightly-routine-prompt rows; it now matches package.json in exact order."
-- Four omissions across two files on two consecutive nights. check:guard-reach landed in 3cd3dbc1, a commit with no reason to know two prose restatements existed.
-- The precedent is in-repo and explicit: CLAUDE.md’s "One brief, two consumers — never a second copy of the philosophy" describes the README philosophy block as previously "a hand-maintained restatement kept honest by an instruction to remember to update it — a drift test made of memory, which is the thing this project bans". It is now generated and gated by check:philosophy-brief in verify:release.
-- Two comparable generators already exist and are not known false-failure sources: check:philosophy-brief and check:doc-manifest (the latter rendering from scripts/doc-manifest-data.mjs, the gloss-data shape this proposal reuses).
-- Design wrinkle for the owner: the two docs render the same list differently — release.md as glossed bullets, ship/SKILL.md as a "+"-joined inline sentence — so this is one source with two render shapes.
-- Full proposal: .audit-tools/nightly/proposals/P6-gate-enumeration-generated/PROPOSAL.md
-
-</details>
-
----
-
-
 <!-- nightly:item key=5938b991779c1cd2 -->
 
 ## `sol-3` — A probe path that does not exist reads exactly like a premise that vanished — 44% of tonight’s leg-2 probes, and 20 of its 27 "already done" stamps
@@ -228,6 +108,26 @@ Backlog and nightly items carry "premise probes": a file plus a literal string q
 ### The question
 
 Approve splitting probe absence into "file not found" versus "fragment not found" in evaluateProbes, so only a genuine fragment-absence can auto-close an item, and a malformed probe degrades to no-signal instead of to "shipped"?
+
+### ⤺ You asked back
+
+> Would the best solution not to be to look at diffs? Git records tracked file history, and we can compare old to new versions to see whether something was fixed.
+
+**Answer:**
+
+Yes — that is better than what I proposed, and it subsumes it. I was going to split one bit (file-missing) from another (text-missing); git answers the sharper question directly, with evidence instead of inference.
+
+Two things it gives that my version cannot:
+- 'Was this path EVER real?' — 'git log --all --full-history -- <path>' returning empty is a definitive bad-probe verdict. My proposal could only say 'not there now', which is exactly the ambiguity that produced the 44% noise.
+- 'Which commit removed this text?' — 'git log -S<literal> -- <path>' names the commit. An auto-close then cites the commit that closed it, so the claim is checkable later instead of being a silent inference.
+
+It also retires a trade-off the item contract currently concedes outright: 'a rename mis-closes'. Git's rename detection follows the file, so that concession stops being necessary rather than being documented.
+
+Two caveats worth building in from the start:
+- A shallow clone has no history to query, so the check must FAIL OPEN — unknown means the item stays open and is surfaced, never auto-closed. An auto-close that depends on clone depth would be a new false-green of exactly the kind this is meant to remove.
+- It does not solve semantic staleness: if the quoted text was rewritten but the underlying bug remains, git says 'removed' and the item still closes wrongly. Same limit as today, just worth not overclaiming.
+
+So: adopt the git-history version instead of the state split, fail open on missing history. If you want, I will respec sol-3 that way and bring it back rather than treating this as approval to build it.
 
 ### Your answer
 

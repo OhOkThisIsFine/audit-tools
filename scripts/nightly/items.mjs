@@ -110,6 +110,30 @@ export function recordDecision(root, key, { answer, disposition, subject, path, 
 }
 
 /**
+ * Answer a counter-question, so an `Ask back` becomes a two-way exchange.
+ *
+ * Without this the loop is one-way: the owner's question is recorded, the item
+ * correctly stays open, and then the next render shows the ORIGINAL proposition
+ * again with the question nowhere on the page and no channel to reply in. That
+ * is not an async conversation, it is a queue that silently drops half the
+ * traffic — caught the first time an item was actually asked back.
+ *
+ * The reply is carried on the decision, not on the item, because the item is
+ * regenerated every run while the exchange is the durable part.
+ */
+export function recordReply(root, key, reply) {
+  if (!reply || !String(reply).trim()) {
+    throw new Error('recordReply: an empty reply would leave the question looking answered');
+  }
+  const decisions = readDecisions(root);
+  const entry = decisions[key];
+  if (!entry) throw new Error(`recordReply: no recorded question "${key}"`);
+  decisions[key] = { ...entry, reply: String(reply).trim(), replied_at: new Date().toISOString() };
+  writeJson(decisionsPath(root), decisions);
+  return decisions[key];
+}
+
+/**
  * Mark a settled subject's WORK as landed. Separate from `recordDecision`
  * because answering and doing are separate acts, and conflating them is what
  * made twelve answered items invisible on 2026-07-28: `--list` reported "No
