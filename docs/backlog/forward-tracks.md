@@ -354,3 +354,13 @@ followed" is otherwise indistinguishable from a bug.
   not in play. Do not re-raise it.
 
 - **Packet `task_ids`/`lens` attribution is missing from the token-usage ledger** (`DispatchPlanEntry` carries neither). Non-blocking follow-up to the context-efficiency access-memory track, whose items 1-3 shipped.
+
+- **Dispatch inversion — llm-relay owns routing; audit-tools only estimates (OWNER DIRECTIVE
+  2026-07-30, given mid-dogfood-run).** audit-tools is doing far more dispatch control than it
+  should. Target shape: audit-tools estimates tokens for each task and packet and hands off; the
+  host or dispatching subagent routes via llm-relay when it is present on the machine, and
+  dispatches on its own when it is not. The per-tool pool/admission/tier machinery shrinks
+  accordingly. Run evidence for why: cost-first routing sent 59/60 packets to the priciest host
+  lane while free lanes idled on a misclassified cooldown, and the hard host-wave/pool-wave
+  partition made the tool's own documented remedies unreachable (see the 2026-07-30 defect cluster
+  in [`open-bugs.md`](open-bugs.md)). [[unified-dispatch-routing-direction]]

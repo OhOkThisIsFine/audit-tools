@@ -37,11 +37,17 @@
   relocates the claim instead of removing it); and contract-pipeline (b) narrows the
   whole-artifact-rewrite invariant, so it must be scoped to rejections naming specific fields.
 
-- **The dogfood self-audit is the OWNER's, in a separate conversation, after the code fixes land.**
-  14 `⬇ LIVE-run watch` entries are blocked only on evidence from it (9 in `open-bugs.md`, 5 in
-  `forward-tracks.md`). A lap lands what it can WITHOUT
-  the run and must not start one: a commit mid-run re-stales the planning chain and regresses it to
-  `charter_extraction`. Recipe is in the collapsed section below.
+- **The dogfood self-audit RAN TO COMPLETION 2026-07-29/30** (owner-authorized, maximal coverage,
+  deep design review). Deliverables: `.audit-tools/audit-report.md` + `audit-findings.json`
+  (1567 findings — 2 critical, 31 high), friction record `.audit-tools/audit/friction/run.json`
+  (14 observations). The 14 `⬇ LIVE-run watch` entries now HAVE their evidence — **walking them
+  against the run record is the immediate post-run item**, alongside triaging the report itself.
+  Headline: the `no_capable_pool` pause PASSED (honest, resumable), with a seven-part defect
+  cluster attached (see the 2026-07-30 entry in [`open-bugs.md`](backlog/open-bugs.md)) — including
+  a false-green `present_report` promotion and free-lane starvation via a quota misclassification.
+  An OWNER DIRECTIVE from the run — dispatch inversion, llm-relay owns routing — is specced in
+  [`forward-tracks.md`](backlog/forward-tracks.md). Recipe for future runs stays in the collapsed
+  section below.
 
 - **⚠ A credential is NAMED, never pasted — inline `api_key` is retired on both declaration shapes.**
   A config carrying one is REFUSED at validation with an actionable message; that refusal is the

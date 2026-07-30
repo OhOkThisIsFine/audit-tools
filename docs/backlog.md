@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 151 entr(y/ies) indexed.
+> and at commit). 153 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -115,6 +115,7 @@
 - `open-bugs.md:1140` — Selective-deepening convergence — live validation env-bound.
 - `open-bugs.md:1162` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
 - `open-bugs.md:1171` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:1180` — Dogfood self-audit 2026-07-30 — dispatch/loop defect cluster (one run, one evidence set: `.audit-tools/audit/friction/run.json` + the run's event log).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -139,6 +140,7 @@
 - `forward-tracks.md:301` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
 - `forward-tracks.md:312` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
 - `forward-tracks.md:356` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
+- `forward-tracks.md:358` — Dispatch inversion — llm-relay owns routing; audit-tools only estimates (OWNER DIRECTIVE 2026-07-30, given mid-dogfood-run).
 
 ### [`deferred.md`](backlog/deferred.md)
 
