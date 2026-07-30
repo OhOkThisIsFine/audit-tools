@@ -51,6 +51,25 @@ function trackedMarkdown() {
 const INLINE_LINK = /\[[^\]]*\]\(\s*<?([^)<>\s]+)>?(?:\s+"[^"]*")?\s*\)/g;
 const REFERENCE_DEF = /^[ \t]{0,3}\[[^\]]+\]:[ \t]+<?([^\s<>]+)>?/gm;
 
+/**
+ * Blank out code — fenced blocks and inline spans — before links are extracted.
+ *
+ * A `[text](path)` written inside backticks is a SYNTAX EXAMPLE, not a link.
+ * Docs here explain markdown link checking often enough that this matters, and
+ * the failure is pure noise: the gate reports a broken link at a line that
+ * contains no link, which is the false-RED that teaches a reader to distrust a
+ * gate whose whole value is being objective.
+ *
+ * Replacement preserves BOTH length and newlines, so byte offsets — and the
+ * line numbers `lineAt` derives from them — stay exact.
+ */
+export function maskCode(source) {
+  const blank = (m) => m.replace(/[^\n]/g, " ");
+  return source
+    .replace(/^[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?^[ \t]{0,3}\1[ \t]*$/gm, blank) // fenced
+    .replace(/(`+)(?:[^`]|(?!\1)`)*\1/g, blank); // inline spans, incl. ``a ` b``
+}
+
 /** Targets that are not repo-relative paths and cannot be resolved on disk. */
 function isExternal(target) {
   return (
@@ -167,7 +186,8 @@ export function findDeadLinks(files = trackedMarkdown()) {
   for (const file of files) {
     const absolute = join(root, file);
     if (!existsSync(absolute)) continue; // staged-delete race
-    const source = readFileSync(absolute, "utf8");
+    // Offsets are preserved by the mask, so findings still report real lines.
+    const source = maskCode(readFileSync(absolute, "utf8"));
 
     for (const re of [INLINE_LINK, REFERENCE_DEF]) {
       re.lastIndex = 0;

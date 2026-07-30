@@ -248,24 +248,43 @@ collapsed **technical evidence** list underneath. The routine populates the
 `eli5` field for every escalated item — a decision needs the full picture, and a
 plain-language version is what makes it answerable without re-derivation.
 
-Two surfaces render those items:
+The answering surface is **one tracked markdown file**,
+[`docs/nightly-inbox.md`](nightly-inbox.md), rendered by
+`scripts/nightly/render-inbox.mjs` (`npm run nightly:inbox`). Each open item
+becomes a block with its plain-terms explanation, its question, and its options
+as **checkboxes**. Answering is: tick exactly one box, save. Every item also
+carries **Other**, **Won't fix** and **Ask back**, so an answer the routine did
+not anticipate — including "your premise is wrong" — is always expressible.
 
-- **Static snapshot** — `.audit-tools/nightly/latest.html`
-  (`scripts/nightly/render-digest.mjs`), a read-only record the run writes.
-- **Interactive review** — `npm run nightly:review` (`scripts/nightly/serve.mjs`).
-  A tiny server bound to **127.0.0.1 only** that renders the same items with a
-  **text box and Settle / Won't-fix buttons**; clicking one records the answer
-  and the item collapses. A `file://` page cannot persist a click, which is why
-  answering is a served page rather than the static file — the one command
-  starts it, and everything after is buttons. Stop it with Ctrl-C.
+`scripts/nightly/ingest-answers.mjs` (`npm run nightly:ingest`) reads the ticks
+back, records them in the durable ledger, and re-renders so answered items drop
+out. It **refuses** rather than guesses: two ticked boxes, or an `Other` /
+`Won't fix` / `Ask back` with an empty note, records nothing for that item and
+reports why — one malformed answer never blocks the rest.
 
-After `writeOpenItems()` persists the machine contract, render and open the
-snapshot with `node scripts/nightly/render-digest.mjs --open`. When nothing was
-applied, open, or skipped, stay silent rather than churning the digest.
+Why a tracked markdown file and not the HTML digest plus localhost server this
+replaced. The old pair was technically sound — a `file://` page genuinely cannot
+persist a click, so buttons required a server — but it answered the wrong
+question. What answering needs is to be **async, easy, and reachable from
+wherever the owner is**, and a tracked file is all three: any editor opens it,
+GitHub's web UI edits it from a phone, git syncs it between machines and keeps
+the history, and nothing has to be running. Being tracked is the other half —
+an escalation that lives only in one machine's untracked scratch is lost the
+moment you are not sitting at that machine. Deleting the renderer and the server
+removed ~560 lines and the entire "is the server up?" question.
 
-A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**,
-and only when a subject has not been announced before, pointing at
-`npm run nightly:review`.
+The machine contract (`.audit-tools/nightly/open-items.json`) and the full
+proposals (`.audit-tools/nightly/proposals/**/*.md`) are tracked for the same
+reason. When nothing was applied, open, or skipped, stay silent rather than
+churning the inbox.
+
+A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**, at
+most once per subject, and is otherwise silent. It has exactly two things to
+say: *there are new propositions waiting* (pointing at the inbox), or *there are
+answered items ready to apply* (pointing at the ingest command). **Nothing open
+means nothing printed** — not even a count of what was auto-closed. Both
+announcements are bounded by the viewed ledger, because many answers imply no
+work at all and would otherwise nag forever.
 
 This replaced a hook that printed the full decision table into every
 conversation. It failed for reasons worth keeping written down, because they are
@@ -292,7 +311,8 @@ in [`scripts/nightly/items.mjs`](../scripts/nightly/items.mjs). Answers are
 recorded against the subject in `.claude/nightly-decisions.json` — tracked, so it
 outlives runs, branches and machines.
 
-Answer with the buttons in `npm run nightly:review`, or from a shell:
+Answer by ticking a box in [`docs/nightly-inbox.md`](nightly-inbox.md) and
+running `npm run nightly:ingest`, or directly from a shell:
 
 ```bash
 node scripts/nightly/answer.mjs <ID> "the answer"      # settle it
@@ -569,10 +589,11 @@ the check for its type:
 | **backlog** | `docs/backlog.md`, `docs/backlog/open-bugs.md`, `docs/backlog/forward-tracks.md`, `docs/backlog/deferred.md`, `docs/backlog/durable-traps.md` | Shipped-detection (see *Shipped-entry deletion* below — a fully-shipped entry is **deleted outright**, never kept as a `SHIPPED`/`FIXED`/`DONE` marker; a partial entry is **trimmed to its open remainder**); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
 | **handoff (sequencing view)** | `docs/HANDOFF.md` | The ordered roadmap of everything open + current state (sanctioned per the philosophy's HANDOFF row): each open item appears once, in suggested order, with a pointer to its `backlog.md` detail. Flag **changelog creep** (narrated already-shipped work) and **per-item specs duplicated from `backlog.md`**; verify each item vs code; a done item → clear it, with proof. NOT immediate-next-only. | yes |
 | **design / concept (`spec/`)** | `spec/**/*.md` (the normative design corpus — workflow designs, contracts, goals docs; routed by pattern, so a new spec is registered the moment it lands) | Claims vs code (drift); flag current-state / changelog creep (durable design only). A `> **Status:** <type-declaration>` preamble identifying the kind of design artifact is permitted; a dated/versioned status string in it is still status-noise → escalate. The goals docs and the `spec/audit/*` contracts are **normative** — see *Normative goals docs* above and the constitutional-doc refusal in `src/shared/constitutionalDocPaths.ts`: a change to one is a design-decision → escalate. | factual-stale → yes (except the constitutional subset — escalate-only) |
-| **excluded** | `docs/doc-review-guidelines.md` (this spec — excluded from its own review), `docs/reviews/*-<date>.md` (dated review / plan / diagnosis / dogfood records — excluded BY CONSTRUCTION. Each is a one-off record of what was decided on a day, never a timeless concept; the durable outcome lives in `spec/`, the backlog, or project memory. This pattern replaced a 21.5k-character exhaustive list that grew every lap), `.audit-tools/audit-report.md` (runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed), `.audit-tools/remediation-report.md` (runtime run-artifact — the structurally parallel remediate-code run output; tracked but never reviewed), `tests/audit/fixtures/simple-app/README.md` (test-fixture content — a sample-app README, its own concern, not a project doc) | — | — |
+| **excluded** | `docs/doc-review-guidelines.md` (this spec — excluded from its own review), `docs/reviews/*-<date>.md` (dated review / plan / diagnosis / dogfood records — excluded BY CONSTRUCTION. Each is a one-off record of what was decided on a day, never a timeless concept; the durable outcome lives in `spec/`, the backlog, or project memory. This pattern replaced a 21.5k-character exhaustive list that grew every lap), `.audit-tools/nightly/proposals/**/*.md` (nightly leg-3 proposal records — the full analysis behind an escalated item (recurrence evidence, proposed mechanism, false-positive surface). TRACKED so a proposal outlives the machine that produced it, but excluded BY CONSTRUCTION for the same reason as a dated review: each is a one-off record of a proposition as it stood that night, never a timeless concept. They deliberately cite paths that do not exist — a file the proposal proposes CREATING, or one deleted since — so reviewing them for staleness, or citation-checking them, would be checking a historical record against a present tree. Accepted outcomes land in code, `spec/`, the backlog or memory; the record stays as provenance), `.audit-tools/audit-report.md` (runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed), `.audit-tools/remediation-report.md` (runtime run-artifact — the structurally parallel remediate-code run output; tracked but never reviewed), `tests/audit/fixtures/simple-app/README.md` (test-fixture content — a sample-app README, its own concern, not a project doc) | — | — |
 | **generated host assets** | `.agent/skills/audit-code/SKILL.md`, `.agent/skills/remediate-code/SKILL.md`, `.github/agents/auditor.agent.md`, `.github/agents/remediator.agent.md`, `.github/copilot-instructions.md`, `.github/prompts/audit-code.prompt.md`, `.github/prompts/remediate-code.prompt.md` | ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — governed by renderer drift tests (`tests/audit/host-asset-renderer-drift.test.ts`, `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`, `tests/remediate/install-repo-assets.test.ts`). Review the canonical source, not the generated copy; a diff = a drift-test/renderer gap, not a doc edit. | **No — renderer-owned.** |
 | **canonical loader bodies** | `skills/audit-code/SKILL.md`, `skills/audit-code/audit-code.prompt.md`, `skills/remediate-code/SKILL.md`, `skills/remediate-code/remediate-code.prompt.md` | HAND-AUTHORED sources, not generated output — the arrow points OUT of `skills/`: the renderer drift tests read these as the canonical body and assert the `.agent/**` and `.github/**` copies equal a fresh render of them, and `scripts/audit/postinstall.mjs` copies one outward as its literal prompt source. Nothing writes into `skills/`. Review them like any other doc — in particular the CLI invocations and flag literals they carry, which no other reviewer checks. Run `npm test` after editing (the drift tests will fail until the generated copies are re-rendered). | Yes — with the renderer drift tests re-run. |
 | **generated scheduler prompt** | `docs/nightly-routine-prompt.md` | WHOLE-FILE GENERATED from `docs/nightly-routine.md` (cross-leg routine) + `docs/doc-review-guidelines.md` (leg-1 rubric) by `scripts/check-nightly-routine-prompt.mjs`. Never hand-edit or resolve a conflict in the target; edit the owning source and regenerate. `check:nightly-routine-prompt` gates byte parity plus its `package.json` check/release wiring in `verify:checks` and at commit. | **No — generator-owned.** |
+| **generated decision inbox** | `docs/nightly-inbox.md` | GENERATED by `scripts/nightly/render-inbox.mjs` from `.audit-tools/nightly/open-items.json` — the nightly routine's answering surface, and the ONE tracked doc that is deliberately current-state rather than timeless. The owner answers by ticking a checkbox; `scripts/nightly/ingest-answers.mjs` reads the ticks into `.claude/nightly-decisions.json` and re-renders, so answered items drop out on their own. Everything except the ticked boxes and the `notes` blocks is rewritten on each run — review the item CONTENT at its source (`open-items.json`), never by hand-editing this file. Its status-noise is the point: it is a work queue, the same sanctioned exception as `docs/HANDOFF.md`. | **No — generator-owned** (and the owner's answers are the only hand-written part). |
 | **meta-tooling / dev-workflow** | `.claude/skills/design-check/SKILL.md`, `.claude/skills/disambiguate-backlog/SKILL.md`, `.claude/skills/ship/SKILL.md`, `.claude/skills/start-lap/SKILL.md`, `docs/nightly-routine.md` | Standalone dev-workflow how-to and scheduler-prompt SOURCE; do the documented commands/paths still resolve. Changes to `docs/nightly-routine.md` must regenerate the generated scheduler prompt. | factual-stale → yes |
 | **package READMEs (non-`docs/`)** | `src/audit/README.md`, `src/audit/adapters/README.md`, `examples/README.md` | Claims vs code; do documented commands/paths/providers still resolve (e.g. the provider list must match `PROVIDER_NAMES`). | factual-stale → yes |
 

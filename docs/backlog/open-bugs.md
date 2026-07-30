@@ -7,14 +7,6 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 
-- **`render-digest.mjs --open` discards the URL of the server it starts (2026-07-29, low, friction:
-  missing-affordance).** It spawns `serve.mjs` `detached` with `stdio: 'ignore'`, and `serve.mjs` binds
-  port 0, so the one line carrying the ephemeral URL goes to a closed pipe. The nightly run that starts
-  the review therefore cannot tell the owner where it is; recovering it means finding the pid and
-  reading its listening socket. **Property to hold:** the process that starts the answerable surface
-  knows its URL — have `serve.mjs` write the URL to a file the caller reads (or pass a port in), rather
-  than printing to a stream the caller threw away. ⚠ Not `stdio: 'inherit'`: the launcher is itself
-  detached from the nightly run, so there is no stream to inherit.
 
 - **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
   (2026-07-25, low, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep globbed

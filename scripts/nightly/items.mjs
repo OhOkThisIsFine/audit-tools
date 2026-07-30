@@ -21,7 +21,19 @@ import { dirname, join } from 'node:path';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
 export const OPEN_ITEMS_RELPATH = '.audit-tools/nightly/open-items.json';
-export const DIGEST_RELPATH = '.audit-tools/nightly/latest.html';
+// The answering surface is a TRACKED markdown file, not an HTML page.
+//
+// It was an HTML digest plus a localhost server (`npm run nightly:review`),
+// because a file:// page cannot persist a click without one. That reasoning was
+// sound and still is — it was the QUESTION that was wrong. Answering does not
+// need buttons; it needs to be async, easy, and reachable from wherever the
+// owner happens to be. A tracked markdown file with checkboxes is all three: it
+// opens in any editor, it is answerable from GitHub's web UI on a phone, it
+// diffs and syncs across machines like everything else in the repo, and it
+// needs no server, no browser, and no ceremony. Deleting the HTML renderer and
+// the server removed ~560 lines and one whole class of "is the server running"
+// friction.
+export const INBOX_RELPATH = 'docs/nightly-inbox.md';
 export const VIEWED_RELPATH = '.audit-tools/nightly/last-viewed.json';
 
 // The three legs of one nightly run. A leg is the KIND of work an item came

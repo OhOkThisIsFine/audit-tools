@@ -445,6 +445,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `` `tests/**` `` renders truncated ("Convert `tests/") in BOTH generated docs, silently. Seen
   2026-07-28. Write the glob in prose, or drop it to the entry body.
 
+- **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
+  its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
+  and the packaged smoke tests run that install, so `npm test` alone is enough to erase the edit.
+  It fails quietly: the rules work right up until any install runs, and the loss shows up later as
+  files that were tracked mysteriously becoming ignored again. Already-tracked files are unaffected
+  (gitignore does not untrack), which is what makes it easy to miss — only NEW matching files go
+  missing. Put custom rules **after** the closing marker; later rules win, so a negation there still
+  overrides the block's `.audit-tools/*` / `.audit-tools/*/*` patterns.
+
 ## Doc-set hygiene (enforced)
 
 

@@ -21,8 +21,8 @@ import {
   nightsBetween,
   recordViewed,
 } from '../../scripts/nightly/items.mjs';
-import { renderDigest } from '../../scripts/nightly/render-digest.mjs';
-import { createNightlyReviewServer } from '../../scripts/nightly/serve.mjs';
+import { renderInbox, writeInbox } from '../../scripts/nightly/render-inbox.mjs';
+import { ingestAnswers } from '../../scripts/nightly/ingest-answers.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
@@ -75,9 +75,18 @@ const item = (over: Partial<NightlyItemFixture> = {}): NightlyItemFixture => ({
   question: 'Should this stay?',
   evidence: ['grep found zero hits'],
   subject_key: subjectKey('spec/foo.md', 'the claim prose'),
+  // Every item carries options: an item without them degrades to a bare text
+  // box, which is what shipped on 2026-07-29 and made 18 items cost an essay
+  // each to answer.
+  options: [
+    { label: 'Keep it', answer: 'Keep the pin, it is a deliberate anchor.' },
+    { label: 'Drop it', answer: 'Remove the claim; it no longer holds.' },
+  ],
   premise_probes: [{ file: PROBE_FILE, contains: 'ANCHOR_PRESENT' }],
   ...over,
 });
+
+type NightlyItem = NightlyItemFixture;
 
 interface NightlyDecisionEntry {
   disposition: string;
@@ -96,15 +105,6 @@ interface NightlyDecisionEntry {
 // needing its own cast.
 function readDecisions(rootDir: string): Record<string, NightlyDecisionEntry> {
   return readDecisionsRaw(rootDir);
-}
-
-// The interactive review server's own return type as this file uses it — the
-// three methods actually called, with `address()` narrowed to the post-listen
-// TCP shape (never the pre-listen `null` or the unix-socket `string`).
-interface ReviewServer {
-  listen(port: number, host: string, callback: () => void): void;
-  address(): { address: string; port: number };
-  close(callback: () => void): void;
 }
 
 describe('subject key — identity is the SUBJECT, not the question wording', () => {
@@ -246,86 +246,148 @@ describe('open items — nights_open carries across runs', () => {
   });
 });
 
-describe('digest render', () => {
-  it('is self-contained: no external fetches of any kind', () => {
-    const html = renderDigest({ items: [item()], applied: [], skipped: [] });
-    expect(html).not.toMatch(/<script\s+src=/i);
-    expect(html).not.toMatch(/<link[^>]+href=/i);
-    expect(html).not.toMatch(/https?:\/\//);
+describe('inbox render — the tracked markdown answering surface', () => {
+  it('renders one anchored block per open item, with every option as a tickable box', () => {
+    const md = renderInbox({ items: [item({ id: 'DOC-1' })] });
+    expect(md).toContain('<!-- nightly:item key=');
+    expect(md).toMatch(/- \[ \] \*\*1\. /);
+    expect(md).toContain('```notes');
   });
 
-  it('escapes item text so a doc quote containing markup cannot break the page', () => {
-    const html = renderDigest({
-      items: [item({ title: '<img src=x onerror=alert(1)>' })],
-      applied: [],
-      skipped: [],
-    });
-    expect(html).not.toMatch(/<img src=x/);
-    expect(html).toMatch(/&lt;img src=x/);
+  it('always offers the three escape hatches, not just the routine\'s proposed options', () => {
+    const md = renderInbox({ items: [item()] });
+    // An item that only offers the answers the routine thought of cannot record
+    // a disagreement — which is the failure mode the free-text box exists for.
+    expect(md).toContain('**Other**');
+    expect(md).toContain("**Won't fix**");
+    expect(md).toContain('**Ask back**');
   });
 
-  // The digest is a decision surface, not a document. Two properties keep it
-  // that way, and both regressed once: every disclosure must start CLOSED (22
-  // auto-expanded explanations is a wall to scroll past, not a list to work),
-  // and the digest must never answer "how do I respond to this?" with a command
-  // to type — the options are buttons.
-  it('starts every disclosure closed', () => {
-    const html = renderDigest({
-      items: [item({ eli5: 'A plain-language explanation.', evidence: ['file.ts:1 — a fact'] })],
-      applied: [],
-      skipped: [],
-    });
-    expect(html).toMatch(/In plain terms/);
-    expect(html).not.toMatch(/<details[^>]*\sopen[\s>]/);
+  it('needs no server, no browser and no scripts — it is plain markdown', () => {
+    const md = renderInbox({ items: [item()], applied: [], skipped: [] });
+    expect(md).not.toMatch(/<script/i);
+    expect(md).not.toMatch(/localhost|127\.0\.0\.1|http:\/\//);
   });
 
-  it('never tells the reader to run a command to answer', () => {
-    const html = renderDigest({ items: [item({ id: 'BKL-7' })], applied: [], skipped: [] });
-    expect(html).not.toMatch(/nightly:review/);
-    expect(html).not.toMatch(/answer\.mjs/);
+  it('says so plainly when there is nothing to answer', () => {
+    const md = renderInbox({ items: [] });
+    expect(md).toMatch(/Nothing to answer/);
   });
 
-  it('renders an expandable ELI5 block when the item carries one', () => {
-    const html = renderDigest({
-      items: [item({ eli5: 'The docs say a robot double-checks the math, but no robot exists.' })],
-      applied: [],
-      skipped: [],
-    });
-    expect(html).toMatch(/In plain terms/);
-    expect(html).toMatch(/no robot exists/);
+  it('calls out answered-but-not-applied work, since that is the agent\'s debt not the owner\'s', () => {
+    const key = subjectKey('a.md', 'some subject');
+    const decisions = {
+      [key]: { disposition: 'settled', answer: 'do it', decided_at: '2026-07-29T00:00:00Z' },
+    };
+    const md = renderInbox({ items: [], decisions });
+    expect(md).toMatch(/not yet marked done/);
   });
 
-  it('omits the ELI5 block when the item has none', () => {
-    const html = renderDigest({ items: [item({ eli5: undefined })], applied: [], skipped: [] });
-    expect(html).not.toMatch(/In plain terms/);
+  it('surfaces a stuck item\'s age — a question that keeps coming back is itself a finding', () => {
+    const md = renderInbox({ items: [{ ...item(), nights_open: 7 }] });
+    expect(md).toMatch(/open 7 nights/);
+  });
+});
+
+describe('inbox ingest — a ticked box becomes a ledger entry', () => {
+  function writeInboxFor(items: NightlyItem[]): void {
+    writeOpenItems(root, { items });
+    writeInbox(root);
+  }
+  const tick = (label: string): void => {
+    const p = join(root, 'docs', 'nightly-inbox.md');
+    const s = readFileSync(p, 'utf8').replace(`- [ ] **${label}**`, `- [x] **${label}**`);
+    writeFileSync(p, s);
+  };
+  const setNote = (text: string): void => {
+    const p = join(root, 'docs', 'nightly-inbox.md');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('```notes\n\n```', '```notes\n' + text + '\n```'));
+  };
+
+  it('records the option\'s exact answer prose, not its label', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick('1. Keep it');
+    const res = ingestAnswers(root);
+    expect(res.recorded).toHaveLength(1);
+    expect(res.errors).toHaveLength(0);
+    const decisions = readDecisionsRaw(root);
+    const rec = Object.values(decisions)[0] as { answer: string; disposition: string };
+    expect(rec.answer).toBe('Keep the pin, it is a deliberate anchor.');
+    expect(rec.disposition).toBe('settled');
   });
 
-  it('calls out items open 5+ nights instead of repeating them silently', () => {
-    const html = renderDigest({
-      items: [item({ nights_open: 9, first_seen: '2026-07-01' })],
-      applied: [],
-      skipped: [],
-    });
-    expect(html).toMatch(/open 5\+ nights/);
-    expect(html).toMatch(/9 nights/);
+  it('drops an answered item from the inbox on re-render', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick('1. Keep it');
+    ingestAnswers(root);
+    expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toMatch(/Nothing to answer/);
   });
 
-  it('renders every leg heading, so an empty leg reads as "nothing open" not "not run"', () => {
-    const html = renderDigest({ items: [], applied: [], skipped: [] });
-    expect(html).toMatch(/Documentation/);
-    expect(html).toMatch(/Backlog disambiguation/);
-    expect(html).toMatch(/Recurring-problem solutions/);
-    expect(html).toMatch(/Nothing open/);
+  it('REFUSES two ticked boxes rather than guessing which one was meant', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick('1. Keep it');
+    tick('Other');
+    const res = ingestAnswers(root);
+    expect(res.recorded).toHaveLength(0);
+    expect(res.errors[0].error).toMatch(/tick exactly one/);
+    expect(Object.keys(readDecisionsRaw(root))).toHaveLength(0);
   });
 
-  it('surfaces a skipped leg — a quiet digest must never mean "did not look"', () => {
-    const html = renderDigest({
-      items: [],
-      applied: [],
-      skipped: ['working tree dirty — applies skipped'],
-    });
-    expect(html).toMatch(/Not covered this run/);
-    expect(html).toMatch(/working tree dirty/);
+  it('REFUSES a note-less Won\'t fix — an empty settle suppresses the question and records no reason', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick("Won't fix");
+    const res = ingestAnswers(root);
+    expect(res.errors[0].error).toMatch(/empty Notes/);
+    expect(Object.keys(readDecisionsRaw(root))).toHaveLength(0);
+  });
+
+  it('records Won\'t fix with its reason when the note is there', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick("Won't fix");
+    setNote('not worth the churn');
+    const res = ingestAnswers(root);
+    expect(res.recorded[0].disposition).toBe('wontfix');
+    expect(res.recorded[0].answer).toBe('not worth the churn');
+  });
+
+  it('keeps an "Ask back" item OPEN — a counter-question is not an answer', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick('Ask back');
+    setNote('which of the two paths do you mean?');
+    ingestAnswers(root);
+    // disposition 'question' is excluded from settled by partitionBySettled, so
+    // the item must still be in the regenerated inbox.
+    expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toContain('<!-- nightly:item key=');
+  });
+
+  it('one malformed answer never blocks the others', () => {
+    writeInboxFor([item({ id: 'DOC-1' }), item({ id: 'DOC-2', subject_key: subjectKey('spec/bar.md', 'a second claim') })]);
+    const p = join(root, 'docs', 'nightly-inbox.md');
+    // tick a valid option on the first block, and a note-less Other on the last
+    writeFileSync(p, readFileSync(p, 'utf8').replace('- [ ] **1. Keep it**', '- [x] **1. Keep it**'));
+    const s = readFileSync(p, 'utf8');
+    const i = s.lastIndexOf('- [ ] **Other**');
+    writeFileSync(p, s.slice(0, i) + '- [x] **Other**' + s.slice(i + '- [ ] **Other**'.length));
+
+    const res = ingestAnswers(root);
+    expect(res.recorded).toHaveLength(1);
+    expect(res.errors).toHaveLength(1);
+  });
+
+  it('--dry-run reports without touching the ledger', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    tick('1. Keep it');
+    const res = ingestAnswers(root, { dryRun: true });
+    expect(res.recorded).toHaveLength(1);
+    expect(Object.keys(readDecisionsRaw(root))).toHaveLength(0);
+  });
+
+  it('an untouched inbox records nothing and reports the items as unanswered', () => {
+    writeInboxFor([item({ id: 'DOC-1' })]);
+    const res = ingestAnswers(root);
+    expect(res.recorded).toHaveLength(0);
+    expect(res.errors).toHaveLength(0);
+    expect(res.unanswered).toBe(1);
   });
 });
 
@@ -369,10 +431,36 @@ describe('SessionStart surface hook', () => {
     expect(runHook().stdout).toMatch(/1 new item/);
   });
 
-  it('is silent when the only open item is already settled', () => {
+  it('never re-asks a settled subject as an open question', () => {
     const it1 = item();
     writeOpenItems(root, { items: [it1] });
     recordDecision(root, it1.subject_key, { answer: 'no change wanted' });
+    expect(runHook().stdout).not.toMatch(/new item/);
+  });
+
+  it('nudges ONCE that an answered item is ready to apply, then never again', () => {
+    // The bound is the whole point. Plenty of answers imply no work at all
+    // ("keep the pin, it is a deliberate anchor"), so they are never marked
+    // done — an unbounded nudge would reappear every session forever, which is
+    // the exact trap the subject-key ledger exists to kill.
+    const it1 = item();
+    writeOpenItems(root, { items: [it1] });
+    recordDecision(root, it1.subject_key, { answer: 'no change wanted' });
+
+    expect(runHook().stdout).toMatch(/ready to apply/);
+    expect(runHook().stdout.trim()).toBe('');
+    expect(runHook().stdout.trim()).toBe('');
+  });
+
+  it('does not nudge for grandfathered answers — their landing state is unknowable, so it would be a standing false RED', () => {
+    const it1 = item();
+    writeOpenItems(root, { items: [it1] });
+    recordDecision(root, it1.subject_key, { answer: 'answered long ago' });
+    // Backdate past the completion-tracking cutover.
+    const p = join(root, '.claude', 'nightly-decisions.json');
+    const raw = JSON.parse(readFileSync(p, 'utf8'));
+    raw[it1.subject_key].decided_at = '2026-07-01T00:00:00.000Z';
+    writeFileSync(p, JSON.stringify(raw));
     expect(runHook().stdout.trim()).toBe('');
   });
 
@@ -441,145 +529,6 @@ describe('answer CLI', () => {
   it('--list prints the open ids', () => {
     const r = runAnswer(['--list']);
     expect(r.stdout).toMatch(/DOC-1/);
-  });
-});
-
-describe('interactive review server — the buttoned surface', () => {
-  let server: ReviewServer | undefined;
-  let base: string;
-
-  async function start(): Promise<ReviewServer> {
-    const s = createNightlyReviewServer(root) as ReviewServer;
-    server = s;
-    await new Promise<void>((res) => s.listen(0, '127.0.0.1', res));
-    base = `http://127.0.0.1:${s.address().port}`;
-    return s;
-  }
-  afterEach(async () => {
-    if (server) await new Promise<void>((res) => server!.close(() => res()));
-    server = undefined;
-  });
-
-  it('binds to loopback only — never network-exposed', async () => {
-    writeOpenItems(root, { items: [item()] });
-    const server = await start();
-    expect(server.address().address).toBe('127.0.0.1');
-  });
-
-  it('serves a page with a text box and Settle / Won\'t-fix buttons', async () => {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1', eli5: 'Plain explanation here.' })] });
-    await start();
-    const html = await (await fetch(`${base}/`)).text();
-    expect(html).toMatch(/<textarea/);
-    expect(html).toMatch(/data-act="settled"/);
-    expect(html).toMatch(/data-act="wontfix"/);
-    expect(html).toMatch(/In plain terms/);
-  });
-
-  // An item that poses a choice must render that choice as something pressable,
-  // carrying the EXACT text it will record — otherwise the owner is composing an
-  // answer the routine already knows how to phrase, and a button press is a
-  // guess about what it agreed to.
-  it('renders one button per option, each carrying the answer it will record', async () => {
-    writeOpenItems(root, {
-      items: [
-        item({
-          id: 'DOC-1',
-          options: [
-            { label: 'Correct it', answer: 'Approved. Correct the phrase and file the attestation.' },
-            { label: 'Leave it', answer: 'Leave the sentence as written.' },
-          ],
-        }),
-      ],
-    });
-    await start();
-    const html = await (await fetch(`${base}/`)).text();
-    expect(html).toMatch(/data-answer="Approved\. Correct the phrase and file the attestation\."/);
-    expect(html).toMatch(/data-answer="Leave the sentence as written\."/);
-    expect(html).toMatch(/Something else/);
-  });
-
-  it('settles with an option answer verbatim, so the ledger records what was pressed', async () => {
-    const key = subjectKey('a.md', 'one');
-    const chosen = 'Leave the sentence as written.';
-    writeOpenItems(root, {
-      items: [item({ id: 'DOC-1', subject_key: key, options: [{ label: 'Leave it', answer: chosen }] })],
-    });
-    await start();
-    const r = await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'DOC-1', answer: chosen, disposition: 'settled' }),
-    });
-    expect(r.status).toBe(200);
-    expect(readDecisions(root)[key].answer).toBe(chosen);
-  });
-
-  it('records an answer via POST and reports the remaining open count', async () => {
-    writeOpenItems(root, {
-      items: [
-        item({ id: 'DOC-1', subject_key: subjectKey('a.md', 'one') }),
-        item({ id: 'DOC-2', subject_key: subjectKey('b.md', 'two') }),
-      ],
-    });
-    await start();
-    const r = await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'DOC-1', answer: 'keep it as is', disposition: 'settled' }),
-    });
-    expect(r.status).toBe(200);
-    const data = await r.json();
-    expect(data.open_count).toBe(1);
-    const decisions = readDecisions(root);
-    expect(Object.values(decisions)[0].answer).toBe('keep it as is');
-  });
-
-  it('rejects an empty answer — the same guard the CLI enforces', async () => {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
-    await start();
-    const r = await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'DOC-1', answer: '   ', disposition: 'settled' }),
-    });
-    expect(r.status).toBe(400);
-    expect(Object.keys(readDecisions(root))).toHaveLength(0);
-  });
-
-  it('rejects an unknown or already-settled id', async () => {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
-    await start();
-    const r = await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'NOPE', answer: 'x', disposition: 'settled' }),
-    });
-    expect(r.status).toBe(404);
-  });
-
-  it('records --wontfix as its own disposition', async () => {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
-    await start();
-    await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'DOC-1', answer: 'not worth it', disposition: 'wontfix' }),
-    });
-    expect(Object.values(readDecisions(root))[0].disposition).toBe('wontfix');
-  });
-
-  it('a settled subject is gone from the served page on reload', async () => {
-    const it1 = item({ id: 'DOC-1' });
-    writeOpenItems(root, { items: [it1] });
-    await start();
-    await fetch(`${base}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'DOC-1', answer: 'done', disposition: 'settled' }),
-    });
-    const html = await (await fetch(`${base}/`)).text();
-    expect(html).not.toMatch(/data-id="DOC-1"/);
   });
 });
 

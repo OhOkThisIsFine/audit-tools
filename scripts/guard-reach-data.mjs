@@ -91,6 +91,7 @@ export const GUARDS = [
   // ── contract tests (the guards' own guards) ────────────────────────────────
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
+  { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
@@ -141,8 +142,9 @@ export const REACH = [
       'check:guard-reach',
     ],
     uncovered:
-      'attest-loop-core-review, question-philosophy-gate, closeout-challenge-gate, nightly-surface and ' +
-      'shell-split have no dedicated contract test — only their registration/parity is reconciled',
+      'attest-loop-core-review, question-philosophy-gate, closeout-challenge-gate and shell-split have ' +
+      'no dedicated contract test — only their registration/parity is reconciled. (nightly-surface IS ' +
+      'covered, by nightly-routine-test.)',
   },
   {
     area: 'gate scripts (the guards themselves)',
@@ -184,10 +186,14 @@ export const REACH = [
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: 'declared-gap',
+    guardedBy: ['nightly-routine-test'],
     note:
-      'runs only inside the nightly routine (docs/nightly-routine.md); item premises are probed at ' +
-      'presentation, but no build gate executes these scripts',
+      'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
+      'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
+      'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
+      'refusals. UNCOVERED HALF: nothing executes the routine end-to-end, so the ORDER of the legs and ' +
+      'the decision to escalate-vs-apply remain behavioural, guarded by docs/nightly-routine.md and the ' +
+      'three-agent gate rather than by a test.',
   },
   {
     area: 'rendered host assets',

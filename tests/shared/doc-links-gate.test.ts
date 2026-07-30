@@ -288,6 +288,55 @@ describe("check-doc-links — an ignored target is an install artifact, not a de
   });
 });
 
+describe("check-doc-links — a link inside CODE is a syntax example, not a link", () => {
+  let repo: Repo;
+  beforeAll(() => {
+    repo = makeRepo();
+    write(repo.dir, "docs/real.md", "# real\n");
+    write(
+      repo.dir,
+      "docs/syntax.md",
+      [
+        "# Explaining the syntax",
+        "",
+        "Inline links look like `[text](does-not-exist.md)` — that is an example.",
+        "",
+        "```markdown",
+        "[another](also-missing.md)",
+        "```",
+        "",
+        "And a reference form: ``[a ` b](nope-too.md)``",
+        "",
+        "But this one is REAL and dead: [broken](./actually-missing.md)",
+        "",
+        "And this one is real and fine: [real](./real.md)",
+      ].join("\n"),
+    );
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "fixture");
+  });
+  afterAll(() => rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("ignores link syntax inside inline spans and fenced blocks", () => {
+    const { out } = runChecker(repo.dir);
+    expect(out).not.toContain("does-not-exist.md");
+    expect(out).not.toContain("also-missing.md");
+    expect(out).not.toContain("nope-too.md");
+  });
+
+  it("STILL fails on the genuinely dead link outside code — the mask must not neuter the gate", () => {
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toContain("actually-missing.md");
+  });
+
+  it("reports the dead link at its TRUE line number — masking preserves offsets", () => {
+    const { out } = runChecker(repo.dir);
+    // "But this one is REAL and dead" is line 11 of the fixture above.
+    expect(out).toMatch(/docs\/syntax\.md:11/);
+  });
+});
+
 describe("check-doc-links — the real repo is the contract", () => {
   it("THIS repo has zero unresolvable relative links", () => {
     const { code, out } = runChecker(process.cwd());

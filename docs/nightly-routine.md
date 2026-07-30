@@ -237,24 +237,43 @@ collapsed **technical evidence** list underneath. The routine populates the
 `eli5` field for every escalated item — a decision needs the full picture, and a
 plain-language version is what makes it answerable without re-derivation.
 
-Two surfaces render those items:
+The answering surface is **one tracked markdown file**,
+[`docs/nightly-inbox.md`](nightly-inbox.md), rendered by
+`scripts/nightly/render-inbox.mjs` (`npm run nightly:inbox`). Each open item
+becomes a block with its plain-terms explanation, its question, and its options
+as **checkboxes**. Answering is: tick exactly one box, save. Every item also
+carries **Other**, **Won't fix** and **Ask back**, so an answer the routine did
+not anticipate — including "your premise is wrong" — is always expressible.
 
-- **Static snapshot** — `.audit-tools/nightly/latest.html`
-  (`scripts/nightly/render-digest.mjs`), a read-only record the run writes.
-- **Interactive review** — `npm run nightly:review` (`scripts/nightly/serve.mjs`).
-  A tiny server bound to **127.0.0.1 only** that renders the same items with a
-  **text box and Settle / Won't-fix buttons**; clicking one records the answer
-  and the item collapses. A `file://` page cannot persist a click, which is why
-  answering is a served page rather than the static file — the one command
-  starts it, and everything after is buttons. Stop it with Ctrl-C.
+`scripts/nightly/ingest-answers.mjs` (`npm run nightly:ingest`) reads the ticks
+back, records them in the durable ledger, and re-renders so answered items drop
+out. It **refuses** rather than guesses: two ticked boxes, or an `Other` /
+`Won't fix` / `Ask back` with an empty note, records nothing for that item and
+reports why — one malformed answer never blocks the rest.
 
-After `writeOpenItems()` persists the machine contract, render and open the
-snapshot with `node scripts/nightly/render-digest.mjs --open`. When nothing was
-applied, open, or skipped, stay silent rather than churning the digest.
+Why a tracked markdown file and not the HTML digest plus localhost server this
+replaced. The old pair was technically sound — a `file://` page genuinely cannot
+persist a click, so buttons required a server — but it answered the wrong
+question. What answering needs is to be **async, easy, and reachable from
+wherever the owner is**, and a tracked file is all three: any editor opens it,
+GitHub's web UI edits it from a phone, git syncs it between machines and keeps
+the history, and nothing has to be running. Being tracked is the other half —
+an escalation that lives only in one machine's untracked scratch is lost the
+moment you are not sitting at that machine. Deleting the renderer and the server
+removed ~560 lines and the entire "is the server up?" question.
 
-A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**,
-and only when a subject has not been announced before, pointing at
-`npm run nightly:review`.
+The machine contract (`.audit-tools/nightly/open-items.json`) and the full
+proposals (`.audit-tools/nightly/proposals/**/*.md`) are tracked for the same
+reason. When nothing was applied, open, or skipped, stay silent rather than
+churning the inbox.
+
+A SessionStart hook (`.claude/hooks/nightly-surface.mjs`) prints **one line**, at
+most once per subject, and is otherwise silent. It has exactly two things to
+say: *there are new propositions waiting* (pointing at the inbox), or *there are
+answered items ready to apply* (pointing at the ingest command). **Nothing open
+means nothing printed** — not even a count of what was auto-closed. Both
+announcements are bounded by the viewed ledger, because many answers imply no
+work at all and would otherwise nag forever.
 
 This replaced a hook that printed the full decision table into every
 conversation. It failed for reasons worth keeping written down, because they are
@@ -281,7 +300,8 @@ in [`scripts/nightly/items.mjs`](../scripts/nightly/items.mjs). Answers are
 recorded against the subject in `.claude/nightly-decisions.json` — tracked, so it
 outlives runs, branches and machines.
 
-Answer with the buttons in `npm run nightly:review`, or from a shell:
+Answer by ticking a box in [`docs/nightly-inbox.md`](nightly-inbox.md) and
+running `npm run nightly:ingest`, or directly from a shell:
 
 ```bash
 node scripts/nightly/answer.mjs <ID> "the answer"      # settle it
