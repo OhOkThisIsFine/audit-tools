@@ -8,6 +8,22 @@
 
 
 
+- **LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at
+  `.` inside filenames.** `src/shared/intent/freeFormIntentInterpreter.ts:81` splits on
+  `(?<![0-9])\.(?![0-9])` — only decimal points are guarded, so "(docs/backlog/open-bugs.md) rather
+  than duplicating them" yielded the clause fragment "md) rather than duplicating them", surfaced
+  for constraint promotion. Property: the splitter must not break inside a path/extension token —
+  e.g. require whitespace after the dot (`\.\s`) or extend the guard beyond digits.
+
+- **LIVE (remediation run 2026-07-30, low): `--guidance-file` combined with `--input` silently drops
+  the guidance from the intake source manifest.** The manifest builder registers only the inputs
+  (`created_from: "input"`); `intake/conversation-start.md` is written but unlisted, and the
+  `synthesize_intake` prompt says "read only the listed source files" — so the operator's guidance
+  is invisible to the intake worker unless the host compensates (this run's host did).
+  `src/remediate/steps/intakeResolver.ts` gives `--input` precedence deliberately, but precedence
+  should order sources, not evict one. Property: an explicitly supplied guidance file is always a
+  manifest source alongside the inputs.
+
 - **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
   (2026-07-25, low, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep globbed
   `tests/**`; the synthetic-result generators in `scripts/` are reached only by `verify:checks`, which
