@@ -26,7 +26,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `docs/**`, unregistered in `docs/doc-review-guidelines.md` otherwise fails only in RELEASE CI;
   burned v0.34.17).
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`
-  (= `verify:checks` + full vitest) — but the sharded CI gate re-runs it authoritatively either way.
+  (= `verify:checks` + full vitest + both linked-install smokes) — but the sharded CI gate re-runs it
+  authoritatively either way.
 - Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first (the smokes
   pack a tarball and are Windows-flaky on temp-dir EPERM/EBUSY).
 
@@ -50,7 +51,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
-  parallel jobs — `gate` (`verify:checks`: control-bytes + version-gates + loop-core-patterns +
+  parallel jobs — `gate` (`verify:checks`: control-bytes + version-gates + guard-reach + loop-core-patterns +
   constitutional-doc-paths + deadcode + doc-manifest + doc-links + doc-code-citations + philosophy-brief +
   nightly-routine-prompt + handoff-roadmap +
   backlog-index + memory-citations + backlog-budget + backlog-status + check:tests +

@@ -15,6 +15,7 @@ npm run verify:release
 - test-tree typecheck (`check:tests`)
 - raw control-byte gate (`check:control-bytes`)
 - version-gate scan (`check:version-gates`)
+- guard wiring/reach reconciliation (`check:guard-reach`)
 - loop-core pattern-list drift check (`check:loop-core-patterns`)
 - constitutional-doc-path parity (`check:constitutional-doc-paths`)
 - backlog size-budget gate (`check:backlog-budget`)

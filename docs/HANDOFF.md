@@ -78,7 +78,7 @@
   Corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs. SPEC in
   [`forward-tracks.md`](backlog/forward-tracks.md).
 
-- **Current version = `package.json`** (authoritative): v0.34.41, live on npm. HEAD sits AHEAD of the
+- **Current version = `package.json`** (authoritative): v0.34.42, live on npm. HEAD sits AHEAD of the
   tag, and that is the normal resting state — docs, specs, tests and hooks land without a release. Read
   "nothing pending" off the DIFF, not off the commit count:
   `git diff --name-only $(git describe --tags --abbrev=0 --match 'v*')..HEAD -- src/ package.json`
