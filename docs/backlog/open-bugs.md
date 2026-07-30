@@ -418,10 +418,6 @@
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
 
-- **Friction walk (premise-probe lap, 2026-07-29):** (1) **ambiguous-direction:** none. (2)
-  **tool-should-decide (fixed in-lap):** offload agent types died on `pool/<name>` frontmatter
-  pins; re-pointed to tier names (memory: subagent-offload-tier-path-works-pool-pin-broken).
-  (3) **inefficient-feeding:** none — recon and refutation ran on free lanes without failures.
 
 - **Friction walk (determinations-execution lap, 2026-07-29):** (1) **ambiguous-direction:** none —
   the 16 nightly-ledger answers were executable as written; the two left unexecuted (premise probe
