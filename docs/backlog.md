@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 151 entr(y/ies) indexed.
+> and at commit). 152 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -112,7 +112,8 @@
 - `open-bugs.md:1117` — Selective-deepening convergence — live validation env-bound.
 - `open-bugs.md:1139` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
 - `open-bugs.md:1148` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:1157` — ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.
+- `open-bugs.md:1157` — ▶ Meta-review run 2026-07-30b — root causes + two new loop defects.
+- `open-bugs.md:1169` — ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

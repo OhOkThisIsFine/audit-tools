@@ -1154,6 +1154,18 @@
   (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
   minted by the registry or validated on the way in.
 
+- **▶ Meta-review run 2026-07-30b — root causes + two new loop defects.** Primary record:
+  [`reviews/meta-review-audit-run-2026-07-30.md`](../reviews/meta-review-audit-run-2026-07-30.md).
+  Re-confirmed from the cluster below: re-planning shrink never fires (watched twice), exit-2-on-success,
+  promotion gap. NEW: (a) root cause of the head-of-line block — the selective-deepening re-partitioner
+  packs its whole task set into one packet (97 tasks / 655k tokens) instead of applying the initial
+  planner's budget split; (b) an ERRORED rolling-engine packet leaves `audit_tasks_completed` actionable
+  and advance cycles to the `maxTransitions(100)` crash instead of a graceful pause; (c) a worker's
+  stderr cause (headless agy write-deny) never surfaces in `packet_result` or the step prompt, and the
+  session-config refusal names the spec but not `~/.audit-code/sources-declared.json` as the fix home.
+  Properties to hold: deepening partitions under the same budget as planning; an errored packet pauses
+  resumably with its cause; a lane-config refusal names the sanctioned file.
+
 - **▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.** Primary record:
   [`reviews/dogfood-run-2026-07-30.md`](../reviews/dogfood-run-2026-07-30.md); the
   `no_capable_pool` watch PASSED (its watch entry is closed). Properties to hold: (1) re-planning

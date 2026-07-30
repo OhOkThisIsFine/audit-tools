@@ -148,10 +148,11 @@ defects**, not the A2 oracle corpus. A2 is funded and its SPEC is intact
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 2 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
+- ▶ Meta-review run 2026-07-30b — root causes + two new loop defects. · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects. · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->
