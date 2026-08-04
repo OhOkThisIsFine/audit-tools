@@ -27,13 +27,18 @@
 - The over-swept `.audit-tools/nightly/` deletions were restored: five nightly items are still
   OPEN and unanswered in `docs/nightly-inbox.md` (P5 triage-lane-429 and P7 probe-absence among
   them); their proposals and `open-items.json` are back so the SessionStart surface works.
+- Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
+  `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
+  [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).
+  Includes the executed 2026-07-18 gemini sunset and the new `OrchestratorDescriptor` (one declared
+  per-orchestrator delta object; provider shims + hostLimits twins collapsed). New defect logged:
+  a dedup survivor can belong to multiple blocks (`blockIdsByFinding` now pins first-wins;
+  root question in `open-bugs.md`).
 
 ## Verification state
 
-- Full `npm test` is green: 551 test files passed, 4 skipped (0 failed). `npm run check`,
-  `npm run check:tests`, and `check:doc-links` all pass.
-- CI on main is RED at `93c2a3ab` — root-caused to the backlog-budget gate + its unit test broken
-  by that commit itself; this tree's backlog edits fix it, so it clears when this lands.
+- Full `npm test` is green post-sweep (7,386 tests passed, 10 skipped, 0 failed). `npm run check`,
+  `check:tests`, `check:deadcode`, `check:guard-reach`, doc-manifest, and both packaged smokes pass.
 - CP-NODE-4 is not accepted: its retained worktree has six modified files, a 776-line diff, and a
   failing duplicate-ID dedupe test. No CP-NODE-4 change was merged into the primary checkout.
 - The pause/terminal persisted-state XOR inconsistency is recorded in `docs/backlog/open-bugs.md`.
