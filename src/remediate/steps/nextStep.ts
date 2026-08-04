@@ -1783,11 +1783,20 @@ function findingCarryForwardKey(finding: Finding): string {
   return JSON.stringify(stripPlanTimeBookkeeping(finding));
 }
 
+// FIRST-wins on multi-block membership: `fixupBlocksAfterDedup` can leave a
+// dedup survivor in more than one block's items, and historically the two
+// consumers disagreed (saveStateForPlan scanned blocks first-wins while this
+// map overwrote last-wins), so the same plan could yield different block_ids
+// per path. First-wins is pinned as the single semantic. The root question —
+// whether a finding should ever belong to two blocks at all — is tracked in
+// docs/backlog/open-bugs.md.
 function blockIdsByFinding(plan: RemediationPlan): Map<string, string> {
   const byFinding = new Map<string, string>();
   for (const block of plan.blocks) {
     for (const id of block.items) {
-      byFinding.set(id, block.block_id);
+      if (!byFinding.has(id)) {
+        byFinding.set(id, block.block_id);
+      }
     }
   }
   return byFinding;

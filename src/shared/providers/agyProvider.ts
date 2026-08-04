@@ -12,7 +12,7 @@ import {
   emitProviderDoneDiagnostic,
 } from "./providerDiagnostics.js";
 import { resolveWindowsShimSpawnCommand } from "./opencodeLaunch.js";
-import { commandExists } from "./providerPathGuard.js";
+import { isSelfSpawnBlocked } from "./providerPathGuard.js";
 
 export const AGY_PROVIDER_NAME = "agy" as const;
 
@@ -56,40 +56,25 @@ export class AgyProvider implements FreshSessionProvider {
   }
 
   async launch(input: LaunchFreshSessionInput) {
-    const env = process.env;
-    if (env.AGY_CLI || env.ANTIGRAVITY_CLI || env.GEMINI_CLI) {
+    // Single-sourced nested-session guard (providerPathGuard SELF_SPAWN_ENV_SIGNAL).
+    if (isSelfSpawnBlocked("agy")) {
       throw new Error(this.activeSessionMessage);
     }
     const prompt = await readFile(input.promptPath, "utf8");
     const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
 
-    // Resolve command: explicit config first, then try agy on path, default to gemini fallback
-    let command = this.config.command;
-    if (!command) {
-      command = commandExists("agy") ? "agy" : "gemini";
-    }
-
-    // Determine if we are using the modern agy command or fallback gemini command
-    const isAgy = command.toLowerCase().includes("agy");
+    // Explicit config first, else the agy binary. (The legacy gemini binary
+    // fallback and its -m/-y flag dialect were removed with the July 18, 2026
+    // sunset.)
+    const command = this.config.command ?? "agy";
     const skipPermissions = this.config.dangerously_skip_permissions ?? this.skipPermissionsDefault;
 
     const baseArgs: string[] = [];
-
-    // Gated for July 18, 2026 sunset cleanup: fallback to legacy gemini flags (-m and -y)
-    if (isAgy) {
-      if (this.config.model) {
-        baseArgs.push("--model", this.config.model);
-      }
-      if (skipPermissions) {
-        baseArgs.push("--dangerously-skip-permissions");
-      }
-    } else {
-      if (this.config.model) {
-        baseArgs.push("-m", this.config.model);
-      }
-      if (skipPermissions) {
-        baseArgs.push("-y");
-      }
+    if (this.config.model) {
+      baseArgs.push("--model", this.config.model);
+    }
+    if (skipPermissions) {
+      baseArgs.push("--dangerously-skip-permissions");
     }
 
     baseArgs.push(...(this.config.extra_args ?? []));
@@ -98,7 +83,7 @@ export class AgyProvider implements FreshSessionProvider {
     const { command: spawnCmd, args } = resolveWindowsShimSpawnCommand(
       command,
       baseArgs,
-      ["gemini", "agy"],
+      ["agy"],
     );
 
     emitProviderLaunchDiagnostic(this.name, input);

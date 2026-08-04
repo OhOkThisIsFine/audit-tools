@@ -36,9 +36,11 @@ describe("resolveConversationHostProvider", () => {
   });
 
   it("agy is detected from any of its self-spawn signals", () => {
-    for (const key of ["AGY_CLI", "ANTIGRAVITY_CLI", "GEMINI_CLI"]) {
+    for (const key of ["AGY_CLI", "ANTIGRAVITY_CLI"]) {
       expect(resolveConversationHostProvider({ env: { [key]: "x" } })).toBe("agy");
     }
+    // Post-sunset (2026-07-18): the legacy GEMINI_CLI signal no longer detects agy.
+    expect(resolveConversationHostProvider({ env: { GEMINI_CLI: "x" } })).not.toBe("agy");
   });
 
   it("codex wins over an also-present CLAUDECODE (a Codex host keeps its own meter)", () => {

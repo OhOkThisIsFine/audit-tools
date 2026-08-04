@@ -62,16 +62,28 @@ export function setCommandExistsForTesting(
 /**
  * The in-session env signals that mark a host as already running INSIDE an agent
  * of a given kind — a fresh subprocess of that same agent cannot be spawned from
- * within one (it would self-spawn). Single-sourced so the auto-resolver and the
- * source discovery path agree byte-for-byte on what "self-spawn-blocked" means.
+ * within one (it would self-spawn). ANY-OF semantics: the provider is blocked
+ * when any listed variable is set. Single-sourced so the auto-resolver, the
+ * source discovery path, and the agy provider's own nested-session guard agree
+ * byte-for-byte on what "self-spawn-blocked" means.
  *
- * Only `claude-code` and `codex` have a self-spawn hazard: they are headless
- * CLIs auto-spawned as fresh subprocesses. The other providers are either
+ * Only the headless CLIs auto-spawned as fresh subprocesses (`claude-code`,
+ * `codex`, `agy`) have a self-spawn hazard. The other providers are either
  * IDE/template-bound, an API pool, or the always-available worker-command
- * fallback — none can self-spawn.
+ * fallback — none can self-spawn. (The legacy `GEMINI_CLI` signal was removed
+ * with the July 18, 2026 gemini-fallback sunset.)
  */
-const SELF_SPAWN_ENV_SIGNAL: Partial<Record<ResolvedProviderName, string>> = {
-  "claude-code": "CLAUDECODE",
+const SELF_SPAWN_ENV_SIGNAL: Partial<
+  Record<ResolvedProviderName, readonly string[]>
+> = {
+  "claude-code": ["CLAUDECODE"],
+  codex: [
+    "CODEX",
+    "CODEX_SHELL",
+    "CODEX_THREAD_ID",
+    "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+  ],
+  agy: ["AGY_CLI", "ANTIGRAVITY_CLI"],
 };
 
 /**
@@ -85,25 +97,8 @@ export function isSelfSpawnBlocked(
   provider: ResolvedProviderName,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (provider === "codex") {
-    return Boolean(
-      env.CODEX ||
-        env.CODEX_SHELL ||
-        env.CODEX_THREAD_ID ||
-        env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
-    );
-  }
-  if (provider === "agy") {
-    // Note: checks both agy/antigravity and the legacy gemini in-session env variables.
-    // Gated for July 18, 2026 sunset cleanup: env.GEMINI_CLI
-    return Boolean(
-      env.AGY_CLI ||
-        env.ANTIGRAVITY_CLI ||
-        env.GEMINI_CLI
-    );
-  }
-  const signal = SELF_SPAWN_ENV_SIGNAL[provider];
-  return signal !== undefined && Boolean(env[signal]);
+  const signals = SELF_SPAWN_ENV_SIGNAL[provider];
+  return signals !== undefined && signals.some((name) => Boolean(env[name]));
 }
 
 /**

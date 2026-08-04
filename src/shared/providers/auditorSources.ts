@@ -73,9 +73,6 @@ const CLI_DEFAULT_COMMAND: Readonly<Record<string, string>> = {
   agy: "agy",
 };
 
-/** Gated for the 2026-07-18 agy sunset: `agy` falls back to a legacy `gemini` binary. */
-const AGY_LEGACY_COMMAND = "gemini";
-
 function defaultFileReadable(path: string): boolean {
   try {
     accessSync(path, constants.R_OK);
@@ -357,10 +354,6 @@ export function verifySourceReach(
       }
       const fallback = CLI_DEFAULT_COMMAND[source.transport];
       if (exists(fallback)) return { verified: true };
-      // Gated for the 2026-07-18 sunset, mirroring agyProvider's own fallback.
-      if (source.transport === "agy" && exists(AGY_LEGACY_COMMAND)) {
-        return { verified: true };
-      }
       return { verified: false, reason: `launcher "${fallback}" is not on PATH.` };
     }
     case "subprocess-template": {

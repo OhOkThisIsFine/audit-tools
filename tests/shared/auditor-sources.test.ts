@@ -247,8 +247,8 @@ describe("verifySourceReach — declared ∩ ambient", () => {
     expect(verifySourceReach(source, deps({ onPath: ["opencode"] })).verified).toBe(false);
   });
 
-  it("falls back to the legacy gemini binary for agy (2026-07-18 sunset gate)", () => {
-    expect(verifySourceReach({ transport: "agy" }, deps({ onPath: ["gemini"] })).verified).toBe(true);
+  it("does not reach agy through the retired legacy gemini binary (sunset 2026-07-18)", () => {
+    expect(verifySourceReach({ transport: "agy" }, deps({ onPath: ["gemini"] })).verified).toBe(false);
   });
 
   it("probes subprocess-template's command_template[0]", () => {

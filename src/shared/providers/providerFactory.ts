@@ -135,11 +135,8 @@ function getAutoProviderContext(
     opencodeAvailable: lookupCommand(opencodeCommand),
     // A fresh `codex` subprocess cannot be spawned from inside a codex session.
     codexAvailable: !insideCodex && lookupCommand(codexCommand),
-    // Gated for July 18, 2026 sunset cleanup: fallback check for gemini CLI executable on PATH
-    agyAvailable:
-      !insideAgy &&
-      (lookupCommand(agyCommand) ||
-        (sessionConfig.agy?.command === undefined && lookupCommand("gemini"))),
+    // (The legacy gemini-CLI PATH fallback was removed with the July 18, 2026 sunset.)
+    agyAvailable: !insideAgy && lookupCommand(agyCommand),
   };
 }
 
@@ -223,7 +220,7 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   },
   {
     name: "agy",
-    comment: "Tie-break: agy/gemini is available — prefer agy.",
+    comment: "Tie-break: agy is available — prefer agy.",
     predicate: (ctx) => ctx.agyAvailable,
   },
   // NOTE: there is deliberately NO bare-availability opencode tie-break. A

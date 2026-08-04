@@ -696,9 +696,11 @@ test("resolveFreshSessionProviderName handles agy rules", () => {
   expect(
     resolveFreshSessionProviderName("auto", {}, { env: { ANTIGRAVITY_CLI: "1" }, commandExists: noCommands })
   ).toBe("agy");
+  // Post-sunset (2026-07-18): the legacy GEMINI_CLI in-session signal no longer
+  // marks an agy session.
   expect(
     resolveFreshSessionProviderName("auto", {}, { env: { GEMINI_CLI: "1" }, commandExists: noCommands })
-  ).toBe("agy");
+  ).not.toBe("agy");
 
   // config-gated resolution
   expect(
@@ -709,14 +711,14 @@ test("resolveFreshSessionProviderName handles agy rules", () => {
     )
   ).toBe("agy");
 
-  // Gated for July 18, 2026 sunset cleanup: fallback config check for gemini
+  // Post-sunset (2026-07-18): a lone legacy gemini binary no longer resolves agy.
   expect(
     resolveFreshSessionProviderName(
       "auto",
       { agy: {} },
       { env: {}, commandExists: (cmd) => cmd === "gemini" }
     )
-  ).toBe("agy");
+  ).not.toBe("agy");
 
   // tie-break when agy is available on PATH
   expect(
@@ -727,14 +729,14 @@ test("resolveFreshSessionProviderName handles agy rules", () => {
     )
   ).toBe("agy");
 
-  // Gated for July 18, 2026 sunset cleanup: fallback tie-break when gemini is available on PATH
+  // Post-sunset (2026-07-18): a lone legacy gemini binary no longer tie-breaks to agy.
   expect(
     resolveFreshSessionProviderName(
       "auto",
       {},
       { env: {}, commandExists: (cmd) => cmd === "gemini" }
     )
-  ).toBe("agy");
+  ).not.toBe("agy");
 });
 
 test("createFreshSessionProvider constructs an AgyProvider", () => {
@@ -823,12 +825,12 @@ test("AgyProvider: launches agy command with correct arguments and pipes stdin",
   expect(launched.options.stdinText).toBe("Hello agy!");
 });
 
-test("AgyProvider: falls back to gemini command and flags", async () => {
+test("AgyProvider: an explicit custom command keeps the agy flag dialect (gemini fallback sunset)", async () => {
   // See the holder-object rationale in the previous test.
   const capturedLaunch: { value: { command: string; args: string[]; options: LaunchFreshSessionInput } | null } = { value: null };
   const mockLauncher = async (command: string, args: string[], options: LaunchFreshSessionInput) => {
     capturedLaunch.value = { command, args, options };
-    return { accepted: true, exitCode: 0, stdout: "gemini run complete", stderr: "" };
+    return { accepted: true, exitCode: 0, stdout: "custom run complete", stderr: "" };
   };
 
   const tempDir = mkdtempSync(join(tmpdir(), "gemini-test-"));
@@ -839,7 +841,9 @@ test("AgyProvider: falls back to gemini command and flags", async () => {
 
   const provider = new AgyProvider(
     {
-      command: "gemini",
+      // A custom launcher outside the shim allowlist and not on PATH: spawned
+      // verbatim on every platform (no cmd.exe wrapper), agy flag dialect.
+      command: "my-agy-wrapper.exe",
       model: "gemini-1.5-flash",
       dangerously_skip_permissions: true,
     },
@@ -866,13 +870,10 @@ test("AgyProvider: falls back to gemini command and flags", async () => {
   const launched = capturedLaunch.value;
   if (!launched) throw new Error("unreachable: mockLauncher was invoked by the launch above");
 
-  if (process.platform === "win32") {
-    expect(launched.command.toLowerCase()).toMatch(/cmd\.exe$/);
-    expect(launched.args[3]).toBe('gemini -m gemini-1.5-flash -y');
-  } else {
-    expect(launched.command).toBe("gemini");
-    expect(launched.args).toEqual(["-m", "gemini-1.5-flash", "-y"]);
-  }
+  // Post-sunset: the explicit command is honored verbatim, but the legacy
+  // -m/-y gemini dialect is gone — agy flags are the only dialect.
+  expect(launched.command).toBe("my-agy-wrapper.exe");
+  expect(launched.args).toEqual(["--model", "gemini-1.5-flash", "--dangerously-skip-permissions"]);
   expect(launched.options.stdinText).toBe("Hello gemini!");
 });
 
@@ -900,9 +901,6 @@ test("AgyProvider: active session throws error", async () => {
     await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
 
     process.env = { ...originalEnv, ANTIGRAVITY_CLI: "1" };
-    await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
-
-    process.env = { ...originalEnv, GEMINI_CLI: "1" };
     await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
   } finally {
     process.env = originalEnv;

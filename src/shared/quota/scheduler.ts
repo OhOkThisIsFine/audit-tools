@@ -20,6 +20,7 @@ import {
 } from "./quotaSource.js";
 import {
   hostClassFor,
+  isAgentHostProvider,
   resolveLimits,
   type ProviderType,
 } from "./limits.js";
@@ -215,16 +216,6 @@ export interface ProviderClassification {
 }
 
 /**
- * Is this provider a capable agent host that fans out to parallel subagent
- * sessions? Such hosts get the lifted agent-host concurrency floor rather than
- * the conservative cold-start floor. (opencode also fans out but classifies
- * `local` and uses the local path, so it is intentionally excluded here.)
- */
-function isCapableAgentHost(providerName: ResolvedProviderName): boolean {
-  return providerName === "claude-code" || providerName === "vscode-task";
-}
-
-/**
  * Classify a provider for dispatch in ONE struct: its host-class, its resolved
  * cold-start / agent-host concurrency floor, and its driver mechanism
  * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005). This is the only
@@ -238,7 +229,7 @@ export function classifyProvider(
   providerName: ResolvedProviderName,
 ): ProviderClassification {
   const hostClass = hostClassFor(providerName);
-  const agentHost = isCapableAgentHost(providerName);
+  const agentHost = isAgentHostProvider(providerName);
   return {
     hostClass,
     // Capable agent hosts are lifted to the parallel agent-host floor; every

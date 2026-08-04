@@ -308,13 +308,13 @@ export interface AntigravityConfig {
  * Built on the same agent harness as the legacy Gemini CLI.
  */
 export interface AgyConfig {
-  /** Launcher command on PATH (defaults to "agy"; falls back to "gemini" until July 18th sunset). */
+  /** Launcher command on PATH (defaults to "agy"). */
   command?: string;
   /** Extra argv appended after default options. */
   extra_args?: string[];
-  /** Dangerously skip permissions/prompts (passes --dangerously-skip-permissions on agy, -y on gemini). */
+  /** Dangerously skip permissions/prompts (passes --dangerously-skip-permissions). */
   dangerously_skip_permissions?: boolean;
-  /** Model the agent should use (passes --model on agy, -m on gemini). */
+  /** Model the agent should use (passes --model). */
   model?: string;
 }
 

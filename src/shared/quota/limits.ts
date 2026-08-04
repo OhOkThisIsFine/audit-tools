@@ -6,35 +6,55 @@ import { resolveModelStatics } from "./modelStatics.js";
 export type ProviderType = "hosted" | "local" | "unknown";
 
 /**
- * Map a provider to its relative host-class — the coarse capability tier used by
- * limit resolution and the broker's single classifier ({@link classifyProvider}
- * in `scheduler.ts`). This is the *bare* class mapping only; the resolved
- * cold-start / agent-host concurrency floor is NOT exposed here as a separable
- * constant — it lives solely on the `classifyProvider` struct's `concurrencyFloor`
+ * The ONE per-provider trait table behind the broker's single classifier
+ * ({@link classifyProvider} in `scheduler.ts`) and limit resolution. Declared
+ * data, never name inference at call sites: `hostClass` is the coarse capability
+ * tier; `agentHost` marks a capable agent host that fans out to parallel
+ * subagent sessions (such hosts get the lifted agent-host concurrency floor —
+ * opencode also fans out but classifies `local` and takes the local path, so it
+ * is deliberately NOT an agent host here). The resolved cold-start / agent-host
+ * concurrency floor is NOT exposed here as a separable constant — it lives
+ * solely on the `classifyProvider` struct's `concurrencyFloor`
  * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005). Kept in this module (rather than
  * `scheduler.ts`) so `resolveLimits` can consult the class without importing the
  * scheduler, preserving the one-directional scheduler→limits dependency.
+ * Exhaustive over ResolvedProviderName: adding a provider forces a row here.
  */
+const PROVIDER_TRAITS: Record<
+  ResolvedProviderName,
+  { hostClass: ProviderType; agentHost: boolean }
+> = {
+  // codex/agy are hosted model backends — engages hosted concurrency defaults +
+  // learned-limits, same as claude-code.
+  "claude-code": { hostClass: "hosted", agentHost: true },
+  codex: { hostClass: "hosted", agentHost: false },
+  agy: { hostClass: "hosted", agentHost: false },
+  opencode: { hostClass: "local", agentHost: false },
+  "worker-command": { hostClass: "local", agentHost: false },
+  // antigravity (like vscode-task/subprocess-template) is command-template-
+  // driven and its underlying model is operator-chosen, so it classifies per
+  // its configured model — unknown until a model is configured.
+  "subprocess-template": { hostClass: "unknown", agentHost: false },
+  "vscode-task": { hostClass: "unknown", agentHost: true },
+  antigravity: { hostClass: "unknown", agentHost: false },
+  "claude-worker": { hostClass: "unknown", agentHost: false },
+  "openai-compatible": { hostClass: "unknown", agentHost: false },
+};
+
+/** Map a provider to its relative host-class (see {@link PROVIDER_TRAITS}). */
 export function hostClassFor(providerName: ResolvedProviderName): ProviderType {
-  switch (providerName) {
-    case "claude-code":
-    case "codex":
-    case "agy":
-      // codex/agy are hosted model backends — engages hosted concurrency defaults +
-      // learned-limits, same as claude-code.
-      return "hosted";
-    case "opencode":
-    case "worker-command":
-      return "local";
-    case "subprocess-template":
-    case "vscode-task":
-    case "antigravity":
-    default:
-      // antigravity (like vscode-task/subprocess-template) is command-template-
-      // driven and its underlying model is operator-chosen, so it classifies per
-      // its configured model — unknown until a model is configured.
-      return "unknown";
-  }
+  return PROVIDER_TRAITS[providerName].hostClass;
+}
+
+/**
+ * Is this provider a capable agent host that fans out to parallel subagent
+ * sessions? Declared per-provider data (never a name check at a call site);
+ * consumed by `classifyProvider` to lift the concurrency floor.
+ */
+export function isAgentHostProvider(
+  providerName: ResolvedProviderName,
+): boolean {
+  return PROVIDER_TRAITS[providerName].agentHost;
 }
 
 export interface ResolveHostModelOptions {

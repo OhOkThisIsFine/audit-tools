@@ -62,71 +62,51 @@ export async function validateConfiguredProviderEnvironment(
   const lookupPath = options.pathExists ?? configuredPathExists;
   const provider = sessionConfig.provider ?? "worker-command";
 
-  if (provider === "claude-code") {
-    const command = sessionConfig.claude_code?.command ?? "claude";
-    if (isBareExecutableName(command) && !(await lookupCommand(command))) {
-      pushIssue(
-        issues,
-        "claude_code.command",
-        `Configured claude-code executable was not found on PATH: ${command}.`,
-      );
-    } else if (isDirectExecutablePath(command) && !lookupPath(command)) {
-      pushIssue(
-        issues,
-        "claude_code.command",
-        `Configured claude-code executable path does not exist: ${command}.`,
-      );
-    } else if (!isSupportedConfiguredCommand(command)) {
-      pushIssue(
-        issues,
-        "claude_code.command",
-        "Configured claude-code command must be a bare executable name or direct path. Put CLI flags in extra_args.",
-      );
-    }
-  }
+  // One row per CLI-launched provider: the provider name, its config block's
+  // issue-path key, and the configured/default command. Same checks and message
+  // text for every row — adding a CLI provider is a row, not a copied block.
+  const cliProviderCommands: ReadonlyArray<{
+    provider: string;
+    configKey: string;
+    command: string;
+  }> = [
+    {
+      provider: "claude-code",
+      configKey: "claude_code",
+      command: sessionConfig.claude_code?.command ?? "claude",
+    },
+    {
+      provider: "opencode",
+      configKey: "opencode",
+      command: sessionConfig.opencode?.command ?? "opencode",
+    },
+    {
+      provider: "codex",
+      configKey: "codex",
+      command: sessionConfig.codex?.command ?? "codex",
+    },
+  ];
 
-  if (provider === "opencode") {
-    const command = sessionConfig.opencode?.command ?? "opencode";
+  for (const row of cliProviderCommands) {
+    if (provider !== row.provider) continue;
+    const { configKey, command } = row;
     if (isBareExecutableName(command) && !(await lookupCommand(command))) {
       pushIssue(
         issues,
-        "opencode.command",
-        `Configured opencode executable was not found on PATH: ${command}.`,
+        `${configKey}.command`,
+        `Configured ${row.provider} executable was not found on PATH: ${command}.`,
       );
     } else if (isDirectExecutablePath(command) && !lookupPath(command)) {
       pushIssue(
         issues,
-        "opencode.command",
-        `Configured opencode executable path does not exist: ${command}.`,
+        `${configKey}.command`,
+        `Configured ${row.provider} executable path does not exist: ${command}.`,
       );
     } else if (!isSupportedConfiguredCommand(command)) {
       pushIssue(
         issues,
-        "opencode.command",
-        "Configured opencode command must be a bare executable name or direct path. Put CLI flags in extra_args.",
-      );
-    }
-  }
-
-  if (provider === "codex") {
-    const command = sessionConfig.codex?.command ?? "codex";
-    if (isBareExecutableName(command) && !(await lookupCommand(command))) {
-      pushIssue(
-        issues,
-        "codex.command",
-        `Configured codex executable was not found on PATH: ${command}.`,
-      );
-    } else if (isDirectExecutablePath(command) && !lookupPath(command)) {
-      pushIssue(
-        issues,
-        "codex.command",
-        `Configured codex executable path does not exist: ${command}.`,
-      );
-    } else if (!isSupportedConfiguredCommand(command)) {
-      pushIssue(
-        issues,
-        "codex.command",
-        "Configured codex command must be a bare executable name or direct path. Put CLI flags in extra_args.",
+        `${configKey}.command`,
+        `Configured ${row.provider} command must be a bare executable name or direct path. Put CLI flags in extra_args.`,
       );
     }
   }

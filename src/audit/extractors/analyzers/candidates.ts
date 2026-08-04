@@ -28,28 +28,35 @@ import { parseRubocop } from "../../adapters/rubocop.js";
 const GITLEAKS_VERSION = "8.21.2";
 const GITLEAKS_RELEASE_BASE = `https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}`;
 
+/**
+ * Look up a release-asset name part (os or cpu) in a per-tool naming table.
+ * Every external tool names its assets differently (windows vs macos, x64 vs
+ * amd64 vs x86_64), so the TABLES stay per-tool — only the lookup is shared.
+ * Absent key ⇒ null ⇒ the tool publishes no asset for that platform/arch.
+ */
+function lookupAssetPart(
+  value: string,
+  table: Readonly<Record<string, string>>,
+): string | null {
+  return Object.prototype.hasOwnProperty.call(table, value)
+    ? table[value]
+    : null;
+}
+
 /** Map Node's platform/arch onto the gitleaks release asset naming. */
 function gitleaksAsset(platform: NodeJS.Platform, arch: string): string | null {
-  const os =
-    platform === "win32"
-      ? "windows"
-      : platform === "darwin"
-        ? "darwin"
-        : platform === "linux"
-          ? "linux"
-          : null;
-  if (!os) return null;
-  const cpu =
-    arch === "x64"
-      ? "x64"
-      : arch === "arm64"
-        ? "arm64"
-        : arch === "ia32"
-          ? "x32"
-          : arch === "arm"
-            ? "armv7"
-            : null;
-  if (!cpu) return null;
+  const os = lookupAssetPart(platform, {
+    win32: "windows",
+    darwin: "darwin",
+    linux: "linux",
+  });
+  const cpu = lookupAssetPart(arch, {
+    x64: "x64",
+    arm64: "arm64",
+    ia32: "x32",
+    arm: "armv7",
+  });
+  if (!os || !cpu) return null;
   const ext = os === "windows" ? "zip" : "tar.gz";
   return `gitleaks_${GITLEAKS_VERSION}_${os}_${cpu}.${ext}`;
 }
@@ -427,18 +434,14 @@ const OSV_SCANNER_RELEASE_BASE = `https://github.com/google/osv-scanner/releases
 
 /** Map Node's platform/arch onto the osv-scanner release asset naming. */
 function osvScannerAsset(platform: NodeJS.Platform, arch: string): string | null {
-  const os =
-    platform === "win32"
-      ? "windows"
-      : platform === "darwin"
-        ? "darwin"
-        : platform === "linux"
-          ? "linux"
-          : null;
-  if (!os) return null;
+  const os = lookupAssetPart(platform, {
+    win32: "windows",
+    darwin: "darwin",
+    linux: "linux",
+  });
   // osv-scanner only publishes amd64/arm64 assets (no 32-bit/arm variants).
-  const cpu = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null;
-  if (!cpu) return null;
+  const cpu = lookupAssetPart(arch, { x64: "amd64", arm64: "arm64" });
+  if (!os || !cpu) return null;
   const ext = os === "windows" ? ".exe" : "";
   return `osv-scanner_${os}_${cpu}${ext}`;
 }
@@ -591,10 +594,9 @@ function hadolintAsset(platform: NodeJS.Platform, arch: string): string | null {
     // hadolint publishes only an x86_64 Windows asset.
     return arch === "x64" ? "hadolint-windows-x86_64.exe" : null;
   }
-  const os = platform === "darwin" ? "macos" : platform === "linux" ? "linux" : null;
-  if (!os) return null;
-  const cpu = arch === "x64" ? "x86_64" : arch === "arm64" ? "arm64" : null;
-  if (!cpu) return null;
+  const os = lookupAssetPart(platform, { darwin: "macos", linux: "linux" });
+  const cpu = lookupAssetPart(arch, { x64: "x86_64", arm64: "arm64" });
+  if (!os || !cpu) return null;
   return `hadolint-${os}-${cpu}`;
 }
 
@@ -670,26 +672,18 @@ const ACTIONLINT_RELEASE_BASE = `https://github.com/rhysd/actionlint/releases/do
 
 /** Map Node's platform/arch onto actionlint's release asset naming. */
 function actionlintAsset(platform: NodeJS.Platform, arch: string): string | null {
-  const os =
-    platform === "win32"
-      ? "windows"
-      : platform === "darwin"
-        ? "darwin"
-        : platform === "linux"
-          ? "linux"
-          : null;
-  if (!os) return null;
-  const cpu =
-    arch === "x64"
-      ? "amd64"
-      : arch === "arm64"
-        ? "arm64"
-        : arch === "ia32"
-          ? "386"
-          : arch === "arm"
-            ? "armv6"
-            : null;
-  if (!cpu) return null;
+  const os = lookupAssetPart(platform, {
+    win32: "windows",
+    darwin: "darwin",
+    linux: "linux",
+  });
+  const cpu = lookupAssetPart(arch, {
+    x64: "amd64",
+    arm64: "arm64",
+    ia32: "386",
+    arm: "armv6",
+  });
+  if (!os || !cpu) return null;
   // actionlint does not publish a windows/armv6 asset.
   if (os === "windows" && cpu === "armv6") return null;
   const ext = os === "windows" ? "zip" : "tar.gz";
