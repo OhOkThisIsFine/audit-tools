@@ -5,7 +5,7 @@ import {
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditObligation, AuditState } from "../types/auditState.js";
-import { EXECUTOR_REGISTRY } from "./executors.js";
+import { EXECUTOR_BY_OBLIGATION, EXECUTOR_REGISTRY } from "./executors.js";
 import { deriveAuditState } from "./state.js";
 
 export interface NextStepDecision {
@@ -138,9 +138,7 @@ export function decideNextStep(
     };
   }
 
-  const executor = EXECUTOR_REGISTRY.find((item) =>
-    item.obligation_ids.includes(next.id),
-  );
+  const executor = EXECUTOR_BY_OBLIGATION.get(next.id);
   return {
     state,
     selected_obligation: next.id,

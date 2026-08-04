@@ -10,8 +10,7 @@ export interface ExecutorDefinition {
  * perform work) rather than a deterministic executor.
  */
 export function isHostDelegationExecutor(id: string): boolean {
-  const entry = EXECUTOR_REGISTRY.find((e) => e.id === id);
-  return entry?.kind === "host_delegation";
+  return executorById.get(id)?.kind === "host_delegation";
 }
 
 export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
@@ -186,3 +185,17 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["friction_capture_current"],
   },
 ];
+
+// O(1) lookup indexes over the registry, built once at module load. Uniqueness
+// of the obligation→executor mapping is asserted at load in nextStep.ts
+// (assertExecutorRegistryCoversPriority), so last-wins insertion cannot mask an
+// ambiguity there.
+const executorById = new Map(EXECUTOR_REGISTRY.map((e) => [e.id, e]));
+
+/** Executor owning each obligation id — O(1) replacement for scanning the registry. */
+export const EXECUTOR_BY_OBLIGATION: ReadonlyMap<string, ExecutorDefinition> =
+  new Map(
+    EXECUTOR_REGISTRY.flatMap((e) =>
+      e.obligation_ids.map((id) => [id, e] as const),
+    ),
+  );

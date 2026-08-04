@@ -53,11 +53,17 @@ export async function loadRemediateSessionConfig(params: {
   ambient?: ResolveSessionConfigOptions;
 }): Promise<SessionConfig | undefined> {
   if (params.override) return params.override;
-  const intent = params.artifactsFirst
-    ? ((await readValidatedRepoSessionIntent(
-        join(params.root, ".remediation-artifacts", "session-config.json"),
-      )) ?? (await readValidatedRepoSessionIntent(join(params.root, "session-config.json"))))
-    : await readValidatedRepoSessionIntent(join(params.root, "session-config.json"));
+  const candidatePaths = [
+    ...(params.artifactsFirst
+      ? [join(params.root, ".remediation-artifacts", "session-config.json")]
+      : []),
+    join(params.root, "session-config.json"),
+  ];
+  let intent;
+  for (const path of candidatePaths) {
+    intent = await readValidatedRepoSessionIntent(path);
+    if (intent) break;
+  }
   return intent
     ? resolveSessionConfig(intent, ambientAuditorDescriptor(), params.ambient)
     : undefined;

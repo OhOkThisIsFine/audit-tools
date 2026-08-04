@@ -10,7 +10,88 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { discardOnSchemaVersionMismatch, buildSelfSpawnExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+// IO / validation / rendering helpers
+import {
+  discardOnSchemaVersionMismatch,
+  buildSelfSpawnExclusion,
+  readOptionalJsonFile,
+  readValidatedRepoSessionIntent,
+  stagedAndUntracked,
+  writeJsonFile,
+  writeTextFile,
+  buildAuditDeliverablePair,
+  formatValidationIssues,
+  isRecord,
+  withFsRetry,
+  RunLogger,
+  DISPATCH_PROMPT_HANDOFF_NOTE,
+  renderHostScratchNote,
+  hostScratchDir,
+  renderQuotaCoverageNudge,
+  renderTokenBudgetView,
+  coerceJsonObjectArg,
+  // rolling engine + quota
+  driveRolling,
+  resolveLedgerBudgets,
+  setQuotaStateDir,
+  detectHostDispatchWall,
+  admissionBlockedOnBudget,
+  classifyEmptyGrantCause,
+  reconcileAdmissionLeasesFromQuotaFile,
+  buildQuotaPausedTerminal,
+  HostSessionQuotaSource,
+  quotaPoolKey,
+  // obligation engine + intent
+  interpretFreeFormIntent,
+  advance,
+  decideFrictionTriage,
+  buildFrictionTriageBlock,
+  // dispatch planning / provider classification
+  planHybridDispatch,
+  readSettledPools,
+  addSettledPool,
+  isPoolSettlingOutcome,
+  isInProcessWorkerProvider,
+  sourceByPoolId,
+  classifyProvider,
+  selectDispatchDriver,
+  renderDispatchDriverInstruction,
+  resolveHostProviderName,
+  resolveHostDispatchProviderName,
+  resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
+  resolveAutonomousMode,
+  resolveRollingEngineFlag,
+  // friction capture
+  captureStepBoundaryFriction,
+  captureZeroCapacityFriction,
+  captureCostDriftFriction,
+  captureCreditExhaustionFriction,
+  captureQuotaUnclassifiedFriction,
+  captureModelUnavailableFriction,
+  capturePacketTooLargeFriction,
+  createDispatchDecisionLog,
+  // domain constants
+  LENSES,
+  SEVERITIES,
+  // types
+  type FrictionTriageDecision,
+  type ObligationDef,
+  type ObligationOutcome,
+  type InterpretedIntent,
+  type SessionConfig,
+  type HostModelRosterEntry,
+  type CapacityPool,
+  type PartialCompletionTerminal,
+  type RollingDispatchResult,
+  type ProviderSlot,
+  type FrontierNode,
+  type EngineDecisionSink,
+  type ResolvedProviderName,
+  type ProviderName,
+  type DispatchableSource,
+  type QuotaBindingWindow,
+  type DispatchModelTier,
+} from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1654,14 +1735,12 @@ async function saveStateForPlan(
   planCoverage?: CoverageLedger,
 ): Promise<RemediationState> {
   const items: Record<string, RemediationItemState> = {};
+  const blockIds = blockIdsByFinding(plan);
   for (const finding of plan.findings) {
-    const block = plan.blocks.find((candidate) =>
-      candidate.items.includes(finding.id),
-    );
     items[finding.id] = {
       finding_id: finding.id,
       status: "pending",
-      block_id: block?.block_id ?? "UNKNOWN",
+      block_id: blockIds.get(finding.id) ?? "UNKNOWN",
     };
   }
   const state: RemediationState = {
@@ -2786,6 +2865,7 @@ async function handlePendingExtractedPlan(
     const filterDisp = await readOptionalJsonFile<PersistedReviewFilterDispositions>(
       reviewFilterDispositionsPath(artifactsDir),
     );
+    const pipelinedBlockIds = blockIdsByFinding(pipelined);
     const coverage = filterDisp
       ? buildCoverageLedger({
           planId: pipelined.plan_id,
@@ -2815,9 +2895,7 @@ async function handlePendingExtractedPlan(
               {
                 finding_id: finding.id,
                 status: "pending" as const,
-                block_id:
-                  pipelined.blocks.find((b) => b.items.includes(finding.id))
-                    ?.block_id ?? "UNKNOWN",
+                block_id: pipelinedBlockIds.get(finding.id) ?? "UNKNOWN",
               },
             ]),
           ),
@@ -3293,32 +3371,50 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
+  // Resolve the manifest sources ONCE for the whole step (risk signal, Path A,
+  // and the pipeline source inputs all consume the same snapshot), and read the
+  // structured-audit source file at most once via a memoized reader (an
+  // unreadable source memoizes `undefined`; extractAuditFindings on undefined
+  // yields the empty set, so consumers degrade exactly as before).
+  const manifestSources = intake.manifest
+    ? resolveManifestSources(root, intake.manifest).resolved
+    : [];
+  const auditSource =
+    intake.summary.source_type === "structured_audit"
+      ? manifestSources.find((s) => s.type === "structured_audit")
+      : undefined;
+  let auditFindingsCache: { value: unknown } | undefined;
+  const readAuditFindingsOnce = async (): Promise<unknown> => {
+    if (!auditSource) {
+      return undefined;
+    }
+    if (!auditFindingsCache) {
+      let value: unknown;
+      try {
+        value = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
+      } catch {
+        value = undefined;
+      }
+      auditFindingsCache = { value };
+    }
+    return auditFindingsCache.value;
+  };
+
   // Slice 2 — compute & persist the shared intake risk/complexity signal the
   // self-scaling dials (Slices 3/4) will read. Idempotent: recorded once from
   // intake-available data only (affected_files + goals + path-risk patterns), so
-  // a later escalate-on-evidence raise is never clobbered. The input is gathered
-  // lazily (only on the run that actually computes), and for structured_audit —
-  // where the top-level summary.affected_files is legitimately empty (paths live
-  // per-finding) — it unions the per-finding affected files so the path-risk
-  // patterns actually fire (fail-closed: a risky-subsystem audit must not land
-  // `low`). No behavior keys on it yet — this establishes the source of truth.
+  // a later escalate-on-evidence raise is never clobbered. The audit-source read
+  // happens only on the run that actually computes (memoized above), and for
+  // structured_audit — where the top-level summary.affected_files is
+  // legitimately empty (paths live per-finding) — it unions the per-finding
+  // affected files so the path-risk patterns actually fire (fail-closed: a
+  // risky-subsystem audit must not land `low`). No behavior keys on it yet —
+  // this establishes the source of truth.
   await ensureIntakeRiskSignal(artifactsDir, async () => {
     const summary = intake.summary!;
     const affectedFiles = summary.affected_files.map((f) => f.path);
-    if (summary.source_type === "structured_audit" && intake.manifest) {
-      const auditSource = resolveManifestSources(root, intake.manifest).resolved.find(
-        (s) => s.type === "structured_audit",
-      );
-      if (auditSource) {
-        try {
-          const parsed = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
-          affectedFiles.push(...distinctAffectedFiles(extractAuditFindings(parsed)));
-        } catch {
-          // Unreadable audit source — leave the summary-derived list; an empty
-          // list with non-empty goals still rates conservatively via intent.
-        }
-      }
-    }
+    const parsed = await readAuditFindingsOnce();
+    affectedFiles.push(...distinctAffectedFiles(extractAuditFindings(parsed)));
     return { affectedFiles, goals: summary.goals };
   });
 
@@ -3349,148 +3445,138 @@ async function handleReadyIntakeContractPipeline(
   // ledger is built over the originals (every audit finding → exactly one
   // disposition). The gate may halt to collect the user's decision.
   let reviewSourceSwap: { from: string; to: string } | undefined;
-  if (intake.summary.source_type === "structured_audit" && intake.manifest) {
-    const auditSource = resolveManifestSources(root, intake.manifest).resolved.find(
-      (s) => s.type === "structured_audit",
-    );
-    if (auditSource) {
-      let auditFindings: unknown;
-      try {
-        auditFindings = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
-      } catch {
-        auditFindings = undefined;
+  if (auditSource) {
+    const auditFindings = await readAuditFindingsOnce();
+    const originals = extractAuditFindings(auditFindings);
+    if (originals.length > 0) {
+      const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+        join(artifactsDir, "intent_checkpoint.json"),
+      );
+      const filter = await runFindingFilterPass(originals, {
+        root,
+        checkpoint: checkpoint ?? undefined,
+        evidenceGrounding: true,
+      });
+      const gate = await runReviewApprovalGate(
+        root,
+        artifactsDir,
+        filter.survivors,
+        // Autonomy resolves from the PERSISTED session config (hoisted load
+        // above) → env → attended default, never from the bare CLI options.
+        resolveAutonomousMode({ sessionConfig: sessionConfigForDispatch }),
+      );
+      if (gate.kind === "halt") {
+        return gate.step;
       }
-      const originals = extractAuditFindings(auditFindings);
-      if (originals.length > 0) {
-        const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
-          join(artifactsDir, "intent_checkpoint.json"),
-        );
-        const filter = await runFindingFilterPass(originals, {
-          root,
-          checkpoint: checkpoint ?? undefined,
-          evidenceGrounding: true,
-        });
-        const gate = await runReviewApprovalGate(
+      // Persist the filter dispositions so coverage is built over the originals.
+      await persistReviewFilterDispositions(artifactsDir, originals, filter);
+
+      // Lean path = the `low` risk tier's realization (D-68 — the standalone lean
+      // fast-path folded into the self-scaling dial; its two mechanisms now live in
+      // `riskSignal.ts` (light-review) + `contractPipeline.ts` (lean plan builder)).
+      // A run skips the heavy contract DESIGN loop and
+      // synthesizes the extracted plan directly IFF its effective risk tier is `low`;
+      // the plan→implement→close machinery (per-node verify-before-merge + the final
+      // whole-repo gate) is the retained safety net. Runs only here — on Path A
+      // (structured_audit), the only intake with a pre-existing finding set to judge.
+      //
+      // First fold the APPROVED set's finding-level risk (grounding / confidence /
+      // coupling / systemic / architecture / count — the finding-QUALITY dimension the
+      // intake path/breadth/intent signal doesn't see) INTO the shared risk signal as
+      // escalate-on-evidence. This makes the tier the SINGLE classifier: there is no
+      // separate fast-path boolean that can DISAGREE with it (a grounded handful
+      // touching a risk subsystem stays `high` and takes the full pipeline, instead of
+      // bypassing it as the old parallel `evaluateFastPath` allowed).
+      const findingEvidence = findingRiskEvidence(gate.approved);
+      let riskSignal = await readIntakeRiskSignal(artifactsDir);
+      if (findingEvidence && riskSignal) {
+        const raised = escalateRiskSignal(riskSignal, findingEvidence);
+        // escalateRiskSignal returns the SAME reference when the evidence does not
+        // raise the tier — only persist on an actual change (no byte-identical rewrite).
+        if (raised !== riskSignal) {
+          riskSignal = raised;
+          await writeIntakeRiskSignal(artifactsDir, riskSignal);
+        }
+      }
+      // T1 slice 3b — the lean tier is NOT zero-scrutiny: a `low`-tier run first runs
+      // a bounded LIGHT adversarial review over the approved findings (the floor,
+      // never off — `adversarialDepthForTier("low") === "light"`). A clear verdict
+      // proceeds to the lean plan; a verdict that surfaces a real concern escalates
+      // the risk signal and routes to the full pipeline below.
+      if (gate.approved.length > 0 && riskSignal?.tier === "low") {
+        const review = await runLeanLightReviewGate(
           root,
           artifactsDir,
-          filter.survivors,
-          // Autonomy resolves from the PERSISTED session config (hoisted load
-          // above) → env → attended default, never from the bare CLI options.
-          resolveAutonomousMode({ sessionConfig: sessionConfigForDispatch }),
+          gate.approved,
         );
-        if (gate.kind === "halt") {
-          return gate.step;
+        if (review.kind === "halt") {
+          return review.step;
         }
-        // Persist the filter dispositions so coverage is built over the originals.
-        await persistReviewFilterDispositions(artifactsDir, originals, filter);
-
-        // Lean path = the `low` risk tier's realization (D-68 — the standalone lean
-        // fast-path folded into the self-scaling dial; its two mechanisms now live in
-        // `riskSignal.ts` (light-review) + `contractPipeline.ts` (lean plan builder)).
-        // A run skips the heavy contract DESIGN loop and
-        // synthesizes the extracted plan directly IFF its effective risk tier is `low`;
-        // the plan→implement→close machinery (per-node verify-before-merge + the final
-        // whole-repo gate) is the retained safety net. Runs only here — on Path A
-        // (structured_audit), the only intake with a pre-existing finding set to judge.
-        //
-        // First fold the APPROVED set's finding-level risk (grounding / confidence /
-        // coupling / systemic / architecture / count — the finding-QUALITY dimension the
-        // intake path/breadth/intent signal doesn't see) INTO the shared risk signal as
-        // escalate-on-evidence. This makes the tier the SINGLE classifier: there is no
-        // separate fast-path boolean that can DISAGREE with it (a grounded handful
-        // touching a risk subsystem stays `high` and takes the full pipeline, instead of
-        // bypassing it as the old parallel `evaluateFastPath` allowed).
-        const findingEvidence = findingRiskEvidence(gate.approved);
-        let riskSignal = await readIntakeRiskSignal(artifactsDir);
-        if (findingEvidence && riskSignal) {
-          const raised = escalateRiskSignal(riskSignal, findingEvidence);
-          // escalateRiskSignal returns the SAME reference when the evidence does not
-          // raise the tier — only persist on an actual change (no byte-identical rewrite).
-          if (raised !== riskSignal) {
-            riskSignal = raised;
-            await writeIntakeRiskSignal(artifactsDir, riskSignal);
-          }
-        }
-        // T1 slice 3b — the lean tier is NOT zero-scrutiny: a `low`-tier run first runs
-        // a bounded LIGHT adversarial review over the approved findings (the floor,
-        // never off — `adversarialDepthForTier("low") === "light"`). A clear verdict
-        // proceeds to the lean plan; a verdict that surfaces a real concern escalates
-        // the risk signal and routes to the full pipeline below.
-        if (gate.approved.length > 0 && riskSignal?.tier === "low") {
-          const review = await runLeanLightReviewGate(
+        if (review.kind === "escalate") {
+          // Escalate-on-evidence: raise the signal to at least `medium` so the
+          // full pipeline's adversarial depth is `full` (see slice 3a), then
+          // fall through to the full pipeline.
+          await writeIntakeRiskSignal(
+            artifactsDir,
+            escalateRiskSignal(riskSignal, {
+              tier: "medium",
+              reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
+            }),
+          );
+          process.stderr.write(
+            `[remediate-code] Lean light review escalated (${review.concerns.join("; ")}); routing to the full contract pipeline.\n`,
+          );
+        } else {
+          // Clear verdict → proceed with the lean plan.
+          const leanPlan = buildLeanExtractedPlan(
+            gate.approved,
+            randomRunId("LEAN"),
+          );
+          await writeJsonFile(
+            intakePaths(artifactsDir).extractedPlan,
+            leanPlan,
+          );
+          process.stderr.write(
+            `[remediate-code] Lean fast path (risk tier low): ${riskSignal.rationale.join("; ")}; light review clear. Routing to plan→implement.\n`,
+          );
+          const planned = await handlePendingExtractedPlan(
             root,
             artifactsDir,
-            gate.approved,
+            { status: "pending" },
+            leanPlan,
           );
-          if (review.kind === "halt") {
-            return review.step;
+          if (planned) {
+            return planned;
           }
-          if (review.kind === "escalate") {
-            // Escalate-on-evidence: raise the signal to at least `medium` so the
-            // full pipeline's adversarial depth is `full` (see slice 3a), then
-            // fall through to the full pipeline.
-            await writeIntakeRiskSignal(
-              artifactsDir,
-              escalateRiskSignal(riskSignal, {
-                tier: "medium",
-                reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
-              }),
-            );
-            process.stderr.write(
-              `[remediate-code] Lean light review escalated (${review.concerns.join("; ")}); routing to the full contract pipeline.\n`,
-            );
-          } else {
-            // Clear verdict → proceed with the lean plan.
-            const leanPlan = buildLeanExtractedPlan(
-              gate.approved,
-              randomRunId("LEAN"),
-            );
-            await writeJsonFile(
-              intakePaths(artifactsDir).extractedPlan,
-              leanPlan,
-            );
-            process.stderr.write(
-              `[remediate-code] Lean fast path (risk tier low): ${riskSignal.rationale.join("; ")}; light review clear. Routing to plan→implement.\n`,
-            );
-            const planned = await handlePendingExtractedPlan(
-              root,
-              artifactsDir,
-              { status: "pending" },
-              leanPlan,
-            );
-            if (planned) {
-              return planned;
-            }
-            // Defensive: a deterministically-built lean plan should always
-            // normalize. If it somehow didn't, handlePendingExtractedPlan removed
-            // the file; fall through to the full pipeline (the safety net) rather
-            // than stalling the run.
-            process.stderr.write(
-              "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
-            );
-          }
+          // Defensive: a deterministically-built lean plan should always
+          // normalize. If it somehow didn't, handlePendingExtractedPlan removed
+          // the file; fall through to the full pipeline (the safety net) rather
+          // than stalling the run.
+          process.stderr.write(
+            "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
+          );
         }
+      }
 
-        // Seed the pipeline with the approved survivors only. When that set is
-        // narrower than the originals (anything filtered or declined), route the
-        // seed AND the pipeline's source inputs at a filtered file so a removed
-        // finding can never re-enter via the raw audit-findings.json (tool-enforced).
-        const approvedPayload = isRecord(auditFindings)
-          ? { ...auditFindings, findings: gate.approved }
-          : { findings: gate.approved };
-        let seedSourcePath = auditSource.path;
-        if (gate.approved.length < originals.length) {
-          await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
-          seedSourcePath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
-          await writeJsonFile(seedSourcePath, approvedPayload);
-          reviewSourceSwap = { from: auditSource.path, to: seedSourcePath };
-        }
-        try {
-          await writePathASeedFromFindings(artifactsDir, seedSourcePath, approvedPayload);
-        } catch {
-          // If the seed cannot be written, the pipeline still runs; the LLM
-          // phases use the source files from sourcePaths.
-        }
+      // Seed the pipeline with the approved survivors only. When that set is
+      // narrower than the originals (anything filtered or declined), route the
+      // seed AND the pipeline's source inputs at a filtered file so a removed
+      // finding can never re-enter via the raw audit-findings.json (tool-enforced).
+      const approvedPayload = isRecord(auditFindings)
+        ? { ...auditFindings, findings: gate.approved }
+        : { findings: gate.approved };
+      let seedSourcePath = auditSource.path;
+      if (gate.approved.length < originals.length) {
+        await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
+        seedSourcePath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
+        await writeJsonFile(seedSourcePath, approvedPayload);
+        reviewSourceSwap = { from: auditSource.path, to: seedSourcePath };
+      }
+      try {
+        await writePathASeedFromFindings(artifactsDir, seedSourcePath, approvedPayload);
+      } catch {
+        // If the seed cannot be written, the pipeline still runs; the LLM
+        // phases use the source files from sourcePaths.
       }
     }
   }
@@ -3500,16 +3586,14 @@ async function handleReadyIntakeContractPipeline(
   if (existsSync(paths.brief)) {
     sourcePaths.add(paths.brief);
   }
-  if (intake.manifest) {
-    for (const source of resolveManifestSources(root, intake.manifest).resolved) {
-      // Swap the raw audit-findings.json for the approved-only filtered file so a
-      // declined finding can never re-enter the pipeline as a source input.
-      sourcePaths.add(
-        reviewSourceSwap && source.path === reviewSourceSwap.from
-          ? reviewSourceSwap.to
-          : source.path,
-      );
-    }
+  for (const source of manifestSources) {
+    // Swap the raw audit-findings.json for the approved-only filtered file so a
+    // declined finding can never re-enter the pipeline as a source input.
+    sourcePaths.add(
+      reviewSourceSwap && source.path === reviewSourceSwap.from
+        ? reviewSourceSwap.to
+        : source.path,
+    );
   }
 
   // Resolve the independent-critic dispatch capability from the SAME handshake

@@ -7,10 +7,7 @@ import {
 } from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
 import { isMetadataManifestCurrent } from "./resultBaseline.js";
-import {
-  hashArtifactValue,
-  stableStringify,
-} from "./artifactFreshness.js";
+import { hashArtifactValue } from "./artifactFreshness.js";
 import {
   computeDependencySliceHash,
   hasDependencySliceProjection,
@@ -106,8 +103,10 @@ export function computeStaleArtifacts(
         .sort();
       const recordedDependencies = Object.keys(entry.dependency_revisions).sort();
       if (
-        stableStringify(expectedDependencies) !==
-        stableStringify(recordedDependencies)
+        expectedDependencies.length !== recordedDependencies.length ||
+        expectedDependencies.some(
+          (dependencyName, i) => dependencyName !== recordedDependencies[i],
+        )
       ) {
         stale.add(artifactName);
         continue;

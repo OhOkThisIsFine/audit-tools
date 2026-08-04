@@ -59,14 +59,11 @@ export function validateDesignSpecGates(
   // Checks both DesignSpec.modules (optional annotation array) and
   // finalized_module_contracts.module_contracts (used when called with the
   // finalized design artifact).
-  const moduleEntries: unknown[] = Array.isArray(designSpec.modules)
-    ? (designSpec.modules as unknown[])
-    : Array.isArray(designSpec.module_contracts)
-      ? (designSpec.module_contracts as unknown[])
-      : [];
-  const moduleFieldName = Array.isArray(designSpec.modules)
-    ? "modules"
-    : "module_contracts";
+  const [moduleFieldName, moduleEntries]: [string, unknown[]] = Array.isArray(
+    designSpec.modules,
+  )
+    ? ["modules", designSpec.modules as unknown[]]
+    : ["module_contracts", Array.isArray(designSpec.module_contracts) ? (designSpec.module_contracts as unknown[]) : []];
   for (const [i, mod] of moduleEntries.entries()) {
     if (!isRecord(mod)) continue;
     if (!Array.isArray(mod.inputs) || mod.inputs.length === 0) {

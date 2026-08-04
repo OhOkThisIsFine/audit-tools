@@ -1134,3 +1134,12 @@
   persisted result depends on call order. **Property to hold:** choose one lifecycle invariant and
   enforce it in a single atomic state-transition writer used by pause, forced synthesis, and rolling
   terminal paths.
+
+- **A dedup survivor can belong to multiple blocks; block ownership is ill-defined.**
+  `fixupBlocksAfterDedup` (`src/remediate/dedup/crossLensDedup.ts`) rewrites absorbed finding ids to
+  their survivor per block, so a survivor absorbed from another lens's block ends up in BOTH blocks'
+  `items`. `blockIdsByFinding` now pins first-wins as the single ownership semantic (its two consumers
+  historically disagreed), but both dispatch scoping and the coverage ledger still see the finding in
+  two blocks. **Property to hold:** each finding id appears in exactly one block after fixup — or the
+  contract explicitly declares multi-block membership legal and every consumer resolves ownership
+  through one shared accessor.

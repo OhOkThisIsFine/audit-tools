@@ -61,7 +61,14 @@ import {
 } from "./args.js";
 import { resolveCurrentWorkPartitionRuntime } from "./workPartitionRuntime.js";
 
-// Re-export helpers from nextStepHelpers so existing imports remain valid.
+// Import the helpers used locally, then re-export the full helper surface so
+// existing imports remain valid (an `export … from` clause creates no local
+// bindings, so the locally-used names must be imported explicitly).
+import {
+  runDeterministicForNextStep,
+  renderDesignReviewRejectionNotice,
+  renderEdgeReasoningRejectionNotice,
+} from "./nextStepHelpers.js";
 export {
   tryConsumeIncoming,
   consumeArrayIncoming,
@@ -76,12 +83,6 @@ export {
   checkFinalizationCycle,
   checkNoProgressBeforeDispatch,
   runDeterministicForNextStep,
-} from "./nextStepHelpers.js";
-
-import {
-  runDeterministicForNextStep,
-  renderDesignReviewRejectionNotice,
-  renderEdgeReasoningRejectionNotice,
 } from "./nextStepHelpers.js";
 
 /**
