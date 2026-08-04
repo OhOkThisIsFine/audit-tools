@@ -86,3 +86,32 @@ export function resolveHostActiveSubagentLimit(options: {
     options.readCodexMaxThreads ?? (() => readCodexConfiguredMaxThreads()),
   );
 }
+
+/**
+ * Bind the shared host-limit resolution to one orchestrator's descriptor —
+ * the quota half of the per-orchestrator draw (the provider half is
+ * `buildOrchestratorProviderBindings`). Each orchestrator's `quota/hostLimits`
+ * module is exactly this call; the env prefix is declared once, on the
+ * descriptor.
+ */
+export function buildHostLimitBindings(descriptor: {
+  envPrefix: string;
+}): {
+  detectHostActiveSubagentLimit: (
+    env?: NodeJS.ProcessEnv,
+    readCodexMaxThreads?: ReadCodexMaxThreads,
+  ) => HostConcurrencyLimit | null;
+  resolveHostActiveSubagentLimit: (options: {
+    explicitLimit?: number | null;
+    sessionConfig: SessionConfig;
+    env?: NodeJS.ProcessEnv;
+    readCodexMaxThreads?: ReadCodexMaxThreads;
+  }) => HostConcurrencyLimit | null;
+} {
+  return {
+    detectHostActiveSubagentLimit: (env, readCodexMaxThreads) =>
+      detectHostActiveSubagentLimit(descriptor.envPrefix, env, readCodexMaxThreads),
+    resolveHostActiveSubagentLimit: (options) =>
+      resolveHostActiveSubagentLimit({ envPrefix: descriptor.envPrefix, ...options }),
+  };
+}

@@ -5,8 +5,30 @@ four parallel review agents, one per angle — reuse, simplification, efficiency
 over `src/audit` (272 files / ~53k lines), `src/remediate` (74 / ~33k), `src/shared`
 (173 / ~37k). Quality only; correctness bugs were out of scope. Findings below were
 agent-reported and the top tier re-verified against HEAD (`c4b953df`, v0.35.0) by the
-coordinating session; per-finding verification status is marked. Nothing here is applied
-yet — this is the pick list.
+coordinating session; per-finding verification status is marked.
+
+**Outcome (2026-08-04, all tiers + deferred worked):** applied in three commits —
+`0796a359` (Tier 1+3), `0dbd3e61` (Tier 2 + gemini sunset), and the descriptor
+consolidation. Per-item dispositions:
+- **Applied:** items 1, 2, 5 (Tier 1); 6, 7, 9-command-validation, 9-asset-mappers
+  (Tier 2, shapes per design-check); 10–14 (Tier 3); the OrchestratorDescriptor
+  consolidation including the hostLimits twins (item 3); the full 2026-07-18 gemini
+  sunset (grew out of item 7's map widening).
+- **Declined after verification:** item 4 (staleness boundary recompute — the comment at
+  advance.ts documents recompute-from-returned-bundle as the deliberate emit-consistency
+  guarantee); item 8's validation-predicate half (design-check found the "transport
+  inference" is the deliberate retired-field refusal + H3 claude-worker guard — false
+  positive); item 9's ensureGlobalAssets half (already table-driven; the two non-table
+  blocks are genuinely different operations); friction back-compat fields (optionality is
+  load-bearing for persisted records in audited repos; removal = schema-version bump,
+  disproportionate); OpenCode renderer interface (primitives already single-sourced in
+  shared; one consumer — speculative abstraction); acceptNode param consolidation (each
+  optional is a deliberate, documented test-injection seam with type-enforced production
+  behavior).
+- **Item 8's classification-registry half narrowed to nothing:** the worker Sets ARE the
+  H3 single-source classifier; a registry would re-fragment it.
+- **New defect found en route:** a dedup survivor can belong to multiple blocks
+  (first-wins now pinned in `blockIdsByFinding`; root question in open-bugs).
 
 ## Tier 1 — verified, high payoff, low risk
 

@@ -10,8 +10,8 @@ import type { LaunchFreshSessionInput } from "audit-tools/shared";
 const {
   ACTIVE_CLAUDE_CODE_SESSION_MESSAGE,
   createClaudeCodeProvider,
-} = await import("../../src/audit/providers/claudeCodeProvider.js");
-const { createOpenCodeProvider } = await import("../../src/audit/providers/opencodeProvider.js");
+  createOpenCodeProvider,
+} = await import("../../src/audit/providers/index.js");
 const {
   WorkerCommandProvider,
   MISSING_WORKER_COMMAND_MESSAGE,

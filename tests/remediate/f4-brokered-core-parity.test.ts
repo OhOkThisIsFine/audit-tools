@@ -40,25 +40,22 @@ describe("F4 inv-8 (CE-004): brokered host-limit core is single-sourced", () => 
   });
 
   it("both orchestrator wrappers delegate to the SAME shared core (no local re-implementation)", () => {
-    // The wrappers are thin: they must import the shared decision functions and
-    // call them with their own env prefix. They must NOT contain the decision
-    // body (env-key lookup, Codex-Desktop fallback, session-config resolution).
+    // The wrappers are one descriptor draw each: they must bind the shared
+    // decision core via buildHostLimitBindings and must NOT contain the
+    // decision body (env-key lookup, Codex-Desktop fallback, session-config
+    // resolution) or a locally-declared prefix.
     for (const [label, src] of [
       ["audit-code", readFileSync(AUDIT_SRC, "utf8")],
       ["remediate-code", readFileSync(REMEDIATE_SRC, "utf8")],
     ] as const) {
-      // (a) imports the shared core
+      // (a) binds the shared core through the descriptor builder
       expect(
         src.includes('from "audit-tools/shared"'),
         `${label} wrapper must import the core from audit-tools/shared`,
       ).toBe(true);
       expect(
-        /detectHostActiveSubagentLimit as detectShared/.test(src),
-        `${label} wrapper must delegate to shared detect core`,
-      ).toBe(true);
-      expect(
-        /resolveHostActiveSubagentLimit as resolveShared/.test(src),
-        `${label} wrapper must delegate to shared resolve core`,
+        /buildHostLimitBindings\(/.test(src),
+        `${label} wrapper must bind the shared core via buildHostLimitBindings`,
       ).toBe(true);
       // (b) does NOT re-implement the decision body locally
       expect(
@@ -69,19 +66,24 @@ describe("F4 inv-8 (CE-004): brokered host-limit core is single-sourced", () => 
         src.includes("CODEX_INTERNAL_ORIGINATOR_OVERRIDE"),
         `${label} wrapper must not re-implement the Codex-Desktop fallback`,
       ).toBe(false);
+      // (c) does NOT declare its own prefix — the prefix lives on the
+      // orchestrator descriptor (providers/index.ts), the wrapper only draws it.
+      expect(
+        /ENV_PREFIX\s*=/.test(src),
+        `${label} wrapper must not declare a local env prefix (it lives on the descriptor)`,
+      ).toBe(false);
     }
   });
 
-  it("the ONLY per-orchestrator delta is the env prefix (AUDIT_CODE vs REMEDIATE_CODE)", () => {
+  it("the ONLY per-orchestrator delta is the descriptor (env prefix AUDIT_CODE vs REMEDIATE_CODE)", () => {
     const auditSrc = readFileSync(AUDIT_SRC, "utf8");
     const remediateSrc = readFileSync(REMEDIATE_SRC, "utf8");
-    expect(/ENV_PREFIX\s*=\s*["']AUDIT_CODE["']/.test(auditSrc)).toBe(true);
-    expect(/ENV_PREFIX\s*=\s*["']REMEDIATE_CODE["']/.test(remediateSrc)).toBe(true);
 
-    // Normalize away the prefix literal; the remaining wrapper source must be
-    // byte-identical. Any divergence beyond the prefix is a parity break.
+    // Normalize away the descriptor identifier; the remaining wrapper source
+    // must be byte-identical. Any divergence beyond the descriptor binding is a
+    // parity break.
     const normalize = (s: string) =>
-      s.replace(/["'](?:AUDIT_CODE|REMEDIATE_CODE)["']/g, '"<PREFIX>"');
+      s.replace(/(?:AUDIT|REMEDIATE)_CODE_DESCRIPTOR/g, "<DESCRIPTOR>");
     expect(normalize(auditSrc)).toBe(normalize(remediateSrc));
   });
 

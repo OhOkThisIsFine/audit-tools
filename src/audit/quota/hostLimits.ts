@@ -1,27 +1,7 @@
-import type {
-  SessionConfig,
-  HostConcurrencyLimit,
-  ReadCodexMaxThreads,
-} from "audit-tools/shared";
-import {
-  detectHostActiveSubagentLimit as detectShared,
-  resolveHostActiveSubagentLimit as resolveShared,
-} from "audit-tools/shared";
+import { buildHostLimitBindings } from "audit-tools/shared";
+import { AUDIT_CODE_DESCRIPTOR } from "../providers/index.js";
 
-const ENV_PREFIX = "AUDIT_CODE";
-
-export function detectHostActiveSubagentLimit(
-  env: NodeJS.ProcessEnv = process.env,
-  readCodexMaxThreads?: ReadCodexMaxThreads,
-): HostConcurrencyLimit | null {
-  return detectShared(ENV_PREFIX, env, readCodexMaxThreads);
-}
-
-export function resolveHostActiveSubagentLimit(options: {
-  explicitLimit?: number | null;
-  sessionConfig: SessionConfig;
-  env?: NodeJS.ProcessEnv;
-  readCodexMaxThreads?: ReadCodexMaxThreads;
-}): HostConcurrencyLimit | null {
-  return resolveShared({ envPrefix: ENV_PREFIX, ...options });
-}
+// The quota half of the per-orchestrator draw: the env prefix is declared once,
+// on the descriptor, and the shared binding builder does the rest.
+export const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } =
+  buildHostLimitBindings(AUDIT_CODE_DESCRIPTOR);

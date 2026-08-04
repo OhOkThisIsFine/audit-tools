@@ -77,24 +77,16 @@ const ALLOWLIST = new Map<string, string>([
       "then routed through the shared helper, not joined",
   ],
   [
-    "src/audit/providers/claudeCodeProvider.ts",
-    "repo-relative session-config path quoted in the nested-session guard " +
-      "MESSAGE shown to the host — display text, not path construction",
+    "src/audit/providers/index.ts",
+    "descriptor's repo-relative session-config path, quoted in the " +
+      "nested-session guard MESSAGE shown to the host — display text, not " +
+      "path construction",
   ],
   [
-    "src/audit/providers/agyProvider.ts",
-    "repo-relative session-config path quoted in the nested-session guard " +
-      "MESSAGE shown to the host — display text, not path construction",
-  ],
-  [
-    "src/remediate/providers/claudeCodeProvider.ts",
-    "repo-relative session-config path quoted in the nested-session guard " +
-      "MESSAGE shown to the host — display text, not path construction",
-  ],
-  [
-    "src/remediate/providers/agyProvider.ts",
-    "repo-relative session-config path quoted in the nested-session guard " +
-      "MESSAGE shown to the host — display text, not path construction",
+    "src/remediate/providers/index.ts",
+    "descriptor's repo-relative session-config path, quoted in the " +
+      "nested-session guard MESSAGE shown to the host — display text, not " +
+      "path construction",
   ],
   [
     "wrapper/audit-code-wrapper-lib.mjs",

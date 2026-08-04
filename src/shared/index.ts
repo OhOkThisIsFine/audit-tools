@@ -927,6 +927,11 @@ export {
   OPENCODE_PROVIDER_NAME,
   createOpenCodeProvider,
 } from "./providers/opencodeProvider.js";
+export type {
+  OrchestratorDescriptor,
+  OrchestratorProviderBindings,
+} from "./providers/orchestratorBindings.js";
+export { buildOrchestratorProviderBindings } from "./providers/orchestratorBindings.js";
 export {
   AgyProvider,
   AGY_PROVIDER_NAME,
@@ -1061,6 +1066,7 @@ export { collectClaudeCodeJsonLines } from "./quota/claudeCodeJsonLines.js";
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
+  buildHostLimitBindings,
 } from "./quota/hostLimits.js";
 export type { ReadCodexMaxThreads } from "./quota/hostLimits.js";
 export {

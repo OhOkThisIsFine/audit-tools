@@ -276,10 +276,8 @@ function stripComments(source: string): string {
 }
 
 const PER_ORCHESTRATOR_PROVIDER_FILES = [
-  "../../src/audit/providers/claudeCodeProvider.ts",
-  "../../src/audit/providers/opencodeProvider.ts",
-  "../../src/remediate/providers/claudeCodeProvider.ts",
-  "../../src/remediate/providers/opencodeProvider.ts",
+  "../../src/audit/providers/index.ts",
+  "../../src/remediate/providers/index.ts",
 ];
 
 test("no per-orchestrator provider class body: orchestrator provider files declare no FreshSessionProvider class", () => {
@@ -296,17 +294,14 @@ test("no per-orchestrator provider class body: orchestrator provider files decla
   }
 });
 
-test("provider class single-source: both orchestrators' ClaudeCodeProvider is the SAME shared class identity", async () => {
+test("provider class single-source: both orchestrators' bound factories construct the SAME shared class identity", async () => {
   const sharedShared = await import("audit-tools/shared");
-  const auditClaude = await import("../../src/audit/providers/claudeCodeProvider.js");
-  const remediateClaude = await import(
-    new URL(
-      "../../src/remediate/providers/claudeCodeProvider.js",
-      import.meta.url,
-    ).href
+  const auditProviders = await import("../../src/audit/providers/index.js");
+  const remediateProviders = await import(
+    new URL("../../src/remediate/providers/index.js", import.meta.url).href
   );
-  expect(auditClaude.ClaudeCodeProvider, "audit-code ClaudeCodeProvider must be the shared class, not a re-implementation").toBe(sharedShared.ClaudeCodeProvider);
-  expect(remediateClaude.ClaudeCodeProvider, "remediate-code ClaudeCodeProvider must be the shared class, not a re-implementation").toBe(sharedShared.ClaudeCodeProvider);
+  expect(auditProviders.createClaudeCodeProvider({}) instanceof sharedShared.ClaudeCodeProvider, "audit-code's bound factory must construct the shared ClaudeCodeProvider class, not a re-implementation").toBeTruthy();
+  expect(remediateProviders.createClaudeCodeProvider({}) instanceof sharedShared.ClaudeCodeProvider, "remediate-code's bound factory must construct the shared ClaudeCodeProvider class, not a re-implementation").toBeTruthy();
 });
 
 test("per-orchestrator delta is ONLY the claude-code skip-permissions default", async () => {
@@ -319,12 +314,9 @@ test("per-orchestrator delta is ONLY the claude-code skip-permissions default", 
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const auditClaude = await import("../../src/audit/providers/claudeCodeProvider.js");
+  const auditClaude = await import("../../src/audit/providers/index.js");
   const remediateClaude = await import(
-    new URL(
-      "../../src/remediate/providers/claudeCodeProvider.js",
-      import.meta.url,
-    ).href
+    new URL("../../src/remediate/providers/index.js", import.meta.url).href
   );
 
   type CreateProvider = typeof auditClaude.createClaudeCodeProvider;

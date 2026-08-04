@@ -4,12 +4,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnLoggedCommand } from "audit-tools/shared";
-import { resolveFreshSessionProviderName } from "../../src/remediate/providers/index.js";
+import {
+  createClaudeCodeProvider,
+  createOpenCodeProvider,
+  resolveFreshSessionProviderName,
+} from "../../src/remediate/providers/index.js";
 import type { LaunchFreshSessionInput } from "audit-tools/shared";
 import type { WriteStream } from "node:fs";
 import type { SpawnOptions } from "node:child_process";
-import { createClaudeCodeProvider } from "../../src/remediate/providers/claudeCodeProvider.js";
-import { createOpenCodeProvider } from "../../src/remediate/providers/opencodeProvider.js";
 import {
   SubprocessTemplateProvider,
   WorkerCommandProvider,
