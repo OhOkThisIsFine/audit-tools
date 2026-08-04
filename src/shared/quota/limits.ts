@@ -1,7 +1,6 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
 import type { DiscoveredRateLimitsInput } from "./scheduler.js";
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
 import { resolveModelStatics } from "./modelStatics.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
@@ -91,12 +90,28 @@ export interface ResolveLimitsOptions {
 function defaultLimits(sessionConfig: SessionConfig): ResolvedLimits {
   const quota = sessionConfig.quota ?? {};
   return {
-    context_tokens: quota.default_context_tokens ?? DEFAULT_CONTEXT_TOKENS,
-    output_tokens: quota.reserved_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
+    context_tokens: positiveIntegerOrNull(quota.default_context_tokens),
+    output_tokens: positiveIntegerOrNull(quota.reserved_output_tokens),
     requests_per_minute: null,
     input_tokens_per_minute: null,
     output_tokens_per_minute: null,
   };
+}
+
+function positiveIntegerOrNull(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function outputLimitBelowContext(
+  value: number | null | undefined,
+  contextTokens: number,
+): number | null {
+  const outputTokens = positiveIntegerOrNull(value);
+  return outputTokens !== null && outputTokens < contextTokens
+    ? outputTokens
+    : null;
 }
 
 export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionResult {
@@ -108,8 +123,8 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
   // 1. Explicit per-model config overrides
   // 2. Discovered capability from the dispatch-time handshake
   // 3. Static metadata from the vendored models.dev snapshot (dataset fallback)
-  // 4. Conservative provider-typed default
-  // 5. Generic default fallback
+  // 4. Explicit operator-wide defaults, if declared
+  // 5. Unknown (null), never a guessed window
   // (No hardcoded model table — the static rung is a community dataset consumed
   // with degrade-to-empty semantics, and it ALWAYS ranks below real discovery.)
   if (hostModel && quota.models?.[hostModel]) {
@@ -127,26 +142,22 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
     };
   }
 
+  const staticStatics = hostModel ? resolveModelStatics(hostModel) : undefined;
+
   // 1.5 Discovered capability: the host reported this model's real window at the
   // dispatch handshake. Outranks the static table — it is how dispatch sizes to
-  // the real model (e.g. 200k) instead of the conservative default.
+  // the real model (e.g. 200k) instead of an unknown window.
   const discoveredContext = options.discoveredLimits?.context_tokens;
   if (typeof discoveredContext === "number" && discoveredContext > 0) {
-    // Respect the discovered context as the real ceiling (never fall through to a
-    // larger static/default floor that would over-admit against a smaller
-    // endpoint). Use the discovered output reservation only when it is positive
-    // AND leaves room for input (output < context); a degenerate or inverted
-    // value (e.g. a malformed operator quota that reached the remediate scheduler
-    // without a config-load validator) falls to the conservative default so the
-    // pair can't produce a wedged budget. Enforced in the SHARED consumer so the
-    // property holds for both orchestrators, not just the audit validator path.
+    // Respect the discovered context as the real ceiling. Fill a missing/invalid
+    // output cap only from lower-priority authoritative metadata or an explicit
+    // operator default that still fits below that ceiling; otherwise keep it
+    // unknown. No rung fabricates a reservation.
     const discoveredOutput = options.discoveredLimits?.output_tokens;
     const usableOutput =
-      typeof discoveredOutput === "number" &&
-      discoveredOutput > 0 &&
-      discoveredOutput < discoveredContext
-        ? discoveredOutput
-        : defaults.output_tokens;
+      outputLimitBelowContext(discoveredOutput, discoveredContext) ??
+      outputLimitBelowContext(staticStatics?.output_tokens, discoveredContext) ??
+      outputLimitBelowContext(defaults.output_tokens, discoveredContext);
     return {
       limits: {
         context_tokens: discoveredContext,
@@ -161,15 +172,15 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
   }
 
   // 2.5 Static metadata: no real window was discovered, so consult the vendored
-  // models.dev snapshot for this model's real context window instead of falling
-  // straight to the flat conservative default. Degrades to empty (falls through)
+  // models.dev snapshot for this model's real context window instead of leaving
+  // it unknown. Degrades to empty (falls through)
   // on an unknown model id or an unavailable dataset.
-  const staticStatics = hostModel ? resolveModelStatics(hostModel) : undefined;
   if (staticStatics && typeof staticStatics.context_tokens === "number" && staticStatics.context_tokens > 0) {
     return {
       limits: {
         context_tokens: staticStatics.context_tokens,
-        output_tokens: staticStatics.output_tokens ?? defaults.output_tokens,
+        output_tokens:
+          positiveIntegerOrNull(staticStatics.output_tokens) ?? defaults.output_tokens,
         requests_per_minute: null,
         input_tokens_per_minute: null,
         output_tokens_per_minute: null,
@@ -179,13 +190,13 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
     };
   }
 
-  // 3. Conservative provider defaults. Concurrency caps remain in the scheduler;
-  // this rung records that the provider was part of limit resolution.
+  // 3. Operator-wide defaults. Concurrency caps remain in the scheduler; this
+  // rung records provider classification even when both window fields are null.
   const providerType = hostClassFor(providerName);
   if (providerType !== "unknown") {
     return { limits: defaults, source: "provider_default", confidence: "low" };
   }
 
-  // 4. Conservative defaults for all unknown provider types
+  // 4. Operator-wide defaults for unknown provider types (possibly all null).
   return { limits: defaults, source: "default", confidence: "low" };
 }

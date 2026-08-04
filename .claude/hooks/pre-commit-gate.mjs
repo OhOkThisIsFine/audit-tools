@@ -503,7 +503,7 @@ function runGate(committedPaths) {
   //
   // The trigger was `^docs/.*\.md$` while the checker only enumerated `docs/`.
   // The checker now reconciles the WHOLE tracked markdown tree (that narrowness
-  // is how `examples/9router-harness-proxy-setup.md` sat unregistered with
+  // is how a retired proxy-setup example sat unregistered with
   // nothing to catch it), so the trigger must widen with it — a trigger narrower
   // than the check it fires plants violations the gate never runs on. Same
   // reasoning as the `paths:` filters in .github/workflows/ci.yml.

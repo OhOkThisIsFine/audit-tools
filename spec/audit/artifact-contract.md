@@ -37,7 +37,6 @@ the staleness DAG (see dependency-map.md).
 
 | Artifact | Format | Purpose |
 |---|---|---|
-| `provider_confirmation.json` | JSON | Auto-discovered/confirmed provider set for this run. |
 | `repo_manifest.json` | JSON | Repository structure and file classification. |
 | `file_disposition.json` | JSON | Per-file audit-scope disposition derived from the manifest. |
 | `auto_fixes_applied.json` | JSON | Record of mechanical auto-fixes applied before review. |

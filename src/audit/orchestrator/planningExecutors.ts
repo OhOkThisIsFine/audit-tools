@@ -24,6 +24,7 @@ import { taskContentTokens } from "./reviewPacketSizing.js";
 import { computeRiskEstimate } from "./auditTaskUtils.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { resolveEffectiveLenses } from "./lensSelection.js";
+import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
 import {
   applyContentAddressedPreservation,
@@ -276,7 +277,9 @@ export async function runPlanningExecutor(
     ...t,
     file_line_counts: Object.fromEntries(
       t.file_paths
-        .filter((p) => lineIndex[p] != null)
+        // Exclude the unmeasured sentinel (NaN) alongside absent keys: NaN would
+        // JSON-serialize as null and violate the numeric file_line_counts contract.
+        .filter((p) => lineIndex[p] != null && !isUnmeasuredLineCount(lineIndex[p]))
         .map((p) => [p, lineIndex[p]]),
     ),
   }));

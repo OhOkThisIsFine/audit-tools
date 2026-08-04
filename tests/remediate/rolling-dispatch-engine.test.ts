@@ -194,10 +194,12 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "openai-compatible",
+        host_provider: "claude-code",
         quota: {},
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
       capabilityRanks: null,
+      env: {} as NodeJS.ProcessEnv,
     });
     expect(pools.filter((p) => p.providerName === "openai-compatible").length).toBe(1);
     // The host pool keys to the conversation host, not the worker backend (D5).
@@ -209,10 +211,12 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
+        host_provider: "claude-code",
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
       capabilityRanks: null,
+      env: {} as NodeJS.ProcessEnv,
     });
     // The conversation-host pool keys to claude-code (NOT codex — the founding-bug
     // quota mis-keying), and codex appears as a SEPARATE source pool so the host
@@ -231,10 +235,12 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "agy",
+        host_provider: "claude-code",
         quota: {},
         agy: { command: "agy", model: "gemini-3-pro" },
       },
       capabilityRanks: null,
+      env: {} as NodeJS.ProcessEnv,
     });
     const agyPool = pools.find((p) => p.providerName === "agy");
     expect(agyPool).toBeTruthy();
@@ -247,10 +253,12 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const { pools } = await buildConfirmedPools({
       sessionConfig: {
         provider: "subprocess-template",
+        host_provider: "claude-code",
         quota: {},
         subprocess_template: { command_template: ["run", "{prompt}"] },
       },
       capabilityRanks: null,
+      env: {} as NodeJS.ProcessEnv,
     });
     expect(pools.some((p) => p.providerName === "subprocess-template")).toBeTruthy();
     expect(pools.some((p) => p.providerName === "claude-code")).toBeTruthy();
@@ -308,6 +316,7 @@ describe("INV-ROLL-02: rolling dispatch fills a freed slot on completion", () =>
         source: "session_config",
         description: "test fixture host limit",
       },
+      contextCapTokens: 200_000,
     };
     const session: SessionConfig = { quota: {} };
     const order: string[] = [];
@@ -541,6 +550,7 @@ describe("fail-3: empty-pool stranding (no surviving pool)", () => {
         source: "session_config",
         description: "test fixture host limit",
       },
+      contextCapTokens: 200_000,
     };
     const session: SessionConfig = { quota: {} };
     const dispatcher = createRollingDispatcher<{ id: string }>({
@@ -642,4 +652,3 @@ describe("fail-5: host-wave fallback retained as opt-out; rolling engine default
     ).toBe(false);
   });
 });
-

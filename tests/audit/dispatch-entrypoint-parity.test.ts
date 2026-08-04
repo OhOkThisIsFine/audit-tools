@@ -120,7 +120,15 @@ test("quota fails closed on an invalid session-config", async () => {
 test("quota keys its preview on block_quota.host_model, like prepare-dispatch does", async () => {
   await withSandbox(async (artifactsDir) => {
     await writeSessionConfig(artifactsDir, {
-      block_quota: { host_model: "vendor/model-x" },
+      quota: {
+        default_context_tokens: 200_000,
+        reserved_output_tokens: 8_000,
+      },
+      block_quota: {
+        host_model: "vendor/model-x",
+        context_tokens: 200_000,
+        reserved_output_tokens: 8_000,
+      },
     });
     const { stdout } = await captureConsole(() =>
       cmdQuota(quotaArgv(artifactsDir, ["--provider", "codex"])),
@@ -142,6 +150,13 @@ test("both entry points read the AUDIT_CODE_HOST_MODEL hint the pool builder rea
   process.env.AUDIT_CODE_HOST_MODEL = "env/model-y";
   try {
     await withSandbox(async (artifactsDir) => {
+      await writeSessionConfig(artifactsDir, {
+        quota: {
+          default_context_tokens: 200_000,
+          reserved_output_tokens: 8_000,
+        },
+        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      });
       const { stdout } = await captureConsole(() =>
         cmdQuota(quotaArgv(artifactsDir, ["--provider", "codex"])),
       );
@@ -163,7 +178,15 @@ test("an explicit --host-model still outranks config and env on the preview", as
   try {
     await withSandbox(async (artifactsDir) => {
       await writeSessionConfig(artifactsDir, {
-        block_quota: { host_model: "vendor/model-x" },
+        quota: {
+          default_context_tokens: 200_000,
+          reserved_output_tokens: 8_000,
+        },
+        block_quota: {
+          host_model: "vendor/model-x",
+          context_tokens: 200_000,
+          reserved_output_tokens: 8_000,
+        },
       });
       const { stdout } = await captureConsole(() =>
         cmdQuota(

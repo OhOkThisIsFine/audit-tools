@@ -9,8 +9,8 @@
  *  - both pools receive nodes when both have capacity (proactive split, crit. 2);
  *  - each node is claimed to exactly one pool — partitions are disjoint, every
  *    assignment carries an ownerToken (single claimant, crit. 1);
- *  - a pool with a silent/absent capacity signal still gets a floored slot, so its
- *    nodes are never dropped (safe degrade, crit. 4);
+ *  - a pool with a degraded live quota signal still uses its explicitly declared
+ *    context capability (safe degrade, crit. 4);
  *  - the host-only and backend-only configs fall out with one partition empty.
  */
 
@@ -25,7 +25,11 @@ import type { CapacityPool, FrontierNode, SessionConfig } from "audit-tools/shar
 // Configured hosted concurrency so the shared fold yields a wave > 1 — which is
 // what makes the cross-pool split observable (the fold still owns every cap).
 const SESSION: SessionConfig = {
-  quota: { unknown_hosted_concurrency: 8 },
+  quota: {
+    unknown_hosted_concurrency: 8,
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
 } as SessionConfig;
 
 function nodes(count: number, tokens = 1000): FrontierNode[] {
@@ -162,12 +166,12 @@ describe("A-8 planHybridDispatch", () => {
     }
   });
 
-  it("safe degrade: a backend pool with a silent capacity signal still gets a floored slot (crit. 4)", async () => {
+  it("safe degrade: a backend pool with a silent quota-usage signal retains its declared capacity (crit. 4)", async () => {
     const store = settledStore();
     const part = await planHybridDispatch({
       frontier: nodes(3, 500),
-      // Single backend pool whose proactive quota source silently degraded — the
-      // S4 fold floors it to >=1 slot off the byte estimate rather than dropping it.
+      // The live usage probe degraded, but TEST_SESSION_CONFIG still supplies a
+      // real context window. Usage degradation must not erase known capability.
       pools: [nimPool({ quotaSignalDegraded: true, quotaSourceSnapshot: null })],
       sessionConfig: SESSION,
       claimRegistry: fakeRegistry(),
@@ -255,12 +259,12 @@ describe("A-8 planHybridDispatch", () => {
     expect(part.unplaceable).toEqual(["blk-0", "blk-1", "blk-2"]);
   });
 
-  it("a node that fits somewhere is NOT unplaceable — a cap-less pool absorbs it", async () => {
+  it("a node that fits the explicit session capability is not unplaceable", async () => {
     const store = settledStore();
     const part = await planHybridDispatch({
       frontier: nodes(2, 90_000),
       pools: [
-        // The host pool declares no cap, so it stays admissible at any size.
+        // The host pool inherits the explicitly configured 200k test window.
         hostPool(),
         nimPool({ contextCapTokens: 32_000 }),
       ],

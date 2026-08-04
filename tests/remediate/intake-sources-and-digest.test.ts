@@ -81,6 +81,7 @@ function makeReport(findingCount: number, overrides: Partial<AuditFindingsReport
     },
     findings,
     work_blocks: [],
+    work_block_seams: [],
     ...overrides,
   };
 }
@@ -198,6 +199,7 @@ describe("buildFindingsDigest", () => {
           finding_ids: ["F-001", "F-002"],
           unit_ids: [],
           owned_files: [],
+          role: "implementation",
           max_severity: "high",
           rationale: "r",
           depends_on: [],

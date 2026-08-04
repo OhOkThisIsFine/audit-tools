@@ -757,6 +757,138 @@ export function validateDigestCoverage(
   return issues;
 }
 
+/**
+ * Path-A work-topology gate. Every dangerous audit overlap must have exactly one
+ * distinct seam-preparation module, and both participating implementation blocks
+ * must remain represented by implementation modules. This turns the auditor's
+ * overlap metadata into a mechanically enforced decomposition boundary instead
+ * of prompt-only advice.
+ */
+export function validateWorkBlockSeamPreparation(
+  pathASeedPayload: unknown,
+  moduleDecompositionPayload: unknown,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(pathASeedPayload) || !Array.isArray(pathASeedPayload.work_block_seams)) {
+    return issues;
+  }
+  const requiredSeams = (pathASeedPayload.work_block_seams as unknown[]).filter(
+    (seam) => isRecord(seam) && seam.requires_preparation === true,
+  );
+  if (requiredSeams.length === 0) return issues;
+
+  const workBlocks = Array.isArray(pathASeedPayload.work_blocks)
+    ? (pathASeedPayload.work_blocks as unknown[]).filter(isRecord)
+    : [];
+  const blockById = new Map<string, Record<string, unknown>>();
+  for (const block of workBlocks) {
+    if (typeof block.id === "string") blockById.set(block.id, block);
+  }
+  const modules =
+    isRecord(moduleDecompositionPayload) && Array.isArray(moduleDecompositionPayload.modules)
+      ? (moduleDecompositionPayload.modules as unknown[]).filter(isRecord)
+      : [];
+  const requiredSeamIds = new Set(
+    requiredSeams
+      .map((seam) => (isRecord(seam) && typeof seam.id === "string" ? seam.id : undefined))
+      .filter((id): id is string => id !== undefined),
+  );
+
+  for (const [index, mod] of modules.entries()) {
+    const sourceIds = Array.isArray(mod.source_work_block_ids)
+      ? (mod.source_work_block_ids as unknown[]).filter((id): id is string => typeof id === "string")
+      : [];
+    const preparedIds = Array.isArray(mod.prepares_seam_ids)
+      ? (mod.prepares_seam_ids as unknown[]).filter((id): id is string => typeof id === "string")
+      : [];
+    for (const blockId of sourceIds) {
+      if (!blockById.has(blockId)) {
+        pushValidationIssue(
+          issues,
+          `module_decomposition.modules[${index}].source_work_block_ids`,
+          `Module references unknown audit work block "${blockId}".`,
+        );
+      }
+    }
+    for (const seamId of preparedIds) {
+      if (!requiredSeamIds.has(seamId)) {
+        pushValidationIssue(
+          issues,
+          `module_decomposition.modules[${index}].prepares_seam_ids`,
+          `Module references unknown or non-required audit seam "${seamId}".`,
+        );
+      }
+    }
+  }
+
+  for (const seam of requiredSeams) {
+    if (!isRecord(seam) || typeof seam.id !== "string") continue;
+    const seamId = seam.id;
+    const preparers = modules.filter(
+      (mod) =>
+        Array.isArray(mod.prepares_seam_ids) &&
+        (mod.prepares_seam_ids as unknown[]).includes(seamId),
+    );
+    if (preparers.length !== 1) {
+      pushValidationIssue(
+        issues,
+        `module_decomposition.seam_preparation[${seamId}]`,
+        `Required audit seam "${seamId}" must be prepared by exactly one module; found ${preparers.length}.`,
+      );
+      continue;
+    }
+    const preparer = preparers[0]!;
+    const sharedFiles = Array.isArray(seam.shared_files)
+      ? (seam.shared_files as unknown[]).filter((file): file is string => typeof file === "string")
+      : [];
+    const preparerFiles = new Set(
+      Array.isArray(preparer.file_scope)
+        ? (preparer.file_scope as unknown[]).filter((file): file is string => typeof file === "string")
+        : [],
+    );
+    if (sharedFiles.length > 0 && !sharedFiles.some((file) => preparerFiles.has(file))) {
+      pushValidationIssue(
+        issues,
+        `module_decomposition.seam_preparation[${seamId}].file_scope`,
+        `The module preparing seam "${seamId}" must own at least one shared file (${sharedFiles.join(", ")}).`,
+      );
+    }
+
+    const blockIds = Array.isArray(seam.block_ids)
+      ? (seam.block_ids as unknown[]).filter((id): id is string => typeof id === "string")
+      : [];
+    for (const blockId of blockIds) {
+      const block = blockById.get(blockId);
+      if (!block) {
+        pushValidationIssue(
+          issues,
+          `path_a_seed.work_block_seams[${seamId}].block_ids`,
+          `Seam "${seamId}" references unknown work block "${blockId}".`,
+        );
+        continue;
+      }
+      const implementationOwners = modules.filter(
+        (mod) =>
+          mod !== preparer &&
+          Array.isArray(mod.source_work_block_ids) &&
+          (mod.source_work_block_ids as unknown[]).includes(blockId),
+      );
+      const preparerOwnsCoordinationBlock =
+        block.role === "coordination" &&
+        Array.isArray(preparer.source_work_block_ids) &&
+        (preparer.source_work_block_ids as unknown[]).includes(blockId);
+      if (implementationOwners.length === 0 && !preparerOwnsCoordinationBlock) {
+        pushValidationIssue(
+          issues,
+          `module_decomposition.work_block_coverage[${blockId}]`,
+          `Work block "${blockId}" participating in required seam "${seamId}" has no distinct implementation module.`,
+        );
+      }
+    }
+  }
+  return issues;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

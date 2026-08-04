@@ -69,12 +69,14 @@ function buildAuditorPayload(overrides: Partial<AuditFindingsReport> = {}): Audi
         evidence: ["src/foo.ts:1: example evidence"],
       },
     ],
+    work_block_seams: [],
     work_blocks: [
       {
         id: "WB-001",
         finding_ids: ["SEAM-001"],
         unit_ids: ["u-1"],
         owned_files: ["src/foo.ts"],
+        role: "implementation",
         max_severity: "high",
         rationale: "Seam test block.",
         depends_on: [],

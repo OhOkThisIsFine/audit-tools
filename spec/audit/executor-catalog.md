@@ -46,7 +46,6 @@ actual friction triage fires from the `present_report` terminal step
 
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `provider_confirmation_executor` | host_delegation | `provider_confirmation` | — |
 | `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | one call, one obligation with two artifact names |
 | `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | — |
 | `intent_equivalence_executor` | host_delegation | `intent_equivalence_current` | DD-9 intent-equivalence gate. A prose-only delta emits the bounded judge step; every other arm (baseline stamp, gate-version stale, structured delta) resolves deterministically via the runner — mirroring `charter_extraction`'s emit-vs-run gating in `nextStepHelpers` |

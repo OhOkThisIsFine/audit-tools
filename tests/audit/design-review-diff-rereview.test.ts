@@ -34,8 +34,7 @@ const {
   renderDesignReReviewSection,
   buildDesignReReviewSection,
 } = await import("../../src/audit/orchestrator/designReviewSnapshot.js");
-const { stableStringifyProjection, PROVIDER_CONFIRMATION_RESULT_VERSION } =
-  await import("audit-tools/shared");
+const { stableStringifyProjection } = await import("audit-tools/shared");
 
 // ── Bundle factory ──────────────────────────────────────────────────────────────
 
@@ -224,12 +223,6 @@ test("renderDesignReReviewSection: allUnchanged → re-affirm-verbatim wording",
 
 function fullBundle(extra: Partial<ArtifactBundle> = {}): ArtifactBundle {
   return {
-    provider_confirmation: {
-      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-      confirmed_at: "2026-01-01T00:00:00Z",
-      provider_pool: [],
-      session_level: true,
-    },
     file_disposition: { files: [] },
     auto_fixes_applied: { executed_tools: [] },
     syntax_resolution_status: { completed_at: "2026-01-01T00:00:00Z" },

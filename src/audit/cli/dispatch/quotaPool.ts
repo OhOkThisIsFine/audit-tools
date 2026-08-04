@@ -102,9 +102,8 @@ export async function buildDispatchPool(params: {
    */
   onEscalation?: (escalation: HostSessionEscalation) => void;
   /**
-   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`), stamped onto
-   * every pool at construction so the capability floor bands on real evidence rather
-   * than fail-opening. Required — `null` is the explicit "no confirmation in scope".
+   * Optional externally supplied per-model capability ranks, stamped onto every pool
+   * at construction. Source declarations may carry capability_rank directly.
    */
   capabilityRanks: ReadonlyMap<string, number> | null;
 }): Promise<ResolvedDispatchPool> {
@@ -161,14 +160,26 @@ export async function buildDispatchPool(params: {
   });
   const { pools, hostModel, hostSession } = preamble;
 
-  const probeBudget = (pool: CapacityPool): number => {
+  const probeBudget = (pool: CapacityPool): number | null => {
     const probe = computeDispatchCapacity({
       pools: [pool],
       sessionConfig,
       pendingItemTokens: [],
     });
     const limits = probe.primary.schedule.resolved_limits;
-    return Math.max(1, limits.context_tokens - limits.output_tokens);
+    if (limits.context_tokens == null || limits.output_tokens == null) return null;
+    const budget = limits.context_tokens - limits.output_tokens;
+    return budget > 0 ? budget : null;
+  };
+  const requireProbeBudget = (pool: CapacityPool): number => {
+    const budget = probeBudget(pool);
+    if (budget == null) {
+      throw new Error(
+        `Cannot size audit packets for pool "${pool.id}" because its context or output token limit is unknown. ` +
+          "Report both limits in the auditor capability handshake, configure explicit quota limits, or provide a model_id resolvable through models.dev.",
+      );
+    }
+    return budget;
   };
 
   // Audit-specific budget layer on the shared pools: per-tier budgets from a roster,
@@ -177,7 +188,7 @@ export async function buildDispatchPool(params: {
   if (roster && roster.length > 0) {
     const perRank = new Map<DispatchModelTier, number>();
     for (const pool of pools) {
-      if (pool.rank) perRank.set(pool.rank, probeBudget(pool));
+      if (pool.rank) perRank.set(pool.rank, requireProbeBudget(pool));
     }
     const tierBudgets = resolveTierBudgets(perRank);
     return {
@@ -191,7 +202,7 @@ export async function buildDispatchPool(params: {
   return {
     pools,
     hostModel,
-    contextBudgetTokens: probeBudget(pools[0]!),
+    contextBudgetTokens: requireProbeBudget(pools[0]!),
     tierBudgets: null,
     hostSession,
   };
@@ -226,17 +237,6 @@ export async function finalizeDispatchQuota(params: {
    * here would double-count the same work. Defaults to true (host path).
    */
   grantLeases?: boolean;
-  /**
-   * Operator-confirmed cost ordering (rung 1 of costRank; spec/dispatch-quota.md),
-   * keyed by model id → 0-based confirmed position. Derived from the Gate-0
-   * confirmed provider pool. Absent/empty ⇒ costRank falls to real price then tier.
-   */
-  confirmedCostPositions?: Map<string, number> | null;
-  /**
-   * Operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the Gate-0
-   * confirmation (spec/dispatch-quota.md). 0/absent ⇒ cost-first (default).
-   */
-  dispatchBias?: number;
   /**
    * Host fan-out mode (item C): gate the admission purely on TOKEN BUDGET, dropping
    * the cold-start calibration clamp and the concurrency cap. A design-review /
@@ -286,12 +286,9 @@ export async function finalizeDispatchQuota(params: {
   // construction is single-sourced in `admissionPoolsFromSummaries` so audit and
   // remediate cannot drift on how a capacity pool maps to an admission pool — audit
   // summarizes its dispatch capacity, remediate passes its `capacity_pools`, both feed
-  // the SAME builder (budget, declaredCap, costRank rung-1, capability, throughput).
+  // the SAME builder (budget, declaredCap, cost rank, capability, throughput).
   const poolSummaries = summarizeDispatchCapacityPools(dispatchCapacity);
-  const admissionPools: AdmissionPool[] = admissionPoolsFromSummaries(
-    poolSummaries,
-    params.confirmedCostPositions,
-  ).map((pool, i) =>
+  const admissionPools: AdmissionPool[] = admissionPoolsFromSummaries(poolSummaries).map((pool, i) =>
     // Fan-out mode: budget-only gating so an atomic panel dispatches whenever its
     // tokens fit the session budget, and pauses only on a genuine budget/cooldown
     // wall. Two relaxations vs the packet path, both because fan-out is HOST-ONLY
@@ -352,7 +349,6 @@ export async function finalizeDispatchQuota(params: {
     grantLeases: params.grantLeases !== false,
     ledger: createReservationLedger(),
     capable,
-    ...(params.dispatchBias != null ? { dispatchBias: params.dispatchBias } : {}),
     base: {
       model: hostModel,
       resolved_limits: waveSchedule.resolved_limits,

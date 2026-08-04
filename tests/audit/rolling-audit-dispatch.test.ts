@@ -87,6 +87,13 @@ test("A8a: resolveAuditRollingEngineEnabled resolution order — explicit > sess
 });
 
 const RUN_ID = "rolling-audit-run";
+const TEST_SESSION_CONFIG: SessionConfig = {
+  provider: "openai-compatible",
+  quota: {
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+};
 
 function tasks(): AuditTask[] {
   const dirs = ["mod_a", "mod_b", "mod_c"];
@@ -228,7 +235,7 @@ test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => fakeProvider,
   });
@@ -266,7 +273,7 @@ test("A8a: makeAuditProviderPacketDispatcher relays the provider's observedCostU
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -301,7 +308,7 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rej
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -335,7 +342,7 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -388,7 +395,7 @@ test("A8a: driveRollingAuditDispatch drives every packet, writes results, and fo
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: makeWritingDispatcher(runDir, taskList),
     ingest: ingestStub,
@@ -421,7 +428,7 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: stranding,
     ingest: ingestStub,
@@ -468,7 +475,7 @@ test("write-scope: in a git repo, spawned review workers launch against a dispos
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -516,7 +523,7 @@ test("write-scope: a non-git root degrades LOUDLY — real root + a write_scope_
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -565,7 +572,7 @@ test("claims: a round where every pending task is held by a live peer reports NO
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: async () => {
       throw new Error("must not dispatch — nothing was granted");
@@ -597,7 +604,7 @@ test("claims: a peer-claimed round still SALVAGES a prior pass's landed-but-unme
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: async () => {
       throw new Error("must not dispatch — nothing was granted");
@@ -619,7 +626,7 @@ test("claims: a genuinely-empty pending set still completes (ingest folds whatev
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: async () => {
       throw new Error("must not dispatch — nothing pending");
@@ -642,7 +649,7 @@ test("claims: a full strand releases this run's task claims so the next invocati
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: stranding,
     ingest: async () => {
@@ -675,7 +682,7 @@ test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-saf
     root: artifactsDir,
     artifactsDir,
     runId: RUN_ID,
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     createProvider: () => ({
       name: "fake",
@@ -748,7 +755,7 @@ test("A8a: a same-packet account wall escalates through the retained host-sessio
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     tasksOverride: oneTask,
     poolsOverride: pools,
@@ -795,7 +802,7 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
       root: artifactsDir,
       artifactsDir,
       activeReviewRun: activeReviewRun(artifactsDir, runDir),
-      sessionConfig: { provider: "openai-compatible" },
+      sessionConfig: TEST_SESSION_CONFIG,
       timeoutMs: 1000,
       dispatchPacket: makeWritingDispatcher(runDir, taskList),
       ingest: throwingIngest,
@@ -848,7 +855,7 @@ test("F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to 
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     poolsOverride: [capablePool, incapablePool],
     dispatchPacket: async (packet, slot) => {

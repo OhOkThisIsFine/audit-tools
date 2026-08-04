@@ -3,7 +3,6 @@ import { test, expect } from "vitest";
 const { resolveLimits, hostClassFor, resolveHostModel } = await import(
   "../../src/shared/quota/limits.js"
 );
-const { DEFAULT_OUTPUT_TOKENS } = await import("../../src/shared/tokens.js");
 
 test("hostClassFor maps claude-code to hosted", () => {
   expect(hostClassFor("claude-code")).toBe("hosted");
@@ -62,8 +61,8 @@ test("resolveLimits uses discovered_capability when the handshake reports a wind
 test("resolveLimits respects a discovered context but ignores an inverted output reservation", () => {
   // A degenerate discovered window (output ≥ context — e.g. a malformed operator
   // quota that reached the scheduler without a validator) must not size against
-  // the bad output: keep the real context ceiling (no over-admit) and fall to the
-  // conservative default output so the pair can't wedge a negative budget.
+  // the bad output: keep the real context ceiling (no over-admit) and leave the
+  // output unknown so downstream sizing refuses rather than inventing a reserve.
   const result = resolveLimits({
     providerName: "openai-compatible",
     sessionConfig: {},
@@ -72,13 +71,13 @@ test("resolveLimits respects a discovered context but ignores an inverted output
   });
   expect(result.source).toBe("discovered_capability");
   expect(result.limits.context_tokens).toBe(4_000);
-  expect(result.limits.output_tokens).toBe(DEFAULT_OUTPUT_TOKENS);
+  expect(result.limits.output_tokens).toBeNull();
 });
 
 test("resolveLimits uses static_metadata for a named model in the models.dev snapshot", () => {
   // No discovered window and no explicit config, but the model is in the vendored
   // models.dev dataset — the static rung supplies its real window instead of the
-  // conservative default. (Route prefix `anthropic/` is stripped on lookup.)
+  // an invented default. (Route prefix `anthropic/` is stripped on lookup.)
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
@@ -89,7 +88,7 @@ test("resolveLimits uses static_metadata for a named model in the models.dev sna
   expect(result.limits.context_tokens).toBeGreaterThan(32_000);
 });
 
-test("resolveLimits falls back to provider_default when model is unknown to the snapshot", () => {
+test("resolveLimits leaves windows unknown when the model is unknown to the snapshot", () => {
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
@@ -97,7 +96,8 @@ test("resolveLimits falls back to provider_default when model is unknown to the 
   });
   expect(result.source).toBe("provider_default");
   expect(result.confidence).toBe("low");
-  expect(result.limits.context_tokens).toBe(32_000);
+  expect(result.limits.context_tokens).toBeNull();
+  expect(result.limits.output_tokens).toBeNull();
 });
 
 test("resolveLimits uses quota.default_context_tokens from session config", () => {
@@ -134,8 +134,7 @@ test("explicit_config takes precedence for a configured model", () => {
   });
   expect(result.source).toBe("explicit_config");
   expect(result.limits.context_tokens).toBe(1_000);
-  // known output_tokens not used — falls back to default_context_tokens? No, reserved_output_tokens default
-  expect(result.limits.output_tokens).toBe(4_096); // default reserved_output_tokens
+  expect(result.limits.output_tokens).toBeNull();
 });
 
 test("resolveHostModel returns explicit hostModel argument when provided", () => {

@@ -181,119 +181,26 @@ Use `ui_mode: "visible"` when debugging provider stdout/stderr. Use
 `subprocess-template` or `vscode-task` only when you have a reliable launcher
 bridge.
 
-## Gate-0 provider confirmation
+## Relay-backed dispatch sources
 
-The first thing an interactive audit run does — before it reads the repo — is
-pause on a **provider confirmation** step (Gate-0). The tool auto-detects the
-provider pool it can dispatch to, prices each candidate, and proposes a cost
-ordering (cheapest capable first). You confirm, reorder, or amend it. The
-mechanism behind the ordering is documented in
-[`spec/dispatch-quota.md`](../../spec/dispatch-quota.md); this section is
-only how to respond to the step.
-
-### When it fires
-
-- On the conversation/CLI path (`audit-code next-step`) it fires on **every** run,
-  even when only one — or zero — providers were auto-detected, so you can reorder,
-  exclude, self-report your own model roster, or add a provider that discovery missed.
-- Headless (`audit-code advance-audit`, no interactive host) it auto-completes with
-  the tool's price-ascending suggestion and never pauses.
-
-### How to respond
-
-The step prints the suggested pool as a priced table and asks you to write your
-decision to:
-
-```text
-.audit-tools/audit/provider-confirmation.input.json
-```
-
-**Writing that file is what lets the run proceed** — its presence is the "operator
-has acted" signal. To accept the suggestion verbatim, write just the version:
-
-```json
-{ "schema_version": "provider-confirmation-input/v1" }
-```
-
-Every other field is optional:
+Audit-tools does not ask you to confirm provider/model order. Concrete candidates,
+ranking, cooldowns, and failover belong to the external broker. A machine-level
+`sources-declared.json` should expose only provider-neutral intents, for example:
 
 ```json
 {
-  "schema_version": "provider-confirmation-input/v1",
-  "cost_order": ["<provider-or-model-key>", "..."],
-  "exclude": ["transport:<name>", "transport:<name>/<model>", "service:<name>", "host:<endpoint-host>"],
-  "include": ["<self-spawn-blocked provider to opt back in>"],
-  "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }]
+  "sources": [
+    { "id": "relay-fast", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/fast", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 2 },
+    { "id": "relay-coding", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/coding", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 1 },
+    { "id": "relay-reasoning", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/reasoning", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 0 }
+  ]
 }
 ```
 
-- `cost_order` — the confirmed ordering, cheapest first, as a list of keys. A key
-  is either a **provider name** (as shown in the table) or a **host `model_id`** you
-  report in `host_models`. Keys you omit keep their suggested relative order,
-  appended after the ones you name; unrecognized keys are ignored. Omit it to accept
-  the suggested order.
-- `exclude` — drops backends from the dispatchable pool. Each entry names its AXIS
-  explicitly, so the same string means the same thing on every machine. The grammar
-  is defined in [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)
-  → *The exclusion grammar: axis-explicit*; what follows is how to use it, and that
-  spec wins on any disagreement:
-  - `transport:openai-compatible/gpt-oss-120b` — that **model** of that transport,
-    leaving its other models routable. This is the granularity to reach for: you are
-    confirming model choices, so ruling out one model of a multi-model backend
-    should not rule out the backend.
-  - `transport:codex` — the whole **transport**, every model of it.
-  - `service:nim` — every transport reaching that **service**, including ones
-    discovered later.
-  - `host:integrate.api.nvidia.com` (or `host:localhost:8000` to pin a port) — every
-    source at that **endpoint host**.
-
-  The older prefix-less forms (`codex`, `openai-compatible:gpt-oss-120b`,
-  `integrate.api.nvidia.com`) are still accepted and migrated to the axis form on
-  read, so saved rules keep working. A rule naming an axis that does not exist —
-  `model:gpt-oss-120b` — is REFUSED when you submit it, rather than being silently
-  reinterpreted as a host rule that matches nothing.
-
-  A rule is a durable decision, not a reachability claim: it keeps applying on a
-  later run and on a different machine, whatever is reachable there. A rule that
-  matches nothing is legitimate and stays inert — the tool authors one itself every
-  run — but the confirmation summary lists any of YOUR rules that matched nothing,
-  as an advisory, so a model-name typo is visible without blocking anything.
-- `include` — opts a self-spawn-blocked provider back in. A CLI provider detected
-  while you are already inside a session of that same agent (`claude-code` under
-  `CLAUDECODE`, `codex` under `CODEX`) is excluded by default so the run can't
-  self-spawn a fresh agent; naming it here overrides that. Advanced — normally leave
-  it excluded.
-- `host_models` — reports your own (the host agent's) model roster so those tiers
-  are priced from the models.dev dataset and orderable here, not just at dispatch.
-
-You supply only ordering intent plus your model roster. The tool owns the prices
-and the capability flags — you never hand-author those. If a
-provider you use isn't listed, it wasn't auto-detected: it rides the per-auditor
-`--auditor <json>` descriptor (an OpenAI-compatible endpoint or CLI backend as a
-`sources[]` entry, resolved from your environment — NOT `session-config.json`, which
-no longer accepts dispatch config; see `spec/unified-dispatch-worker-model.md`), then
-re-run the step.
-
-Once the input is written, re-run the continue command the step printed
-(`audit-code next-step`). The tool consumes the input and promotes it into both
-canonical artifacts: the per-tool `provider_confirmation.json` seam and the shared
-`.audit-tools/provider-confirmation.json`.
-
-### The confirmed pool persists — you aren't re-prompted
-
-The shared `.audit-tools/provider-confirmation.json` is written once and reused for
-the rest of the audit→remediate session. A later step, and a subsequent
-`remediate-code` run against the same repo, read and honor that pool without
-prompting again — `remediate-code` has no confirmation step of its own; it consumes
-the audit-side pool. You are re-prompted only when a backend you never confirmed
-becomes reachable — and then the prompt leads with just that delta, not the whole
-table again. A backend that has *disappeared* never re-prompts: it simply drops out
-of reach, which needs no decision from you. On an unattended run (`autonomous_mode`)
-there is nobody to ask, so a newly-reachable backend is **excluded rather than used**
-and a `newly_reachable_backend` friction event records why — confirm or exclude it at
-your next attended gate. If the file is absent
-(for example a standalone remediate run with no prior audit), the run resolves its
-provider independently — absence is never an error.
+The relay owns the concrete model lists behind those pool names. Audit-tools still
+enforces packet size/context fit, capability floors, quota/headroom, concurrency,
+result validation, and the local self-spawn guard. No provider-order input or
+provider-confirmation artifact is created.
 
 ## Model selection
 

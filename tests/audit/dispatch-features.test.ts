@@ -16,6 +16,17 @@ const { taskResultPath, packetPromptPath } = await import("../../src/audit/cli/a
 const { packageRoot } = await import("../../src/audit/cli/paths.js");
 
 const RUN_ID = "test-run";
+const TEST_QUOTA: NonNullable<SessionConfig["quota"]> = {
+  default_context_tokens: 200_000,
+  reserved_output_tokens: 8_000,
+};
+
+function withTestCapacity(sessionConfig: SessionConfig = {}): SessionConfig {
+  return {
+    ...sessionConfig,
+    quota: { ...TEST_QUOTA, ...(sessionConfig.quota ?? {}) },
+  };
+}
 
 // Three tasks in three distinct units → three priority-ordered packets
 // (high → medium → low). packets[0] is the high-priority security task.
@@ -68,7 +79,7 @@ function run(artifactsDir: string, sessionConfig?: SessionConfig): Promise<Prepa
     runId: RUN_ID,
     artifactsDir,
     root: artifactsDir, // repo root unused for non-large-file packets
-    sessionConfig: sessionConfig ?? {},
+    sessionConfig: withTestCapacity(sessionConfig),
     hostModel: null,
   });
 }
@@ -212,7 +223,12 @@ await test("JIT partition splits a cluster that exceeds the context budget", asy
   // across a strong edge; the partition keeps them as separate packets.
   const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(20000));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
-  const result = await run(artifactsDir);
+  const result = await run(artifactsDir, {
+    quota: {
+      default_context_tokens: 32_000,
+      reserved_output_tokens: 4_000,
+    },
+  });
   expect(result.packet_count, "an oversized cluster splits along its weakest edge under the budget").toBe(2);
 });
 
@@ -337,7 +353,7 @@ await test("Bug 8: confirmation_recommended fires on the first grant, is suppres
     runId: freshRunId,
     artifactsDir,
     root: artifactsDir,
-    sessionConfig,
+    sessionConfig: withTestCapacity(sessionConfig),
     hostModel: null,
   });
   expect(pass3.agent_count).toBe(3);

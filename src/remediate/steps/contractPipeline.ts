@@ -38,6 +38,8 @@ import {
   type ObligationLedger,
   type SessionConfig,
   type CounterexampleReport,
+  type WorkBlock,
+  type WorkBlockSeam,
   captureStepBoundaryFriction,
 } from "audit-tools/shared";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
@@ -115,6 +117,7 @@ import {
   validatePairedObligations,
   validateEvidenceThreaded,
   validateDigestCoverage,
+  validateWorkBlockSeamPreparation,
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   deriveNodeModelTierFromNode,
@@ -626,7 +629,7 @@ export interface ContractPipelineStepOptions {
 // ── Path-A seed ───────────────────────────────────────────────────────────────
 
 export interface PathASeed {
-  schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha1";
+  schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha2";
   /** Absolute path to the audit-findings.json source file. */
   audit_findings_path: string;
   /** Number of findings in the report. */
@@ -635,6 +638,10 @@ export interface PathASeed {
   findings_summary: Array<{ id: string; title: string; lens: string }>;
   /** Repo-relative paths cited as affected_files across all findings. */
   affected_files: string[];
+  /** Auditor-produced bounded work topology. */
+  work_blocks: WorkBlock[];
+  /** Explicit cross-block overlaps; required seams must be prepared before refactors. */
+  work_block_seams: WorkBlockSeam[];
   created_at: string;
 }
 
@@ -675,12 +682,82 @@ export async function writePathASeedFromFindings(
     }
   }
 
+  const rawWorkBlocks =
+    isRecord(auditFindings) && Array.isArray(auditFindings.work_blocks)
+      ? (auditFindings.work_blocks as unknown[])
+      : [];
+  const workBlocks: WorkBlock[] = rawWorkBlocks
+    .filter(isRecord)
+    .filter((block) => typeof block.id === "string")
+    .map((block): WorkBlock => ({
+      id: block.id as string,
+      finding_ids: Array.isArray(block.finding_ids)
+        ? block.finding_ids.filter((id): id is string => typeof id === "string").sort()
+        : [],
+      unit_ids: Array.isArray(block.unit_ids)
+        ? block.unit_ids.filter((id): id is string => typeof id === "string").sort()
+        : [],
+      owned_files: Array.isArray(block.owned_files)
+        ? block.owned_files.filter((file): file is string => typeof file === "string").sort()
+        : [],
+      role: block.role === "coordination" ? "coordination" : "implementation",
+      max_severity:
+        block.max_severity === "critical" ||
+        block.max_severity === "high" ||
+        block.max_severity === "medium" ||
+        block.max_severity === "low" ||
+        block.max_severity === "info"
+          ? block.max_severity
+          : "medium",
+      rationale: typeof block.rationale === "string" ? block.rationale : "",
+      depends_on: Array.isArray(block.depends_on)
+        ? block.depends_on.filter((id): id is string => typeof id === "string").sort()
+        : [],
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const rawSeams =
+    isRecord(auditFindings) && Array.isArray(auditFindings.work_block_seams)
+      ? (auditFindings.work_block_seams as unknown[])
+      : [];
+  const workBlockSeams: WorkBlockSeam[] = rawSeams
+    .filter(isRecord)
+    .filter(
+      (seam) =>
+        typeof seam.id === "string" &&
+        Array.isArray(seam.block_ids) &&
+        seam.block_ids.length === 2 &&
+        seam.block_ids.every((id) => typeof id === "string"),
+    )
+    .map((seam): WorkBlockSeam => {
+      const blockIds = seam.block_ids as [unknown, unknown];
+      return {
+      id: seam.id as string,
+      block_ids: [blockIds[0] as string, blockIds[1] as string],
+      kind:
+        seam.kind === "predicted_write_conflict" ||
+        seam.kind === "systemic_coordination"
+          ? seam.kind
+          : "shared_context",
+      shared_files: Array.isArray(seam.shared_files)
+        ? seam.shared_files.filter((file): file is string => typeof file === "string").sort()
+        : [],
+      shared_unit_ids: Array.isArray(seam.shared_unit_ids)
+        ? seam.shared_unit_ids.filter((id): id is string => typeof id === "string").sort()
+        : [],
+      requires_preparation: seam.requires_preparation === true,
+      rationale: typeof seam.rationale === "string" ? seam.rationale : "",
+    };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+
   const seed: PathASeed = {
-    schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha1",
+    schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha2",
     audit_findings_path: auditFindingsPath,
     finding_count: findings.length,
     findings_summary: findingsSummary,
     affected_files: [...affectedFilesSet],
+    work_blocks: workBlocks,
+    work_block_seams: workBlockSeams,
     created_at: new Date().toISOString(),
   };
 
@@ -1888,7 +1965,41 @@ ${rejectionRewriteInstruction(archived)}`,
     }
   }
 
-  // 2.6. Conceptual-design-critique gate (A1). Once the critique exists, a
+  // 2.6. Path-A overlap topology gate. A required audit seam is not advisory:
+  //      decomposition must name exactly one seam-preparation module and keep
+  //      distinct implementation modules for the participating work blocks.
+  //      This is checked before module contracts fan out, so the seam is shaped
+  //      once and downstream authors can work in parallel against it.
+  if (contractArtifactExists(artifactsDir, "module_decomposition")) {
+    const seedPath = pathASeedFilePath(artifactsDir);
+    const seed = await readOptionalJsonFile<unknown>(seedPath);
+    if (seed) {
+      const decomposition = envelopePayload(
+        await readContractArtifact(artifactsDir, "module_decomposition"),
+      );
+      const seamIssues = validateWorkBlockSeamPreparation(seed, decomposition).filter(
+        (issue) => issue.severity === "error",
+      );
+      if (seamIssues.length > 0) {
+        const archived = await archiveContractArtifact(
+          artifactsDir,
+          "module_decomposition",
+          "invalid",
+        );
+        return buildPhaseStep(
+          "decomposition",
+          `## Audit Work-Block Seam Errors
+
+The module decomposition dropped or blurred required audit work-block seams. Fix every issue below. Keep implementation work blocks distinct, add exactly one seam-preparation module per required seam (one module may prepare several seams), and list the corresponding source_work_block_ids / prepares_seam_ids:
+
+${seamIssues.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
+${rejectionRewriteInstruction(archived)}`,
+        );
+      }
+    }
+  }
+
+  // 2.7. Conceptual-design-critique gate (A1). Once the critique exists, a
   //      blocking concern routes a design repair BEFORE any downstream artifact
   //      is derived — closing the gap where a `blocking` item inside a
   //      non-`rejected` verdict (and even a bare `rejected` verdict) silently
@@ -1962,7 +2073,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
     // gate.kind === "proceed": fall through.
   }
 
-  // 2.7. Deterministic artifact derivation (S1, contract-authoring determinism).
+  // 2.8. Deterministic artifact derivation (S1, contract-authoring determinism).
   //      The obligation ledger is a pure function of the finalized module
   //      contracts (every invariant/failure mode/module → an obligation), so it
   //      is generated by the tool rather than authored by an LLM phase: the
@@ -1979,7 +2090,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
     return buildNextContractPipelineStep(options);
   }
 
-  // 2.8. Degenerate seam_reconciliation collapse. A single-module decomposition
+  // 2.9. Degenerate seam_reconciliation collapse. A single-module decomposition
   //      has NO inter-module seams, so seam_reconciliation is a structural no-op:
   //      write an empty seam report deterministically (no host round-trip),
   //      mirroring the obligation_ledger / cyclic_seam no-op fast paths. The empty
@@ -2005,7 +2116,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
     }
   }
 
-  // 2.9. Deterministic contract_finalization (all module counts). Finalization is
+  // 2.10. Deterministic contract_finalization (all module counts). Finalization is
   //      a mechanical merge, not fresh authoring: carry each drafted module
   //      contract verbatim (preserving neighbor_needs for the ordering derivation)
   //      and attach the agreed_interface of every seam that touches the module as a

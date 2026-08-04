@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AuditFindingsReportSchema } from "audit-tools/shared";
 import type { AuditFindingsReport, SynthesisNarrative } from "audit-tools/shared";
 import type { AuditResult } from "../../src/audit/types.js";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 function assertMatchesJsonSchema(_schema: unknown, value: unknown, label: string): void {
   const result = AuditFindingsReportSchema.safeParse(value);
@@ -17,16 +18,28 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 
 const {
-  buildAuditReportModel,
+  buildAuditReportModel: buildAuditReportModelRaw,
   buildAuditFindingsReport,
   applyNarrative,
   renderAuditReportMarkdown,
 } = await import("../../src/audit/reporting/synthesis.js");
 const {
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
+  runSynthesisExecutor: runSynthesisExecutorRaw,
+  runSynthesisNarrativeExecutor: runSynthesisNarrativeExecutorRaw,
 } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
+
+const buildAuditReportModel = (
+  params: Parameters<typeof buildAuditReportModelRaw>[0],
+) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+const runSynthesisExecutor = (
+  bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
+  results?: Parameters<typeof runSynthesisExecutorRaw>[1],
+) => runSynthesisExecutorRaw(bundle, results, { workPartition: TEST_WORK_PARTITION });
+const runSynthesisNarrativeExecutor = (
+  bundle: Parameters<typeof runSynthesisNarrativeExecutorRaw>[0],
+  narrative?: Parameters<typeof runSynthesisNarrativeExecutorRaw>[1],
+) => runSynthesisNarrativeExecutorRaw(bundle, narrative, { workPartition: TEST_WORK_PARTITION });
 
 
 function syntheticResults(): AuditResult[] {

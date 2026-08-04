@@ -1,34 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import {
-  existsSync,
-  readFileSync,
-} from "node:fs";
 import { join, resolve } from "node:path";
-import type {
-  SessionConfig,
-  RepoSessionIntent,
-  NewlyReachableBackend,
-} from "audit-tools/shared";
+import type { SessionConfig, RepoSessionIntent } from "audit-tools/shared";
 import {
   resolveSessionConfig,
   applyGuidanceFile,
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
-  buildProviderConfirmationRender,
-  deriveSourcePoolDisplayFromSources,
-  gatherDispatchableSources,
-  resolveFreshSessionProviderName,
-  resolveAutonomousMode,
-  populateDeclaredProxyCatalog,
-  readSharedProviderConfirmation,
-  resolveUnevidencedCapabilityPools,
-  selectCapabilityAnchors,
-  carryForwardConfirmationInput,
-  computeNewlyReachableBackends,
-  renderHostWallExplanation,
-  PROVIDER_CONFIRMATION_INPUT_FILENAME,
-  auditArtifactsDir,
-  promotedAuditFindingsPath,
 } from "audit-tools/shared";
 import {
   buildEdgeReasoningPrompt,
@@ -60,19 +37,9 @@ import {
   persistConfigErrorHandoff,
 } from "./reviewRun.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
-import {
-  gateHostFanout,
-  type HostFanoutFamily,
-  type HostFanoutUnit,
-} from "./dispatch/hostFanoutGate.js";
-import {
-  stampDesignReviewSkipped,
-  stampSystemicChallengeSkipped,
-} from "./nextStepHelpers.js";
-import { ARTIFACT_DEFINITIONS, type ArtifactBundle } from "../io/artifacts.js";
+import type { HostFanoutFamily, HostFanoutUnit } from "./dispatch/hostFanoutGate.js";
+import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
-import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
-import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
   nextStepCommand,
@@ -92,6 +59,7 @@ import {
   resolveHostDispatchCapability,
   warnIfNotGitRepo,
 } from "./args.js";
+import { resolveCurrentWorkPartitionRuntime } from "./workPartitionRuntime.js";
 
 // Re-export helpers from nextStepHelpers so existing imports remain valid.
 export {
@@ -117,14 +85,9 @@ import {
 } from "./nextStepHelpers.js";
 
 /**
- * Gate a HOST fan-out step through the quota layer (item C). Registers the host
- * pool, leases the whole panel all-or-nothing, and — when the host session is at
- * its wall — writes a resumable pause step (mirroring the packet path's
- * `semanticReviewStep` wall pause) INSTEAD of the fan-out step, so the fan-out can
- * never die raw at the wall. Returns true when it paused (the caller must return
- * without emitting its dispatch step); false when capacity was granted and the
- * caller should proceed. On the granted path the panel's leases are reconciled at
- * results ingest (`reconcileHostFanoutLeases`).
+ * Host-owned fan-out hand-off. The helper remains at the call sites so the
+ * obligation shape stays stable, but execution policy belongs to the host and
+ * llm-relay; audit-tools never meters, leases, caps, or pauses these panels.
  */
 async function gateHostFanoutOrPause(params: {
   root: string;
@@ -136,112 +99,13 @@ async function gateHostFanoutOrPause(params: {
   units: HostFanoutUnit[];
   bundle: ArtifactBundle;
 }): Promise<boolean> {
-  const outcome = await gateHostFanout({
-    artifactsDir: params.artifactsDir,
-    sessionConfig: params.sessionConfig,
-    family: params.family,
-    units: params.units,
-    hostActiveSubagentLimit: params.hostDescriptor.self.max_active_subagents ?? null,
-    hostContextTokens: params.hostDescriptor.self.context_tokens ?? null,
-    hostOutputTokens: params.hostDescriptor.self.output_tokens ?? null,
-    hostModelId: params.hostDescriptor.self.model_id ?? null,
-  });
-  if (!outcome.atWall) return false;
+  // Host/relay own this fan-out. audit-tools must not meter, lease, cap, or pause
+  // a host-owned design/systemic panel; returning false lets the existing caller
+  // emit its normal host prompt. Keep the helper boundary for persisted runs and
+  // low-level tests, but make the conversation path a pure hand-off.
+  void params;
+  return false;
 
-  const resetClause = outcome.earliestResetAt
-    ? ` (resets at ${outcome.earliestResetAt})`
-    : "";
-  const wallExplain = renderHostWallExplanation(
-    outcome.bindingWindow,
-    outcome.perPacketCost,
-  );
-  const label =
-    params.family === "systemic_challenge"
-      ? "systemic-challenge adversary"
-      : "design-review";
-
-  // Livelock: the wall persisted past the bound. Skip this enrichment (stamp the pass
-  // satisfied) so a permanent host wall does not stall the run — the give-up analogue
-  // of the packet path's partial-synthesis terminal. The obligation is now satisfied,
-  // so the emitted step just advances; next-step derives the next obligation.
-  if (outcome.livelocked) {
-    if (params.family === "systemic_challenge") {
-      await stampSystemicChallengeSkipped(params.artifactsDir, params.bundle);
-    } else {
-      await stampDesignReviewSkipped(params.artifactsDir, params.bundle);
-    }
-    // Honest skip message (step E): a structural no_capable_pool skip arrives
-    // livelocked on the FIRST pass — the panel does not fit any available window and
-    // no reset can change that. Claiming "persisted across repeated attempts" there
-    // would assert quota-wall passes that never happened (D+E review F1).
-    const structural = outcome.emptyGrantCause === "no_capable_pool";
-    const skipStep = await writeCurrentStep({
-      artifactsDir: params.artifactsDir,
-      stepKind: "blocked",
-      status: "ready",
-      runId: null,
-      allowedCommands: [params.continueCommand],
-      allowedMcpTools: ["auditor_continue_audit"],
-      progress: {
-        summary: structural
-          ? `The ${label} panel does not fit any available pool's context window — ` +
-            `skipping the pass and continuing on the audit's coverage.`
-          : `Host session quota wall persisted past the enrichment bound — ` +
-            `skipping the ${label} pass and continuing on the audit's coverage.`,
-        granted_count: 0,
-      },
-      stopCondition: structural
-        ? `The ${label} panel exceeds every available pool's window (a fit mismatch, ` +
-          `not a quota wall), so the pass is skipped. Run next-step to continue — ` +
-          `the audit proceeds without it.`
-        : `The host quota wall persisted past the enrichment bound, so the ${label} ` +
-          `pass is skipped. Run next-step to continue — the audit proceeds without it.`,
-      repoRoot: params.root,
-      artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
-      prompt: structural
-        ? `The ${label} panel's prompt does not fit the context window of any pool ` +
-          `available to this run${wallExplain} — this is a size/capability mismatch, ` +
-          `not a quota wall, so waiting would not help and the audit is skipping the ` +
-          `enrichment pass rather than stalling. This is a graceful skip — nothing ` +
-          "else was lost. Run `next-step` to continue."
-        : `The host session limit stayed at its wall across repeated attempts, so the ` +
-          `audit is giving up on the ${label} enrichment pass and continuing on the ` +
-          "coverage it has. This is a graceful skip — nothing was lost. Run `next-step` " +
-          "to continue.",
-    });
-    console.log(JSON.stringify(skipStep, null, 2));
-    return true;
-  }
-
-  const step = await writeCurrentStep({
-    artifactsDir: params.artifactsDir,
-    stepKind: "blocked",
-    status: "ready",
-    runId: null,
-    allowedCommands: [params.continueCommand],
-    allowedMcpTools: ["auditor_continue_audit"],
-    progress: {
-      summary:
-        `Host session quota wall${resetClause}; ${label} fan-out ` +
-        `(${outcome.requiredCount} subagent(s)) paused, resumable.`,
-      granted_count: outcome.grantedCount,
-    },
-    stopCondition:
-      `Host session quota is at its wall${resetClause}.${wallExplain} Wait for the reset, ` +
-      `then run next-step to resume — the tool re-checks the live quota and re-grants the ` +
-      `${label} fan-out when capacity returns.`,
-    repoRoot: params.root,
-    artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
-    prompt:
-      `The host session limit is exhausted${resetClause}, so the ` +
-      `${outcome.requiredCount}-subagent ${label} fan-out cannot be dispatched this pass ` +
-      `without dying at the wall.${wallExplain} This is a graceful, resumable pause — nothing ` +
-      `was dispatched and no work was lost. Wait for the quota to reset, then run ` +
-      "`next-step`; the tool re-checks the live quota and re-grants the fan-out when " +
-      "capacity returns.",
-  });
-  console.log(JSON.stringify(step, null, 2));
-  return true;
 }
 
 /**
@@ -316,47 +180,6 @@ async function prepareContractDispatch(opts: {
       estInputBytes: Buffer.byteLength(promptText, "utf8"),
     },
   };
-}
-
-/**
- * The G3 reconciliation gate's delta for THIS invocation: backends this auditor can
- * reach now that the operator's persisted confirmation never mentions.
- *
- * Returns `[]` when no confirmation exists — and that early-out is the point, not an
- * optimization detail. `computeNewlyReachableBackends` calls `discoverProviders`,
- * which shells out ~6 times; with no confirmation on disk the Gate-0 obligation is
- * `missing` regardless, so the delta is moot and probing would only add an
- * unconditional per-`next-step` cost (including on invocations deep in synthesis).
- * Today those probes run ONLY when the Gate-0 step is emitted; this preserves that.
- *
- * REACH-NOW's source half comes from `gatherDispatchableSources` — the documented
- * chokepoint both `buildSourcePools` and the Gate-0 surface consume, so what the
- * operator confirms is exactly what routes. Deliberately NOT `resolveAmbientSources`:
- * that is an INPUT to the chokepoint and is blind to descriptor-supplied sources, the
- * folded primary, and the legacy `openai_compatible` fold — three backends that
- * route without ever appearing in it.
- */
-async function resolveNewlyReachableBackends(
-  root: string,
-  effectiveConfig: SessionConfig,
-): Promise<NewlyReachableBackend[]> {
-  const confirmation = await readSharedProviderConfirmation(root);
-  if (!confirmation) return [];
-  const primaryProviderName = resolveFreshSessionProviderName(
-    undefined,
-    effectiveConfig,
-    { env: process.env },
-  );
-  const { sources } = await gatherDispatchableSources(
-    effectiveConfig,
-    primaryProviderName,
-  );
-  return computeNewlyReachableBackends(
-    confirmation,
-    effectiveConfig,
-    sources,
-    process.env,
-  );
 }
 
 export async function cmdNextStep(argv: string[]): Promise<void> {
@@ -491,77 +314,11 @@ async function cmdNextStepBody(
   // graph/quota/…) are preserved identically; only the DISPATCH consumers switch to the
   // effective config. Persistence is untouched — the store reads/writes intent only, so an
   // in-memory resolve can never write dispatch inventory back into the repo config.
-  // 3c POPULATE trigger (plan §populate-vs-resolve): with Gate-0 still unsatisfied,
-  // THIS invocation is the provider-confirmation build — refresh the proxy catalog
-  // populate cache NOW, before the effective config resolves, so this same
-  // invocation's `resolveAmbientSources` reads the fresh expansion and the roster the
-  // operator confirms includes the proxied lane. Gated on the machine declaration's
-  // `proxy` block (no lane declared ⇒ no network) and — via the Gate-0-pending check —
-  // run only until the confirmation lands, never on every next-step. Confirmed runs
-  // re-populate only on explicit refresh. Network-tolerant: a failed populate degrades
-  // to a stderr warning (the lane then resolves from the existing cache or unexpanded,
-  // with its own dropped[] reason) — it never blocks Gate-0.
-  //
-  // Keyed on the SAME artifact Gate-0's obligation reads (`bundle.provider_confirmation`,
-  // the PER-TOOL `provider_confirmation.json` under this run's artifacts dir), so one
-  // confirmation drives both. It previously keyed on the SHARED, repo-level
-  // confirmation — a different lifetime: that artifact outlives the artifacts dir and
-  // is written by remediate too, so any repo that had ever confirmed suppressed the
-  // populate while Gate-0 was still pending, and the operator confirmed a roster built
-  // from an unrefreshed cache. Filename comes from the artifact registry, not a literal.
-  const gate0ArtifactPath = join(
-    artifactsDir,
-    ARTIFACT_DEFINITIONS.provider_confirmation.fileName,
-  );
-  if (!existsSync(gate0ArtifactPath)) {
-    const populated = await populateDeclaredProxyCatalog().catch(() => null);
-    if (populated !== null && !populated.written) {
-      process.stderr.write(
-        `WARNING: proxy catalog populate did not refresh the cache ` +
-          `(${populated.reason ?? "unknown reason"}). The proxied lane resolves from ` +
-          `any existing cache, or stays unexpanded for this run.\n`,
-      );
-    }
-  }
-  // Capture the drops instead of letting them go to the stderr default: the Gate-0
-  // prompt below renders them, so a declared-but-unresolved lane states its own
-  // reason in the artifact the operator reads. Without this the sole channel is a
-  // stderr line that conversation-first use never surfaces, and the lane is simply
-  // missing from the table with no stated cause.
-  const droppedSources: { id: string; reason: string }[] = [];
-  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor, {
-    onDroppedSources: (dropped) => {
-      for (const d of dropped) {
-        droppedSources.push({ id: d.id, reason: d.reason });
-        // ADD the render channel; do not REPLACE stderr. Injecting the callback
-        // suppresses the resolver's own stderr default, and that line is the only
-        // signal on every path that never reaches Gate-0 — headless runs, CI logs,
-        // and the non-confirmation obligations this same function serves. Emitting
-        // both keeps the drop loud at every draw, which is the property that made
-        // it loud in the first place.
-        process.stderr.write(`[audit-tools] declared source "${d.id}" not resolved: ${d.reason}\n`);
-      }
-    },
-  });
-
-  // G3 reconciliation gate — computed ONCE per invocation, here, because it cannot
-  // live inside the pure obligation scan: it needs `discoverProviders` (~6
-  // `spawnSync("where"/"which")`), while `deriveAuditState` is sync and called ~20
-  // times per invocation, three of them inside the drain loop (MAX_DRAIN_STEPS=64).
-  //
-  // Gated on an EXISTING confirmation: with none, the obligation is `missing`
-  // regardless, so the delta is moot — and these probes would otherwise become an
-  // unconditional cost on every next-step, including ones deep in synthesis. Today
-  // they run only when the Gate-0 step is emitted; this keeps that property.
-  //
-  // MUTABLE and shared by reference: the executor clears the delta on promotion, and
-  // both this call's obligation engine AND `advanceAudit`'s nested drain must observe
-  // that — otherwise this `PRIORITY[0]` obligation never converges.
-  const providerConfirmationGate: ProviderConfirmationGateState = {
-    newlyReachable: await resolveNewlyReachableBackends(root, effectiveConfig),
-    unevidencedCapability: await resolveUnevidencedCapabilityPools(root, effectiveConfig),
-    autonomous: resolveAutonomousMode({ sessionConfig: effectiveConfig }),
-  };
+  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
+  const workPartition = resolveCurrentWorkPartitionRuntime(
+    effectiveConfig,
+    hostDescriptor.self,
+  ) ?? undefined;
 
   const result = await runDeterministicForNextStep({
     root,
@@ -586,13 +343,11 @@ async function cmdNextStepBody(
     // see the per-auditor descriptor's resolved backends, not the repo config. Intent
     // reads folded in here are identical either way (resolve preserves every intent field).
     sessionConfig: effectiveConfig,
+    workPartition,
     // The resolved attended/headless discriminator (H2+H4 collapse): attended ⇒ the
     // host reviews the coverage-driven complement of the one fan-out; headless ⇒ no
     // attended host in the eligible set, the engine drives the whole frontier.
     hostCanDispatch,
-    // G3: the reconciliation gate — a non-empty delta re-opens the Gate-0 obligation;
-    // `autonomous` keys the response (prompt the delta vs fail-closed-exclude it).
-    providerConfirmationGate,
   });
 
   if (result.kind === "complete") {
@@ -1094,105 +849,6 @@ async function cmdNextStepBody(
     return;
   }
 
-  if (result.kind === "provider_confirmation") {
-    const inputPath = join(artifactsDir, PROVIDER_CONFIRMATION_INPUT_FILENAME);
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    // The tool's suggested pool (price-ascending). Built from the SAME discovery +
-    // annotation the executor will use, so what the operator sees is what routes
-    // if they accept it verbatim.
-    // Gate-0 source fold: expand every dispatchable source pool (the explicit
-    // `sources[]`) so the suggested ordering + roster the operator sees is exactly what
-    // routes. 2a-ii: read the EFFECTIVE config so the confirmed roster reflects the
-    // per-auditor handshake inventory, not the repo config.
-    const primaryProviderName = resolveFreshSessionProviderName(undefined, effectiveConfig, {
-      env: process.env,
-    });
-    const { sources: dispatchSources, dropped: gatherDropped } =
-      await gatherDispatchableSources(effectiveConfig, primaryProviderName);
-    // Same treatment as the resolver drops above, at the OTHER chokepoint: a lane the
-    // worker-kind x pool-class rule filtered is missing from the table with no stated
-    // cause unless it is rendered. Descriptor-supplied `sources[]` reach the gather
-    // WITHOUT passing ambient resolution, so this is not the same set as `onDroppedSources`.
-    for (const d of gatherDropped) droppedSources.push({ id: d.id, reason: d.reason });
-    // BL-2: render the table from the operator's CARRIED decision, never from a bare
-    // suggestion. Passing no prior/input here made a RE-confirmation display the tool's
-    // price-ascending suggestion as though it were current — stale state shown as fact,
-    // beside a prompt that promises omitted fields keep their confirmed values. The
-    // executor promotes through the identical `carryForwardConfirmationInput` seam, so
-    // what is displayed is now exactly what routes if the operator accepts verbatim.
-    const priorConfirmation = await readSharedProviderConfirmation(root);
-    const carriedInput = carryForwardConfirmationInput(null, priorConfirmation);
-    const suggested = buildProviderConfirmationRender(
-      effectiveConfig,
-      process.env,
-      carriedInput?.exclude ?? [],
-      carriedInput?.include ?? [],
-      undefined,
-      carriedInput ?? undefined,
-      dispatchSources,
-      // MUST be passed separately: `carriedInput.exclude` deliberately omits
-      // gate-authored patterns (provenance — `auto_exclude` is the gate's placeholder
-      // for an answer the operator never gave, so a submission supersedes it). That
-      // split governs LIFETIME, not enforcement, so the render still has to mark the
-      // entry excluded — omitting this argument showed a backend the gate had
-      // fail-closed-excluded as routable, in the very prompt asking the operator to
-      // confirm it.
-      priorConfirmation?.policy?.auto_exclude ?? [],
-    );
-    const step = await writeCurrentStep({
-      artifactsDir,
-      stepKind: "provider_confirmation",
-      status: "ready",
-      runId: null,
-      allowedCommands: [continueCommand],
-      stopCondition:
-        "Confirm or reorder the provider cost ordering by writing provider-confirmation.input.json, then run next-step.",
-      repoRoot: root,
-      artifactPaths: {
-        provider_confirmation_input: inputPath,
-      },
-      prompt: renderProviderConfirmationPrompt({
-        providerPool: suggested.provider_pool,
-        sourcePools: deriveSourcePoolDisplayFromSources(dispatchSources),
-        // Declared lanes that did NOT resolve, WITH their reasons — the pool table
-        // above shows only what survived, so without this the operator confirms a
-        // roster that silently omits something they configured.
-        droppedSources,
-        inputPath,
-        continueCommand,
-        // G3: non-empty ⇒ this is a re-confirmation; the prompt leads with the delta
-        // so the operator answers what changed, not the whole table again.
-        newlyReachable: providerConfirmationGate.newlyReachable,
-        // Non-empty ⇒ the prompt additionally asks for a most-capable-first ordering
-        // over these models, so the pools stop fail-opening at the capability floor.
-        unevidencedCapability: providerConfirmationGate.unevidencedCapability,
-        // BL-1: a bounded, spread sample of the confirmed ordering, so the delta-scoped
-        // capability ask is answerable as ONE ordering over new + reference points. The
-        // prompt stays O(new + constant) no matter how large the roster grows.
-        capabilityAnchors: selectCapabilityAnchors(
-          priorConfirmation?.policy?.capability_order ?? [],
-          providerConfirmationGate.unevidencedCapability,
-        ),
-        // BL-2: the do-not-re-litigate guardrail is owed to ANY re-confirmation, not
-        // only to one carrying a reach delta.
-        hasPriorConfirmation: priorConfirmation !== null,
-        // R3-3: only ever true here when this step was emitted for a non-empty
-        // capability delta on an autonomous run (`nextStepHelpers.ts`'s emission
-        // branch never emits `provider_confirmation` for autonomous otherwise, and
-        // this gate is the exact one that branch read) — addresses the capability
-        // section to the host LLM and omits the reach section.
-        autonomous: providerConfirmationGate.autonomous,
-        // R3-3: which of the rendered anchors are LLM-ranked rather than
-        // operator-ranked — drives the "restate it to reposition" marker on the
-        // attended variant only (harmless to pass unconditionally: the renderer
-        // ignores it on the autonomous variant).
-        capabilityOrderLlmRanked: priorConfirmation?.policy?.capability_order_llm_ranked ?? [],
-      }),
-    });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
-
   if (result.kind === "confirm_intent") {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
@@ -1533,76 +1189,3 @@ async function cmdNextStepBody(
   console.log(JSON.stringify(step, null, 2));
 }
 
-/**
- * Provider-agnostic headless audit-dispatch driver for the gated provider-matrix
- * live e2e (`tests/audit/provider-matrix-dispatch-e2e.test.mjs`). With
- * `rolling_engine` ON and any in-process dispatch provider
- * (the shared `isHeadlessPrimaryProvider` predicate),
- * `runDeterministicForNextStep` routes the `audit_tasks_completed` review through
- * the in-process rolling engine (`driveRollingAuditDispatch`), which launches the
- * real backend per packet. One bounded review result landing in
- * `audit_results.jsonl` (blocked terminal) or the promoted `audit-findings.json`
- * (complete terminal) is proof the dispatch round-tripped real data through
- * ingestion — regardless of which provider drove it.
- *
- * The caller passes the provider's `sessionConfig` and must have advanced the
- * audit to planning (so the next obligation is the host-delegation dispatch).
- * This driver owns only the rolling dispatch + the result-landing check;
- * fixture/planning setup belongs to the gated test, keeping this production
- * helper free of test-fixture deps and free of any per-provider branching.
- */
-export async function runInProcessAuditDispatch(params: {
-  root: string;
-  sessionConfig: SessionConfig;
-  timeoutMs?: number;
-}): Promise<{ dispatched: boolean }> {
-  const { root, sessionConfig } = params;
-  const timeoutMs = params.timeoutMs ?? sessionConfig.timeout_ms ?? 120_000;
-  const artifactsDir = auditArtifactsDir(root);
-
-  // Review results land in one of two places depending on how far the fold gets:
-  // the cumulative `audit_results.jsonl` store (run blocks) or the promoted
-  // parent `audit-findings.json` machine contract (run completes — which removes
-  // the artifacts dir and promotes the synthesized findings). Either is proof.
-  const storePath = join(artifactsDir, "audit_results.jsonl");
-  const promotedFindingsPath = promotedAuditFindingsPath(artifactsDir);
-  const landed = (): boolean => {
-    if (existsSync(promotedFindingsPath)) return true;
-    if (!existsSync(storePath)) return false;
-    return readFileSync(storePath, "utf8")
-      .split("\n")
-      .some((line) => line.trim().length > 0);
-  };
-
-  // One next-step drives the whole review frontier through the provider
-  // in-process; a rare first-pass total-invalid blocks cleanly with nothing
-  // ingested, so a bounded retry re-dispatches still-pending tasks.
-  for (let attempt = 0; attempt < 3 && !landed(); attempt += 1) {
-    const result = await runDeterministicForNextStep({
-      root,
-      artifactsDir,
-      selfCliPath: "audit-code",
-      timeoutMs,
-      narrativeEnabled: false,
-      analyzers: {
-        typescript: "skip",
-        python: "skip",
-        css: "skip",
-        html: "skip",
-        sql: "skip",
-      },
-      graphLlmEdgeReasoning: false,
-      sessionConfig,
-    });
-    // The in-process driver consumed the dispatch obligation itself, so it must
-    // never fall through to a host-subagent `semantic_review` dispatch step.
-    if (result.kind === "semantic_review") {
-      throw new Error(
-        `${sessionConfig.provider} rolling dispatch must drive review in-process, ` +
-          "not emit a host semantic_review step",
-      );
-    }
-  }
-
-  return { dispatched: landed() };
-}

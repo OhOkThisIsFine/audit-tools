@@ -16,6 +16,8 @@ import { computeDispatchCapacity, type CapacityPool } from "../../src/shared/quo
 import { scheduleWave } from "../../src/shared/quota/scheduler.js";
 import type { HostConcurrencyLimit } from "../../src/shared/quota/types.js";
 
+const TEST_CONTEXT_TOKENS = 200_000;
+
 function hostPool(id: string, overrides: Partial<CapacityPool> = {}): CapacityPool {
   return {
     id,
@@ -26,6 +28,7 @@ function hostPool(id: string, overrides: Partial<CapacityPool> = {}): CapacityPo
     quotaStateEntry: null,
     discoveredLimits: null,
     quotaSourceSnapshot: null,
+    contextCapTokens: TEST_CONTEXT_TOKENS,
     ...overrides,
   };
 }

@@ -14,6 +14,8 @@ import type {
   FindingTheme,
   GraphBundle,
   SynthesisNarrative,
+  WorkBlockSeam,
+  WorkPartitionPolicy,
 } from "audit-tools/shared";
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
@@ -27,7 +29,7 @@ import type {
   RuntimeValidationReport,
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
-import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
+import { buildWorkBlockPartition, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
@@ -53,6 +55,7 @@ export interface RenderableAuditReport {
   // narrowed to Lens) and the canonical AuditFindingsReport render unchanged.
   findings: SharedFinding[];
   work_blocks: WorkBlock[];
+  work_block_seams: WorkBlockSeam[];
   /** Tool-REFUTED findings excluded from the admitted set (B4); rendered separately. */
   quarantined_findings?: SharedFinding[];
   themes?: FindingTheme[];
@@ -94,6 +97,7 @@ export interface AuditReportModel {
   summary: AuditReportSummary;
   findings: Finding[];
   work_blocks: WorkBlock[];
+  work_block_seams: WorkBlockSeam[];
   /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
   quarantined_findings?: Finding[];
 }
@@ -176,6 +180,10 @@ export function buildAuditReportModel(params: {
   systemicChallenge?: SystemicChallengeRegister;
   /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
   activeDispatch?: ActiveDispatchState | null;
+  /** Intake manifest byte sizes used to estimate remediation source context. */
+  sizeIndex?: Readonly<Record<string, number>>;
+  /** Transient runtime capacity; never persisted as auditor identity/configuration. */
+  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
 }): AuditReportModel {
   // Re-key the finalized findings with globally-unique, content-addressed ids
   // before anything addresses them by id. mergeFindings emits exactly one
@@ -183,9 +191,9 @@ export function buildAuditReportModel(params: {
   // title) across files, units, and passes, and assignStableFindingIds hashes
   // only stable identity signals — never line numbers, pass ids, or the merged
   // file list — so the same logical finding keeps one id across passes and
-  // re-syntheses. buildWorkBlocks keys its union-find on finding.id, so the
-  // locally-scoped, collision-prone ids worker packets emit must be replaced
-  // here or unrelated findings fuse into one block.
+  // re-syntheses. Work partition coverage and seam identities key on finding.id,
+  // so locally-scoped, collision-prone packet ids must be replaced here or
+  // unrelated findings become indistinguishable in the partition contract.
   // O3 supersession: resolve the ledger to its CURRENT record per task lineage
   // before merging, so a re-dispatched result's fresh findings replace the stale
   // base record they superseded — including findings the re-audit dropped, which
@@ -210,11 +218,14 @@ export function buildAuditReportModel(params: {
   // is never quarantined.
   const findings = allFindings.filter((f) => f.grounding?.status !== "refuted");
   const quarantinedRefuted = allFindings.filter((f) => f.grounding?.status === "refuted");
-  const workBlocks = buildWorkBlocks({
+  const workPartition = buildWorkBlockPartition({
     findings,
     unitManifest: params.unitManifest,
     graphBundle: params.graphBundle,
     criticalFlows: params.criticalFlows,
+    sizeIndex: params.sizeIndex,
+    contextBudgetTokens: params.workPartition?.capacityTokens,
+    availableParallelism: params.workPartition?.availableParallelism,
   });
   const coverage = coverageSummary(params.coverageMatrix);
   const strandedUnitCount =
@@ -225,7 +236,7 @@ export function buildAuditReportModel(params: {
   const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
-      work_block_count: workBlocks.length,
+      work_block_count: workPartition.blocks.length,
       severity_breakdown: severityBreakdown(findings),
       lens_breakdown: lensBreakdown(findings),
       audited_file_count: coverage.audited_file_count,
@@ -241,7 +252,8 @@ export function buildAuditReportModel(params: {
       ),
     },
     findings,
-    work_blocks: workBlocks,
+    work_blocks: workPartition.blocks,
+    work_block_seams: workPartition.seams,
     ...(quarantinedRefuted.length > 0 ? { quarantined_findings: quarantinedRefuted } : {}),
   };
   return model;
@@ -260,6 +272,7 @@ export function buildAuditFindingsReport(
     summary: { ...model.summary },
     findings: model.findings,
     work_blocks: model.work_blocks,
+    work_block_seams: model.work_block_seams,
     ...(model.quarantined_findings && model.quarantined_findings.length > 0
       ? { quarantined_findings: model.quarantined_findings }
       : {}),
@@ -432,6 +445,7 @@ export function renderAuditReportMarkdown(
       lines.push(`### ${block.id}`);
       lines.push("");
       lines.push(`- Max severity: ${block.max_severity}`);
+      lines.push(`- Role: ${block.role}`);
       lines.push(`- Units: ${block.unit_ids.join(", ")}`);
       lines.push(`- Owned files: ${block.owned_files.join(", ")}`);
       lines.push(`- Findings: ${block.finding_ids.join(", ")}`);
@@ -440,6 +454,24 @@ export function renderAuditReportMarkdown(
       );
       lines.push(`- Rationale: ${block.rationale}`);
       lines.push("");
+    }
+  }
+
+  const workBlockSeams = report.work_block_seams ?? [];
+  if (workBlockSeams.length > 0) {
+    lines.push("## Work Block Seams", "");
+    for (const seam of workBlockSeams) {
+      lines.push(`### ${seam.id} — ${seam.kind}`);
+      lines.push("");
+      lines.push(`- Blocks: ${seam.block_ids.join(", ")}`);
+      lines.push(
+        `- Shared files: ${seam.shared_files.length > 0 ? seam.shared_files.join(", ") : "none"}`,
+      );
+      lines.push(
+        `- Shared units: ${seam.shared_unit_ids.length > 0 ? seam.shared_unit_ids.join(", ") : "none"}`,
+      );
+      lines.push(`- Seam preparation required: ${seam.requires_preparation ? "yes" : "no"}`);
+      lines.push(`- Rationale: ${seam.rationale}`, "");
     }
   }
 
@@ -550,6 +582,7 @@ export function normalizeExistingFindingsReport(
   return {
     ...report,
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    work_block_seams: report.work_block_seams ?? [],
     summary: {
       ...report.summary,
       finding_count: report.findings.length,

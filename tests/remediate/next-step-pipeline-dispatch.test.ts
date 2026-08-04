@@ -21,6 +21,13 @@ const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckp
 let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await harness.resetTestRepo();
+  await writeFile(
+    join(REPO_DIR, "session-config.json"),
+    JSON.stringify({
+      block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+    }),
+    "utf8",
+  );
   prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
   process.env.REMEDIATE_ROLLING_ENGINE = "false";
 });

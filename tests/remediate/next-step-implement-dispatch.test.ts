@@ -67,7 +67,20 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await writeIntentCheckpoint();
     process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+      hostContextTokens: 200_000,
+      hostOutputTokens: 8_000,
+      // Keep this host-routing fixture hermetic: ambient CLI sources would turn
+      // a capacity-resolved test into a real in-process worker launch.
+      sessionConfig: {
+        provider: "worker-command",
+        host_provider: "worker-command",
+        host_can_dispatch_subagents: true,
+        sources: [],
+      },
+    });
 
     // Dispatch proceeds directly; pending items are not marked terminal.
     expect(step.step_kind).toMatch(/dispatch_implement/);
@@ -98,7 +111,20 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     );
     process.env.REMEDIATE_ROLLING_ENGINE = "true";
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+      hostContextTokens: 200_000,
+      hostOutputTokens: 8_000,
+      // Keep this host-routing fixture hermetic: ambient CLI sources would turn
+      // a capacity-resolved test into a real in-process worker launch.
+      sessionConfig: {
+        provider: "worker-command",
+        host_provider: "worker-command",
+        host_can_dispatch_subagents: true,
+        sources: [],
+      },
+    });
 
     expect(step.step_kind).toBe("dispatch_implement_rolling");
     expect(step.allowed_commands.some((c) => c.includes("accept-node"))).toBe(true);
@@ -116,17 +142,30 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
   it("implement phase dispatch sweep routes by host capability (rolling default)", async () => {
     const cases = [
       {
-        options: { root: REPO_DIR },
+        options: {
+          root: REPO_DIR,
+          hostContextTokens: 200_000,
+          hostOutputTokens: 8_000,
+        },
         sessionConfig: null,
         stepKind: "dispatch_implement_rolling",
       },
       {
-        options: { root: REPO_DIR, hostCanDispatchSubagents: true },
+        options: {
+          root: REPO_DIR,
+          hostCanDispatchSubagents: true,
+          hostContextTokens: 200_000,
+          hostOutputTokens: 8_000,
+        },
         sessionConfig: null,
         stepKind: "dispatch_implement_rolling",
       },
       {
-        options: { root: REPO_DIR },
+        options: {
+          root: REPO_DIR,
+          hostContextTokens: 200_000,
+          hostOutputTokens: 8_000,
+        },
         sessionConfig: { host_can_dispatch_subagents: true },
         stepKind: "dispatch_implement_rolling",
       },
@@ -160,7 +199,15 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
         );
       }
 
-      const step = await decideNextStep(scenario.options);
+      const step = await decideNextStep({
+        ...scenario.options,
+        sessionConfig: {
+          provider: "worker-command",
+          host_provider: "worker-command",
+          sources: [],
+          ...(scenario.sessionConfig ?? {}),
+        },
+      });
 
       expect(step.step_kind).toBe(scenario.stepKind);
     }

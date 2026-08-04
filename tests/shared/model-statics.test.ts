@@ -91,6 +91,11 @@ describe("resolveLimits static_metadata rung", () => {
   });
 
   test("discovered capability outranks the static rung", () => {
+    const staticOnly = resolveLimits({
+      providerName: "claude-code",
+      sessionConfig: baseConfig,
+      hostModel: "claude-opus-4-8",
+    });
     const result = resolveLimits({
       providerName: "claude-code",
       sessionConfig: baseConfig,
@@ -99,6 +104,23 @@ describe("resolveLimits static_metadata rung", () => {
     });
     expect(result.source).toBe("discovered_capability");
     expect(result.limits.context_tokens).toBe(500_000);
+    expect(
+      result.limits.output_tokens,
+      "a partial handshake fills its missing output cap from models.dev",
+    ).toBe(staticOnly.limits.output_tokens);
+  });
+
+  test("lower-priority output metadata cannot exceed the discovered context ceiling", () => {
+    const result = resolveLimits({
+      providerName: "claude-code",
+      sessionConfig: baseConfig,
+      hostModel: "claude-opus-4-8",
+      discoveredLimits: { context_tokens: 16_000 },
+    });
+
+    expect(result.source).toBe("discovered_capability");
+    expect(result.limits.context_tokens).toBe(16_000);
+    expect(result.limits.output_tokens).toBeNull();
   });
 
   test("explicit config override outranks the static rung", () => {
@@ -111,13 +133,13 @@ describe("resolveLimits static_metadata rung", () => {
     expect(result.limits.context_tokens).toBe(111_000);
   });
 
-  test("unknown model falls through to the conservative default", () => {
+  test("unknown model leaves context capacity unknown", () => {
     const result = resolveLimits({
       providerName: "claude-code",
       sessionConfig: baseConfig,
       hostModel: "totally-made-up-model-xyz",
     });
     expect(result.source).not.toBe("static_metadata");
-    expect(result.limits.context_tokens).toBe(32_000);
+    expect(result.limits.context_tokens).toBeNull();
   });
 });

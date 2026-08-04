@@ -6,7 +6,7 @@
  * reports it ONLY via `warnIncompatibleLaneOnce` — one stderr write per (lane,
  * reason) per PROCESS. Nothing in the returned value says the lane existed, so:
  *
- *   - the Gate-0 confirmation surface cannot show it. That surface deliberately
+ *   - source-resolution diagnostics cannot show it. That surface deliberately
  *     keeps a dropped-by-exclusion provider VISIBLE and marked so the operator can
  *     opt it back in (`buildSourcePools`' `excludedBackends` doc in apiPool.ts
  *     says exactly this: "display and routing diverge deliberately"). A

@@ -2,10 +2,10 @@
  * Rolling engine paused-state management (N-S09).
  *
  * Owns the `waiting_for_provider` resumable paused state that the rolling
- * engine enters when the confirmed provider pool empties mid-run.
+ * engine enters when every eligible dispatch pool empties mid-run.
  *
  * Invariants enforced here:
- *   INV-S03 — settled Gate-0/Gate-1 exclusions are never re-offered on
+ *   INV-S03 — settled dispatch-pool exclusions are never re-offered on
  *              re-discovery. `filterNewProviders` strips them from every
  *              re-discovery pass; `SettledExclusionSet` is never mutated.
  *   CE-003/CE-205 — no indefinite stall. After `LIVELOCK_PAUSE_LIMIT`
@@ -25,8 +25,8 @@
 /**
  * Top-level lifecycle state of the rolling dispatch engine.
  *
- * - `running`              — confirmed pool has capacity; dispatch proceeding.
- * - `waiting_for_provider` — confirmed pool emptied mid-run; engine is
+ * - `running`              — an eligible pool has capacity; dispatch proceeding.
+ * - `waiting_for_provider` — all eligible pools emptied mid-run; engine is
  *                            explicitly paused and resumable.
  * - `terminal`             — engine is done (complete, livelock, or handed
  *                            off to the consumer terminal handler).
@@ -49,8 +49,8 @@ export type RollingEngineLifecycleState =
     };
 
 /**
- * Opaque set of provider identifiers that a Gate-0/Gate-1 user has
- * explicitly excluded. Carried across re-discovery rounds; never cleared.
+ * Opaque set of provider identifiers already settled by dispatch. Carried across
+ * re-discovery rounds; never cleared.
  *
  * Use a `ReadonlySet<string>` so callers cannot accidentally mutate it.
  */
@@ -73,7 +73,7 @@ export const LIVELOCK_PAUSE_LIMIT = 3;
 /**
  * Pure function: return only providers not present in `settled`.
  *
- * Guarantees that re-discovery never re-offers a Gate-0/Gate-1 settled
+ * Guarantees that re-discovery never re-offers a settled
  * exclusion (INV-S03). The `settled` set is never mutated.
  *
  * @param discovered  Provider identifiers returned by the latest re-discovery pass.

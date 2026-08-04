@@ -82,7 +82,13 @@ export function isImplausibleTokenSum(
   const perDispatchCeiling = pool.resolved_limits.context_tokens;
   // A ceiling that can't be established is treated as doubtful too — bias
   // toward NOT recording rather than trusting an unbounded sum.
-  if (!Number.isFinite(perDispatchCeiling) || perDispatchCeiling <= 0) return true;
+  if (
+    typeof perDispatchCeiling !== "number" ||
+    !Number.isFinite(perDispatchCeiling) ||
+    perDispatchCeiling <= 0
+  ) {
+    return true;
+  }
   if (!Number.isFinite(resultCount) || resultCount <= 0) return true;
   return tokens > perDispatchCeiling * resultCount;
 }
@@ -110,7 +116,11 @@ export function pickPrimaryCapacityPoolSummary(
     if (candidate.slots !== best.slots) return candidate.slots > best.slots ? candidate : best;
     const candidateContext = candidate.resolved_limits.context_tokens;
     const bestContext = best.resolved_limits.context_tokens;
-    if (candidateContext !== bestContext) return candidateContext > bestContext ? candidate : best;
+    if (candidateContext !== bestContext) {
+      if (candidateContext == null) return best;
+      if (bestContext == null) return candidate;
+      return candidateContext > bestContext ? candidate : best;
+    }
     return candidate.pool_id < best.pool_id ? candidate : best;
   }, pools[0]!);
 }

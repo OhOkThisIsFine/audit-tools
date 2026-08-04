@@ -52,6 +52,13 @@ beforeEach(async () => {
   await mkdir(ARTIFACTS_DIR, { recursive: true });
   await writeFile(join(TEST_DIR, "src", "real.ts"), "line1\nline2\nline3\n", "utf8");
   await writeFile(join(TEST_DIR, "src", "other.ts"), "const x = 1;\n", "utf8");
+  await writeFile(
+    join(TEST_DIR, "session-config.json"),
+    JSON.stringify({
+      block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+    }),
+    "utf8",
+  );
 });
 
 afterEach(async () => {

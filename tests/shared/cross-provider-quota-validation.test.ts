@@ -334,7 +334,11 @@ test("inv-7: learned quotaStateEntry + handshake quotaSourceSnapshot fold into O
     hostModel: "standard",
     hostConcurrencyLimit: null,
     quotaStateEntry: learnedEntry,
-    discoveredLimits: { requests_per_minute: 30 },
+    discoveredLimits: {
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+      requests_per_minute: 30,
+    },
     quotaSourceSnapshot: {
       remaining_pct: 0.6,
       reset_at: null,
@@ -354,7 +358,11 @@ test("inv-7: learned quotaStateEntry + handshake quotaSourceSnapshot fold into O
   expect(capacity.pools[0].pool_id).toBe("codex/standard");
   expect(capacity.total_slots >= 1, "folded capacity yields at least one slot").toBeTruthy();
   // The fold consults both signals: the snapshot+learned+rpm produce a resolved schedule.
-  expect(capacity.primary.schedule.resolved_limits.context_tokens > 0, "resolved limits present from the fold").toBeTruthy();
+  expect(
+    capacity.primary.schedule.resolved_limits.context_tokens,
+    "resolved limits present from the fold",
+  ).not.toBeNull();
+  expect(capacity.primary.schedule.resolved_limits.context_tokens!).toBeGreaterThan(0);
   expect(capacity.primary.pool_id).toBe("codex/standard");
 });
 
@@ -393,4 +401,3 @@ test("fail-6: a provider with no resolvable token degrades to null (no fetch)", 
   expect(await noToken.queryCurrentUsage("copilot/*")).toBe(null);
   expect(fetchImpl.calls.length, "no token → no live probe").toBe(0);
 });
-

@@ -58,7 +58,10 @@
 
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
-import { AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "../quota/capacity.js";
+import {
+  AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS,
+  resolveCapacityPoolContextTokens,
+} from "../quota/capacity.js";
 import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.js";
 import { scheduleWave } from "../quota/scheduler.js";
 import { quotaPoolKey } from "../providers/identity.js";
@@ -302,7 +305,7 @@ export interface RollingDispatchState<TPacket> {
   /**
    * Stranded packet ids whose blockers were ALL structural fit/capability
    * failures (`context_cap` / `oversized_for_pool` / `below_capability_floor`) —
-   * the packet fits NO confirmed pool, as opposed to the pools having died.
+   * the packet fits NO eligible pool, as opposed to the pools having died.
    *
    * Classification is captured AT STRAND TIME, never re-derived in
    * `getTerminal`: the pool set and the packet's 413 skip-set both move on, so a
@@ -366,7 +369,7 @@ export interface RollingDispatchState<TPacket> {
 
 /** Consumer-provided configuration for the rolling dispatcher. */
 export interface RollingDispatchConfig<TPacket> {
-  /** Confirmed provider pools, in preference order. */
+  /** Eligible capacity pools. */
   confirmedPools: CapacityPool[];
   sessionConfig: SessionConfig;
   /**
@@ -512,7 +515,7 @@ export interface RollingDispatchConfig<TPacket> {
   resolveOutputReservation?: (
     packet: RollingDispatchPacket<TPacket>,
     poolId: string,
-  ) => number;
+  ) => number | null;
   /**
    * Decision-record sink (legibility invariant, spec Resolved decision 3): the
    * engine stamps and emits EVERY per-packet admission decision (admit / ledger
@@ -676,7 +679,7 @@ function isPoolQuotaDegraded(schedule: WaveSchedule, budgetTokens: number): bool
  *
  * Pools below a packet's `requiredTier` capability floor are skipped for that
  * packet (F4 — the engine-side enforcement point). The floor is RELATIVE over the
- * confirmed pool set and fails open on unknown capability, so on its own it never
+ * eligible pool set and fails open on unknown capability, so on its own it never
  * manufactures an empty candidate set.
  *
  * Returns null only when the eligibility filter (exhausted / paused / 413-skip /
@@ -733,12 +736,13 @@ export function selectProvider<TPacket>(
   };
 
   // Context-fit skip (U2): this packet does not fit within a pool's declared context cap
-  // (plus harness overhead). Skip pools that cannot fit the packet. A pool with unknown
-  // context cap (null) always fits. This is the selection-time guard; partition-time fit
+  // (plus harness overhead). Skip pools that cannot prove the packet fits; an unknown
+  // context cap is unadmittable. This is the selection-time guard; partition-time fit
   // checking in hybridDispatch ensures every in-process assignment is guaranteed to fit.
   const doesNotFitContext = (pool: CapacityPool): boolean => {
-    if (pool.contextCapTokens == null) return false; // unknown cap → always fits
-    return packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > pool.contextCapTokens;
+    const contextTokens = resolveCapacityPoolContextTokens(pool, sessionConfig);
+    if (contextTokens == null) return true; // unknown cap → cannot prove fit
+    return packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > contextTokens;
   };
 
   // Ask scheduleWave whether each pool can accept one more slot, accounting for
@@ -1633,7 +1637,7 @@ export function createRollingDispatcher<TPacket>(
   }
 
   /**
-   * True when no confirmed pool is eligible to dispatch (every pool has been
+   * True when no configured pool is eligible to dispatch (every pool has been
    * dropped into `exhaustedPoolIds`). Waiting cannot help — the remaining
    * pending work must be stranded (INV-QD-07 empty-pool terminal).
    */
@@ -1692,9 +1696,10 @@ export function createRollingDispatcher<TPacket>(
     if (state.oversizedPacketPools.get(packet.id)?.has(pool.id) ?? false) {
       return "oversized_for_pool";
     }
+    const contextTokens = resolveCapacityPoolContextTokens(pool, sessionConfig);
     if (
-      pool.contextCapTokens != null &&
-      packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > pool.contextCapTokens
+      contextTokens == null ||
+      packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > contextTokens
     ) {
       return "context_cap";
     }
@@ -1933,7 +1938,7 @@ export function createRollingDispatcher<TPacket>(
         }
         // Per-packet never-dispatchable strand (U2/F1, distinct from the
         // pool-level check above): a packet is PERMANENTLY unselectable when
-        // every confirmed pool is exhausted, in the packet's 413 skip-set, or
+        // every eligible pool is exhausted, in the packet's 413 skip-set, or
         // fit-excluded by a declared context cap, or below its capability floor
         // (F4) — none of which reset. Without this, a fit-excluded packet on
         // otherwise-healthy pools spins the 50ms wait tick forever (the

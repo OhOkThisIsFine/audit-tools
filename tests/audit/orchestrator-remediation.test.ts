@@ -15,7 +15,6 @@ import type {
   AuditState,
 } from "../../src/audit/types/auditState.js";
 import type { AuditPlanMetrics } from "../../src/audit/types/reviewPlanning.js";
-import type { ProviderConfirmationResult } from "audit-tools/shared";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const {
@@ -114,22 +113,10 @@ test("advanceAudit wraps executor failures with executor and obligation context"
     `auditor-lambda-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
 
-  // The Gate-0 check is PRESENCE-only (`deriveAuditState`), so an empty pool is
-  // a satisfied confirmation. Built to the live contract: `schema_version` /
-  // `provider_pool` / `session_level` are required, and the pre-conversion
-  // fixture's `confirmed_by` was never a field of it.
-  const confirmation: ProviderConfirmationResult = {
-    schema_version: "1.1.0",
-    confirmed_at: new Date().toISOString(),
-    provider_pool: [],
-    session_level: true,
-  };
-
-  // Pre-supply provider_confirmation so the first unsatisfied obligation is
-  // repo_manifest, causing intake_executor to be selected and fail.
+  // repo_manifest is the first obligation, so intake_executor is selected and fails.
   await assert.rejects(
     () => advanceAudit(
-      { provider_confirmation: confirmation },
+      {},
       { root: missingRoot },
     ),
     (error: Error) => {

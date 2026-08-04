@@ -183,6 +183,9 @@ function fitWaveToBudget(
     contextTokens: limits.context_tokens,
     reservedOutputTokens: limits.output_tokens,
   });
+  if (budget == null || budget <= 0) {
+    return { admittedSlots: [], estimatedTokens: 0, refused: slots.length > 0 };
+  }
   const cap = Math.max(0, Math.min(maxConcurrent, slots.length));
   const admitted: BrokeredDispatchSlot[] = [];
   let total = 0;

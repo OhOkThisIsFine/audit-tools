@@ -27,7 +27,7 @@ import type { WindowBudget } from "../quota/types.js";
 import { windowConstraintsFor } from "../quota/windowConstraints.js";
 import { deriveColdStartAdmissionBatch } from "../quota/scheduler.js";
 import { tierRank } from "./tierRank.js";
-import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
+import { deriveCostRank } from "./costRank.js";
 
 /** One packet the admission loop may grant this pass. */
 export interface AdmissionCandidate {
@@ -92,17 +92,8 @@ export interface AdmissionPool {
    * within that tie. Never reorders against cost or tier.
    */
   capabilityScore?: number | null;
-  /**
-   * Throughput rank for the cost↔speed dial — the pool's effective PARALLELISM (higher
-   * = faster; `+Infinity` = hardware-parallel). Consulted only when λ > 0. Derived
-   * pool-class-aware by {@link deriveThroughputConcurrency} at the build site — a
-   * backend source's uncapped default is `+Infinity` (parallel) while the conversation
-   * host's unspecified default is `1` (sequential), so `declaredCap`'s ambiguous `null`
-   * sentinel is NOT reused for the rank. See spec/dispatch-quota.md.
-   */
-  throughputConcurrency: number;
-  /** Largest packet cost this pool can fit (context window − output). */
-  capacityTokens: number;
+  /** Largest packet cost this pool can fit (context window − output). Null is unadmittable. */
+  capacityTokens: number | null;
   /**
    * Cold-start calibration (see WaveSchedule.calibrating): at least one binding window
    * has no real token budget derived yet (no absolute count, no learned slope). When
@@ -117,44 +108,17 @@ export interface AdmissionPool {
 }
 
 /**
- * Derive a pool's throughput rank (effective parallelism) pool-class-aware — the fix
- * for the `declaredCap == null` ambiguity (spec/dispatch-quota.md): the same
- * "no cap" sentinel means opposite speeds on the two pool classes, so throughput cannot
- * be read off `declaredCap` alone.
- *
- * - **Backend source** (an endpoint that accepts concurrent requests): an uncapped
- *   source is hardware-parallel ⇒ `+Infinity` (fastest); a declared `max_concurrent`
- *   ⇒ that count.
- * - **Conversation host**: its parallelism IS its subagent budget; unspecified ⇒ the
- *   host is effectively SEQUENTIAL ⇒ `1` (ranks slowest), NOT unbounded. This is what
- *   stops λ=1 from crowning the default zero-declaration host over a metered parallel
- *   source — with no manual declaration.
- */
-export function deriveThroughputConcurrency(params: {
-  isConversationHost: boolean;
-  hostActiveSubagents?: number | null;
-  sourceConcurrencyCap?: number | null;
-}): number {
-  if (params.isConversationHost) {
-    return params.hostActiveSubagents ?? 1;
-  }
-  return params.sourceConcurrencyCap ?? Number.POSITIVE_INFINITY;
-}
-
-/**
  * Build the admission pool set from the serializable per-pool capacity summaries —
  * the SINGLE source of truth both orchestrators use (audit summarizes its dispatch
  * capacity; remediate passes `schedule.capacity_pools`), so the two cannot drift on
  * how a pool maps to an {@link AdmissionPool}. Every field is derived here once:
  * budget (optimistic `+Infinity` when no live ceiling), the hard in-flight cap
- * (`declaredCap` — host subagent budget OR endpoint `max_concurrent`), cost rank
- * (with the operator-confirmed position as rung 1; spec/dispatch-quota.md), the
+ * (`declaredCap` — host subagent budget OR endpoint `max_concurrent`), cost rank,
  * capability tier ordinal, the throughput rank (pool-class-aware concurrency;
  * spec/dispatch-quota.md), and the context-window fit ceiling.
  */
 export function admissionPoolsFromSummaries(
   summaries: readonly DispatchCapacityPoolSummary[],
-  confirmedCostPositions?: Map<string, number> | null,
 ): AdmissionPool[] {
   return summaries.map((pool) => ({
     poolId: pool.pool_id,
@@ -174,15 +138,9 @@ export function admissionPoolsFromSummaries(
       model: pool.model,
       tier: pool.rank,
       declaredCostPerMtok: pool.declared_cost_per_mtok,
-      confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
     }),
     capabilityRank: tierRank(pool.rank),
     capabilityScore: pool.capability_rank ?? null,
-    throughputConcurrency: deriveThroughputConcurrency({
-      isConversationHost: pool.is_conversation_host,
-      hostActiveSubagents: pool.host_concurrency_limit?.active_subagents,
-      sourceConcurrencyCap: pool.concurrency_cap,
-    }),
     // ONE fit predicate on both dispatch paths (unified-routing step B): a source
     // pool's own effective window (`context_cap_tokens`, non-null since step A)
     // outranks the wave's resolved limits — previously the host-admission path gated
@@ -377,19 +335,18 @@ export interface AdmitBatchInput {
    * concurrent admitter double-grants the account (budget AND cap-count axes).
    */
   leaseTtlMs?: number;
-  /**
-   * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator-set operating point on the
-   * cost-vs-throughput frontier among capable pools (spec/dispatch-quota.md).
-   * λ=0 (default) is pure cost-first — byte-identical to the pre-dial ordering. λ=1 is
-   * pure throughput (fastest-capable-first). 0<λ<1 blends the two axes' ordinals.
-   * Out-of-range values clamp to [0, 1].
-   */
-  dispatchBias?: number;
 }
 
 /** Default capability gate: the pool's window must fit the packet's reservation. */
 function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolean {
-  if (!Number.isFinite(pool.capacityTokens) || pool.capacityTokens <= 0) return true;
+  if (pool.capacityTokens === Number.POSITIVE_INFINITY) return true;
+  if (
+    typeof pool.capacityTokens !== "number" ||
+    !Number.isFinite(pool.capacityTokens) ||
+    pool.capacityTokens <= 0
+  ) {
+    return false;
+  }
   return pool.capacityTokens >= packet.cost;
 }
 
@@ -552,7 +509,6 @@ export function buildCapacityPoolCapabilityFloor(
     costRank: 0,
     capabilityRank: tierRank(p.rank),
     capabilityScore: p.declaredCapabilityRank ?? null,
-    throughputConcurrency: Number.POSITIVE_INFINITY,
     capacityTokens: Number.POSITIVE_INFINITY,
   }));
   const byId = new Map(stubs.map((s) => [s.poolId, s]));
@@ -594,48 +550,6 @@ function poolIdCmp(a: AdmissionPool, b: AdmissionPool): number {
   return a.poolId < b.poolId ? -1 : a.poolId > b.poolId ? 1 : 0;
 }
 
-/** Descending throughput (effective parallelism); `+Infinity`-safe (Inf−Inf = NaN). */
-function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
-  const ta = a.throughputConcurrency;
-  const tb = b.throughputConcurrency;
-  if (ta !== tb) {
-    if (ta === Number.POSITIVE_INFINITY) return -1;
-    if (tb === Number.POSITIVE_INFINITY) return 1;
-    return tb - ta;
-  }
-  return b.capabilityRank - a.capabilityRank || capabilityScoreCmp(a, b) || poolIdCmp(a, b);
-}
-
-/**
- * Order the capable pools for one packet at the operating point `bias` (λ).
- *
- * λ=0 (or a single candidate) ⇒ the exact pre-dial cost-first order. Otherwise blend
- * the two axes' ORDINALS within this candidate set — a $/Mtok cost value cannot be
- * linearly mixed with a tokens/min rate, so each axis contributes its dense integer
- * rank, keeping a well-defined total order (spec/dispatch-quota.md).
- */
-function orderCandidates(pools: AdmissionPool[], bias: number): AdmissionPool[] {
-  const ordered = pools.slice();
-  if (bias <= 0 || ordered.length <= 1) {
-    return ordered.sort(costFirstCmp);
-  }
-  const costOrdinal = new Map<string, number>();
-  ordered
-    .slice()
-    .sort((a, b) => costFirstCmp(a, b) || poolIdCmp(a, b))
-    .forEach((pool, i) => costOrdinal.set(pool.poolId, i));
-  const speedOrdinal = new Map<string, number>();
-  ordered
-    .slice()
-    .sort(speedFirstCmp)
-    .forEach((pool, i) => speedOrdinal.set(pool.poolId, i));
-  const blended = (pool: AdmissionPool): number =>
-    (1 - bias) * (costOrdinal.get(pool.poolId) ?? 0) + bias * (speedOrdinal.get(pool.poolId) ?? 0);
-  return ordered.sort(
-    (a, b) => blended(a) - blended(b) || b.capabilityRank - a.capabilityRank || costFirstCmp(a, b) || poolIdCmp(a, b),
-  );
-}
-
 /**
  * Admit as many packets as budget + declared caps allow this pass, routing each to
  * the cheapest capable pool with headroom. Every admission RESERVES the packet's
@@ -649,11 +563,6 @@ function orderCandidates(pools: AdmissionPool[], bias: number): AdmissionPool[] 
  */
 export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResult> {
   const capable = input.capable ?? defaultCapable;
-  // Clamp λ into [0,1] AND coerce a non-finite (NaN/±Infinity) input to the cost-first
-  // default — this is the single ordering chokepoint, so it must never emit a NaN
-  // comparator regardless of caller (callers also pre-clamp; this is the enforced floor).
-  const rawBias = input.dispatchBias ?? 0;
-  const bias = Number.isFinite(rawBias) ? Math.min(1, Math.max(0, rawBias)) : 0;
   const granted: AdmissionGrant[] = [];
   const explains: AdmissionExplain[] = [];
   const blocked: string[] = [];
@@ -686,13 +595,11 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
   }
 
   for (const packet of input.packets) {
-    // Capability is a hard floor (filter), then order the survivors at the operating
-    // point λ: cost-first at λ=0 (default, unchanged), sliding toward throughput-first
-    // as λ→1. Spill still walks this order to the next pool with headroom.
-    const candidates = orderCandidates(
-      input.pools.filter((pool) => capable(pool, packet)),
-      bias,
-    );
+    // Capability is a hard floor; relay-owned ordering/failover happens behind each
+    // broker pool, while independently declared pools remain cheapest-capable-first.
+    const candidates = input.pools
+      .filter((pool) => capable(pool, packet))
+      .sort((a, b) => costFirstCmp(a, b) || poolIdCmp(a, b));
 
     if (candidates.length === 0) {
       explains.push({
@@ -899,12 +806,10 @@ export async function computeDispatchAdmission(input: {
   packets: { id: string; inputTokens: number; complexity: number; requiredTier?: DispatchModelTier }[];
   pools: AdmissionPool[];
   /** Declared output cap for the packet envelope (cold-start; ratio refines later). */
-  outputCap: number;
+  outputCap: number | null;
   grantLeases: boolean;
   ledger: ReservationLedger;
   capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
-  /** Cost↔speed operating point λ ∈ [0,1]; see {@link AdmitBatchInput.dispatchBias}. */
-  dispatchBias?: number;
 }): Promise<DispatchAdmission> {
   const candidates: AdmissionCandidate[] = input.packets.map((p) => ({
     id: p.id,
@@ -959,11 +864,19 @@ export async function computeDispatchAdmission(input: {
         grantedIds.push(candidate.id);
         explains.push(plannedExplain(candidate));
       } else {
+        const eligibleUnknownCapacity = input.pools.some(
+          (pool, i) =>
+            floorOnly(sizeNeutralPools[i]!, candidate) &&
+            (pool.capacityTokens == null ||
+              (!Number.isFinite(pool.capacityTokens) &&
+                pool.capacityTokens !== Number.POSITIVE_INFINITY) ||
+              pool.capacityTokens <= 0),
+        );
         explains.push({
           packet_id: candidate.id,
           pool_id: null,
           admitted: false,
-          reason: "packet_oversized",
+          reason: eligibleUnknownCapacity ? "no_capable_pool" : "packet_oversized",
           constraints: [],
           binding: null,
           attempts: [],
@@ -983,7 +896,6 @@ export async function computeDispatchAdmission(input: {
     // concurrent co-located admitter mid-wave (the host-path lease-TTL fix).
     leaseTtlMs: DISPATCH_LEASE_TTL_MS,
     ...(input.capable ? { capable: input.capable } : {}),
-    ...(input.dispatchBias != null ? { dispatchBias: input.dispatchBias } : {}),
   });
   return {
     granted_packet_ids: admit.granted.map((g) => g.packet_id),

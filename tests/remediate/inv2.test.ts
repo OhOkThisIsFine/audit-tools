@@ -7,7 +7,7 @@
  *     and surfaces in the pool summary, never pre-folded into a slot count;
  *   - `buildConfirmedPools` (the remediation pool builder) attaches the marker
  *     from the probe status rather than swallowing it into a bare null snapshot;
- *   - the discovered capability window escapes the conservative 32k floor.
+ *   - a reported capability window resolves otherwise-unknown capacity.
  *
  * Hermetic: under vitest the default-fetch proactive sources skip the network, so
  * the live per-provider endpoints are exercised by the gated audit-side probe, not
@@ -128,8 +128,8 @@ describe("INV-2 silent-degrade marker (shared contract)", () => {
   });
 });
 
-describe("INV-2 discovered-window slot-rise (32k floor escape)", () => {
-  it("a reported capability window outranks the conservative 32k default", () => {
+describe("INV-2 discovered-window slot-rise (unknown-capacity escape)", () => {
+  it("a reported capability window replaces unknown capacity", () => {
     const base: CapacityPool = {
       id: "claude-code/*",
       accountKey: "claude-code/*",
@@ -161,7 +161,7 @@ describe("INV-2 discovered-window slot-rise (32k floor escape)", () => {
       pendingItemTokens,
     });
 
-    expect(floored.primary.schedule.resolved_limits.context_tokens).toBe(32_000);
+    expect(floored.primary.schedule.resolved_limits.context_tokens).toBeNull();
     expect(lifted.primary.schedule.resolved_limits.context_tokens).toBe(200_000);
     expect(lifted.total_slots).toBeGreaterThanOrEqual(floored.total_slots);
   });
@@ -196,4 +196,3 @@ describe("INV-2 buildConfirmedPools wiring (hermetic)", () => {
     expect(capacity.primary.schedule.resolved_limits.context_tokens).toBe(200_000);
   });
 });
-

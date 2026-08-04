@@ -80,11 +80,10 @@ export async function assembleDispatchQuota(params: {
   runId: string;
   pools: AdmissionPool[];
   packets: { id: string; inputTokens: number; complexity: number; requiredTier?: DispatchModelTier }[];
-  outputCap: number;
+  outputCap: number | null;
   grantLeases: boolean;
   ledger: ReservationLedger;
   capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
-  dispatchBias?: number;
   base: Omit<DispatchQuotaContract, "contract_version" | "run_id" | "admission">;
 }): Promise<DispatchQuotaContract> {
   const admission = await computeDispatchAdmission({
@@ -94,7 +93,6 @@ export async function assembleDispatchQuota(params: {
     grantLeases: params.grantLeases,
     ledger: params.ledger,
     ...(params.capable ? { capable: params.capable } : {}),
-    ...(params.dispatchBias != null ? { dispatchBias: params.dispatchBias } : {}),
   });
   return DispatchQuotaContractSchema.parse({
     contract_version: DISPATCH_QUOTA_CONTRACT_VERSION,

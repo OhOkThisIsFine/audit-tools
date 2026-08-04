@@ -33,12 +33,12 @@ test("every engine-dispatched PRIORITY obligation has an entry in the CLI fold's
   }
 });
 
-test("isHostDelegationExecutor returns true for design_review_contract, design_review_conceptual, agent, intent_checkpoint_executor, provider_confirmation_executor, and synthesis_narrative_executor", () => {
+test("isHostDelegationExecutor recognizes the registered host-delegation executors", () => {
   expect(isHostDelegationExecutor("design_review_contract")).toBe(true);
   expect(isHostDelegationExecutor("design_review_conceptual")).toBe(true);
   expect(isHostDelegationExecutor("agent")).toBe(true);
   expect(isHostDelegationExecutor("intent_checkpoint_executor")).toBe(true);
-  expect(isHostDelegationExecutor("provider_confirmation_executor")).toBe(true);
+  expect(isHostDelegationExecutor("provider_confirmation_executor")).toBe(false);
   expect(isHostDelegationExecutor("synthesis_narrative_executor")).toBe(true);
   expect(isHostDelegationExecutor("intake_executor")).toBe(false);
   expect(isHostDelegationExecutor("synthesis_executor")).toBe(false);
@@ -60,7 +60,6 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
     "agent",
     "intent_checkpoint_executor",
     "intent_equivalence_executor",
-    "provider_confirmation_executor",
     "rolling_dispatch_executor",
     "synthesis_narrative_executor",
   ]);
@@ -74,7 +73,7 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   }
   // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
-  expect(hostEntries.map((e) => e.id).sort(), "Exactly 'agent', 'charter_clarification_executor', 'charter_delta_executor', 'charter_extraction_executor', 'critical_flow_fallback_executor', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'intent_equivalence_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', 'synthesis_narrative_executor', and 'systemic_challenge_executor' should have kind host_delegation").toEqual(["agent", "charter_clarification_executor", "charter_delta_executor", "charter_extraction_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
+  expect(hostEntries.map((e) => e.id).sort()).toEqual(["agent", "charter_clarification_executor", "charter_delta_executor", "charter_extraction_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "rolling_dispatch_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
 });
 
 test("every registry executor with a PRIORITY obligation has a runner in EXECUTOR_RUNNERS (host-delegation dispatch executors excepted)", () => {

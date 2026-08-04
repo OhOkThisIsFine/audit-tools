@@ -48,12 +48,9 @@ describe("resolveStateDir", () => {
 });
 
 describe("state-dir consumers honor the override", () => {
-  it("resolveSourceDeclarationPath and resolveProxyCatalogPath route through it", async () => {
+  it("resolveSourceDeclarationPath routes through it", async () => {
     const { resolveSourceDeclarationPath } = await import(
       "../../src/shared/providers/auditorSources.js"
-    );
-    const { resolveProxyCatalogPath } = await import(
-      "../../src/shared/providers/proxyCatalog.js"
     );
     // The suite-level setup file (tests/helpers/state-dir-setup.mjs) always sets
     // the override, so the no-homeDir form must land inside it — never the box's
@@ -62,6 +59,5 @@ describe("state-dir consumers honor the override", () => {
     expect(override).toBeTruthy();
     if (!override) throw new Error("AUDIT_CODE_STATE_DIR must be set by the suite-level setup file");
     expect(resolveSourceDeclarationPath()).toBe(join(override, "sources-declared.json"));
-    expect(resolveProxyCatalogPath()).toBe(join(override, "catalog-cache.json"));
   });
 });

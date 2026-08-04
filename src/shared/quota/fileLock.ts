@@ -1,4 +1,5 @@
-import { writeFile, unlink, stat, readFile, mkdir, utimes } from "node:fs/promises";
+import { access, writeFile, unlink, stat, readFile, mkdir, utimes } from "node:fs/promises";
+import { constants } from "node:fs";
 import { dirname } from "node:path";
 import type { RunLogger } from "../observability/runLog.js";
 
@@ -22,6 +23,37 @@ const RETRY_INTERVAL_INITIAL_MS = 50;
 const RETRY_INTERVAL_MAX_MS = 500;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const STALE_CHECK_INTERVAL_MS = 1_000;
+
+/**
+ * Windows can report EPERM/EACCES for a real create/delete race, but those
+ * errors are also what a sandbox or ACL uses when the parent directory cannot
+ * be written. Only the former is contention. Keep the decision pure so the
+ * boundary is testable; the caller supplies the parent-directory probe.
+ */
+export function isTransientPermissionContention(
+  code: string | undefined,
+  parentDirectoryWritable: boolean,
+): boolean {
+  return (
+    code === "EEXIST" ||
+    ((code === "EPERM" || code === "EACCES") && parentDirectoryWritable)
+  );
+}
+
+/**
+ * Distinguish a Windows create race from an unwritable lock directory. A
+ * missing lock plus a non-writable parent is a configuration/permission
+ * failure, not a held lock, so callers must see the original error immediately
+ * instead of waiting ten seconds for a misleading FileLockTimeoutError.
+ */
+async function lockParentIsWritable(lockPath: string): Promise<boolean> {
+  try {
+    await access(dirname(lockPath), constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export class FileLockTimeoutError extends Error {
   constructor(lockPath: string) {
@@ -203,9 +235,17 @@ export async function acquireLock(
       const code = (err as NodeJS.ErrnoException).code;
       // EEXIST means the lock is already held → wait and retry. On Windows a
       // concurrent create/delete race on the same lock file can surface as
-      // EPERM/EACCES instead of EEXIST; treat those as transient contention and
-      // retry as well, rather than failing the whole acquisition.
-      if (code !== "EEXIST" && code !== "EPERM" && code !== "EACCES") throw err;
+      // EPERM/EACCES instead of EEXIST. Retry those only when the parent is
+      // writable; an unwritable parent is a real permission failure and must
+      // surface immediately instead of becoming a misleading timeout.
+      if (
+        !isTransientPermissionContention(
+          code,
+          code === "EEXIST" || (await lockParentIsWritable(lockPath)),
+        )
+      ) {
+        throw err;
+      }
     }
 
     // Check the deadline BEFORE any stale-check IO (stat/readFile) or sleep, so a

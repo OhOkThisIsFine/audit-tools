@@ -14,8 +14,8 @@ const CODEX_ENV = { CODEX_THREAD_ID: "t-1" };
 const CLAUDE_ENV = { CLAUDECODE: "1" };
 
 describe("resolveConversationHostProvider", () => {
-  it("defaults to claude-code on a clean env (conversation-first host)", () => {
-    expect(resolveConversationHostProvider({ env: CLEAN_ENV })).toBe("claude-code");
+  it("defaults to worker-command on a clean env instead of inventing a host", () => {
+    expect(resolveConversationHostProvider({ env: CLEAN_ENV })).toBe("worker-command");
     expect(resolveConversationHostProvider()).not.toBe(undefined);
   });
 
@@ -82,7 +82,7 @@ describe("resolveHostProviderName", () => {
   });
 
   it("falls back to the auto-detected conversation host when unset / auto", () => {
-    expect(resolveHostProviderName(undefined, { env: CLEAN_ENV })).toBe("claude-code");
+    expect(resolveHostProviderName(undefined, { env: CLEAN_ENV })).toBe("worker-command");
     expect(resolveHostProviderName({}, { env: CODEX_ENV })).toBe("codex");
     expect(resolveHostProviderName({ provider: "auto" }, { env: CODEX_ENV })).toBe("codex");
   });

@@ -11,6 +11,11 @@ import { isFileMissingError } from "audit-tools/shared";
 // descriptors so a large repo manifest does not exhaust the fd limit.
 const LINE_COUNT_BATCH_SIZE = 25;
 
+/** Return true when a line-count lookup is absent or explicitly unmeasured. */
+export function isUnmeasuredLineCount(value: number | undefined): boolean {
+  return value === undefined || Number.isNaN(value);
+}
+
 export async function buildLineIndex(
   root: string,
   repoManifest: RepoManifest,

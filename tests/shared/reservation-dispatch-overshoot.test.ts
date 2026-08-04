@@ -23,6 +23,8 @@ interface Payload {
   id: string;
 }
 
+const TEST_CONTEXT_TOKENS = 200_000;
+
 function makePool(id = "pool-shared"): CapacityPool {
   return {
     id,
@@ -33,6 +35,7 @@ function makePool(id = "pool-shared"): CapacityPool {
     quotaStateEntry: null,
     discoveredLimits: null,
     quotaSourceSnapshot: null,
+    contextCapTokens: TEST_CONTEXT_TOKENS,
   };
 }
 

@@ -21,11 +21,13 @@ import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import {
   contractPipelineDir,
+  pathASeedFilePath,
   readContractArtifact,
   envelopePayload,
 } from "./artifactStore.js";
 import {
   derivePhaseCut,
+  applyWorkBlockSeamDependencies,
   phaseCutModulesFromContracts,
   type PhaseCut,
 } from "./phaseCut.js";
@@ -55,7 +57,15 @@ export async function ensurePhaseCutArtifact(
   const finalized = envelopePayload(
     await readContractArtifact(artifactsDir, "finalized_module_contracts"),
   );
-  const modules = phaseCutModulesFromContracts(finalized);
+  const decomposition = envelopePayload(
+    await readContractArtifact(artifactsDir, "module_decomposition"),
+  );
+  const pathASeed = await readOptionalJsonFile<unknown>(pathASeedFilePath(artifactsDir));
+  const modules = applyWorkBlockSeamDependencies(
+    phaseCutModulesFromContracts(finalized),
+    decomposition,
+    pathASeed,
+  );
   if (modules.length === 0) return null;
   const cut = derivePhaseCut(modules);
   await writeJsonFile(phaseCutFilePath(artifactsDir), cut);

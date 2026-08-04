@@ -16,7 +16,7 @@ test("omitted provider defaults to worker-command even when external CLIs are av
   // resolves to a detected CLI — proving the omitted-provider case above is the
   // deliberate no-detection default, not detection that happened to find nothing.
   expect(resolveFreshSessionProviderName(undefined, { provider: "auto" }, deps)).toBe(
-    "claude-code",
+    "agy",
   );
 });
 
@@ -159,7 +159,7 @@ test("provider auto selects subprocess-template when a generic launcher bridge i
   expect(provider).toBe("subprocess-template");
 });
 
-test("provider auto selects Claude Code when Claude is available and OpenCode is not", () => {
+test("provider auto does not select Claude Code from PATH", () => {
   const provider = resolveFreshSessionProviderName(
     undefined,
     { provider: "auto" },
@@ -169,7 +169,7 @@ test("provider auto selects Claude Code when Claude is available and OpenCode is
     },
   );
 
-  expect(provider).toBe("claude-code");
+  expect(provider).toBe("worker-command");
 });
 
 test("PB-1: bare-PATH OpenCode (no config, no Claude) is NOT auto-selected; falls through to worker-command", () => {
@@ -203,7 +203,7 @@ test("PB-1: configured OpenCode is still auto-selected when on PATH (opt-in pres
   expect(provider).toBe("opencode");
 });
 
-test("provider auto prefers a configured Claude Code adapter when both external CLIs are available", () => {
+test("provider auto ignores configured Claude Code unless it is explicitly selected", () => {
   const provider = resolveFreshSessionProviderName(
     undefined,
     {
@@ -219,7 +219,7 @@ test("provider auto prefers a configured Claude Code adapter when both external 
     },
   );
 
-  expect(provider).toBe("claude-code");
+  expect(provider).toBe("worker-command");
 });
 
 test("provider auto prefers a configured OpenCode adapter when both external CLIs are available", () => {

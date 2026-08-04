@@ -52,6 +52,13 @@ const { runAuditStep } = await import("../../src/audit/cli/auditStep.js");
 // ───────────────────────────────────────────────────────────────────────────
 
 const RUN_ID = "dc4-rolling-audit-run";
+const TEST_SESSION_CONFIG: SessionConfig = {
+  provider: "openai-compatible",
+  quota: {
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+};
 
 function tasks(): AuditTask[] {
   const dirs = ["mod_a", "mod_b", "mod_c"];
@@ -124,7 +131,7 @@ test.concurrent("DC-4 pause: a full strand pauses to a resumable waiting_for_pro
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: strandingDispatcher,
     ingest: async () => { throw new Error("ingestion must be skipped on a full strand"); },
@@ -171,7 +178,7 @@ test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible" },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000,
     dispatchPacket: writingDispatcher,
     ingest: async ({ runId }) => ({ summary: { run_id: runId, accepted_count: 3 }, has_failures: false }),
@@ -191,7 +198,7 @@ test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (b
   // single host pool (settled). prepareDispatchArtifacts assigns the pool id.
   await driveRollingAuditDispatch({
     root: artifactsDir, artifactsDir, activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000, dispatchPacket: strandingDispatcher,
     ingest: async () => ({ summary: {}, has_failures: false }),
   });
@@ -204,7 +211,7 @@ test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (b
   // genuinely-new provider id NOT in the settled set → advancePausedState resumes.
   const result = await driveRollingAuditDispatch({
     root: artifactsDir, artifactsDir, activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000, dispatchPacket: strandingDispatcher,
     ingest: async () => ({ summary: {}, has_failures: false }),
     discoverProviders: () => [...settled, "brand-new-pool"],
@@ -222,7 +229,7 @@ test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-off
   // Pass 1 → pause, capturing the settled (exhausted) pool ids.
   await driveRollingAuditDispatch({
     root: artifactsDir, artifactsDir, activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000, dispatchPacket: strandingDispatcher, ingest: async () => ({ summary: {}, has_failures: false }),
   });
   const settled = (await readActiveDispatch(artifactsDir)).paused_state.settled_exclusions;
@@ -232,7 +239,7 @@ test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-off
   // it stays paused (pause_count bumped) toward livelock.
   const result = await driveRollingAuditDispatch({
     root: artifactsDir, artifactsDir, activeReviewRun: activeReviewRun(runDir),
-    sessionConfig: { provider: "openai-compatible", quota: {} },
+    sessionConfig: TEST_SESSION_CONFIG,
     timeoutMs: 1000, dispatchPacket: strandingDispatcher, ingest: async () => ({ summary: {}, has_failures: false }),
     discoverProviders: () => settled, // re-offer the settled pools only
   });
@@ -245,7 +252,7 @@ test.concurrent("DC-4 terminal: the pause promotes to a partial-completion termi
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  const session: SessionConfig = { provider: "openai-compatible", quota: {} };
+  const session = TEST_SESSION_CONFIG;
   // livelockLimit 2: pass1 enters (count 0), pass2 bumps to 1 (still paused),
   // pass3 bumps to 2 == limit → terminal/livelock.
   const passOnce = (extra: { settled?: string[] } = {}) =>

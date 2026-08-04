@@ -53,6 +53,7 @@ function pool(id: string, over: Partial<CapacityPool> = {}): CapacityPool {
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
     ...over,
   };
 }
@@ -250,6 +251,20 @@ describe("A-8 HybridSpillCoordinator", () => {
     // The global host budget caps the TOTAL across both pools.
     expect(assignments.length).toBeLessThanOrEqual(2);
     expect(assignments.length).toBeGreaterThan(0);
+  });
+
+  it("unknown context capacity leaves nodes explicitly unplaceable", async () => {
+    const store = settledStore();
+    const coord = new HybridSpillCoordinator({
+      pools: [pool("pool/unknown", { contextCapTokens: null })],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+    });
+
+    expect(await coord.planAssignments(nodes(1))).toEqual([]);
+    expect(coord.unplaceableNodeIds()).toEqual(["n-0"]);
   });
 
   it("terminalStatus: dispatchable until every confirmed pool is settled, then the sole pause terminal fires", async () => {

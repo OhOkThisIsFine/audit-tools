@@ -144,8 +144,8 @@ const FIXTURE_SKIP_ANALYZERS = {
  * `FIXTURE_LINE_INDEX`.
  *
  * `advanceAudit` drains the consecutive deterministic regen frontier within one
- * call, stopping only at host-delegation boundaries (provider_confirmation,
- * intent_checkpoint, charter, both design-review passes). So the whole
+ * call, stopping only at host-delegation boundaries (intent_checkpoint, charter,
+ * both design-review passes). So the whole
  * deterministic chain collapses into a handful of host-boundary round-trips — this
  * helper is chain-length-agnostic: it loops `advanceAudit` until the planning
  * artifacts are built (planning_executor is the deterministic tail that the

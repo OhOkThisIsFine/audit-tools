@@ -8,64 +8,6 @@
 
 ## Open tracks
 
-
-**Track 1 — Proxy-catalog enrichment has no source. LiteLLM is RETIRED (2026-07-28); the local lane is
-now `llm-relay` on `127.0.0.1:8791`, and it serves NEITHER catalog endpoint.**
-The retirement itself is DONE and needed zero audit-tools source change — the property held exactly as
-predicted. Re-pointed: `~/.claude/llm-call.mjs` (now `:8791`, `/health` preflight, namespaced model
-specs), `.claude/hooks/session-start-guards.mjs` (probes `:8791/health`), and the three
-`nim-*-single-shot` entries in `~/.audit-code/sources-declared.json` (verified 2026-07-28: all three
-route to their intended model, no downgrade). Backup: `sources-declared.json.bak-pre-litellm-retirement`.
-
-⚠ **What is now OPEN is the same gap (1) previously measured against 9router — it applies to llm-relay
-too (measured 2026-07-28).** llm-relay returns 404 for `/v1/models`, `/model/info` AND
-`/health/liveliness` ("path not supported for an openai backend"); it fronts its registry on `/registry`
-and `/telemetry` instead. So `adaptProxyModelInfo`'s whole input (`max_input_tokens`,
-`input_cost_per_token`, `output_cost_per_token`, `mode`, `supports_tool_calls`) has no source, and the
-roster cannot be enumerated at all. Cost feeds costRank rung 2 (the default λ=0 operating point) and
-context caps feed the fit gate, so both silently degrade.
-**Consequence already applied:** the generic `proxy` auto-discovery block was REMOVED from
-`sources-declared.json` — against llm-relay it can only ever drop itself with
-`GET …/v1/models returned no models or was unreachable`. The lane is now carried entirely by the three
-explicit per-model sources. Discovery is what regressed; dispatch is unaffected.
-**Non-gap:** the degradation is graceful and reasoned, not a crash — `populateProxyCatalog` never throws
-(`{written:false, reason}`), `/model/info` 404 degrades to roster-only, and the dropped lane surfaces a
-named reason.
-**The decision this track now needs:** whether to teach `proxyCatalog` an llm-relay `/registry` adapter,
-map prefixes to canonical models.dev ids for the cost/context half, or accept explicit-source-only
-declaration and delete the discovery path. ⚠ Do NOT hand-maintain a prefix→price table to close this —
-that is the banned shape.
-**Property (still holds):** starting, stopping or swapping the proxy changes zero audit-tools source —
-so any migration is a re-point plus adapters, never a fork.
-
-<details><summary>Superseded: original LiteLLM stand-up + validation scope (2026-07-18, kept for the endpoint contract it names)</summary>
-
-**(a)–(e) all VALIDATED live 2026-07-18** — LiteLLM 1.91.1 on `127.0.0.1:4000` fronting NVIDIA NIM,
-9 aliases across tiers; record: [`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](../reviews/litellm-proxy-live-validation-2026-07-18.md).
-Config lives at `~/.audit-code/litellm-config.yaml`. One defect found + fixed (proxy lane never
-reach-verified its own `api_key_env`). **Still open on this track:** dispatch through the proxy under
-a real audit wave (packets validated only to the completion boundary), and quota/rate-limit behavior
-at the proxy — both fold into the re-dogfood step this validation unblocks.
-Original scope follows. Deployment/configuration work, not audit-tools code changes. Stand up a local LiteLLM proxy (`litellm --config config.yaml`, default port 4000, optional master_key for auth). Configure it with an openai-compatible backend (NVIDIA NIM, vLLM, LM Studio, etc.) and model roster. Point the generic `proxy` block in `~/.audit-code/sources-declared.json` at it: `{endpoint, api_key_env, top_k?, cost_per_mtok?}` (env note: `NVIDIA_API_KEY` and `LLM_BACKEND_BASE_URL` are already set on the box). Then run `/audit-code` and validate the full chain end-to-end: (a) `/v1/models` roster is discovered and merged into Gate-0 confirmed pool, (b) `/model/info` enrichment parses cost + context caps when available (graceful degrades when absent), (c) liveness via `/health/liveliness` (fallback `/v1/models` if missing), (d) auth: master_key threaded correctly + loud drop if `api_key_env` names an unset var, (e) workers receive `--model <alias>` verbatim and dispatch honors the order. Deployment guidance → `examples/`, never as code concept. ⬇ Closes the "swap never run against a live proxy" gap.
-
-</details>
-
-**Track 2 — Ranker contract. ⚠ The "design a contract" framing is SUPERSEDED — the contract already
-exists and is in use.** The original deliverable was a new machine-level ranks file for audit-tools to
-read. That is no longer the right shape: the ranker writes capability ranks into the local proxy's
-per-model metadata, and audit-tools already ingests that metadata and rides it to the capability floor.
-So the join is done, it needed **zero audit-tools code change**, and adding a separate ranks artifact now
-would be a second channel carrying the same fact — the parallel-channel mistake the original entry
-explicitly warned against.
-**The property held and still holds:** audit-tools stays agnostic — starting, stopping, or swapping the
-ranker changes zero audit-tools source, because the tool consumes a general metadata field rather than
-anything ranker-specific.
-**What is actually open is smaller: the ranker is a hand-run generation step, not a refreshed pipeline.**
-Ranks are produced once by hand and then age silently — the same staleness shape as the proxy catalog
-cache, and it should be resolved the same way rather than invented separately. Ranking itself remains a
-distinct project outside this repo; only its freshness touches audit-tools, and only through the cache
-whose read path already needs an age rule.
-
 **Track 2.5 — Slim-down: ~9,400 removable lines, mapped and ranked in
 [`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md). Nothing applied.**
 Deliberately a pointer, not a summary — the report carries 48 items with per-item mechanisms and
@@ -82,22 +24,6 @@ happen: this file asserts the F3/O3/F4 emit-validate-repair seam is live (it has
 `src/`), and `CLAUDE.md` documents `resolveHostConcurrencyLimit` as dispatch concurrency machinery
 (zero call sites in `src/` — definition, one unconsumed re-export, and its own tests).
 Unpinned on purpose: this is a map to draw from, not the next thing to do.
-
-**Track 3 — Gate-0 operator-confirmed priority order fallback (UX enhancement when no ranks exist).**
-Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists to `SharedProviderConfirmation.provider_pool[].cost_order` + host/source pools; dispatch reads it back via `readConfirmedCostPositions()` and applies it as rung-1 of costRank. What's MISSING is prompt clarity + fallback when no external ranks exist. (a) Gate-0 should explicitly surface that `cost_order` is the operator's **DISPATCH PRIORITY ORDER** — distinct from `exclude[]`/`include[]` (binary gating). (b) When no ranker has populated prices, Gate-0 should default-suggest an ordering by tier (`frontier > capable > fast > unknown`). (c) Operator can accept, reorder manually, or exclude pools — all decisions persist to shared confirmation. (d) Dispatch routing must be explicit: operator priority order is rung 1 of costRank, below capability floor ∧ available ∧ quota headroom. 
-**Both design questions resolved.**
-**(i) The suggested order lists EVERY pool.** Restricting the suggestion to the stronger tiers would
-reintroduce the exact confusion (a) exists to remove: an order is DISPATCH PRIORITY, not inclusion.
-A pool missing from the suggested ordering reads as excluded, so a suggestion that silently omits the
-weak tiers teaches the operator the wrong model of what the field means. Weak pools belong at the
-bottom of the order, not absent from it — and if the operator wants one gone, exclusion is the separate
-control that says so.
-**(ii) Operator order is authoritative WITHIN the cost axis; λ decides how much the cost axis weighs.**
-These do not conflict and no reconciliation mechanism is owed. The operator's ordering already sits as
-the first rung of cost ranking, and λ trades the cost axis against throughput — so a throughput-biased
-operating point can legitimately outrank the operator's cost preference, exactly as it outranks price.
-What IS owed is that this be stated where the operator sets the order, since "my priority order was not
-followed" is otherwise indistinguishable from a bug.
 
 ---
 
@@ -132,11 +58,12 @@ followed" is otherwise indistinguishable from a bug.
 
 
 
-- **Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)).** The Gate-0 bypass (fixed v0.33.11) was one symptom of a naming defect: `provider` names TWO concepts (the adapter that carries a request vs. the vendor that serves the model), `endpoint` holds TWO shapes (URL vs. launcher command), and every downstream keyspace had to independently rediscover which it needed. Quota got it right, the gate got it wrong for months, and a proposed "one identity function" fix would have been fail-OPEN. The spec settles the vocabulary and the axis each question binds to; the invariant is **co-locate and name, do not unify**.
+- **Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)).** `provider` still names two concepts (the adapter that carries a request vs. the declared capacity service), and `endpoint` holds two shapes (URL vs. launcher command). The spec settles the vocabulary and the axis each remaining local question binds to; the invariant is **co-locate and name, do not unify**.
   **Staged migration — each stage atomic + green on its own (atomic-replace ordering invariant).**
   The vocabulary rename + chokepoint normalization, the co-located projections in
   `src/shared/providers/identity.ts`, and the axis-explicit exclusion grammar with its capacity
-  guard are all in place and are described as current design by the spec. Open remainder:
+    guard are retired where they represented operator routing policy; the mechanical self-spawn
+    guard remains. Open remainder:
   - **Normalization left the declared-account fold unmigrated.** `service = declared ?? transport`
     activates the fold for a source carrying `account` but no `service`, changing those CapacityPool
     ids and orphaning their learned `quota-state.json` keys — those pools silently fall back to blind
@@ -144,7 +71,7 @@ followed" is otherwise indistinguishable from a bug.
   - **Stage 3 — KNOWN WRONG, not queued work.** The `Locus` two-arm union (`{kind:"url"} | {kind:"command"}`) is refuted and must not be re-proposed; the reasoning is at [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md) → *the url | command locus union*.
   **Property to hold:** a new consumer PICKS an axis from the spec's table; it never invents an identity. ⚠ Do NOT collapse the keyspaces — that instinct is what produced both the bypass and the fail-open proposal.
 
-- **One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).** Audit's intent is `<root>/.audit-tools/audit/session-config.json` (`src/audit/supervisor/sessionConfig.ts` + `auditArtifactsDir`); remediate's is `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` (`src/remediate/steps/sessionConfigLoad.ts`, called from `nextStep.ts`); a stale guard-message in `claudeCodeProvider.ts`/`agyProvider.ts` still points operators at a third path, `.audit-tools/remediation/session-config.json`, that nothing reads — the wrapper itself no longer seeds it (`wrapper/remediate-code-wrapper-install-hosts.mjs` deliberately creates the config empty on demand). They are DISJOINT — audit never writes a file remediate reads as intent — which is precisely why the root-scoped `provider-confirmation.json` exists as the only cross-tool decision channel (`sharedProviderConfirmation.ts`). Two draws of one concept with three homes and no shared store. Unifying the path is a prerequisite for ever collapsing the Gate-0 artifact into the intent (a G3 draft proposed exactly that and was refuted on this). Too large to ride G3. One more live instance of the split-artifact cost (re-dogfood 2026-07-22): the per-tool `.audit-tools/audit/provider_confirmation.json` (4 legacy providers, no source fields) read as "sources dropped" and cost 20 min of misdiagnosis before the real decision at `.audit-tools/provider-confirmation.json` was checked.
+- **One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.** Audit's intent is `<root>/.audit-tools/audit/session-config.json` (`src/audit/supervisor/sessionConfig.ts` + `auditArtifactsDir`); remediate's is `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` (`src/remediate/steps/sessionConfigLoad.ts`, called from `nextStep.ts`); a stale guard-message in `claudeCodeProvider.ts`/`agyProvider.ts` still points operators at a third path, `.audit-tools/remediation/session-config.json`, that nothing reads. The wrapper itself no longer seeds it (`wrapper/remediate-code-wrapper-install-hosts.mjs` deliberately creates the config empty on demand). Two draws still read one concept from different homes.
   **SPEC — one canonical intent path for both draws, and make the migration LOUD rather than silent.**
   The intent is one concept and belongs in one place; two draws reading different files is the fork this
   project's "one core, two draws" rule exists to prevent, and the third path is already dead — nothing
@@ -174,20 +101,18 @@ followed" is otherwise indistinguishable from a bug.
   tool-owned gate that can't pass on a clean tree fails the release, not a dogfood run. Sibling of the
   packaged-bin smokes but for the *gate execution path*, not just `--version`.
 
-- **Free/cheap "quota-arbitrage" dispatch tier (9router-inspired) — extra SOURCE POOLS on existing
+- **Free/cheap "quota-arbitrage" dispatch tier — extra SOURCE POOLS on existing
   machinery, not a new provider engine.** Fan dispatch across genuinely-free backends and (Phase 1)
   N captured subscription-OAuth accounts, rotating on 429/cooldown to exceed any single subscription's
   limit. The rotation engine is already ours: pool identity is `(provider, account[, model])`, the
   admission loop (`admitBatch` cost-first + spill) IS the rotation, `ReservationLedger` does per-key
   backoff, and Claude/Codex/Copilot accounts get live per-account quota free via `BaseHttpQuotaSource`.
   Worker shape ≈ `OpenAiCompatibleProvider` (thin `buildHeaders`/`buildUrl` subclass) except Kiro
-  (AWS EventStream) + Cursor (protobuf). **Reuse (vendor+sync, MIT):** 9router's `PROVIDER_OAUTH`
-  catalogue + per-provider token-refresh endpoints/client_ids — the someone-else-maintained table the
-  sourcing rule prefers — and its `ERROR_RULES` text classes; a 2026-07-07 coverage diff confirmed its
-  price table adds nothing over models.dev, so skip that.
+  (AWS EventStream) + Cursor (protobuf). **Acquire and normalize:** use a vetted, externally maintained
+  provider OAuth catalogue, token-refresh endpoints/client ids, and text-error classes rather than
+  owning those volatile tables. Continue using models.dev for price data.
   ⚠ **This entry previously declared Phase 1 "RULED OUT, not deferred" on ToS grounds; that ruling was
-  REVERSED by operator directive 2026-07-23** ([[9router-functionality-wanted-tos-reversed]]; the
-  2026-07-14 "don't cross it" decision was removed as a misinterpretation —
+  REVERSED by operator directive 2026-07-23** (the 2026-07-14 "don't cross it" decision was removed as a misinterpretation —
   [[repair-proxy-registry-and-codex-tos]]). Subscription-OAuth replay — read the CLI's on-disk creds,
   replay against the vendor's own model API (Codex → Responses, Gemini → Cloud Code Assist) — is IN, on
   the operator's own accounts at his own risk, and must stay **opt-in, per-provider, operator-consented,
@@ -353,13 +278,3 @@ followed" is otherwise indistinguishable from a bug.
   not in play. Do not re-raise it.
 
 - **Packet `task_ids`/`lens` attribution is missing from the token-usage ledger** (`DispatchPlanEntry` carries neither). Non-blocking follow-up to the context-efficiency access-memory track, whose items 1-3 shipped.
-
-- **Dispatch inversion — llm-relay owns routing; audit-tools only estimates (OWNER DIRECTIVE
-  2026-07-30, given mid-dogfood-run).** audit-tools is doing far more dispatch control than it
-  should. Target shape: audit-tools estimates tokens for each task and packet and hands off; the
-  host or dispatching subagent routes via llm-relay when it is present on the machine, and
-  dispatches on its own when it is not. The per-tool pool/admission/tier machinery shrinks
-  accordingly. Run evidence for why: cost-first routing sent 59/60 packets to the priciest host
-  lane while free lanes idled on a misclassified cooldown, and the hard host-wave/pool-wave
-  partition made the tool's own documented remedies unreachable (see the 2026-07-30 defect cluster
-  in [`open-bugs.md`](open-bugs.md)). [[unified-dispatch-routing-direction]]

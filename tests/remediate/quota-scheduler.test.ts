@@ -21,7 +21,10 @@ import { scheduleWave as dispatchScheduleWave } from "../../src/remediate/steps/
 
 const baseConfig: SessionConfig = {
   provider: "claude-code",
-  quota: {},
+  quota: {
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
 };
 
 function makeEntry(overrides: Partial<QuotaStateEntry> = {}): QuotaStateEntry {
@@ -199,7 +202,7 @@ describe("scheduleWave (quota module)", () => {
   it("dispatches the full requested wave for a local provider with no signal", () => {
     const result = scheduleWave({
       providerName: "worker-command",
-      sessionConfig: { ...baseConfig, quota: {} },
+      sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
     });
@@ -240,7 +243,7 @@ describe("dispatch.ts scheduleWave", () => {
   it("returns a wave schedule with max_concurrent when quota is disabled", async () => {
     const result = await dispatchScheduleWave({
       providerName: "claude-code",
-      sessionConfig: { provider: "claude-code", quota: {} },
+      sessionConfig: baseConfig,
       hostModel: null,
       itemCount: 5,
       capabilityRanks: null,
@@ -251,7 +254,7 @@ describe("dispatch.ts scheduleWave", () => {
   it("caps concurrency at the host limit when quota is enabled", async () => {
     const result = await dispatchScheduleWave({
       providerName: "claude-code",
-      sessionConfig: { provider: "claude-code", quota: {} },
+      sessionConfig: baseConfig,
       hostModel: null,
       hostMaxConcurrent: 3,
       itemCount: 10,
@@ -276,6 +279,7 @@ function brokerPool(overrides: Partial<CapacityPool> = {}): CapacityPool {
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
     ...overrides,
   };
 }

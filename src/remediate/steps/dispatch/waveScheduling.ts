@@ -73,7 +73,7 @@ export interface ScheduleWaveInput {
   hostModelId?: string | null;
   env?: NodeJS.ProcessEnv;
   /**
-   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`) — stamped
+   * Optional externally supplied per-model capability ranks — stamped
    * onto the host pools this wave sizes against.
    *
    * **REQUIRED, and `null` must be written out explicitly.** It was optional, on the
@@ -146,7 +146,7 @@ async function buildRemediateHostPools(input: {
   /** Optional retained host-session source (the rolling driver threads its own). */
   hostSession?: HostSessionQuotaSource;
   /**
-   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). Required —
+   * Optional externally supplied per-model capability ranks. Required —
    * the capability floor fails OPEN, so an unwired site is indistinguishable from a
    * working one, and remediate passes no `onFailOpen`, so its fail-opens are invisible.
    */
@@ -239,26 +239,28 @@ export async function buildConfirmedPools(input: {
    * pool-set membership, not a branch flag.
    */
   hostCanDispatch?: boolean;
-  /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
+  /** Backends rejected by the local self-spawn guard. */
   excludedBackends?: DispatchExclusion;
   /**
-   * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). Required —
+   * Optional externally supplied per-model capability ranks. Required —
    * stamped onto BOTH halves below (host pools and source pools), so remediate's floor
    * bands on the same evidence audit's does. Omitting it on one half is the exact
    * one-sided-capability drift [[auditor-remediator-mirroring-is-common-logic]] warns of.
    */
   capabilityRanks: ReadonlyMap<string, number> | null;
-}): Promise<SourcePoolBuild> {
+}): Promise<SourcePoolBuild & { sourcePoolIds: ReadonlySet<string> }> {
   // The ACTUAL configured backend (the primary the fold synthesizes a source for) vs
   // the HOST-pool identity. When the primary is a headless in-process backend it is a
   // WORKER, never the driver: the host pools key to the CONVERSATION HOST (D5,
   // shared `resolveHostDispatchProviderName`, remediate policy `commandWorkers`) —
   // otherwise the host fan-out is charged against the backend's meter
   // ([[capability-is-per-auditor-not-per-audit]]).
-  const actualProviderName = resolveHostProviderName(input.sessionConfig);
+  const actualProviderName = resolveHostProviderName(input.sessionConfig, {
+    env: input.env,
+  });
   const hostProviderName: ResolvedProviderName = resolveHostDispatchProviderName(
     input.sessionConfig,
-    { commandWorkers: true },
+    { commandWorkers: true, env: input.env },
   );
 
   // Resolve identity/limits and build the per-rank host-model pools via the SAME
@@ -297,7 +299,14 @@ export async function buildConfirmedPools(input: {
   // Headless: no host pool in the eligible set — the engine drives the source pools.
   // This is the branch where a zeroing is FATAL rather than degrading (there is no
   // host to fall back to), so the fact must survive the early return.
-  if (input.hostCanDispatch === false) return { pools: sourcePools, zeroedByExclusion, dropped };
+  if (input.hostCanDispatch === false) {
+    return {
+      pools: sourcePools,
+      zeroedByExclusion,
+      dropped,
+      sourcePoolIds: new Set(sourcePools.map((pool) => pool.id)),
+    };
+  }
 
   // D1 cross-class dedup: a folded source colliding with the host's pool identity
   // (same provider+account — attended provider=codex=host) keeps exactly ONE pool.
@@ -307,7 +316,17 @@ export async function buildConfirmedPools(input: {
     // Remediate policy: command-shaped workers are engine-drivable here (H3).
     commandWorkers: true,
   });
-  return { pools: [...dedup.hostPools, ...dedup.sourcePools], zeroedByExclusion, dropped };
+  return {
+    pools: [...dedup.hostPools, ...dedup.sourcePools],
+    zeroedByExclusion,
+    dropped,
+    // Pool CLASS is construction-time knowledge: the caller must never re-derive
+    // "engine-drivable source" from the provider NAME — the neutral worker-command
+    // host identity name-collides with the in-process worker class, so a name test
+    // would classify the HOST pool as a drivable backend and the engine would spawn
+    // the host's own pool as a worker.
+    sourcePoolIds: new Set(dedup.sourcePools.map((pool) => pool.id)),
+  };
 }
 
 export async function buildDispatchQuota(
@@ -325,16 +344,6 @@ export async function buildDispatchQuota(
    */
   grantLeases: boolean,
   quotaStateEntry?: QuotaStateEntry | null,
-  /**
-   * Operator-confirmed cost ordering (rung 1 of costRank; spec/dispatch-quota.md),
-   * keyed by model id → 0-based confirmed position. Absent ⇒ price then tier.
-   */
-  confirmedCostPositions?: Map<string, number> | null,
-  /**
-   * Operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the Gate-0
-   * confirmation (spec/dispatch-quota.md). 0/absent ⇒ cost-first (default).
-   */
-  dispatchBias?: number,
 ): Promise<RemediationDispatchQuota> {
   let backoffState: BackoffState | null = null;
   const count = quotaStateEntry?.consecutive_429_count ?? 0;
@@ -348,7 +357,7 @@ export async function buildDispatchQuota(
   // H5: the admission math + contract shape live in the shared emit core; this
   // wrapper keeps only remediate's assembly policy (precomputed schedule, phase,
   // estimated_wave_tokens).
-  const pools = admissionPoolsFromSummaries(schedule.capacity_pools ?? [], confirmedCostPositions);
+  const pools = admissionPoolsFromSummaries(schedule.capacity_pools ?? []);
   return assembleDispatchQuota({
     runId,
     pools,
@@ -365,10 +374,9 @@ export async function buildDispatchQuota(
       process.stderr.write(
         `WARNING: capability fail-open — pool "${info.poolId}" has no capability evidence ` +
           `and was admitted for a "${info.requiredTier}" packet (${info.packetId}). ` +
-          `Confirm a capability_order at Gate-0, or supply a rank source.\n`,
+          `Declare source capability_rank or supply a ranked host roster.\n`,
       );
     }),
-    ...(dispatchBias != null ? { dispatchBias } : {}),
     base: {
       phase,
       host_concurrency_limit: schedule.host_concurrency_limit,

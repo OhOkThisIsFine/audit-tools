@@ -9,9 +9,21 @@ const { renderSemanticReviewStep } = await import("../../src/audit/cli/semanticR
 // Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
 const { toPromptPathToken } = await import("audit-tools/shared");
 
-// A minimal ambient descriptor (no host handshake) — sufficient for both branches
-// under test, which don't assert on descriptor-carried fields.
+// A minimal ambient descriptor (no host handshake) — sufficient for the
+// single_task_fallback branch, which doesn't size dispatch packets.
 const AMBIENT_DESCRIPTOR: AuditorDescriptor = { self: {} };
+
+// The dispatch branch sizes packets against the host pool, so the handshake must
+// report both token limits — an unidentified host with unknown limits is a
+// deliberate refusal, not a sizing default.
+const DISPATCH_DESCRIPTOR: AuditorDescriptor = {
+  self: {
+    provider: "worker-command",
+    can_dispatch_subagents: true,
+    context_tokens: 200_000,
+    output_tokens: 8_000,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -116,7 +128,9 @@ describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_revie
     const runDir = join(artifactsDir, "runs", runId);
     await mkdir(join(runDir, "task-results"), { recursive: true });
 
-    // Write a minimal pending-audit-tasks.json with one task
+    // Write a small multi-packet frontier. The host semantic path must hand the
+    // whole fit-compatible frontier to the conversation host; audit-tools must
+    // not reserve or cold-start-cap it first.
     const pendingTasks = [
       {
         task_id: "t-abc123",
@@ -126,6 +140,26 @@ describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_revie
         file_paths: ["src/foo/foo.ts"],
         file_line_counts: { "src/foo/foo.ts": 50 },
         rationale: "review foo",
+        priority: "medium",
+      },
+      {
+        task_id: "t-def456",
+        unit_id: "unit-def",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/bar/bar.ts"],
+        file_line_counts: { "src/bar/bar.ts": 50 },
+        rationale: "review bar",
+        priority: "medium",
+      },
+      {
+        task_id: "t-ghi789",
+        unit_id: "unit-ghi",
+        pass_id: "pass:reliability",
+        lens: "reliability",
+        file_paths: ["src/baz/baz.ts"],
+        file_line_counts: { "src/baz/baz.ts": 50 },
+        rationale: "review baz",
         priority: "medium",
       },
     ];
@@ -145,7 +179,11 @@ describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_revie
       hostMaxActiveSubagents: null,
       hostCanRestrictSubagentTools: false,
       hostCanSelectSubagentModel: false,
-      descriptor: AMBIENT_DESCRIPTOR,
+      // The real caller (nextStepCommand) lifts these from the handshake's
+      // self.context_tokens/output_tokens — mirror that derivation here.
+      hostContextTokens: DISPATCH_DESCRIPTOR.self.context_tokens ?? null,
+      hostOutputTokens: DISPATCH_DESCRIPTOR.self.output_tokens ?? null,
+      descriptor: DISPATCH_DESCRIPTOR,
     });
   });
 
@@ -165,6 +203,11 @@ describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_revie
 
   it("progress.pending_packets >= 1", () => {
     expect(result.progress != null && (result.progress.pending_packets ?? 0) >= 1, "progress.pending_packets must be at least 1").toBeTruthy();
+  });
+
+  it("does not expose local quota state or a local grant subset", () => {
+    expect(result.artifact_paths?.dispatch_quota).toBeUndefined();
+    expect(result.progress?.granted_count).toBe(3);
   });
 
   it("artifactPaths.dispatch_plan is a non-empty string", () => {

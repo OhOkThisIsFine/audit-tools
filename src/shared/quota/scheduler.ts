@@ -23,7 +23,6 @@ import {
   resolveLimits,
   type ProviderType,
 } from "./limits.js";
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
 
 /**
  * Minimal structural shape of capabilities discovered at runtime — RPM/TPM (e.g.
@@ -35,8 +34,7 @@ import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
  *
  * `context_tokens`/`output_tokens`, when present, are the discovered model's
  * window and take precedence over the static known-model table — they are how
- * dispatch escapes the conservative 32k default once a host reports its real
- * capabilities (see spec/audit-workflow-design.md).
+ * dispatch sizes from real capabilities (see spec/audit-workflow-design.md).
  */
 export interface DiscoveredRateLimitsInput {
   requests_per_minute?: number | null;
@@ -79,7 +77,7 @@ const HOST_MODEL_RANKS = new Set<string>(["small", "standard", "deep"]);
  * Parse and validate a `--host-models` handshake value (JSON array, lowest
  * rank first) into a roster. Single-sourced here so both orchestrators accept
  * the identical contract. Malformed input throws so a mistyped handshake fails
- * loudly instead of silently downgrading to the conservative floor.
+ * loudly instead of silently leaving the affected rank without usable capacity.
  */
 export function parseHostModelRoster(raw: string): HostModelRosterEntry[] {
   let parsed: unknown;

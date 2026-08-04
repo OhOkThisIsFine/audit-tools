@@ -180,6 +180,7 @@ describe("INV-SOO-03/05: real concurrent in-flight through the rolling driver", 
       source: "session_config",
       description: "Host active subagent limit from session-config.",
     },
+    contextCapTokens: 200_000,
   };
   const session: SessionConfig = { quota: {} };
   const block = (id: string, files: string[]): RemediationBlock => ({
@@ -476,6 +477,7 @@ describe("M-B2 (integration): two barrel-only-sharing nodes complete merged with
       source: "session_config",
       description: "Host active subagent limit from session-config.",
     },
+    contextCapTokens: 200_000,
   };
   const session: SessionConfig = { quota: {} };
   const BARREL = "src/shared/index.ts";
@@ -716,4 +718,3 @@ describe("increment 2d: continuity biases sub-wave admission order", () => {
     }
   });
 });
-

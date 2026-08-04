@@ -62,7 +62,7 @@ export interface RollingRunResult<TPacket> {
  * createRollingDispatcher from audit-tools/shared.
  *
  * @param packets          - Items to dispatch (must satisfy RollingDispatchPacket).
- * @param confirmedPools   - Provider pool from provider confirmation (Gate-0).
+ * @param confirmedPools   - Capacity pools assembled from the active host and declared sources.
  * @param sessionConfig    - Active session config.
  * @param contract         - Seam contract override (dispatchItems / onResult / livelockGuard / consumerTerminal).
  * @param dispatchPacket   - The actual per-packet dispatch function (provider-specific).
@@ -79,8 +79,9 @@ export async function runRollingDispatch<TPacket>(
 ): Promise<RollingRunResult<TPacket>> {
   const livelockLimit = contract.livelockGuard ?? 3;
 
-  // Pool filtering happens upstream (providerConfirmation). Trust the caller's
-  // pool list — a filter that always returns true is a contract lie (INV-07).
+  // Source resolution and self-spawn filtering happen upstream. Trust the
+  // caller's pool list — a filter that always returns true is a contract lie
+  // (INV-07).
   const activePools = confirmedPools;
 
   if (activePools.length === 0) {
@@ -93,7 +94,7 @@ export async function runRollingDispatch<TPacket>(
       results: [],
       stranded_ids: strandedIds,
       partial_reason: "empty_pool",
-      // No pool was ever eligible — every confirmed pool is, by definition,
+      // No pool was ever eligible — every configured pool is, by definition,
       // unavailable for this run and is settled-excluded so re-discovery must
       // surface genuinely-new capacity to resume.
       exhausted_pool_ids: confirmedPools.map((p) => p.id),

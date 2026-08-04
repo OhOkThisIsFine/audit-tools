@@ -111,8 +111,9 @@ export interface AuditorDescriptor {
  * - **HOST-SELF-class** (`model_id` / `context_tokens` / `output_tokens` / `roster`) —
  *   "I am model X with an N-token window." Genuinely unknowable to a spawned CLI: the
  *   running agent's model identity is not on PATH, not an env var, not a file. Absent
- *   here, so the host pool sizes to the conservative floor. That is a fidelity
- *   degradation, never a block.
+ *   here, so the host pool's token capacity remains unknown unless explicit config or
+ *   synced models.dev metadata resolves it. Unknown capacity is unplaceable, never an
+ *   implicit fit.
  *
  * ⚠ NOT interchangeable with a `null` descriptor. `resolveSessionConfig(intent, null)`
  * FAILS CLOSED to driver-self-only — "resolve no pool at all" — and short-circuits

@@ -2,7 +2,7 @@
  * C1: persisted host-capability handshake.
  *
  * Tests the PURE resolver `resolveHostCapabilities(explicit, persisted)` — a DI
- * seam so the per-field `explicit ?? persisted ?? floor` merge is exercised
+ * seam so the per-field `explicit ?? persisted` merge is exercised
  * without driving a full next-step. The dispatch-build site feeds the resolved
  * values downstream and persists only the explicitly-supplied delta.
  */
@@ -21,7 +21,7 @@ describe("resolveHostCapabilities (C1 per-field handshake merge)", () => {
     };
     // Explicit supplies nothing → every field falls through to persisted.
     const { resolved } = resolveHostCapabilities({}, persisted);
-    expect(resolved.context_tokens).toBe(200_000); // persisted, not the 32k floor
+    expect(resolved.context_tokens).toBe(200_000); // persisted authoritative capability
     expect(resolved.max_concurrent).toBe(4);
     expect(resolved.output_tokens).toBe(8_000);
     expect(resolved.can_dispatch_subagents).toBe(true);
@@ -49,14 +49,14 @@ describe("resolveHostCapabilities (C1 per-field handshake merge)", () => {
     expect(toPersist).toEqual({ max_concurrent: 8 });
   });
 
-  it("true first contact (nothing persisted) floors context_tokens at 32k", () => {
+  it("true first contact (nothing persisted) leaves token limits unknown", () => {
     const { resolved, toPersist } = resolveHostCapabilities(undefined, undefined);
-    expect(resolved.context_tokens).toBe(32_000);
-    // The floor is NOT persisted — only explicitly-supplied fields are.
+    expect(resolved.context_tokens).toBeUndefined();
+    expect(resolved.output_tokens).toBeUndefined();
     expect(toPersist).toEqual({});
   });
 
-  it("an explicit context_tokens overrides the first-contact floor and is persisted", () => {
+  it("an explicit context_tokens is preserved and persisted", () => {
     const { resolved, toPersist } = resolveHostCapabilities(
       { context_tokens: 128_000 },
       undefined,

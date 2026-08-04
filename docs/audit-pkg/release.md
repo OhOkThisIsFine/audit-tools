@@ -72,21 +72,19 @@ no-drift guard does not see that, so a human runs these rows at release. A faile
 row becomes a backlog item.
 
 Codex and `agy` are headless CLIs, so they are correctly absent from the GUI-host
-table below and their live dispatch is automated instead of listed here — see the
-`RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix e2e in
-`tests/audit/provider-matrix-dispatch-e2e.test.ts` (supersedes the former
-per-provider `RUN_CODEX_E2E=1` gate). Run it at release with a live backend
-present:
+table below. The `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix live e2e (and
+its `runInProcessAuditDispatch` driver) was **retired with the dispatch
+inversion**: the host and llm-relay own concrete provider/model routing now, so
+audit-tools no longer selects or instantiates those backends for host review and
+the per-backend live round-trip it exercised is no longer this package's seam.
 
-```
-RUN_PROVIDER_MATRIX_E2E=1 npx vitest run tests/audit/provider-matrix-dispatch-e2e.test.ts
-```
-
-Coverage gap: that e2e currently exercises only `codex` / `opencode` /
-`openai-compatible`. `agy` and `claude-worker` have **no live-dispatch e2e coverage**
-yet — until a row is added for each, their real dispatch is unverified by any
-automated gate (`claude-worker`'s existing test, `tests/shared/claude-worker-provider.test.ts`,
-is a local-mock-HTTP-server unit test of transport/argv/env, not a live-dispatch e2e).
+Coverage gap, stated so it is not mistaken for coverage: **no headless backend has
+live-dispatch e2e coverage** — worker-side dispatch through a configured source
+(openai-compatible / codex / agy / `claude-worker`) is verified by unit tests over
+local stubs only (e.g. `tests/shared/claude-worker-provider.test.ts` is a
+local-mock-HTTP-server unit test of transport/argv/env, and
+`tests/remediate/hybrid-decision-point-pools.test.ts` drives a local stub
+endpoint), never by a gate against a live backend.
 
 ### How to run a row
 

@@ -273,7 +273,6 @@ test("blocked handoff renders the dispatch path trio and pending obligations in 
     state: {
       status: "blocked",
       obligations: [
-        { id: "provider_confirmation", state: "present" },
         { id: "repo_manifest", state: "satisfied" },
         { id: "module_graph", state: "stale" },
         { id: "audit_tasks_completed", state: "blocked" },

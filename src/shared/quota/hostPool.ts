@@ -99,7 +99,7 @@ export interface HostPoolPreambleInput {
   roster?: HostModelRosterEntry[] | null;
   /**
    * Confirmed per-model capability ranks (LOWER = more capable), read from the shared
-   * Gate-0 confirmation via `readConfirmedCapabilityRanks`. Stamped onto each host pool
+   * Optional externally supplied capability ranks. Stamped onto each host pool
    * at construction so the host's models band exactly like every other pool's. Required
    * (never optional) — the capability floor fails OPEN, so an unwired site would look
    * identical to a working one; `null` is the explicit "no confirmation in scope".
@@ -190,8 +190,8 @@ export async function buildHostPoolPreamble(
 
   // The capability handshake: the host reported its dispatch model's real context/output
   // window this session. Carried into the pool's discoveredLimits so the shared
-  // discovered_capability rung sizes the budget to the real window instead of the
-  // conservative floor. RPM/TPM stay null and fill from the queried/learned sources.
+  // discovered_capability rung sizes the budget to the real window instead of leaving
+  // capacity unknown. RPM/TPM stay null and fill from the queried/learned sources.
   const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
     input.hostContextTokens != null || input.hostOutputTokens != null
       ? {

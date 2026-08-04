@@ -22,14 +22,6 @@ function hasEntries(values: string[] | undefined): boolean {
   return (values?.length ?? 0) > 0;
 }
 
-function hasConfiguredClaudeCode(sessionConfig: SessionConfig): boolean {
-  return (
-    Boolean(sessionConfig.claude_code?.command?.trim()) ||
-    hasEntries(sessionConfig.claude_code?.extra_args) ||
-    sessionConfig.claude_code?.dangerously_skip_permissions === true
-  );
-}
-
 export function hasConfiguredOpenCode(sessionConfig: SessionConfig): boolean {
   return (
     Boolean(sessionConfig.opencode?.command?.trim()) ||
@@ -79,19 +71,16 @@ export interface AutoProviderContext {
   headless: boolean;
   inVSCode: boolean;
   insideOpenCode: boolean;
-  insideClaudeCode: boolean;
   insideCodex: boolean;
   insideAgy: boolean;
   inAntigravity: boolean;
   hasVSCodeTaskTemplate: boolean;
   hasAntigravityTemplate: boolean;
   hasSubprocessTemplate: boolean;
-  hasClaudeCodeConfig: boolean;
   hasOpenCodeConfig: boolean;
   hasCodexConfig: boolean;
   hasAgyConfig: boolean;
   hasOpenAiCompatibleConfig: boolean;
-  claudeAvailable: boolean;
   opencodeAvailable: boolean;
   codexAvailable: boolean;
   agyAvailable: boolean;
@@ -104,14 +93,12 @@ function getAutoProviderContext(
   uiMode?: "visible" | "headless",
 ): AutoProviderContext {
   // Self-spawn signals come from the single-sourced guard so the auto-resolver
-  // and Gate-0 discovery agree byte-for-byte on what "inside an active session"
+  // and source discovery agree byte-for-byte on what "inside an active session"
   // means (the `CLAUDECODE` / `CODEX` in-session env convention).
   // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
   // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
   // These signals are the behavioral contract; regression-tested in
   // packages/shared/tests/codex-antigravity-providers.test.mjs.
-  const insideClaudeCode = isSelfSpawnBlocked("claude-code", env);
-  const claudeCommand = sessionConfig.claude_code?.command ?? "claude";
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   const codexCommand = sessionConfig.codex?.command ?? "codex";
   const insideCodex = isSelfSpawnBlocked("codex", env);
@@ -121,7 +108,6 @@ function getAutoProviderContext(
     headless: uiMode === "headless",
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
-    insideClaudeCode,
     insideCodex,
     insideAgy,
     // In-IDE marker for Antigravity: either an `ANTIGRAVITY` env var or
@@ -140,17 +126,14 @@ function getAutoProviderContext(
     hasSubprocessTemplate: hasEntries(
       sessionConfig.subprocess_template?.command_template,
     ),
-    hasClaudeCodeConfig: hasConfiguredClaudeCode(sessionConfig),
     hasOpenCodeConfig: hasConfiguredOpenCode(sessionConfig),
     hasCodexConfig: hasConfiguredCodex(sessionConfig.codex),
     hasAgyConfig: hasConfiguredAgy(sessionConfig.agy),
     hasOpenAiCompatibleConfig: hasConfiguredOpenAiCompatible(
       sessionConfig.openai_compatible,
     ),
-    claudeAvailable: !insideClaudeCode && lookupCommand(claudeCommand),
     opencodeAvailable: lookupCommand(opencodeCommand),
-    // Self-spawn guard mirrors claudeAvailable: a fresh `codex` subprocess
-    // cannot be spawned from inside a codex session.
+    // A fresh `codex` subprocess cannot be spawned from inside a codex session.
     codexAvailable: !insideCodex && lookupCommand(codexCommand),
     // Gated for July 18, 2026 sunset cleanup: fallback check for gemini CLI executable on PATH
     agyAvailable:
@@ -204,11 +187,7 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   },
   {
     name: "vscode-task",
-    comment:
-      "Note: when inside a Claude Code session (CLAUDECODE set) `claudeAvailable` " +
-      "is forced false, so we never resolve to claude-code — a fresh `claude` " +
-      "subprocess cannot be spawned from within one. Such runs fall through to " +
-      "worker-command (manual dispatch), matching ClaudeCodeProvider's guard.",
+    comment: "Use an explicitly configured VS Code task when the current IDE owns it.",
     predicate: (ctx) => ctx.inVSCode && ctx.hasVSCodeTaskTemplate,
   },
   {
@@ -223,11 +202,6 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
     name: "subprocess-template",
     comment: "Explicit subprocess template configured: use it.",
     predicate: (ctx) => ctx.hasSubprocessTemplate,
-  },
-  {
-    name: "claude-code",
-    comment: "Config-gated: operator explicitly configured claude-code and it is available.",
-    predicate: (ctx) => ctx.hasClaudeCodeConfig && ctx.claudeAvailable,
   },
   {
     name: "opencode",
@@ -246,14 +220,6 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
     name: "agy",
     comment: "Config-gated: operator explicitly configured agy and it is available.",
     predicate: (ctx) => ctx.hasAgyConfig && ctx.agyAvailable,
-  },
-  {
-    name: "claude-code",
-    comment:
-      "Tie-break: claude is available — prefer claude-code. (No `!opencodeAvailable` " +
-      "guard: opencode no longer competes at the bare-availability rung, so claude " +
-      "wins whenever present rather than yielding to an unconfigured opencode.)",
-    predicate: (ctx) => ctx.claudeAvailable,
   },
   {
     name: "agy",
@@ -278,10 +244,9 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   {
     name: "codex",
     comment:
-      "Last resort: codex is only auto-selected when no claude/opencode is available, " +
-      "to avoid surprising existing setups that rely on those.",
+      "Last resort: codex is only auto-selected when no configured opencode is available.",
     predicate: (ctx) =>
-      ctx.codexAvailable && !ctx.claudeAvailable && !ctx.opencodeAvailable,
+      ctx.codexAvailable && !ctx.opencodeAvailable,
   },
 ];
 

@@ -6,6 +6,28 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Remediation pause/recovery is not durable (2026-08-03, medium).** A plan-only stop left
+  `.audit-tools/remediation/state.json` at `status: implementing`; the wrapper, backend, and detached
+  worker had to be found and terminated manually, while the worktree survived only because the operator
+  knew its path. The primary record is
+  [`graph-derived-findings-remediation-process-review-2026-08-03.md`](../reviews/graph-derived-findings-remediation-process-review-2026-08-03.md).
+  **Property:** `plan_only`, pause, cancel, and resume persist the node, claim, worktree, process-group
+  outcome, and exact continuation action; resume must not re-run or discard accepted work.
+
+- **Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).**
+  Generic cut-edge detection labels ordinary test/asset/manifest bridges as systemic fragility; absolute
+  co-change counts overstate broad migration commits; and whole-document file co-mentions masquerade as
+  declared module boundaries. The sixteen declined items are the negative/corroboration corpus. **Property:**
+  deterministic graph output is a generation/provenance-bound lead, not an approved finding, until semantic
+  confirmation; report promotion must preserve producer, source hash, and evidence lineage.
+
+- **Dispatch accepts work against an incomplete source/obligation boundary (2026-08-03, medium).** The
+  CP-NODE-4 worker used a clean committed worktree while the primary checkout carried unrelated WIP, and
+  its broad node exposed missing provenance, projection, disposition, observer-containment, and numeric
+  boundary obligations only after implementation began. **Property:** dispatch records the source snapshot
+  and dirty overlay, and node acceptance mechanically proves every obligation or records an explicit
+  disposition before merge.
+
 
 
 - **LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at
@@ -96,25 +118,6 @@
   bounded by the lease — designed behaviour; revisit only on live evidence of the lease outliving a dead
   round. The "zero-granted round pauses the drain" half is VERIFIED HOLDING; nothing open. Record:
   [`re-dogfood-endgame-2026-07-22.md`](../reviews/re-dogfood-endgame-2026-07-22.md).
-
-- **LEAD (2026-07-23, low, surfaced by the shipped worker-kind × pool-class rule): a
-  `burst_limited` proxy contributes NOTHING — populate/expansion should emit single-shot lanes
-  instead of agentic ones that all drop.** The rule itself SHIPPED 2026-07-23 (declared
-  `burst_limited` on sources + proxy block; `laneWorkerKindConflict` enforced per-lane in
-  `resolveAmbientSources` and at the `collectDispatchableSources` chokepoint; `deriveWorkerKind`
-  fixed-kind transports made override-proof; LiteLLM same-tier `router_settings.fallbacks`
-  configured — mechanism + review record:
-  [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md)).
-  What remains is the productive endpoint for the proxy lane: when the proxy declares
-  `burst_limited`, its expanded claude-worker (agentic) lanes are correctly refused with reasons —
-  so the lane yields zero capacity until the operator hand-declares single-shot
-  `openai-compatible` sources onto the same proxy (done for the live box). Populate/expansion
-  emitting single-shot lanes for a burst-limited proxy would keep the capacity in the safe class
-  with zero operator work; it is a deliberate populate-contract change, not smuggled into the rule
-  lap. Two accepted residuals in the record: `burst_limited` is not yet a scheduler pacing input
-  for single-shot lanes (declared `quota` rpm/max_concurrent covers the observed failure mode);
-  `collectDispatchableSources` filtered-lane reporting is stderr-only (ambient path carries the
-  structured `dropped[]`).
 
 - **⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace):
   a lane can return success-shaped EMPTY results and nothing in routing notices.** agy
@@ -341,47 +344,18 @@
   (e.g. from a baseline coverage/ownership map), or the gate measures "the suite went red" again — the
   exact fail-open it exists to catch. Until then its output is not admissible as attestation evidence.
 
-- **SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no
-  operator-runnable refresh.** A 10-minute TTL exists but gates only whether populate re-fetches; the
-  read path accepts cached data of ANY age, so the freshness concept is applied on exactly the wrong
-  side. ⚠ **Half SHIPPED 2026-07-25, WRITE-ONLY:** `readProxyCatalog` derives `age_ms`/`stale`/
-  `stale_reason`, but nothing branches on the verdict — `populateProxyCatalogIfMissing`
-  (`auditorSources.ts`) still short-circuits on any age and `resolveProxyLane` (`:641`) folds
-  sources in without surfacing `stale_reason` ([[write-only-data-looks-authoritative]]).
-  **Properties to hold:**
-  (a) the age rule applies where staleness does damage — the read path revalidates against the live
-  roster, or surfaces the cache's age rather than presenting stale data as current;
-  (b) every drop reason names an action the operator can actually take, which requires that such an
-  action EXIST — no populate/refresh command is reachable from the CLI at all, so the reason has nothing
-  true to name. Fix the missing command first; the reason text is downstream of it;
-  (c) a tool-written, fully-regenerable cache that SHAPE-DEGRADES (the identity migration left a v1
-  cache carrying the pre-rename `provider` field) must be REGENERATED by the tool at the next natural
-  boundary (Gate-0 build), never reported as the operator's problem;
-  (d) the cache is machine-global while its populate trigger is per-repo-confirmation-keyed, so starting
-  work in repo B rewrites the expansion repo A is resolving mid-run (additions gate-caught; removals
-  silent by design).
-  Same family as the `dropped[]`-not-surfaced entry below; the stale-read path is also what recreated
-  the zero-spill state (host-only pools while glm cooled). Observed on the same call: the engine's drain
-  re-stormed cooling glm to 143 consecutive 429s — wave-3 pre-wall pacing from learned limits still is
-  not happening on a single-model pool.
-  Records: re-dogfood 2026-07-21 (drop reason named an internal function) and 2026-07-22 (cache served
-  3.5h past TTL; an operator `top_k` change had zero effect until `populateProxyCatalog` was
-  hand-imported from dist with `force:true`).
-
 - **Ranked-pool composition — live-wave watch + the absolute-floor question.** ⬇ **Blocked on a real
   wave.** The mechanism shipped R3-3 (`c0cf7e9b`, 2026-07-21); what follows is residue.
   (a) The composition prediction
   that started this — free/unranked pools preferentially drawing `deep` packets — has never been
-  observed live: watch that every pool arrives ranked at Gate-0, that `deep` routes by band, and that
-  the autonomous ranker step round-trips in a real headless lap (emit branch
-  `nextStepHelpers.ts` `provider_confirmation` → promotion via `intakeExecutors.ts`'s `authoredByLlm`,
-  which sanitizes an LLM submission to `capability_order` alone and fails reach closed regardless).
+  observed live: watch that the broker pool intents arrive with their declared capability ranks and
+  that `deep` routes by band.
   (b) **Open design, and it wants (a)'s data first:** the capability floor is RELATIVE by construction —
   `band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand())` in `src/shared/dispatch/admissionLoop.ts`
   — so if every pool is weak, `deep` routes to the least-weak. An ABSOLUTE floor re-manufactures the
   `no_capable_pool` wall the relative rule exists to prevent (step E calls it structural/permanent →
   livelock), so it is only worth deciding against a ranked run's numbers. (c) Ranker freshness is
-  Track 2's cache-age rule (hand-run generation, ages silently) — not tracked separately here.
+  broker-owned ranking freshness is outside audit-tools.
   Records: [`capability-evidence-salvage-2026-07-20.md`](../reviews/capability-evidence-salvage-2026-07-20.md)
   (landing gate MET carries the full mechanism),
   [`nim-dispatch-single-pool-2026-07-19.md`](../reviews/nim-dispatch-single-pool-2026-07-19.md).
@@ -524,24 +498,17 @@
   **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
   who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 
-- **`AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an unmeasured estimate, and the lane cannot currently measure it (low, live-gated; the rest of the 2026-07-17 feedback-gap residuals are closed — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`).** The constant (`src/shared/quota/capacity.ts`) is added to every packet estimate at all three fit gates (`src/shared/dispatch/coordinator.ts`, `rollingDispatch.ts` partition + selection, `cli/dispatch.ts` budget clamp), so a wrong value silently mis-sizes every agentic pool in both directions. The measurement basis now exists — per-packet `input_tokens` in `token-usage.jsonl` (`src/shared/io/tokenUsageLedger.ts`) minus the packet's local `estimateTokensFromBytes` — but `ClaudeWorkerProvider.launch` spawns `claude -p --model <alias>` with no `--output-format json` and never populates `LaunchFreshSessionResult.observedUsage`, so every claude-worker line records `input_tokens: null` ("unmeasured", deliberately not 0). Two moves to close: teach the lane to report usage (parse the CLI's JSON envelope into `observedUsage`; the stdout failure-classification scan must keep matching through the envelope), then calibrate the constant against a real run. Still true from the same lap: a worker retries 429s inside its own lifetime (dogfood: 307 proxy-side vs 29 surfaced) — invisible to the parent; terminal classification → `cooldown_until` paces ACROSS workers only. Two former residuals are now closed and should not be re-derived — declared `quota.max_concurrent` IS consumed per-pool (`apiPool.ts` → `CapacityPool.concurrencyCap` → the engine's in-flight cap; no learned/free-tier default is wanted, [[concurrency-is-declared-or-absent-never-learned]]), and context caps are never absent (`resolveSourceContextWindowTokens` returns declared stamp → models.dev window → `DEFAULT_CONTEXT_TOKENS`, never null), so registry stamp coverage no longer gates anything — this box's LiteLLM registry advertises `capability_rank` and no context field, and populate's proxied lane fits correctly regardless. The old watch's run dir (`20260717T062404401Z…`) no longer exists; a fresh dogfood run is the evidence base. [[external-audit-catalogs-are-leads]]
+- **`AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an unmeasured estimate, and the lane cannot currently measure it (low, live-gated; the rest of the 2026-07-17 feedback-gap residuals are closed — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`).** The constant (`src/shared/quota/capacity.ts`) is added to every packet estimate at all three fit gates (`src/shared/dispatch/coordinator.ts`, `rollingDispatch.ts` partition + selection, `cli/dispatch.ts` budget clamp), so a wrong value silently mis-sizes every agentic pool in both directions. The measurement basis now exists — per-packet `input_tokens` in `token-usage.jsonl` (`src/shared/io/tokenUsageLedger.ts`) minus the packet's local `estimateTokensFromBytes` — but `ClaudeWorkerProvider.launch` spawns `claude -p --model <alias>` with no `--output-format json` and never populates `LaunchFreshSessionResult.observedUsage`, so every claude-worker line records `input_tokens: null` ("unmeasured", deliberately not 0). Two moves to close: teach the lane to report usage (parse the CLI's JSON envelope into `observedUsage`; the stdout failure-classification scan must keep matching through the envelope), then calibrate the constant against a real run. Still true from the same lap: a worker retries 429s inside its own lifetime (dogfood: 307 proxy-side vs 29 surfaced) — invisible to the parent; terminal classification → `cooldown_until` paces ACROSS workers only. Declared `quota.max_concurrent` is consumed per-pool (`apiPool.ts` → `CapacityPool.concurrencyCap` → the engine's in-flight cap; no learned/free-tier default is wanted, [[concurrency-is-declared-or-absent-never-learned]]). Context limits now resolve declared stamp → synced models.dev → `null`; unknown capacity is unplaceable and yields a resumable refusal, never a fabricated fit. A registry that advertises `capability_rank` but no context field therefore needs explicit limits or resolvable model metadata before that lane can run. The old watch's run dir (`20260717T062404401Z…`) no longer exists; a fresh dogfood run is the evidence base. [[external-audit-catalogs-are-leads]]
 
-- **claude-worker lane residuals — two symptoms of ONE defect: identity is decided somewhere other
-  than where it is known (2026-07-16, low-medium, deferred deliberately).**
-  (a) **Account axis unstampable.** `expandSources` (`proxyCatalog.ts`) stamps no `account`, and
-  `ProxyDeclaration` has no field to add one, so an operator declaring `account` on a direct lane merely
-  splits `nim#X/m` vs `nim/m` into two pools to one backend — reopening the double-grant boundary for
-  that model. Needs a per-backend account map on the declaration.
-  (b) **Intra-declaration duplicates.** `collectDispatchableSources` spreads `sessionConfig.sources`
+- **Declared-source duplicates can resolve to one pool id and silently clobber their launch source
+  (2026-07-16, low-medium).** `collectDispatchableSources` spreads `sessionConfig.sources`
   verbatim, so two hand-declared sources with one resolved identity yield two same-id pools and
   `sourceByPoolId` arbitrates the transport by silent clobber.
-  **SPEC / resolution:** the producer that knows an identity stamps it and it travels on the wire — the
-  rule the account-metering work reached after five refused rounds. Dedup once, over the full source set,
-  keyed on resolved identity rather than declaration origin; and never rewrite a machine-global cache
-  under a run that is reading it (snapshot the read, or scope the rewrite).
+  **Resolution:** dedup once, over the full source set, keyed on resolved identity rather than
+  declaration origin.
   **Property:** one pool identity ⇒ exactly one launchable source, everywhere, and no in-flight run sees
   its own source set change underneath it.
-  ⚠ (c) is the bounded half and can land alone: dedup by `dispatchableSourceId` across the whole assembled
+  Dedup by `dispatchableSourceId` across the whole assembled
   set in `collectDispatchableSources` (`src/shared/quota/apiPool.ts` — loop-core, needs attestation),
   first-wins, loser reported rather than dropped.
 
@@ -621,36 +588,6 @@
   ⚠ Not an ignore-list: suppressing these tests destroys the signal, and the hermeticity defects remain
   worth fixing on their own merits. This removes the investigation tax, not the flakes.
 
-- **No read-only surface shows the built dispatch pools — an exclusion rule is unverifiable until a live dispatch (G3 A″ lap 2026-07-16, tool-should-decide, medium).** Verifying "operator excludes one NIM model ⇒ siblings still route" end-to-end, I could observe the operator half at the real CLI (Gate-0 prompt → persisted `policy`) but **not the routing half**: `buildSourcePools` is reachable only from a live dispatch wave. Checked every read-only surface — `audit-code quota` reports only the host pool (`claude-code/*`) and reports the SAME with no exclusion at all, so it never builds source pools; `validate` surfaces none either. So an operator authors a rule and cannot see which pools resulted. NARROWED: the two sub-claims that made this acute are closed — an ungrammatical rule is now refused at authorship, and a zero-match rule is now reported by an advisory at Gate-0 promotion. What remains is the surface itself: both of those fire only along the promotion path, so there is still no READ-ONLY way to ask "what pools would this produce" without committing to a dispatch. Property to hold: the operator can see the resolved dispatch pool set (and any zero-match rule) WITHOUT committing to a dispatch. Would also give the A″ routing filter a runtime surface to verify at, which it currently lacks.
-
-- **Gate-0 display never reflects an exclusion for a SOURCE — no status column, and the endpoint tier can't mark a provider entry (G3 A″ lap 2026-07-16, tool-should-decide, low).** Two halves of one gap, both display-only (routing is correct — `buildSourcePools` honors every tier): (a) the Gate-0 **sources table** (`providerConfirmationStep.ts`, `| id | provider | model | $/Mtok |`) carries **no status column at all**, so NO exclusion tier is ever shown for a source — pre-existing for provider-name rules, but total for A″'s model/endpoint tiers, which can only ever match sources; (b) `provider_pool` is provider-granular and its entries carry no endpoint, so an **endpoint-host rule can never mark one** (`ruledOut` in `sharedProviderConfirmation.ts` evaluates `{provider, model}` only) — the Gate-0 table renders the backend "included" while dispatch correctly drops it. Property to hold: what the operator is shown as excluded is exactly what dispatch drops, at EVERY grammar tier. Direction is fail-safe (under-reports, never over-routes), which is why it is low. NOTE: `excluded` leaves the persisted shape in **B+D**, so fix the RENDER path, not the artifact field.
-
-- **The per-tool seam artifact marks `excluded` at provider granularity only — inert today (G3 A″ lap 2026-07-16, low).** `confirmProviders` (`src/audit/orchestrator/providerConfirmation.ts`) still does `excludeSet.has(provider.name)` on what is now a **pattern** list, so a `provider:model` rule marks nothing in the per-tool `provider_confirmation.json`. Verified inert: the only reader of `.excluded` anywhere is the Gate-0 renderer, which reads the SHARED artifact. Cleanup, not a defect — but it is a latent trap the moment anything reads the seam's `excluded`.
-
-- **SPEC — split the two things currently merged into one "excluded" set; then host exclusion has an obvious
-  meaning.** An operator excluding the host or primary provider is not honored: host/primary pools are built
-  unfiltered while only source pools get the exclusion set. This was deferred as needing "a decision about
-  what excluding your own driver should even mean," because the exclusion set always contains the
-  conversation host in-session, so handing it to the host-pool builder would zero out dispatch.
-  **That dilemma is an artifact of conflating two different concepts under one set:** (a) OPERATOR POLICY —
-  "do not use this backend", a deliberate instruction; and (b) SELF-SPAWN BLOCK — "this backend is me, I
-  cannot spawn myself", a mechanical fact about the current process. Merging them is why applying the set
-  to host pools looks catastrophic: it is the self-spawn fact, not the operator's intent, that would zero
-  dispatch.
-  **Resolution:** separate them at the source. Operator policy applies EVERYWHERE, host pools included.
-  Self-spawn blocking applies only where spawning is what happens. Then "exclude your own host" means
-  exactly what it says, and an operator who excludes every pool gets a loud, correct "you have excluded
-  all dispatch capacity" rather than a silently-ignored instruction. No new decision is owed once the two
-  concepts stop sharing a container.
-  **Remaining residue on the same surface, each smaller:** (a) an absent or unparseable confirmation still
-  fails OPEN — no policy read as no exclusions, which is the wrong default for a gate whose purpose is
-  withholding approval; (b) part of the artifact's reach half is still persisted but read by nothing at
-  dispatch — write-only data that looks authoritative; (c) the self-spawn signal covers some host
-  environments but not all, so a source running inside its own host is not always blocked — a gap in (b)
-  above, and it closes when the self-spawn concept is separated and made to enumerate its environments.
-
-- **The reconciliation gate is silently disabled if the two confirmation artifacts split (G3 A′ review 2026-07-16, tool-should-decide, low).** The obligation gates on the per-tool SEAM (`has(bundle.provider_confirmation)`, `state.ts`) while the gate's delta early-outs on the SHARED artifact (`readSharedProviderConfirmation(root)`, `nextStepCommand.ts`). They are written together only under `if (root)`, so seam-present + shared-absent (a root-less promotion, or an operator deleting the shared file) ⇒ obligation satisfied AND delta `[]` ⇒ the gate never fires for the run, and `resolveExcludedProviders` also finds no policy ⇒ a newly-reachable backend routes unconfirmed. Narrow (needs the pair to split) but silent. Property to hold: the gate's CONFIRMED operand and the obligation's presence check must key on the same artifact, or a split must be loud. [[dispatch-policy-vs-reach-cut]]
-
 - **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` includes `src/audit/orchestrator/` (so 2a-ii's Finding-A fix in `advanceTypes.ts`/`executorRunners.ts`/`intakeExecutors.ts` correctly demanded attestation) but NOT `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts` — where the CORE 2a-ii dispatch-inventory READ switch lives. A dispatch-substrate edit confined to those cli emitters (plausible for 2a-iii's loader wiring) would ship WITHOUT the attestation backstop. Endpoint (owner call): either add the audit cli dispatch-emitters to `src/shared/loopCorePaths.ts` (`.mjs` list is generated), or accept them as cli-glue and rely on the reviewer catching it. Not auto-expanded — widening the set makes every edit to the big `nextStepCommand.ts` require attestation, a real friction tax to weigh. **G1 (`e7b593ac`) is a concrete SECOND instance:** a breaking dispatch-handshake transport change spanning `args.ts`/`prompts.ts`/`nextStepCommand.ts`/`semanticReviewStep.ts`/`prepareDispatchCommand.ts`/`quotaCommand.ts` shipped attestation-free (none are loop-core by path). An independent review WAS done by discipline (and caught a real roster-validation-drop regression) — so the reviewer-catches-it fallback held, but only because the author chose to run it. Reinforces the owner-call endpoint above.
   **SPEC — move the CODE, do not widen the pattern list. The owner call dissolves.** The choice was framed
   as "add the CLI dispatch emitters to the attested path set (and tax every edit to a huge, constantly-
@@ -670,8 +607,6 @@
   ENDPOINT — a marker grammar a lint can check that names the GATE rather than the progress, so it does
   not re-admit the status vocabulary `design-docs-declarative.test.ts` bans. The lint's doc set widens
   to the spec files carrying endpoint statements. (2) and (3) are unchanged and still open.
-
-- **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
 
 - **Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).** Every planning phase that still needs judgment is authored by the host conversation: `buildParallelModuleWaveStep` (`src/remediate/steps/contractPipeline.ts`) calls `scheduleWave` for a fan-out *cap only* (`capacity_pools` never reaches `buildDispatchQuota` from here — see the comment at `:1669`), so even the per-module drafting wave renders a prompt asking the HOST to dispatch. Determinism already trimmed it to ~9-11 round-trips, but all of them bill before the first implement dispatch, so routing fixes on the implement half never touch the planning bill. Separately, a validation failure archives the host's artifact and `rejectionRewriteInstruction` (`:457`) demands a fresh complete rewrite, so a one-field schema error costs a whole re-author — deliberate, not accidental. Owner calls: (a) should planning phases become dispatchable to a non-host pool (they are the only half that cannot be)? (b) is a targeted in-place repair worth admitting for a single-field rejection, against the whole-artifact-rewrite invariant that makes re-emission trivially correct? ⚠ The companion `implementation_dag` citation-grounding claim was REFUTED at HEAD and dropped — grounding tries `affected_files` first and prose tokens last, and `deriveNodeFiles` gives every DAG node a file scope. [[synth-scopeless-nodes-doomed-run]]
   ⚠ **OWNER DECISION 2026-07-25 — BOTH calls answered YES.** (a) Planning phases BECOME dispatchable to
@@ -796,7 +731,7 @@
   so consolidating it dropped it off the generated roadmap. Executed as answered; flagged because the
   destination silently changes an item's status.
   (4) **tool-should-decide (low):** a delegated Codex worker, asked to make one type change, also
-  appended an unrelated `durable-traps.md` entry about an `rtk` binary this project retired 2026-07-22.
+  appended an unrelated `durable-traps.md` entry about an already-retired local tool.
   Reverted. **Property:** offloaded work needs its DIFF scope-checked, not just its result verified —
   a worker's out-of-scope edit lands silently in a doc nobody diffs.
   (5) **tool-should-decide (medium, fixed this lap):** the remediation worktree test pinned “no global
@@ -1192,3 +1127,10 @@
   (5) `present_report` completes only after the promoted deliverables verifiably exist;
   (6) report coverage counts and lens exclusions reflect the run; (7) events/exit codes are
   success-shaped only on success.
+
+- **Audit pause/terminal persistence does not enforce its documented XOR.** The public state comment
+  permits `paused_state` and a partial-completion terminal to coexist, while `pausePersist.ts` and
+  lifecycle tests require exactly one. Separate writers can preserve the opposite field, so the
+  persisted result depends on call order. **Property to hold:** choose one lifecycle invariant and
+  enforce it in a single atomic state-transition writer used by pause, forced synthesis, and rolling
+  terminal paths.

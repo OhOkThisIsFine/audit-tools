@@ -121,11 +121,10 @@ test("no invented cap: an unconfigured local provider is also uncapped", () => {
 
 // ── Discovered-capability context window (N5a) ───────────────────────────────
 // A host that reports its real context window at the dispatch handshake must
-// outrank the conservative default AND the static known-model table.
+// outrank an unknown window AND the static known-model table.
 
-test("discovered capability: context window overrides the 32k default for a null model", () => {
-  // model:null normally falls to the 32k provider/default floor. A discovered
-  // 200k window must take over so the partition sizes to the real model.
+test("discovered capability: context window resolves a null model's capacity", () => {
+  // model:null has unknown capacity until a discovered 200k window takes over.
   const schedule = scheduleWave({
     providerName: "worker-command",
     sessionConfig: baseSessionConfig(),
@@ -158,9 +157,8 @@ test("discovered capability: explicit per-model config still wins over discovery
   expect(schedule.source).toBe("explicit_config");
 });
 
-test("discovered capability: absent context window leaves resolution unchanged", () => {
-  // Only RPM/TPM discovered (no context window) → context still resolves from
-  // the existing rungs, not the discovered channel.
+test("discovered capability: absent context window leaves capacity unknown", () => {
+  // Only RPM/TPM discovered (no context window) → context stays unknown.
   const schedule = scheduleWave({
     providerName: "worker-command",
     sessionConfig: baseSessionConfig(),
@@ -170,7 +168,7 @@ test("discovered capability: absent context window leaves resolution unchanged",
     hostConcurrencyLimit: null,
     discoveredLimits: { requests_per_minute: 10 },
   });
-  expect(schedule.resolved_limits.context_tokens).toBe(32_000);
+  expect(schedule.resolved_limits.context_tokens).toBeNull();
   expect(schedule.source).not.toBe("discovered_capability");
 });
 

@@ -36,6 +36,7 @@ function makeReport(findings: Finding[], workBlockCount = 1): AuditFindingsRepor
     },
     findings,
     work_blocks: [],
+    work_block_seams: [],
   };
 }
 

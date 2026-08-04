@@ -2,6 +2,7 @@ import { join } from "node:path";
 import {
   artifactTreeLockPath,
   buildOperatorForcedTerminal,
+  resolveSessionConfig,
   withFileLock,
   writeJsonFile,
 } from "audit-tools/shared";
@@ -11,6 +12,9 @@ import { loadArtifactBundle, type ArtifactBundle } from "../io/artifacts.js";
 import { ACTIVE_DISPATCH_FILENAME, type ActiveDispatchState } from "../types/activeDispatch.js";
 import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { computeStaleResultTaskIds } from "../orchestrator/resultBaseline.js";
+import { getAuditorDescriptor } from "./args.js";
+import { loadSessionConfig } from "../supervisor/sessionConfig.js";
+import { resolveCurrentWorkPartitionRuntime } from "./workPartitionRuntime.js";
 
 /**
  * The operator recovery escape for a run wedged on audit tasks that can never
@@ -33,6 +37,15 @@ import { computeStaleResultTaskIds } from "../orchestrator/resultBaseline.js";
 export async function cmdForceSynthesis(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
   const artifactsDir = getArtifactsDir(argv);
+  const descriptor = getAuditorDescriptor(argv);
+  const sessionConfig = resolveSessionConfig(
+    await loadSessionConfig(artifactsDir),
+    descriptor,
+  );
+  const workPartition = resolveCurrentWorkPartitionRuntime(
+    sessionConfig,
+    descriptor?.self ?? {},
+  ) ?? undefined;
 
   // Stamp the terminal under the artifact-tree lock, then RELEASE it before
   // runAuditStep (which re-acquires the same non-reentrant lock — a nested
@@ -53,6 +66,8 @@ export async function cmdForceSynthesis(argv: string[]): Promise<void> {
     root,
     artifactsDir,
     preferredExecutor: "synthesis_executor",
+    sessionConfig,
+    workPartition,
   });
 
   console.log(

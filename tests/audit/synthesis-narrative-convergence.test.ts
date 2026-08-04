@@ -79,6 +79,7 @@ function baseFindingsReport(): AuditFindingsReport {
       },
     ],
     work_blocks: [],
+    work_block_seams: [],
   };
 }
 

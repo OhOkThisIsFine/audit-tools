@@ -16,11 +16,6 @@ export function isHostDelegationExecutor(id: string): boolean {
 
 export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
-    id: "provider_confirmation_executor",
-    kind: "host_delegation",
-    obligation_ids: ["provider_confirmation"],
-  },
-  {
     id: "intake_executor",
     kind: "deterministic",
     obligation_ids: ["repo_manifest", "file_disposition"],

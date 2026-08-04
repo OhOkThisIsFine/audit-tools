@@ -6,9 +6,6 @@ import {
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  DEFAULT_OUTPUT_TOKENS,
-  BLOCK_SAFETY_MARGIN,
 } from "../../src/shared/tokens.js";
 
 test("estimateTokensFromBytes is the single token-estimation primitive in shared", () => {
@@ -48,7 +45,7 @@ test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite"
   expect(estimateTokensFromBytes(BYTES_PER_TOKEN * 10)).toBe(10);
 });
 
-test("resolveContextBudget prefers explicit values, else the conservative floor", () => {
+test("resolveContextBudget requires a real context window and output reservation", () => {
   const explicit = resolveContextBudget({
     contextTokens: 100_000,
     reservedOutputTokens: 4_000,
@@ -56,10 +53,9 @@ test("resolveContextBudget prefers explicit values, else the conservative floor"
   });
   expect(explicit).toBe(Math.floor((100_000 - 4_000) * 0.5));
 
-  // No window configured/discovered → conservative floor, never a guessed
-  // per-model window.
-  const defaults = resolveContextBudget({});
-  expect(defaults).toBe(Math.floor((DEFAULT_CONTEXT_TOKENS - DEFAULT_OUTPUT_TOKENS) * BLOCK_SAFETY_MARGIN));
+  expect(resolveContextBudget({})).toBeNull();
+  expect(resolveContextBudget({ contextTokens: 100_000 })).toBeNull();
+  expect(resolveContextBudget({ reservedOutputTokens: 4_000 })).toBeNull();
 });
 
 test("resolveContextBudget floors at 0 — a reserved output ≥ context never goes negative", () => {
@@ -69,4 +65,3 @@ test("resolveContextBudget floors at 0 — a reserved output ≥ context never g
   expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 8_000 })).toBe(0);
   expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 4_000 })).toBe(0);
 });
-

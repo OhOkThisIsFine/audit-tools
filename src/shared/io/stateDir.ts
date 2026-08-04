@@ -4,13 +4,13 @@ import { join } from "node:path";
 /**
  * Single source for the MACHINE-GLOBAL state dir (`~/.audit-code` /
  * `~/.remediate-code`): the home-dir tree holding `sources-declared.json`,
- * `catalog-cache.json`, `quota-state.json`, and `reservations.json`.
+ * `quota-state.json`, and `reservations.json`.
  *
  * Every reader/writer of that state MUST resolve its path through this module —
  * never `join(homedir(), ".audit-code")` inline — so the {@link STATE_DIR_ENV_VAR}
  * override is honored everywhere at once. The override exists for hermeticity:
  * test/smoke harnesses point it at a per-run temp dir so no test or smoke outcome
- * can depend on the box's live declaration, populate cache, or quota ledger
+ * can depend on the box's live declaration or quota ledger
  * (docs/backlog.md "Machine-global ~/.audit-code state leaks into EVERY e2e test").
  * Normal conversational usage never sets it — auto-resolution stays flag-free.
  */

@@ -152,8 +152,8 @@ export function computeDispatchFanout(params: {
    * True when the interactive confirmation recommendation has already been
    * surfaced once this run (carried from `ActiveDispatchState.confirmation_shown`
    * for the SAME run_id). Suppresses re-recommending on steady-state repeat
-   * grants (Bug 8 / Slice A4) — the operator confirmed the roster/ordering
-   * once; a fresh run (no carried flag) still recommends on its first grant.
+   * grants (Bug 8 / Slice A4) — the operator has already acknowledged this
+   * run's large fan-out once; a fresh run still recommends on its first grant.
    */
   confirmationAlreadyShown?: boolean;
 }): DispatchFanout {

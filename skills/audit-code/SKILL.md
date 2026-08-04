@@ -63,7 +63,8 @@ Bounded steps are a backend implementation detail, not the intended user experie
 After `audit-code ensure --quiet` bootstraps the repository, ask the backend for
 exactly one next step. This is also the **capability handshake**: report what you
 can dispatch to *right now* on every `next-step` call so the backend sizes review
-packets to your real model instead of a conservative 32k floor.
+packets against reported or configured limits. When no authoritative limits are
+available, capacity remains unknown and packet sizing pauses.
 
 The whole handshake is a single `--auditor <json>` flag: one object with a `self`
 field describing the model you drive.

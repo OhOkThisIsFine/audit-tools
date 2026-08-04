@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditObligation } from "../../src/audit/types/auditState.js";
 import type { IntentCheckpoint } from "../../src/shared/types/intentCheckpoint.js";
-import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "../../src/shared/types/providerConfirmation.js";
 
 // ---------------------------------------------------------------------------
 // N-free-form-intent-interpretation
@@ -55,12 +54,6 @@ function bundleWithCheckpoint(
     ...checkpointExtra,
   };
   return {
-    provider_confirmation: {
-      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-      confirmed_at: "2026-06-15T00:00:00Z",
-      provider_pool: [],
-      session_level: true,
-    },
     repo_manifest: {
       repository: { name: "fixture" },
       generated_at: "2026-01-01T00:00:00.000Z",

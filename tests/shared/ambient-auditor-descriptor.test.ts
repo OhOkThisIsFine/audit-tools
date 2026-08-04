@@ -10,8 +10,8 @@
  * Pins the semantic these tests exist to keep apart:
  *   1. `null`      ⇒ resolve NO pool (short-circuits before ambient resolution),
  *   2. ambient     ⇒ resolve the pool from `declared ∩ ambient-verifiable`,
- *   3. ambient carries NO host-self-class fields (model/window/roster stay absent →
- *      the conservative floor, a fidelity degradation, never a block),
+ *   3. ambient carries NO host-self-class fields (model/window/roster stay absent;
+ *      unresolved capacity remains unknown and unplaceable),
  *   4. it returns a FRESH object (no shared-literal mutation across callers).
  *
  * SCOPE — read this before trusting it as the regression guard. This pins the MECHANISM

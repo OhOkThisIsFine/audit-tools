@@ -16,12 +16,6 @@ const { runExternalAnalyzerAcquisitionExecutor } = await import(
 
 function bundleAfterIntake(): ArtifactBundle {
   return {
-    provider_confirmation: {
-      schema_version: "1.1.0",
-      confirmed_at: "2026-01-01T00:00:00Z",
-      provider_pool: [],
-      session_level: true,
-    },
     repo_manifest: {
       repository: { name: "fixture" },
       generated_at: "2026-01-01T00:00:00.000Z",

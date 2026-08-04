@@ -13,11 +13,11 @@ import {
 // contract (the endpoints and the relative ordering), independent of any prose.
 
 test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
-  // Endpoints are semantic invariants: provider_confirmation MUST be the session
-  // gate (first), friction_capture_current MUST be the terminal close-out (last).
-  // Asserted by endpoint, not literal index, so they don't churn when a phase is
-  // inserted between them.
-  expectObligationEndpoint(expect, "provider_confirmation", "first");
+  // Provider routing belongs to the dispatch broker, not the audit obligation
+  // graph. A fresh audit must begin with intake rather than pausing for an
+  // operator-authored provider order.
+  expect(PRIORITY).not.toContain("provider_confirmation");
+  expectObligationEndpoint(expect, "repo_manifest", "first");
   expectObligationEndpoint(expect, "friction_capture_current", "last");
 
   expect(!PRIORITY.includes("design_review_completed"), "design_review_completed should no longer be in PRIORITY").toBeTruthy();
@@ -29,7 +29,6 @@ test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
   // edit rather than a sweep of every pinned number here (the recurring friction
   // this test was the worst offender for — it re-broke on the Phase-B insert).
   expectObligationOrder(expect, [
-    "provider_confirmation",
     "repo_manifest",
     "file_disposition",
     "syntax_resolved",

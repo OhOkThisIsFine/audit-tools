@@ -64,6 +64,13 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
     await mkdir(join(TEST_DIR, "src"), { recursive: true });
     // Create real files so fileSizeBytes can stat them
     writeFileSync(join(TEST_DIR, "src", "shared.ts"), "export const x = 1;\n");
+    await writeFile(
+      join(TEST_DIR, "session-config.json"),
+      JSON.stringify({
+        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      }),
+      "utf8",
+    );
   });
 
   afterEach(async () => {

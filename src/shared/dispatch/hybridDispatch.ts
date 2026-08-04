@@ -63,13 +63,16 @@ export interface HybridDispatchInput {
   /**
    * Classify a pool as one the orchestrator launches IN-PROCESS this cycle (vs. the
    * conversation host / IDE pool). Tool-specific: audit's in-process set excludes
-   * `worker-command` / `subprocess-template`; remediate's includes them.
+   * `worker-command` / `subprocess-template`; remediate's includes them. The pool id
+   * is provided so a caller whose pool set mixes classes can classify by declared
+   * membership rather than provider name (the neutral worker-command host identity
+   * name-collides with the in-process worker class).
    */
-  isInProcess: (pool: { providerName: string }) => boolean;
+  isInProcess: (pool: { poolId: string; providerName: string }) => boolean;
 }
 
 /**
- * Split one eligible frontier across the confirmed pools via the shared coordinator,
+ * Split one eligible frontier across the available pools via the shared coordinator,
  * claiming each node to exactly one pool, and partition the claimed assignments by the
  * caller's in-process classification.
  *

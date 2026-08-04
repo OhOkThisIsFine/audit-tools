@@ -7,7 +7,7 @@ check), and this document is never edited to record what has or hasn't shipped o
 to narrate past defects.
 
 Companion to [`audit-workflow-design.md`](audit-workflow-design.md) — the two
-share principles (rolling dispatch, provider confirmation, prompt caching,
+share principles (rolling dispatch, bounded admission, prompt caching,
 structured output, roundtrip minimization). Genuinely shared infrastructure lives
 in `audit-tools/shared` and is listed under *Cross-tool alignment* in both.
 
@@ -16,8 +16,7 @@ in `audit-tools/shared` and is listed under *Cross-tool alignment* in both.
 ## Pipeline order
 
 ```
-provider_confirmation        [user gate — shared with audit; session-level]
-  → intake + validation      [deterministic; validates input at manifest time]
+intake + validation          [deterministic; validates input at manifest time]
   → synthesize + draft       [one background LLM pass: intake summary +
                               preliminary intent checkpoint + open questions]
   → intent_checkpoint        [user gate — single consolidated stop: confirm
@@ -50,13 +49,11 @@ and `close` is **closing** (`pending`/`complete` bookend the run).
 
 ---
 
-## Gate 0 — Provider confirmation (shared with audit)
+## Dispatch boundary
 
-The audit design's Gate 1 (provider discovery, capability tiers, quota state,
-user include/exclude) applies to remediation identically and is implemented once,
-session-level, in `audit-tools/shared`. The confirmed provider pool drives
-rolling-dispatch routing for both tools; a pool confirmed for an audit run carries
-over to a remediation run in the same session.
+Audit and remediation consume provider-neutral source intents. The external broker
+owns concrete provider/model ordering and failover. Both tools retain only packet
+estimation, context/capability fit, quota headroom, concurrency, and self-spawn safety.
 
 ---
 
@@ -300,7 +297,7 @@ bulk-dispositioned invisibly. The gate operates before that collapse.
 ## Dispatch — rolling, worktree-isolated, contract-verified
 
 Adopts the audit design's rolling model (no pre-computed wave size; quota is the
-only throttle; per-packet provider selection from the confirmed pool; ingestion
+only throttle; per-packet admission across eligible pools; ingestion
 folded into the same logical turn) with remediation-specific additions.
 
 **Rolling loop.** A DAG node is dispatchable when its `depends_on` nodes are
@@ -421,13 +418,13 @@ grants) scoped to the node's package.
   tools drive it with different packet types. The *pause lifecycle* wrapped around that
   decision is per-orchestrator: the audit side owns the `waiting_for_provider` resumable
   paused state, remediation owns its own analogous `quota_paused` mechanism. Both expose a
-  consumer-neutral terminal: when the confirmed pool empties mid-run and the livelock guard
+  consumer-neutral terminal: when every eligible pool empties mid-run and the livelock guard
   trips, remediation routes the stranded subtree through close with a partial report (audit
   synthesizes on partial coverage). Re-discovery surfaces only genuinely-new providers and
-  never re-offers a Gate-0 settled exclusion. (Unifying the full pause-lifecycle shell across
+  never re-offers an already-settled pool. (Unifying the full pause-lifecycle shell across
   both tools — beyond the shared admission math — is tracked as open work in `docs/backlog.md`.)
-- **Provider confirmation is session-level and shared** (Gate 0). One confirmation
-  covers an audit→remediate pipeline run.
+- **Provider routing is external.** Remediation consumes the same provider-neutral
+  broker pool intents as audit; no confirmation artifact crosses the seam.
 - **`free_form_intent` interpretation parity.** Interpret-don't-thread is the rule
   in both tools; the interpretation logic (intent → priority/lens weighting) is a
   shared concern.
@@ -439,7 +436,7 @@ grants) scoped to the node's package.
   contract stays rich enough to seed goal normalization: stable IDs, affected
   files with line evidence, lens/severity, theme links.
 - **Pinned shared seam contracts.** The three shared APIs (rolling dispatch
-  engine, Gate-0 provider confirmation, `free_form_intent` interpreter) are
+  engine, provider-neutral source resolution, `free_form_intent` interpreter) are
   pinned/versioned and validated through one real consumer end-to-end before full
   fan-out.
 

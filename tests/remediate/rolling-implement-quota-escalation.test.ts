@@ -117,6 +117,7 @@ const backendPool = (id: string): CapacityPool =>
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
   }) as unknown as CapacityPool;
 
 /**

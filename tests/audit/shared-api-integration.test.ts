@@ -1,8 +1,8 @@
 /**
  * Shared-API integration tests (N-X06).
  *
- * Validates the three versioned seam contracts (Rolling Dispatch Engine,
- * Provider Confirmation, FreeFormIntent Interpreter) end-to-end through the
+ * Validates the versioned Rolling Dispatch Engine and FreeFormIntent Interpreter
+ * seam contracts end-to-end through the
  * audit-code consumer path.
  *
  * All tests are pure/synchronous or use mock dispatchers — no real LLM calls.
@@ -22,7 +22,6 @@ import type {
 
 const {
   ROLLING_DISPATCH_ENGINE_VERSION,
-  PROVIDER_CONFIRMATION_RESULT_VERSION,
   FREE_FORM_INTENT_INTERPRETATION_VERSION,
 } = await import("audit-tools/shared");
 
@@ -30,7 +29,6 @@ const {
 // audit-code consumer imports
 // ---------------------------------------------------------------------------
 
-const { confirmProviders } = await import("../../src/audit/orchestrator/providerConfirmation.js");
 const { interpretFreeFormIntentForAudit } = await import("../../src/audit/orchestrator/intentInterpreter.js");
 const { runRollingDispatch } = await import("../../src/audit/orchestrator/rollingDispatch.js");
 
@@ -61,6 +59,7 @@ test("runRollingDispatch: dispatches items and calls onResult once per item", as
       providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
+      contextCapTokens: 200_000,
     },
   ];
 
@@ -158,6 +157,7 @@ test("runRollingDispatch: one packet outcome:failed is included in results with 
       providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
+      contextCapTokens: 200_000,
     },
   ];
 
@@ -199,60 +199,7 @@ test("runRollingDispatch: one packet outcome:failed is included in results with 
 });
 
 // ============================================================================
-// 2. ProviderConfirmationResult contract
-// ============================================================================
-
-test("PROVIDER_CONFIRMATION_RESULT_VERSION is a non-empty string", () => {
-  expect(typeof PROVIDER_CONFIRMATION_RESULT_VERSION).toBe("string");
-  expect(PROVIDER_CONFIRMATION_RESULT_VERSION.length > 0).toBeTruthy();
-});
-
-test("confirmProviders: returns a valid ProviderConfirmationResult with schema_version", () => {
-  // Run in an env that has no CLIs on PATH (commandExists will return false
-  // for all CLIs since we inject a clean env without PATH entries for them).
-  const result = confirmProviders(
-    {},
-    {
-      // Deliberately no CLAUDECODE/CODEX/OPENCODE env vars — no self-spawn block.
-      // Deliberately no claude/opencode/codex on PATH.
-    },
-    [],
-  );
-
-  expect(result.schema_version).toBe(PROVIDER_CONFIRMATION_RESULT_VERSION);
-  expect(typeof result.confirmed_at).toBe("string");
-  expect(result.confirmed_at.length > 0, "confirmed_at is set").toBeTruthy();
-  expect(Array.isArray(result.provider_pool), "provider_pool is array").toBeTruthy();
-  expect(result.provider_pool.length >= 1, "at least one pool entry").toBeTruthy();
-  expect(result.session_level).toBe(true);
-});
-
-test("confirmProviders: every pool entry has name, capability_tier, excluded flag", () => {
-  const result = confirmProviders({}, {}, []);
-
-  for (const entry of result.provider_pool) {
-    expect(typeof entry.name, `entry.name is string for ${JSON.stringify(entry)}`).toBe("string");
-    expect(typeof entry.capability_tier, `entry.capability_tier is string`).toBe("string");
-    expect(typeof entry.excluded, `entry.excluded is boolean`).toBe("boolean");
-  }
-});
-
-test("confirmProviders: worker-command is present and not excluded by default", () => {
-  const result = confirmProviders({}, {}, []);
-  const local = result.provider_pool.find((e) => e.name === "worker-command");
-  expect(local, "worker-command in pool").toBeTruthy();
-  expect(local!.excluded).toBe(false);
-});
-
-test("confirmProviders: worker-command is marked excluded when explicitly excluded", () => {
-  const result = confirmProviders({}, {}, ["worker-command"]);
-  const local = result.provider_pool.find((e) => e.name === "worker-command");
-  expect(local, "worker-command still in pool when excluded").toBeTruthy();
-  expect(local!.excluded).toBe(true);
-});
-
-// ============================================================================
-// 3. FreeFormIntentInterpretation contract
+// 2. FreeFormIntentInterpretation contract
 // ============================================================================
 
 test("FREE_FORM_INTENT_INTERPRETATION_VERSION is a non-empty string", () => {
@@ -305,19 +252,15 @@ test("interpretFreeFormIntentForAudit: empty input returns empty results", () =>
 });
 
 // ============================================================================
-// 4. End-to-end: all three compose without throwing
+// 3. End-to-end: both seams compose without throwing
 // ============================================================================
 
-test("all three shared APIs compose end-to-end without throwing", async () => {
-  // Step 1: confirm providers (deterministic)
-  const confirmation = confirmProviders({}, {}, []);
-  expect(confirmation.schema_version).toBe(PROVIDER_CONFIRMATION_RESULT_VERSION);
-
-  // Step 2: interpret intent (deterministic)
+test("both shared APIs compose end-to-end without throwing", async () => {
+  // Step 1: interpret intent (deterministic)
   const interpretation = interpretFreeFormIntentForAudit("review security and performance");
   expect(interpretation.schema_version).toBe(FREE_FORM_INTENT_INTERPRETATION_VERSION);
 
-  // Step 3: run rolling dispatch through the confirmed pool
+  // Step 2: run rolling dispatch through an available pool
   const packets: RollingDispatchPacket<{ lens: string }>[] = [
     { id: "task-1", payload: { lens: "security" }, estimatedTokens: 200, complexity: 0.8 },
     { id: "task-2", payload: { lens: "performance" }, estimatedTokens: 200, complexity: 0.3 },
@@ -331,6 +274,7 @@ test("all three shared APIs compose end-to-end without throwing", async () => {
       providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
+      contextCapTokens: 200_000,
     },
   ];
 
@@ -349,13 +293,12 @@ test("all three shared APIs compose end-to-end without throwing", async () => {
     async (packet) => ({ packet, outcome: "success" }),
   );
 
-  // All three composed without throwing; dispatch completed
+  // Both seams composed without throwing; dispatch completed
   expect(dispatchResult.status).toBe("complete");
   expect(dispatchResult.results.length).toBe(2);
   expect(onResultIds.length).toBe(2);
 
-  // Verify confirmation and interpretation are non-trivially populated
-  expect(confirmation.provider_pool.length >= 1).toBeTruthy();
+  // Verify interpretation is non-trivially populated
   expect(interpretation.encoded_clauses.length >= 1 ||
       interpretation.checkpoint_questions.length >= 1, "interpretation has at least some output").toBeTruthy();
 });

@@ -5,7 +5,7 @@
  *    capabilities at the loop-entry seam, on EVERY invocation — not only when the
  *    call lands on the implement-dispatch branch. (The dogfood re-drive passed the
  *    full handshake while the state sat in triage; the flags were dropped and
- *    dispatch stayed at the 32k floor.)
+ *    dispatch capacity remained unknown.)
  *  - FIX-D-MARSHAL: prepareImplementDispatch falls back per-field to the
  *    persisted state.host_capabilities when waveOptions omits a field (the bare
  *    `prepare-implement-dispatch` CLI channel).
@@ -150,7 +150,7 @@ describe("FIX-D-MARSHAL — prepareImplementDispatch host_capabilities fallback"
     const quota = JSON.parse(await readFile(quotaPath, "utf8")) as {
       resolved_limits?: { context_tokens?: number };
     };
-    // The persisted 200k window, not the 32k conservative floor.
+    // The persisted handshake resolves the real 200k window.
     expect(quota.resolved_limits?.context_tokens).toBeGreaterThan(32_000);
   });
 });

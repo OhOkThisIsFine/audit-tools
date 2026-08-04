@@ -277,13 +277,13 @@ export interface OpenAiCompatibleConfig {
   /**
    * Per-endpoint quota / rate-limit — the SAME shape a {@link DispatchableSource}
    * carries in `quota`, so a legacy `openai_compatible` block converges onto the
-   * source-pool budget instead of falling to the default context/output floor
-   * (`DEFAULT_CONTEXT_TOKENS` / `DEFAULT_OUTPUT_TOKENS`). Set `context_tokens` /
+   * source-pool budget. Set `context_tokens` /
    * `output_tokens` to size dispatch packets against this endpoint's real window
    * (e.g. a 128k NIM deployment), and `max_concurrent` to declare its in-flight
    * cap — both flow through `openAiCompatibleSource` → `buildSourcePool`
    * (`discoveredLimits` / `concurrencyCap`) identically to an explicit
-   * `sources[]` entry. Omit for the conservative default floor.
+   * `sources[]` entry. If the endpoint and models.dev expose no window, omission
+   * leaves the lane explicitly unadmittable until capability is supplied.
    */
   quota?: QuotaModelLimits;
 }
@@ -339,7 +339,7 @@ export const PROVIDER_SECTION_KEYS = {
  * `claude-worker` is NOT the conversation host: it is the proxied, ISOLATED
  * Claude-harness worker class — a `claude -p` spawn fronted by a proxy transport
  * (`endpoint` = the proxy url, `--model <service>/<model>` composed at
- * launch). Every self-spawn / Gate-0 refusal layer keys on `claude-code` and never
+ * launch). Every self-spawn refusal layer keys on `claude-code` and never
  * sees this name, so the host guards stay byte-identical
  * (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).
  */
@@ -561,7 +561,7 @@ export interface DispatchableSource {
    * Per-`(provider,model)` capability rank from the discovery registry — LOWER =
    * better (the raw `composite_rank` from BFCL/Arena, never collapsed into a tier).
    * Optional — absent leaves ranking unchanged; consumed only as a tiebreak among
-   * otherwise cost-equal candidates in `deriveCostRank`/`suggestCostOrdering`, never
+   * otherwise cost-equal candidates in `deriveCostRank`, never
    * folded into the cost band itself (so it can't reorder against cost).
    */
   capability_rank?: number;

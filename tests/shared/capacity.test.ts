@@ -6,6 +6,14 @@ import {
   type CapacityPool,
 } from "../../src/shared/quota/capacity.js";
 import type { HostConcurrencyLimit } from "../../src/shared/quota/types.js";
+import type { SessionConfig } from "../../src/shared/types/sessionConfig.js";
+
+const TEST_SESSION_CONFIG = {
+  quota: {
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+} satisfies SessionConfig;
 
 function hostLimit(n: number): HostConcurrencyLimit {
   return { active_subagents: n, source: "cli_flags", description: "test host limit" };
@@ -30,7 +38,7 @@ function hostPool(id: string, overrides: Partial<CapacityPool> = {}): CapacityPo
 test("single pool: capacity is the full pending layout capped by host concurrency", () => {
   const capacity = computeDispatchCapacity({
     pools: [hostPool("host", { hostConcurrencyLimit: hostLimit(4) })],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: new Array(17).fill(30000),
   });
   // Ambition is the 17 pending items; the host's 4-subagent ceiling binds — NOT a
@@ -46,7 +54,7 @@ test("single pool: capacity is the full pending layout capped by host concurrenc
 test("single pool: never dispatches more slots than there are pending items", () => {
   const capacity = computeDispatchCapacity({
     pools: [hostPool("host", { hostConcurrencyLimit: hostLimit(8) })],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: [1000, 1000],
   });
   expect(capacity.total_slots).toBe(2);
@@ -55,7 +63,7 @@ test("single pool: never dispatches more slots than there are pending items", ()
 test("single pool, no host ceiling: a parallel agent host fans out instead of serializing to 1", () => {
   const capacity = computeDispatchCapacity({
     pools: [hostPool("host", { hostConcurrencyLimit: null })],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: new Array(20).fill(1000),
   });
   // claude-code with no learned history and no host cap invents no floor and no
@@ -69,7 +77,7 @@ test("multi pool: capacity sums independent host pool slots", () => {
       hostPool("cli", { hostConcurrencyLimit: hostLimit(2) }),
       hostPool("ide", { hostConcurrencyLimit: hostLimit(3) }),
     ],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: [900, 800, 700, 600, 500, 400],
   });
   expect(capacity.total_slots).toBe(5);
@@ -88,7 +96,7 @@ test("multi pool: total slots never exceed pending item count", () => {
       hostPool("cli", { hostConcurrencyLimit: hostLimit(8) }),
       hostPool("ide", { hostConcurrencyLimit: hostLimit(8) }),
     ],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: [1000, 1000],
   });
   expect(capacity.total_slots).toBe(2);
@@ -101,7 +109,7 @@ test("multi pool: summary exposes serializable per-pool quota metadata", () => {
       hostPool("cli", { hostConcurrencyLimit: hostLimit(1) }),
       hostPool("ide", { hostConcurrencyLimit: hostLimit(2) }),
     ],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: [3000, 2000, 1000],
   });
   const summaries = summarizeDispatchCapacityPools(capacity);
@@ -110,7 +118,8 @@ test("multi pool: summary exposes serializable per-pool quota metadata", () => {
     ["ide", 2],
   ]);
   expect(summaries[0].binding_cap).toBe("host_concurrency");
-  expect(summaries[0].resolved_limits.context_tokens > 0).toBe(true);
+  expect(summaries[0].resolved_limits.context_tokens).not.toBeNull();
+  expect(summaries[0].resolved_limits.context_tokens!).toBeGreaterThan(0);
 });
 
 test("a pool's concurrencyCap is carried through the allocation AND the serialized summary", () => {
@@ -121,7 +130,7 @@ test("a pool's concurrencyCap is carried through the allocation AND the serializ
   // slot math (host-less claude-code fans out on token/rate headroom as usual).
   const capacity = computeDispatchCapacity({
     pools: [hostPool("nim", { hostConcurrencyLimit: null, concurrencyCap: 3 })],
-    sessionConfig: {},
+    sessionConfig: TEST_SESSION_CONFIG,
     pendingItemTokens: new Array(10).fill(1000),
   });
   expect(capacity.pools[0].concurrencyCap, "allocation echoes the pool cap").toBe(3);
@@ -144,7 +153,7 @@ test("a pool's contextCapTokens is carried through the allocation AND the serial
   // U2 context-fit gate: source pools carry a per-request context-token cap that
   // gates packet fitting. It must survive both in-memory (audit reads the allocation)
   // and serialization (remediate reads the summary) so selection-time fit checking
-  // works correctly. null/absent = unknown cap → no fit filtering.
+  // works correctly. null/absent = unknown cap → the pool is unadmittable.
   const capacity = computeDispatchCapacity({
     pools: [hostPool("worker", { hostConcurrencyLimit: null, contextCapTokens: 32000 })],
     sessionConfig: {},
@@ -158,7 +167,7 @@ test("a pool's contextCapTokens is carried through the allocation AND the serial
 test("contextCapTokens: null (unknown) is absent from allocation and summary when unset", () => {
   // When contextCapTokens is null/absent, it is not included in the allocation or
   // summary (optional spread semantics). The fit-check code treats undefined and
-  // null equivalently as "no cap → always fits".
+  // null equivalently as unknown capacity and refuses placement.
   const capacity = computeDispatchCapacity({
     pools: [hostPool("unknown", { hostConcurrencyLimit: null, contextCapTokens: null })],
     sessionConfig: {},

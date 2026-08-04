@@ -1,12 +1,9 @@
 // Vitest setupFile: machine-global state-dir hermeticity for the whole suite.
 //
-// Every e2e/wrapper test spawns the real CLIs, and every confirmation-absent CLI
+// Every e2e/wrapper test spawns the real CLIs, and every CLI
 // invocation resolves the machine-global state dir (`~/.audit-code`:
-// sources-declared.json, catalog-cache.json, quota-state.json, reservations.json).
-// Without this override a box with a declared+live proxy lane leaks that state
-// into EVERY child process — proxy-dependent behavior and per-invocation
-// network cost (docs/backlog.md "Machine-global ~/.audit-code state leaks into
-// EVERY e2e test", 2026-07-17).
+// sources-declared.json, quota-state.json, reservations.json). Without this
+// override a box with declared sources leaks that state into EVERY child process.
 //
 // Setting AUDIT_CODE_STATE_DIR here redirects every reader/writer (single-sourced
 // in src/shared/io/stateDir.ts) to a fresh temp dir, both in-process and in every

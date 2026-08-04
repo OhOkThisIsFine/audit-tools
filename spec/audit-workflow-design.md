@@ -10,8 +10,7 @@ and this document is never edited to record what has or hasn't shipped.
 ## Pipeline order
 
 ```
-provider_confirmation       [user gate]
-  → intake
+intake
   → batch_deterministic     [auto_fix → syntax_resolved → external_analyzers
                              → structure_artifacts]
   → critical_flow_fallback  [host_delegation, conditional — only when deterministic flow
@@ -28,41 +27,10 @@ provider_confirmation       [user gate]
   → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
   → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
   → planning
-  → rolling_dispatch        [quota + capability-routed, ingestion folded in]
+  → rolling_dispatch        [bounded admission + capability/context fit; broker owns provider failover]
   → synthesis
   → synthesis_narrative     [host_delegation]
 ```
-
----
-
-## Gate 1 — Provider confirmation
-
-Fires before intake. Session-level: applies to the whole run, not specific to
-what is found in the repo.
-
-**Orchestrator discovers:**
-- CLI tools on PATH (claude-code, codex, gemini CLI, etc.)
-- Configured API endpoints and registered local backends
-- Capability tier estimate for each discovered provider/model
-- Current quota / rate status where queryable
-
-**Shown to the user:**
-- Each discovered provider's name, representative model, blended price, capability tier, cost
-  order, and inclusion status
-- Which will be included by default
-
-**User can:**
-- Exclude any discovered provider
-- Add providers not auto-discoverable (API keys for models not on PATH, local
-  inference endpoints, IDE models the orchestrator cannot detect directly)
-
-**Output:** confirmed provider pool with capability tiers, used by all
-subsequent dispatch and lens-proposal decisions.
-
-**Why before intake:** the provider pool informs lens recommendations at the
-intent checkpoint. Lens proposals should be grounded in what is actually
-dispatchable (a narrow fast pool suggests fewer lenses; a capable pool justifies
-broader coverage).
 
 ---
 
@@ -76,7 +44,7 @@ when all obligations are satisfied.
 
 ---
 
-## Gate 2 — Intent checkpoint (extended)
+## Intent checkpoint (extended)
 
 The main repo-specific user gate. Fires after the deterministic block, before
 design review.
@@ -109,8 +77,8 @@ design review.
 - Both inclusions and exclusions are proposed
 - Mandatory lenses (`security`, `correctness`, `reliability`, `data_integrity`)
   cannot be excluded regardless of proposal or user input
-- Proposals are informed by the confirmed provider pool (capability tier
-  influences how many lenses are realistic)
+- Proposals account for the provider-neutral capability and context budget
+  reported by the attended host and declared source pools
 
 **User/host produces** (structured output inline, skill writes to disk):
 - `scope_summary`, `intent_summary` (required)
@@ -368,8 +336,6 @@ shared between the two tools — implement once, in `audit-tools/shared`:
   rolling worktree dispatch are the same loop (quota tracking, per-packet
   provider selection, capacity re-check on result arrival) with different
   packet types. Build it as shared infrastructure, not twice.
-- **Provider confirmation (Gate 1) is session-level.** One confirmed provider
-  pool covers an audit→remediate pipeline run; remediation does not re-ask.
 - **`free_form_intent` interpretation** (interpret to shape weighting/priority;
   never thread verbatim into worker prompts) is the rule in both tools; the
   interpretation logic is a shared concern.
@@ -400,8 +366,8 @@ Audit-relevant items (the remediation companion carries the full set):
 - **`waiting_for_provider` paused state (audit consumer layer).** The shared engine
   single-sources the *admission decision* (`computeDispatchAdmission`); the audit
   consumer wraps it in an explicit resumable `waiting_for_provider` paused state. When
-  the confirmed pool empties, that state is entered; re-discovery surfaces only
-  genuinely-new providers and never re-offers a Gate-1 settled exclusion. A no-progress
+  every eligible pool empties, that state is entered; re-discovery surfaces only
+  genuinely new pools and never re-offers a settled exclusion. A no-progress
   livelock guard bounds oscillation (N pauses without net new capacity → consumer
   terminal). The pause-lifecycle shell is per-consumer, not itself shared.
 - **Per-clause `free_form_intent` escape hatch.** The interpreter decomposes a
@@ -412,6 +378,6 @@ Audit-relevant items (the remediation companion carries the full set):
   sibling clauses encode cleanly. Detection keys on per-clause encodability, not
   total-encoding-failure.
 - **Pinned shared APIs.** The three shared APIs (rolling dispatch engine — the
-  shared admission decision, `computeDispatchAdmission`; Gate-0/Gate-1 provider
-  confirmation; free_form_intent interpreter) are pinned/versioned seam
+  shared admission decision, `computeDispatchAdmission`; provider-neutral source
+  resolution; free_form_intent interpreter) are pinned/versioned seam
   contracts.

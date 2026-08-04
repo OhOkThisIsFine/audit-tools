@@ -1,4 +1,3 @@
-import { readConfirmedCapabilityRanks } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
 import {
   quotaPoolKey,
@@ -10,7 +9,6 @@ import {
 } from "../quota/index.js";
 import { buildDispatchPool } from "./dispatch/quotaPool.js";
 import { resolveDispatchDriverIdentity } from "./prepareDispatchCommand.js";
-import { getRootDir } from "./args.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
   // This command is a read-only PREVIEW of what `prepare-dispatch` builds, so it
@@ -42,9 +40,7 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   // command never calls finalizeDispatchQuota, so nothing is written to disk.
   const dispatchPool = await buildDispatchPool({
     sessionConfig,
-    // The preview must band exactly as real dispatch does, so it reads the same
-    // confirmed capability evidence rather than passing null.
-    capabilityRanks: await readConfirmedCapabilityRanks(getRootDir(argv)),
+    capabilityRanks: null,
     providerName,
     hostModel,
     queryLimits: undefined,

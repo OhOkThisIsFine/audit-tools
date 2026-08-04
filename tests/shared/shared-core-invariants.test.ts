@@ -149,6 +149,7 @@ test("INV-shared-core-02: rollingDispatch derives pool rank from pool.rank, not 
       quotaStateEntry: null,
       discoveredLimits: null,
       quotaSourceSnapshot: null,
+      contextCapTokens: 200_000,
     };
   }
 

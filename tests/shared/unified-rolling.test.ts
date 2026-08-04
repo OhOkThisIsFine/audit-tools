@@ -39,6 +39,7 @@ const POOL: CapacityPool = {
     source: "session_config",
     description: "test host concurrency limit",
   },
+  contextCapTokens: 200_000,
 };
 const SESSION: SessionConfig = { quota: {} };
 

@@ -9,11 +9,18 @@ import {
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
+import type { WorkPartitionPolicy } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
+
+interface SynthesisCapacityOptions {
+  sizeIndex?: Readonly<Record<string, number>>;
+  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
+}
 
 function buildBaseFindingsReport(
   bundle: ArtifactBundle,
   results: AuditResult[],
+  options: SynthesisCapacityOptions = {},
 ) {
   const report = buildAuditFindingsReport(
     buildAuditReportModel({
@@ -30,6 +37,8 @@ function buildBaseFindingsReport(
       charterRegister: bundle.charter_register,
       systemicChallenge: bundle.systemic_challenge,
       activeDispatch: bundle.active_dispatch,
+      sizeIndex: options.sizeIndex,
+      workPartition: options.workPartition,
     }),
   );
   // Record the host-confirmed exclusions in the machine contract so omissions
@@ -43,11 +52,12 @@ function buildBaseFindingsReport(
 export function runSynthesisExecutor(
   bundle: ArtifactBundle,
   results?: AuditResult[],
+  options: SynthesisCapacityOptions = {},
 ): ExecutorRunResult {
   const finalResults = results ?? bundle.audit_results ?? [];
   // Emit the canonical machine contract and render the human report from it.
   // No narrative yet — that is layered by the synthesis-narrative obligation.
-  const findings = buildBaseFindingsReport(bundle, finalResults);
+  const findings = buildBaseFindingsReport(bundle, finalResults, options);
 
   // Synthesis renders findings; it does NOT own audit_results. Writing
   // audit_results back here desyncs it from its metadata entry (it isn't in
@@ -80,10 +90,11 @@ export function runSynthesisExecutor(
 export function runSynthesisNarrativeExecutor(
   bundle: ArtifactBundle,
   narrative?: SynthesisNarrative,
+  options: SynthesisCapacityOptions = {},
 ): ExecutorRunResult {
   const baseReport =
     bundle.audit_findings ??
-    buildBaseFindingsReport(bundle, bundle.audit_results ?? []);
+    buildBaseFindingsReport(bundle, bundle.audit_results ?? [], options);
   const needsBaseWrite = !bundle.audit_findings;
 
   const hasNarrative = Boolean(

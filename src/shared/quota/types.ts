@@ -20,12 +20,9 @@ export const HostConcurrencyLimitSourceSchema = z.enum([
   "session_config",
   "environment",
   // Read from a host's own config file (e.g. Codex `~/.codex/config.toml`
-  // `[agents].max_threads`) — a real discovered value, not an env reading.
+  // `[agents].max_concurrent_threads_per_session`) — a real discovered value,
+  // not an env reading.
   "discovered_config",
-  // A documented product default applied when the host exposes no configurable
-  // signal (e.g. Codex's default `agents.max_threads` of 6). Honestly labelled
-  // as a known constant rather than masquerading as an environment reading.
-  "known_default",
 ]);
 export type HostConcurrencyLimitSource = z.infer<
   typeof HostConcurrencyLimitSourceSchema
@@ -42,8 +39,8 @@ export type HostConcurrencyLimit = z.infer<typeof HostConcurrencyLimitSchema>;
 
 export const ResolvedLimitsSchema = z
   .object({
-    context_tokens: z.number().int().min(1),
-    output_tokens: z.number().int().min(1),
+    context_tokens: z.number().int().min(1).nullable(),
+    output_tokens: z.number().int().min(1).nullable(),
     requests_per_minute: z.number().int().min(1).nullable(),
     input_tokens_per_minute: z.number().int().min(1).nullable(),
     output_tokens_per_minute: z.number().int().min(1).nullable(),

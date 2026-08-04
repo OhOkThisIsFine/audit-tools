@@ -20,6 +20,7 @@ import { QuotaUsageSnapshotSchema, QuotaWindowScopeSchema } from "./quotaSource.
 import type { QuotaCoverageStatus } from "./coverage.js";
 import { QuotaCoverageStatusSchema } from "./coverage.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
+import { resolveLimits } from "./limits.js";
 
 /**
  * Rough estimate of the agentic-CLI harness's own system-prompt/tool overhead
@@ -28,6 +29,33 @@ import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
  * packet and the harness.
  */
 export const AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000;
+
+/**
+ * Resolve the context ceiling a pool may actually admit against. A source's
+ * declared cap wins; otherwise use the same explicit/discovered/models.dev
+ * resolution as the scheduler. Unknown remains null.
+ */
+export function resolveCapacityPoolContextTokens(
+  pool: CapacityPool,
+  sessionConfig: SessionConfig,
+): number | null {
+  if (
+    typeof pool.contextCapTokens === "number" &&
+    Number.isFinite(pool.contextCapTokens) &&
+    pool.contextCapTokens > 0
+  ) {
+    return pool.contextCapTokens;
+  }
+  const resolved = resolveLimits({
+    providerName: pool.providerName,
+    sessionConfig,
+    hostModel: pool.hostModel,
+    discoveredLimits: pool.discoveredLimits,
+  }).limits.context_tokens;
+  return typeof resolved === "number" && Number.isFinite(resolved) && resolved > 0
+    ? resolved
+    : null;
+}
 
 /**
  * Reason a partial-completion terminal fired on the dispatch engine.
@@ -223,10 +251,11 @@ export interface CapacityPool {
   concurrencyCap?: number | null;
   /**
    * Endpoint-declared per-request/context token cap (from `source.quota.context_tokens`
-   * or populate-stamped registry data). null/absent = unknown cap → no fit filtering.
-   * Used at packet→pool binding to skip pools whose context window cannot fit the packet
-   * plus the agentic-worker harness overhead. Applied only for `worker_kind: "agentic"`
-   * sources; single-shot sources keep their own inline caps.
+   * or synced model metadata). null/absent = unknown cap and therefore unadmittable:
+   * the scheduler cannot prove that a packet fits. Used at packet→pool binding to skip
+   * pools whose context window cannot fit the packet plus the agentic-worker harness
+   * overhead. Applied only for `worker_kind: "agentic"` sources; single-shot sources
+   * keep their own inline caps.
    */
   contextCapTokens?: number | null;
   /**
@@ -334,10 +363,8 @@ export interface PoolDispatchAllocation {
   contextCapTokens?: number | null;
   /**
    * True when this pool is the conversation host's own pool (no backing
-   * {@link CapacityPool.source}), false for a configured backend source. Carried so
-   * the throughput axis of the cost↔speed dial can tell a hardware-parallel source
-   * (uncapped ⇒ fast) from a subagent-bounded host (unspecified ⇒ sequential) — the
-   * `declaredCap == null` sentinel alone is ambiguous. See deriveThroughputConcurrency.
+   * {@link CapacityPool.source}), false for a configured backend source. Carried for
+   * host-specific quota binding and observability; it does not affect ordering.
    */
   isConversationHost: boolean;
 }
@@ -353,7 +380,7 @@ export const DispatchCapacityPoolSummarySchema = z
     source: LimitSourceSchema,
     resolved_limits: ResolvedLimitsSchema,
     host_concurrency_limit: HostConcurrencyLimitSchema.nullable(),
-    /** Host-vs-source discriminator for the dial throughput axis (see PoolDispatchAllocation.isConversationHost). */
+    /** Host-vs-source discriminator for quota binding and observability. */
     is_conversation_host: z.boolean(),
     cooldown_until: z.string().nullable(),
     estimated_wave_tokens: z.number().int().min(0),
@@ -583,16 +610,16 @@ export function computeDispatchCapacity(
     // ever scheduled over the items that FIT it (item + agentic-harness overhead
     // ≤ cap), so its slot count never claims work it would 413. The remaining
     // list therefore can no longer be a contiguous cursor over the sorted array —
-    // an unfitting item must stay pending for a later (larger or cap-less) pool.
+    // an unfitting item must stay pending for a later pool with known capacity.
     let remainingList = pendingTokens;
     for (const pool of input.pools) {
       if (remainingList.length === 0) break;
       if (remainingGlobalBudget !== null && remainingGlobalBudget <= 0) break;
 
-      const cap = pool.contextCapTokens;
+      const cap = resolveCapacityPoolContextTokens(pool, input.sessionConfig);
       const fitting =
         cap == null
-          ? remainingList
+          ? []
           : remainingList.filter(
               (t) => t + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= cap,
             );
@@ -785,6 +812,8 @@ function choosePrimaryAllocation(
     const candidateContext = candidate.schedule.resolved_limits.context_tokens;
     const bestContext = best.schedule.resolved_limits.context_tokens;
     if (candidateContext !== bestContext) {
+      if (candidateContext == null) return best;
+      if (bestContext == null) return candidate;
       return candidateContext > bestContext ? candidate : best;
     }
     return candidate.pool_id < best.pool_id ? candidate : best;

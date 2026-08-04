@@ -249,16 +249,13 @@ test("codex tie-break does not preempt claude/opencode availability", () => {
   expect(resolved).not.toBe("codex");
 });
 
-// Guard: configured claude takes precedence over configured codex (claude's
-// config rung is listed before codex's), matching the spec's "keep claude/opencode
-// precedence" intent for configured providers.
-test("configured claude takes precedence over configured codex", () => {
+test("configured codex wins auto resolution because Claude is explicit-only", () => {
   const resolved = resolveFreshSessionProviderName(
     "auto",
     { claude_code: { command: "claude" }, codex: { command: "codex" } },
     { env: {}, commandExists: allCommands },
   );
-  expect(resolved).toBe("claude-code");
+  expect(resolved).toBe("codex");
 });
 
 // Minimal deps that satisfies FreshSessionProviderDeps for the auto path.
@@ -402,13 +399,13 @@ test("chooseAutoProvider: subprocess-template fires with no IDE or in-session si
 
 // ── config-gated rungs take precedence over tie-breaks ────────────────────────
 
-test("chooseAutoProvider: config-gated claude-code fires even when opencode is also available", () => {
+test("chooseAutoProvider: auto never selects claude-code from config or PATH", () => {
   const resolved = resolveFreshSessionProviderName(
     "auto",
     { claude_code: { command: "claude" } },
-    { env: {}, commandExists: allCommands },
+    { env: {}, commandExists: (cmd) => cmd === "claude" },
   );
-  expect(resolved).toBe("claude-code");
+  expect(resolved).toBe("worker-command");
 });
 
 test("chooseAutoProvider: config-gated opencode fires when explicitly configured and available", () => {
@@ -435,7 +432,7 @@ test("chooseAutoProvider: config-gated codex fires when configured and only code
 
 // ── availability tie-breaks with no explicit config ───────────────────────────
 
-test("chooseAutoProvider: tie-break resolves claude-code when only claude is available", () => {
+test("chooseAutoProvider: bare claude availability does not enter auto ordering", () => {
   const resolved = resolveFreshSessionProviderName(
     "auto",
     {},
@@ -444,7 +441,7 @@ test("chooseAutoProvider: tie-break resolves claude-code when only claude is ava
       commandExists: (cmd) => cmd === "claude",
     },
   );
-  expect(resolved).toBe("claude-code");
+  expect(resolved).toBe("worker-command");
 });
 
 test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; falls through to worker-command", () => {

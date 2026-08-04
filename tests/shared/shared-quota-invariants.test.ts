@@ -27,6 +27,8 @@ import {
 import { acquireLock, releaseLock } from "../../src/shared/quota/fileLock.js";
 import { parseHostModelRoster, scheduleWave, type ScheduleWaveOptions } from "../../src/shared/quota/scheduler.js";
 
+const TEST_CONTEXT_TOKENS = 200_000;
+
 // ── INV-shared-quota-01: Global host limit partitioned across pools ──────────
 // FRIC-001: computeDispatchCapacity must not multiply the global host concurrency
 // limit by pool count. When all pools carry the SAME host limit (same
@@ -39,7 +41,8 @@ test("INV-shared-quota-01: shared global host limit is partitioned across pools 
   }
   function pool(id: string, limit: HostConcurrencyLimit): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null, hostConcurrencyLimit: limit,
-             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null };
+             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+             contextCapTokens: TEST_CONTEXT_TOKENS };
   }
   // 3 pools all sharing the same global limit of 2 — total must be ≤ 2.
   const capacity = computeDispatchCapacity({
@@ -58,7 +61,8 @@ test("INV-shared-quota-01: shared limit 1 with 3 pools dispatches exactly 1 tota
   }
   function pool(id: string, limit: HostConcurrencyLimit): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null, hostConcurrencyLimit: limit,
-             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null };
+             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+             contextCapTokens: TEST_CONTEXT_TOKENS };
   }
   const capacity = computeDispatchCapacity({
     pools: [pool("a", hostLimit(1)), pool("b", hostLimit(1)), pool("c", hostLimit(1))],
@@ -76,7 +80,8 @@ test("INV-shared-quota-02: independent pools with different limits sum independe
   function pool(id: string, n: number): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null,
              hostConcurrencyLimit: { active_subagents: n, source: "cli_flags", description: "t" },
-             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null };
+             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+             contextCapTokens: TEST_CONTEXT_TOKENS };
   }
   const capacity = computeDispatchCapacity({
     pools: [pool("cli", 2), pool("ide", 3)],
@@ -91,7 +96,8 @@ test("INV-shared-quota-02: independent pools with different limits sum independe
 test("INV-shared-quota-02: pools with no host limits are fully independent — no global cap applied", async () => {
   function pool(id: string): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null, hostConcurrencyLimit: null,
-             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null };
+             quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+             contextCapTokens: TEST_CONTEXT_TOKENS };
   }
   const capacity = computeDispatchCapacity({
     pools: [pool("a"), pool("b")],
@@ -107,10 +113,12 @@ test("INV-shared-quota-02: mixed pools (one with limit, one without) are indepen
     id: "limited", accountKey: "limited", providerName: "claude-code", hostModel: null,
     hostConcurrencyLimit: { active_subagents: 4, source: "cli_flags", description: "t" },
     quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+    contextCapTokens: TEST_CONTEXT_TOKENS,
   };
   const poolWithout: CapacityPool = {
     id: "unlimited", accountKey: "unlimited", providerName: "claude-code", hostModel: null, hostConcurrencyLimit: null,
     quotaStateEntry: null, discoveredLimits: null, quotaSourceSnapshot: null,
+    contextCapTokens: TEST_CONTEXT_TOKENS,
   };
   const capacity = computeDispatchCapacity({
     pools: [poolWithLimit, poolWithout],
@@ -265,7 +273,7 @@ test("INV-shared-quota-07: CapacityPool.rank is typed as DispatchModelTier (smal
   function pool(id: string, rank: CapacityPool["rank"]): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null, rank,
              hostConcurrencyLimit: null, quotaStateEntry: null, discoveredLimits: null,
-             quotaSourceSnapshot: null };
+             quotaSourceSnapshot: null, contextCapTokens: TEST_CONTEXT_TOKENS };
   }
   const capacity = computeDispatchCapacity({
     pools: [pool("a", "small"), pool("b", "standard"), pool("c", "deep")],
@@ -360,7 +368,7 @@ test("INV-shared-quota-11: CRIT-name-canonical-tier-field — capacity module ra
   function pool(id: string, rank: CapacityPool["rank"]): CapacityPool {
     return { id, accountKey: id, providerName: "claude-code", hostModel: null, rank,
              hostConcurrencyLimit: null, quotaStateEntry: null, discoveredLimits: null,
-             quotaSourceSnapshot: null };
+             quotaSourceSnapshot: null, contextCapTokens: TEST_CONTEXT_TOKENS };
   }
 
   const capacity = computeDispatchCapacity({
@@ -514,6 +522,7 @@ test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota conf
       quotaStateEntry: null,
       discoveredLimits: null,
       quotaSourceSnapshot: null,
+      contextCapTokens: TEST_CONTEXT_TOKENS,
       ...overrides,
     };
   }
@@ -558,4 +567,3 @@ test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota conf
     expect(capacity.total_slots >= 1, `total_slots must be >= 1, got ${capacity.total_slots} for ${JSON.stringify(cfg.pendingItemTokens.length)} items`).toBeTruthy();
   }
 });
-

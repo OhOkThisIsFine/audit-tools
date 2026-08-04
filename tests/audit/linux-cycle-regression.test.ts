@@ -73,6 +73,16 @@ const TERMINAL_KINDS = new Set([
 ]);
 
 const MAX_PAUSES = 8;
+const TEST_AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
 
 test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withFloorOnlyRepo(async (root, env) => {
@@ -84,7 +94,9 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
     let firstKind;
 
     for (let i = 0; i < MAX_PAUSES; i++) {
-      const step = JSON.parse((await runWrapper(["next-step"], { cwd: root, env })).stdout);
+      const step = JSON.parse(
+        (await runWrapper(["next-step", ...TEST_AUDITOR_ARGS], { cwd: root, env })).stdout,
+      );
       if (i === 0) firstKind = step.step_kind;
 
       expect(step.step_kind, `floor-only next-step folded to 'blocked' at iteration ${i + 1} — the slice-2b ` +
@@ -148,17 +160,6 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         await writeFile(
           step.artifact_paths.edge_reasoning_results,
           JSON.stringify([], null, 2) + "\n",
-        );
-        continue;
-      }
-      if (step.step_kind === "provider_confirmation") {
-        await writeFile(
-          step.artifact_paths.provider_confirmation_input,
-          JSON.stringify(
-            { schema_version: "provider-confirmation-input/v1" },
-            null,
-            2,
-          ) + "\n",
         );
         continue;
       }

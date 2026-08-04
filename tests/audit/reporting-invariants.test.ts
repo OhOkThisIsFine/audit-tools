@@ -16,15 +16,19 @@ import {
   AuditResultSchema,
   type AuditResult,
 } from "../../src/audit/types.js";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const {
-  buildAuditReportModel,
+  buildAuditReportModel: buildAuditReportModelRaw,
   buildAuditFindingsReport,
   applyNarrative,
   renderAuditReportMarkdown,
   normalizeExistingFindingsReport,
   AUDIT_FINDINGS_CONTRACT_VERSION,
 } = await import("../../src/audit/reporting/synthesis.js");
+const buildAuditReportModel = (
+  params: Parameters<typeof buildAuditReportModelRaw>[0],
+) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
 
 const { renderSynthesisNarrativePrompt } = await import("../../src/audit/reporting/synthesisNarrativePrompt.js");
 

@@ -23,7 +23,6 @@ export interface NextStepDecision {
 export const FRICTION_CAPTURE_OBLIGATION_ID = "friction_capture_current";
 
 export const PRIORITY: string[] = [
-  "provider_confirmation",
   "repo_manifest",
   "file_disposition",
   "auto_fixes_applied",
@@ -106,19 +105,6 @@ export interface DecideNextStepOptions {
    * Defaults to `true`.
    */
   emitStaleness?: boolean;
-  /**
-   * Forwarded to `deriveAuditState` — the G3 reconciliation gate's precomputed
-   * delta. MUST be passed anywhere the selection drives an executor: the obligation
-   * engine's `derive` is gate-aware, so a gate-blind `decideNextStep` here would
-   * disagree with it and dispatch the executor for a DIFFERENT obligation.
-   */
-  newlyReachableBackends?: readonly string[];
-  /**
-   * Forwarded to `deriveAuditState` — the capability-evidence gate's precomputed
-   * delta. Same MUST as above: a gate-blind `decideNextStep` would disagree with the
-   * obligation engine's gate-aware `derive` and dispatch the wrong executor.
-   */
-  unevidencedCapabilityPools?: readonly string[];
 }
 
 export function decideNextStep(
@@ -137,12 +123,6 @@ export function decideNextStep(
   }
   const state = deriveAuditState(bundle, {
     emitStaleness: options.emitStaleness ?? true,
-    ...(options.newlyReachableBackends
-      ? { newlyReachableBackends: options.newlyReachableBackends }
-      : {}),
-    ...(options.unevidencedCapabilityPools
-      ? { unevidencedCapabilityPools: options.unevidencedCapabilityPools }
-      : {}),
   });
   const next = findObligation(state.obligations);
 

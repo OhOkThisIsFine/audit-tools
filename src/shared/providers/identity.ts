@@ -14,62 +14,11 @@
  * nothing — both shipped, both as silent fail-opens.
  *
  * This module is a LEAF on purpose: pure string derivation, no value imports. That is
- * what lets the quota ledger, the Gate-0 confirmation, the source fold, and the
- * routing filter all import the same answers without an import cycle — the previous
- * homes (`quota/scheduler.ts`, `providers/sharedProviderConfirmation.ts`) could not
+ * what lets the quota ledger and source fold import the same answer without an
+ * import cycle — the previous homes could not
  * all be reached from each other, which is why the keys were rediscovered per-consumer
  * in the first place.
  */
-
-import type { DispatchExclusionPattern } from "./sharedProviderConfirmation.js";
-
-/**
- * **"Is this the backend the operator already saw?"** → **service** + model.
- *
- * `service:model` where the model is knowable, else the coarse service name — where
- * "service" is the BACKEND ACTUALLY SERVING the model (`service ?? transport`), never
- * the transport that reaches it. Approval is about whose model you consume, not the
- * road taken: two transports onto one service+model are ONE backend the operator
- * confirms once.
- *
- * **Service-qualification is load-bearing, not cosmetic.** The earlier `model_id ??
- * provider` form dropped the provider whenever a model was known, and that was a gate
- * BYPASS in two directions: two backends from different services advertising the SAME
- * model string collapsed into one delta entry (only one got an exclusion pattern),
- * and — worse — confirming one service's model marked a different service's
- * identically-named model as confirmed, so a backend the operator never saw routed as
- * approved. Proxy expansion makes that collision ordinary, not exotic.
- *
- * **The coarse fallback is equally load-bearing** — do not "simplify" it away. A model
- * is knowable here only for `openai-compatible` and `codex`; for claude-code / agy /
- * opencode / worker-command the model arrives only at the dispatch handshake. A
- * model-ONLY identity would let such a backend contribute no key at all, so installing
- * `agy` on PATH would leave the Gate-0 delta empty and the gate would dispatch it
- * silently — reopening the exact PATH-appearance case the gate exists to catch, blind
- * rather than loud.
- *
- * ⚠ NOT interchangeable with {@link exclusionPattern}. Building an exclusion rule from
- * this identity matches nothing for a proxied lane — `ruleMatches` compares the
- * TRANSPORT. They were unified once; that was the bypass.
- *
- * ⚠ Nor is it the dispatch COST-POSITION map (`readConfirmedCostPositions`), a third
- * keyspace keyed by BARE `model_id` because `costRank` looks positions up with no
- * service in hand at the lookup site. Do not unify with either.
- */
-export function backendIdentity(
-  modelId: string | undefined,
-  serviceName: string,
-): string {
-  return modelId ? `${serviceName}:${modelId}` : serviceName;
-}
-
-/** The service a source is served BY — its declared backend, else its own transport. */
-export function sourceService(source: {
-  transport: string;
-  service?: string;
-}): string {
-  return source.service ?? source.transport;
-}
 
 /**
  * **"How much quota is left?"** → **service** (+account) + model.
@@ -104,41 +53,3 @@ export function quotaPoolKey(
   const head = account ? `${providerName}#${account}` : providerName;
   return hostModel ? `${head}/${hostModel}` : `${head}/*`;
 }
-
-/**
- * **"What pattern rules this backend out?"** → **transport** + model.
- *
- * The axis-explicit exclusion pattern that rules out one backend at the finest
- * granularity its model is knowable at — prefixed with `transport:` because the
- * routing filter matches on `ExcludableBackend.transport`. A backend whose model
- * arrives only at the dispatch handshake (a CLI) must be ruled out at the coarse
- * `transport:provider` tier or the rule would never match.
- *
- * Model-granular form uses `/` as the delimiter (not `:`) because model ids can
- * contain colons (e.g. `qwen2.5:7b`).
- *
- * ⚠ NOT the same value as {@link backendIdentity} — see that function's note.
- */
-export function exclusionPattern(
-  modelId: string | undefined,
-  transportProvider: string,
-): DispatchExclusionPattern {
-  return modelId
-    ? `transport:${transportProvider}/${modelId}`
-    : `transport:${transportProvider}`;
-}
-
-/**
- * **"What pattern rules this service/vendor out durably?"** → **service** + model.
- *
- * The axis-explicit exclusion pattern that rules out a backend at the service
- * (vendor) axis — prefixed with `service:`. Emitted by autonomous fail-closed
- * writes so unconfirmed backends stay excluded across transport/proxy changes.
- */
-export function serviceExclusionPattern(
-  modelId: string | undefined,
-  serviceName: string,
-): DispatchExclusionPattern {
-  return modelId ? `service:${serviceName}/${modelId}` : `service:${serviceName}`;
-}
-

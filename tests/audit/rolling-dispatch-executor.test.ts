@@ -14,7 +14,6 @@ import {
   ESTIMATED_TOKENS_PER_LINE,
   estimateTokensFromBytes,
   detectLivelock,
-  PROVIDER_CONFIRMATION_RESULT_VERSION,
 } from "audit-tools/shared";
 import type { CapacityPool, RollingDispatchPacket } from "audit-tools/shared";
 import { taskContentTokens } from "../../src/audit/orchestrator/reviewPacketSizing.js";
@@ -116,12 +115,6 @@ test("N-A06: taskContentTokens falls back to line-based estimate when sizeIndex 
 test("N-A06: deriveAuditState with partial_completion_terminal treats stranded tasks as excluded", () => {
   // Minimal bundle with one uncompleted task plus a partial_completion_terminal
   const bundle: ArtifactBundle = {
-    provider_confirmation: {
-      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-      confirmed_at: new Date().toISOString(),
-      provider_pool: [],
-      session_level: true,
-    },
     repo_manifest: {
       repository: { name: "test-repo" },
       generated_at: new Date().toISOString(),
@@ -189,12 +182,6 @@ test("N-A06: deriveAuditState with partial_completion_terminal treats stranded t
 
 test("N-A06: deriveAuditState without partial_completion_terminal blocks on uncompleted tasks", () => {
   const bundle: ArtifactBundle = {
-    provider_confirmation: {
-      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-      confirmed_at: new Date().toISOString(),
-      provider_pool: [],
-      session_level: true,
-    },
     repo_manifest: {
       repository: { name: "test-repo" },
       generated_at: new Date().toISOString(),
@@ -417,6 +404,7 @@ test("TST-8f9c443f: runRollingDispatch post-run invariant — all successfully d
     providerName: "worker-command",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
   };
   const packets = [
     { id: "post-p1", payload: {}, estimatedTokens: 1, complexity: 0.5 },

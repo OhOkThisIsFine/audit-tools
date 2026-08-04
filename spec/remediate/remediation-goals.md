@@ -112,10 +112,12 @@ input is Markdown, free-form, or conversational.
   LLM extraction otherwise (including `audit-report.md`), emitting the same
   `finding.schema.json` shape in either case.
 - If the input already carries block assignments (as `audit-findings.json`
-  does), adopt them. Otherwise, compute blocks deterministically by **File
-  Overlap**: findings that touch the exact same files group into one block.
-  (Richer co-location signals — grouping by overlapping test suites, or by git
-  co-commit history — are documented future enrichment, not yet built.)
+  does), adopt them. Otherwise, use the shared deterministic work partitioner:
+  estimate finding plus unique-file context cost against the runtime-resolved
+  token budget, optimize normalized semantic/unit cohesion and cross-block
+  overlap, and keep shared files/units as affinity rather than transitive-closure
+  edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
+  it does not force one unbounded block.
 - Compute parallel-safety per block (default true unless dependencies are found).
 - Detect project type and candidate closing actions (git remote, package
   metadata, release scripts) for confirmation in Phase 2.

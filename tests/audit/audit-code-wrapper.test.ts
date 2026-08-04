@@ -57,7 +57,16 @@ const { toPromptPathToken } = await import("audit-tools/shared");
 
 // Post-G2 the backend provider identity rides the per-invocation --auditor
 // descriptor rather than the persisted session-config.json (which now rejects it).
-const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
+const AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
 
 // Loose shapes for the JSON the wrapper prints / writes. Only the fields the
 // assertions read through a callback are named — everything else stays open via
@@ -378,17 +387,6 @@ async function startDispatchRun(root: string): Promise<any> {
       );
       continue;
     }
-    if (step.step_kind === "provider_confirmation") {
-      await writeFile(
-        step.artifact_paths.provider_confirmation_input,
-        JSON.stringify(
-          { schema_version: "provider-confirmation-input/v1" },
-          null,
-          2,
-        ) + "\n",
-      );
-      continue;
-    }
     if (step.step_kind === "confirm_intent") {
       await writeFile(
         step.artifact_paths.intent_checkpoint,
@@ -464,7 +462,14 @@ async function setupDispatchFixture(root: string) {
   expect(artifactsDir).toBeTruthy();
 
   await runWrapper(
-    ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+    [
+      "prepare-dispatch",
+      "--run-id",
+      runId,
+      "--artifacts-dir",
+      artifactsDir,
+      ...AUDITOR_ARGS,
+    ],
     { cwd: root },
   );
 
@@ -704,7 +709,14 @@ test.concurrent("merge-and-ingest blocks when assigned task results are missing"
     expect(artifactsDir).toBeTruthy();
 
     await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      [
+        "prepare-dispatch",
+        "--run-id",
+        runId,
+        "--artifacts-dir",
+        artifactsDir,
+        ...AUDITOR_ARGS,
+      ],
       { cwd: root },
     );
 
@@ -805,7 +817,14 @@ test.concurrent("merge-and-ingest self-heals a stale completion marker by re-ing
     const markerPath = join(runDir, "merge-complete.json");
 
     await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      [
+        "prepare-dispatch",
+        "--run-id",
+        runId,
+        "--artifacts-dir",
+        artifactsDir,
+        ...AUDITOR_ARGS,
+      ],
       { cwd: root },
     );
     const tasks: TaskRecord[] = JSON.parse(await readFile(pendingPath, "utf8"));
@@ -869,7 +888,14 @@ test.concurrent("all packets dispatched in one round, merge ingests everything",
     expect(runId).toBeTruthy();
     expect(artifactsDir).toBeTruthy();
     await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      [
+        "prepare-dispatch",
+        "--run-id",
+        runId,
+        "--artifacts-dir",
+        artifactsDir,
+        ...AUDITOR_ARGS,
+      ],
       { cwd: root },
     );
     const runDir = join(artifactsDir, "runs", runId);
@@ -1054,7 +1080,14 @@ test.concurrent("merge-and-ingest rejects swapped task result files", async () =
     expect(artifactsDir).toBeTruthy();
 
     await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      [
+        "prepare-dispatch",
+        "--run-id",
+        runId,
+        "--artifacts-dir",
+        artifactsDir,
+        ...AUDITOR_ARGS,
+      ],
       { cwd: root },
     );
 

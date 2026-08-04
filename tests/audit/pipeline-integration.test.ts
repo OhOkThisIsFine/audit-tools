@@ -21,9 +21,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  PROVIDER_CONFIRMATION_RESULT_VERSION,
   type IntentCheckpoint,
-  type ProviderConfirmationResult,
 } from "audit-tools/shared";
 
 import type { AuditTask } from "../../src/audit/types.js";
@@ -59,13 +57,6 @@ function settleIntentBaseline(bundle: ArtifactBundle): ArtifactBundle {
 
 // ── Shared bundle factory helpers ─────────────────────────────────────────────
 
-const VALID_PROVIDER_CONFIRMATION: ProviderConfirmationResult = {
-  schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-  confirmed_at: "2026-01-01T00:00:00Z",
-  provider_pool: [],
-  session_level: true,
-};
-
 interface PostDesignAssessmentOptions {
   contract_reviewed?: boolean;
   conceptual_reviewed?: boolean;
@@ -75,7 +66,6 @@ interface PostDesignAssessmentOptions {
 /** Bundle ready for intent_checkpoint (all deterministic obligations satisfied). */
 function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}): ArtifactBundle {
   return {
-    provider_confirmation: VALID_PROVIDER_CONFIRMATION,
     repo_manifest: {
       repository: { name: "integration-fixture" },
       generated_at: "2026-01-01T00:00:00Z",
@@ -231,7 +221,6 @@ test("S1: deterministic obligations (structure_artifacts etc.) are satisfied bef
 test("S1: decideNextStep does NOT return intent_checkpoint before design_assessment is present", () => {
   // Bundle without design_assessment → design_assessment_current is missing/stale.
   const bundleNoDa: ArtifactBundle = {
-    provider_confirmation: VALID_PROVIDER_CONFIRMATION,
     repo_manifest: {
       repository: { name: "integration-fixture" },
       generated_at: "2026-01-01T00:00:00Z",
@@ -535,7 +524,6 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
   // The key assertion: after synthesis_narrative omits, no further steps are needed.
   const synthReadyBundle: ArtifactBundle = {
     // All upstream obligations satisfied
-    provider_confirmation: VALID_PROVIDER_CONFIRMATION,
     repo_manifest: { repository: { name: "test" }, generated_at: "2026-01-01T00:00:00Z", files: [] },
     file_disposition: { files: [] },
     auto_fixes_applied: { fixes: [] },
@@ -573,6 +561,7 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
       },
       findings: [],
       work_blocks: [],
+      work_block_seams: [],
     },
     audit_report: "# Audit Report\n\nNo findings.\n",
     // synthesis_narrative NOT yet present — that's what we're testing

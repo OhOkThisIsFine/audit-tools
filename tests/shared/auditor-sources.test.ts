@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildLivenessProbeUrls,
   probeReachableWithEscalation,
   readSourceDeclaration,
   resolveAmbientSources,
@@ -413,6 +414,17 @@ describe("probeReachableWithEscalation", () => {
     }, [1000, 4000]);
     expect(ok).toBe(false);
     expect(budgets).toEqual([1000, 4000]);
+  });
+});
+
+describe("buildLivenessProbeUrls", () => {
+  it("checks origin-level health routes for a /v1 relay endpoint", () => {
+    expect(buildLivenessProbeUrls("http://127.0.0.1:8791/v1")).toEqual([
+      "http://127.0.0.1:8791/v1/health/liveliness",
+      "http://127.0.0.1:8791/v1/models",
+      "http://127.0.0.1:8791/health/liveliness",
+      "http://127.0.0.1:8791/health",
+    ]);
   });
 });
 

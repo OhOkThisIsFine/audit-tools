@@ -190,6 +190,7 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
     providerName: "worker-command",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
   };
   const packets: RollingDispatchPacket<Record<string, never>>[] = [
     { id: "p1", payload: {}, estimatedTokens: 1, complexity: 0.5 },

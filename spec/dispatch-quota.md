@@ -2,9 +2,9 @@
 
 This spec owns the whole dispatch/quota model as one subject: which quotas a run tracks and why;
 how quota pools are identified and metered; how work is admitted against a shared, account-keyed
-reservation ledger; how the candidate pools for a packet are ordered by an operator-set policy
-along the cost↔throughput frontier; how a packet's exclusivity claim is separated from its
-routing so a backend is chosen just-in-time at launch; and what the tool enforces mechanically
+reservation ledger; how provider-neutral pool intent constrains eligible work while the external
+broker owns concrete provider/model routing; how a packet's exclusivity claim is separated from
+its routing so a backend is chosen just-in-time at launch; and what the tool enforces mechanically
 rather than leaving to host discretion. It is a conceptual spec, not an implementation log:
 everything below is a durable contract, invariant, or the rationale that fixes its shape. Per-provider
 recipes (endpoints, credential locations, response shapes) live in
@@ -18,17 +18,18 @@ capability live in [`unified-dispatch-worker-model.md`](unified-dispatch-worker-
 There is exactly one dispatch decision, made per packet at the moment of launch:
 
 ```
-route(packet) = capability floor           (hard: eligible pools only)
-              × live capacity              (budget headroom, declared caps, cooldowns)
-              × ordering policy            (the operator's cost↔throughput dial)
+route(packet) = capability/context fit     (hard: eligible pools only)
+              × live capacity and quota    (budget headroom and declared caps)
+              × stable eligible pool intent (provider-neutral work class)
               × claim-before-assign        (exclusivity, pool-agnostic)
               , reserved against the shared ledger before the provider is called
 ```
 
 Every subsequent section is one factor of that product. The factors compose in a fixed order and
-never substitute for each other: capability gates *eligibility*, the ordering policy chooses *among
-eligible pools*, capacity decides *whether the chosen pool can take it now*, and the claim decides
-*whether anyone else already owns the work*. The ordering policy reorders; it never un-gates.
+never substitute for each other: capability and context gate *eligibility*, stable pool intent
+describes the required work class without naming a provider or model, capacity decides *whether an
+eligible pool can take it now*, and the claim decides *whether anyone else already owns the work*.
+Concrete ordering, health, cooldown, and failover remain the external broker's responsibility.
 
 ### 1.1 The defects this shape closes
 
@@ -457,35 +458,22 @@ provider reports usage (NIM/openai-compatible).
 
 ---
 
-## 7. Candidate ordering — an operator-customizable policy
+## 7. Candidate ordering — provider-neutral admission, broker-owned failover
 
-Among the pools *capable* of a packet, two independent axes rank a pool:
-
-- **cost** — `costRank` (dollars per unit work; §7.2). Lower is cheaper.
-- **throughput** — how fast the pool sustainably absorbs work (§7.3). Higher is faster.
-
-These trade off: the cheapest pool is rarely the fastest, and the set of non-dominated
-(cost, throughput) pools is a discrete Pareto frontier. **Ordering is therefore a policy the
-operator sets, not a fixed rule of the system.** A single durable scalar — the **dispatch bias**
-λ ∈ [0,1] — picks the operating point on that frontier:
-
-- **λ = 0** → pure cost. Cheapest-capable-fill, the frontier's minimum-cost corner.
-- **λ = 1** → pure throughput. Route to the fastest capable pool regardless of price.
-- **0 < λ < 1** → a blended operating point between the two.
-
-λ = 0 is the **default**, so an operator who says nothing gets cheapest-capable-first. That is one
-setting of the dial, not an unconditional property of dispatch. The dial is **1D** — cost ↔
-throughput — with capability as a hard floor rather than a tradeable axis.
+Audit-tools never orders the concrete providers or models inside a broker pool. It filters stable
+pool intents by capability/context fit and hard quota constraints, then uses deterministic cost and
+stable-id fallback only across independently declared pool intents. The external broker owns the
+candidate ladder, live health, cooldowns, and failover within each pool.
 
 ### 7.1 Capability is a hard floor, never traded
 
-`capable()` runs first and gates eligibility; the dial ranks only among pools that pass. The floor
+`capable()` runs first and gates eligibility; selection considers only pools that pass. The floor
 composes size-fit (`capacityTokens >= packet.cost`, inert when the pool declares no capacity) with
 a per-packet capability floor computed **relatively over the currently-available pool set** — never
 from a named-model→tier map — and it fails OPEN on a pool with no capability signal rather than
 blocking dispatch.
 
-**Quality as a second tradeable axis (a true 2D dial) is declined on the shape of the quantity, not
+**Quality as a tradeable axis is declined on the shape of the quantity, not
 on effort: capability does not degrade smoothly.** A model above the floor produces usable output;
 one below it does not produce cheaper, slightly-worse output — it produces output that fails review
 and costs a full retry plus the wasted first attempt. A tradeable axis presumes a continuum that
@@ -497,35 +485,29 @@ project treats as a bug signal.
 
 **The invariant: capability gates eligibility and is never traded away for price or speed.**
 
-### 7.2 The cost axis — `costRank`, four rungs
+### 7.2 The cost axis — `costRank`, three rungs
 
 `costRank` answers "how many dollars per unit of work". It is **independent of `capabilityRank`**
 ("is this pool strong enough"): a change to cost policy is a change to one rung of one field, and
 capability routing plus the capacity-fit gate are untouched. `deriveCostRank`
 (`src/shared/dispatch/costRank.ts`) resolves top-down, mirroring `resolveLimits`' rung structure:
 
-1. **Operator-confirmed ordering** (highest). When the run carries a confirmed provider/model cost
-   ordering (§7.5), a pool's `costRank` is the confirmed integer position of its provider/model.
-   The operator ordered *every* candidate — including unknown-price ones — so this rung is total
-   and internally consistent. A pool that appeared after confirmation carries no confirmed position
-   and falls through to price/tier, sorting AFTER the confirmed ones.
-2. **Operator-declared per-source price.** When a pool's own configured source declares a `$/Mtok`
+1. **Operator-declared per-source price.** When a pool's own configured source declares a `$/Mtok`
    (`sources[].cost_per_mtok`, mapped into `CostRankInput.declaredCostPerMtok`), that value is authoritative over the generic catalog — the operator
    knows their own endpoint's cost, and a free arbitrage backend declaring `0` sorts free-first. A
    negative or non-finite declared value is ignored and falls to the next rung, never trusted as
    "free".
-3. **Dataset price.** Otherwise `costRank` is the model's **blended price**: a single representative
+2. **Dataset price.** Otherwise `costRank` is the model's **blended price**: a single representative
    $/Mtok scalar = `input · 0.75 + output · 0.25`. The blend is prompt-heavy because the workload
    reads far more than it writes, but output price is typically 4–5× input so it is not dropped.
    Cheaper sorts first. Price resolves from the vendored models.dev snapshot via
    `resolveModelStatics`, consumed degrade-to-empty: unknown model id ⇒ no price ⇒ fall through,
    never fabricate.
-4. **Tier ordinal** (fallback). With no confirmed position, no declared price and no resolvable
+3. **Tier ordinal** (fallback). With no declared price and no resolvable
    dataset price, `costRank` falls back to `tierRank(pool.rank)`.
 
 **Total order, no scale-mixing.** Rungs never interleave within a pass: the band bases are
-disjoint, so the order stays total even when a pool appearing after confirmation falls through to
-price/tier, and an unknown-price pool is offset to sort after all priced
+disjoint, so an unknown-price pool is offset to sort after all priced
 pools (`UNKNOWN_PRICE_BAND_BASE + tierRank`), preserving tier order among the unknowns. So
 all-known ⇒ ordered by real dollars; all-unknown ⇒ ordered by tier; mixed ⇒ priced pools first by
 dollars, unknown-price pools after by tier — "route to the provably-cheapest first, treat
@@ -538,147 +520,35 @@ order; an unpriced record always loses to a priced one). Every provider's own re
 under `byProvider`, so a provider-scoped lookup can pin the native price instead of taking the
 cheapest-collision default.
 
-### 7.3 The speed axis — auto-derived concurrency, pool-class-aware
+### 7.3 Throughput evidence — capacity only, never ordering policy
 
-**Throughput is the pool's declared CONCURRENCY — how many packets it runs in parallel — derived
-automatically from what the provider already states. Nothing is learned, measured, or
-hand-declared.** Two constraints fix this shape:
+Throughput is capacity evidence only: declared concurrency and host subagent limits bound how many
+packets may run, but they never become a local preference dial. Concurrency is declared or absent,
+never learned; provider-reported rate limits and reactive cooldowns remain hard admission inputs.
 
-- *Concurrency is declared or absent, never learned.* There is no learned or adaptive concurrency
-  ceiling, and no measured tokens/sec signal — that is the class of learned dispatch signal this
-  design excludes.
-- *A needed manual flag is a bug signal.* The operator must not have to hand-declare a per-pool
-  rate to get correct speed routing, so the signal comes from what is already known, never from a
-  new operator field.
+### 7.4 Broker boundary
 
-The signal satisfying both is **effective parallelism**, and it must be derived **pool-class-aware**
-— reading it off `declaredCap` is a trap. `declaredCap == null` means *opposite* things on the two
-pool classes: "hardware-parallel, genuinely fast" for a backend source, but "no subagent budget
-declared ⇒ effectively sequential" for the conversation host. Reusing that one ambiguous sentinel
-for the speed rank crowns the zero-declaration default host as fastest and lets it monopolize the
-wave at λ=1 — the exact opposite of the dial's intent.
+Audit-tools does not persist or ask the operator to confirm a provider/model ordering, and there is
+no cost↔speed bias. Each declared broker pool is one source intent (`pool/fast`, `pool/coding`, or
+`pool/reasoning`); the broker expands that intent into concrete candidates, ranks them against live
+health, and performs failover.
 
-`deriveThroughputConcurrency({ isConversationHost, hostActiveSubagents, sourceConcurrencyCap })`
-(higher = faster; `src/shared/dispatch/admissionLoop.ts`) keys on the host-vs-source discriminator,
-which `admissionPoolsFromSummaries` projects automatically from
-`DispatchCapacityPoolSummary.is_conversation_host` (a pool built from a backend `CapacityPool.source`
-is a source; one without is the host):
+Across independently declared source intents, admission remains deterministic and provider-neutral:
+apply the hard capability/context floor, then try eligible pools by declared/catalog cost and stable
+pool id. Quota headroom, cooldowns, concurrency caps, reservations, and claim-before-assign remain
+hard constraints. Throughput concurrency is retained as capacity evidence, not as an operator-tuned
+ordering axis.
 
-- **Backend source** — an endpoint accepting concurrent requests: `source.quota.max_concurrent` when
-  declared, else **`+Infinity`** (uncapped ⇒ hardware-parallel ⇒ fastest; a local inference server
-  is hardware-bound and the operator's config is authoritative).
-- **Conversation host** — its parallelism IS its subagent budget:
-  `host_concurrency_limit.active_subagents` when declared, else **`1`** (unspecified ⇒ effectively
-  sequential ⇒ ranks slowest). This is what stops λ=1 from crowning the default host over a metered
-  parallel source, with no manual declaration.
+### 7.5 Where capability evidence comes from
 
-So at λ=1 an uncapped or high-concurrency source out-ranks a sequential host and the dial toward
-speed actually pushes work onto the parallel pool. `declaredCap` still separately feeds the hard
-in-flight cap gate in the spill loop; the throughput rank is its own pool-class-aware quantity, not
-a reuse of the cap's ambiguous null. Declared rate limits (TPM/RPM) are **not** part of the
-throughput rank — mixing a tokens/min magnitude with a concurrency count is unsound — and their
-effect already appears in the pool's *budget*, which gates admission separately (§6).
-
-A discovery probe that reads an endpoint's concurrency or context window at run time is a legitimate
-future enrichment of this signal, provided it stays auto (never a hand-declared rate) and
-sanity-clamps a probed value before it reaches the rank, so a poisoned probe cannot over-admit.
-
-### 7.4 The blend — ordinal, total order preserved
-
-`costRank` lives in disjoint numeric bands (§7.2) and a $/Mtok value cannot be linearly blended
-against a concurrency count. The blend is therefore over **per-axis ordinals within the current
-candidate set**, computed *after* the capability filter, in `orderCandidates`
-(`src/shared/dispatch/admissionLoop.ts`):
-
-```
-candidates    = pools.filter(capable(·, packet))          // capability hard floor
-costOrdinal   = rank by costRank ascending                // 0 = cheapest
-speedOrdinal  = rank by throughput descending             // 0 = fastest
-blended(pool) = (1 − λ)·costOrdinal + λ·speedOrdinal
-sort by blended ascending, tiebreak capabilityRank descending, then cost, then poolId
-```
-
-Properties:
-
-- **λ ≤ 0, or a single candidate ⇒ the pure cost comparator**, returned directly without computing
-  ordinals. Above zero the blended comparator applies. The ordering is thus exactly cost-first at
-  the default and only at the default.
-- **Total order preserved.** Ordinals are dense integers over the same candidate set, so the blend
-  is always a well-defined total order — no scale-mixing, matching the cost axis's own no-scale-mixing
-  property. Deterministic pool-id tiebreaks make the ordinal assignment stable.
-- **Frontier walk.** As λ rises the blend's argmin walks the non-dominated (cost, throughput) pools
-  from the min-cost corner toward the max-throughput corner.
-- **The λ clamp is enforced at the chokepoint.** `admitBatch` clamps λ into [0,1] and coerces a
-  non-finite value to 0, so no caller can make the single ordering seam emit a NaN comparator
-  (callers pre-clamp as well; this is the enforced floor).
-
-**The blend enters at exactly one place** — `orderCandidates` feeding the per-packet loop in
-`admitBatch`, the single point where pool ordering is decided. Spill (walking to the next pool on
-budget or cap exhaustion), the reservation ledger, and claim-before-assign are unchanged by it: the
-dial reorders *which pool is tried first*, never weakens a headroom or safety gate.
-
-### 7.5 Where the policy is set — Gate-0
-
-Both the cost ordering and λ are **durable policy captured once**, at the `provider_confirmation`
-step — the run's first obligation — and never a per-packet menu (which would tax conversation-first
-context and risk livelock).
-
-On the conversation-first audit CLI path this is an **interactive host-delegation step** parallel to
-`confirm_intent`: the tool renders a suggested priced ordering and the host confirms or reorders it.
-The headless path (`advanceAudit`, no CLI host) auto-completes with the tool's suggestion and
-`dispatch_bias = 0`, so nothing blocks when there is no operator and the default is the safe
-minimum-cost corner.
-
-- **Candidates are gathered from every knowable source at the step.** Configured source models are
-  priced at the outset; the host **self-reports its own model roster** in the step's input
-  (`host_models` — it *is* the agent, so the roster is knowable at confirmation), and those
-  host-native tiers are priced and ordered here rather than only at dispatch. A CLI backend whose
-  roster is not knowable until spawn contributes at provider granularity, priced "resolved at
-  dispatch" and placed by capability tier in the suggestion.
-- **The tool prices each candidate** via `resolveModelStatics`, computes the blended $/Mtok, and
-  **suggests** an ordering (ascending price, capability tiebreak). Unknown-price candidates are
-  flagged and placed last within their tier.
-- **Dispatchable sources fold into the SAME unified ordering.** Configured `sources[]` pools and
-  ambient expansions are ranked alongside provider/host candidates, not in a separate list
-  (`collectDispatchableSources`, `src/shared/quota/apiPool.ts`). Source candidates
-  are keyed under a `source::` namespace internally so a source id can never collide with a
-  provider name, but the operator's `cost_order` may name a source by its **displayed bare id** —
-  the bare form is an accepted alias, and exact candidate keys always win a token. Declared cost
-  wins pricing precedence for a source; registry/catalog list price is the fallback.
-- **The operator confirms or reorders — input/envelope split.** The host writes a plain
-  `provider-confirmation.input.json` (schema `provider-confirmation-input/v1`,
-  `src/shared/types/providerConfirmation.ts`: an optional `cost_order` list of provider/model keys,
-  `exclude`/`include`, `host_models`, and an optional **`dispatch_bias` ∈ [0,1], default 0**); the
-  tool owns the canonical envelope. The input's presence is the "operator has acted" signal that
-  flips the gate from *emit the step* to *consume the input*. The deterministic executor promotes
-  the submission into both canonical artifacts — the per-tool `provider_confirmation.json` seam and
-  the shared `provider-confirmation.json` —
-  with the tool-owned cost annotation, then DELETES the submission (consume-and-invalidate: a spent
-  input must not auto-satisfy a later reconciliation it never answered).
-- **The operator supplies ordering intent and a roster; never prices or capability flags.** The
-  confirmed order persists on `PersistedPoolEntry.cost_order` for provider pools and
-  `host_model_cost_order` for host tiers, read back at dispatch as rung 1 through a single
-  model-keyed positions map (`readConfirmedCostPositions`,
-  `src/shared/providers/sharedProviderConfirmation.ts`); λ persists beside it and is read back by
-  the sibling `readConfirmedDispatchBias`, both threaded into `admitBatch`. `ConfirmedPoolEntry` is
-  the in-memory render DTO and by design never reaches disk. Remediate has no standalone
-  confirmation step: it consumes the same persisted confirmation.
-- **The gate fires on every interactive run**, even with one or zero auto-detected providers — the
-  operator may want to reorder, exclude, self-report a roster, or **add a provider discovery
-  missed** (an OpenAI-compatible endpoint or a configured CLI backend that was not surfaced).
-
-**Static policy, dynamic execution.** Gate-0 fixes the *policy* (the ordering and λ); the router
-*realizes* it against the LIVE frontier at every dispatch. Declared limits, live budget headroom,
-cooldowns and contention all shift under rolling dispatch and parallel IDEs, so the policy applies
-to whatever the candidate set actually is at admission time, never to a frozen Gate-0 snapshot. The
-Gate-0 suggestion is best-effort (it prices what is knowable there); the deterministic
-price→`costRank` engine at dispatch — where the per-model roster is always known — is the always-on
-floor, and Gate-0 is the operator's approval/override layer on top of it, not a replacement.
+Source declarations carry `capability_rank` at the broker-pool boundary; attended hosts can supply a
+ranked roster in the normal auditor handshake. Unknown capability continues to fail open with an
+observable warning. The workflow never reconstructs capability from a provider-confirmation artifact.
 
 ### 7.6 Free-pool maximization falls out of the frontier
 
-Price-0 pools carry the minimum `costRank`, so at every operating point with λ < 1 they are
-first-fill ahead of any paid pool: free capacity saturates before paid capacity **automatically**,
+Price-0 declared pools carry the minimum `costRank`, so they are first-fill ahead of any paid
+declared pool: free capacity saturates before paid capacity **automatically**,
 as a property of the frontier rather than a separate mechanism. "Saturated" means filled to the
 pool's declared sustainable ceiling — declared cap, rate limits, and the reactive 429 floor — not
 flooded; the naive free-flood failure mode is precisely what those gates already prevent.
@@ -714,7 +584,7 @@ Pre-binding conflates three separable things. They are separated:
 
     effective route = claim (who)
                     × live feed (what is open)
-                    × selection policy (λ over cost↔throughput, capability floor)
+                    × admission policy (capability/context fit, quota, stable pool intent)
                     , resolved at launch time
 
 **Nothing persists a packet→pool binding. A binding that cannot be represented cannot go stale.**
@@ -816,14 +686,14 @@ Not host memory, not a shipped instruction — these hold on every install:
 ### 10.1 Parity — one shared path, not two kept in step
 
 - **One `AdmissionPool` builder.** Both orchestrators construct their `AdmissionPool[]` through the
-  single shared `admissionPoolsFromSummaries(summaries, confirmedCostPositions)` — audit summarizes
+  single shared `admissionPoolsFromSummaries(summaries)` — audit summarizes
   its dispatch capacity (`finalizeDispatchQuota`, `src/audit/cli/dispatch/quotaPool.ts`), remediate
   passes `schedule.capacity_pools`
   (`src/remediate/steps/dispatch/waveScheduling.ts`) — and that function derives budget,
-  declaredCap, costRank, capabilityRank, throughputConcurrency and capacityTokens once. There is no
+  declaredCap, costRank, capabilityRank, and capacityTokens once. There is no
   per-orchestrator pool-construction map to drift.
-- **One ordering path.** Both derive candidate ordering through the one shared `admitBatch`, with λ
-  threaded identically via `computeDispatchAdmission`.
+- **One ordering path.** Both derive provider-neutral pool-intent selection through the one shared
+  `admitBatch` / `computeDispatchAdmission` path.
 - **One driver-identity resolver.** `resolveHostDispatchProviderName` returns the conversation host
   for a headless primary and otherwise delegates to `resolveHostProviderName`. Both orchestrators
   call that same function (`src/remediate/steps/dispatch/waveScheduling.ts`,
@@ -868,15 +738,9 @@ Not host memory, not a shipped instruction — these hold on every install:
   down and the run pauses gracefully.
 - The dispatch-quota artifact explains every admission well enough that a human can reconstruct why
   the fan-out was the width it was — and every decision path writes an explain (§5.6).
-- **λ = 0 ordering is exactly the cost-first ordering.** The dial is additive and its default
-  operating point is the min-cost corner; a test asserts the λ=0 admission order over a mixed pool
-  set equals the pure cost-first order.
-- **Throughput is auto-derived, pool-class-aware effective parallelism** — a pure function of the
-  declared source cap or host subagent budget plus the `is_conversation_host` discriminator. No
-  learned ceiling, no measured tokens/sec, no EWMA over speed, and no new operator rate field.
-- **Capability stays a hard floor**; the dial ranks only among capable pools.
-- **The dial reorders, never un-gates**: declaredCap, ledger headroom, cooldowns and
-  claim-before-assign all apply after the ordering, unchanged.
+- **Throughput is capacity evidence, never an ordering dial.** No learned ceiling, measured
+  tokens/sec, speed EWMA, or operator routing-bias field exists.
+- **Capability stays a hard floor**; selection considers only capable pools.
 - **`costRank` and `capabilityRank` are independent.**
 - **No model→price and no model→concurrency literal in backend code.** Price comes from the vendored
   dataset via `resolveModelStatics` (consumed degrade-to-empty) or an operator's own declaration;

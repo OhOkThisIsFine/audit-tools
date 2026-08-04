@@ -74,7 +74,7 @@ export function graphEnrichmentLowConfidenceEdges(
  * pauses for HOST INPUT and must not be resolved deterministically in-process.
  *
  * Two classes of pause:
- *  1. A registry-level host-delegation executor (provider confirmation, intent /
+ *  1. A registry-level host-delegation executor (intent /
  *     charter checkpoints, design-review + clarification + systemic-challenge
  *     loops, synthesis narrative, dispatch handoffs). `isHostDelegationExecutor`
  *     already sees every one of these — they are `kind: "host_delegation"` in the

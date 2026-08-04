@@ -13,8 +13,8 @@
 //
 //   • REACH. The tracked-file listing was `git ls-files 'docs/*.md'
 //     'docs/**/*.md'` — it could not see the ~65 tracked markdown files outside
-//     `docs/`, even though the manifest routes them. `examples/9router-harness-
-//     proxy-setup.md` was tracked, appeared in ZERO rows, and nothing caught it.
+//     `docs/`, even though the manifest routes them. A retired proxy-setup
+//     example was tracked, appeared in ZERO rows, and nothing caught it.
 //     The listing is now the whole repo.
 //   • GLOBS. Row matching discarded any pattern containing `*`, so the
 //     `spec/**/*.md` row matched nothing and 22 spec docs were unrouted.

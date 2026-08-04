@@ -1,26 +1,25 @@
 /**
- * Regression: a dispatchable source pool's context window is NEVER null.
+ * Regression: an unknown source window must stay unknown and fail closed.
  *
  * The 2026-07-17 host-only-collapse root cause: `buildSourcePool` stamped
  * `contextCapTokens: null` whenever a source carried no `quota.context_tokens`
  * (a proxy pool whose registry entry exposed no context field). A null cap means
  * "unknown ⇒ always fits", which silently no-op'd every context-fit gate, so
  * oversized packets were dispatched and 413'd instead of being skipped. The fix
- * resolves an effective window from a fallback chain (declared → models.dev backend
- * window → DEFAULT_CONTEXT_TOKENS) so `null` is unreachable.
+ * resolves an effective window from declared or models.dev data. When neither is
+ * available, null is preserved and the fit gates must treat it as unadmittable.
  *
  * RED before the fix (contextCapTokens === null for the no-quota source); GREEN after.
  */
 
 import { test, expect } from "vitest";
 import { buildSourcePool, resolveSourceContextWindowTokens } from "../../src/shared/quota/apiPool.js";
-import { DEFAULT_CONTEXT_TOKENS } from "../../src/shared/tokens.js";
 import type { QuotaSource } from "../../src/shared/quota/quotaSource.js";
 import type { DispatchableSource } from "../../src/shared/types/sessionConfig.js";
 
 const STUB_QUOTA: QuotaSource = { name: "stub", async queryCurrentUsage() { return null; } };
 
-test("buildSourcePool: a source with NO declared context_tokens still carries a non-null window (the no-op-fit-gate fix)", async () => {
+test("buildSourcePool: an undiscoverable source window remains explicitly unknown", async () => {
   // A claude-worker proxy source whose registry entry exposed no context field —
   // exactly the run that collapsed to host-only.
   const source: DispatchableSource = {
@@ -30,11 +29,7 @@ test("buildSourcePool: a source with NO declared context_tokens still carries a 
     endpoint: "http://127.0.0.1:8791",
   };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {}, capabilityRanks: null });
-  expect(pool.contextCapTokens).not.toBeNull();
-  expect(typeof pool.contextCapTokens).toBe("number");
-  expect(pool.contextCapTokens).toBeGreaterThan(0);
-  // Unknown to models.dev ⇒ the conservative default floor, never null.
-  expect(pool.contextCapTokens).toBe(DEFAULT_CONTEXT_TOKENS);
+  expect(pool.contextCapTokens).toBeNull();
 });
 
 test("resolveSourceContextWindowTokens: declared quota.context_tokens wins the fallback chain", () => {
@@ -46,32 +41,30 @@ test("resolveSourceContextWindowTokens: declared quota.context_tokens wins the f
   expect(window).toBe(128_000);
 });
 
-test("resolveSourceContextWindowTokens: a non-positive declared value degrades to the default, not null", () => {
+test("resolveSourceContextWindowTokens: a non-positive declaration remains unknown", () => {
   const window = resolveSourceContextWindowTokens({
     transport: "openai-compatible",
     model: "unlisted-model-xyz",
-    quota: { context_tokens: 0 }, // "0 = unknown" convention must not become an always-fits null
+    quota: { context_tokens: 0 },
   });
-  expect(window).toBe(DEFAULT_CONTEXT_TOKENS);
+  expect(window).toBeNull();
 });
 
-test("resolveSourceContextWindowTokens: an unknown model with no declaration falls to DEFAULT_CONTEXT_TOKENS", () => {
+test("resolveSourceContextWindowTokens: an unknown model with no declaration remains unknown", () => {
   const window = resolveSourceContextWindowTokens({
     transport: "claude-worker",
     service: "groq",
     model: "definitely-not-a-real-model-id-000",
   });
-  expect(window).toBe(DEFAULT_CONTEXT_TOKENS);
+  expect(window).toBeNull();
 });
 
-test("resolveSourceContextWindowTokens: middle rung — a known models.dev model resolves to its REAL window, not the default", () => {
+test("resolveSourceContextWindowTokens: a known models.dev model resolves to its real window", () => {
   // gpt-4o carries a 128k window in the vendored snapshot; no declared quota, so this
-  // exercises fallback step 2 (models.dev) rather than the blind default. Locks the
-  // middle rung so a regression that skipped straight to DEFAULT_CONTEXT_TOKENS is caught.
+  // exercises models.dev rather than a declared window.
   const window = resolveSourceContextWindowTokens({
     transport: "openai-compatible",
     model: "gpt-4o",
   });
-  expect(window).toBeGreaterThan(DEFAULT_CONTEXT_TOKENS);
   expect(window).toBe(128_000);
 });

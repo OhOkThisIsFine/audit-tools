@@ -230,6 +230,11 @@ test("ensureSemanticReviewRun new-run: access.read_paths is non-empty and contai
 test("ensureSemanticReviewRun existing-run branch reuses the run without creating a new runId", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     const seeded = agentTask(artifactsDir, root, "SEEDED-RUN");
+    await mkdir(join(artifactsDir, "runs", "SEEDED-RUN"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "runs", "SEEDED-RUN", "pending-audit-tasks.json"),
+      JSON.stringify([]),
+    );
     await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
     await writeFile(
       join(artifactsDir, "dispatch", "current-task.json"),
@@ -249,6 +254,63 @@ test("ensureSemanticReviewRun existing-run branch reuses the run without creatin
     // The pre-seeded run is reused, so no new runId is minted.
     expect(result.activeReviewRun.run_id).toBe("SEEDED-RUN");
     expect(result.state.status).toBe("blocked");
+  });
+});
+
+test("ensureSemanticReviewRun refreshes an existing run when its pending manifest is stale", async () => {
+  await withTempArtifacts(async ({ artifactsDir, root }) => {
+    const seeded = agentTask(artifactsDir, root, "STALE-RUN");
+    const staleTask: AuditTask = {
+      task_id: "task-stale",
+      unit_id: "unit-stale",
+      pass_id: "pass-stale",
+      lens: "correctness",
+      file_paths: ["src/stale.ts"],
+      rationale: "stale task",
+    };
+    const freshTask: AuditTask = {
+      task_id: "task-fresh",
+      unit_id: "unit-fresh",
+      pass_id: "pass-fresh",
+      lens: "security",
+      file_paths: ["src/current.ts"],
+      rationale: "fresh task",
+    };
+
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "stale.ts"), "export const stale = true;\n");
+    await writeFile(join(root, "src", "current.ts"), "export const current = true;\n");
+    await mkdir(join(artifactsDir, "runs", "STALE-RUN"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "runs", "STALE-RUN", "pending-audit-tasks.json"),
+      JSON.stringify([staleTask]),
+    );
+    await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "dispatch", "current-task.json"),
+      JSON.stringify(seeded, null, 2),
+    );
+
+    const result = await ensureSemanticReviewRun({
+      root,
+      artifactsDir,
+      bundle: {
+        audit_state: minimalState("active"),
+        audit_tasks: [freshTask],
+      },
+      state: minimalState("active"),
+      obligationId: "audit_tasks_completed",
+      selfCliPath: join(repoRoot, "dist", "index.js"),
+      timeoutMs: 60_000,
+    });
+
+    expect(result.activeReviewRun.run_id).not.toBe("STALE-RUN");
+    const refreshedTasksPath = result.activeReviewRun.pending_audit_tasks_path;
+    assert.ok(refreshedTasksPath);
+    const refreshedTasks = JSON.parse(
+      await readFile(refreshedTasksPath, "utf8"),
+    ) as AuditTask[];
+    expect(refreshedTasks.map((task) => task.task_id)).toEqual(["task-fresh"]);
   });
 });
 

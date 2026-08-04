@@ -7,7 +7,7 @@
  *   1. fraction/clamp — each source maps a live response to a 0–1 remaining_pct,
  *      exact for integers and clamped for out-of-range values;
  *   2. discovered-window slot-rise — a reported capability window escapes the
- *      conservative 32k floor, so TPM-derived slots rise;
+ *      otherwise-unknown capacity, so TPM-derived slots can be computed;
  *   3. hermeticity — the DEFAULT fetch makes no network call under a test runner,
  *      while an injected fetchImpl exercises the real mapping;
  *   4. attaches-raw-no-slot-count + the explicit silent-degrade marker — a pool
@@ -159,9 +159,9 @@ test("each source maps its live payload to an exact, binding 0–1 fraction", ()
   expect(antigravity.remaining_pct).toBe(0.9); // 1.5 clamps but 0.9 is lower → binds 0.9
 });
 
-// ── 2. Discovered-window slot-rise (escape the 32k floor) ─────────────────────
+// ── 2. Discovered-window slot-rise (resolve unknown capacity) ─────────────────
 
-test("a discovered capability window lifts the resolved context above the 32k floor → more slots", async () => {
+test("a discovered capability window replaces unknown capacity and enables more slots", async () => {
   const pool = (overrides: Partial<CapacityPool>): CapacityPool => ({
     id: "claude-code/*",
     accountKey: "claude-code/*",
@@ -187,7 +187,7 @@ test("a discovered capability window lifts the resolved context above the 32k fl
   const lifted = computeDispatchCapacity({
     pools: [
       pool({
-        // Host reported a 200k window at the handshake — outranks the 32k default.
+        // Host reported a 200k window at the handshake.
         discoveredLimits: { input_tokens_per_minute: 600_000, context_tokens: 200_000, output_tokens: 32_000 },
       }),
     ],
@@ -195,8 +195,8 @@ test("a discovered capability window lifts the resolved context above the 32k fl
     pendingItemTokens,
   });
 
-  expect(floored.primary.schedule.resolved_limits.context_tokens, "without a discovered window the conservative 32k floor applies").toBe(32_000);
-  expect(lifted.primary.schedule.resolved_limits.context_tokens, "the discovered capability window must outrank the 32k default").toBe(200_000);
+  expect(floored.primary.schedule.resolved_limits.context_tokens, "without a discovered window capacity remains unknown").toBeNull();
+  expect(lifted.primary.schedule.resolved_limits.context_tokens, "the discovered capability window becomes authoritative").toBe(200_000);
   expect(lifted.total_slots >= floored.total_slots, `discovered window must not REDUCE slots (floored=${floored.total_slots} lifted=${lifted.total_slots})`).toBeTruthy();
 });
 

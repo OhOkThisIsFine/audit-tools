@@ -52,7 +52,12 @@ function run(artifactsDir: string, extra: Partial<DispatchParams> = {}) {
     runId: RUN_ID,
     artifactsDir,
     root: artifactsDir,
-    sessionConfig: {},
+    sessionConfig: {
+      quota: {
+        default_context_tokens: 200_000,
+        reserved_output_tokens: 8_000,
+      },
+    },
     hostModel: null,
     ...extra,
   });

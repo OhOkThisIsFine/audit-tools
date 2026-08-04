@@ -45,7 +45,7 @@ test("getAuditorDescriptor rejects malformed JSON in --auditor", () => {
 // The roster inside `--auditor` is re-validated through the SAME shared
 // parseHostModelRoster the retired `--host-models` flag used, so a semantically
 // malformed roster (valid JSON, bad entries) still fails LOUDLY at the CLI
-// boundary — never silently downgrading to the conservative floor deep in dispatch
+// boundary — never silently inventing a capacity deep in dispatch
 // budget resolution. (Regression guard: G1's transport collapse must not weaken
 // this validation.)
 test("getAuditorDescriptor throws on a semantically malformed roster (schema-validated, not just JSON)", () => {
@@ -225,6 +225,8 @@ await test("--host-model-id keys the quota pool as provider/<id>; absent → pro
       sessionConfig: {},
       hostModel: null,
       hostModelId,
+      hostContextTokens: 200_000,
+      hostOutputTokens: 8_000,
     });
     const quota = await readJson(join(runDir, "dispatch-quota.json"));
     expect(quota.capacity_pools[0].pool_id.endsWith(suffix), `pool_id ${quota.capacity_pools[0].pool_id} should end with ${suffix}`).toBeTruthy();

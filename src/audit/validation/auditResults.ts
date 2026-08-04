@@ -1,4 +1,5 @@
 import type { AuditResult, AuditTask, Finding } from "../types.js";
+import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import {
   captureStepBoundaryFriction,
   describeValue,
@@ -816,7 +817,12 @@ function validateFileCoverageEntry(
   if (Number.isInteger(entry.total_lines) && Number(entry.total_lines) < 0) {
     pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].total_lines`, message: "file_coverage total_lines must be zero or greater." });
   }
-  const expectedLineCount = entryNorm.length > 0 ? normLineIndex.get(entryNorm) : undefined;
+  const expectedRaw = entryNorm.length > 0 ? normLineIndex.get(entryNorm) : undefined;
+  // An unmeasured entry (NaN sentinel) carries no expectation: comparing against it
+  // would render "expected NaN" and silently defeat isSignificantLineCountDivergence
+  // (every NaN comparison is false), degrading the hard-reject to a warning.
+  const expectedLineCount =
+    expectedRaw !== undefined && !isUnmeasuredLineCount(expectedRaw) ? expectedRaw : undefined;
   if (Number.isInteger(entry.total_lines) && typeof expectedLineCount === "number" && Number(entry.total_lines) !== expectedLineCount) {
     const got = Number(entry.total_lines);
     const significant = isSignificantLineCountDivergence(got, expectedLineCount);

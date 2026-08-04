@@ -22,7 +22,13 @@ const { HybridSpillCoordinator } = await import(
 // is what makes the proactive split observable (the fold still owns every cap).
 // `unknown_hosted_concurrency` is a test-only synthetic knob, not a real
 // QuotaConfig field — mirrors the identical cast in tests/remediate/a8.test.ts.
-const SESSION = { quota: { unknown_hosted_concurrency: 8 } } as SessionConfig;
+const SESSION = {
+  quota: {
+    unknown_hosted_concurrency: 8,
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+} as SessionConfig;
 
 function nodes(count: number, tokens = 1000): FrontierNode[] {
   return Array.from({ length: count }, (_, i) => ({

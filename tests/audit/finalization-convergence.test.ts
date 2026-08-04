@@ -4,13 +4,18 @@ import { join } from "node:path";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advanceTypes.js";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
 const { loadArtifactBundle, writeCoreArtifacts, ARTIFACT_FILE_TO_BUNDLE_KEY } =
   await import("../../src/audit/io/artifacts.js");
 const { hashArtifactValue } = await import("../../src/audit/orchestrator/artifactFreshness.js");
-const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
+const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
+const runSynthesisExecutor = (
+  bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
+  results?: Parameters<typeof runSynthesisExecutorRaw>[1],
+) => runSynthesisExecutorRaw(bundle, results, { workPartition: TEST_WORK_PARTITION });
 
 const LINE_INDEX: Record<string, number> = {
   "src/api/auth.ts": 6,
@@ -117,9 +122,14 @@ test("finalization converges through the real persist/reload loop without oscill
           lineIndex: LINE_INDEX,
           preferredExecutor: "result_ingestion_executor",
           auditResults: results,
+          workPartition: TEST_WORK_PARTITION,
         });
       } else {
-        res = await advanceAudit(bundle, { root, lineIndex: LINE_INDEX });
+        res = await advanceAudit(bundle, {
+          root,
+          lineIndex: LINE_INDEX,
+          workPartition: TEST_WORK_PARTITION,
+        });
       }
       // A drain that produced the report (synthesis ran) is recorded the first
       // time audit_report becomes present in the accumulated bundle.

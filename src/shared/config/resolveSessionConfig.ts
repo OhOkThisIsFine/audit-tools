@@ -139,11 +139,14 @@ export function resolveSessionConfig(
   if (sources.length > 0) {
     effective.sources = sources;
     if (self.provider && DISPATCHABLE_TRANSPORT_SET.has(self.provider)) {
-      // The FIRST source matching the driver's provider supplies its flat block. With
-      // multiple same-provider sources (e.g. two NIM endpoints), the operator orders
-      // `sources[]` so the driver's own endpoint is first; the non-primary ones still
-      // become their own pools via `effective.sources`.
-      const primary = sources.find((s) => s.transport === self.provider);
+      const matchingSources = sources.filter((s) => s.transport === self.provider);
+      if (matchingSources.length > 1) {
+        throw new Error(
+          `auditor self.provider "${self.provider}" matches multiple sources; ` +
+            "the driver source must be unique and cannot be selected by sources[] order",
+        );
+      }
+      const [primary] = matchingSources;
       if (primary) Object.assign(effective, sourceProviderConfig(primary));
     }
   }

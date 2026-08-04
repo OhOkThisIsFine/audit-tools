@@ -26,10 +26,11 @@ const repoRoot = pkgRoot;
 test("io/artifacts.ts ArtifactPayloadMap carries phase-block comments (ARC-dd468422)", async () => {
   const src = await readFile(join(pkgRoot, "src/audit/io/artifacts.ts"), "utf8");
 
-  // Each of the 5 phases must appear as a section header comment inside
+  // Each phase must appear as a section header comment inside
   // ArtifactPayloadMap so the grouping is visible to human readers.
+  // (Phase 0, the provider-confirmation session gate, was retired by the
+  // dispatch inversion — the host and llm-relay own provider selection now.)
   const requiredComments = [
-    "Phase 0",
     "Phase 1",
     "Phase 2",
     "Phase 3",

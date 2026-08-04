@@ -18,6 +18,7 @@ test("renderAuditReportMarkdown includes a Process Feedback section only when re
     },
     findings: [],
     work_blocks: [],
+    work_block_seams: [],
   };
 
   const withReflections = renderAuditReportMarkdown(base, {

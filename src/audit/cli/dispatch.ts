@@ -17,8 +17,14 @@ import type {
   CapacityPool,
   ResolvedProviderName,
 } from "audit-tools/shared";
-import type { HostModelRosterEntry, ProviderRateLimits, QuotaBindingWindow } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedCapabilityRanks, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
+import type {
+  HostModelRosterEntry,
+  ProviderRateLimits,
+  QuotaBindingWindow,
+  DispatchAdmission,
+  DispatchModelTier,
+} from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
 import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import { recordAttemptedPackets } from "./dispatchAttempted.js";
@@ -172,8 +178,9 @@ export async function releaseOwnedTaskClaims(
  */
 export function deriveOverridePackerBudget(
   pools: ReadonlyArray<{ contextCapTokens?: number | null }>,
-  limits: { context_tokens: number; output_tokens: number },
-): number {
+  limits: { context_tokens: number | null; output_tokens: number | null },
+): number | null {
+  if (limits.context_tokens == null || limits.output_tokens == null) return null;
   const caps = pools
     .map((pool) => pool.contextCapTokens)
     .filter((cap): cap is number => typeof cap === "number" && Number.isFinite(cap) && cap > 0);
@@ -181,7 +188,7 @@ export function deriveOverridePackerBudget(
   const fitBudget = caps.length
     ? Math.min(rawBudget, Math.max(...caps) - AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS)
     : rawBudget;
-  return Math.max(1, fitBudget);
+  return fitBudget > 0 ? fitBudget : null;
 }
 
 export async function prepareDispatchArtifacts(params: {
@@ -235,6 +242,17 @@ export async function prepareDispatchArtifacts(params: {
    * not double-lease. Defaults to true. See `finalizeDispatchQuota`.
    */
   grantLeases?: boolean;
+  /**
+   * The attended conversation host owns this dispatch. In this mode audit-tools
+   * only prepares packet artifacts; the host and llm-relay choose providers,
+   * fail over, pace, and fan out the complete plan. No local admission subset,
+   * quota wall, cold-start clamp, or concurrency cap is applied.
+   *
+   * This is deliberately separate from `grantLeases`: the in-process rolling
+   * driver also disables the host grant lease, but still needs the shared
+   * admission engine for its own per-packet execution.
+   */
+  hostOwnedDispatch?: boolean;
   /**
    * Whether to record the admission grant as this round's ATTEMPTED packet set
    * (`dispatch-attempted.json`, read by merge to tell deferred work from failed
@@ -406,21 +424,27 @@ export async function prepareDispatchArtifacts(params: {
       ),
       onEscalation: params.onEscalation,
     });
+    const contextBudgetTokens = deriveOverridePackerBudget(params.poolsOverride, limits);
+    if (contextBudgetTokens == null) {
+      throw new Error(
+        "Cannot size audit packets for the selected dispatch pools because their context or output token limits are unknown. " +
+          "Declare both limits on the source, report them in the auditor capability handshake, or provide a model resolvable through models.dev.",
+      );
+    }
     dispatchPool = {
       pools: params.poolsOverride,
       hostModel: params.hostModel ?? null,
-      contextBudgetTokens: deriveOverridePackerBudget(params.poolsOverride, limits),
+      contextBudgetTokens,
       tierBudgets: null,
       hostSession: overrideHostSession,
     };
   } else {
     dispatchPool = await buildDispatchPool({
       sessionConfig,
-      // Capability evidence is stamped onto every pool at CONSTRUCTION so the admission
-      // capability floor bands on real ranks instead of fail-opening. Read here (not at
-      // the floor) because the in-process rolling engine reads the pool directly and
-      // would otherwise never see it.
-      capabilityRanks: await readConfirmedCapabilityRanks(params.root),
+      // Concrete source capability belongs to the declared source boundary (for
+      // relay integration, each pool intent carries capability_rank). The audit no
+      // does not reconstruct ranks from routing policy.
+      capabilityRanks: null,
       providerName: params.providerName,
       hostModel: params.hostModel,
       queryLimits: params.queryLimits,
@@ -436,7 +460,10 @@ export async function prepareDispatchArtifacts(params: {
   let packets = buildReviewPacketsFromPartition(orderedTasks, {
     graph: taskGraph,
     contextTokenBudget: dispatchPool.contextBudgetTokens,
-    riskMassBudget: sessionConfig.dispatch?.risk_mass_budget,
+    // Risk-mass and packet-count budgets are audit-tools dispatch policy. An
+    // attended host hands the complete packet plan to the host/relay, so those
+    // local throttles are inactive on that path.
+    riskMassBudget: params.hostOwnedDispatch ? undefined : sessionConfig.dispatch?.risk_mass_budget,
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex,
@@ -474,8 +501,9 @@ export async function prepareDispatchArtifacts(params: {
   //
   // FINDING-013: top-K coverage budget. Budget defaults OFF (no cap) so default
   // behavior is unchanged.
-  const { emitPackets, deferredPackets } =
-    filterPackets(packets, sessionConfig);
+  const { emitPackets, deferredPackets } = params.hostOwnedDispatch
+    ? { emitPackets: packets, deferredPackets: [] as typeof packets }
+    : filterPackets(packets, sessionConfig);
   const budgetCapped = deferredPackets.length > 0;
 
   // Release claims we took on tasks that were NOT emitted this round (deferred by
@@ -621,56 +649,72 @@ export async function prepareDispatchArtifacts(params: {
     entries: resultMapEntries,
   } satisfies DispatchResultMap);
 
-  // Admission control replaces the preset wave size: the loop GRANTS the affordable
-  // admitted set (cost-first-capable, ledger-leased) from the priority-ordered plan
-  // — highest-priority packets first, so a budget-limited grant admits the most
-  // important work; the host dispatches exactly the granted set and re-invokes
-  // next-step for the remainder. Today there is a single host pool; a heterogeneous
-  // provider pool slots in through the same admission loop without changing the call.
-  const packetPriorityScore = (entry: DispatchPlanEntry): number =>
-    entry.complexity.priority === "high" ? 1 : entry.complexity.priority === "low" ? 0 : 0.5;
-  const admissionPackets = plan
-    .map((entry) => ({
-      id: entry.packet_id,
-      inputTokens: entry.complexity.estimated_tokens,
-      complexity: packetPriorityScore(entry),
-      // Step C: the packet's capability floor rides into admission — the same
-      // risk/complexity-derived tier the plan entry already carries.
-      ...(entry.model_hint ? { requiredTier: entry.model_hint.tier } : {}),
-    }))
-    .sort((a, b) => b.complexity - a.complexity);
-  // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
-  // shared Gate-0 confirmation (spec/dispatch-quota.md). Best-effort — an absent
-  // or unreadable confirmation ⇒ costRank falls to real price then tier. G3: the
-  // ordering is POLICY and is no longer discarded when reach shifts.
-  const confirmedCostPositions = await readConfirmedCostPositions(params.root);
-  // Cost↔speed dial: the operator's durable operating point from the same Gate-0
-  // confirmation (spec/dispatch-quota.md). Absent ⇒ 0 (cost-first default).
-  const dispatchBias = await readConfirmedDispatchBias(params.root);
-  const { dispatchQuotaPath, waveSchedule, dispatchCapacity, admission } = await finalizeDispatchQuota({
-    runId,
-    runDir,
-    sessionConfig,
-    pools: dispatchPool.pools,
-    hostModel: dispatchPool.hostModel,
-    packets: admissionPackets,
-    hostModelRoster: params.hostModelRoster,
-    tierBudgets: dispatchPool.tierBudgets,
-    grantLeases: params.grantLeases,
-    confirmedCostPositions,
-    dispatchBias,
-    // Step C: fail-open on unknown capability is deliberate but must be OBSERVABLE —
-    // each (pool, packet) fail-open routes a floor-carrying packet to a pool with no
-    // capability signal, recorded as a dispatch warning (deduped per pair).
-    onCapabilityFailOpen: (info) => {
-      warnings.push({
-        code: "capability_fail_open",
-        message:
-          `packet ${info.packetId} (tier ${info.requiredTier}) admitted to pool ` +
-          `${info.poolId} with UNKNOWN capability (fail-open, low confidence)`,
-      });
-    },
-  });
+  const hostOwnedDispatch = params.hostOwnedDispatch === true;
+  let dispatchQuotaPath: string | null = null;
+  let waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
+  let dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
+  let grantedPacketIds: string[];
+  let declaredCap: number | null;
+  let admission: DispatchAdmission | null = null;
+  let admissionPackets: Array<{
+    id: string;
+    inputTokens: number;
+    complexity: number;
+    requiredTier?: DispatchModelTier;
+  }> = [];
+
+  if (hostOwnedDispatch) {
+    // The attended host is the dispatch authority. Keep the capacity fold only
+    // as diagnostic context for packet preparation; it must not decide which
+    // packets run, create leases, or turn a large packet into a local wall.
+    dispatchCapacity = computeDispatchCapacity({
+      pools: dispatchPool.pools,
+      sessionConfig,
+      pendingItemTokens: plan.map((entry) => entry.complexity.estimated_tokens),
+    });
+    waveSchedule = dispatchCapacity.primary.schedule;
+    grantedPacketIds = plan.map((entry) => entry.packet_id);
+    declaredCap = null;
+  } else {
+    // Headless/in-process dispatch retains the shared admission contract: it is
+    // the execution engine, not an attended host, so it must reserve and pace
+    // its own work before launching providers.
+    const packetPriorityScore = (entry: DispatchPlanEntry): number =>
+      entry.complexity.priority === "high" ? 1 : entry.complexity.priority === "low" ? 0 : 0.5;
+    admissionPackets = plan
+      .map((entry) => ({
+        id: entry.packet_id,
+        inputTokens: entry.complexity.estimated_tokens,
+        complexity: packetPriorityScore(entry),
+        ...(entry.model_hint ? { requiredTier: entry.model_hint.tier } : {}),
+      }))
+      .sort((a, b) => b.complexity - a.complexity);
+    const finalized = await finalizeDispatchQuota({
+      runId,
+      runDir,
+      sessionConfig,
+      pools: dispatchPool.pools,
+      hostModel: dispatchPool.hostModel,
+      packets: admissionPackets,
+      hostModelRoster: params.hostModelRoster,
+      tierBudgets: dispatchPool.tierBudgets,
+      grantLeases: params.grantLeases,
+      onCapabilityFailOpen: (info) => {
+        warnings.push({
+          code: "capability_fail_open",
+          message:
+            `packet ${info.packetId} (tier ${info.requiredTier}) admitted to pool ` +
+            `${info.poolId} with UNKNOWN capability (fail-open, low confidence)`,
+        });
+      },
+    });
+    dispatchQuotaPath = finalized.dispatchQuotaPath;
+    waveSchedule = finalized.waveSchedule;
+    dispatchCapacity = finalized.dispatchCapacity;
+    admission = finalized.admission;
+    grantedPacketIds = finalized.admission.granted_packet_ids;
+    declaredCap = finalized.admission.declared_cap;
+  }
 
   // Record what this round will actually attempt. The result map above covers the
   // WHOLE packetized plan, but the dispatch prompt instructs the host to run
@@ -685,7 +729,7 @@ export async function prepareDispatchArtifacts(params: {
   // grant recorded here. It records the packets the engine actually drove
   // instead, so a stranded packet stays correctly unattempted.
   if (params.recordAttemptedGrant !== false) {
-    await recordAttemptedPackets(runDir, admission.granted_packet_ids);
+    await recordAttemptedPackets(runDir, grantedPacketIds);
   }
 
   // Fail loud when self-quota monitoring is blind on the host-dispatch path (no live
@@ -693,7 +737,7 @@ export async function prepareDispatchArtifacts(params: {
   // identical stderr + run-ledger friction — the uncapped-but-LOUD half of the always-on
   // quota track. Host path only (grantLeases !== false); the in-process driver paces
   // reactively so a null proactive snapshot is not the same silent hazard there.
-  if (params.grantLeases !== false) {
+  if (!hostOwnedDispatch && params.grantLeases !== false) {
     await emitBlindDispatchFrictionIfBlind({
       artifactsDir,
       runId,
@@ -746,8 +790,8 @@ export async function prepareDispatchArtifacts(params: {
   // not a computed concurrency number.
   const fanout = computeDispatchFanout({
     agentCount: plan.length,
-    grantedCount: admission.granted_packet_ids.length,
-    declaredCap: admission.declared_cap,
+    grantedCount: grantedPacketIds.length,
+    declaredCap,
     confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
     confirmationAlreadyShown: carriedConfirmationShown,
   });
@@ -786,25 +830,25 @@ export async function prepareDispatchArtifacts(params: {
         perPacketCost: number | null;
       }
     | undefined;
-  if (params.grantLeases !== false) {
+  if (!hostOwnedDispatch && params.grantLeases !== false) {
     // Only attribute the budget wall's binding window when admission actually blocked a
     // packet on BUDGET — a `cap_reached` empty grant (the shared ledger momentarily full
     // under a concurrent admitter) frees in seconds, so surfacing a binding window whose
     // reset may be days out would mislead the host into over-waiting (keep the prior
     // best-effort null-reset behavior for that case).
-    const budgetBound = admissionBlockedOnBudget(admission.explains);
+    const budgetBound = admissionBlockedOnBudget(admission!.explains);
     const wall = detectHostDispatchWall({
-      grantedCount: admission.granted_packet_ids.length,
+      grantedCount: admission!.granted_packet_ids.length,
       cooldownUntil: dispatchCapacity.cooldown_until ?? null,
       bindingWindow: budgetBound ? (waveSchedule.binding_window ?? null) : null,
-      explains: admission.explains,
+      explains: admission!.explains,
       now: Date.now(),
     });
     if (wall.atWall) {
       // Release the leases the grant just reserved — pausing skips the merge that would
       // reconcile them, so without this they leak until TTL (over-granted during
       // cooldown) and mis-size the resume grant (C3).
-      await reconcileAdmissionLeasesFromQuotaFile(dispatchQuotaPath);
+      await reconcileAdmissionLeasesFromQuotaFile(dispatchQuotaPath!);
       // Packet ids for the paused_state display; their constituent TASK ids for the
       // terminal (deriveAuditState routes synthesis by matching task_id — packet ids
       // there would never unlock synthesis → infinite pause loop).
@@ -858,8 +902,8 @@ export async function prepareDispatchArtifacts(params: {
     candidate_task_count: candidateTasks.length,
     granted_task_ids: grantedTaskIds,
     host_pause: hostPause,
-    granted_count: admission.granted_packet_ids.length,
-    declared_cap: admission.declared_cap,
+    granted_count: grantedPacketIds.length,
+    declared_cap: declaredCap,
     agent_count: fanout.agent_count,
     confirmation_recommended: fanout.confirmation_recommended,
     dispatch_summary: fanout.dispatch_summary,

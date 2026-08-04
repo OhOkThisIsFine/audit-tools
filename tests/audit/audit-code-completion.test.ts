@@ -25,6 +25,18 @@ const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { cmdIngestResults } = await import("../../src/audit/cli/ingestResultsCommand.js");
 const { cmdForceSynthesis } = await import("../../src/audit/cli/forceSynthesisCommand.js");
 
+const TEST_AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      can_dispatch_subagents: true,
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
+
 async function buildSyntheticResults(tasks: AuditTask[], root: string) {
   return Promise.all(tasks.map(async (task) => ({
     task_id: task.task_id,
@@ -108,9 +120,12 @@ async function callNextStep(
   artifactsDir: string,
   extraArgs: string[] = [],
 ) {
+  const args = extraArgs.includes("--auditor")
+    ? extraArgs
+    : [...TEST_AUDITOR_ARGS, ...extraArgs];
   await captureConsoleLog(() =>
     withEnvParity(() =>
-      cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir, ...extraArgs]),
+      cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir, ...args]),
     ),
   );
   return JSON.parse(await readFile(currentStepPath(artifactsDir), "utf8"));
@@ -207,17 +222,6 @@ async function advanceToDispatchReady(root: string) {
       );
       continue;
     }
-    if (step.step_kind === "provider_confirmation") {
-      await writeFile(
-        step.artifact_paths.provider_confirmation_input,
-        JSON.stringify(
-          { schema_version: "provider-confirmation-input/v1" },
-          null,
-          2,
-        ) + "\n",
-      );
-      continue;
-    }
     if (step.step_kind === "confirm_intent") {
       await writeFile(
         step.artifact_paths.intent_checkpoint,
@@ -289,13 +293,20 @@ async function advanceToDispatchReady(root: string) {
 // run has already persisted (e.g. analyzer skip decisions).
 async function disableNarrative(artifactsDir: string) {
   const configPath = join(artifactsDir, "session-config.json");
-  let config: { synthesis?: { narrative?: boolean } } = {};
+  let config: {
+    synthesis?: { narrative?: boolean };
+    block_quota?: { context_tokens?: number; reserved_output_tokens?: number };
+  } = {};
   try {
     config = JSON.parse(await readFile(configPath, "utf8"));
   } catch {
     // No session config yet — start fresh.
   }
   config.synthesis = { ...(config.synthesis ?? {}), narrative: false };
+  config.block_quota = {
+    context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  };
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
 }
 

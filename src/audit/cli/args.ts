@@ -1,4 +1,4 @@
-import { existsSync, createReadStream } from "node:fs";
+import { existsSync, createReadStream, readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -240,11 +240,30 @@ export function getHostModel(argv: string[]): string | null {
  * blocks onto `self` and resliced the per-backend dispatch blocks to a top-level
  * `sources[]`). Malformed JSON or a non-object throws loudly so a mistyped handshake
  * fails here rather than silently downgrading. `null` when the flag is absent.
+ *
+ * `--auditor @<path>` reads the JSON from a file instead. Inline JSON through a
+ * Windows `.cmd` shim is a known quoting trap (cmd's batch `%*` re-expansion
+ * mangles embedded quotes — the same class the submit-packet flow solved with a
+ * file), so a host on a hostile shell writes the handshake to a file and passes
+ * the `@` form.
  * [[capability-is-per-auditor-not-per-audit]] [[unified-dispatch-worker-model]]
  */
 export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
-  const raw = getFlag(argv, "--auditor");
-  if (!raw) return null;
+  const flagValue = getFlag(argv, "--auditor");
+  if (!flagValue) return null;
+  let raw = flagValue;
+  if (flagValue.startsWith("@")) {
+    const filePath = flagValue.slice(1);
+    try {
+      raw = readFileSync(filePath, "utf8");
+    } catch (err) {
+      throw new Error(
+        `--auditor @${filePath}: cannot read the handshake file: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -267,7 +286,8 @@ export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
   // `parseHostModelRoster` the `--host-models` flag used (loud throw on a malformed
   // roster: a mistyped handshake fails at the CLI boundary, never silently deep in
   // dispatch budget resolution). Scalars mirror `parsePositiveIntegerFlag`
-  // (silent-drop of a non-positive-int, resolving to the conservative default);
+  // (silent-drop of a non-positive-int, leaving the value unknown or allowing a
+  // lower-priority authoritative source to resolve it);
   // booleans/model_id mirror their old parsers (drop a non-boolean / blank id).
   const self: AuditorSelf = {};
   // `self.provider` is the driver's identity + quota-attribution key: a mistyped

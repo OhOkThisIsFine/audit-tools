@@ -11,17 +11,21 @@ import type {
   Finding,
 } from "../../src/audit/types.js";
 import type { AuditReportModel } from "../../src/audit/reporting/synthesis.js";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { validateAuditResults }: typeof import(
   "../../src/audit/validation/auditResults.js"
 ) = await importSourceModule(
   "src/validation/auditResults.ts",
 );
-const { buildAuditReportModel }: typeof import(
+const { buildAuditReportModel: buildAuditReportModelRaw }: typeof import(
   "../../src/audit/reporting/synthesis.js"
 ) = await importSourceModule(
   "src/reporting/synthesis.ts",
 );
+const buildAuditReportModel = (
+  params: Parameters<typeof buildAuditReportModelRaw>[0],
+) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
 const { buildRequeuePayload }: typeof import(
   "../../src/audit/orchestrator/requeueCommand.js"
 ) = await importSourceModule(

@@ -114,6 +114,7 @@ const backendPool = (id: string): CapacityPool =>
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,
+    contextCapTokens: 200_000,
   }) as unknown as CapacityPool;
 
 /** A stub worker that lands its node's declared file + a resolved result. */

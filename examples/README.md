@@ -29,9 +29,9 @@ Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cu
   agent's provider identity, model scalars, subagent capabilities) plus optional explicit `sources[]`
   (the operator's escape hatch — normally sources resolve ambiently instead).
 - **`catalog/sources-declared.json`** — the machine-level declaration (`~/.audit-code/sources-declared.json`)
-  of backends this box owns, including the optional `proxy` lane; see below.
+  of provider-neutral broker pool intents; see below.
 
-### `catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
+### `catalog/sources-declared.json` — broker pool intents
 
 **This is no longer a session-config.** Dispatch sources are per-auditor CAPABILITY, not repo intent, so
 `sources[]` was removed from the persisted session-config type and the file moved to
@@ -41,21 +41,10 @@ process can actually reach (`declared ∩ ambient-verifiable`) and dispatches to
 one box each resolve it against their own environment, so each gets its own pool with nothing shared.
 See `spec/unified-dispatch-worker-model.md` → *Source resolution — in-process, by construction*.
 
-It shows the quota-arbitrage pattern: adding a genuinely-free backend as an extra **dispatch source pool**
-alongside the conversation host, so background work routes to it first. Pure config — no provider code —
-using the `openai-compatible` shape pointed at opencode's public ZEN endpoint. To run it:
+The example points the generic `openai-compatible` adapter at a loopback dispatch broker and names
+only `pool/fast`, `pool/coding`, and `pool/reasoning`. The broker owns concrete providers, model ids,
+credentials, ordering, health, and failover. Audit-tools sees three stable capability intents and
+continues to enforce context fit, quota/headroom, concurrency, and result validation.
 
-- Export `OPENCODE_ZEN_API_KEY=public` — the free models need only the static `Bearer public` token (no
-  account, no signup; the "get an API key" flow is opencode's *paid* tier). The declaration names the
-  variable (`api_key_env`) and never carries an inline `api_key`; **why** a declared lane must prove
-  reach rather than merely possess a credential is at
-  `spec/unified-dispatch-worker-model.md` → *Source resolution — in-process, by construction*.
-- The free model ids are **promotional and time-limited** — fetch the current list from
-  `GET https://opencode.ai/zen/v1/models` (public, unauthenticated) rather than trusting the example's id.
-
-`cost_per_mtok: 0` declares the source free. Declared cost wins pricing precedence for a source and is
-backed by reactive verification, so a "free" tier that starts billing is demoted for the rest of the run —
-the ranking rule lives in [`spec/dispatch-quota.md`](../spec/dispatch-quota.md), and the drift
-event is documented at its code site (`src/shared/friction/stepBoundaryCapture.ts`,
-`declared_cost_drift`). Cost is declared per **source** (`sources[].cost_per_mtok`); the legacy singleton
-`openai_compatible` provider block has no cost field.
+The example uses `no_auth: true` because the broker is loopback-only. A remote or authenticated
+broker should name its credential with `api_key_env`; never put a secret in this file.

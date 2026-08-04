@@ -162,7 +162,7 @@
   - Action: 
   - Paths: `.`
 - **forward-tracks#5** (medium) — Free/cheap "quota‑arbitrage" dispatch tier – multi‑account credential store & refresh‑under‑lock
-  - Action: Create/extend the credential store (encrypted, lock‑protected rotation), reuse 9router’s OAuth catalogue, hook it into `ReservationLedger` and dispatch admission, and add the per‑provider opt‑in checks. Update docs and friction events accordingly.
+  - Action: Create/extend the credential store (encrypted, lock‑protected rotation), acquire and normalize a vetted external OAuth catalogue, hook it into `ReservationLedger` and dispatch admission, and add the per‑provider opt‑in checks. Update docs and friction events accordingly.
   - Paths: `src/shared/providers/auditorSources.ts`, `src/shared/friction/stepBoundaryCapture.ts`, `src/shared/types/sessionConfig.ts`, `examples/catalog/sources-declared.json`
 - **forward-tracks#13** (small) — Add task_ids/lens to DispatchPlanEntry token‑usage ledger
   - Action: Modify `DispatchPlanEntry` (likely in the token‑usage ledger module) to include optional `task_ids` and `lens` properties, update any related serialization/deserialization, and adjust tests/documentation accordingly.

@@ -40,8 +40,8 @@ const LENS_ID_PREFIX: Record<string, string> = {
  *
  * Worker packets assign locally-scoped ids (e.g. `MNT-001`) that collide across
  * packets once merged, which breaks `audit-findings.json` as a machine contract:
- * `buildWorkBlocks` keys its union-find on `id` (so colliding ids fuse unrelated
- * findings into one block), and `work_blocks.finding_ids` / theme `finding_ids` /
+ * work partition coverage keys on `id` (so colliding ids alias unrelated
+ * findings), and `work_blocks.finding_ids` / theme `finding_ids` /
  * the remediator's per-finding addressing can no longer resolve a single finding.
  *
  * The id is `<LENS_PREFIX>-<sha256(signature)[:8]>`, where the signature comes

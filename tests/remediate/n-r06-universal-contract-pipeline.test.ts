@@ -88,8 +88,18 @@ const STUB_AUDIT_FINDINGS = {
     },
   ],
   work_blocks: [
-    { id: "WB-001", finding_ids: ["AUD-001", "AUD-002"], depends_on: [] },
+    {
+      id: "WB-001",
+      finding_ids: ["AUD-001", "AUD-002"],
+      unit_ids: ["unit-auth"],
+      owned_files: ["package.json", "src/auth.ts"],
+      role: "implementation",
+      max_severity: "high",
+      rationale: "test block",
+      depends_on: [],
+    },
   ],
+  work_block_seams: [],
 };
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
@@ -351,6 +361,8 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
       findings_summary: Array<{ id: string; title: string; lens: string }>;
       affected_files: string[];
       audit_findings_path: string;
+      work_blocks: Array<{ id: string; finding_ids: string[] }>;
+      work_block_seams: unknown[];
     };
 
     expect(seed.finding_count).toBe(2);
@@ -359,6 +371,10 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
     expect(seed.findings_summary[0].lens).toBe("security");
     expect(seed.affected_files).toContain("src/auth.ts");
     expect(seed.audit_findings_path).toBe(auditFindingsPath);
+    expect(seed.work_blocks).toEqual([
+      expect.objectContaining({ id: "WB-001", finding_ids: ["AUD-001", "AUD-002"] }),
+    ]);
+    expect(seed.work_block_seams).toEqual([]);
   });
 
   it("writePathASeedFromFindings is idempotent (does not overwrite existing seed)", async () => {

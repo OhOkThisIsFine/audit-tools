@@ -401,7 +401,7 @@ export async function driveRollingAuditDispatch(params: {
   /**
    * Re-discover the provider ids currently available. Probed only when the run is
    * already paused on a `waiting_for_provider` state, to decide resume vs. stay
-   * paused vs. terminal/livelock (DC-4). Defaults to the run's confirmed pool ids
+   * paused vs. terminal/livelock (DC-4). Defaults to the run's eligible pool ids
    * (the dispatch plan's pools), i.e. "the same pools that were just exhausted" —
    * so with no external re-discovery wiring the run still advances toward livelock
    * rather than spinning forever, while a caller that can re-probe a live roster
@@ -843,4 +843,3 @@ async function advanceRollingPause(params: {
   await persistPausedState(artifactsDir, runId, pausedState);
   return pausedState;
 }
-

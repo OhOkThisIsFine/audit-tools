@@ -173,33 +173,22 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   branch a `worker_command` of `["codex","exec",…]` actually takes, has no test. So the substrate is
   correct and unproven, and bypassing it is undetected.
 
-- **A retired or unrecognized key in the machine declaration file fails as a MISSING lane (2026-07-18).**
-  `~/.audit-code/sources-declared.json` is operator-authored machine config that no repo test ever reads
-  (tests inject `readDeclarationFile`), so a stale key survives a fully green suite. Only `repair_proxy`
-  has a *named* rejection (`auditorSources.ts` → a `dropped[]` reason); every other unrecognized top-level
-  key and every retired per-source field is ignored in silence — `readSourceDeclaration` reads `sources`
-  only, and `validateSessionConfig` has no unknown-key check. There is deliberately **no back-compat
-  alias**. The drop reason *is* printed, but on stderr only: `resolveSessionConfig` writes
-  `[audit-tools] declared source "<id>" not resolved: <reason>` for every drop (no caller overrides the
-  default reporter), while the Gate-0 render carries no drop reasons and the populate half is fully mute
-  (`populateDeclaredProxyCatalog` returns `null` for an absent/retired declaration and its call site in
-  `nextStepCommand.ts` prints nothing). So the lived symptom is "the lane is gone" plus one easily-missed
-  stderr line. After any transport-contract change, re-read the declaration file by hand.
+- **An unrecognized key in the machine declaration can fail as a missing lane.**
+  `~/.audit-code/sources-declared.json` is operator-authored machine config that repo tests do not read
+  directly (tests inject `readDeclarationFile`). `readSourceDeclaration` consumes `sources` only, and
+  the validator does not reject unknown top-level keys. Per-source reach failures are printed on stderr
+  as `[audit-tools] declared source "<id>" not resolved: <reason>`. After a source-contract change,
+  validate the live declaration through `resolveAmbientSources`; do not infer health from a green suite.
 
-- **The free offload lane is the local `llm-relay` proxy — it must be RUNNING, and the model must be
-  NAMESPACED (LiteLLM retired 2026-07-28).** Requests go to `127.0.0.1:8791` (see `~/.claude/CLAUDE.md`
-  → *Offload lane*); start it with a bare `llm-relay`. Three consequences:
+- **The free offload lane is the local `llm-relay` broker — it must be RUNNING, and callers should
+  request a named pool.** Requests go to `127.0.0.1:8791`; start it with a bare `llm-relay`.
+  Three consequences:
   (a) there is no standalone fallback — `~/.claude/llm-call.mjs` POSTs that one endpoint, preflights
   `/health`, and exits 3 when nothing is listening, so a failing offload means "start the relay", not
   "the backend is broken".
-  (b) ⚠ **A non-namespaced model does NOT error — it silently downgrades.** The model must be
-  `<provider>/<model>` (`nim/z-ai/glm-5.2`, rank 1 at SWE-bench 42%). A bare alias — including the
-  old LiteLLM form `glm-5.2` — falls through to `routing.default`, which is
-  `nim/meta/llama-3.1-70b-instruct`: verified 2026-07-28, HTTP **200** with a plausible answer and the
-  substitution visible only in the response's `model` field. This is the opposite of the old LiteLLM
-  failure mode (a loud `HTTP 400 Invalid model name`), so the habit that was safe there is now a silent
-  quality cap. `llm-relay models [-p nim]` is the authoritative roster; routing lives in
-  `~/.llm-relay/config.json`. **Read the `model` field of the response when quality looks off.**
+  (b) Use `pool/fast`, `pool/coding`, or `pool/reasoning`. The relay owns concrete candidates and
+  failover; putting a provider/model id in audit-tools recreates the duplicate configuration this
+  boundary exists to remove. `llm-relay pools --probe` is the concrete-model health check.
   (c) invocation shape differs by consumer: `llm-call.mjs` takes the model as its FIRST POSITIONAL
   argument, while `--model <spec>` is the *worker/provider* form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
@@ -455,6 +444,5 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   overrides the block's `.audit-tools/*` / `.audit-tools/*/*` patterns.
 
 ## Doc-set hygiene (enforced)
-
 
 

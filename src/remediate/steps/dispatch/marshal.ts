@@ -1,4 +1,4 @@
-import { mkdir, rename, readFile } from "node:fs/promises";
+import { mkdir, rename, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { OwnershipRegistry } from "../../dispatch/ownershipRegistry.js";
@@ -15,7 +15,6 @@ import {
 } from "../../state/types.js";
 import type { SessionConfig, HostModelRosterEntry } from "audit-tools/shared";
 import { captureStepBoundaryFriction, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
-import { readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedCapabilityRanks } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -258,6 +257,12 @@ export async function prepareImplementDispatch(
      * here would double-count). Threaded into `buildDispatchQuota`.
      */
     grantLeases?: boolean;
+    /**
+     * The attended host owns provider selection, pacing, and fan-out. In this
+     * mode the marshal emits the complete eligible plan and writes no local
+     * admission/quota artifact. Headless/in-process callers leave this false.
+     */
+    hostOwnedDispatch?: boolean;
   },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
@@ -436,6 +441,19 @@ export async function prepareImplementDispatch(
   };
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);
 
+  if (waveOptions?.hostOwnedDispatch === true) {
+    // The attended host and llm-relay own provider selection, failover, quota,
+    // and concurrency. The marshal's only job here is to hand over the complete
+    // eligible plan. Remove a stale generated quota file so merge cannot mistake
+    // an earlier headless pass's refusal for this host-owned dispatch.
+    await rm(join(dir, "dispatch-quota.json"), { force: true });
+    process.stderr.write(
+      `[remediate-code] dispatch: implement ${items.length} item(s) ` +
+        "host-owned; no local admission or concurrency cap\n",
+    );
+    return plan;
+  }
+
   // Read back the per-item estimate stamped above rather than recomputing it —
   // a second derivation is how the plan and admission drift apart.
   const estimatedSlotTokens = items.map((i) => i.estimated_input_tokens);
@@ -443,7 +461,7 @@ export async function prepareImplementDispatch(
   // decideNextStep seam) is the fallback for every capability field the wave
   // scheduler reads: a caller that passes no waveOptions — the bare
   // `prepare-implement-dispatch` CLI, a triage re-drive — still sizes pools to
-  // the host's real windows instead of the conservative floor. Explicit
+  // the host's real windows instead of leaving capacity unknown. Explicit
   // waveOptions (the next-step branch, which already folded persisted values)
   // win per field.
   const persistedCaps = state.host_capabilities;
@@ -459,11 +477,9 @@ export async function prepareImplementDispatch(
     hostModelId: waveOptions?.hostModelId ?? persistedCaps?.model_id ?? null,
     itemCount: items.length,
     estimatedSlotTokens,
-    // The capability floor bands against THESE pools (this schedule's `capacity_pools`
-    // feed `buildDispatchQuota` below), so the ranks must be stamped here or every pool
-    // bands `null` and every `deep` packet admits everywhere. Read from the same root
-    // as the sibling cost/bias reads a few lines down — one confirmation, three fields.
-    capabilityRanks: await readConfirmedCapabilityRanks(options.root),
+    // Relay-backed sources carry capability_rank at the source boundary; no
+    // routing-policy artifact is consulted here.
+    capabilityRanks: null,
   });
   // Admission packets in plan order: id = the node's block id (what
   // `admission.granted_packet_ids` references and the host matches to nodes),
@@ -498,14 +514,6 @@ export async function prepareImplementDispatch(
     waveKind: "implement",
     toolName: "remediate-code",
   });
-  // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
-  // shared Gate-0 confirmation (spec/dispatch-quota.md). Best-effort — an absent
-  // or unreadable confirmation ⇒ costRank falls to real price then tier. G3: the
-  // ordering is POLICY and is no longer discarded when reach shifts.
-  const confirmedCostPositions = await readConfirmedCostPositions(options.root);
-  // Cost↔speed dial: the operator's durable operating point from the same Gate-0
-  // confirmation (spec/dispatch-quota.md). Absent ⇒ 0 (cost-first default).
-  const dispatchBias = await readConfirmedDispatchBias(options.root);
   const quota = await buildDispatchQuota(
     runId,
     "implement",
@@ -513,8 +521,6 @@ export async function prepareImplementDispatch(
     admissionPackets,
     waveOptions?.grantLeases ?? true,
     null,
-    confirmedCostPositions,
-    dispatchBias,
   );
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 

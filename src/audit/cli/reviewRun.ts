@@ -186,6 +186,17 @@ export async function materializeReviewRun(
   return { task, activeReviewRun, pendingTasks };
 }
 
+function sortedTaskIds(tasks: AuditTask[]): string[] {
+  const ids: string[] = [];
+  for (const task of tasks) {
+    if (typeof task.task_id !== "string") {
+      throw new Error("Invalid pending audit task manifest: task_id must be a string.");
+    }
+    ids.push(task.task_id);
+  }
+  return ids.sort();
+}
+
 export async function ensureSemanticReviewRun(params: {
   root: string;
   artifactsDir: string;
@@ -197,33 +208,65 @@ export async function ensureSemanticReviewRun(params: {
 }): Promise<{ state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }> {
   const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
   if (existingRun) {
-    const blockedState =
-      params.bundle.audit_state?.status === "blocked"
-        ? params.bundle.audit_state
-        : buildBlockedAuditState({
-            state: params.state,
-            obligationId: params.obligationId,
-            executor: "agent",
-            blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-          });
-    const blockedBundle = { ...params.bundle, audit_state: blockedState };
-    await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-      writeCoreArtifacts(params.artifactsDir, blockedBundle),
-    );
-    await writeHandoffOnly({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      bundle: blockedBundle,
-      audit_state: blockedState,
-      progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-      providerName: WORKER_COMMAND_PROVIDER_NAME,
-      activeReviewRun: existingRun,
-    });
-    return {
-      state: blockedState,
-      bundle: blockedBundle,
-      activeReviewRun: existingRun,
-    };
+    let existingPendingTasks: AuditTask[] | null = null;
+    if (existingRun.pending_audit_tasks_path) {
+      try {
+        existingPendingTasks = await readJsonFile<AuditTask[]>(
+          existingRun.pending_audit_tasks_path,
+        );
+      } catch (error) {
+        if (!isFileMissingError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    const currentPendingTaskIds = sortedTaskIds(buildPendingAuditTasks(params.bundle));
+    const existingPendingTaskIds =
+      existingPendingTasks === null
+        ? undefined
+        : sortedTaskIds(existingPendingTasks);
+    const manifestMatches =
+      existingPendingTaskIds !== undefined &&
+      existingPendingTaskIds.length === currentPendingTaskIds.length &&
+      existingPendingTaskIds.every(
+        (taskId, index) => taskId === currentPendingTaskIds[index],
+      );
+
+    // Source-pool ingestion can advance coverage between materializing the host
+    // run and preparing its dispatch. Reusing the old pointer in that window
+    // would send the host a packet for tasks already accepted by the source
+    // pool, while leaving the current complement unreviewed. A missing manifest
+    // is equally untrusted: fail closed by rematerializing it below.
+    if (manifestMatches) {
+      const blockedState =
+        params.bundle.audit_state?.status === "blocked"
+          ? params.bundle.audit_state
+          : buildBlockedAuditState({
+              state: params.state,
+              obligationId: params.obligationId,
+              executor: "agent",
+              blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
+            });
+      const blockedBundle = { ...params.bundle, audit_state: blockedState };
+      await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+        writeCoreArtifacts(params.artifactsDir, blockedBundle),
+      );
+      await writeHandoffOnly({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        bundle: blockedBundle,
+        audit_state: blockedState,
+        progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
+        providerName: WORKER_COMMAND_PROVIDER_NAME,
+        activeReviewRun: existingRun,
+      });
+      return {
+        state: blockedState,
+        bundle: blockedBundle,
+        activeReviewRun: existingRun,
+      };
+    }
   }
 
   const blockedState = buildBlockedAuditState({

@@ -144,6 +144,13 @@ describe("decideNextStep — lean path = the low risk tier (integration)", () =>
   let priorRollingEngine: string | undefined;
   beforeEach(async () => {
     await harness.resetTestRepo();
+    await writeFile(
+      join(REPO_DIR, "session-config.json"),
+      JSON.stringify({
+        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      }),
+      "utf8",
+    );
     // G2: dispatch.rolling_engine is unrepresentable on disk; pin the wave opt-out via
     // the sanctioned env override so the post-fast-path step is a clean dispatch_implement.
     priorRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;

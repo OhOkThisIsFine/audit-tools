@@ -20,7 +20,15 @@ import { BYTES_PER_TOKEN } from "audit-tools/shared";
 import { makeState as makeBaseState } from "./test-helpers.js";
 
 function makeState(overrides: Partial<RemediationState> = {}): RemediationState {
-  return makeBaseState({ status: "implementing", ...overrides });
+  return makeBaseState({
+    status: "implementing",
+    host_capabilities: {
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+      max_concurrent: 4,
+    },
+    ...overrides,
+  });
 }
 
 describe("byte-based token estimation — implement dispatch", () => {

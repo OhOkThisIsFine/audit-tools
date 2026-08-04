@@ -272,6 +272,84 @@ export function phaseCutModulesFromContracts(contractsPayload: unknown): PhaseCu
   return out;
 }
 
+/**
+ * Add Path-A seam-preparation edges to the contract-derived module DAG. The
+ * decomposition gate has already guaranteed one preparer per required seam;
+ * this projection makes every implementation module for either participating
+ * work block depend on that preparer, yielding a seam-first phase followed by
+ * parallel refactor modules.
+ */
+export function applyWorkBlockSeamDependencies(
+  modules: PhaseCutModule[],
+  moduleDecompositionPayload: unknown,
+  pathASeedPayload: unknown,
+): PhaseCutModule[] {
+  const decomposition = moduleDecompositionPayload as { modules?: unknown } | undefined;
+  const decomposed = Array.isArray(decomposition?.modules) ? decomposition!.modules : [];
+  const seed = pathASeedPayload as { work_block_seams?: unknown } | undefined;
+  const seams = Array.isArray(seed?.work_block_seams) ? seed!.work_block_seams : [];
+  if (decomposed.length === 0 || seams.length === 0) return modules;
+
+  const sourceBlocksByModule = new Map<string, Set<string>>();
+  const preparerBySeam = new Map<string, string>();
+  for (const value of decomposed) {
+    if (typeof value !== "object" || value === null) continue;
+    const mod = value as {
+      name?: unknown;
+      source_work_block_ids?: unknown;
+      prepares_seam_ids?: unknown;
+    };
+    if (typeof mod.name !== "string") continue;
+    sourceBlocksByModule.set(
+      mod.name,
+      new Set(
+        Array.isArray(mod.source_work_block_ids)
+          ? mod.source_work_block_ids.filter((id): id is string => typeof id === "string")
+          : [],
+      ),
+    );
+    for (const seamId of Array.isArray(mod.prepares_seam_ids)
+      ? mod.prepares_seam_ids
+      : []) {
+      if (typeof seamId === "string" && !preparerBySeam.has(seamId)) {
+        preparerBySeam.set(seamId, mod.name);
+      }
+    }
+  }
+
+  const extraDeps = new Map<string, Set<string>>();
+  for (const value of seams) {
+    if (typeof value !== "object" || value === null) continue;
+    const seam = value as {
+      id?: unknown;
+      block_ids?: unknown;
+      requires_preparation?: unknown;
+    };
+    if (seam.requires_preparation !== true || typeof seam.id !== "string") continue;
+    const preparer = preparerBySeam.get(seam.id);
+    if (!preparer) continue;
+    const blockIds = new Set(
+      Array.isArray(seam.block_ids)
+        ? seam.block_ids.filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    for (const [moduleName, sourceBlocks] of sourceBlocksByModule) {
+      if (moduleName === preparer) continue;
+      if (![...sourceBlocks].some((id) => blockIds.has(id))) continue;
+      const deps = extraDeps.get(moduleName) ?? new Set<string>();
+      deps.add(preparer);
+      extraDeps.set(moduleName, deps);
+    }
+  }
+
+  return modules.map((module) => ({
+    ...module,
+    depends_on: [
+      ...new Set([...module.depends_on, ...(extraDeps.get(module.name) ?? [])]),
+    ].sort((a, b) => a.localeCompare(b)),
+  }));
+}
+
 /** Render the derived phase cut as a markdown section for the critique prompt. */
 export function renderPhaseCutSection(cut: PhaseCut): string {
   const lines = cut.phases.map(

@@ -24,7 +24,13 @@ const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.js"
 const { isInProcessAuditPool } = await import("../../src/audit/cli/hybridDispatch.js");
 const { planHybridDispatch } = await import("../../src/shared/dispatch/hybridDispatch.js");
 
-const SESSION: SessionConfig = { quota: { host_active_subagent_limit: 8 } };
+const SESSION: SessionConfig = {
+  quota: {
+    host_active_subagent_limit: 8,
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+};
 
 function tasks(count: number, tokens = 1000): FrontierNode[] {
   return Array.from({ length: count }, (_, i) => ({ id: `task-${i}`, estimatedTokens: tokens }));
@@ -65,8 +71,8 @@ function settledStore() {
 }
 
 test("audit hybrid: a claude-worker pool is an in-process pool and receives partition work", async () => {
-  // Live dogfood 2026-07-16: the claude-worker lane shipped confirmable (Gate-0 fold,
-  // backend-keyed pools, launch transport) but UNDRIVABLE — isInProcessAuditPool did
+  // Live dogfood 2026-07-16: the claude-worker lane shipped with reachable,
+  // backend-keyed pools and a launch transport but was UNDRIVABLE — isInProcessAuditPool did
   // not classify `claude-worker`, so the hybrid split assigned the free lanes nothing
   // and all 313 packets fell to the walled host pool (zero dispatched).
   expect(isInProcessAuditPool({ providerName: "claude-worker" })).toBe(true);

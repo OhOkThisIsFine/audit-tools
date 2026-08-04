@@ -62,11 +62,13 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "modules": [{
     "name": "<module-name>",
     "responsibilities": "<brief description of what this module does>",
-    "file_scope": ["<repo-relative paths owned by this module>"]
+    "file_scope": ["<repo-relative paths owned by this module>"],
+    "source_work_block_ids": ["<audit work-block ids implemented by this module; [] outside Path A>"],
+    "prepares_seam_ids": ["<required audit seam ids prepared by this module before parallel refactors; [] when none>"]
   }]
 }`,
     description:
-      "Decompose the goal into a set of named modules with rough responsibilities and file scope. Do not draft seam contracts yet — only identify modules and their file ownership. Before assigning a module's file_scope, verify where the named responsibility logic ACTUALLY lives in the repository — open the candidate file and confirm it implements the logic. Do NOT scope a module at a thin re-export shim / barrel (a file that only does `export * from …` / `export { x } from …`): scope it at the file where the real logic lives, or the enforcing gate (validateDecompositionFileScope) will reject a shim-only file_scope.",
+      "Decompose the goal into a set of named modules with rough responsibilities and file scope. For a Path-A seed, preserve its bounded work topology: map implementation modules with source_work_block_ids, and create a distinct seam-preparation module for every work_block_seam where requires_preparation=true (one module may prepare several seams). A seam-preparation module lists prepares_seam_ids and scopes the shared files; downstream implementation modules are mechanically dependency-gated behind it. Do not draft seam contracts yet — only identify modules and ownership/preparation roles. Before assigning a module's file_scope, verify where the named responsibility logic ACTUALLY lives in the repository — open the candidate file and confirm it implements the logic. Do NOT scope a module at a thin re-export shim / barrel (a file that only does `export * from …` / `export { x } from …`): scope it at the file where the real logic lives, or the enforcing gate (validateDecompositionFileScope) will reject a shim-only file_scope.",
   },
   module_contract_drafting: {
     title: "Per-Module Contract Drafting",
@@ -617,4 +619,3 @@ Downstream artifacts are re-derived automatically after this repair — do not e
 
   return { prompt, outputPath };
 }
-

@@ -99,14 +99,14 @@
   },
   "16c518f14d62ba29": {
     "disposition": "settled",
-    "answer": "Retire the 9router doc (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
+    "answer": "Retire the obsolete proxy guide (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
     "subject": "A tracked doc sits in no manifest row, and the gate meant to prevent that structurally cannot see it",
-    "path": "examples/9router-harness-proxy-setup.md",
+    "path": "examples/README.md",
     "decided_at": "2026-07-26T02:39:37.188Z"
   },
   "c3bcc992b3794a9a": {
     "disposition": "settled",
-    "answer": "Retire the 9router doc (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
+    "answer": "Retire the obsolete proxy guide (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
     "subject": "examples/README has a pointer that no longer resolves, an incomplete contents list, and half its body is spec prose",
     "path": "examples/README.md",
     "decided_at": "2026-07-26T02:39:37.238Z"

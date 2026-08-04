@@ -38,8 +38,9 @@ workflow semantics.
 
 ## Architecture
 
-The system separates deterministic extraction from bounded LLM judgment: a provider-confirmation gate,
-intake, the analysis artifacts, task planning, review, ingestion, and synthesis into `audit-report.md`.
+The system separates deterministic extraction from bounded LLM judgment: intake, analysis artifacts,
+task planning, review, ingestion, and synthesis into `audit-report.md`. Provider/model ordering is an
+external broker concern, not an audit obligation.
 
 **The ordering has one home** — the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`, walked by
 `decideNextStep`. `README.md` carries the conceptual grouping with the disclaimer that `PRIORITY` is

@@ -88,7 +88,7 @@ Obligation-driven. Each invocation **drains** the deterministic obligation front
 
 Steps 2–4 **drain** — they repeat within a single `advanceAudit` call across successive deterministic obligations (the default; fold-aware, so the loop halts at every operator-interactive pause), bounded by `MAX_DRAIN_STEPS`. The call returns a single consolidated summary for the whole drain. "Bounded" therefore means *fold-aware drain of the deterministic frontier*, not one obligation per call — see *One bounded step per invocation* below.
 
-The obligation ordering is the single-sourced `PRIORITY` array in `src/audit/orchestrator/nextStep.ts` (running `provider_confirmation` → … → `friction_capture_current`); `decideNextStep` walks it and picks the highest-priority unsatisfied obligation. Read the array for the authoritative, current ordering — it is not restated here (it has drifted when copied).
+The obligation ordering is the single-sourced `PRIORITY` array in `src/audit/orchestrator/nextStep.ts` (running `repo_manifest` → … → `friction_capture_current`); `decideNextStep` walks it and picks the highest-priority unsatisfied obligation. Provider/model ordering and failover live in the external dispatch broker, not the audit graph.
 
 Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is its render. `synthesis_narrative_current` layers LLM narrative (themes/exec summary/top risks); omits cleanly without provider.
 

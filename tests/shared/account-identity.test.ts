@@ -83,7 +83,7 @@ test("one vendor credential is ONE account partition, however the lane is reache
 });
 
 test("proxied siblings on ONE service behind ONE proxy share an account key", () => {
-  // Expanded claude-worker sources (proxyCatalog.expandSources) all carry the proxy's
+  // Declared claude-worker sources can all carry the proxy's
   // endpoint + api_key_env and differ only in `service`+`model`. Two nim models behind
   // the proxy are ONE account — a 429 on one must gate the other. The old
   // deriveLocalAccountId guard (transport === "openai-compatible") returned null here,

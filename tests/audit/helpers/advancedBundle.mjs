@@ -86,8 +86,8 @@ function injectPreStructureMarkers(bundle) {
  * `advanceAudit(b)` here would overshoot the target obligation. The forced path is
  * the single-step primitive (drain never triggers on a forced executor).
  */
-// Some stages require a real root (intake / provider-confirmation / intent
-// checkpoint); the structure + graph-enrichment + later stages deliberately run
+// Some stages require a real root (intake / intent checkpoint); the structure +
+// graph-enrichment + later stages deliberately run
 // ROOTLESS so the fixture stays offline-hermetic (manifest-only floor graph, no
 // analyzer subprocess). `withRoot` mirrors the pre-drain hand-drive exactly.
 const forcedStep = (executor, { withRoot = false } = {}) => async (b, root) =>
@@ -99,8 +99,6 @@ const forcedStep = (executor, { withRoot = false } = {}) => async (b, root) =>
   ).updated_bundle;
 
 const FIXTURE_STAGES = [
-  // Session gate: provider confirmation auto-completes headlessly (ignores input).
-  { upTo: "provider_confirmation", run: forcedStep("provider_confirmation_executor", { withRoot: true }) },
   // Intake satisfies repo_manifest + file_disposition in one advance.
   { upTo: "file_disposition", run: forcedStep("intake_executor", { withRoot: true }) },
   // Host-delegated markers: auto_fixes_applied + syntax_resolved + external_analyzers_current.

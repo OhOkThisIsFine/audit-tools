@@ -87,15 +87,8 @@ async function runSingleAdvanceStep(
 ): Promise<AdvanceAuditResult> {
   const log = options.runLogger ?? RunLogger.disabled();
   const correlationId = createCorrelationId();
-  // Gate-aware, and load-bearing: this decide is what actually picks the runner. The
-  // engine layers above derive `provider_confirmation` WITH the G3 delta, so a
-  // gate-blind decide here would see it satisfied, select the next obligation, and
-  // dispatch the WRONG executor — the gate would never fire at all. Reads the gate's
-  // CURRENT value (it clears on promotion), so the drain converges.
   const decision = decideNextStep(bundle, {
     emitStaleness: false,
-    newlyReachableBackends: gateDeltaKeys(options),
-    unevidencedCapabilityPools: gateCapabilityDelta(options),
   });
   const forcedExecutor = options.preferredExecutor ?? null;
   const selectedExecutor = forcedExecutor ?? decision.selected_executor;
@@ -164,8 +157,6 @@ async function runSingleAdvanceStep(
     });
     const state = deriveAuditState(bundle, {
       emitStaleness: false,
-      newlyReachableBackends: gateDeltaKeys(options),
-      unevidencedCapabilityPools: gateCapabilityDelta(options),
     });
     state.last_executor = selectedExecutor;
     state.last_obligation = selectedObligation ?? undefined;
@@ -236,14 +227,8 @@ async function runSingleAdvanceStep(
     agent_reflections: bundle.agent_reflections,
     artifact_metadata: metadata,
   };
-  // Gate-aware: this state is what gets PERSISTED as audit_state.json. Deriving it
-  // blind would record `provider_confirmation: satisfied` while the gate still says
-  // otherwise — a report that contradicts the routing decision. Read AFTER the
-  // executor ran, so a promotion's clear is already reflected.
   const updatedState = deriveAuditState(metadataBundle, {
     emitStaleness: false,
-    newlyReachableBackends: gateDeltaKeys(options),
-    unevidencedCapabilityPools: gateCapabilityDelta(options),
   });
   updatedState.last_executor = selectedExecutor;
   updatedState.last_obligation = selectedObligation ?? undefined;
@@ -362,8 +347,6 @@ function deriveObligationState(
       // can never outlive the delta it was derived under.
       state = deriveAuditState(bundle, {
         emitStaleness: false,
-        newlyReachableBackends: gateDeltaKeys(options),
-        unevidencedCapabilityPools: gateCapabilityDelta(options),
       });
       cache.set(bundle, state);
     }
@@ -447,26 +430,6 @@ function buildDrainObligations(
     derive: deriveObligationState(id, cache, options),
     execute: runDrainStep,
   }));
-}
-
-/**
- * The G3 gate's CURRENT delta as bare keys — all `deriveAuditState` needs (it only
- * names them in the obligation's reason). Read through the shared gate object on
- * every call, never captured: the executor clears it on promotion, and a stale read
- * here is exactly the `PRIORITY[0]` livelock.
- */
-function gateDeltaKeys(options: AdvanceAuditOptions): string[] {
-  return (options.providerConfirmationGate?.newlyReachable ?? []).map((b) => b.key);
-}
-
-/**
- * The capability-evidence delta, read through the shared gate for the same reason as
- * {@link gateDeltaKeys}. A drain decide blind to THIS delta would see
- * `provider_confirmation` satisfied and dispatch the next obligation's executor —
- * the capability gate would never fire inside a drain at all.
- */
-function gateCapabilityDelta(options: AdvanceAuditOptions): string[] {
-  return options.providerConfirmationGate?.unevidencedCapability ?? [];
 }
 
 /**

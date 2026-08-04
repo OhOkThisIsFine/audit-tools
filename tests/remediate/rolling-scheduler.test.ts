@@ -387,6 +387,7 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
       id: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
+      contextCapTokens: 200_000,
     } as CapacityPool,
   ];
   const sessionConfig: SessionConfig = { quota: {} } as SessionConfig;
@@ -482,6 +483,7 @@ describe("driveRollingDispatch: capability floor enforced in the engine (F4)", (
         hostModel: null,
         hostConcurrencyLimit: null,
         rank: "deep",
+        contextCapTokens: 200_000,
         quotaStateEntry: { cooldown_until: future, consecutive_429_count: 1 },
       } as unknown as CapacityPool,
       {
@@ -490,6 +492,7 @@ describe("driveRollingDispatch: capability floor enforced in the engine (F4)", (
         hostModel: null,
         hostConcurrencyLimit: null,
         rank: "small",
+        contextCapTokens: 200_000,
       } as unknown as CapacityPool,
     ];
     const seen: string[] = [];
@@ -850,4 +853,3 @@ describe("atomic-replace: wave-batch shim removed", () => {
     expect(typesSrc).toContain("implement_rolling_sequential");
   });
 });
-

@@ -13,7 +13,6 @@ import {
   isFileMissingError,
   readJsonFile,
   writeJsonFile,
-  readProviderConfirmationInput,
   type ObligationDef,
   type ObligationOutcome,
 } from "audit-tools/shared";
@@ -23,6 +22,7 @@ import type {
   GraphEdge,
   SessionConfig,
   SynthesisNarrative,
+  WorkPartitionPolicy,
 } from "audit-tools/shared";
 import {
   type ArtifactBundle,
@@ -36,7 +36,6 @@ import {
   groundDesignFindings,
   promotedAuditReportPath,
   withFileLock,
-  type NewlyReachableBackend,
 } from "audit-tools/shared";
 import {
   CharterSubmissionSchema,
@@ -55,7 +54,6 @@ import type {
 } from "../types/designAssessment.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
-import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
 import {
   captureDesignReviewSnapshot,
   isDesignReviewStale,
@@ -95,7 +93,6 @@ import {
   materializeReviewRun,
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
-import { reconcileHostFanoutLeases } from "./dispatch/hostFanoutGate.js";
 
 /**
  * Skip the design-review enrichment when the host quota wall has persisted past the
@@ -182,7 +179,6 @@ export async function stampSystemicChallengeSkipped(
 import {
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
-  resolveHostDispatchProviderName,
 } from "./rollingAuditDispatch.js";
 import {
   buildAuditSourcePools,
@@ -194,11 +190,8 @@ import {
   planHybridDispatch,
   readSettledPools,
   addSettledPool,
-  readConfirmedDispatchPolicy,
-  readConfirmedCapabilityRanks,
-  resolveDispatchExclusion,
+  buildSelfSpawnExclusion,
   captureZeroCapacityFriction,
-  PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
 } from "audit-tools/shared";
 import { resolveHostDispatchCapability } from "./args.js";
 
@@ -288,6 +281,8 @@ export type NextStepParams = {
    * enabled AND an explicit backend provider is configured.
    */
   sessionConfig?: SessionConfig;
+  /** Current invocation's resolved partition capacity; transient and never persisted. */
+  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
   /**
    * Defect-1: whether an attended conversation host is driving this invocation and can
    * fan out subagents (the already-resolved `resolveHostDispatchCapability` value from
@@ -299,14 +294,6 @@ export type NextStepParams = {
    * env / true via `resolveHostDispatchCapability` in the fold.
    */
   hostCanDispatch?: boolean;
-  /**
-   * G3 reconciliation gate state, threaded BY REFERENCE from the CLI down to the
-   * executor. The delta is computed ONCE per invocation (it shells out — see
-   * `DeriveAuditStateOptions.newlyReachableBackends`) and CLEARED by the executor on
-   * promotion, so every derivation in the drain reads the current value.
-   * Unset by every non-CLI caller ⇒ presence-only, as before.
-   */
-  providerConfirmationGate?: ProviderConfirmationGateState;
 };
 
 export type TerminalStepResult =
@@ -332,7 +319,6 @@ export type NextStepResult =
   | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "intent_equivalence"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
@@ -977,13 +963,6 @@ export async function handleDesignReviewBranch(
     consumed = true;
   }
 
-  if (contractResult.status !== "absent" || conceptualResult.status !== "absent") {
-    // Item C: the design-review fan-out results are in — release the host-fan-out
-    // panel's leases now, before the coverage packet dispatch that follows, rather
-    // than letting them linger to the 20-min TTL and depress its headroom.
-    await reconcileHostFanoutLeases(params.artifactsDir, "design_review");
-  }
-
   if (consumed && existing) {
     await writeJsonFile(
       join(params.artifactsDir, "design_assessment.json"),
@@ -1440,10 +1419,6 @@ export async function handleSystemicChallengeBranch(
           preferredExecutor: "systemic_challenge_executor",
           systemicChallengePath: path,
         });
-        // Item C: this adversary round's findings are folded — release its host
-        // fan-out lease before the next round (or the coverage dispatch) rather
-        // than at the 20-min TTL.
-        await reconcileHostFanoutLeases(p.artifactsDir, "systemic_challenge");
       },
       shouldOmit: (b) => {
         // Shallow ceiling (default): omit deterministically, no host turn.
@@ -1539,7 +1514,7 @@ export const HOST_GATE_KINDS: readonly HostGateKind[] = [
  * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig" | "providerConfirmationGate">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig" | "workPartition">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -1563,12 +1538,8 @@ export async function executeAndRecord(
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
       since: params.since,
-      // 2a-ii: the effective dispatch config reaches provider_confirmation_executor,
-      // which consumes + persists the confirmed pool from the handshake inventory.
       sessionConfig: params.sessionConfig,
-      // G3: threaded by reference so `advanceAudit`'s OWN nested drain derives
-      // against the same live gate, and the executor's clear is visible to it.
-      providerConfirmationGate: params.providerConfirmationGate,
+      workPartition: params.workPartition,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -1771,30 +1742,6 @@ interface AuditNextStepCtx {
   obligationTrail: string[];
 }
 
-/**
- * The gate's CURRENT delta as bare keys — all the PURE state pass needs (it only
- * names them in the obligation's reason). Keeps `deriveAuditState` decoupled from the
- * richer provider-carrying record the autonomous write consumes.
- *
- * Read through the shared gate object on every call, never captured by value: the
- * executor clears it on promotion, and a stale read is exactly the `PRIORITY[0]`
- * livelock (see {@link ProviderConfirmationGateState}).
- */
-function gateKeys(gate: ProviderConfirmationGateState | undefined): string[] {
-  return (gate?.newlyReachable ?? []).map((b) => b.key);
-}
-
-/**
- * The capability-evidence delta as bare model ids. Read through the shared gate object
- * on every call for exactly the same reason as {@link gateKeys} — the executor clears
- * it on promotion, and a stale read re-selects `PRIORITY[0]` forever.
- */
-function gateUnevidencedCapability(
-  gate: ProviderConfirmationGateState | undefined,
-): string[] {
-  return gate?.unevidencedCapability ?? [];
-}
-
 /** The engine state audit folds on: the in-memory bundle (reloaded per transition). */
 type AuditEngineState = ArtifactBundle;
 
@@ -1838,16 +1785,7 @@ async function runDeterministicExecutor(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  // Gate-aware, and that is load-bearing: the obligation engine's `derive` re-opens
-  // `provider_confirmation` on a non-empty G3 delta, so a gate-BLIND decision here
-  // would see it as satisfied, select the next obligation instead, and run the wrong
-  // executor for the one the engine actually picked.
-  const decision = decideNextStep(bundle, {
-    newlyReachableBackends: gateKeys(ctx.params.providerConfirmationGate),
-    unevidencedCapabilityPools: gateUnevidencedCapability(
-      ctx.params.providerConfirmationGate,
-    ),
-  });
+  const decision = decideNextStep(bundle);
 
   const noProgress = await checkNoProgressBeforeDispatch({
     index: ctx.iterationRef.value,
@@ -1901,13 +1839,10 @@ async function runDeterministicExecutor(
  */
 function deriveObligationState(
   id: string,
-  gate?: ProviderConfirmationGateState,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
   return (bundle) => {
     if (bundle.audit_state?.status === "complete") return "satisfied";
     const state = deriveAuditState(bundle, {
-      newlyReachableBackends: gateKeys(gate),
-      unevidencedCapabilityPools: gateUnevidencedCapability(gate),
     });
     const found = state.obligations.find((o) => o.id === id);
     if (!found) return "satisfied";
@@ -1927,7 +1862,6 @@ function deriveObligationState(
  * priority scan it mirrors.
  */
 export function buildAuditObligations(
-  gate?: ProviderConfirmationGateState,
 ): AuditObligationDef[] {
   const deterministic = (id: string): AuditObligationDef => ({
     id,
@@ -1936,84 +1870,6 @@ export function buildAuditObligations(
   });
 
   return [
-    // Provider confirmation gate (Gate-0, interactive on the conversation-first
-    // CLI path): pause for the operator to confirm/reorder the priced provider
-    // pool + optionally self-report a host model roster. The operator writes
-    // `provider-confirmation.input.json`; its presence flips this obligation from
-    // "emit the step" to "consume the input" — the deterministic executor then
-    // promotes it into both canonical artifacts (per-tool seam + shared
-    // confirmation). Headless (`advanceAudit`, no CLI) never reaches here and
-    // auto-completes with the tool's price-ascending suggestion. See
-    // spec/dispatch-quota.md.
-    {
-      id: "provider_confirmation",
-      derive: deriveObligationState("provider_confirmation", gate),
-      execute: async (bundle, ctx): Promise<AuditOutcome> => {
-        const input = await readProviderConfirmationInput(ctx.params.artifactsDir);
-        if (input) {
-          // Operator has submitted → consume it (writes both canonical artifacts).
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        // `?.` on the property too, not just `gate` itself: unlike the old single
-        // `||` expression (whose short-circuit meant a fixture setting only one of
-        // the two fields never evaluated the other), both are now read
-        // unconditionally below, so an omitted field must degrade to `0`, not throw.
-        const capabilityDelta = (gate?.unevidencedCapability?.length ?? 0) > 0;
-        const reachDelta = (gate?.newlyReachable?.length ?? 0) > 0;
-        if (gate?.autonomous && capabilityDelta) {
-          // R3-3: autonomous ≠ "no LLM" — it means no HUMAN operator. `next-step`
-          // still returns a prompt contract to the host agent driving the run, so a
-          // capability-evidence delta on an autonomous run EMITS the ranker prompt
-          // addressed to that host LLM instead of folding to the executor (which
-          // today can only promote the pools unranked — a loud fail-open, not a
-          // fix). The reach delta, if also present, does NOT get asked here: reach
-          // is never an LLM's call (the executor fails it closed regardless of what
-          // this submission says — see `intakeExecutors.ts`'s `authoredByLlm`), so
-          // the prompt omits that section entirely and the reach delta is resolved
-          // on a LATER attended re-confirmation, not this one.
-          return {
-            kind: "emit",
-            step: {
-              kind: "provider_confirmation",
-              state: deriveAuditState(bundle, {
-                newlyReachableBackends: gateKeys(gate),
-                unevidencedCapabilityPools: gateUnevidencedCapability(gate),
-              }),
-              bundle,
-            },
-          };
-        }
-        if (gate?.autonomous && reachDelta) {
-          // G3, autonomous, reach-only (no capability delta): a backend the operator
-          // never confirmed became reachable and there is nobody to ask — and unlike
-          // capability, reach is not something an LLM may answer on the operator's
-          // behalf either (see the executor's sharp edge). Fold to the executor,
-          // which fail-closed-excludes it + records the friction — never emit a
-          // prompt no one will read.
-          //
-          // Scoped to the DELTA case deliberately: a first-time confirmation (no
-          // artifact at all) still pauses even under `autonomous_mode`, exactly as
-          // today. Auto-confirming a pool the operator has never once seen is a
-          // separate decision from reconciling a delta against one they approved.
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        // Otherwise pause for the operator — ALWAYS on the interactive CLI path,
-        // even with one (or zero) auto-detected provider: the operator may want to
-        // ADD a provider discovery missed, exclude one, or reorder. Headless
-        // (`advanceAudit`, no CLI host) never reaches here and auto-completes.
-        return {
-          kind: "emit",
-          step: {
-            kind: "provider_confirmation",
-            state: deriveAuditState(bundle, {
-              newlyReachableBackends: gateKeys(gate),
-              unevidencedCapabilityPools: gateUnevidencedCapability(gate),
-            }),
-            bundle,
-          },
-        };
-      },
-    },
     deterministic("repo_manifest"),
     deterministic("file_disposition"),
     deterministic("auto_fixes_applied"),
@@ -2280,39 +2136,29 @@ async function runHostDelegationObligation(
   });
   const engineEnabled = resolveAuditRollingEngineEnabled({ sessionConfig });
   const hybridCfg = sessionConfig ?? ({} as SessionConfig);
-  // The operator's Gate-0 route decision, applied as a set-difference over freshly
-  // gathered reach. Read here (not inside the pool build) because policy lives on the
-  // root-scoped confirmation and this is the layer that owns `root`. Self-spawn-blocked
-  // is recomputed against THIS process's env, never inherited from the writing auditor.
-  const auditExcludedBackends = resolveDispatchExclusion(
-    await readConfirmedDispatchPolicy(ctx.params.root),
-  );
-  const { pools: auditSourcePools, zeroedByExclusion } = await buildAuditSourcePools(hybridCfg, {
-    excludedBackends: auditExcludedBackends,
-    // These pools ARE the headless rolling drive's `poolsOverride`, not a preview —
-    // omitting the ranks here would leave every headless audit run fail-opening at the
-    // capability floor, the exact behavior this obligation exists to remove.
-    capabilityRanks: await readConfirmedCapabilityRanks(ctx.params.root),
-    // D1 cross-class collision rule: an attended host identity colliding with a
-    // folded source keeps exactly one pool (the in-process source survives — the
-    // engine drives that one account; a non-in-process collider is dropped).
-    ...(hostCanDispatch
-      ? { attendedHostProviderName: resolveHostDispatchProviderName(hybridCfg) }
-      : {}),
-  });
-
-  // Loud, not silent: the operator's own exclusion policy removed every reachable
-  // source, so this run has no in-process capacity and the headless branch below is
-  // unreachable. Emitted under the stable provider-confirmation key rather than a run
-  // id — the source-pool build happens BEFORE the review run is materialized, so no
-  // run id exists yet (the same reason Gate-0's fail-closed capture uses that key).
-  if (zeroedByExclusion) {
-    await captureZeroCapacityFriction(
-      ctx.params.artifactsDir,
-      PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
-      zeroedByExclusion,
-      "audit-code",
-    );
+  // An attended host is the review dispatcher. Provider/model policy, ordering,
+  // failover, and concurrency belong to the host plus llm-relay; audit-tools must
+  // not auto-resolve a second provider (for example Codex) and compete with it.
+  // Keep source-pool discovery only for a genuinely headless invocation, where no
+  // host exists to launch the review packets.
+  let auditSourcePools: Awaited<ReturnType<typeof buildAuditSourcePools>>["pools"] = [];
+  if (!hostCanDispatch) {
+    const auditExcludedBackends = buildSelfSpawnExclusion();
+    const sourceBuild = await buildAuditSourcePools(hybridCfg, {
+      excludedBackends: auditExcludedBackends,
+      capabilityRanks: null,
+    });
+    auditSourcePools = sourceBuild.pools;
+    // Loud, not silent: a headless run with every source removed has no way to
+    // make progress, so retain the mechanical self-spawn diagnostic.
+    if (sourceBuild.zeroedByExclusion) {
+      await captureZeroCapacityFriction(
+        ctx.params.artifactsDir,
+        "source-pool-admission",
+        sourceBuild.zeroedByExclusion,
+        "audit-code",
+      );
+    }
   }
 
   // Headless whole-frontier drive — the old in-process monopoly branch, now a
@@ -2676,9 +2522,7 @@ export async function runDeterministicForNextStep(
   const outcome = await advance(
     {
       priority: PRIORITY,
-      obligations: countTransitions(
-        buildAuditObligations(params.providerConfirmationGate),
-      ),
+      obligations: countTransitions(buildAuditObligations()),
     },
     startBundle,
     ctx,

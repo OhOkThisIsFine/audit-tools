@@ -367,15 +367,12 @@ test("scheduleWave source and confidence reflect the limit origin", () => {
   expect(schedule.model).toBe("anthropic/claude-sonnet-4-6");
 });
 
-test("detectHostActiveSubagentLimit falls back to Codex documented default when config silent", () => {
+test("detectHostActiveSubagentLimit returns null when Codex config is silent", () => {
   const limit = detectHostActiveSubagentLimit(
     { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop" },
     () => null,
   );
-  expect(limit !== null, "expected a non-null limit for Codex Desktop").toBeTruthy();
-  if (limit === null) throw new Error("expected a non-null limit for Codex Desktop");
-  expect(limit.active_subagents).toBe(6);
-  expect(limit.source).toBe("known_default");
+  expect(limit).toBe(null);
 });
 
 test("detectHostActiveSubagentLimit discovers Codex agents.max_threads from config", () => {

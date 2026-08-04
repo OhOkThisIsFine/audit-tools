@@ -32,17 +32,8 @@ async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise<T> {
         "",
       ].join("\n"),
     );
-    // Pre-satisfy the interactive provider-confirmation gate (accept the suggested
-    // ordering) so tests that assert a specific FIRST next-step reach it directly.
-    // Without this the gate would halt first whenever the host has ≥2 dispatchable
-    // providers on PATH — a PATH-dependent (non-hermetic) stop point orthogonal to
-    // what these tests exercise.
     const seededArtifactsDir = join(root, ".audit-tools/audit");
     await mkdir(seededArtifactsDir, { recursive: true });
-    await writeFile(
-      join(seededArtifactsDir, "provider-confirmation.input.json"),
-      JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
-    );
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -127,10 +118,20 @@ const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
 // Several pause step kinds (analyzer_install + design_review_parallel/contract/conceptual
 // + confirm_intent + optional edge_reasoning), each at most once; allow extra headroom.
 const MAX_STRUCTURE_PHASE_PAUSES = 8;
+const TEST_AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
 
 async function advancePastDesignReview(
   root: string,
-  wrapperArgs: string[] = ["next-step"],
+  wrapperArgs: string[] = ["next-step", ...TEST_AUDITOR_ARGS],
   wrapperOpts: Record<string, unknown> = {},
 ) {
   const incomingDir = join(root, ".audit-tools/audit", "incoming");
@@ -208,17 +209,6 @@ async function advancePastDesignReview(
       await writeFile(
         step.artifact_paths.edge_reasoning_results,
         JSON.stringify([], null, 2) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "provider_confirmation") {
-      await writeFile(
-        step.artifact_paths.provider_confirmation_input,
-        JSON.stringify(
-          { schema_version: "provider-confirmation-input/v1" },
-          null,
-          2,
-        ) + "\n",
       );
       continue;
     }
@@ -333,7 +323,13 @@ test.concurrent("next-step reads host_can_dispatch_subagents from session-config
     const step = await advancePastDesignReview(root, [
       "next-step",
       "--auditor",
-      JSON.stringify({ self: { provider: "worker-command" } }),
+      JSON.stringify({
+        self: {
+          provider: "worker-command",
+          context_tokens: 200_000,
+          output_tokens: 8_000,
+        },
+      }),
     ]);
 
     expect(step.step_kind).toBe("dispatch_review");
@@ -345,7 +341,7 @@ test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or se
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step"],
+      ["next-step", ...TEST_AUDITOR_ARGS],
       { env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" } },
     );
 
@@ -357,7 +353,11 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":true}}'],
+      [
+        "next-step",
+        "--auditor",
+        '{"self":{"can_dispatch_subagents":true,"context_tokens":200000,"output_tokens":8000}}',
+      ],
     );
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -365,8 +365,8 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
     expect(step.step_kind).toBe("dispatch_review");
     expect(Array.isArray(plan)).toBe(true);
     expect(plan.length > 0).toBeTruthy();
-    expect(prompt).toMatch(/dispatch-quota\.json/);
-    expect(prompt).toMatch(/admission\.granted_packet_ids/);
+    expect(prompt).toMatch(/Launch one subagent for each entry in the plan/);
+    expect(prompt).not.toMatch(/admission\.granted_packet_ids/);
     expect(prompt).toMatch(/merge-and-ingest/);
     expect(prompt).not.toMatch(/single-task fallback/i);
   });
@@ -376,7 +376,11 @@ test.concurrent("next-step false emits single_task_fallback and does not prepare
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
+      [
+        "next-step",
+        "--auditor",
+        '{"self":{"can_dispatch_subagents":false,"context_tokens":200000,"output_tokens":8000}}',
+      ],
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 

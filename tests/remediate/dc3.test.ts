@@ -76,7 +76,10 @@ const STEP_OPTIONS = {
   root: TEST_DIR,
   artifactsDir: ARTIFACTS_DIR,
   runId: "DC3-TEST",
-  sessionConfig: { parallel_workers: 2, quota: {} } as any,
+  sessionConfig: {
+    parallel_workers: 2,
+    quota: { default_context_tokens: 200_000, reserved_output_tokens: 8_000 },
+  } as any,
 };
 
 async function writeRaw(
@@ -254,7 +257,10 @@ describe("DC-3 module_contract_drafting — per-module wave fan-out", () => {
   it("inv-2: the cap collapses to the module count when host concurrency is higher", async () => {
     const step = await buildNextContractPipelineStep({
       ...STEP_OPTIONS,
-      sessionConfig: { parallel_workers: 10, quota: {} } as any,
+      sessionConfig: {
+        parallel_workers: 10,
+        quota: { default_context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      } as any,
     });
     const prompt = await promptOf(step!);
     // max_concurrent never exceeds itemCount (3 modules).
@@ -566,4 +572,3 @@ describe("DC-3 source partition (inv-5)", () => {
     expect(ledger.goal_id).toBe("G1");
   });
 });
-

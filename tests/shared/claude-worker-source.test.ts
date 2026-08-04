@@ -19,7 +19,7 @@ const { validateSessionConfig } = await import(
   "../../src/shared/validation/sessionConfig.js"
 );
 
-/** A fully-specified claude-worker source (what the populate cache emits). */
+/** A fully-specified, explicitly declared claude-worker source. */
 const CLAUDE_WORKER: DispatchableSource = {
   id: "claude-worker:nim/z-ai/glm-5.2",
   transport: "claude-worker",

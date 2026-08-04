@@ -242,10 +242,18 @@ describe("hybrid decision point — the pools the drive receives (H2+H4 residual
       // The cross-cycle fact: the free pool exhausted on an earlier cycle.
       await addSettledPool(nodeSettledPoolsPath(ARTIFACTS_DIR, PLAN_ID), POOL_SETTLED);
 
+      // The host's token limits are DECLARED (matching the real handshake): the
+      // coordinator's fit gate refuses a pool whose context cap it cannot resolve,
+      // so an undeclared host pool would take no nodes, the backend would carry the
+      // whole frontier, and the fully-green close would delete the very artifacts
+      // this test reads. With a declared host cap the host keeps its partition and
+      // the drain stops at the host dispatch step, artifacts intact.
       await decideNextStep({
         root: REPO_DIR,
         hostCanDispatchSubagents: true,
         hostMaxConcurrent: 1,
+        hostContextTokens: 200_000,
+        hostOutputTokens: 8_000,
         rollingEngine: true,
         sessionConfig,
       });

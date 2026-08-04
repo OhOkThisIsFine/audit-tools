@@ -35,7 +35,7 @@ import {
 } from "audit-tools/shared";
 
 /**
- * Whether a confirmed pool is one audit launches in-process as a review worker —
+ * Whether an eligible pool is one audit launches in-process as a review worker —
  * the shared `isInProcessWorkerProvider` predicate (H3), audit policy: no
  * command-shaped workers (a read-only review packet carries no per-worker command,
  * and `worker-command` is audit's conventional host-dispatch default). The host
@@ -55,7 +55,7 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
 export async function buildAuditSourcePools(
   sessionConfig: SessionConfig,
   options: {
-    /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
+    /** Backends rejected by the local self-spawn guard. */
     excludedBackends?: DispatchExclusion;
     /**
      * The attended conversation host's identity (D1 cross-class dedup): audit's host
@@ -66,13 +66,8 @@ export async function buildAuditSourcePools(
      */
     attendedHostProviderName?: ResolvedProviderName | null;
     /**
-     * Confirmed per-model capability ranks (`readConfirmedCapabilityRanks`). REQUIRED,
-     * like every other builder on this path: the capability floor fails OPEN, so an
-     * unwired site is indistinguishable from a working one. This was briefly optional
-     * on a "read-only/preview callers have no root" justification that was simply
-     * false — the sole production caller is the headless rolling-dispatch drive, with
-     * `root` in scope — and the optionality is exactly what let that site go unwired.
-     * `null` is the explicit "no confirmation in scope" answer.
+     * Optional externally supplied per-model capability ranks. Relay-backed sources
+     * normally declare capability_rank directly; null means no auxiliary rank map.
      */
     capabilityRanks: ReadonlyMap<string, number> | null;
   },

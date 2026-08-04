@@ -39,7 +39,20 @@ interface FrictionRecord {
 
 // Post-G2 the backend provider identity rides the per-invocation --auditor
 // descriptor rather than the persisted session-config.json (which now rejects it).
-const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
+const AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
+const TEST_WORK_PARTITION = {
+  capacityTokens: 192_000,
+  availableParallelism: null,
+};
 
 /** Drive the deterministic pipeline in-process up to (and including) synthesis,
  * leaving synthesis_narrative_current as the only outstanding obligation, and
@@ -55,6 +68,7 @@ async function persistSynthesisReadyState(
   });
   const synthesis = await advanceAudit(ingest.updated_bundle, {
     preferredExecutor: "synthesis_executor",
+    workPartition: TEST_WORK_PARTITION,
   });
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, synthesis.updated_bundle);
@@ -106,7 +120,13 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
-        { analyzers: { typescript: "skip" } },
+        {
+          analyzers: { typescript: "skip" },
+          block_quota: {
+            context_tokens: 200_000,
+            reserved_output_tokens: 8_000,
+          },
+        },
         null,
         2,
       ) + "\n",
@@ -206,6 +226,10 @@ test.concurrent("next-step omits the narrative when synthesis.narrative is disab
         {
           synthesis: { narrative: false },
           analyzers: { typescript: "skip" },
+          block_quota: {
+            context_tokens: 200_000,
+            reserved_output_tokens: 8_000,
+          },
         },
         null,
         2,

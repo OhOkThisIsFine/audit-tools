@@ -27,9 +27,10 @@ node audit-code.mjs ensure --quiet
 
 Then ask the backend for exactly one next step. This is also the **capability
 handshake**: report what you can dispatch to *right now* on every `next-step`
-call as a single `--auditor <json>` flag, so the backend sizes review packets to
-your real model instead of a conservative 32k floor. The JSON is one object with
-a `self` field describing the model you drive; report inside `self`:
+call as a single `--auditor <json>` flag, so the backend sizes review packets
+against reported or configured limits. Without them, capacity remains unknown
+and packet sizing pauses. The JSON is one object with a `self` field describing
+the model you drive; report inside `self`:
 
 - `roster` — an ordered JSON array (lowest rank first) of the models you can
   dispatch subagents to *right now*, one entry per relative rank:

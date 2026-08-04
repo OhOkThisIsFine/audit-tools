@@ -88,7 +88,7 @@ reported.
 
 ## Finding 3 — R3-3 is not the mechanism the gate specified
 
-`rankHeadlessCapabilityPools` ([`rankHeadlessCapabilityPools` in sharedProviderConfirmation.ts](../../src/shared/providers/sharedProviderConfirmation.ts)) is 14 lines:
+`rankHeadlessCapabilityPools` (in the since-retired `sharedProviderConfirmation.ts`) was 14 lines:
 deduplicate, sort by `context_tokens` descending, tie-break `localeCompare`, merge into the prior
 order. There is no LLM anywhere in its path.
 

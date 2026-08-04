@@ -8,8 +8,8 @@ import { isHeadlessPrimaryProvider } from "./inProcessWorkers.js";
 /**
  * Single-sourced PATH detection + self-spawn guard for the provider subsystem.
  *
- * Both `providerFactory.ts` (auto-resolution) and `providerConfirmation.ts`
- * (Gate-0 discovery) used to carry their OWN copy of `commandExists` and their
+ * Legacy provider discovery and `providerFactory.ts` (auto-resolution) used to
+ * carry separate copies of `commandExists` and their
  * own ad-hoc `env.CLAUDECODE` / `env.CODEX` self-spawn checks. Two copies of a
  * security-relevant guard is exactly the drift hazard the project's
  * "single-source the guard" invariant exists to prevent — a fix to one copy
@@ -63,7 +63,7 @@ export function setCommandExistsForTesting(
  * The in-session env signals that mark a host as already running INSIDE an agent
  * of a given kind — a fresh subprocess of that same agent cannot be spawned from
  * within one (it would self-spawn). Single-sourced so the auto-resolver and the
- * Gate-0 discovery path agree byte-for-byte on what "self-spawn-blocked" means.
+ * source discovery path agree byte-for-byte on what "self-spawn-blocked" means.
  *
  * Only `claude-code` and `codex` have a self-spawn hazard: they are headless
  * CLIs auto-spawned as fresh subprocesses. The other providers are either
@@ -79,7 +79,7 @@ const SELF_SPAWN_ENV_SIGNAL: Partial<Record<ResolvedProviderName, string>> = {
  * is currently inside an active session of that same agent (e.g. `claude-code`
  * while `CLAUDECODE` is set, `codex` while `CODEX` is set). Machine-readable,
  * single-sourced, and the basis for both the auto-resolver's `*Available`
- * guards and the Gate-0 `self_spawn_blocked` exclusion flag.
+ * guards and the source-pool self-spawn exclusion.
  */
 export function isSelfSpawnBlocked(
   provider: ResolvedProviderName,
@@ -119,7 +119,7 @@ export function isSelfSpawnBlocked(
  *   3. env auto-detection — the SAME in-session signals the self-spawn guard
  *      reads: inside a Codex session (`isSelfSpawnBlocked("codex")`) ⇒ `codex`;
  *      inside a Claude Code session (`CLAUDECODE`) ⇒ `claude-code`;
- *   4. default `claude-code` (the conversation-first host).
+ *   4. neutral `worker-command` fallback when the host did not identify itself.
  *
  * B1 host-identity sourcing: keying the host fan-out off THIS (rather than
  * literal `claude-code`) is what stops a Codex host from charging its packets to
@@ -141,7 +141,7 @@ export function resolveConversationHostProvider(options?: {
   if (isSelfSpawnBlocked("codex", env)) return "codex";
   if (isSelfSpawnBlocked("claude-code", env)) return "claude-code";
   if (isSelfSpawnBlocked("agy", env)) return "agy";
-  return "claude-code";
+  return "worker-command";
 }
 
 /**
@@ -149,7 +149,7 @@ export function resolveConversationHostProvider(options?: {
  * an EXPLICIT `sessionConfig.provider` passes through; an unset / `auto`
  * provider falls back to the auto-detected {@link resolveConversationHostProvider}
  * (the `--host-provider` override / `host_provider` config / env detection /
- * `claude-code`). Single-sourced so the fallback and the `auto`-exclusion live
+ * neutral fallback). Single-sourced so the fallback and the `auto`-exclusion live
  * in ONE place rather than being re-spelled at each dispatch call site across
  * both orchestrators.
  *

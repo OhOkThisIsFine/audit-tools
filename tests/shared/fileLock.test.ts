@@ -10,7 +10,13 @@ import {
   makeClock,
 } from "./fileLockTestSupport.mjs";
 
-import { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } from "../../src/shared/quota/fileLock.js";
+import {
+  acquireLock,
+  releaseLock,
+  withFileLock,
+  FileLockTimeoutError,
+  isTransientPermissionContention,
+} from "../../src/shared/quota/fileLock.js";
 import { RunLogger } from "../../src/shared/observability/runLog.js";
 
 // A back-dated mtime guaranteed to read as stale: any time older than the
@@ -43,6 +49,15 @@ test("FileLockTimeoutError has correct name, message, and prototype chain", () =
   expect(err instanceof Error, "should be an instance of Error").toBeTruthy();
   expect(err.name, "name must be FileLockTimeoutError").toBe("FileLockTimeoutError");
   expect(err.message.includes(lockPath), `message should contain the lock path; got: ${err.message}`).toBeTruthy();
+});
+
+test("permission errors retry only when the lock directory is writable", () => {
+  expect(isTransientPermissionContention("EEXIST", false)).toBe(true);
+  expect(isTransientPermissionContention("EPERM", true)).toBe(true);
+  expect(isTransientPermissionContention("EACCES", true)).toBe(true);
+  expect(isTransientPermissionContention("EPERM", false)).toBe(false);
+  expect(isTransientPermissionContention("EACCES", false)).toBe(false);
+  expect(isTransientPermissionContention("ENOENT", true)).toBe(false);
 });
 
 // ---------------------------------------------------------------------------

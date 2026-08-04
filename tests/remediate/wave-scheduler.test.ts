@@ -11,8 +11,7 @@ import {
   computeBackoffCooldownMs,
 } from "../../src/remediate/quota/index.js";
 import {
-  CODEX_DEFAULT_MAX_THREADS,
-  createBrokeredRepairDispatch,
+  createBrokeredRepairDispatch as createBrokeredRepairDispatchCore,
   classifyCapableHost,
   classifyProvider,
   computeDispatchCapacity,
@@ -23,6 +22,35 @@ import {
   type CapacityPool,
   type QuotaStateEntry,
 } from "audit-tools/shared";
+
+const TEST_SESSION_CONFIG = {
+  quota: {
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+};
+
+// Most broker tests isolate concurrency/quota behavior, not missing-capability
+// refusal. Give those fixtures an explicit window; the dedicated unknown-window
+// test below calls the production constructor directly.
+function createBrokeredRepairDispatch() {
+  const broker = createBrokeredRepairDispatchCore();
+  return {
+    ...broker,
+    broker(input: Parameters<typeof broker.broker>[0]) {
+      return broker.broker({
+        ...input,
+        sessionConfig: {
+          ...input.sessionConfig,
+          quota: {
+            ...TEST_SESSION_CONFIG.quota,
+            ...(input.sessionConfig.quota ?? {}),
+          },
+        },
+      });
+    },
+  };
+}
 
 describe("detectHostConcurrencyFromEnv", () => {
   it("returns limit from REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
@@ -42,14 +70,12 @@ describe("detectHostConcurrencyFromEnv", () => {
     expect(result!.active_subagents).toBe(4);
   });
 
-  it("falls back to Codex documented default when config is silent", () => {
+  it("does not invent a Codex limit when config is silent", () => {
     const result = detectHostConcurrencyFromEnv(
       { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop" } as any,
       () => null, // config file silent / absent
     );
-    expect(result).not.toBeNull();
-    expect(result!.active_subagents).toBe(CODEX_DEFAULT_MAX_THREADS);
-    expect(result!.source).toBe("known_default");
+    expect(result).toBeNull();
   });
 
   it("discovers Codex agents.max_threads from config when present", () => {
@@ -124,7 +150,7 @@ describe("scheduleWave", () => {
   it("uses host-reported limit as max_concurrent cap", async () => {
     const result = await scheduleWave({
       hostMaxConcurrent: 3,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 10,
       capabilityRanks: null,
       env: {} as any,
@@ -134,9 +160,9 @@ describe("scheduleWave", () => {
   });
 
   it("F4 inv-4: a host limit below the computed wave reduces max_concurrent to exactly active_subagents and binds host_concurrency", async () => {
-    // No reported host limit → unknown-provider fallback yields a wave > 2.
+    // No reported host limit → declared token capacity permits a wave > 2.
     const uncapped = await scheduleWave({
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 20,
       capabilityRanks: null,
       env: {} as any,
@@ -148,7 +174,7 @@ describe("scheduleWave", () => {
     // to exactly 2 and binding_cap is stamped host_concurrency.
     const capped = await scheduleWave({
       hostMaxConcurrent: 2,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 20,
       capabilityRanks: null,
       env: {} as any,
@@ -164,7 +190,7 @@ describe("scheduleWave", () => {
     // it stays at the item count (concurrency-is-declared-or-absent-never-learned).
     // The dispatch site (marshal.ts) surfaces this blind wave loudly instead.
     const result = await scheduleWave({
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 20,
       capabilityRanks: null,
       env: {} as any,
@@ -179,7 +205,7 @@ describe("scheduleWave", () => {
   it("max_concurrent never exceeds item count", async () => {
     const result = await scheduleWave({
       hostMaxConcurrent: 10,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 3,
       capabilityRanks: null,
       env: {} as any,
@@ -200,7 +226,7 @@ describe("scheduleWave", () => {
   it("computes estimated_wave_tokens correctly", async () => {
     const result = await scheduleWave({
       hostMaxConcurrent: 4,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 10,
       capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
@@ -222,7 +248,10 @@ describe("scheduleWave", () => {
 
   it("uses session config parallel_workers when no explicit limit", async () => {
     const result = await scheduleWave({
-      sessionConfig: { parallel_workers: 7 },
+      sessionConfig: {
+        ...TEST_SESSION_CONFIG,
+        parallel_workers: 7,
+      },
       itemCount: 20,
       capabilityRanks: null,
       env: {} as any,
@@ -316,7 +345,7 @@ describe("buildDispatchQuota", () => {
   it("assembles a valid quota object with an admission block (no scalar)", async () => {
     const schedule = await scheduleWave({
       hostMaxConcurrent: 5,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 10,
       capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
@@ -350,7 +379,7 @@ describe("buildDispatchQuota", () => {
 
   it("works for implement phase (no declared cap ⇒ null)", async () => {
     const schedule = await scheduleWave({
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 3,
       capabilityRanks: null,
       env: {} as any,
@@ -373,7 +402,7 @@ describe("buildDispatchQuota", () => {
     // With a real ledger grant, the host in-flight cap bounds the granted set: 5 of 10.
     const schedule = await scheduleWave({
       hostMaxConcurrent: 5,
-      sessionConfig: null,
+      sessionConfig: TEST_SESSION_CONFIG,
       itemCount: 10,
       capabilityRanks: null,
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
@@ -400,7 +429,7 @@ function makeQuotaStateEntry(
 async function makeScheduleResult(): Promise<WaveScheduleResult> {
   return await scheduleWave({
     hostMaxConcurrent: 4,
-    sessionConfig: null,
+    sessionConfig: TEST_SESSION_CONFIG,
     itemCount: 4,
     capabilityRanks: null,
     env: {} as any,
@@ -498,19 +527,19 @@ describe("scheduleWave — host capability handshake (N8)", () => {
     expect(result.resolved_limits.output_tokens).toBe(32_000);
   });
 
-  it("falls back to the conservative 32k floor when no window is reported", async () => {
+  it("leaves token windows unknown when no capability is reported", async () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 3,
       capabilityRanks: null,
       env: {} as any,
     });
-    expect(result.resolved_limits.context_tokens).toBe(32_000);
-    expect(result.resolved_limits.output_tokens).toBe(4_096);
+    expect(result.resolved_limits.context_tokens).toBeNull();
+    expect(result.resolved_limits.output_tokens).toBeNull();
   });
 
-  it("lifts resolved_limits above the floor on the quota-enabled path", async () => {
-    const floor = await scheduleWave({
+  it("resolves unknown limits on the quota-enabled path", async () => {
+    const unknown = await scheduleWave({
       sessionConfig: { quota: {} },
       itemCount: 3,
       capabilityRanks: null,
@@ -526,9 +555,8 @@ describe("scheduleWave — host capability handshake (N8)", () => {
       hostOutputTokens: 32_000,
       env: {} as any,
     });
-    // Without a handshake the discovered_capability rung is absent → conservative
-    // floor; reporting the real window sizes the budget up to it.
-    expect(floor.resolved_limits.context_tokens).toBe(32_000);
+    // Without a handshake capacity is unknown; reporting the real window resolves it.
+    expect(unknown.resolved_limits.context_tokens).toBeNull();
     expect(discovered.resolved_limits.context_tokens).toBe(200_000);
   });
 });
@@ -662,7 +690,7 @@ describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
     const broker = createBrokeredRepairDispatch();
     const base = {
       providerName: "claude-code" as const,
-      sessionConfig: {},
+      sessionConfig: TEST_SESSION_CONFIG,
       hostModel: null,
       slots: [slot("n1", 500), slot("n2", 500)],
     };
@@ -729,8 +757,7 @@ describe("createBrokeredRepairDispatch — broker()", () => {
   });
 
   it("refuses over-budget when even the top slot exceeds the usable window", () => {
-    // Conservative 32k floor → usable budget ~ (32000-4096)*0.7 ≈ 19532 tokens.
-    // A ~30MB payload estimates far above that, so the single slot is refused.
+    // The fixture's explicit window is far below this ~30MB payload estimate.
     const decision = broker.broker({
       providerName: "claude-code",
       sessionConfig: {},
@@ -740,6 +767,17 @@ describe("createBrokeredRepairDispatch — broker()", () => {
     expect(decision.admission).toBe("refused_over_budget");
     expect(decision.admitted).toBe(0);
     expect(decision.admittedSlotIds).toEqual([]);
+  });
+
+  it("refuses when context or output capacity is unknown", () => {
+    const decision = createBrokeredRepairDispatchCore().broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("unknown", 500)],
+    });
+    expect(decision.admission).toBe("refused_over_budget");
+    expect(decision.admitted).toBe(0);
   });
 
   it("surfaces a persisted cooldown_until from the quota state entry", () => {
@@ -867,7 +905,7 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
     };
     const capacity = computeDispatchCapacity({
       pools: [pool],
-      sessionConfig: {},
+      sessionConfig: TEST_SESSION_CONFIG,
       // N pending items, each cheap — the host cap must bind the wave, not tokens.
       pendingItemTokens: Array.from({ length: N }, () => 500),
     });
@@ -896,7 +934,7 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
           hostConcurrencyLimit: hostLimit,
         },
       ],
-      sessionConfig: {},
+      sessionConfig: TEST_SESSION_CONFIG,
       pendingItemTokens: Array.from({ length: N }, () => 500),
     });
     // Identical cap from both dispatch paths ⟹ a single scheduling chokepoint.
@@ -965,7 +1003,7 @@ describe("F4 inv-10 — O3 stage-3 re-dispatch flows through the broker chokepoi
           hostConcurrencyLimit: hostLimit,
         },
       ],
-      sessionConfig: {},
+      sessionConfig: TEST_SESSION_CONFIG,
       pendingItemTokens: slots.map(estimateSlotTokens),
     });
     expect(decision.schedule.max_concurrent).toBe(
@@ -1647,7 +1685,7 @@ describe("buildConfirmedPools — capabilityRanks parameter flow", () => {
     // passed vacuously when the fixture's model never matched.
     const capabilityRanks = new Map([["model-host", 2]]);
     const result = await buildConfirmedPools({
-      sessionConfig: null,
+      sessionConfig: { host_provider: "claude-code" },
       hostCanDispatch: true,
       hostModels: [
         { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "model-host" },
@@ -1697,4 +1735,3 @@ describe("buildConfirmedPools — capabilityRanks parameter flow", () => {
     }
   });
 });
-

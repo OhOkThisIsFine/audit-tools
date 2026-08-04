@@ -1,7 +1,12 @@
 import { test, expect } from "vitest";
 import { assignStableFindingIds, findingIdentitySignature } from "../../src/audit/reporting/findingIdentity.js";
-import { buildAuditReportModel } from "../../src/audit/reporting/synthesis.js";
+import { buildAuditReportModel as buildAuditReportModelRaw } from "../../src/audit/reporting/synthesis.js";
 import type { Finding, AuditResult } from "../../src/audit/types.js";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
+
+const buildAuditReportModel = (
+  params: Parameters<typeof buildAuditReportModelRaw>[0],
+) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
 
 // A finding fixture also carries the volatile per-emission metadata
 // (unit_id/pass_id/timestamp) real workers attach alongside a Finding — none of

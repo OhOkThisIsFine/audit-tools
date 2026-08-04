@@ -164,11 +164,29 @@ export const WorkBlockSchema = z.object({
   finding_ids: z.array(z.string()),
   unit_ids: z.array(z.string()),
   owned_files: z.array(z.string()),
+  /** Implementation work, or a broad/systemic coordination obligation. */
+  role: z.enum(["implementation", "coordination"]),
   max_severity: FindingSeveritySchema,
   rationale: z.string(),
   depends_on: z.array(z.string()),
 });
 export type WorkBlock = z.infer<typeof WorkBlockSchema>;
+
+/** Explicit overlap between two work blocks. Dangerous overlaps require a seam-first phase. */
+export const WorkBlockSeamSchema = z.object({
+  id: z.string(),
+  block_ids: z.tuple([z.string(), z.string()]),
+  kind: z.enum([
+    "predicted_write_conflict",
+    "shared_context",
+    "systemic_coordination",
+  ]),
+  shared_files: z.array(z.string()),
+  shared_unit_ids: z.array(z.string()),
+  requires_preparation: z.boolean(),
+  rationale: z.string(),
+});
+export type WorkBlockSeam = z.infer<typeof WorkBlockSeamSchema>;
 
 /** A synthesis theme: a root cause spanning several findings (Phase 6). */
 export const FindingThemeSchema = z.object({
@@ -269,6 +287,7 @@ export const AuditFindingsReportSchema = z.object({
   summary: AuditFindingsSummarySchema,
   findings: z.array(FindingSchema),
   work_blocks: z.array(WorkBlockSchema),
+  work_block_seams: z.array(WorkBlockSeamSchema),
   /**
    * Findings a tool-executable anchor REFUTED (S7 tier-2 disproof). Recorded here
    * but kept OUT of `findings`/`work_blocks` so a disproven claim never merges as

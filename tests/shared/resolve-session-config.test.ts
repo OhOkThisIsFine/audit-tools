@@ -85,6 +85,16 @@ describe("resolveSessionConfig", () => {
     expect(eff.sources).toEqual(sources);
   });
 
+  test("a dispatchable driver never selects its source by array order", () => {
+    const sources: DispatchableSource[] = [
+      { transport: "openai-compatible", endpoint: "https://a/v1", model: "a" },
+      { transport: "openai-compatible", endpoint: "https://b/v1", model: "b" },
+    ];
+    expect(() =>
+      resolveSessionConfig({}, { self: { provider: "openai-compatible" }, sources }),
+    ).toThrow(/matches multiple sources.*cannot be selected by sources\[\] order/);
+  });
+
   test("self.parallel_workers resolves onto the effective config (it has a descriptor home)", () => {
     const eff = resolveSessionConfig({}, { self: { provider: "claude-code", parallel_workers: 3 } });
     expect(eff.parallel_workers).toBe(3);

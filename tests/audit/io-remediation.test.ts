@@ -481,31 +481,6 @@ test("loadArtifactBundle succeeds for correct intent_checkpoint schema_version (
   });
 });
 
-test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched provider_confirmation schema_version (ARC-dd468422)", async () => {
-  const { loadArtifactBundle: load } = await import("../../src/audit/io/artifacts.js");
-  const { writeFile: wf } = await import("node:fs/promises");
-  await withTempDir("arc-dd468422-provider-", async (dir: string) => {
-    // Write provider_confirmation.json with wrong schema_version
-    const stale = {
-      schema_version: "0.0.0",
-      confirmed_at: new Date().toISOString(),
-      provider_pool: [],
-      session_level: true,
-    };
-    await wf(join(dir, "provider_confirmation.json"), JSON.stringify(stale), "utf8");
-
-    await assert.rejects(
-      load(dir),
-      (err: any) => {
-        expect(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError").toBeTruthy();
-        expect(err.message).toMatch(/provider_confirmation\.json/);
-        expect(err.message).toMatch(/0\.0\.0/);
-        return true;
-      },
-    );
-  });
-});
-
 test("audit-code src/ has no circular imports — in-process cycle check reports zero cycles (ARC-1fa005bb)", async () => {
   // ARC-1fa005bb: a dep-cycle was alleged (index.ts -> cli.ts -> io/ -> index.ts).
   // The STILL-REAL verdict confirmed the cycle does NOT exist in current source.

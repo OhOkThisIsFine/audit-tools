@@ -50,8 +50,7 @@ test("advanceAudit drains the consecutive deterministic regen frontier by defaul
     // The drain is the DEFAULT now (no opt-in flag); a bare call drains.
     const options = { root, analyzers: SKIP_ANALYZERS };
 
-    // First call starts at provider_confirmation (host-delegation, auto-completes
-    // headlessly) and then drains the WHOLE deterministic run — intake, auto-fix,
+    // First call starts at intake and then drains the WHOLE deterministic run — intake, auto-fix,
     // syntax, external-analyzer acquisition, structure, graph enrichment, design
     // assessment, structure decomposition — in ONE call, halting at the
     // intent_checkpoint host-delegation boundary.
@@ -87,20 +86,16 @@ test("a forced preferredExecutor runs EXACTLY one step (no drain)", async () => 
     await writeFixtureRepo(root);
     const options = { root, analyzers: SKIP_ANALYZERS };
 
-    // Reach a state with a deterministic frontier ahead: provider gate first.
-    const provider = await advanceAudit({}, {
+    // Force the first deterministic executor.
+    const intake = await advanceAudit({}, {
       ...options,
-      preferredExecutor: "provider_confirmation_executor",
+      preferredExecutor: "intake_executor",
     });
-    // Forced provider step ran exactly one step and did NOT drain into intake.
-    expect(provider.selected_obligation).toBe(
-      "forced:provider_confirmation_executor",
-    );
-    const afterProvider = decideNextStep(provider.updated_bundle);
-    // The very next actionable obligation is still intake's repo_manifest —
-    // proving the forced call did not drain past its single step.
-    expect(afterProvider.selected_obligation).toBe("repo_manifest");
-    expect(provider.updated_bundle.repo_manifest).toBe(undefined);
+    expect(intake.selected_obligation).toBe("forced:intake_executor");
+    const afterIntake = decideNextStep(intake.updated_bundle);
+    expect(afterIntake.selected_obligation).toBe("auto_fixes_applied");
+    expect(intake.updated_bundle.repo_manifest).toBeDefined();
+    expect(intake.updated_bundle.auto_fixes_applied).toBe(undefined);
   });
 });
 

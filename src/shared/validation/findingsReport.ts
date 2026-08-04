@@ -92,6 +92,14 @@ export function validateAuditFindingsReport(
     );
   }
 
+  if ("work_block_seams" in value && !Array.isArray(value.work_block_seams)) {
+    pushValidationIssue(
+      issues,
+      path ? `${path}.work_block_seams` : "work_block_seams",
+      `work_block_seams must be an array, got ${typeof value.work_block_seams}.`,
+    );
+  }
+
   // summary must be an object if present.
   if ("summary" in value && (typeof value.summary !== "object" || value.summary === null)) {
     pushValidationIssue(

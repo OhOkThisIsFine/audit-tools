@@ -129,16 +129,6 @@ async function advanceToDispatchReady(runNextStep, root, log) {
       );
       continue;
     }
-    if (step.step_kind === "provider_confirmation") {
-      // Accept the tool's suggested cost ordering verbatim (the interactive Gate-0
-      // step; spec/dispatch-quota.md). Writing the input is the "operator has
-      // acted" signal that lets the run proceed.
-      await writeFile(
-        step.artifact_paths.provider_confirmation_input,
-        JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
-      );
-      continue;
-    }
     if (step.step_kind === "confirm_intent") {
       await writeFile(
         step.artifact_paths.intent_checkpoint,
@@ -632,13 +622,36 @@ export async function runAuditFlowPhase({
   smokeLabel,
   distCliPath,
 }) {
+  // The smoke drives next-step the way a real conversation host does: with the
+  // `--auditor` capability handshake (single-model shorthand from the skill).
+  // Post dispatch-inversion, packet sizing REFUSES a host whose token limits are
+  // unknown (a resumable blocked step) — so a handshake-less drive can never
+  // reach dispatch_review, and a smoke without one would only ever test the
+  // refusal path. The handshake rides the `@<path>` FILE form: inline JSON
+  // through the `.cmd` bin shim is the known batch-%*-requoting trap.
+  const auditorHandshakePath = join(root, ".audit-tools", "smoke-auditor.json");
+  await mkdir(join(root, ".audit-tools"), { recursive: true });
+  await writeFile(
+    auditorHandshakePath,
+    JSON.stringify({
+      self: {
+        can_dispatch_subagents: true,
+        context_tokens: 200_000,
+        output_tokens: 32_000,
+      },
+    }) + "\n",
+  );
   const runNextStep = () =>
-    runCommand(auditCodeCommand, ["next-step"], {
-      cwd: root,
-      label: "audit-code next-step",
-      failureHint:
-        "Inspect .audit-tools/audit/steps/current-step.json and rerun with AUDIT_CODE_VERBOSE=1 if the wrapper fails earlier than expected.",
-    });
+    runCommand(
+      auditCodeCommand,
+      ["next-step", "--auditor", `@${auditorHandshakePath}`],
+      {
+        cwd: root,
+        label: "audit-code next-step",
+        failureHint:
+          "Inspect .audit-tools/audit/steps/current-step.json and rerun with AUDIT_CODE_VERBOSE=1 if the wrapper fails earlier than expected.",
+      },
+    );
 
   let stepStart = Date.now();
   log.step("next-step until dispatch_review (expect a ready review step)");

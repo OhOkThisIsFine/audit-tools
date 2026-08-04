@@ -1,17 +1,14 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, ResolvedProviderName, AuditorDescriptor } from "audit-tools/shared";
-import { resolveSessionConfig, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
+import type { HostModelRosterEntry, AuditorDescriptor } from "audit-tools/shared";
+import { resolveSessionConfig, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
-import { createFreshSessionProvider } from "../providers/index.js";
-import { resolveHostDispatchProviderName } from "./rollingAuditDispatch.js";
 import { renderCommand } from "./args.js";
 import { writeCurrentStep } from "./steps.js";
 import {
   mergeAndIngestCommand,
   nextStepCommand,
   renderDispatchReviewPrompt,
-  renderRollingDispatchPrompt,
   renderSingleTaskFallbackStepPrompt,
 } from "./prompts.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
@@ -109,13 +106,11 @@ export async function renderSemanticReviewStep(params: {
     await loadSessionConfig(artifactsDir),
     params.descriptor,
   );
-  // The host-review dispatch pool is keyed to the CURRENT driver's identity, never
-  // an inherited headless-backend `sessionConfig.provider` (the founding capability-
-  // inheritance bug): a run started under `provider: codex` and resumed by a Claude
-  // host must size/charge the fan-out against the host's meter, not codex's. See
-  // `resolveHostDispatchProviderName` ([[capability-is-per-auditor-not-per-audit]]).
-  const providerName = resolveHostDispatchProviderName(sessionConfig);
-  const provider = createFreshSessionProvider(providerName, sessionConfig);
+  // The host and llm-relay own provider selection, failover, quota, and
+  // concurrency. Use the non-LLM bookkeeping identity only to let the shared
+  // packet sizer apply the host handshake; never auto-resolve or instantiate a
+  // second provider here (especially not Codex).
+  const providerName = "worker-command" as const;
   const dispatch = await prepareDispatchArtifacts({
     packageRoot,
     runId: activeReviewRun.run_id,
@@ -124,13 +119,19 @@ export async function renderSemanticReviewStep(params: {
     sessionConfig,
     providerName,
     hostModel: sessionConfig.block_quota?.host_model ?? null,
-    queryLimits: provider.queryLimits?.bind(provider),
+    queryLimits: undefined,
     hostActiveSubagentLimit: params.hostMaxActiveSubagents,
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
     hostModelRoster: params.hostModelRoster,
     hostModelId: params.hostModelId,
     inProcessMadeProgress: params.inProcessMadeProgress,
+    // The conversation host and llm-relay own execution, quota, and concurrency.
+    // audit-tools still packetizes and records the plan, but must not reserve a
+    // host lease or turn its cold-start probe into a host-facing pause/cap.
+    grantLeases: false,
+    hostOwnedDispatch: true,
+    recordAttemptedGrant: true,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   // The current driver's RESOLVED descriptor rides the continue-command so a bare
@@ -175,7 +176,7 @@ export async function renderSemanticReviewStep(params: {
           ? `No available pool can hold this wave's packets: every blocked packet exceeds the context window (or ` +
             `capability) of every pool currently available — this is a fit mismatch, NOT a quota wall, and waiting ` +
             `for a reset will not clear it. ${strandedCount} packet(s) are pending.${wallExplain} Options: free a ` +
-            `larger pool (un-exclude one at Gate-0, or declare one), or re-run \`next-step\` after upstream ` +
+            `larger declared pool, or re-run \`next-step\` after upstream ` +
             `re-planning shrinks the packets.`
           : `The provider session limit is exhausted${resetClause}, so no review packets can be dispatched this ` +
             `pass. ${strandedCount} packet(s) remain pending.${wallExplain} This is a graceful, resumable pause — ` +
@@ -212,23 +213,8 @@ export async function renderSemanticReviewStep(params: {
     });
   }
 
-  // S-BROKER-WIRING: choose the dispatch DRIVER off the single classification +
-  // the live packet frontier / concurrency cap, and render the matching host
-  // instruction. Only meaningful when there is a quota (a real fan-out); the
-  // no-quota path launches one subagent per entry with no rolling loop.
-  const hostProvider: ResolvedProviderName = providerName;
-  const driverInstruction = dispatch.dispatch_quota_path
-    ? renderDispatchDriverInstruction(
-        selectDispatchDriver({
-          classification: classifyProvider(hostProvider),
-          eligibleItemCount: dispatch.packet_count,
-          // The admission width is the granted set size (emergent), not a computed
-          // concurrency number; the driver is chosen off how many are granted now.
-          slots: dispatch.granted_count,
-        }),
-        "the granted set (`admission.granted_packet_ids`)",
-      )
-    : undefined;
+  // Every packet in this host-owned path is emitted. There is no audit-tools
+  // dispatch driver, cap, or admission subset for the host to interpret.
   return writeCurrentStep({
     artifactsDir,
     stepKind: "dispatch_review",
@@ -238,8 +224,8 @@ export async function renderSemanticReviewStep(params: {
     allowedMcpTools: ["auditor_merge_and_ingest", "auditor_continue_audit"],
     progress: {
       summary:
-        `Granting ${dispatch.granted_count} of ${dispatch.packet_count} review packet(s) covering ` +
-        `${dispatch.task_count} task(s) this pass` +
+        `Prepared ${dispatch.packet_count} review packet(s) covering ` +
+        `${dispatch.task_count} task(s) for host dispatch` +
         (dispatch.declared_cap != null ? ` (≤${dispatch.declared_cap} in flight)` : "") +
         (dispatch.skipped_task_count > 0
           ? `; ${dispatch.skipped_task_count} task(s) already completed.`
@@ -254,38 +240,29 @@ export async function renderSemanticReviewStep(params: {
       dispatch_summary: dispatch.dispatch_summary,
     },
     stopCondition:
-      "Dispatch exactly the granted packets, run merge-and-ingest once, then run next-step for the next grant.",
+      "Dispatch every packet in the plan through the host/relay, run merge-and-ingest once, then run next-step.",
     repoRoot: root,
-    artifactPaths: {
-      dispatch_plan: dispatch.dispatch_plan_path,
-      dispatch_quota: dispatch.dispatch_quota_path,
-      dispatch_warnings: dispatch.dispatch_warnings_path,
+      artifactPaths: {
+        dispatch_plan: dispatch.dispatch_plan_path,
+        ...(dispatch.dispatch_quota_path
+          ? { dispatch_quota: dispatch.dispatch_quota_path }
+          : {}),
+        dispatch_warnings: dispatch.dispatch_warnings_path,
       active_review_task: activeReviewRun.task_path,
       pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
     },
-    prompt: params.selectedExecutor === "rolling_dispatch_executor"
-      ? renderRollingDispatchPrompt({
-          root,
-          artifactsDir,
-          runId: activeReviewRun.run_id,
-          dispatchPlanPath: dispatch.dispatch_plan_path,
-          dispatchQuotaPath: dispatch.dispatch_quota_path,
-          hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-          hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
-          driverInstruction,
-          hostDescriptor,
-        })
-      : renderDispatchReviewPrompt({
-          root,
-          artifactsDir,
-          activeReviewRun,
-          dispatchPlanPath: dispatch.dispatch_plan_path,
-          dispatchQuotaPath: dispatch.dispatch_quota_path,
-          hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-          hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
-          driverInstruction,
-          hostDescriptor,
-        }),
+    prompt: renderDispatchReviewPrompt({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      dispatchPlanPath: dispatch.dispatch_plan_path,
+      // The quota artifact remains diagnostic, but its admission subset is not
+      // an instruction: host/relay own the complete packet fan-out.
+      dispatchQuotaPath: null,
+      hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
+      hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+      hostDescriptor,
+    }),
     access: {
       read_paths: [
         dispatch.dispatch_plan_path,

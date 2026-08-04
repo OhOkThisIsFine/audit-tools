@@ -14,6 +14,7 @@ import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
   readValidatedRepoSessionIntent,
   resolveContextBudget,
+  resolveModelStatics,
   estimateTokensFromBytes,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
@@ -21,7 +22,7 @@ import {
   type SessionConfig,
 } from "audit-tools/shared";
 import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
-import { StateStore } from "../state/store.js";
+import { StateStore, type HostCapabilities } from "../state/store.js";
 import { pathTokensInCommand } from "../steps/dispatch/verifyCommands.js";
 
 /**
@@ -734,7 +735,7 @@ export async function applyPlanPipeline(
   // The budget derives from INTENT fields (block_quota) first; absent those, the
   // persisted host handshake (state.host_capabilities, written at the
   // decideNextStep seam) supplies the real window — without it a 200k-window
-  // host would over-fragment (or, pre-fix, never split) against the blind 32k
+  // host would over-fragment (or, pre-fix, never split) against a fabricated
   // floor. The two split passes run single-finding first: an oversized
   // single-finding block is atomic to the finding-granularity splitter, so it
   // must be partitioned by FILE into sub-findings before the general pass runs.
@@ -761,26 +762,52 @@ export async function applyPlanPipeline(
 /**
  * The plan-time context budget: intent `block_quota` fields first (operator
  * intent outranks discovery), then the persisted host-capability handshake for
- * any field the intent omits, then the shared conservative floor.
+ * any field the intent omits, then synced models.dev metadata when the host
+ * reported a model id. If no real pair resolves, planning refuses resumably.
  */
 async function resolvePlanContextBudget(
   sessionConfig: SessionConfig | null,
   artifactsDir?: string,
 ): Promise<number> {
   const quota = sessionConfig?.block_quota ?? {};
-  let contextTokens = quota.context_tokens ?? null;
-  let reservedOutputTokens = quota.reserved_output_tokens ?? null;
-  if ((contextTokens == null || reservedOutputTokens == null) && artifactsDir) {
+  let caps: HostCapabilities | undefined;
+  if (artifactsDir) {
     try {
-      const caps = (await new StateStore(artifactsDir).loadState())?.host_capabilities;
-      const finite = (v: unknown): number | null =>
-        typeof v === "number" && Number.isFinite(v) ? v : null;
-      contextTokens ??= finite(caps?.context_tokens);
-      reservedOutputTokens ??= finite(caps?.output_tokens);
+      caps = (await new StateStore(artifactsDir).loadState())?.host_capabilities;
     } catch {
-      /* unreadable state degrades to the floor, never throws at plan time */
+      caps = undefined;
     }
   }
-  return resolveContextBudget({ contextTokens, reservedOutputTokens });
-}
+  const finite = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  const rosterBudgets = Array.isArray(caps?.models)
+    ? caps.models
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const record = entry as Record<string, unknown>;
+          return resolveContextBudget({
+            contextTokens: quota.context_tokens ?? finite(record.context_tokens),
+            reservedOutputTokens:
+              quota.reserved_output_tokens ?? finite(record.output_tokens),
+          });
+        })
+        .filter((budget): budget is number => budget !== null && budget > 0)
+    : [];
+  if (rosterBudgets.length > 0) return Math.max(...rosterBudgets);
 
+  const statics = resolveModelStatics(caps?.model_id, sessionConfig?.host_provider);
+  const budget = resolveContextBudget({
+    contextTokens:
+      quota.context_tokens ?? finite(caps?.context_tokens) ?? statics?.context_tokens,
+    reservedOutputTokens:
+      quota.reserved_output_tokens ?? finite(caps?.output_tokens) ?? statics?.output_tokens,
+  });
+  if (budget == null || budget <= 0) {
+    throw new Error(
+      "Cannot size remediation blocks because the current host's context and output token limits are unknown. " +
+        "Report both limits (or a roster/model_id resolvable through models.dev) in the host capability handshake, " +
+        "or configure block_quota.context_tokens and block_quota.reserved_output_tokens.",
+    );
+  }
+  return budget;
+}

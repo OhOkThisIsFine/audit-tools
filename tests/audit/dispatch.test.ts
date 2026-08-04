@@ -24,6 +24,6 @@ test("deriveOverridePackerBudget: sizes to the largest pool cap minus the agenti
   ).toBe(192_000);
   // No caps (degrade, impossible post step A) → the raw resolved budget, exactly as before.
   expect(deriveOverridePackerBudget([{}], limits)).toBe(192_000);
-  // A cap at/below the overhead floors at 1, never 0/negative.
-  expect(deriveOverridePackerBudget([{ contextCapTokens: 10_000 }], limits)).toBe(1);
+  // A cap at/below the harness overhead cannot fit a packet and is refused.
+  expect(deriveOverridePackerBudget([{ contextCapTokens: 10_000 }], limits)).toBeNull();
 });

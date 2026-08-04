@@ -17,7 +17,6 @@ import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import type { RenderableAuditReport } from "../../src/audit/reporting/synthesis.js";
 import type { ReviewPacket } from "../../src/audit/types/reviewPlanning.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
-import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
 
 function obligationState(bundle: ArtifactBundle, id: string): ObligationState | undefined {
   return deriveAuditState(bundle).obligations.find((o) => o.id === id)?.state;
@@ -55,12 +54,6 @@ function omittedCharterRegister(): CharterRegister {
 // is satisfied, but the intent checkpoint has not yet been written.
 function readyForIntentBundle(): ArtifactBundle {
   return {
-    provider_confirmation: {
-      schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      provider_pool: [],
-      session_level: true,
-    },
     repo_manifest: {
       repository: { name: "fixture" },
       generated_at: "2026-01-01T00:00:00.000Z",
@@ -375,6 +368,7 @@ function emptyRenderableReport(): RenderableAuditReport {
     },
     findings: [],
     work_blocks: [],
+    work_block_seams: [],
   };
 }
 

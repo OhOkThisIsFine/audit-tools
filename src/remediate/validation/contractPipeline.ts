@@ -182,6 +182,20 @@ export function validateModuleDecomposition(
       requireString(mod.name, `${path}.modules[${i}].name`, issues);
       requireString(mod.responsibilities, `${path}.modules[${i}].responsibilities`, issues);
       requireStringArray(mod.file_scope, `${path}.modules[${i}].file_scope`, issues);
+      if (mod.source_work_block_ids !== undefined) {
+        requireStringArray(
+          mod.source_work_block_ids,
+          `${path}.modules[${i}].source_work_block_ids`,
+          issues,
+        );
+      }
+      if (mod.prepares_seam_ids !== undefined) {
+        requireStringArray(
+          mod.prepares_seam_ids,
+          `${path}.modules[${i}].prepares_seam_ids`,
+          issues,
+        );
+      }
     }
   }
   requireString(v.created_at, `${path}.created_at`, issues);
@@ -304,6 +318,7 @@ export {
   validatePairedObligations,
   validateEvidenceThreaded,
   validateDigestCoverage,
+  validateWorkBlockSeamPreparation,
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   validateDecompositionFileScope,

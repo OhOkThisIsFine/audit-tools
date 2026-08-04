@@ -1,11 +1,8 @@
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { HostConcurrencyLimit } from "./types.js";
-import {
-  CODEX_DEFAULT_MAX_THREADS,
-  readCodexConfiguredMaxThreads,
-} from "./codexHostConfig.js";
+import { readCodexConfiguredMaxThreads } from "./codexHostConfig.js";
 
-/** Reads Codex's configured `[agents].max_threads`, or null when unset. Injectable for tests. */
+/** Reads Codex's configured agent-thread cap, or null when unset. Injectable for tests. */
 export type ReadCodexMaxThreads = () => number | null;
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -37,23 +34,20 @@ export function detectHostActiveSubagentLimit(
   }
 
   if (env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE === "Codex Desktop") {
-    // Codex exposes no env var for its concurrency, but `[agents].max_threads`
-    // in `~/.codex/config.toml` IS its real user-configurable ceiling — discover
-    // it there. Only when that config is silent do we fall back to Codex's
-    // documented default, labelled `known_default` (not a fake env reading).
+    // Codex exposes no env var for its concurrency, but its configured
+    // `[agents].max_concurrent_threads_per_session` (or legacy `max_threads`)
+    // in `~/.codex/config.toml` is its real user-configurable ceiling — discover
+    // it there. When the config is silent, Codex chooses its own default; the
+    // audit backend must not guess it.
     const discovered = readCodexMaxThreads();
     if (discovered !== null) {
       return {
         active_subagents: discovered,
         source: "discovered_config",
-        description: "Codex agents.max_threads from ~/.codex/config.toml.",
+        description: "Codex agent-thread cap from ~/.codex/config.toml.",
       };
     }
-    return {
-      active_subagents: CODEX_DEFAULT_MAX_THREADS,
-      source: "known_default",
-      description: "Codex documented default agents.max_threads (config file silent).",
-    };
+    return null;
   }
 
   return null;

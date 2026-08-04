@@ -149,7 +149,11 @@ test("fallback cleanup is path-scoped when a sibling registration has no directo
 test("production source never shells out to global `git worktree prune`", async () => {
   const sourceFiles = git(REPO_ROOT, "ls-files", "src")
     .split(/\r?\n/)
-    .filter((path) => /\.(?:[cm]?[jt]s|tsx)$/.test(path));
+    .filter(
+      (path) =>
+        /\.(?:[cm]?[jt]s|tsx)$/.test(path) &&
+        existsSync(join(REPO_ROOT, path)),
+    );
   const offenders: string[] = [];
   for (const path of sourceFiles) {
     const source = await readFile(join(REPO_ROOT, path), "utf8");

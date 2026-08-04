@@ -378,7 +378,8 @@ export async function prepareHostRollingDispatch(
   session: RollingSession;
   initial: Array<RollingFrontierNode & { worktree_root: string }>;
   planPath: string;
-  quotaPath: string;
+  /** Null when the attended host owns provider selection, pacing, and fan-out. */
+  quotaPath: string | null;
   /**
    * Set ONLY when admission hit the host-dispatch cooldown wall (Increment B residual
    * a): the granted set was over-granted during an active cooldown, so this driver
@@ -403,12 +404,20 @@ export async function prepareHostRollingDispatch(
     ? new Map(hybrid.partition.map((a) => [a.block_id, a.ownerToken]))
     : null;
   const dir = implementDir(options.artifactsDir, runId);
-  const quotaPath = join(dir, "dispatch-quota.json");
-  const quota = await readOptionalJsonFile<RemediationDispatchQuota>(quotaPath);
-  // The admission block is the tool-owned budget gate: dispatch EXACTLY the granted
-  // set this step. A missing/empty admission (older state, or a degrade) grants
-  // nothing — the frontier folds to zero and the run re-grants on the next next-step.
-  const grantedIds = new Set(quota?.admission?.granted_packet_ids ?? []);
+  const hostOwnedDispatch = waveOptions.hostOwnedDispatch === true;
+  const quotaPath = hostOwnedDispatch ? null : join(dir, "dispatch-quota.json");
+  const quota = quotaPath
+    ? await readOptionalJsonFile<RemediationDispatchQuota>(quotaPath)
+    : null;
+  // An attended host owns the complete eligible frontier. Headless/in-process
+  // execution retains the shared admission contract and reads its granted set.
+  const grantedIds = hostOwnedDispatch
+    ? new Set(
+        plan.items
+          .map((item) => item.block_id)
+          .filter((id): id is string => typeof id === "string"),
+      )
+    : new Set(quota?.admission?.granted_packet_ids ?? []);
 
   // Increment B residual (a): the host-subagent driver fans out the granted set
   // BLINDLY — unlike the in-process rolling engine it is NOT paced by `scheduleWave`,
@@ -435,7 +444,7 @@ export async function prepareHostRollingDispatch(
     .filter((i) => !partitionIds || partitionIds.has(i.block_id))
     .filter((i) => grantedIds.has(i.block_id))
     .map((i) => i.block_id);
-  if (cooldownWall.atWall && cooldownWall.reason === "cooldown" && strandedBlockIds.length > 0) {
+  if (!hostOwnedDispatch && cooldownWall.atWall && cooldownWall.reason === "cooldown" && strandedBlockIds.length > 0) {
     return {
       session: {
         run_id: runId,
@@ -458,7 +467,7 @@ export async function prepareHostRollingDispatch(
     .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
     .filter((i) => !partitionIds || partitionIds.has(i.block_id))
     // Admission gate: only the granted subset of the eligible frontier runs this step.
-    .filter((i) => grantedIds.has(i.block_id))
+    .filter((i) => hostOwnedDispatch || grantedIds.has(i.block_id))
     .map((i) => ({ block_id: i.block_id, prompt_path: i.prompt_path, result_path: i.result_path }));
 
   // Create a worktree for the WHOLE granted set upfront (worktrees == granted set):

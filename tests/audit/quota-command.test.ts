@@ -77,10 +77,16 @@ const ROSTER = JSON.stringify([
   { rank: "standard", context_tokens: 200000, output_tokens: 16000 },
   { rank: "deep", context_tokens: 1000000, output_tokens: 64000 },
 ]);
+const SCALAR_AUDITOR_ARG = JSON.stringify({
+  self: {
+    context_tokens: 200_000,
+    output_tokens: 8_000,
+  },
+});
 
-test("multi-rank --auditor roster shapes the preview and differs from no-roster", async () => {
+test("multi-rank --auditor roster shapes the preview and differs from a scalar handshake", async () => {
   const withRoster = await runQuota(["--auditor", JSON.stringify({self: {roster: JSON.parse(ROSTER)}})]);
-  const noRoster = await runQuota([]);
+  const noRoster = await runQuota(["--auditor", SCALAR_AUDITOR_ARG]);
 
   const rosterPreview = parsePreview(withRoster.stdout);
   const cachedPreview = parsePreview(noRoster.stdout);
@@ -93,14 +99,14 @@ test("multi-rank --auditor roster shapes the preview and differs from no-roster"
   }
   expect(Object.keys(rosterPreview.tier_budgets).length >= 3, "tier_budgets populated across ranks").toBeTruthy();
 
-  // No-roster preview is the conservative cached/learned single pool.
-  expect(cachedPreview.pools.length, "no-roster falls back to one pool").toBe(1);
+  // A scalar handshake produces one pool and no per-rank tier budgets.
+  expect(cachedPreview.pools.length, "scalar handshake produces one pool").toBe(1);
   expect(cachedPreview.tier_budgets, "no-roster has no tier_budgets").toBe(null);
 
   // Guard against a tautology: the roster-derived budget must actually reflect
-  // the reported (large) windows, NOT collapse to the cached/learned floor.
-  expect(rosterPreview, "roster preview must differ from the cached/learned preview").not.toEqual(cachedPreview);
-  expect(rosterPreview.context_budget_tokens > cachedPreview.context_budget_tokens, `roster budget (${rosterPreview.context_budget_tokens}) should exceed cached floor (${cachedPreview.context_budget_tokens})`).toBeTruthy();
+  // its largest reported window rather than collapsing to the scalar handshake.
+  expect(rosterPreview, "roster preview must differ from the scalar preview").not.toEqual(cachedPreview);
+  expect(rosterPreview.context_budget_tokens > cachedPreview.context_budget_tokens, `roster budget (${rosterPreview.context_budget_tokens}) should exceed scalar budget (${cachedPreview.context_budget_tokens})`).toBeTruthy();
 });
 
 test("queryLimits undefined does not zero/empty the roster-derived preview", async () => {
@@ -135,11 +141,14 @@ test("malformed --auditor JSON throws loudly (not swallowed)", async () => {
   }
 });
 
-test("no handshake flags → cached/learned preview, and nothing is written to disk", async () => {
-  const { stdout, stateDir, repoRootBefore } = await runQuotaKeepDir([]);
+test("scalar handshake → single-pool preview, and nothing is written to disk", async () => {
+  const { stdout, stateDir, repoRootBefore } = await runQuotaKeepDir([
+    "--auditor",
+    SCALAR_AUDITOR_ARG,
+  ]);
   try {
     const preview = parsePreview(stdout);
-    expect(preview.pools.length, "single cached/learned pool").toBe(1);
+    expect(preview.pools.length, "single scalar-handshake pool").toBe(1);
     expect(preview.tier_budgets, "no tier budgets without a roster").toBe(null);
     // Read-only command: must not invoke finalizeDispatchQuota.
     expect(!existsSync(join(stateDir, "dispatch-quota.json")), "quota command must not write dispatch-quota.json").toBeTruthy();

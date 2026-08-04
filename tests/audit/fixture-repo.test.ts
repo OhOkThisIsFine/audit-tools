@@ -57,7 +57,7 @@ test("committed fixture repo supports external analyzer import and deterministic
 
     // advanceAudit now DRAINS the consecutive deterministic regen frontier within
     // one call, stopping only at host-delegation boundaries. So the first call
-    // (provider_confirmation) drains intake → auto_fix → syntax_resolution →
+    // The first invocation drains intake → auto_fix → syntax_resolution →
     // external_analyzer_acquisition → structure → graph_enrichment →
     // design_assessment → structure_decomposition in one round-trip, halting at
     // the intent_checkpoint host boundary.

@@ -75,6 +75,7 @@ function openPool(id: string, rank?: DispatchModelTier): CapacityPool {
     quotaStateEntry: null,
     discoveredLimits: null,
     quotaSourceSnapshot: null,
+    contextCapTokens: 200_000,
   };
 }
 

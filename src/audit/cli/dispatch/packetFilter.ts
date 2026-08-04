@@ -219,10 +219,17 @@ export function collectOversizedWarnings(
     complexity: DispatchComplexity;
     model_hint?: DispatchModelHint;
   }>,
-  waveSchedule: { confidence: string; resolved_limits: { context_tokens: number; output_tokens: number } },
+  waveSchedule: {
+    confidence: string;
+    resolved_limits: { context_tokens: number | null; output_tokens: number | null };
+  },
   tierBudgets?: Record<DispatchModelTier, number> | null,
 ): Array<{ code: string; message: string }> {
-  if (waveSchedule.confidence === "low") {
+  if (
+    waveSchedule.confidence === "low" ||
+    waveSchedule.resolved_limits.context_tokens == null ||
+    waveSchedule.resolved_limits.output_tokens == null
+  ) {
     return [];
   }
   const fallbackBudget = Math.max(

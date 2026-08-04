@@ -48,17 +48,17 @@ describe("resolveHostDispatchProviderName demotes an inherited backend to a non-
     withHostEnv({}, () => {
       const providers: ProviderName[] = ["codex", "opencode", "openai-compatible"];
       for (const provider of providers) {
-        expect(resolveHostDispatchProviderName({ provider })).toBe("claude-code");
+        expect(resolveHostDispatchProviderName({ provider }, { env: {} })).toBe("worker-command");
       }
     });
   });
 
   it("unset / auto resolves to the conversation host (claude-code by default)", () => {
     withHostEnv({}, () => {
-      expect(resolveHostDispatchProviderName(undefined)).toBe("claude-code");
-      expect(resolveHostDispatchProviderName(null)).toBe("claude-code");
-      expect(resolveHostDispatchProviderName({})).toBe("claude-code");
-      expect(resolveHostDispatchProviderName({ provider: "auto" })).toBe("claude-code");
+      expect(resolveHostDispatchProviderName(undefined, { env: {} })).toBe("worker-command");
+      expect(resolveHostDispatchProviderName(null, { env: {} })).toBe("worker-command");
+      expect(resolveHostDispatchProviderName({}, { env: {} })).toBe("worker-command");
+      expect(resolveHostDispatchProviderName({ provider: "auto" }, { env: {} })).toBe("worker-command");
     });
   });
 
@@ -102,7 +102,7 @@ describe("resolveHostDispatchProviderName demotes an inherited backend to a non-
   });
 });
 
-describe("host-review dispatch pool for a codex-configured run is keyed to claude-code, not codex", () => {
+describe("host-review dispatch for a codex-configured run never inherits the codex identity", () => {
   let artifactsDir: string;
   let result: Awaited<ReturnType<typeof renderSemanticReviewStep>>;
   const savedHostEnv: Record<string, string | undefined> = {};
@@ -161,11 +161,12 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     };
 
     // A DIFFERENT auditor (a Claude host) resumes and fans out subagents. Its
-    // descriptor carries no explicit provider, so the effective provider resolves to
-    // the conversation host via env detection (pinned to claude-code above) — never a
-    // stored codex value (there is none). The descriptor rides every continue-command.
+    // descriptor identifies its current host explicitly — desktop hosts do not
+    // reliably expose an env marker. That identity, never a stored codex value,
+    // rides every continue-command.
     const hostDescriptor = {
       self: {
+        provider: "claude-code" as const,
         can_dispatch_subagents: true,
         context_tokens: 200000,
         output_tokens: 32000,
@@ -197,16 +198,18 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     expect(result.step_kind).toBe("dispatch_review");
   });
 
-  it("every dispatch-quota capacity pool is keyed to claude-code, never the inherited codex", async () => {
-    const quotaPath = result.artifact_paths?.dispatch_quota;
-    expect(typeof quotaPath).toBe("string");
-    const quota = JSON.parse(await readFile(quotaPath!, "utf8"));
-    const pools = quota.capacity_pools ?? [];
-    expect(pools.length).toBeGreaterThan(0);
-    for (const pool of pools) {
-      expect(pool.pool_id.startsWith("claude-code")).toBe(true);
-      expect(pool.pool_id.startsWith("codex")).toBe(false);
-    }
+  it("host-owned dispatch writes no admission quota artifact and inherits no codex identity", async () => {
+    // Post dispatch-inversion the attended host (and llm-relay) own admission:
+    // finalizeDispatchQuota is headless-only, so this path emits NO dispatch_quota
+    // artifact — the inherited-codex-pool leak the original bug charged against is
+    // structurally impossible because no capacity pool is persisted at all.
+    expect(result.artifact_paths?.dispatch_quota).toBeUndefined();
+    // The dispatch plan that IS written carries the neutral bookkeeping identity,
+    // never the stored run's codex provider.
+    const planPath = result.artifact_paths?.dispatch_plan;
+    expect(typeof planPath).toBe("string");
+    const planRaw = await readFile(planPath!, "utf8");
+    expect(planRaw.includes("codex")).toBe(false);
   });
 
   it("the continue-command re-emits the current driver's handshake (descriptor rides it)", () => {
@@ -244,4 +247,3 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     expect(descriptor.self.can_dispatch_subagents).toBe(true);
   });
 });
-

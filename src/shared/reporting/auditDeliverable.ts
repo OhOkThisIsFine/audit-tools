@@ -64,6 +64,7 @@ export function buildAuditFindingsDeliverable(
     summary,
     findings: [...findings],
     work_blocks: [],
+    work_block_seams: [],
   };
 }
 

@@ -174,3 +174,51 @@ test("survivor rule follows the DRAW's worker policy (h2c3 F9): a command-shaped
   expect(audit.hostPools.length).toBe(1);
   expect(audit.sourcePools).toEqual([]);
 });
+
+test("D1 survivor merges an unambiguous host capability into partial source quota metadata", () => {
+  const host: CapacityPool = {
+    ...pool("codex#acctA/gpt-5", "codex"),
+    discoveredLimits: {
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+      requests_per_minute: 99,
+    },
+  };
+  const source: CapacityPool = {
+    ...pool("codex#acctA/*", "codex", { transport: "codex" }),
+    discoveredLimits: {
+      requests_per_minute: 12,
+      input_tokens_per_minute: 600_000,
+    },
+  };
+
+  const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
+
+  expect(out.hostPools).toEqual([]);
+  expect(out.sourcePools[0].discoveredLimits).toEqual({
+    context_tokens: 200_000,
+    output_tokens: 8_000,
+    requests_per_minute: 12,
+    input_tokens_per_minute: 600_000,
+  });
+});
+
+test("D1 survivor does not guess a capability across a multi-model host roster", () => {
+  const hostSmall: CapacityPool = {
+    ...pool("codex#acctA/small", "codex"),
+    discoveredLimits: { context_tokens: 32_000, output_tokens: 8_000 },
+  };
+  const hostDeep: CapacityPool = {
+    ...pool("codex#acctA/deep", "codex"),
+    discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
+  };
+  const source = pool("codex#acctA/*", "codex", { transport: "codex" });
+
+  const out = dedupHostAndSourcePools({
+    hostPools: [hostSmall, hostDeep],
+    sourcePools: [source],
+  });
+
+  expect(out.hostPools).toEqual([]);
+  expect(out.sourcePools[0].discoveredLimits).toBeUndefined();
+});

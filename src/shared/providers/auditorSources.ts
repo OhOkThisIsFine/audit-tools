@@ -8,20 +8,13 @@ import {
 import { resolveAuditCodeStateDir } from "../io/stateDir.js";
 import { spawnSyncHidden } from "../tooling/exec.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
-import {
-  populateProxyCatalog,
-  readProxyCatalog,
-  type PopulateProxyCatalogResult,
-} from "./proxyCatalog.js";
 import { commandExists } from "./providerPathGuard.js";
 
 /**
  * The machine-level declaration file: the backends the OPERATOR owns, hand-authored
- * like `session-config.json`. Deliberately NOT id-keyed and deliberately NOT named
- * like the POPULATE cache (`catalog-cache.json`, `proxyCatalog.ts` — the
- * `catalog-<auditor-id>.json` name this comment once reserved landed WITHOUT the
- * auditor-id key; see the rationale there) — squatting the cache name would turn
- * this read into a direct cache read, violating never-inherit by filename collision.
+ * like `session-config.json`. Deliberately NOT id-keyed: each invocation intersects
+ * the declaration with its own ambient reach instead of inheriting another
+ * auditor's resolved capability.
  *
  * A declaration is not a cache: it is operator INTENT, not a prior auditor's resolved
  * state. Reading it and intersecting it with live ambient reach does not inherit
@@ -65,8 +58,6 @@ export interface AmbientSourceDeps {
    * then `GET <endpoint>/v1/models` fallback) through a hidden node child. Tests inject.
    */
   probeHttpReachable?: (url: string) => boolean;
-  /** Raw populate-cache reader (tests inject); defaults to reading the cache file. */
-  readCatalogFile?: (path: string) => string | null;
 }
 
 /**
@@ -124,26 +115,50 @@ export function probeReachableWithEscalation(
   return false;
 }
 
+/**
+ * Build liveness URLs for both ordinary OpenAI-compatible bases and proxies
+ * whose API base is `/v1` but whose health endpoint is served at the origin.
+ */
+export function buildLivenessProbeUrls(url: string): string[] {
+  const base = url.replace(/\/+$/u, "");
+  try {
+    const parsed = new URL(base);
+    const path = parsed.pathname.replace(/\/+$/u, "");
+    const origin = parsed.origin;
+    const root = path.toLowerCase().endsWith("/v1")
+      ? `${origin}${path.slice(0, -3)}`.replace(/\/+$/u, "")
+      : origin;
+    return [
+      `${base}/health/liveliness`,
+      `${base}/models`,
+      `${root}/health/liveliness`,
+      `${root}/health`,
+      `${root}/v1/models`,
+    ].filter((candidate, index, all) => all.indexOf(candidate) === index);
+  } catch {
+    return [`${base}/health/liveliness`, `${base}/models`];
+  }
+}
+
 function defaultProbeHttpReachable(url: string): boolean {
-  // Neutral proxy contract liveness: try /health/liveliness first (unauthenticated),
-  // then fallback to /v1/models. On /v1/models, ANY HTTP status counts alive
-  // (a 401 from a keyed proxy still proves it's listening).
-  const probeOnce = (budgetMs: number, path: string): boolean => {
+  // Neutral proxy contract liveness: any HTTP response proves the listener is
+  // alive, including a 401 from a keyed proxy. Try the API base first, then
+  // origin-level health/model routes for proxies that mount health outside /v1.
+  const probeOnce = (budgetMs: number, targetUrl: string): boolean => {
     const script =
       "const [url, ms] = process.argv.slice(1);" +
       "fetch(url, { signal: AbortSignal.timeout(Number(ms)) })" +
       ".then((r) => process.exit(0), () => process.exit(1));";
-    const result = spawnSyncHidden(process.execPath, ["-e", script, `${url}${path}`, String(budgetMs)], {
+    const result = spawnSyncHidden(process.execPath, ["-e", script, targetUrl, String(budgetMs)], {
       timeout: budgetMs + 1_500,
     });
     return result.status === 0;
   };
 
   for (const budgetMs of [1_000, 4_000]) {
-    // Try /health/liveliness first (unauthenticated, guaranteed safe)
-    if (probeOnce(budgetMs, "/health/liveliness")) return true;
-    // Fallback to /v1/models (if /health/liveliness is absent)
-    if (probeOnce(budgetMs, "/v1/models")) return true;
+    for (const candidate of buildLivenessProbeUrls(url)) {
+      if (probeOnce(budgetMs, candidate)) return true;
+    }
   }
   return false;
 }
@@ -192,40 +207,14 @@ export function readSourceDeclaration(
 }
 
 /**
- * The declared proxy lane (`proxy` top-level key in the same declaration file):
- * the operator asserting "a generic OpenAI-compatible proxy listens here — discover
- * and expand its models into `claude-worker` sources". Optional knobs: `top_k`
- * (models per backend provider), `cost_per_mtok` (the free-to-operator cost axis;
- * wins over the advert price), and `api_key_env` (env var holding the proxy's master
- * key for authenticated endpoints).
- */
-export interface ProxyDeclaration {
-  endpoint: string;
-  top_k?: number;
-  cost_per_mtok?: number;
-  api_key_env?: string;
-  /**
-   * The proxy's BACKEND burst-limits per model (see
-   * `DispatchableSource.burst_limited`). Stamped onto every expanded lane at RESOLVE
-   * time — declaration-authoritative, so flipping it never requires a re-populate —
-   * where the worker-kind compatibility rule then refuses agentic expansion
-   * ({@link laneWorkerKindConflict}) with a per-lane reason.
-   */
-  burst_limited?: boolean;
-}
-
-/** `readProxyDeclaration`'s outcome: the lane, or why it is absent. */
-/**
  * `api_key_env` names an environment VARIABLE; it never carries the value. A
  * declaration that pastes `NAME=value` (or the secret itself) used to be
  * accepted verbatim by every reader and then reported as `unset var
  * "NAME=value"` — which reads as a missing env var and sends the operator to
  * their shell instead of to the typo.
  *
- * The check belongs to the FIELD, not to one of its readers: it previously
- * guarded only the `openai-compatible` source branch while `readProxyDeclaration`
- * and the `claude-worker` reach branch accepted any non-empty string, so both
- * inherited the misleading symptom the validated branch exists to prevent.
+ * The check belongs to the FIELD, not to one of its readers: both endpoint-backed
+ * source transports must reject the typo with the same precise explanation.
  * Returns a precise reason, or `null` when the name is well formed. Reach
  * branches call {@link apiKeyEnvReachReason}, which pairs this with the
  * env-is-set half. [[validator-guards-every-field-caller-reads]]
@@ -261,167 +250,6 @@ function apiKeyEnvReachReason(
     return `env var "${apiKeyEnv.trim()}" is unset or empty in this process.`;
   }
   return null;
-}
-
-export interface ProxyDeclarationResult {
-  declaration: ProxyDeclaration | null;
-  /** Present only when a `proxy` key EXISTS but is malformed (never thrown). */
-  reason?: string;
-}
-
-/**
- * Read the optional `proxy` block from the machine declaration. Tolerant like
- * {@link readSourceDeclaration}: an absent / unparseable file or a missing key is
- * simply `{declaration: null}`; a PRESENT-but-malformed block degrades to lane-absent
- * WITH a reason (surfaced via `resolveAmbientSources`' `dropped[]`), never a throw.
- * Malformed optional TUNING knobs (`top_k` / `cost_per_mtok`) are dropped
- * individually — a bad tuning value must not cost the operator the whole lane.
- * `api_key_env` is deliberately NOT in that set: it is a credential reference,
- * and dropping it silently leaves the lane looking unauthenticated so the
- * failure surfaces far downstream with a reason that no longer names the typo.
- *
- * Rejection: if a `repair_proxy` key exists, it is not recognized and surfaces a
- * dropped reason telling the operator what key to use instead (never silent ignore).
- */
-export function readProxyDeclaration(
-  deps: AmbientSourceDeps = {},
-): ProxyDeclarationResult {
-  const path = resolveSourceDeclarationPath(deps.homeDir);
-  const raw = (deps.readDeclarationFile ?? defaultReadDeclarationFile)(path);
-  if (raw === null) return { declaration: null };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { declaration: null };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { declaration: null };
-  }
-
-  // Check for unrecognized `repair_proxy` key and surface it as a dropped reason (never silent).
-  const unresolvedBlock = (parsed as Record<string, unknown>).repair_proxy;
-  if (unresolvedBlock !== undefined) {
-    return {
-      declaration: null,
-      reason: "repair_proxy is retired — declare a proxy block instead.",
-    };
-  }
-
-  const block = (parsed as { proxy?: unknown }).proxy;
-  if (block === undefined) return { declaration: null };
-  if (typeof block !== "object" || block === null || Array.isArray(block)) {
-    return {
-      declaration: null,
-      reason: "proxy must be a JSON object with an endpoint — fix the declaration.",
-    };
-  }
-  const { endpoint, top_k, cost_per_mtok, api_key_env, burst_limited } =
-    block as Record<string, unknown>;
-  if (typeof endpoint !== "string" || endpoint.trim().length === 0) {
-    return {
-      declaration: null,
-      reason: "proxy.endpoint must be a non-empty url string — fix the declaration.",
-    };
-  }
-  const declaration: ProxyDeclaration = {
-    // Trailing slashes stripped so the reach probe, the discovery cache's stored
-    // endpoint, and the expanded sources all compare on one canonical form.
-    endpoint: endpoint.trim().replace(/\/+$/u, ""),
-  };
-  if (typeof top_k === "number" && Number.isInteger(top_k) && top_k > 0) {
-    declaration.top_k = top_k;
-  }
-  if (
-    typeof cost_per_mtok === "number" &&
-    Number.isFinite(cost_per_mtok) &&
-    cost_per_mtok >= 0
-  ) {
-    declaration.cost_per_mtok = cost_per_mtok;
-  }
-  if (typeof api_key_env === "string" && api_key_env.trim().length > 0) {
-    // NOT dropped-individually like the tuning knobs above. `api_key_env` is a
-    // CREDENTIAL REFERENCE: silently discarding a malformed one leaves the lane
-    // looking unauthenticated and fails much further downstream, where the
-    // reason no longer names the typo. Fail the lane here, with the same
-    // precise text the `openai-compatible` branch uses.
-    const bad = invalidEnvVarNameReason("proxy.api_key_env", api_key_env);
-    if (bad !== null) return { declaration: null, reason: bad };
-    declaration.api_key_env = api_key_env.trim();
-  }
-  if (typeof burst_limited === "boolean") {
-    declaration.burst_limited = burst_limited;
-  }
-  return { declaration };
-}
-
-/**
- * The default populate fetch: time-boxed so a routable-but-dead proxy cannot hang a
- * `next-step` at the Gate-0 build (network-tolerant means bounded, not just caught).
- */
-const populateFetchWithTimeout: typeof fetch = (input, init) =>
-  fetch(input, { ...init, signal: AbortSignal.timeout(5_000) });
-
-/**
- * POPULATE the declared proxy lane (plan §populate-vs-resolve): read the
- * machine declaration's `proxy` block and, when present, fetch its model
- * discovery into the machine-level populate cache ({@link populateProxyCatalog}).
- * This is the network half the resolve path must never run — call it at Gate-0
- * build time (once per run) or on explicit refresh, NEVER from `resolveAmbientSources`.
- *
- * "Present + reachable" gating is the fetch itself: the discovery GET is both the
- * liveness proof and the payload, so a separate pre-probe would only double the
- * network. Never throws: no declared lane ⇒ `null`; a failed/unreachable fetch ⇒
- * `{written:false, reason}` and any prior cache is left untouched — the lane then
- * resolves from the existing cache or unexpanded with its own `dropped[]` reason,
- * degrading Gate-0, never blocking it.
- */
-export async function populateDeclaredProxyCatalog(
-  deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
-): Promise<PopulateProxyCatalogResult | null> {
-  const { declaration } = readProxyDeclaration(deps);
-  if (declaration === null) return null;
-  return populateProxyCatalog({
-    endpoint: declaration.endpoint,
-    ...(declaration.top_k !== undefined ? { topK: declaration.top_k } : {}),
-    ...(declaration.cost_per_mtok !== undefined
-      ? { costPerMtok: declaration.cost_per_mtok }
-      : {}),
-    ...(declaration.api_key_env !== undefined
-      ? { apiKeyEnv: declaration.api_key_env }
-      : {}),
-    fetchImpl: deps.fetchImpl ?? populateFetchWithTimeout,
-    ...(deps.homeDir !== undefined ? { homeDir: deps.homeDir } : {}),
-  });
-}
-
-/**
- * Populate the proxy catalog ONLY when the resolve half would otherwise drop the
- * lane for it: a `proxy` is declared but the cache is absent or was fetched from a
- * different endpoint. Bounded by construction — after one success the cache exists
- * and this is a cheap read — so a draw with no Gate-0 build moment (remediate) can
- * call it on every config load without a per-load network fetch. Freshness (TTL /
- * explicit refresh) is deliberately NOT this function's job (backlog).
- * [[silent-fail-closed-on-one-draw]] — both draws must trigger populate, not just audit.
- */
-export async function populateProxyCatalogIfMissing(
-  deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
-): Promise<PopulateProxyCatalogResult | null> {
-  const { declaration } = readProxyDeclaration(deps);
-  if (declaration === null) return null;
-  const cache = readProxyCatalog(deps);
-  if (
-    cache !== null &&
-    cache.endpoint.replace(/\/+$/u, "") === declaration.endpoint
-  ) {
-    return {
-      sources: cache.sources,
-      written: false,
-      reason: "populate cache already present",
-      dropped: [],
-    };
-  }
-  return populateDeclaredProxyCatalog(deps);
 }
 
 /**
@@ -559,9 +387,8 @@ export function verifySourceReach(
     }
     case "claude-worker": {
       // The proxied isolated Claude-harness worker: its reach IS the proxy's
-      // liveness (endpoint = the proxy url). Normally these sources come pre-verified
-      // from the populate cache via the `proxy` lane; a hand-declared one is held to
-      // the same bar. `api_key_env` is optional here (keyless proxy default).
+      // liveness (endpoint = the proxy url). Explicit declarations are held to the
+      // same bar as every other endpoint source. `api_key_env` is optional here.
       if (!source.endpoint?.trim()) {
         return {
           verified: false,
@@ -616,9 +443,8 @@ export function resolveAmbientSources(
     if (reach.verified) sources.push(source);
     else dropped.push({ id: sourceId(source), reason: reach.reason });
   }
-  resolveProxyLane(deps, sources, dropped);
   // Worker-kind × pool-class compatibility, applied ONCE over the assembled set so
-  // declared and proxy-expanded lanes are held to the same rule. Per-lane, so one
+  // all declared lanes are held to the same rule. Per-lane, so one
   // incompatible lane never costs the operator the rest of the pool (unlike a
   // validator error, which degrades the whole declaration).
   const compatible: DispatchableSource[] = [];
@@ -628,105 +454,4 @@ export function resolveAmbientSources(
     else dropped.push({ id: sourceId(source), reason: conflict });
   }
   return { sources: compatible, dropped };
-}
-
-/**
- * The proxy lane of the resolve half (plan §populate-vs-resolve): a declared
- * `proxy` whose liveness probe passes expands from the POPULATE CACHE — never
- * a mid-resolve fetch. Fail-open, mirroring the declared-source contract: every
- * outcome short of expansion lands in `dropped[]` with an operator-facing reason
- * (malformed declaration / probe failure / cache absent-stale-empty), so the lane is
- * never silently discarded.
- */
-function resolveProxyLane(
-  deps: AmbientSourceDeps,
-  sources: DispatchableSource[],
-  dropped: DroppedSource[],
-): void {
-  const { declaration, reason } = readProxyDeclaration(deps);
-  if (reason !== undefined) {
-    dropped.push({ id: "proxy", reason });
-    return;
-  }
-  if (declaration === null) return;
-  const { endpoint } = declaration;
-  const laneId = `proxy:${endpoint}`;
-  // Reach-verify the declared master key BEFORE the liveness probe. A proxy's
-  // health endpoint is typically unauthenticated (LiteLLM's /health/liveliness
-  // is), so the probe passes with no key and the lane then fails downstream at
-  // populate — surfacing "cache absent, run the populate" when the operator DID
-  // run it and the real cause is the unset var. Mirrors the same check the
-  // expanded per-model claude-worker sources get in `verifySourceReach`.
-  const env = deps.env ?? process.env;
-  if (declaration.api_key_env !== undefined) {
-    if (!(env[declaration.api_key_env] ?? "").trim()) {
-      dropped.push({
-        id: laneId,
-        reason: `env var "${declaration.api_key_env}" is unset or empty in this process.`,
-      });
-      return;
-    }
-  }
-  const probe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
-  if (!probe(endpoint)) {
-    dropped.push({
-      id: laneId,
-      reason: `proxy at "${endpoint}" failed the liveness probe — lane dropped for this invocation.`,
-    });
-    return;
-  }
-  const catalog = readProxyCatalog(deps);
-  if (catalog === null) {
-    dropped.push({
-      id: laneId,
-      reason:
-        "proxy is reachable but the populate cache is absent/invalid — run the populate (populateProxyCatalog) to expand this lane.",
-    });
-    return;
-  }
-  if (catalog.endpoint.replace(/\/+$/u, "") !== endpoint) {
-    dropped.push({
-      id: laneId,
-      reason: `populate cache was fetched from "${catalog.endpoint}", not the declared "${endpoint}" — re-run the populate.`,
-    });
-    return;
-  }
-  if (catalog.sources.length === 0) {
-    dropped.push({
-      id: laneId,
-      reason:
-        "proxy expansion is empty (no reachable backend models at populate time) — lane present but unexpanded.",
-    });
-    return;
-  }
-  // Declared-wins dedup: an expanded lane whose (service, model)
-  // identity a DECLARED source already covers is skipped, so one pool identity
-  // never maps to two sources (the launch bridge's pool→source map is 1:1 by
-  // assumption — a duplicate would arbitrate the transport by silent map-order
-  // clobber). The operator's explicit lane always beats auto-expansion; routing
-  // through the proxy for that model is still available by declaring the
-  // claude-worker source explicitly.
-  const declaredIdentities = new Set(
-    sources.map((s) => `${s.service ?? s.transport}/${s.model ?? ""}`),
-  );
-  for (const expanded of catalog.sources) {
-    const identity = `${expanded.service ?? expanded.transport}/${expanded.model ?? ""}`;
-    if (declaredIdentities.has(identity)) {
-      dropped.push({
-        id: sourceId(expanded),
-        reason: `expanded lane skipped — a declared source already covers backend identity "${identity}" (declared wins over expansion).`,
-      });
-      continue;
-    }
-    // `burst_limited` is stamped from the CURRENT declaration, not the populate
-    // cache — declaration-authoritative in BOTH directions: an explicit `false`
-    // strips a cache-carried flag just as `true` adds one, so flipping the knob
-    // takes effect on the next resolve without a re-populate (a stale cache can
-    // neither launder the flag off nor pin it on).
-    sources.push(
-      typeof declaration.burst_limited === "boolean"
-        ? { ...expanded, burst_limited: declaration.burst_limited }
-        : expanded,
-    );
-  }
 }

@@ -9,6 +9,16 @@ import type { AuditTask } from "../../src/audit/types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
+const TEST_AUDITOR_ARGS = [
+  "--auditor",
+  JSON.stringify({
+    self: {
+      provider: "worker-command",
+      context_tokens: 200_000,
+      output_tokens: 8_000,
+    },
+  }),
+];
 
 const {
   buildAuditPlanMetrics,
@@ -1083,6 +1093,7 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
         runId,
         "--artifacts-dir",
         artifactsDir,
+        ...TEST_AUDITOR_ARGS,
       ]),
     );
 
@@ -1194,6 +1205,7 @@ test("prepare-dispatch marks tiny low-risk packets for small model routing", asy
         runId,
         "--artifacts-dir",
         artifactsDir,
+        ...TEST_AUDITOR_ARGS,
       ]),
     );
 
@@ -1235,6 +1247,7 @@ test("prepare-dispatch keeps colliding sanitized task ids on distinct result pat
         runId,
         "--artifacts-dir",
         artifactsDir,
+        ...TEST_AUDITOR_ARGS,
       ]),
     );
 
@@ -1306,6 +1319,7 @@ test("large single-file packets stay isolated and get mechanical anchors", async
         runId,
         "--artifacts-dir",
         artifactsDir,
+        ...TEST_AUDITOR_ARGS,
       ]),
     );
 

@@ -52,17 +52,18 @@ export interface ActiveDispatchState {
   /**
    * Set when the rolling audit run is paused on an exhausted provider pool and is
    * resumable (DC-4). Cleared once it resumes (capacity returned) or is promoted to
-   * a `partial_completion_terminal` (livelock after the pause limit). Mutually
-   * exclusive with a "done" state — a run is either paused here or terminal there,
-   * never both.
+   * a `partial_completion_terminal` (livelock after the pause limit). The terminal
+   * stamp clears this field atomically in the same write (the one-way ratchet in
+   * `pausePersist.ts`); a later pause MAY coexist with an already-stamped terminal —
+   * the terminal survives as the ratchet and `deriveAuditState` subtracts its
+   * stranded ids before deriving `dispatch_capacity`.
    */
   paused_state?: DispatchPausedState;
   /**
-   * Set once the interactive provider/admission confirmation recommendation
+   * Set once the large-fan-out confirmation recommendation
    * (`DispatchFanout.confirmation_recommended`) has been surfaced for this
-   * run_id (Bug 8 / Slice A4). The operator confirms the roster/ordering once
-   * per run; subsequent grants of the SAME run must not re-recommend it. A
-   * fresh run (new run_id, or no prior state) confirms again.
+   * run_id (Bug 8 / Slice A4). Subsequent grants of the SAME run must not
+   * re-recommend it. A fresh run (new run_id, or no prior state) confirms again.
    */
   confirmation_shown?: boolean;
 }

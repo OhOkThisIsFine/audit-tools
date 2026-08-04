@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { discardOnSchemaVersionMismatch, readConfirmedDispatchPolicy, readConfirmedCapabilityRanks, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { discardOnSchemaVersionMismatch, buildSelfSpawnExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, classifyEmptyGrantCause, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, quotaPoolKey, captureStepBoundaryFriction, captureZeroCapacityFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, createDispatchDecisionLog, type EngineDecisionSink, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -230,21 +230,16 @@ export interface ExplicitHostCapabilities {
   models?: unknown;
 }
 
-/** Conservative context-window floor, applied ONLY at true first contact (nothing persisted). */
-const HOST_CONTEXT_TOKENS_FLOOR = DEFAULT_CONTEXT_TOKENS;
-
 function finiteOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /**
  * Pure per-field host-capability resolver (C1). Each field resolves as
- * `explicit ?? persisted ?? floor` — a per-field merge, never a whole-object
- * clobber that would drop fields the current call omitted. The 32k context
- * floor applies ONLY at true first contact (no persisted handshake at all);
- * once a handshake exists, an omitted field reuses the persisted value rather
- * than re-flooring. Corrupt / non-finite persisted numbers degrade to undefined
- * without throwing.
+ * `explicit ?? persisted` — a per-field merge, never a whole-object
+ * clobber that would drop fields the current call omitted. Corrupt / non-finite
+ * persisted numbers degrade to undefined without throwing; missing capability
+ * stays missing and is handled by the dispatch/plan refusal seam.
  *
  * Returns:
  *  - `resolved` — the merged capabilities to drive downstream dispatch sizing;
@@ -257,15 +252,12 @@ export function resolveHostCapabilities(
 ): { resolved: HostCapabilities; toPersist: HostCapabilities } {
   const exp = explicit ?? {};
   const per = persisted && typeof persisted === "object" ? persisted : undefined;
-  const firstContact = per === undefined;
-
   const pick = <T>(e: T | null | undefined, p: T | undefined): T | undefined =>
     e ?? p ?? undefined;
 
   const context_tokens =
     finiteOrUndefined(exp.context_tokens) ??
-    finiteOrUndefined(per?.context_tokens) ??
-    (firstContact ? HOST_CONTEXT_TOKENS_FLOOR : undefined);
+    finiteOrUndefined(per?.context_tokens);
 
   const resolved: HostCapabilities = {
     can_dispatch_subagents: pick(exp.can_dispatch_subagents, per?.can_dispatch_subagents),
@@ -277,8 +269,7 @@ export function resolveHostCapabilities(
     models: exp.models ?? per?.models,
   };
 
-  // Persist ONLY the explicitly-supplied fields (the delta) — never the floor,
-  // never an omitted field.
+  // Persist ONLY the explicitly-supplied fields (the delta), never an omitted field.
   const toPersist: HostCapabilities = {};
   if (exp.can_dispatch_subagents !== undefined)
     toPersist.can_dispatch_subagents = exp.can_dispatch_subagents;
@@ -1030,7 +1021,7 @@ export interface DriveRollingImplementDispatchOptions {
   dispatchNode?: ProgrammaticNodeDispatcher;
   /** Rebuild the upstream shared surface between dependency levels (single-flight). */
   rebuildSharedBetweenLevels: () => Promise<void>;
-  /** Wave/host inputs used to size the quota-derived confirmed pools. */
+  /** Wave/host inputs used to size the quota-derived eligible pools. */
   waveOptions?: {
     hostMaxConcurrent?: number;
     hostContextTokens?: number | null;
@@ -1117,7 +1108,7 @@ export interface DriveRollingImplementDispatchResult {
 }
 
 /**
- * Whether a confirmed pool is one the orchestrator launches IN-PROCESS this cycle
+ * Whether an eligible pool is one the orchestrator launches IN-PROCESS this cycle
  * (vs. the conversation host's subagent pool) — the shared
  * `isInProcessWorkerProvider` predicate (H3), same remediate policy.
  */
@@ -1256,7 +1247,7 @@ export async function driveRollingImplementDispatch(
     },
   });
 
-  // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
+  // Eligible pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
   // A partition-scoped caller supplies its coordinator's already-built set instead.
   const builtPools = options.poolsOverride
     ? null
@@ -1267,16 +1258,11 @@ export async function driveRollingImplementDispatch(
       hostOutputTokens: options.waveOptions?.hostOutputTokens,
       hostModels: options.waveOptions?.hostModels,
       hostModelId: options.waveOptions?.hostModelId,
-      capabilityRanks: await readConfirmedCapabilityRanks(options.root),
+      capabilityRanks: null,
       hostSession,
-      // The operator's Gate-0 exclusions, applied as a set-difference over freshly
-      // gathered reach. Read here because this layer owns `root`; self-spawn-blocked is
-      // recomputed against THIS process's env rather than inherited from the auditor
-      // that wrote the confirmation.
-        excludedBackends: resolveDispatchExclusion(
-          await readConfirmedDispatchPolicy(options.root),
-        ),
-      });
+      // Mechanical self-spawn exclusion, recomputed from this process's environment.
+      excludedBackends: buildSelfSpawnExclusion(),
+    });
   const confirmedPools = options.poolsOverride ?? builtPools!.pools;
   // The operator's own policy left this dispatch with no capacity at all. Loud, not
   // silent — a `poolsOverride` caller supplied its own set, so there is no zeroing of
@@ -1938,6 +1924,9 @@ async function buildImplementDispatchStep(ctx: {
       hostOutputTokens: resolvedHostOutputTokens,
       hostModels: resolvedHostModels,
       hostModelId: resolvedHostModelId,
+      // An attended host is the dispatch authority. Headless/in-process paths
+      // leave this false and retain the shared admission engine.
+      hostOwnedDispatch: canDispatchImpl,
     };
 
     // H2+H4 collapse: ONE fan-out over the eligible pool set. `buildConfirmedPools`
@@ -1967,29 +1956,34 @@ async function buildImplementDispatchStep(ctx: {
       const hybridHostSession = new HostSessionQuotaSource({
         providerModelKey: hybridHostSessionModelKey,
       });
-      const { pools: confirmedPools, zeroedByExclusion } = await buildConfirmedPools({
+      const { pools: confirmedPools, zeroedByExclusion, sourcePoolIds } = await buildConfirmedPools({
         sessionConfig: sessionConfigImpl ?? null,
         hostMaxConcurrent: resolvedHostMaxConcurrent,
         hostContextTokens: resolvedHostContextTokens,
         hostOutputTokens: resolvedHostOutputTokens,
         hostModels: resolvedHostModels,
         hostModelId: resolvedHostModelId,
-        capabilityRanks: await readConfirmedCapabilityRanks(root),
+        capabilityRanks: null,
         hostSession: hybridHostSession,
         // Attendance IS pool-set membership: headless ⇒ no host pool in the set.
         hostCanDispatch: canDispatchImpl,
-        // The operator's Gate-0 exclusions, applied as a set-difference over freshly
-        // gathered reach; self-spawn-blocked recomputed against THIS process's env.
-        excludedBackends: resolveDispatchExclusion(
-          await readConfirmedDispatchPolicy(root),
-        ),
+        // Mechanical self-spawn exclusion uses the same resolved driver identity as quota.
+        excludedBackends: buildSelfSpawnExclusion({
+          activeHostProvider: canDispatchImpl ? hybridProviderName : null,
+        }),
       });
       // Loud, not silent: on the headless branch below there is no host pool to fall
       // back to, so a policy-zeroed set means this dispatch does nothing at all.
       if (zeroedByExclusion) {
         await captureZeroCapacityFriction(artifactsDir, runId, zeroedByExclusion, "remediate-code");
       }
-      const backendPools = confirmedPools.filter(isInProcessPool);
+      // Engine-drivable backends are SOURCE pools only, by declared class — never
+      // re-derived from the provider name. The neutral worker-command host identity
+      // name-collides with the in-process worker class, so a name-only test would
+      // hand the HOST's own pool to the engine as a spawnable worker.
+      const isEngineDrivableId = (poolId: string, providerName: string): boolean =>
+        sourcePoolIds.has(poolId) && isInProcessPool({ providerName });
+      const backendPools = confirmedPools.filter((p) => isEngineDrivableId(p.id, p.providerName));
 
       if (!canDispatchImpl) {
         // Headless: no host pool in the eligible set — when any dispatchable
@@ -2082,7 +2076,7 @@ async function buildImplementDispatchStep(ctx: {
             settled.add(id);
             await addSettledPool(settledPath, id);
           },
-          isInProcess: isInProcessPool,
+          isInProcess: (a) => isEngineDrivableId(a.poolId, a.providerName),
         });
         // Drive the in-process partition through the ROLLING ENGINE (H2 plan D2 —
         // `executeInProcessPartition`'s direct Promise.all executor is deleted; one
@@ -2231,7 +2225,9 @@ async function buildImplementDispatchStep(ctx: {
       // nodes stay PENDING and re-dispatch on resume. The in-process partition (above)
       // already ran on its own cooldown-safe pool, so its work still lands.
       if (rolling.wall) {
-        await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+        if (rolling.quotaPath) {
+          await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+        }
         const paused = await store.loadState();
         if (paused) {
           paused.partial_completion_terminal = buildQuotaPausedTerminal(
@@ -2254,10 +2250,12 @@ async function buildImplementDispatchStep(ctx: {
       // ("free a larger pool or split the node"), never "wait for a reset".
       if (rolling.session.frontier.length === 0) {
         const structuralRefusal = detectStructuralRefusalPause(
-          await readOptionalJsonFile(rolling.quotaPath),
+          await readOptionalJsonFile(rolling.quotaPath!),
         );
         if (structuralRefusal.pause) {
-          await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+          if (rolling.quotaPath) {
+            await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+          }
           const paused = await store.loadState();
           if (paused) {
             paused.partial_completion_terminal = buildQuotaPausedTerminal(
@@ -2290,6 +2288,16 @@ async function buildImplementDispatchStep(ctx: {
       const rollNext = loaderCommand("next-step");
       const acceptCmd = loaderCommand(`accept-node --id <BLOCK_ID> --run-id ${runId}`);
       const reverifyCmd = loaderCommand(`reverify-node --id <BLOCK_ID> --run-id ${runId}`);
+      const hostOwnedRolling = rolling.quotaPath === null;
+      const dispatchAuthorityNote = hostOwnedRolling
+        ? `The attended host and llm-relay own provider selection, failover, quota, and
+concurrency. Dispatch the COMPLETE eligible set of ${rolling.session.frontier.length}
+node(s) below; audit-tools imposes no admission subset, cold-start wall, or concurrency
+cap. When they are all accepted, merge and re-invoke next-step.`
+        : `The tool admitted this set against the live budget (and any declared in-flight cap):
+dispatch EXACTLY the ${rolling.session.frontier.length} node(s) below and no more.
+Their count is the whole grant — there is no separate concurrency cap. When they are
+all accepted, merge and re-invoke next-step; the tool re-grants the pending remainder.`;
       const nodeLines = rolling.initial
         .map(
           (n) =>
@@ -2309,19 +2317,19 @@ Each granted node runs in its OWN git worktree (hard isolation between nodes). T
 TOOL owns commit -> verify -> merge + write-scope; you only spawn a subagent per
 node and call \`accept-node\` as each finishes.
 
-The tool ADMITTED this set against the live budget (and any declared in-flight cap):
-dispatch EXACTLY the ${rolling.session.frontier.length} node(s) below and no more.
-Their count is the whole grant — there is no separate concurrency cap. When they are
-all accepted, merge and re-invoke next-step; the tool re-grants the pending remainder.
+ ${dispatchAuthorityNote}
 
-${renderDispatchDriverInstruction(driverSelection, `the ${rolling.session.frontier.length} granted node(s)`)}
+${renderDispatchDriverInstruction(
+  driverSelection,
+  `the ${rolling.session.frontier.length} ${hostOwnedRolling ? "eligible" : "granted"} node(s)`,
+)}
 
 Spawn ONE subagent for EACH granted node below. Give the subagent that node's
 \`prompt\`, and set its working directory to the node's **worktree** path. The
 subagent edits source files INSIDE that worktree and writes ONLY its result file.
 Do NOT let any subagent edit the main repository tree.
 
-Granted nodes (worktrees already created):
+ ${hostOwnedRolling ? "Eligible" : "Granted"} nodes (worktrees already created):
 ${nodeLines}
 
 As EACH subagent finishes, run (substituting the finished node's block id):
@@ -2371,7 +2379,10 @@ ${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
         allowedCommands: [acceptCmd, reverifyCmd, rollMerge, rollNext],
         stopCondition:
           "Stop after every node has reached a terminal accept (accept-node returns done), results merged, and next-step has been run.",
-        artifactPaths: { dispatch_plan: rolling.planPath, dispatch_quota: rolling.quotaPath },
+        artifactPaths: {
+          dispatch_plan: rolling.planPath,
+          ...(rolling.quotaPath ? { dispatch_quota: rolling.quotaPath } : {}),
+        },
       }) };
       }
     }
@@ -2453,6 +2464,7 @@ Then run:
     // of `implementing`) emits the resumable `quota_paused` step this same advance; the
     // ungranted nodes stay PENDING and re-dispatch on resume (never abandoned to partial
     // coverage — the remediate divergence from audit's read-only bound-and-give-up).
+    if (!waveOptsImpl.hostOwnedDispatch) {
     const implQuota = await readOptionalJsonFile<{
       admission?: {
         granted_packet_ids?: string[];
@@ -2501,7 +2513,9 @@ Then run:
       }
       return { kind: "transition", state: paused };
     }
+    }
 
+    const hostOwnedLegacy = waveOptsImpl.hostOwnedDispatch === true;
     return { kind: "emit", step: await writeCurrentStep({
       stepKind: "dispatch_implement",
       status: "ready",
@@ -2511,29 +2525,28 @@ Then run:
       prompt: `
 # Dispatch Implementation Work (rolling)
 
-Read the dispatch plan and quota JSONs:
+Read the dispatch plan${hostOwnedLegacy ? "" : " and quota JSONs"}:
 
 \`${planPath}\`
-\`${implQuotaPath}\`
+${hostOwnedLegacy ? "" : `\`${implQuotaPath}\``}
 
 Every item in \`items\` is a node whose dependencies are all VERIFIED-COMPLETE
-(INV-RS-01). The tool admitted a budget-bounded subset: dispatch EXACTLY the block
-ids in the quota file's \`admission.granted_packet_ids\` and no others — that granted
-set is the whole grant (there is no separate concurrency cap). Each item's
+(INV-RS-01). ${hostOwnedLegacy
+  ? "The attended host and llm-relay own provider selection, failover, quota, and concurrency. Dispatch every item in this complete eligible plan; audit-tools imposes no admission subset, cold-start wall, or concurrency cap."
+  : "The tool admitted a budget-bounded subset: dispatch EXACTLY the block ids in the quota file's `admission.granted_packet_ids` and no others — that granted set is the whole grant (there is no separate concurrency cap)."} Each item's
 \`model_hint.tier\` suggests which model to use (small/standard/deep). If your
 provider has rate limits, pace launches accordingly.
 
-For each GRANTED item in \`items\` (its \`block_id\` in \`admission.granted_packet_ids\`),
+For each ${hostOwnedLegacy ? "eligible" : "GRANTED"} item in \`items\`${hostOwnedLegacy ? "" : " (its `block_id` in `admission.granted_packet_ids`)"},
 dispatch one subagent with that item's \`prompt_path\`. Each subagent may edit source
 files needed for that bounded block and must write only its assigned \`result_path\`.
-After the granted set is merged and you run next-step, the tool re-grants the pending
-remainder.
+${hostOwnedLegacy ? "After the complete plan is merged, run next-step." : "After the granted set is merged and you run next-step, the tool re-grants the pending remainder."}
 
 ${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
 
-${renderQuotaCoverageNudge(implQuotaPath, artifactsDir)}
+${renderQuotaCoverageNudge(hostOwnedLegacy ? null : implQuotaPath, artifactsDir)}
 
-${renderTokenBudgetView(implQuotaPath)}
+${renderTokenBudgetView(hostOwnedLegacy ? null : implQuotaPath)}
 
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
 
@@ -2550,7 +2563,10 @@ Then run:
       allowedCommands: [mergeCommand, nextCommand],
       stopCondition:
         "Stop after all implementation results have been merged and next-step has been run.",
-      artifactPaths: { dispatch_plan: planPath, dispatch_quota: implQuotaPath },
+      artifactPaths: {
+        dispatch_plan: planPath,
+        ...(hostOwnedLegacy ? {} : { dispatch_quota: implQuotaPath }),
+      },
     }) };
 }
 
@@ -5349,7 +5365,7 @@ async function decideNextStepLoop(
   // When the fold ran only inside the implement-dispatch step builder, a
   // next-step call carrying the flags that landed on any other obligation (a
   // triage re-drive — the 2026-07-22 dogfood wall) silently dropped them and
-  // dispatch capability stayed at the conservative floor.
+  // dispatch capability stayed unknown and produced a resumable refusal.
   if (state) {
     const { toPersist } = resolveHostCapabilities(
       {

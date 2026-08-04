@@ -115,6 +115,7 @@ function makePool(id: string, overrides: Partial<CapacityPool> = {}): CapacityPo
     quotaStateEntry: null,
     discoveredLimits: null,
     quotaSourceSnapshot: null,
+    contextCapTokens: 200_000,
     accountKey: derivedAccountKey ?? id,
     ...overrides,
   };
@@ -2170,6 +2171,28 @@ test("getTerminal — a WHOLLY-STRUCTURAL strand is the resumable no_capable_poo
   expect(terminal.stranded_ids.sort()).toEqual(["p-huge-1", "p-huge-2"]);
   // Both stranded via the permanent-strand record, on context_cap alone.
   expect(records.filter((r) => r.kind === "engine_stranded_no_fitting_pool").length).toBe(1);
+});
+
+test("unknown context capacity strands resumably and never dispatches", async () => {
+  await setupTmpQuotaDir();
+  const dispatched: string[] = [];
+  const dispatcher = createRollingDispatcher<TestPayload>({
+    confirmedPools: [{ ...makePool("unknown"), contextCapTokens: null }],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      dispatched.push(packet.id);
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue([makePacket("p1", { estimatedTokens: 1_000 })]);
+  await dispatcher.run();
+
+  expect(dispatched).toEqual([]);
+  const terminal = dispatcher.getTerminal();
+  assertTerminal(terminal);
+  expect(terminal.reason).toBe("quota_paused");
+  expect(terminal.empty_grant_cause).toBe("no_capable_pool");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
 });
 
 test("getTerminal — a strand caused by EXHAUSTED pools keeps the empty_pool terminal (structural pause does not swallow real exhaustion)", async () => {

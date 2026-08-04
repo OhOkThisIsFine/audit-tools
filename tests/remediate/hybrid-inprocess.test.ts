@@ -45,7 +45,13 @@ import {
 
 
 const RID = "RID-HYB";
-const SESSION = { quota: { unknown_hosted_concurrency: 8 } } as SessionConfig;
+const SESSION = {
+  quota: {
+    unknown_hosted_concurrency: 8,
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+} as SessionConfig;
 
 /** A confirmed in-process backend pool (the NIM / openai-compatible worker). */
 const NIM_POOL: CapacityPool = {
@@ -56,6 +62,7 @@ const NIM_POOL: CapacityPool = {
   providerName: "openai-compatible",
   hostModel: null,
   hostConcurrencyLimit: null,
+  contextCapTokens: 200_000,
   quotaSourceSnapshot: {
     remaining_pct: 0.95,
     reset_at: null,

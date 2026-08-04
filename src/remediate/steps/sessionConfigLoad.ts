@@ -3,7 +3,6 @@ import {
   readValidatedRepoSessionIntent,
   resolveSessionConfig,
   ambientAuditorDescriptor,
-  populateProxyCatalogIfMissing,
   type SessionConfig,
   type ResolveSessionConfigOptions,
 } from "audit-tools/shared";
@@ -15,8 +14,9 @@ import {
  * It is ALWAYS the ambient descriptor: remediate has no host handshake (no `--auditor`
  * flag), but it has an environment, so its dispatch pool resolves in-process from
  * `declared ∩ ambient-verifiable`. Host-self-class fields (model/window/roster) stay
- * absent → the host pool sizes to the conservative floor, which is a fidelity
- * degradation, never a block.
+ * absent at this seam; downstream resolution must obtain them from the current or
+ * persisted host capability, explicit config, or synced models.dev metadata. A pool
+ * that still has unknown capacity is unplaceable rather than assigned a guessed floor.
  *
  * ⚠ Why this function exists rather than three call sites each choosing: passing `null`
  * FAILS CLOSED to driver-self-only — no pool at all — and that is exactly what happened.
@@ -53,13 +53,6 @@ export async function loadRemediateSessionConfig(params: {
   ambient?: ResolveSessionConfigOptions;
 }): Promise<SessionConfig | undefined> {
   if (params.override) return params.override;
-  // Remediate has no Gate-0 build moment (audit's populate trigger), so a declared
-  // proxy lane on a remediate-only machine would never expand — the
-  // [[silent-fail-closed-on-one-draw]] class. Missing-only populate: after one
-  // success this is a cheap cache read, never a per-load fetch. Failure degrades
-  // (the resolve half then drops the lane WITH a reason via resolveSessionConfig's
-  // dropped-source report); it never blocks the load.
-  await populateProxyCatalogIfMissing(params.ambient).catch(() => null);
   const intent = params.artifactsFirst
     ? ((await readValidatedRepoSessionIntent(
         join(params.root, ".remediation-artifacts", "session-config.json"),

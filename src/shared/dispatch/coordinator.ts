@@ -34,7 +34,7 @@
  *
  *  - **The single pause authorization.** {@link HybridSpillCoordinator.terminalStatus}
  *    emits the `all_pools_exhausted` terminal — and that terminal is the ONLY
- *    signal authorizing dc4 to pause the run. While any confirmed pool is still
+ *    signal authorizing dc4 to pause the run. While any eligible pool is still
  *    unsettled the coordinator reports `dispatchable`, so a driver never pauses
  *    on a transient single-pool exhaustion that the split could route around.
  *
@@ -49,6 +49,7 @@ import {
   computeDispatchCapacity,
   buildEmptyPoolTerminal,
   AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS,
+  resolveCapacityPoolContextTokens,
 } from "../quota/capacity.js";
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { SettledExclusionSet } from "../rolling/pausedState.js";
@@ -88,9 +89,9 @@ export interface NodeAssignment {
 /**
  * The coordinator's terminal verdict after a planning pass.
  *
- * - `dispatchable`: at least one confirmed pool is still unsettled — keep going,
+ * - `dispatchable`: at least one eligible pool is still unsettled — keep going,
  *   never pause.
- * - `all_pools_exhausted`: every confirmed pool is settled; this is the ONLY
+ * - `all_pools_exhausted`: every eligible pool is settled; this is the ONLY
  *   signal that authorizes dc4 to engage the resumable pause. The stranded ids
  *   ride along as a {@link PartialCompletionTerminal} so the caller can route
  *   them through its consumer-specific handler.
@@ -101,7 +102,7 @@ export type CoordinatorTerminalStatus =
 
 /** Construction inputs for {@link HybridSpillCoordinator}. */
 export interface HybridSpillCoordinatorOptions {
-  /** Confirmed provider pools for this run, in preference order. */
+  /** Eligible capacity pools for this run. */
   pools: CapacityPool[];
   sessionConfig: SessionConfig;
   /**
@@ -126,12 +127,17 @@ export interface HybridSpillCoordinatorOptions {
 /**
  * Whether a node fits a pool's declared per-request/context token cap, including
  * the agentic-harness overhead a CLI worker adds on top of the packet prompt.
- * A pool with no declared cap (null/absent — host pools, undeclared sources) is
- * always admissible: unknown means no fit filtering, the status quo.
+ * A pool with no resolved cap is unadmittable. Unknown capacity cannot prove
+ * that the packet fits, so the coordinator leaves the node resumably unplaced.
  */
-function nodeContextFits(node: FrontierNode, pool: CapacityPool): boolean {
-  if (pool.contextCapTokens == null) return true;
-  return node.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= pool.contextCapTokens;
+function nodeContextFits(
+  node: FrontierNode,
+  pool: CapacityPool,
+  sessionConfig: SessionConfig,
+): boolean {
+  const contextTokens = resolveCapacityPoolContextTokens(pool, sessionConfig);
+  if (contextTokens == null) return false;
+  return node.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= contextTokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +231,7 @@ export class HybridSpillCoordinator {
       let scan = 0;
       while (placed < alloc.slots && scan < unassigned.length) {
         const node = unassigned[scan]!;
-        if (!nodeContextFits(node, pool)) {
+        if (!nodeContextFits(node, pool, this.sessionConfig)) {
           // Too large for this pool — leave it queued for a later pool this walk
           // (or unclaimed for the next cycle); the slot stays open for the next node.
           scan += 1;
@@ -256,7 +262,7 @@ export class HybridSpillCoordinator {
     // structured line per plan so the caller/operator can see exactly which
     // nodes are unplaceable and why.
     const neverFits = unassigned.filter((n) =>
-      active.every((p) => !nodeContextFits(n, p)),
+      active.every((p) => !nodeContextFits(n, p, this.sessionConfig)),
     );
     // Surface the same fact to the CALLER, not just to stderr (spec F1 shipped the
     // observability half only). A caller that sees an empty partition cannot
@@ -329,7 +335,7 @@ export class HybridSpillCoordinator {
 
   /**
    * The single pause-authorization check. Returns `all_pools_exhausted` — carrying
-   * a `PartialCompletionTerminal` over `strandedIds` — ONLY when every confirmed
+   * a `PartialCompletionTerminal` over `strandedIds` — ONLY when every eligible
    * pool is settled; otherwise `dispatchable`. dc4 may engage its resumable pause
    * if and only if this returns the terminal; a transient single-pool exhaustion
    * (other pools still unsettled) keeps the run dispatchable.

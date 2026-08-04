@@ -82,6 +82,7 @@ export type {
   Finding,
   FindingIdentity,
   WorkBlock,
+  WorkBlockSeam,
   FindingTheme,
   SynthesisNarrative,
   AuditFindingsSummary,
@@ -98,6 +99,7 @@ export {
   ExecutableAnchorSchema,
   FindingSchema,
   WorkBlockSchema,
+  WorkBlockSeamSchema,
   FindingThemeSchema,
   SynthesisNarrativeSchema,
   AuditFindingsSummarySchema,
@@ -348,8 +350,6 @@ export {
 
 // Tokens
 export {
-  DEFAULT_CONTEXT_TOKENS,
-  DEFAULT_OUTPUT_TOKENS,
   BLOCK_SAFETY_MARGIN,
   BYTES_PER_TOKEN,
   ESTIMATED_TOKENS_PER_LINE,
@@ -371,6 +371,16 @@ export { countBy } from "./countBy.js";
 // type explicitly (each just passes an object literal), so barrel-exporting it
 // would be an unconsumed export under the knip dead-code gate.
 export { chunkByBudget } from "./chunkByBudget.js";
+
+// Shared overlap-tolerant work decomposition (audit draw + remediation draw).
+export type {
+  WorkPartitionItem,
+  WorkPartitionPolicy,
+  WorkPartitionGroup,
+  WorkPartitionSeam,
+  WorkPartitionResult,
+} from "./decompose/workPartition.js";
+export { partitionWorkItems } from "./decompose/workPartition.js";
 
 // Concurrency: bounded, order-preserving parallel map
 export { mapWithConcurrency } from "./concurrency.js";
@@ -666,10 +676,7 @@ export {
   captureQuotaUnclassifiedFriction,
   captureModelUnavailableFriction,
   capturePacketTooLargeFriction,
-  captureNewlyReachableBackendFriction,
   captureZeroCapacityFriction,
-  captureUnrankedCapabilityPromotionFriction,
-  PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
 } from "./friction/stepBoundaryCapture.js";
 export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
 
@@ -939,21 +946,6 @@ export {
   discoverOutputConstraintCapability,
 } from "./providers/providerFactory.js";
 
-// Provider confirmation (Gate-0 pool discovery + selection)
-export type {
-  CapabilityTier,
-  DiscoveredProvider,
-  SourcePoolDisplayEntry,
-} from "./providers/providerConfirmation.js";
-export {
-  discoverProviders,
-  queryProviderQuota,
-  representativeModelId,
-  annotateConfirmedPoolCost,
-  annotateConfirmedPool,
-  deriveSourcePoolDisplay,
-  deriveSourcePoolDisplayFromSources,
-} from "./providers/providerConfirmation.js";
 export {
   commandExists,
   isSelfSpawnBlocked,
@@ -1072,7 +1064,6 @@ export {
 } from "./quota/hostLimits.js";
 export type { ReadCodexMaxThreads } from "./quota/hostLimits.js";
 export {
-  CODEX_DEFAULT_MAX_THREADS,
   readCodexConfiguredMaxThreads,
 } from "./quota/codexHostConfig.js";
 export type { RateLimitDetectionResult } from "./quota/errorParsing.js";
@@ -1124,10 +1115,6 @@ export {
   DEFAULT_SAFETY_MARGIN,
 } from "./quota/scheduler.js";
 export {
-  backendIdentity,
-  sourceService,
-  exclusionPattern,
-  serviceExclusionPattern,
   quotaPoolKey,
 } from "./providers/identity.js";
 export type {
@@ -1336,21 +1323,13 @@ export {
 export {
   COST_BLEND_INPUT_WEIGHT,
   COST_BLEND_OUTPUT_WEIGHT,
-  CONFIRMED_ORDER_BAND_BASE,
   PRICE_BAND_BASE,
   UNKNOWN_PRICE_BAND_BASE,
   blendedPrice,
   resolveModelPrice,
   deriveCostRank,
-  suggestCostOrdering,
-  lookupConfirmedPosition,
-  resolveConfirmedCostPositions,
 } from "./dispatch/costRank.js";
-export type {
-  CostRankInput,
-  CostCandidate,
-  OrderedCostCandidate,
-} from "./dispatch/costRank.js";
+export type { CostRankInput } from "./dispatch/costRank.js";
 
 // Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
 export type {
@@ -1377,7 +1356,6 @@ export {
 export {
   admitBatch,
   computeDispatchAdmission,
-  deriveThroughputConcurrency,
   admissionPoolsFromSummaries, buildCapabilityFloorCapable, buildObservedCapabilityFloorCapable,
   toConstraintOutcomeRecords,
   ConstraintOutcomeRecordSchema,
@@ -1480,26 +1458,8 @@ export type {
 } from "./types/rollingDispatch.js";
 export { ROLLING_DISPATCH_ENGINE_VERSION } from "./types/rollingDispatch.js";
 
-export type {
-  ConfirmedPoolEntry,
-  ProviderConfirmationResult,
-  ProviderConfirmationInput,
-} from "./types/providerConfirmation.js";
-export {
-  PROVIDER_CONFIRMATION_RESULT_VERSION,
-  PROVIDER_CONFIRMATION_INPUT_VERSION,
-} from "./types/providerConfirmation.js";
-
-// DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
-export type { SharedProviderConfirmation, RenderedProviderConfirmation, ConfirmedDispatchPolicy, DispatchExclusionPattern, DispatchExclusion, ExcludableBackend, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedCapabilityRanks, resolveUnevidencedCapabilityPools, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, ungrammaticalExclusionPatterns, unmatchedExclusionPatterns, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput, carryForwardConfirmationInput, retainAutoExclusions, detectDiscardedCapabilityReorder, mergeCapabilityOrder, selectCapabilityAnchors, DEFAULT_CAPABILITY_ANCHOR_COUNT, capabilityOrderNonAnchors, advanceCapabilityOrderLlmRanked } from "./providers/sharedProviderConfirmation.js";
-
-// 3c — POPULATE trigger for the proxy lane (Gate-0 build time / explicit
-// refresh; the resolve path only READS the cache).
-export {
-  populateDeclaredProxyCatalog,
-  populateProxyCatalogIfMissing,
-} from "./providers/auditorSources.js";
+export type { DispatchExclusionPattern, DispatchExclusion, ExcludableBackend } from "./providers/dispatchExclusion.js";
+export { buildSelfSpawnExclusion } from "./providers/dispatchExclusion.js";
 
 export type {
   EncodedClause,

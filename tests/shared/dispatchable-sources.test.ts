@@ -376,11 +376,12 @@ test("primaryInProcessSource: command-shaped primaries fold ONLY under commandWo
   expect(sub!.parameters?.env).toEqual({ A: "1" });
   // … but an absent/empty template block is no pool (nothing to launch).
   expect(primaryInProcessSource({}, "subprocess-template", { commandWorkers: true })).toBeNull();
-  // worker-command has NO session-level block: a bare transport source (the command
-  // is per-node on the task, resolved at dispatch).
-  expect(
-    primaryInProcessSource({}, "worker-command", { commandWorkers: true }),
-  ).toEqual({ transport: "worker-command" });
+  // worker-command has NO session-level launch contract at all (its reach is
+  // per-task `task.worker_command`, which the implement dispatchers never
+  // populate), so even under commandWorkers it folds to NO pool — a bare fold is
+  // dead capacity the engine would drive into silent per-node failures, and it is
+  // the neutral unidentified-host identity besides.
+  expect(primaryInProcessSource({}, "worker-command", { commandWorkers: true })).toBeNull();
 });
 
 test("collectDispatchableSources: the codex primary ALWAYS folds in as a source (no flag)", () => {
@@ -412,8 +413,8 @@ test("C1: a legacy openai_compatible.quota converges onto the folded source (leg
   );
   expect(primary!.quota).toEqual(quota);
 
-  // Absent quota stays undefined → the source falls to the conservative floor,
-  // exactly as before C1 (no regression for unconfigured operators).
+  // Absent quota stays undefined; synced model metadata may resolve it later,
+  // otherwise capacity remains unknown and the source is unplaceable.
   const { sources: noQuota } = collectDispatchableSources(
     { openai_compatible: { base_url: "http://nim/v1", model: "m" } },
     "claude-code",
@@ -430,13 +431,13 @@ test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrency
     "claude-code",
   );
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {}, capabilityRanks: null });
-  // discoveredLimits feeds resolveLimits' discovered_capability rung → real window,
-  // not DEFAULT_CONTEXT_TOKENS. concurrencyCap comes from the same quota.
+  // discoveredLimits feeds resolveLimits' discovered_capability rung → real window;
+  // concurrencyCap comes from the same quota.
   expect(pool.discoveredLimits?.context_tokens).toBe(128_000);
   expect(pool.discoveredLimits?.output_tokens).toBe(8_000);
   expect(pool.concurrencyCap).toBe(6);
 
-  // Legacy block WITHOUT quota → discoveredLimits null → resolveLimits floor.
+  // Legacy block WITHOUT quota → discoveredLimits null; no limit is invented.
   const {
     sources: [floorSource],
   } = collectDispatchableSources(

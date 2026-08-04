@@ -423,6 +423,13 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     // Several cases write source files under src/ (e.g. src/big.ts); writeFile
     // does not create parent dirs, so ensure src/ exists up front.
     await mkdir(join(PIPELINE_TEST_DIR, "src"), { recursive: true });
+    await writeFile(
+      join(PIPELINE_TEST_DIR, "session-config.json"),
+      JSON.stringify({
+        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      }),
+      "utf8",
+    );
   });
 
   afterEach(async () => {
@@ -687,4 +694,3 @@ describe("estimateGroupTokens uses shared constants (N-S04)", () => {
     expect(result).toBe(2200);
   });
 });
-

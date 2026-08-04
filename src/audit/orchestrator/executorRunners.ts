@@ -3,7 +3,7 @@ import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
 import { RunLogger, auditArtifactsDir } from "audit-tools/shared";
 import { decideAuditFrictionCloseout } from "./nextStep.js";
-import { runIntakeExecutor, runProviderConfirmationAutoComplete } from "./intakeExecutors.js";
+import { runIntakeExecutor } from "./intakeExecutors.js";
 import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
 import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
 import {
@@ -79,20 +79,6 @@ function requireRoot(root: string | undefined, executorName: string): string {
  * rather than a deterministic run.
  */
 export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
-  provider_confirmation_executor: async (bundle, { options }) =>
-    runProviderConfirmationAutoComplete(
-      bundle,
-      options.root,
-      options.artifactsDir,
-      // 2a-ii: the effective dispatch config (handshake inventory) — so the confirmed
-      // pool is built/persisted from the per-auditor inventory, never a re-read of the
-      // repo config that would re-leak another auditor's backends into the routed pool.
-      options.sessionConfig,
-      // G3: the reconciliation gate, BY REFERENCE — the autonomous path
-      // fail-closed-excludes the delta before it can route, and clears the gate on
-      // promotion so this PRIORITY[0] obligation converges.
-      options.providerConfirmationGate,
-    ),
   intake_executor: async (bundle, { options }) =>
     runIntakeExecutor(
       bundle,
@@ -180,9 +166,15 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       requireRoot(options.root, "runtime_validation_executor"),
     ),
   synthesis_executor: async (bundle, { options }) =>
-    runSynthesisExecutor(bundle, options.auditResults),
+    runSynthesisExecutor(bundle, options.auditResults, {
+      sizeIndex: options.sizeIndex,
+      workPartition: options.workPartition,
+    }),
   synthesis_narrative_executor: async (bundle, { options }) =>
-    runSynthesisNarrativeExecutor(bundle, options.narrativeResults),
+    runSynthesisNarrativeExecutor(bundle, options.narrativeResults, {
+      sizeIndex: options.sizeIndex,
+      workPartition: options.workPartition,
+    }),
   runtime_validation_update_executor: async (bundle, { options }) => {
     if (!options.runtimeValidationUpdates) {
       throw new Error(

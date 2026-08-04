@@ -48,12 +48,14 @@ function makeReport(overrides: Partial<AuditFindingsReport> = {}): AuditFindings
         evidence: [],
       },
     ],
+    work_block_seams: [],
     work_blocks: [
       {
         id: "B-001",
         finding_ids: ["F-001", "F-002"],
         unit_ids: [],
         owned_files: [],
+        role: "implementation",
         depends_on: [],
         max_severity: "high",
         rationale: "security",

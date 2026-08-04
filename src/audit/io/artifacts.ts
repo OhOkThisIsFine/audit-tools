@@ -18,8 +18,7 @@ import type {
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, CriticalFlowFallbackResult, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
-import type { ProviderConfirmationResult, AccessMemory } from "audit-tools/shared";
-import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
+import type { AccessMemory } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type {
   ExternalAnalyzerResults,
@@ -77,9 +76,6 @@ import { buildToolingManifest } from "./toolingManifest.js";
 export { SchemaVersionMismatchError as ArtifactSchemaVersionError } from "audit-tools/shared";
 
 type ArtifactPayloadMap = {
-  // --- Phase 0: Session gate ---
-  provider_confirmation: ProviderConfirmationResult;
-
   // --- Phase 1: Intake & classification ---
   repo_manifest: RepoManifest;
   file_disposition: FileDisposition;
@@ -233,7 +229,6 @@ function textArtifact<K extends ArtifactBundleKey>(
 }
 
 export const ARTIFACT_DEFINITIONS = {
-  provider_confirmation: jsonArtifact("provider_confirmation.json", "intake"),
   repo_manifest: jsonArtifact("repo_manifest.json", "intake"),
   file_disposition: jsonArtifact("file_disposition.json", "intake"),
   auto_fixes_applied: jsonArtifact("auto_fixes_applied.json", "intake"),
@@ -367,12 +362,6 @@ export async function loadArtifactBundle(
     "intent_checkpoint.json",
     "intent-checkpoint/v1",
   );
-  throwOnSchemaVersionMismatch(
-    bundle.provider_confirmation,
-    "provider_confirmation.json",
-    PROVIDER_CONFIRMATION_RESULT_VERSION,
-  );
-
   // agent-feedback.jsonl is appended by workers (opt-in reflections), never
   // written by the orchestrator. Parse leniently: malformed lines are skipped,
   // a present-but-unusable file is just an empty list. Synthesis surfaces the

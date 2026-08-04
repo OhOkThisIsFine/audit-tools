@@ -87,9 +87,7 @@ export type StepBoundaryEventType =
   | "write_scope_degraded"
   | "packet_too_large"
   | "quota_unclassified"
-  | "newly_reachable_backend"
-  | "exclusion_zeroed_capacity"
-  | "unranked_capability_promotion"
+  | "self_spawn_zeroed_capacity"
   | (string & {});
 
 /**
@@ -141,20 +139,9 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // classify it, so the operator must review the verbatim text and (if it's a
   // real quota/billing death) teach the tool a new precise pattern.
   quota_unclassified: "tool_should_decide",
-  // An autonomous run reached a backend the operator never confirmed and, with no
-  // human to ask, fail-closed-excluded it. Same "operator must reconcile" shape as
-  // a cost drift: only they can say whether that backend should route.
-  newly_reachable_backend: "tool_should_decide",
-  // The operator's own exclusion rules removed EVERY reachable lane, so the run has
-  // no source capacity at all. Only they can say whether that was intended — same
-  // "operator must reconcile" shape, and the one case where the tool would otherwise
-  // dispatch nothing and say nothing.
-  exclusion_zeroed_capacity: "tool_should_decide",
-  // The capability gate promoted a confirmation that left model(s) unranked, so they
-  // fail OPEN at the admission capability floor. Only the operator can close it — by
-  // supplying a ranker or answering `capability_order` on an attended run — which is
-  // the same "operator must reconcile" shape as a newly-reachable backend.
-  unranked_capability_promotion: "tool_should_decide",
+  // The mechanical self-spawn guard removed every reachable source. The operator
+  // must supply a non-colliding source or drive the work from another host.
+  self_spawn_zeroed_capacity: "tool_should_decide",
 };
 
 /**
@@ -297,67 +284,8 @@ export function captureCostDriftFriction(
 }
 
 /**
- * Route an autonomous fail-closed exclusion of a newly-reachable backend (the G3
- * reconciliation gate: this auditor can reach a backend the operator's Gate-0
- * decision never mentions, and no human is present to confirm it) through the
- * step-boundary chokepoint as a `newly_reachable_backend` fact.
- *
- * This is what keeps the autonomous branch LOUD rather than silent. The gate's
- * whole point is that the operator confirms model choices; when autonomy rules a
- * backend out on their behalf, they must be able to find out and re-include it at
- * the next attended gate. One fact per backend, discriminated by its gate key, so
- * re-derives never double-count and each backend is individually triageable.
- *
- * AWAITED, unlike the other reactive captures — deliberately. They fire mid-dispatch,
- * with a long-running engine still alive to flush them; this one fires at Gate-0, and
- * the CLI can emit its step and exit immediately after. A dropped write here would
- * mean the exclusion happened SILENTLY — precisely the failure the gate exists to
- * prevent — so the caller waits for it. Awaiting is safe: `captureFrictionEvent`
- * swallows every failure internally, so this can never break the in-flight obligation
- * (INV-O1-5), which is the property the fire-and-forget style was protecting.
- */
-export async function captureNewlyReachableBackendFriction(
-  artifactsDir: string,
-  runId: string,
-  backendKeys: readonly string[],
-  source: FrictionCaptureArtifact["tool"],
-): Promise<void> {
-  // Sequential, not Promise.all: the capture merges the whole record under a file
-  // lock, so concurrent appends would contend on the same lock for no gain.
-  for (const key of backendKeys) {
-    await captureStepBoundaryFriction(
-      artifactsDir,
-      runId,
-      {
-        eventType: "newly_reachable_backend",
-        discriminator: key,
-        note:
-          `backend "${key}" is reachable but absent from the operator's confirmed ` +
-          `route decision; this run is autonomous, so it was fail-closed-excluded ` +
-          `rather than dispatched unconfirmed. Confirm or exclude it at the next ` +
-          `attended provider-confirmation gate.`,
-        severity: "medium",
-        area: "dispatch/provider-confirmation",
-      },
-      source,
-    );
-  }
-}
-
-/**
- * The stable synthetic run key for facts about the operator's confirmed dispatch
- * POLICY. Such facts can arise before any run id exists — Gate-0 predates a run
- * entirely, and a source-pool build happens before the review run is materialized —
- * so they are discriminated by their own content under this fixed key instead.
- * Single-sourced here because both the Gate-0 fail-closed capture and the capacity
- * guard need the SAME key, or the same operator problem would split across two runs.
- */
-export const PROVIDER_CONFIRMATION_FRICTION_RUN_KEY = "provider-confirmation";
-
-/**
- * Route a rules-zeroed dispatch capacity (the operator's exclusion policy removed
- * EVERY gathered source, so the run has no source pool at all) through the
- * step-boundary chokepoint as an `exclusion_zeroed_capacity` fact.
+ * Route a self-spawn-zeroed dispatch capacity through the
+ * step-boundary chokepoint as a `self_spawn_zeroed_capacity` fact.
  *
  * This is the capacity guard's emission half. Without it the zeroing is completely
  * silent: `buildSourcePools` returns `[]`, the driver finds nothing to dispatch to,
@@ -365,8 +293,8 @@ export const PROVIDER_CONFIRMATION_FRICTION_RUN_KEY = "provider-confirmation";
  * caused it. The fact names the patterns responsible so the operator can find the
  * rule instead of re-deriving their whole policy.
  *
- * AWAITED, for the same reason {@link captureNewlyReachableBackendFriction} is: this
- * fires on a path where the CLI can emit its step and exit immediately, and a dropped
+ * AWAITED because this fires on a path where the CLI can emit its step and exit
+ * immediately, and a dropped
  * write would mean the zeroing stayed silent — precisely the failure the guard exists
  * to prevent. Awaiting is safe: `captureFrictionEvent` swallows every failure
  * internally, so it can never break the in-flight obligation (INV-O1-5).
@@ -384,68 +312,17 @@ export async function captureZeroCapacityFriction(
     artifactsDir,
     runId,
     {
-      eventType: "exclusion_zeroed_capacity",
+      eventType: "self_spawn_zeroed_capacity",
       discriminator: info.patterns.join(","),
       note:
         `every reachable dispatch source (${info.gatheredCount}) was removed by the ` +
-        `confirmed exclusion policy — this run has NO source capacity. Rules ` +
-        `responsible: ${info.patterns.map((p) => `"${p}"`).join(", ")}. Re-include a ` +
-        `backend at the next attended provider-confirmation gate, or narrow the rule.`,
+        `local self-spawn guard — this run has NO source capacity. Rules ` +
+        `responsible: ${info.patterns.map((p) => `"${p}"`).join(", ")}.`,
       severity: "high",
-      area: "dispatch/provider-confirmation",
+      area: "dispatch/self-spawn",
     },
     source,
   );
-}
-
-/**
- * Route a capability-evidence promotion that left model(s) unranked through the
- * step-boundary chokepoint as an `unranked_capability_promotion` fact.
- *
- * The counterpart of {@link captureNewlyReachableBackendFriction} on the capability
- * axis, and it exists for the same reason: the obligation's whole point is that a
- * pool with no capability evidence is never SILENTLY routed around. Promoting anyway
- * is the correct call — refusing would livelock, and fail-closed-excluding an
- * unranked pool would silently shrink the dispatch set — but the unranked models
- * then fail OPEN at the admission capability floor, which is a real routing
- * consequence the operator must be able to find and close out of band.
- *
- * The progress summary already states it, but a summary can be folded away by a
- * drain; the friction record is what survives to the per-category walk. One fact per
- * MODEL, discriminated by model id, so re-derives never double-count and each
- * unranked model is individually triageable.
- *
- * AWAITED for the same reason as the reach capture: this fires at Gate-0, where the
- * CLI can emit its step and exit immediately after, so a dropped write would mean the
- * fail-open happened silently. Safe to await — `captureFrictionEvent` swallows every
- * failure internally, so it can never break the in-flight obligation (INV-O1-5).
- */
-export async function captureUnrankedCapabilityPromotionFriction(
-  artifactsDir: string,
-  runId: string,
-  models: readonly string[],
-  source: FrictionCaptureArtifact["tool"],
-): Promise<void> {
-  // Sequential for the same reason as the reach capture: the merge is under a file
-  // lock, so concurrent appends would contend on that lock for no gain.
-  for (const model of models) {
-    await captureStepBoundaryFriction(
-      artifactsDir,
-      runId,
-      {
-        eventType: "unranked_capability_promotion",
-        discriminator: model,
-        note:
-          `model "${model}" was promoted with NO capability evidence — it stays ` +
-          `unranked and fails OPEN at the admission capability floor, so it can be ` +
-          `admitted for work above its real capability. Supply a ranker, or answer ` +
-          `capability_order at the next attended provider-confirmation gate.`,
-        severity: "medium",
-        area: "dispatch/provider-confirmation",
-      },
-      source,
-    );
-  }
 }
 
 /** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */

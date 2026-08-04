@@ -57,7 +57,8 @@ remediate-code next-step
 
 Every `next-step` call is also the **capability handshake**: report what you can
 dispatch to *right now* so the backend sizes remediation waves and per-worker
-context to your real model instead of a conservative 32k floor. Report:
+context against reported or configured limits. Without them, capacity remains
+unknown and wave planning pauses. Report:
 
 - `--host-can-dispatch-subagents` — whether you can run callable subagents at all
   (via the `Agent`/`task` tool). Without it the backend runs remediation serially.

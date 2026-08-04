@@ -21,11 +21,9 @@ import {
 } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { resolveModelStatics } from "./modelStatics.js";
-import { DEFAULT_CONTEXT_TOKENS } from "../tokens.js";
 import type {
   DispatchExclusion,
-  DispatchExclusionPattern,
-} from "../providers/sharedProviderConfirmation.js";
+} from "../providers/dispatchExclusion.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import {
   isHeadlessPrimaryProvider,
@@ -40,22 +38,17 @@ import {
  * (It said `transport[...]` until stage 1 normalized `service` at the chokepoint; the
  * transport arm below is now the unreachable fallback, not the main path.)
  *
- * ⚠ Keyspace (1) of three, and NOT the `provider:model` operator exclusion grammar
- * (`DispatchExclusionPattern`) it superficially resembles — an account is load-bearing
- * here (the double-grant boundary) and irrelevant to a rule about a backend. Nor is it
- * the gate's `(service ?? transport):model` compare key — which shares this
- * backend-qualified provider half but carries no account. Do not unify them.
+ * The account component is load-bearing here: it prevents independent credentials
+ * from collapsing into one quota pool while still deduplicating two transports that
+ * reach the same service, account, and model.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
   // Precedence, in order:
   //
   //   1. An explicit `id` is an operator OVERRIDE and outranks derivation
   //      (spec/backend-identity-axes.md). This is only safe because NOTHING auto-stamps
-  //      one any more — the populate cache used to stamp transport-shaped ids
-  //      (`claude-worker:<service>/<model>`), which is why this branch previously sat
-  //      BELOW the service branch. Re-introducing a tool-stamped id would silently
-  //      re-split the identity `service` exists to merge; the cache comment in
-  //      `proxyCatalog.ts` pins that.
+  //      one any more. Re-introducing a tool-stamped transport-shaped id would
+  //      silently re-split the identity `service` exists to merge.
   //   2. Transport-fronted lane (3c): the transport NEVER enters the quota identity. A
   //      source declaring `service` keys on the BACKEND actually serving it —
   //      `service[#account]/model` — so a proxied `claude-worker` lane and a direct
@@ -73,7 +66,7 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
   }
   // Unreachable for anything that came through the gather chokepoint (`service` is
   // normalized to `declared ?? transport` there). Retained for the pre-chokepoint
-  // callers in `resolveProxyLane`, which see raw declared sources.
+  // callers that see raw declared sources before the gather chokepoint.
   return quotaPoolKey(source.transport, source.model ?? source.endpoint ?? null, account);
 }
 
@@ -90,22 +83,21 @@ function positiveIntCapOrNull(value: number | undefined): number | null {
 
 /**
  * The effective per-request context window (tokens) for a dispatchable source — a
- * positive integer that is NEVER null. This is the invariant that makes context-fit
- * gating REAL: a `null` cap meant "unknown ⇒ always fits", which silently no-op'd
- * every fit gate for a proxy pool whose registry entry carried no context field (the
- * 2026-07-17 host-only-collapse root cause — oversized packets were dispatched and
- * 413'd instead of being skipped). Fallback chain:
+ * positive integer when declared/discovered, otherwise null. Fit gates treat null
+ * as unadmittable: the earlier "unknown ⇒ always fits" behavior silently no-op'd
+ * every fit gate for a proxy pool whose registry entry carried no context field.
+ * Resolution chain:
  *   1. operator/registry-declared `quota.context_tokens` (the stamp populate sets),
  *   2. else the BACKEND model's models.dev window (`resolveModelStatics(model,
  *      service ?? transport)` — a synced, someone-else-maintained table),
- *   3. else the blind `DEFAULT_CONTEXT_TOKENS` floor.
+ *   3. else unknown (`null`) — never a guessed window.
  * Single-sourced (exported) as the one fit-window resolver. Only `buildSourcePool`
  * stamps it — host-model pools carry no `contextCapTokens` and gate (on the admission
  * path) against their own per-pool `resolved_limits` window instead; the admission
  * builder folds the two (`context_cap_tokens ?? resolved_limits.context_tokens`) so
  * BOTH pool classes share one fit predicate (unified-routing step B).
  */
-export function resolveSourceContextWindowTokens(source: DispatchableSource): number {
+export function resolveSourceContextWindowTokens(source: DispatchableSource): number | null {
   const declared = positiveIntCapOrNull(source.quota?.context_tokens);
   if (declared !== null) return declared;
   const statics = resolveModelStatics(
@@ -114,7 +106,7 @@ export function resolveSourceContextWindowTokens(source: DispatchableSource): nu
   );
   const fromCatalog = positiveIntCapOrNull(statics?.context_tokens);
   if (fromCatalog !== null) return fromCatalog;
-  return DEFAULT_CONTEXT_TOKENS;
+  return null;
 }
 
 /**
@@ -156,19 +148,19 @@ function finiteRankOrNull(value: number | undefined): number | null {
  * ordering / operator escape) only fill holes — they never override real data.
  *
  * Joined on the pool's `hostModel`, which BOTH constructors derive and which is the
- * same keyspace `readConfirmedCostPositions` uses. A pool with no model is unjoinable
+ * same model keyspace used by external capability-rank maps. A pool with no model is unjoinable
  * by design and simply stays unranked (it cannot be pinned either — see the plan's
  * model-less-pool trap).
  */
 function resolveDeclaredCapabilityRank(params: {
   hostModel: string | null;
   declared: number | undefined;
-  confirmed: ReadonlyMap<string, number> | null | undefined;
+  fallback: ReadonlyMap<string, number> | null | undefined;
 }): number | null {
   const external = finiteRankOrNull(params.declared);
   if (external !== null) return external;
-  if (!params.hostModel || !params.confirmed) return null;
-  return finiteRankOrNull(params.confirmed.get(params.hostModel));
+  if (!params.hostModel || !params.fallback) return null;
+  return finiteRankOrNull(params.fallback.get(params.hostModel));
 }
 
 /**
@@ -287,12 +279,11 @@ export async function buildHostModelPool(params: {
   const hostModel = parseProviderModelKey(params.poolKey).model;
   // The host roster (`HostModelRosterEntrySchema`, .strict()) carries NO capability
   // field — model_id there is opaque quota-key material by design. So a host model's
-  // rank arrives only through the confirmed map, which is where Gate-0 lands both the
-  // ranker's numbers and the LLM/operator gap-fill for host models.
+  // rank arrives only through an auxiliary map supplied by the host handshake.
   const declaredCapabilityRank = resolveDeclaredCapabilityRank({
     hostModel,
     declared: undefined,
-    confirmed: params.capabilityRanks,
+    fallback: params.capabilityRanks,
   });
   return {
     id: params.poolKey,
@@ -438,11 +429,9 @@ export async function buildSourcePool(params: {
     // null (uncapped) — never 0, which would ceiling the pool to zero in-flight and
     // wedge the rolling engine, and would also violate the summary schema's min(1).
     concurrencyCap: positiveIntCapOrNull(source.quota?.max_concurrent),
-    // Effective per-request context window — NEVER null (declared quota.context_tokens
-    // → backend model's models.dev window → DEFAULT_CONTEXT_TOKENS). A null cap used to
-    // mean "always fits", which no-op'd every fit gate for a registry pool carrying no
-    // context field; resolving to a concrete window means an oversized packet is skipped,
-    // not 413'd. See resolveSourceContextWindowTokens.
+    // Effective per-request context window (declared quota.context_tokens → backend
+    // model's models.dev window → null). Null means capability is unknown and every
+    // fit gate refuses the pool until a real value is supplied/discovered.
     contextCapTokens: resolveSourceContextWindowTokens(source),
     // Operator-declared a-priori $/Mtok for this endpoint → the admission cost rank
     // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
@@ -452,11 +441,11 @@ export async function buildSourcePool(params: {
     // FLOOR (banding) and the tiebreak among cost-equal, same-tier pools. Finite-or-null;
     // a non-finite value degrades to null (no finer signal) rather than poisoning the
     // comparator. The source's own declared/registry rank wins; the confirmed map fills
-    // the gap for a model no external rank source covers.
+    // the gap for a model no declared rank source covers.
     declaredCapabilityRank: resolveDeclaredCapabilityRank({
       hostModel: source.model ?? null,
       declared: source.capability_rank,
-      confirmed: params.capabilityRanks,
+      fallback: params.capabilityRanks,
     }),
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
@@ -501,8 +490,8 @@ function openAiCompatibleSource(
     },
     // C1: converge the legacy block's budget onto the source-pool quota so a
     // configured window/concurrency reaches buildSourcePool's discoveredLimits /
-    // concurrencyCap instead of the default context/output floor. Absent quota
-    // stays undefined → the conservative floor, exactly as before.
+    // concurrencyCap. Absent quota stays undefined; the pool must then resolve
+    // limits from synced model metadata or remain explicitly unplaceable.
     ...(oc.quota !== undefined ? { quota: oc.quota } : {}),
   };
 }
@@ -587,10 +576,14 @@ export function primaryInProcessSource(
       };
     }
     case "worker-command":
-      // No session-level config block exists for worker-command: each node carries
-      // its own `task.worker_command`, resolved at dispatch. A bare provider source
-      // is the correct pool identity.
-      return { transport: "worker-command" };
+      // worker-command has NO session-level launch contract (its reach is per-task
+      // `task.worker_command`, which the implement dispatchers never populate), so a
+      // bare fold is dead capacity: the engine would claim nodes onto it and every
+      // launch would fail with no result — a silently-broken wave, not a pool
+      // (mirrors the absent-template subprocess-template case above). It is also the
+      // neutral UNIDENTIFIED-HOST identity, so folding it as a source would let the
+      // host's own pool identity reappear as an engine-drivable backend.
+      return null;
   }
   return null;
 }
@@ -624,7 +617,7 @@ export interface DispatchableSourceSet {
  * Returns the PAIR `{ sources, dropped }`, mirroring `resolveAmbientSources`
  * (`auditorSources.ts`), which applies the same `laneWorkerKindConflict` predicate.
  * A routing-filtered lane must be a value the caller can read, not only a stderr
- * line: `buildSourcePools` feeds the Gate-0 confirmation display, where a dropped
+ * line: source discovery can feed read-only diagnostics, where a dropped
  * backend stays VISIBLE and marked so the operator can act on it — the same reason
  * `excludedBackends` is filtered on the routing side rather than in the gather.
  * A stderr-only report also self-suppresses after the first (lane, reason) in a
@@ -714,7 +707,7 @@ function warnIncompatibleLaneOnce(laneId: string, reason: string): void {
 /**
  * The FULL dispatchable source list for a run — the configured
  * `collectDispatchableSources` set. The single async source-gather point: both the
- * dispatch pool builder ({@link buildSourcePools}) and the Gate-0 confirmation surface
+ * dispatch pool builder ({@link buildSourcePools}) and source diagnostics
  * consume it, so what the operator confirms is exactly what routes (no display/dispatch
  * drift on the source set). Async is retained as the stable seam for the per-auditor
  * inventory resolution the handshake will feed here.
@@ -728,15 +721,15 @@ export async function gatherDispatchableSources(
 }
 
 /**
- * A rules-zeroed dispatch capacity: reach EXISTED and the operator's exclusion rules
+ * A self-spawn-zeroed dispatch capacity: reach existed and the local safety guard
  * removed all of it. Distinct from a legitimately empty build (nothing configured),
  * which is normal operation and carries no fact.
  */
 export interface ExclusionZeroing {
   /** How many sources were gathered before the rules were applied. */
   gatheredCount: number;
-  /** The operator patterns that did it, deduplicated and sorted. */
-  patterns: DispatchExclusionPattern[];
+  /** The mechanical transport patterns that did it, deduplicated and sorted. */
+  patterns: string[];
 }
 
 /**
@@ -776,8 +769,8 @@ export async function buildSourcePools(params: {
   /** The draw's fold policy: admit command-shaped primaries (remediate) or not (audit). */
   commandWorkers?: boolean;
   /**
-   * The backends the operator ruled out at Gate-0, plus any recomputed as
-   * self-spawn-blocked in THIS process (`resolveDispatchExclusion`). Applied as a
+   * Backends recomputed as self-spawn-blocked in THIS process
+   * (`buildSelfSpawnExclusion`). Applied as a
    * set-difference over freshly-gathered reach — never additively.
    *
    * A matcher rather than a name set because the grammar is MODEL-granular
@@ -785,11 +778,11 @@ export async function buildSourcePools(params: {
    * backend's other sources routable, which a provider-name set cannot express.
    *
    * Filtered HERE, on the routing side, rather than inside
-   * {@link gatherDispatchableSources}: the gather also feeds the Gate-0 confirmation
+   * {@link gatherDispatchableSources}: the gather may also feed read-only source
    * display, where an excluded provider must stay VISIBLE and marked excluded so the
    * operator can see it and opt it back in. Display and routing diverge deliberately.
    *
-   * Omit ⇒ no filtering (the pool build is unaware of Gate-0), so a caller that has
+   * Omit ⇒ no filtering, so a caller that has
    * no confirmation to read behaves exactly as before.
    */
   excludedBackends?: DispatchExclusion;
@@ -817,19 +810,20 @@ export async function buildSourcePools(params: {
   );
   return {
     pools: foldAccountCooldownAcrossPools(pools),
-    // Carried through so the Gate-0 surface can show a routing-filtered lane the same
+    // Carried through so diagnostics can show a routing-filtered lane the same
     // way it shows an excluded one — VISIBLE and reasoned, not vanished.
     dropped,
     // Computed HERE because one line later the pre-filter population is gone: this is
-    // the only point in the program that can tell "the operator ruled everything out"
+    // the only point in the program that can tell "the self-spawn guard ruled everything out"
     // apart from "nothing was configured".
     zeroedByExclusion:
       excluded && gathered.length > 0 && sources.length === 0
         ? {
             gatheredCount: gathered.length,
-            patterns: sortStrings(
-              gathered.map((source) => excluded.excludedBy(source)).filter((p): p is string => p !== null),
-            ),
+            patterns: sortStrings(gathered.flatMap((source) => {
+              const pattern = excluded.excludedBy(source);
+              return pattern === null ? [] : [pattern];
+            })),
           }
         : null,
   };
@@ -924,9 +918,10 @@ export function dedupHostAndSourcePools(params: {
     (source.account === null ? true : host.account === source.account);
 
   const survivingSourceIdentities: Array<{ provider: string; account: string | null }> = [];
-  const sourcePools = params.sourcePools.filter((source) => {
+  const sourcePools = params.sourcePools.flatMap((source) => {
     const id = identityOf(source);
-    if (!hostIdentities.some((host) => collide(host, id))) return true;
+    if (!hostIdentities.some((host) => collide(host, id))) return [source];
+    const matchingHostPools = params.hostPools.filter((host) => collide(identityOf(host), id));
     if (
       isInProcessWorkerProvider(source.providerName, {
         commandWorkers: params.commandWorkers === true,
@@ -934,10 +929,37 @@ export function dedupHostAndSourcePools(params: {
     ) {
       // D1: the engine pool survives; the colliding host pool(s) drop below.
       survivingSourceIdentities.push(id);
-      return true;
+      // The source is the same provider/account lane as the attended host. When
+      // exactly one host pool supplied a current capability handshake, carry that
+      // evidence onto the surviving engine pool instead of discarding it at the
+      // dedup seam. Never guess across a multi-model roster collision.
+      const hostCapability =
+        matchingHostPools.length === 1 ? matchingHostPools[0]!.discoveredLimits : null;
+      const sourceLimits = source.discoveredLimits;
+      const canFillContext =
+        sourceLimits?.context_tokens == null && hostCapability?.context_tokens != null;
+      const canFillOutput =
+        sourceLimits?.output_tokens == null && hostCapability?.output_tokens != null;
+      const transferredLimits =
+        hostCapability && sourceLimits == null
+          ? hostCapability
+          : hostCapability && (canFillContext || canFillOutput)
+            ? {
+                ...sourceLimits,
+                context_tokens:
+                  sourceLimits?.context_tokens ?? hostCapability.context_tokens,
+                output_tokens:
+                  sourceLimits?.output_tokens ?? hostCapability.output_tokens,
+              }
+            : sourceLimits;
+      return [
+        transferredLimits !== sourceLimits
+          ? { ...source, discoveredLimits: transferredLimits }
+          : source,
+      ];
     }
     // Host survives; the colliding non-in-process source drops.
-    return false;
+    return [];
   });
   const hostPools = params.hostPools.filter(
     (pool) => !survivingSourceIdentities.some((id) => collide(identityOf(pool), id)),

@@ -27,6 +27,7 @@ import {
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
 import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
+import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import { buildSelectiveDeepeningTasks } from "./selectiveDeepening.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 
@@ -202,7 +203,9 @@ export function runResultIngestionExecutor(
       ...t,
       file_line_counts: Object.fromEntries(
         t.file_paths
-          .filter((p) => lineIndex[p] != null)
+          // Exclude the unmeasured sentinel (NaN) alongside absent keys: NaN would
+          // JSON-serialize as null and violate the numeric file_line_counts contract.
+          .filter((p) => lineIndex[p] != null && !isUnmeasuredLineCount(lineIndex[p]))
           .map((p) => [p, lineIndex[p]]),
       ),
     }));

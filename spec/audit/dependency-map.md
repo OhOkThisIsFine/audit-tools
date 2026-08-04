@@ -179,7 +179,6 @@ truth remains the pair of registries — `EXECUTOR_REGISTRY`
 
 | Artifact | Primary producer | Also written / refreshed by |
 |---|---|---|
-| `provider_confirmation.json` | `provider_confirmation_executor` | — |
 | `repo_manifest.json` | `intake_executor` | — |
 | `file_disposition.json` | `intake_executor` | `structure_executor` |
 | `intent_checkpoint.json` | `intent_checkpoint_executor` | — |

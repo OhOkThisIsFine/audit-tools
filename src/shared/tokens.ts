@@ -4,19 +4,11 @@
 // estimator (auditor `reviewPackets.ts`, remediator `plan.ts`). This module is
 // the single source of truth for:
 //   - the byte- and line-based token estimators,
-//   - the default budgets and safety margin used when sizing work blocks.
+//   - the safety-margin policy used when sizing work blocks.
 //
-// Model context/output windows are NOT hardcoded here — they are discovered at
-// the dispatch-time capability handshake (see quota/limits.ts
-// `discovered_capability`). When nothing is discovered, sizing falls to the
-// conservative floor below, never to a guessed per-model window.
-
-// Conservative default budgets when no window is configured or discovered. This
-// matches the quota subsystem's conservative floor (quota/limits.ts
-// `defaultLimits`): a headless run that cannot discover its window sizes small
-// and honest rather than assuming a large model's context.
-export const DEFAULT_CONTEXT_TOKENS = 32_000;
-export const DEFAULT_OUTPUT_TOKENS = 4_096;
+// Model context/output windows are never hardcoded here. They come from explicit
+// operator policy, the current dispatch-time capability handshake, or the synced
+// models.dev snapshot. Unknown stays unknown; callers must pause/fail closed.
 
 // Fraction of the usable window (context − reserved output) a single work block
 // or review packet is allowed to occupy. Leaves headroom for the host prompt.
@@ -48,16 +40,25 @@ export function estimateTokensFromBytes(bytes: number): number {
 /**
  * Usable context budget for a single work block: (context − reserved output)
  * scaled by the safety margin. Callers pass the discovered/configured window;
- * absent that, sizing falls to the conservative floor (never a guessed
- * per-model window).
+ * absent either value, sizing is unresolved rather than guessed.
  */
 export function resolveContextBudget(input: {
   contextTokens?: number | null;
   reservedOutputTokens?: number | null;
   safetyMargin?: number;
-}): number {
-  const contextTokens = input.contextTokens ?? DEFAULT_CONTEXT_TOKENS;
-  const outputTokens = input.reservedOutputTokens ?? DEFAULT_OUTPUT_TOKENS;
+}): number | null {
+  const contextTokens = input.contextTokens;
+  const outputTokens = input.reservedOutputTokens;
+  if (
+    typeof contextTokens !== "number" ||
+    !Number.isFinite(contextTokens) ||
+    contextTokens <= 0 ||
+    typeof outputTokens !== "number" ||
+    !Number.isFinite(outputTokens) ||
+    outputTokens <= 0
+  ) {
+    return null;
+  }
   const margin = input.safetyMargin ?? BLOCK_SAFETY_MARGIN;
   // Floor at 0: a window whose reserved output meets or exceeds its context
   // (a malformed operator quota, or a too-small endpoint) yields no usable input

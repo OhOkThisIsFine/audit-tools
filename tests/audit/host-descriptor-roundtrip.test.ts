@@ -50,6 +50,33 @@ describe("auditor descriptor round-trip", () => {
     expect(parsed.self.can_select_subagent_model).toBe(true);
   });
 
+  test("--auditor @<path> reads the handshake from a file (the .cmd-shim JSON-quoting escape hatch)", async () => {
+    const { writeFile, rm, mkdtemp } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "auditor-at-file-"));
+    try {
+      const filePath = join(dir, "auditor.json");
+      await writeFile(
+        filePath,
+        JSON.stringify({ self: { can_dispatch_subagents: true, context_tokens: 123_000, output_tokens: 8_000 } }),
+        "utf8",
+      );
+      const parsed = getAuditorDescriptor(["--auditor", `@${filePath}`]);
+      expect(parsed?.self.can_dispatch_subagents).toBe(true);
+      expect(parsed?.self.context_tokens).toBe(123_000);
+      expect(parsed?.self.output_tokens).toBe(8_000);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--auditor @<missing-path> throws the file error, never a silent downgrade", () => {
+    expect(() =>
+      getAuditorDescriptor(["--auditor", "@Z:/definitely/not/here/auditor.json"]),
+    ).toThrow(/cannot read the handshake file/);
+  });
+
   test("absent self fields re-parse to undefined; a resume then resolves them to defaults", () => {
     const argv = renderAuditorDescriptor({ self: { can_dispatch_subagents: true } });
     const parsed = getAuditorDescriptor(argv);

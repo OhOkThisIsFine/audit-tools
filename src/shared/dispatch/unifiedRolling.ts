@@ -89,7 +89,7 @@ export function resolveLedgerBudgets(input: {
 }): {
   reservationLedger?: ReservationLedger;
   resolvePoolConstraints: (poolId: string, tokens: number) => PoolConstraintResolution;
-  resolveOutputReservation: (poolId: string) => number;
+  resolveOutputReservation: (poolId: string) => number | null;
 } {
   const capacity = computeDispatchCapacity({
     pools: input.pools,
@@ -99,7 +99,7 @@ export function resolveLedgerBudgets(input: {
   const windowsByPool = new Map<string, WindowBudget[]>();
   const accountKeyByPool = new Map<string, string>();
   const budgetByPool = new Map<string, number>();
-  const outputByPool = new Map<string, number>();
+  const outputByPool = new Map<string, number | null>();
   let hasFiniteBudget = false;
   for (const alloc of capacity.pools) {
     const budget = alloc.schedule.remaining_token_budget;
@@ -129,7 +129,7 @@ export function resolveLedgerBudgets(input: {
         tokens,
         budgetByPool.get(poolId) ?? Number.POSITIVE_INFINITY,
       ),
-    resolveOutputReservation: (poolId) => outputByPool.get(poolId) ?? 0,
+    resolveOutputReservation: (poolId) => outputByPool.get(poolId) ?? null,
   };
 }
 
@@ -219,7 +219,10 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
    */
   reservationLedger?: ReservationLedger;
   resolvePoolConstraints?: (poolId: string, tokens: number) => PoolConstraintResolution;
-  resolveOutputReservation?: (packet: RollingDispatchPacket<TPayload>, poolId: string) => number;
+  resolveOutputReservation?: (
+    packet: RollingDispatchPacket<TPayload>,
+    poolId: string,
+  ) => number | null;
   /**
    * Engine decision-record sink (legibility invariant): forwarded to every
    * sub-wave dispatcher so per-packet admits / ledger blocks / strands land in

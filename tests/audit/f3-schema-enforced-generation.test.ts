@@ -69,7 +69,12 @@ const noopDeps: FreshSessionProviderDeps = {
 
 const brokerContext: Omit<BrokerDispatchInput, "slots"> = {
   providerName: "worker-command",
-  sessionConfig: {},
+  sessionConfig: {
+    quota: {
+      default_context_tokens: 200_000,
+      reserved_output_tokens: 8_000,
+    },
+  },
   hostModel: null,
 };
 

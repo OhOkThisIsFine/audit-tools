@@ -16,40 +16,23 @@ import type {
   RepoManifest,
   UnitManifest,
 } from "../../src/audit/types.js";
-import type {
-  AnalyzerSetting,
-  ProviderConfirmationResult,
-} from "audit-tools/shared";
+import type { AnalyzerSetting } from "audit-tools/shared";
+import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { decideNextStep, PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 const { EXECUTOR_REGISTRY } = await import("../../src/audit/orchestrator/executors.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
-const {
-  PROVIDER_CONFIRMATION_RESULT_VERSION,
-  RunLogger,
-} = await import("audit-tools/shared");
+const { RunLogger } = await import("audit-tools/shared");
 const {
   computeArtifactMetadata,
 } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const {
-  buildAuditReportModel,
+  buildAuditReportModel: buildAuditReportModelRaw,
   renderAuditReportMarkdown,
 } = await import("../../src/audit/reporting/synthesis.js");
-
-function createProviderConfirmation(): ProviderConfirmationResult {
-  return {
-    schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
-    confirmed_at: "2026-04-22T00:00:00Z",
-    provider_pool: [
-      {
-        name: "worker-command",
-        capability_tier: "unknown",
-        excluded: false,
-      },
-    ],
-    session_level: true,
-  };
-}
+const buildAuditReportModel = (
+  params: Parameters<typeof buildAuditReportModelRaw>[0],
+) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
 
 function createRepoManifest(): RepoManifest {
   return {
@@ -114,7 +97,6 @@ function createAuditTask(
 
 function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
   return {
-    provider_confirmation: createProviderConfirmation(),
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
@@ -213,14 +195,12 @@ function findObligation(state: AuditState, id: string) {
 
 test("decideNextStep covers representative priority states", () => {
   const intakeDecision = decideNextStep({
-    provider_confirmation: createProviderConfirmation(),
     repo_manifest: createRepoManifest(),
   });
   expect(intakeDecision.selected_obligation).toBe("file_disposition");
   expect(intakeDecision.selected_executor).toBe("intake_executor");
 
   const structureDecision = decideNextStep({
-    provider_confirmation: createProviderConfirmation(),
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
@@ -362,10 +342,9 @@ test("advanceAudit emits a structured run log threading obligation → executor 
     const obligations = events
       .filter((event) => event.kind === "obligation")
       .map((event) => event.obligation);
-    // First obligation is the top of the priority chain (provider_confirmation);
-    // after the provider gate, the intake executor satisfies repo_manifest +
-    // file_disposition together, so structure_artifacts follows.
-    expect(obligations[0]).toBe("provider_confirmation");
+    // Intake is now the top of the priority chain; provider/model routing lives
+    // outside the audit obligation graph.
+    expect(obligations[0]).toBe("repo_manifest");
     expect(obligations.includes("structure_artifacts")).toBeTruthy();
 
     // Executor start/end pairs are emitted, and end carries a numeric duration.
@@ -438,6 +417,7 @@ test("advanceAudit renders a final audit report after synthesis", async () => {
 
     const synthesis = await advanceAudit(ingest.updated_bundle, {
       preferredExecutor: "synthesis_executor",
+      workPartition: TEST_WORK_PARTITION,
     });
 
     expect(synthesis.selected_executor).toBe("synthesis_executor");
@@ -658,7 +638,6 @@ test("buildAuditReportModel runtime breakdown omits pending without a manifest",
 test("decideNextStep emits a warning reason when no executor is registered for the selected obligation", () => {
   // Verify the happy-path reason string for a registered obligation (file_disposition).
   const normalDecision = decideNextStep({
-    provider_confirmation: createProviderConfirmation(),
     repo_manifest: createRepoManifest(),
   });
   expect(normalDecision.selected_obligation).toBe("file_disposition");
