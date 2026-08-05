@@ -15,6 +15,7 @@
 // subject is never re-asked. If the underlying prose is later edited, the key
 // changes and the question legitimately returns — the same "a reword is a new
 // item" rule the doc-review ledger already used, applied to the durable side.
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -202,25 +203,113 @@ export function readOpenItems(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Premise probes (determination ea4e616f). An item's premise is a fact about
-// the CODE, but the queue holds the item until it is ANSWERED — a fact about
-// the conversation. Nothing used to re-test the premise in between, so on
-// 2026-07-25 fifteen of twenty-one surfaced items were already fixed at HEAD.
-// A probe pins the premise mechanically: the literal strings the item quotes,
-// verified at CREATION (the premise must be true when the item is written) and
-// re-evaluated at PRESENTATION (a premise that vanished closes the item as
-// resolved instead of asking the owner). Accepted trade-offs, decided with the
-// determination: a rename mis-closes, a partial fix mis-holds.
+// Premise probes (determination ea4e616f; git-history rework per nightly sol-3).
+// An item's premise is a fact about the CODE, but the queue holds the item until
+// it is ANSWERED — a fact about the conversation. Nothing used to re-test the
+// premise in between, so on 2026-07-25 fifteen of twenty-one surfaced items were
+// already fixed at HEAD. A probe pins the premise mechanically: the literal
+// strings the item quotes, verified at CREATION (the premise must be true when
+// the item is written) and re-evaluated at PRESENTATION.
+//
+// Absence is decided with GIT EVIDENCE, never inferred from a failed read
+// (2026-07-30: 44% of a model-emitted probe batch named unresolvable bare
+// filenames, and ENOENT scored identically to "the code was removed" — a typo
+// became the strongest possible claim). The states:
+//   'present'  — the named file contains the fragment.
+//   'moved'    — the fragment exists in OTHER tracked files (git grep): the
+//                premise still holds, the path is stale. Retires the old
+//                "a rename mis-closes" concession — a rename now reads open.
+//   'absent'   — the named file exists (or existed: deleted with git history)
+//                and the fragment is nowhere in the tracked tree. `commit`
+//                carries the last commit touching the fragment/path when git
+//                can name it, so an auto-close cites checkable evidence.
+//   'bad_path' — the path resolves nowhere AND git has no record it ever
+//                existed: a malformed probe. Pure no-signal.
+//   'unknown'  — the file is missing and history cannot be queried (shallow
+//                clone, git unavailable). Fail OPEN.
+//   'error'    — a read failed for a reason other than absence. Fail OPEN.
+// Remaining accepted trade-off: a partial fix mis-holds; semantic staleness
+// (text rewritten, bug remains) still reads as removed.
+
+function gitLines(root, args, { okStatuses = [0] } = {}) {
+  const out = spawnSync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  if (out.error || !okStatuses.includes(out.status)) return null; // null = git could not answer
+  return out.stdout.split('\n').filter((l) => l.trim() !== '');
+}
+
+function evaluateOneProbe(root, probe) {
+  let fileText = null;
+  let readErr = null;
+  try {
+    fileText = readFileSync(join(root, probe.file), 'utf8');
+  } catch (err) {
+    readErr = err;
+  }
+  if (fileText !== null) {
+    if (fileText.includes(probe.contains)) return { state: 'present' };
+  } else if (!readErr || readErr.code !== 'ENOENT') {
+    return { state: 'error' };
+  }
+
+  // Fragment not in the named file (or file missing). Does it live elsewhere in
+  // the tracked tree? git grep -F over the worktree (exit 1 = clean no-match);
+  // null (git trouble) fails open as 'unknown' rather than letting an absence
+  // claim stand unverified. grep is line-based, so a multi-line fragment is
+  // represented by its longest line — a moved fragment's longest line moves
+  // with it, and a false 'moved' from a common line errs open, never closed.
+  const needle = probe.contains
+    .split('\n')
+    .map((l) => l.trim())
+    .sort((a, b) => b.length - a.length)[0];
+  if (!needle) return { state: 'unknown' };
+  // The question/record channels QUOTE probe fragments verbatim (a backlog
+  // entry quotes the code it is about), so a match there says nothing about
+  // the premise — excluded, or every probe would read 'moved' off its own
+  // entry and no item could ever close.
+  const elsewhere = gitLines(
+    root,
+    ['grep', '-l', '-F', '-e', needle, '--',
+      ':!docs/backlog', ':!docs/nightly-inbox.md', ':!docs/reviews', ':!docs/HANDOFF.md', ':!.claude'],
+    { okStatuses: [0, 1] },
+  );
+  if (elsewhere !== null && elsewhere.length > 0) {
+    return { state: 'moved', moved_to: elsewhere.slice(0, 5) };
+  }
+
+  if (fileText !== null) {
+    // File present, fragment nowhere: the direct read IS the absence evidence —
+    // git adds rename protection (above) and a citation (below), and when it
+    // cannot answer we lose only those extras, not the verdict itself.
+    const removal = gitLines(root, ['log', '-1', '--format=%h', '-S', probe.contains, '--', probe.file]);
+    return { state: 'absent', commit: removal?.[0] ?? null };
+  }
+  // File MISSING: here git evidence is REQUIRED — without history we cannot
+  // tell deleted code from a typo'd path, and the old ENOENT⇒absent inference
+  // is exactly what sol-3 retires.
+  if (elsewhere === null) return { state: 'unknown' };
+
+  // File missing entirely. Distinguish "deleted" (premise vanished with the
+  // code) from "never existed" (malformed probe) via history — a question the
+  // old ENOENT check could not ask.
+  const history = gitLines(root, ['log', '--all', '--full-history', '-1', '--format=%h', '--', probe.file]);
+  if (history === null) return { state: 'unknown' };
+  if (history.length > 0) return { state: 'absent', commit: history[0] };
+  return { state: 'bad_path' };
+}
 
 /**
  * Evaluate one item's probes against the tree at `root`.
  * Returns `{ status, probes }` where status is:
  *   'unprobed'  — no well-formed probes (legacy item; never auto-closed)
- *   'resolved'  — every probe string is ABSENT (missing file counts: deleted
- *                 code IS a vanished premise)
- *   'open'      — at least one probe still present, or a read failed for any
- *                 reason other than the file being absent (fail-open:
- *                 infrastructure trouble must never auto-close an item)
+ *   'resolved'  — EVERY probe is 'absent' with git-backed evidence. A
+ *                 'bad_path' / 'unknown' / 'error' / 'moved' probe can never
+ *                 contribute to an auto-close.
+ *   'open'      — anything else (fail-open).
  */
 export function evaluateProbes(root, item) {
   const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
@@ -234,17 +323,12 @@ export function evaluateProbes(root, item) {
   );
   if (probes.length === 0) return { status: 'unprobed', probes: [] };
 
-  const evaluated = probes.map((p) => {
-    let state;
-    try {
-      state = readFileSync(join(root, p.file), 'utf8').includes(p.contains) ? 'present' : 'absent';
-    } catch (err) {
-      state = err && err.code === 'ENOENT' ? 'absent' : 'error';
-    }
-    return { file: p.file, contains: p.contains, state };
-  });
+  const evaluated = probes.map((p) => ({
+    file: p.file,
+    contains: p.contains,
+    ...evaluateOneProbe(root, p),
+  }));
 
-  if (evaluated.some((p) => p.state === 'error')) return { status: 'open', probes: evaluated };
   const status = evaluated.every((p) => p.state === 'absent') ? 'resolved' : 'open';
   return { status, probes: evaluated };
 }

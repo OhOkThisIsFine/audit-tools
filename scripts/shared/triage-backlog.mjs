@@ -69,11 +69,16 @@ const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
 // Map the shared evaluator's item-level view onto a per-record stamp. `partial`
 // is surfaced separately from `holds` because a half-vanished premise is
-// exactly the "verify against HEAD before working it" case.
+// exactly the "verify against HEAD before working it" case. A row whose every
+// probe is signal-free (bad_path / unknown / error — the model emits bare
+// filenames it cannot resolve) stamps `unprobed`, never `gone`: a malformed
+// probe must not manufacture the strongest possible claim (nightly sol-3).
 function premiseStamp(rec) {
   const { status, probes } = evaluateProbes(ROOT, rec);
   if (status === 'unprobed') return 'unprobed';
   if (status === 'resolved') return 'gone';
+  const signalFree = new Set(['bad_path', 'unknown', 'error']);
+  if (probes.every((p) => signalFree.has(p.state))) return 'unprobed';
   return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
 }
 

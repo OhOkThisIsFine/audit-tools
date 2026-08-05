@@ -194,10 +194,16 @@ describe('premise probes — an item whose quoted code has vanished closes itsel
     expect(resolved).toHaveLength(0);
   });
 
-  it('treats a missing file as a vanished premise — deleted code resolves the item', () => {
+  // sol-3 (2026-07-30): a missing file used to score identically to removed
+  // code, so a typo'd path became the strongest possible claim ("already
+  // done") — 44% of one model-emitted probe batch named unresolvable paths.
+  // Absence of a FILE now needs git evidence (deleted-with-history) to close;
+  // in a root with no queryable history the item stays open (fail-open).
+  it('keeps an item OPEN when its probed file is missing and git history cannot vouch for a deletion', () => {
     const gone = item({ premise_probes: [{ file: 'deleted-module.ts', contains: 'anything' }] });
-    const { resolved } = partitionBySettled([gone], readDecisions(root), root);
-    expect(resolved).toHaveLength(1);
+    const { open, resolved } = partitionBySettled([gone], readDecisions(root), root);
+    expect(open).toHaveLength(1);
+    expect(resolved).toHaveLength(0);
   });
 
   it('fails OPEN on a probe read error — infrastructure trouble never auto-closes an item', () => {
