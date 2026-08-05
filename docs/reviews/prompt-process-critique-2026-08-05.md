@@ -204,6 +204,35 @@ All four directions are **green-lit**, with two reframes settled in review conve
 
 Implementation gate: `/design-check` before the loop-core work, per standing rule.
 
+## Design-check record — resolution 1 (uniform id-join contract), 2026-08-05
+
+Gate run pre-implementation (loop-core). Verdict: **implementable, with three binding constraints**;
+one standing obligation the settled text above does not mention.
+
+- **Retirement collisions:** alias-remap deletion is a *knowing* supersession (named above), but its
+  origin is `c88d137a` (E2: alias-aware coverage so a complete-but-alias-using result doesn't
+  re-dispatch forever) — so enum-validated schemas + remap deletion must land as ONE atomic replace,
+  and `resolveCoveredFindingIds` must stay convergent counting exact ids only (the deterministic
+  `fromBlockId` resolution is not fuzzy; it stays).
+- **OBL-INV-RSD-01 (not in the settled text):** `mergeImplementResults` MUST NOT throw on an unknown
+  finding_id — block the owning block + orphan diagnostic, single state-commit
+  (`marshal.ts` 663–669/777–780/1016/1383; pinned by
+  `tests/remediate/n-remediate-steps-merge-consistency.test.ts`). Reconciliation: "hard-fail
+  everywhere" applies at the *resolution/ingest gates* (closed-enum schema, membership validation,
+  refuse-and-re-prompt); merge-side unknown ids keep RSD-01 semantics — which are already a hard
+  refusal to advance, not a silent skip. An implementation that throws at merge inverts a pinned
+  obligation and is out of scope unless the owner says otherwise.
+- **idDiscipline axis preserved:** the uniform contract must not put a duplicate-/unknown-id refusal
+  into audit's packet-local draw (`idDiscipline: "local"`, settled `2ce641f7`).
+- **Adjacent strands made reachable:** (1) re-prompt livelock — hard-fail gates need a bounded retry
+  cap escalating to triage (mirror `MAX_INCOMPLETE_COVERAGE_ATTEMPTS`); (2) disk-written bypass
+  results skip prompt-schema validation entirely — the membership check must live at the ingest
+  chokepoint (`validateImplementWorkerResult`), not only in the return schema.
+- **Failing test pinned red:** `tests/remediate/reviewGate.test.ts` — "refuses a resolution whose
+  disapproved_findings contains an id not in the request". Today the unknown id is silently dropped
+  and the typo'd decline becomes an approval (gate default approves); green only under the refusal
+  contract. Independent refutation lane: agy-gemini (7 typed verdicts, all verified against source).
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

@@ -100,4 +100,20 @@ describe("applyReviewResolution", () => {
     // every item is accounted for exactly once
     expect(dec.approved_ids.length + dec.declined.length).toBe(req.total);
   });
+
+  // Uniform id-join contract (design resolution 1, 2026-08-05): an unknown id in
+  // disapproved_findings must refuse the WHOLE resolution, naming the unknown ids
+  // and the valid set — never silently drop it. Today the drop turns a typo'd
+  // decline into an approval (the gate's default is approve), the exact silent
+  // failure the contract retires. Pinned RED via it.fails so the tree stays green:
+  // implementing the refusal makes it.fails itself fail, forcing the flip to it().
+  it.fails("refuses a resolution whose disapproved_findings contains an id not in the request", () => {
+    expect(() =>
+      applyReviewResolution(req, { disapproved_findings: ["ARC-1", "TYPO-9"] }),
+    ).toThrow(/TYPO-9/);
+    // the refusal names the valid set so the re-prompt can carry it
+    expect(() =>
+      applyReviewResolution(req, { disapproved_findings: ["TYPO-9"] }),
+    ).toThrow(/ARC-1/);
+  });
 });

@@ -11,8 +11,12 @@
   stated/structural/revealed estimators + downstream triangulated telos. Settled spec:
   §"Design resolutions" in
   [`reviews/prompt-process-critique-2026-08-05.md`](reviews/prompt-process-critique-2026-08-05.md);
-  hook in `backlog/forward-tracks.md`. **Immediate next:** `/design-check` the first change
-  (id-join contract touches loop-core paths), then implement. No code changed yet.
+  hook in `backlog/forward-tracks.md`. `/design-check` on change 1 RAN 2026-08-05 (record:
+  §"Design-check record" in the same review doc): implementable with three binding constraints,
+  failing test pinned via `it.fails` in `tests/remediate/reviewGate.test.ts`. **One question
+  blocks implementation, owner to answer:** does "hard-fail everywhere" carve out
+  `mergeImplementResults` (keep pinned obligation OBL-INV-RSD-01: block+orphan, never throw), or
+  was RSD-01 meant to be retired? Reconciliation proposal is in the record. Then implement.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
