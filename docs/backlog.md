@@ -141,7 +141,7 @@
 - `forward-tracks.md:225` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
 - `forward-tracks.md:236` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
 - `forward-tracks.md:280` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
-- `forward-tracks.md:282` — Prompt/process critique cluster (2026-08-05)
+- `forward-tracks.md:282` — Prompt/process critique cluster (2026-08-05) — GREEN-LIT, design settled.
 
 ### [`deferred.md`](backlog/deferred.md)
 

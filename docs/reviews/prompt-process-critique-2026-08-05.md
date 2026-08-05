@@ -168,6 +168,42 @@ split. **New from this review** (single program-of-record hook added to
 threading into scope confirmation (§2), scope-by-feeding charter packets + file-scope-join
 teleology direction (§4), and the remediate gate-context items (§C2/C5).
 
+## Design resolutions (owner-settled, 2026-08-05 — this section supersedes the open questions above)
+
+All four directions are **green-lit**, with two reframes settled in review conversation:
+
+1. **Uniform id-join contract** — as specced. Unknown-id semantics: **hard-fail everywhere**;
+   every gate refuses the whole resolution, names the unknown ids and the valid set, and
+   re-prompts. The implement-dispatch fuzzy alias remap is deleted (enum-validated schemas
+   upstream make it dead weight).
+2. **Always-materialized fan-out** (replaces "capability-conditional renderer"). No capability
+   branch: every fan-out step **always** writes per-subagent prompt files and validates each
+   returned artifact at a per-lane ingest chokepoint. The step prompt is capability-neutral —
+   "execute these N prompt files: via subagents if available, else sequentially yourself"; only a
+   concurrency hint is capability-sensitive. Identical artifacts across IDEs/providers preserves
+   resumability/parallelism; `semanticReviewStep`'s existing branch is replaced by the
+   unconditional form, not used as the pattern.
+3. **Scope-confirmation context** — both halves: thread `design_assessment` into
+   `buildLensPropositions`, and add the deterministic `docs_digest` artifact before
+   `intent_checkpoint`.
+4. **Charter layer: scope-by-feeding + self-organized teleology**, with the kinds redefined as
+   channel-pure **estimators** — **stated** (docs + extracted comments: testimony), **structural**
+   (file tree / exports / signatures / names / import graph — no bodies, no docs, no comments:
+   intent frozen into organization; replaces "inferred"), **revealed** (comment-stripped bodies:
+   behavior). Blindness enforced by feeding (materialized per-kind packets), never instruction.
+   Each kind self-organizes a leveled teleology whose nodes carry **file scopes**; the tool joins
+   kinds to each other and to the decomposition (demoted to a hint) by file-set overlap. The
+   "read everything and triangulate the true telos" role is NOT a fourth parallel author — it
+   moves downstream: the delta miner reads the three blind charters, mines channel-pair deltas
+   (testimony↔behavior = says/does drift; structure↔behavior = architecture betrayed by
+   implementation; testimony↔structure = doc rot / naming drift), classifies each, and emits a
+   **triangulated telos** per subsystem as a first-class output. "True" stays a nominated
+   provocation at the deepest rung, downstream of triangulation. Disagreement density per
+   subsystem per channel-pair is the quantitative surface. Kind rename is a schema migration
+   riding the teleology redesign.
+
+Implementation gate: `/design-check` before the loop-core work, per standing rule.
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

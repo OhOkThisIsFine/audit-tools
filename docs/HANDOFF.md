@@ -5,12 +5,14 @@
 
 ## Live state
 
-- **Prompt/process critique DELIVERED 2026-08-05 (`0e85f97c`), awaiting owner direction pick:**
-  verified sweep of both orchestrators' prompt surfaces (owner's four critiques generalized) in
+- **Prompt/process critique: design SETTLED 2026-08-05, ready to implement.** Four green-lit
+  atomic changes — uniform id-join contract (hard-fail everywhere), always-materialized fan-out
+  (no capability branch), scope-confirmation context (both halves), charter scope-by-feeding with
+  stated/structural/revealed estimators + downstream triangulated telos. Settled spec:
+  §"Design resolutions" in
   [`reviews/prompt-process-critique-2026-08-05.md`](reviews/prompt-process-critique-2026-08-05.md);
-  the four candidate mechanism directions (uniform id-join contract, capability-conditional
-  fan-out renderer, scope-confirmation context threading, charter scope-by-feeding) are hooked in
-  `backlog/forward-tracks.md`. No code changed; nothing in flight.
+  hook in `backlog/forward-tracks.md`. **Immediate next:** `/design-check` the first change
+  (id-join contract touches loop-core paths), then implement. No code changed yet.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
