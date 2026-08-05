@@ -1113,17 +1113,17 @@
   re-planning-shrink trigger); `maxTransitions` overflow pauses resumably instead of crashing;
   worker stderr causes surface in error packet_results; the dispatch-inventory refusal names
   `sources-declared.json`; host-path next-step salvages on-disk results from dead workers;
-  "already promoted" is an identity check, not existence. ⬇ **Remaining, ALL live-run watch under
-  the inverted dispatch (the 2026-07-30 evidence predates it and the run artifacts are gone):**
-  (2) a remedy a pause names is reachable from it — a declared big source pool must be reachable
-  for packets no host pool fits; (4) a successful packet never cools its pool as rate_limited
-  (statically unreproducible: the finalize success path attaches no rate-limit — re-observe), and
-  the cooldown's provider message is surfaced; (6) report coverage counts and lens exclusions
-  reflect the run (claimed 25 fully-audited files after a 60-packet full-tree wave; 1102 findings
-  on an excluded lens); (7) events/exit codes success-shaped only on success (`merge-and-ingest`
-  exit 2 on full success — `failing` non-empty on a fully-valid wave, cause unidentified); claim
-  expiry ergonomics on dead host workers ([[claim-liveness-is-not-an-inflight-signal]]).
-  **Property to hold:** next dogfood run re-tests each on the new dispatch shape; fix from live
+  "already promoted" is an identity check, not existence. ⬇ **Remaining after the 2026-08-05 dogfood re-test**
+  ([`reviews/dogfood-run-2026-08-05.md`](../reviews/dogfood-run-2026-08-05.md)): (6) coverage
+  counts PASSED (1188/1192 fully-audited on a full-tree wave, all lenses present) and (7) exit
+  codes PASSED (exit 2 exactly when rejections existed, 0 on the clean final merge — the
+  2026-07-30 "exit 2 on full success" did not reproduce; the adjacent prompt-language defect is
+  its own entry below). Still live-run watch, not exercised by 2026-08-05 (every wave granted all
+  packets; no pause, no cooldown): (2) a remedy a pause names is reachable from it — a declared
+  big source pool must be reachable for packets no host pool fits; (4) a successful packet never
+  cools its pool as rate_limited, and the cooldown's provider message is surfaced; claim expiry
+  ergonomics on dead host workers ([[claim-liveness-is-not-an-inflight-signal]]).
+  **Property to hold:** the next run that hits a pause/cooldown re-tests those; fix from live
   evidence, not speculation.
 
 - **Audit pause/terminal persistence does not enforce its documented XOR.** The public state comment
@@ -1133,3 +1133,53 @@
   enforce it in a single atomic state-transition writer used by pause, forced synthesis, and rolling
   terminal paths.
 
+- **Incoming design-review/charter/challenge artifacts have no submit chokepoint.** 2026-08-05
+  dogfood: 5 of 8 design-review agents drifted on the output contract (wrong filename ×2, wrong
+  directory, invalid JSON ×2) and the host hand-repaired all of them; the charter delta-miner also
+  returned invented node_id slugs the host had to remap. The packet lane validates on submit; these
+  lanes validate nothing. **Property to hold:** every incoming artifact rides a tool-validated
+  write (submit-command pattern); an unknown node_id is refused loudly naming the valid set.
+
+- **submit-packet can report success on a result merge later refuses.** 2026-08-05: two workers
+  hand-wrote malformed inline-result JSON not covering the packet's one assigned task, echoed
+  "valid"; merge classified the task missing; no per-task rejection reason was persisted
+  (`failed-tasks.json` exists only when ALL assigned results block — the 81-rejection wave left no
+  reasons on disk). **Property to hold:** submit refuses assigned-task coverage gaps and malformed
+  writes (worker-visible success impossible unless the tool wrote a parseable result per task);
+  rejection reasons persist at reject time.
+
+- **systemic_challenge findings ids are adversary-invented and round-colliding.** Rounds 3 and 4
+  both minted SC-001..004 for different findings (host prefixed r4- to avoid accumulator clobber);
+  convergence also rested on host prompt-craft (8/7/4/8→0 only after hardened dispatch framing).
+  **Property to hold:** the tool namespaces challenge ids per round; the round prompt itself
+  carries a covered-themes digest and an explicit variation bar.
+
+- **Staleness events re-log identically within one next-step.** 28 duplicate lines in ~1.7s
+  (critical_flows/risk_register) and ~15 (task_affinity_graph) — per-iteration re-log, not one
+  event per state change. **Property to hold:** one staleness event per artifact per transition.
+
+- **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
+  map) on every ensure — a generated config violating the stable content-derived ordering invariant,
+  dirtying every tree it touches. **Property to hold:** generated host configs are byte-stable
+  under repeated ensure.
+
+- **Two run-id notions; friction record keyed both ways.** Step envelopes carried `run_id: null`
+  all session (path resolves to `friction/run.json`) while dispatch artifacts use timestamped run
+  ids the shared friction substrate keys by — a substrate-keyed close-out walk was invisible to the
+  present_report gate and had to be rewritten under "run". **Property to hold:** one run identity
+  across step envelope, dispatch artifacts, and friction record.
+
+- **Dispatch-step prompt conflates merge rejections with failure.** `merge-and-ingest` exit 2 means
+  rejections-present + retry plan written (normal, resumable) but the step prompt says "If
+  merge-and-ingest fails, stop and report… Do not manually merge" — a literal host halts a healthy
+  pipeline. **Property to hold:** prompt language and exit semantics agree; rejections-present is
+  distinguishable from failure.
+
+- **Dogfood 2026-08-05 minor friction cluster** (spec + detail in
+  [`reviews/dogfood-run-2026-08-05.md`](../reviews/dogfood-run-2026-08-05.md)): fallback prompt
+  inlines ~340 lines of low-confidence flow stubs; the full auditor handshake JSON is re-echoed
+  every step; one silent >120s next-step derivation; tier routing collapsed 354/358→deep (multi-rank
+  roster dead weight); observability lens rationale factually wrong ("no logging surface" beside a
+  JSONL ledger); resumed runs skip the loader scope echo; charter stated↔revealed blindness leaks in
+  comment-dense repos. **Property to hold:** each is a small tool-side fix; work them from the
+  review record.

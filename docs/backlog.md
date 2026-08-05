@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 145 entr(y/ies) indexed.
+> and at commit). 153 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -111,6 +111,14 @@
 - `open-bugs.md:1099` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
 - `open-bugs.md:1108` — ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.
 - `open-bugs.md:1129` — Audit pause/terminal persistence does not enforce its documented XOR.
+- `open-bugs.md:1136` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
+- `open-bugs.md:1143` — submit-packet can report success on a result merge later refuses.
+- `open-bugs.md:1151` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:1157` — Staleness events re-log identically within one next-step.
+- `open-bugs.md:1161` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:1166` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:1172` — Dispatch-step prompt conflates merge rejections with failure.
+- `open-bugs.md:1178` — Dogfood 2026-08-05 minor friction cluster
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

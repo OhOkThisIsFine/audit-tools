@@ -5,6 +5,15 @@
 
 ## Live state
 
+- **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
+  on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
+  `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
+  (relay pools + codex; agy unusable for write-tasks). Friction close-out: 19 observations on
+  `.audit-tools/audit/friction/run.json`; run story + defect leads in
+  [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md) and 8 new
+  `open-bugs.md` entries. **Immediate next:** consume the report — `/remediate-code` against
+  `.audit-tools/audit-findings.json` (mind the open CP-NODE remediation state below before
+  starting a second remediation stream).
 - **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
   three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
   single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
