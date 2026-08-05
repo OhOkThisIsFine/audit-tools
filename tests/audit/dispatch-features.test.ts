@@ -232,10 +232,14 @@ await test("JIT partition splits a cluster that exceeds the context budget", asy
   expect(result.packet_count, "an oversized cluster splits along its weakest edge under the budget").toBe(2);
 });
 
-await test("capability handshake: host-reported context window collapses the split (N5b)", async (t) => {
-  // 2 × 20000 = 40000 exceeds the ~28k default input budget → splits to 2 packets
-  // with no handshake. When the host reports a 200k window, the same cluster fits
-  // in one packet — the budget now reflects the real dispatch model.
+await test("capability handshake: host-reported context window is discovered, but the soft target still governs merging (N5b + meta-review 2026-07-30b(a))", async (t) => {
+  // The handshake half of N5b still holds: the discovered 200k window is
+  // recorded as this session's budget. The PACKING half is deliberately
+  // inverted from the original N5b: merging is bounded by
+  // min(context, targetPacketTokens) — a huge context window no longer packs
+  // clusters past the planner's soft target (the 97-task/655k mega-packet that
+  // head-of-line-blocked the 2026-07-30 run), so 2 × 20000 stays 2 packets
+  // even under a 200k window.
   const tasks = sharedFileTasks(20000);
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -249,7 +253,10 @@ await test("capability handshake: host-reported context window collapses the spl
     hostContextTokens: 200_000,
     hostOutputTokens: 32_000,
   });
-  expect(result.packet_count, "a 200k host window packs the cluster the 32k default would split").toBe(1);
+  expect(
+    result.packet_count,
+    "the soft per-packet target governs merging even under a 200k window",
+  ).toBe(2);
   // The dispatch-quota records the discovered budget for this session.
   const quota = await readJson<DispatchQuotaContract>(join(artifactsDir, "runs", RUN_ID, "dispatch-quota.json"));
   expect(quota.resolved_limits.context_tokens).toBe(200_000);

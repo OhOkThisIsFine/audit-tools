@@ -6,7 +6,7 @@
  * concern.
  */
 
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   advance,
@@ -92,7 +92,9 @@ import {
   writeHandoffOnly,
   ensureSemanticReviewRun,
   materializeReviewRun,
+  loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
+import { mergeAndIngest } from "./mergeAndIngestCommand.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 
 /**
@@ -362,14 +364,30 @@ async function promoteIfFrictionSatisfied(
   triage: import("audit-tools/shared").FrictionTriageDecision,
 ): Promise<string> {
   const promotedPath = promotedAuditReportPath(artifactsDir);
-  const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
+  // "Already promoted" must mean THIS run's render, not any file at the promoted
+  // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
+  // which is exactly the dogfood 2026-07-30 false-green — `status: complete`
+  // named the promoted path while the root deliverables still held the prior
+  // run's report and this run's render sat only under `.audit-tools/audit/`.
+  // Identity, not existence: promoted content must equal the in-place render.
+  const inPlacePath = auditReportPath(artifactsDir);
+  const [promotedText, inPlaceText] = await Promise.all([
+    readFile(promotedPath, "utf8").catch(() => null),
+    readFile(inPlacePath, "utf8").catch(() => null),
+  ]);
+  // A missing in-place render alongside an existing promoted file is the
+  // legitimate re-entry AFTER promotion (promotion deletes artifactsDir);
+  // a PRESENT in-place render that differs is precisely the stale-promotion
+  // case and must fall through to promote.
+  const alreadyPromoted =
+    promotedText !== null && (inPlaceText === null || promotedText === inPlaceText);
   if (alreadyPromoted) return promotedPath;
   if (triage.action === "dispose") {
     // Friction triage still pending — keep the in-place report, do not delete.
-    return auditReportPath(artifactsDir);
+    return inPlacePath;
   }
   const promoted = await promoteFinalAuditReport({ artifactsDir });
-  return promoted.promoted ? promotedPath : auditReportPath(artifactsDir);
+  return promoted.promoted ? promotedPath : inPlacePath;
 }
 
 /**
@@ -2385,6 +2403,42 @@ async function runHostDelegationObligation(
         // (and never writes the stale pre-NIM bundle back over them).
         reviewBundle = await loadArtifactBundle(ctx.params.artifactsDir);
         reviewState = deriveAuditState(reviewBundle);
+      }
+    }
+  }
+
+  // HOST-PATH SALVAGE (dogfood 2026-07-30 defect 3): host-driven workers that die
+  // (session limit, kill) leave their landed result files in the current run's
+  // task-results/ with no drive-end to reconcile them — the engine path has a
+  // salvage fold, but the host path used to need a MANUAL merge-and-ingest before
+  // those results counted and their tasks stopped re-dispatching. Fold them in
+  // here, before (re)materializing the review run, so a dead worker's completed
+  // work shrinks the pending set and its task claims clear at classification.
+  // Best-effort: merge's own replay marker makes a repeat call idempotent, and a
+  // salvage failure must never block the review step itself.
+  {
+    const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
+    if (currentRun) {
+      const taskResultsDir = join(
+        ctx.params.artifactsDir, "runs", currentRun.run_id, "task-results",
+      );
+      const hasResultFiles = await readdir(taskResultsDir).then(
+        (files) => files.some((f) => f.endsWith(".json")),
+        () => false,
+      );
+      if (hasResultFiles) {
+        try {
+          await mergeAndIngest({
+            runId: currentRun.run_id,
+            artifactsDir: ctx.params.artifactsDir,
+          });
+          reviewBundle = await loadArtifactBundle(ctx.params.artifactsDir);
+          reviewState = deriveAuditState(reviewBundle);
+        } catch (err) {
+          process.stderr.write(
+            `[audit-code] nextStep: host-path result salvage skipped (${err instanceof Error ? err.message : String(err)})\n`,
+          );
+        }
       }
     }
   }
