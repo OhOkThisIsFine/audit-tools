@@ -1183,3 +1183,14 @@
   JSONL ledger); resumed runs skip the loader scope echo; charter stated↔revealed blindness leaks in
   comment-dense repos. **Property to hold:** each is a small tool-side fix; work them from the
   review record.
+
+- **Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.** At
+  `present_report` completion the cleanup deleted `friction/` (both records: the blocking close-out
+  walk it had itself just enforced), `runs/`, and `scratch/` — while leaving `steps/`, which is a
+  run-marker for `friction-stop-gate.mjs`; every session stop for the next 12h then blocks on a walk
+  whose record the tool erased. No consumer read the record first (the report has no friction
+  render); the 2026-08-05 walk survives only because the host had promoted it to
+  [`reviews/dogfood-run-2026-08-05.md`](../reviews/dogfood-run-2026-08-05.md) pre-close, and was
+  restored by hand post-close. **Property to hold:** the friction record outlives the run until a
+  named consumer ingests it (or is archived with the promoted deliverables); cleanup and the
+  stop-gate agree on what constitutes a run.

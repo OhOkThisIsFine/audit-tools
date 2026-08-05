@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 153 entr(y/ies) indexed.
+> and at commit). 154 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -119,6 +119,7 @@
 - `open-bugs.md:1166` — Two run-id notions; friction record keyed both ways.
 - `open-bugs.md:1172` — Dispatch-step prompt conflates merge rejections with failure.
 - `open-bugs.md:1178` — Dogfood 2026-08-05 minor friction cluster
+- `open-bugs.md:1187` — Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

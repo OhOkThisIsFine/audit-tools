@@ -74,3 +74,11 @@ fully audited, promoted to `.audit-tools/audit-report.md` + `audit-findings.json
 - Session host-side lessons: scratchpad script files beat inline `node -e` for anything with
   escapes; `.entries` on an array is a real footgun; disk truth (result-file census) beats agent
   self-reports for fan-out accounting.
+
+## Post-close addendum
+
+The terminal cleanup at `present_report` deleted `friction/` (the just-enforced close-out walk,
+unconsumed — no friction render exists in the report), `runs/`, and `scratch/`, while leaving
+`steps/` — which is a run-marker for the `friction-stop-gate` backstop, so post-completion session
+stops re-blocked on the record the tool itself erased. The walk survives in this document and was
+restored to `friction/run.json` by hand; filed as its own open-bugs entry.
