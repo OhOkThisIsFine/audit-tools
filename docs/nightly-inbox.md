@@ -22,29 +22,287 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-07-30 at `ccb530d7`.*
+*Last run: 2026-08-05 at `563f7c09`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
+
+
+<!-- nightly:item key=d58dbfc3bbc8ef8b -->
+
+## `docs-1` — Constitutional doc states the artifact registry has 38 entries; it has 37 — correct it, or stop stating a count?
+
+*Documentation · open 1 night · `spec/audit/artifact-contract.md`*
+
+### In plain terms
+
+One of the project's "constitutional" documents — spec/audit/artifact-contract.md, a file the nightly routine is mechanically forbidden from editing on its own — opens by saying the artifact registry in src/audit/io/artifacts.ts has 38 entries. It has 37. The missing one is provider_confirmation, which was deleted by the dispatch inversion (commit 6df1f477) when llm-relay took over provider routing. Two independent reviewers counted the registry from source and both got 37, and running the compiled module reports 37 as well, so this is not in doubt. The routine cannot fix it itself: constitutional docs require an explicit attestation from you before a commit touching them is allowed, and that refusal exists precisely so a doc-review sweep cannot quietly rewrite a normative contract. So the choice is yours. Correcting the number is a one-character edit. The alternative worth considering is that a hand-typed count of a code registry will go stale again on the very next commit that adds or removes an artifact — this one drifted within days and nobody noticed — so you may prefer to have a build check verify the number instead (that mechanism is proposed separately), or to drop the count from the sentence entirely.
+
+### The question
+
+spec/audit/artifact-contract.md line 17 says "`src/audit/io/artifacts.ts` — 38 entries". The registry has 37. How should this be resolved?
+
+### Your answer
+
+- [ ] **1. Correct it to 37** — Correct the count in spec/audit/artifact-contract.md from 38 to 37 under a constitutional-doc attestation. Keep the count in the prose.
+- [ ] **2. Correct it AND gate it** — Correct the count to 37, and additionally build the mechanical check proposed in P10 so a registry count can never silently drift again.
+- [ ] **3. Drop the count** — Remove the entry count from the sentence entirely. The contract enumerates what the registry must contain; the size does not need restating in prose.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/audit/artifact-contract.md:17 reads "`src/audit/io/artifacts.ts` — 38 entries, each declaring a filename, a phase".
+- Runtime count: node --input-type=module -e "import('./dist/audit/io/artifacts.js').then(m=>console.log(Object.keys(m.ARTIFACT_DEFINITIONS).length))" prints 37.
+- A reviewer lane and an independent adversary lane each counted ARTIFACT_DEFINITIONS from source and both reported 37; the adversary enumerated all 37 by name.
+- The removed entry is provider_confirmation, deleted in commit 6df1f477 ("dispatch inversion — llm-relay owns provider routing; Gate-0 retired").
+- spec/audit/artifact-contract.md is listed in src/shared/constitutionalDocPaths.ts (CONSTITUTIONAL_DOC_PATHS), so .claude/hooks/pre-commit-gate.mjs blocks a commit touching it without an attestation. The nightly applied nothing here by design.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=e0c4fbe93a7814ef -->
+
+## `docs-2` — Constitutional doc states the executor registry has 28 entries; it has 27 — correct it, or stop stating a count?
+
+*Documentation · open 1 night · `spec/audit/executor-catalog.md`*
+
+### In plain terms
+
+The same problem as the artifact-contract item, in the other normative catalogue. spec/audit/executor-catalog.md opens by saying the executor registry in src/audit/orchestrator/executors.ts has 28 entries. It has 27. The missing one is provider_confirmation_executor, removed by the same dispatch-inversion commit (6df1f477) that took provider routing out of the audit graph and gave it to llm-relay. Two independent lanes counted the registry from source and agreed on 27, and the compiled module reports 27. Like its sibling, this file is constitutional, so the routine is blocked from editing it without your explicit sign-off — the block is working as intended here. Your options are the same: correct the number, correct it and add a build check so the class of error cannot recur, or decide the prose should not carry a count at all.
+
+### The question
+
+spec/audit/executor-catalog.md line 10 says "`src/audit/orchestrator/executors.ts` — 28 entries". The registry has 27. How should this be resolved?
+
+### Your answer
+
+- [ ] **1. Correct it to 27** — Correct the count in spec/audit/executor-catalog.md from 28 to 27 under a constitutional-doc attestation. Keep the count in the prose.
+- [ ] **2. Correct it AND gate it** — Correct the count to 27, and additionally build the mechanical check proposed in P10 so a registry count can never silently drift again.
+- [ ] **3. Drop the count** — Remove the entry count from the sentence entirely. The catalogue enumerates the executors; the size does not need restating in prose.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- spec/audit/executor-catalog.md:10 reads "`src/audit/orchestrator/executors.ts` — 28 entries, each declaring an `id`, a".
+- Runtime count: node --input-type=module -e "import('./dist/audit/orchestrator/executors.js').then(m=>console.log(m.EXECUTOR_REGISTRY.length))" prints 27.
+- A reviewer lane and an independent adversary lane each counted EXECUTOR_REGISTRY from source and both reported 27; the adversary enumerated all 27 by name.
+- The removed entry is provider_confirmation_executor, deleted in commit 6df1f477.
+- spec/audit/executor-catalog.md is listed in src/shared/constitutionalDocPaths.ts, so the pre-commit gate blocks an unattested change. The nightly applied nothing here by design.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=a3552a1df15ea4ec -->
+
+## `sol-1` — A premise probe aimed at a gitignored runtime file still reports "absent", which is the verdict that CLOSES an item — refuse the target?
+
+*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
+
+### In plain terms
+
+The nightly routine decides whether a tracked issue is still real by "probing" it: each item quotes a literal string from a file, and if that string has vanished, the item is treated as fixed and closed. The strongest version of that verdict is called "absent", and the code justifies it with evidence from git — it searches the tracked tree to make sure the text did not simply move, and records the commit that removed it. The bug is that this reasoning is never checked against whether git can actually see the file. If a probe points at something git does not track — a runtime scratch file under .audit-tools/, a build output — every git step comes back empty, and the code returns "absent" anyway. So a file that carries no evidence whatsoever produces the most confident possible answer. This is not hypothetical. Tonight the backlog triage marked "Remediation pause/recovery is not durable" as resolved, on a probe pointed at .audit-tools/remediation/state.json — a gitignored file whose contents change every run. The string was missing only because no remediation run happens to be in flight. The underlying work is not done at all: the feature it describes does not exist in the source yet. Had anything deleted entries on the strength of that stamp, a live issue would have been thrown away. A second false close came from a probe aimed at a dated review record. A related fix shipped last week for a different version of this (a probe naming a file that does not exist), so the idea is established; this is the half it did not cover. The proposed fix refuses the bad probe when the item is written, rather than tolerating it and hoping nobody trusts the result.
+
+### The question
+
+Should premise probes be restricted to git-TRACKED source paths — refusing, at write time, a probe aimed at a gitignored runtime artifact or at a record file (docs/backlog, docs/reviews, HANDOFF, the inbox, .claude) — so such a probe can never yield the "absent" state that closes an item?
+
+### Your answer
+
+- [ ] **1. Build it as proposed** — Build P8 as written: classify the probe target first, return a signal-free "untrackable" state for an untracked or record path so it can never close an item, and refuse such a probe in writeOpenItems with a message naming what to probe instead. Ship with the red-green tests in PATCH.md.
+- [ ] **2. Refuse at write time only** — Only add the writeOpenItems refusal, so a bad probe cannot be authored, and leave evaluateOneProbe unchanged. Simpler, but does not protect the leg-2 triage stamps, which do not go through writeOpenItems.
+- [ ] **3. Downgrade the verdict instead** — Leave probe targets unrestricted, but stop treating all-absent as automatically resolved when the evidence chain could not run — surface it for a human decision rather than refusing the probe.
+- [ ] **4. Leave it** — Accept the risk. Probe stamps are already advisory and nothing deletes an entry on a stamp alone, so a false "gone" costs a hand check rather than lost work.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P8-probe-on-untracked-path-yields-absent/PATCH.md`](../.audit-tools/nightly/proposals/P8-probe-on-untracked-path-yields-absent/PATCH.md)
+
+<details>
+<summary>Evidence (8) — what was verified against code, and how</summary>
+
+- scripts/nightly/items.mjs:284-289 — when the file reads but the fragment is missing, evaluateOneProbe returns { state: 'absent', commit: removal?.[0] ?? null } regardless of whether git tracks the path; its own comment says "when it cannot answer we lose only those extras, not the verdict itself", which holds for a tracked file and not for an untracked one.
+- scripts/nightly/items.mjs:332 — status is 'resolved' when every probe is 'absent', and 'resolved' is what auto-closes an item.
+- Tonight's triage stamped premise: "gone" on open-bugs entry "Remediation pause/recovery is not durable (2026-08-03, medium)" from the single probe { file: ".audit-tools/remediation/state.json", contains: "status: implementing" }.
+- That path is gitignored — `git check-ignore -v` reports .gitignore:84 (".audit-tools/*/*") — and `git ls-files --error-unmatch` reports it untracked.
+- The entry is NOT fixed: `grep -rn "plan_only" src/remediate --include='*.ts'` returns no matches, so the durable pause/resume property it describes is unbuilt at HEAD.
+- A second false close came from { file: "docs/reviews/re-dogfood-2026-07-21.md", contains: "#14" } — docs/reviews is already on the git-grep exclusion list at scripts/nightly/items.mjs:277 because a record quotes the code it is about.
+- 2 of the 3 premise: "gone" stamps produced tonight came from probe targets that carry no evidence.
+- Distinct from the shipped fix 3750a943 ("premise-probe absence is git-evidenced, never inferred from ENOENT"), which covers the file-missing branch; this is the file-present-but-untracked branch.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=a66df2c54c43b85e -->
+
+## `sol-2` — The pre-commit gate still fires only on `git commit`, so merge/rebase/cherry-pick/revert/am land completely ungated — widen it and delete the trap entry?
+
+*Recurring-problem solutions · open 1 night · `.claude/hooks/pre-commit-gate.mjs`*
+
+### In plain terms
+
+Before a commit is allowed, a local hook runs several checks: the typecheck, the doc contract, the doc-manifest reconciliation, and the loop-core review attestation. It decides whether to run by looking for the word "commit" in the git command. But `git commit` is not the only way to create a commit. `git merge`, `git rebase --continue`, `git cherry-pick`, `git revert` and `git am` all write history too, and every one of them skips the gate entirely — not one check runs. This has already caused real breakage: all three merge commits of the v0.34.7 queue landed unregistered docs and left main red until a follow-up commit fixed it. What makes this worth raising rather than just noting is that it is already written down. It has been a known trap since 2026-07-22, the entry was corrected once in 2026-07-24 after the first proposed fix turned out to be a no-op, and the entry itself ends by naming the real fix. Fourteen days later the fix is still not built — verified again tonight against the current code. The project's own rule is that a trap which CAN be enforced mechanically should be enforced and its written entry deleted, because two copies of a rule drift apart. This one is sitting exactly halfway.
+
+### The question
+
+Should the pre-commit gate detect the full commit-creating subcommand set (commit, merge, rebase, cherry-pick, revert, am) instead of only `commit` — and delete the durable-traps entry in the same commit?
+
+### Your answer
+
+- [ ] **1. Widen it and delete the entry** — Build P9: widen the gate to the commit-creating subcommand set, keep the expensive legs scoped by staged set so a conflict-resolution loop stays cheap, ship the red-green tests, and delete the durable-traps entry in the same commit per the hook-enforcement policy.
+- [ ] **2. Widen it, keep the entry** — Widen the gate but leave the durable-traps entry standing, because the coverage will still be partial in ways worth remembering.
+- [ ] **3. Widen only for merge** — Add `merge` only — that is the case with observed breakage — and leave rebase/cherry-pick/revert/am ungated to avoid paying the gate inside a conflict-resolution loop.
+- [ ] **4. Leave it** — Accept the gap. The gate stays commit-only and the durable-traps entry remains the record; CI catches the fallout after the fact.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P9-gate-misses-commit-creating-subcommands/PROPOSAL.md`](../.audit-tools/nightly/proposals/P9-gate-misses-commit-creating-subcommands/PROPOSAL.md)
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- .claude/hooks/pre-commit-gate.mjs:205 reads `const commitSubCmds = subCmds.filter(isGitSubcommand('commit'));` and runGate returns early when commitSubCmds is empty, so no leg runs for any other subcommand.
+- docs/backlog/durable-traps.md:384 documents the trap (filed 2026-07-22, corrected 2026-07-24) and names the fix: "widen the gate's detection to the commit-creating subcommand set — then delete this entry per the hook-enforcement policy."
+- Observed impact recorded in that entry: stray-doc failures on all three merge commits of the v0.34.7 queue, main red until 0c6a5a6d.
+- The entry also records that the ORIGINAL proposed remedy ("also run check:doc-manifest in CI") was a no-op — ci.yml already runs verify:checks, which contains it, and docs/** has been a trigger path since 214f601e. The missing gate is the local one.
+- Re-verified unbuilt at HEAD on 2026-08-05 by grep of the hook.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=0a3a56a6738f40f4 -->
+
+## `sol-3` — Two hand-typed registry counts drifted in one night, in docs that cannot be auto-fixed — add a build check that verifies the number?
+
+*Recurring-problem solutions · open 1 night · `scripts/check-doc-code-citations.mjs`*
+
+### In plain terms
+
+Two documents each state how many entries a code registry has: "38 entries" for the artifact registry, "28 entries" for the executor registry. Both numbers were wrong tonight, both by one, and both because of the same commit — the dispatch inversion, which removed one entry from each. That commit had no reason to know two prose sentences were quietly tracking those totals. The existing citation check already verifies that a document's file paths and symbol names really exist, and it passed — src/audit/io/artifacts.ts does exist. Nothing checks the number sitting next to it. What makes this more than a typo is where the numbers live. Both files are "constitutional", meaning a commit touching them is blocked until you personally sign off. So a number guaranteed to go stale on every registry change lives in the most expensive place in the repo to correct it. This project has twice already replaced a hand-maintained restatement with a generated-or-checked one for exactly this reason — the README philosophy block, and the gate step list last week. The proposal deliberately CHECKS rather than generates: rewriting normative text mechanically is the thing the constitutional refusal exists to prevent. A failing build tells the author to fix the number in the same commit that changed the registry, when it is cheapest.
+
+### The question
+
+Should scripts/check-doc-code-citations.mjs be extended to verify a stated registry count against the real registry export, failing the build when they disagree?
+
+### Your answer
+
+- [ ] **1. Build the check** — Build P10: extend check:doc-code-citations to recognise the "`<path>` — <N> entries" form, count the single top-level registry export in that file, and fail the build on a mismatch. Refuse loudly when the target has no unambiguous registry export rather than passing silently.
+- [ ] **2. Drop the counts instead** — Do not build a check. Remove the entry counts from both documents — the contracts enumerate what the registries contain, and the size does not need restating.
+- [ ] **3. Generate the sentence** — Go further than checking: mark the count with begin/end markers and render it from the registry, the same way the gate enumeration and README philosophy block are generated.
+- [ ] **4. Leave it** — Accept the drift. Two counts in the whole corpus is a small surface, and the nightly doc review catches them.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P10-registry-counts-are-hand-maintained/PROPOSAL.md`](../.audit-tools/nightly/proposals/P10-registry-counts-are-hand-maintained/PROPOSAL.md)
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- spec/audit/artifact-contract.md:17 says "38 entries"; ARTIFACT_DEFINITIONS has 37 (verified at runtime and by two independent lanes).
+- spec/audit/executor-catalog.md:10 says "28 entries"; EXECUTOR_REGISTRY has 27 (verified at runtime and by two independent lanes).
+- Both drifted from the same commit, 6df1f477, which removed provider_confirmation and provider_confirmation_executor.
+- npm run check:doc-code-citations is already wired into verify:checks and passed tonight — it validates paths and symbols, not counts.
+- Both docs are in src/shared/constitutionalDocPaths.ts, so neither can be corrected without a constitutional-doc attestation.
+- Scope is small and precise: `grep -rnE '[0-9]+ entries, each' --include='*.md' .` matches exactly these two sites in the whole corpus.
+- Precedent for replacing a hand-maintained restatement: check:philosophy-brief (README philosophy block) and check:gate-enumeration (P6, shipped 6b8f8d7a — "24 gate steps rendered identically in 2 docs").
+
+</details>
+
+---
+
+
+<!-- nightly:item key=d3e50981fd854566 -->
+
+## `sol-4` — Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool llm-relay deleted. Give the lane a health contract?
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+
+### In plain terms
+
+The backlog has 154 entries, which is far more than a nightly pass can read. So a script classifies them through the local model proxy, and the routine works from that map instead of reading the file. When the script under-delivers, the backlog leg quietly covers only part of the backlog. That has now happened three nights in a row, with a different cause each time. Last week it was a rate limit the script could not see, which was found and fixed. Tonight it is worse and simpler: the model it asks for by default, "pool/fast", no longer exists — the proxy renamed its pools to low/medium/high/xhigh, and now answers that request with a flat error. Run the script the way its own documentation describes and every single entry fails. Tonight produced any output at all only because the pool was overridden by hand, and even then it managed about 32 of 154 entries. The point is not the pool name. A one-line fix repairs tonight and leaves the pattern intact: the script has no way to tell "this lane is dead" from "this lane is slow", and no record of how much it actually covered. Three nights running, the honest sentence "the sweep did not complete" has been reconstructed by hand from a line count. The proposal asks the proxy for a live pool instead of hardcoding one, aborts at the first entry when the lane cannot work, and writes a coverage stamp so partial coverage is a number the routine reads rather than something someone notices.
+
+### The question
+
+Should the triage lane get a health contract — a live-resolved (not hardcoded) model target, a preflight that aborts loudly when the lane cannot answer, and a coverage stamp recording seen/classified/errored so partial coverage is data rather than prose?
+
+### Your answer
+
+- [ ] **1. Build all three** — Build P11 in full: resolve the model target from llm-relay rather than hardcoding a pool name, preflight once and abort with the relay's own error when the lane is dead, and write a coverage stamp beside the JSONL so leg-2 coverage is reported from data.
+- [ ] **2. Coverage stamp first** — Build only the coverage stamp. It is the piece that ends the recurrence by making silent degradation visible; the other two are repairs that can follow.
+- [ ] **3. Just fix the pool name** — Point the default at a pool that exists today and move on. Accept that it will drift again when llm-relay next changes its roster.
+- [ ] **4. Retire the lane** — Stop trying to sweep the whole backlog mechanically each night. Have leg 2 work a bounded slice per run instead, and delete the lane rather than repairing it.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P11-leg2-lane-cannot-sweep-the-backlog/PROPOSAL.md`](../.audit-tools/nightly/proposals/P11-leg2-lane-cannot-sweep-the-backlog/PROPOSAL.md)
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- scripts/shared/triage-backlog.mjs:67 reads `const MODEL = process.env.TRIAGE_MODEL || 'pool/fast';` and its header (lines 41-42) also documents `pool/coding` for retries.
+- llm-relay rejects both: POST /v1/chat/completions with model "pool/fast" returns `llm-relay routing: no pool "fast" configured (available: low, medium, high, xhigh)`. Pools were renamed to effort tiers at llm-relay v0.15.4; fast/coding/reasoning no longer resolve.
+- Confirmed live tonight: `llm-relay config get routing.pools` lists exactly low, medium, high, xhigh.
+- With TRIAGE_MODEL overridden to pool/medium, the run classified ~32 of 154 entries in ~35 minutes, with 2 rows lost to "Unexpected non-whitespace character after JSON" (the serving model prepending prose despite response_format — the failure the script header warns about).
+- Third consecutive partial: the 2026-07-30 run reached 31 of 105 on a masked groq 8000-TPM limit (fixed in 391c743d); the 2026-07-29 run was also partial.
+- No entry was classified already_shipped in tonight's partial output, so leg 2 established no deletions.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- docs/backlog/open-bugs.md + docs/backlog.md (commit cd3d3cab) — deleted the 2026-07-29 friction-walk entry as a code-proven shipped-removal. Its three legs were "ambiguous-direction: none", "tool-should-decide (fixed in-lap)" and "inefficient-feeding: none", so there was no open remainder to trim to. Verified both ways before deleting: both ~/.claude/agents/offload-*.md now carry tier names (sonnet, haiku) rather than the pool/<name> pins the entry calls broken, and the durable rule already lives in its proper home (project memory subagent-offload-tier-path-works-pool-pin-broken). docs/backlog.md is the regenerated seek index, 152 -> 151 entries.
-
-- docs/audit-pkg/release.md — the `verify:release` enumeration gained the missing `check:guard-reach` row (guard wiring/reach reconciliation), placed to match package.json order between `check:version-gates` and `check:loop-core-patterns`. The step landed in 3cd3dbc1 and no doc sweep followed.
-
-- .claude/skills/ship/SKILL.md — the inline `verify:checks` enumeration gained the missing `guard-reach` row, in package.json order. This is the SECOND consecutive night this list needed a missing row added; escalated as sol-2 to generate it instead.
-
-- .claude/skills/ship/SKILL.md — `verify:release` was described as "(= `verify:checks` + full vitest)"; it also runs `smoke:linked-audit-code` and `smoke:linked-remediate-code` after vitest, so the parenthetical now names both linked-install smokes.
-
-- docs/HANDOFF.md — the authoritative current version corrected from v0.34.41 to v0.34.42. Verified both ways: package.json is 0.34.42, tag v0.34.42 exists, release commit 6a364556 is an ancestor of HEAD, and `npm view audit-tools version` returns 0.34.42, so the "live on npm" clause stays true.
+- .claude/skills/start-lap/SKILL.md — the roadmap step pointed at a HANDOFF section called "Suggested ordering" that no longer exists; corrected to "Immediate next". Verified both ways: docs/HANDOFF.md has exactly "## Live state" (6), "## Verification state" (56) and "## Immediate next" (63), and "Suggested ordering" appeared nowhere else in the tracked tree. The section was dropped by commit 90032173 and the skill was never updated. Reviewer and adversary agreed.
 
 
 </details>
@@ -54,11 +312,11 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 2 (backlog) — the EXHAUSTIVE per-entry shipped-detection pass is PARTIAL, for the second run in a row, but this time the cause is identified and filed. The mechanical lane (scripts/shared/triage-backlog.mjs) classified 31 of 105 entries (74 unclassified); every failure recorded "finish_reason=undefined", which instrumenting revealed to be a masked groq 8000-TPM rate limit carrying its own 20s retry-after. Throughput against that ceiling was ~2-5 entries per paced burst, so the file cannot be swept in one night until the retry-after is honoured. The lane is capable (a previously-failing entry classified correctly on first retry) and the defect is in the caller, which surfaces neither the error nor the retry-after and skips errored ids on resume. Filed as sol-1 with a full proposal. What leg 2 DID cover this run: every entry that classified carries a MECHANICALLY evaluated premise stamp (the script holds repo access and checks each quoted fragment against HEAD itself, so those stamps are not model claims); all four backlog gates green via verify:checks (budget, status, index, doc-links) plus the newer check:doc-code-citations; the newly filed 2026-07-30 dogfood defect cluster read end to end and reconciled against its friction record; and forward-tracks.md Stage 5 verified as shipped (escalated as docs-1 rather than deleted, because the spec points at it). ONE entry WAS deleted this run on hand verification, not on a lane verdict — the 2026-07-29 friction walk, whose every leg was "none" or "fixed in-lap", with the offload agent pins confirmed re-pointed to tier names and its durable rule already in project memory (commit cd3d3cab). Critically, NO entry was deleted on the strength of a `premise: gone` stamp, because that stamp turned out not to be trustworthy evidence — see sol-3. So "no further shipped entries found" is again NOT what this run established.
+- The weekly /insights pass — DUE and FAILED TO RUN, so it is a skipped leg, not a quiet one. The stamp .audit-tools/nightly/insights-last-run.json is absent (the file the 2026-07-30 run recorded as reading 2026-07-25 is gone from disk), which makes the pass due by the routine's own rule. The nested session `claude -p "/insights"` exited 1 with "Failed to authenticate: OAuth session expired and could not be refreshed" — the nested-session lane cannot authenticate on this machine tonight. No stamp was written, deliberately: leaving it absent makes the pass due again tomorrow rather than parking the failure for a week. Leg 3 therefore ran on the written surfaces (memory, global CLAUDE.md, backlog traps/open-bugs, friction records) but WITHOUT the cross-session friction counts /insights measures from the outside.
 
-- Second independent model family — degraded, not absent. The relay pools were unhealthy for schema-constrained work throughout the run: gemini-2.5-flash returned interleaved 429/503 with no failover to other pool candidates, and several pinned candidates returned 401 (ollama-cloud, kilo, huggingface, mistral, codestral, cohere) or 504 (nim/z-ai/glm-5.2 at 120s). Coverage was preserved by routing the doc corpus through five independent reviewer lanes plus a separate independent adversary lane, so no assigned doc went unreviewed and every applied edit was independently verified — but the cross-family check ran on fewer distinct providers than the routine intends.
+- Leg 2 (backlog) — the EXHAUSTIVE per-entry shipped-detection pass is PARTIAL for the THIRD consecutive run, and this time the cause is a dead default rather than a rate limit: scripts/shared/triage-backlog.mjs asks for `pool/fast`, a pool llm-relay deleted when it renamed its pools to low/medium/high/xhigh, so an unmodified run 400s on every entry. Re-run on pool/medium it reached ~32 of 154 entries, with 2 rows lost to unparseable model output. NO entry classified already_shipped, so leg 2 established NO deletions this run — "no shipped entries found" is again NOT what this run established. What leg 2 DID cover: all four backlog gates green via verify:checks (budget, status, index, doc-links) plus check:doc-code-citations; the ~32 classified entries each carry a mechanically evaluated premise stamp; and the three `premise: gone` stamps were hand-verified rather than trusted — two proved FALSE (see sol-1) and none justified a deletion. In particular "Remediation pause/recovery is not durable" was stamped gone but is unbuilt at HEAD (`plan_only` appears nowhere in src/remediate), so no entry was deleted on the strength of a stamp. Filed as sol-4 with a full proposal.
 
-- The weekly /insights pass — NOT DUE, and therefore not a skipped leg. Stamp .audit-tools/nightly/insights-last-run.json reads ran_at 2026-07-25T18:47:42Z, 5 days old against the 7-day gate. Recorded here only so the absence is not read as an omission.
+- Second independent model family — degraded. The six doc-review reviewer lanes and the independent adversary lane all ran through the relay's tier mapping rather than across distinct providers, and the two peer-CLI lanes were not exercised: the nested-session lane is the one that failed OAuth above. Coverage was preserved in the sense that every in-scope doc was reviewed by a reviewer lane and independently re-attacked by a separate adversary lane, and both surfaced findings were confirmed twice from source plus once mechanically by the routine itself — but the cross-family check ran on fewer distinct providers than the routine intends.
 
 
 </details>
