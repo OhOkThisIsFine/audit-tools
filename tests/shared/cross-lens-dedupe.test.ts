@@ -165,17 +165,17 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     // Chain B→A→C collapses: every mergeMap value is an id present in the output.
     expect(out.mergeMap.get("A")).toBe("C");
     expect(out.mergeMap.get("B"), "the merge chain must collapse to the FINAL survivor").toBe("C");
-    expect(out.dispositionById.get("A")).toEqual({
+    expect(out.dispositionById!.get("A")).toEqual({
       status: "merged",
       terminalFindingId: "C",
       mergePath: ["A", "C"],
     });
-    expect(out.dispositionById.get("B")).toEqual({
+    expect(out.dispositionById!.get("B")).toEqual({
       status: "merged",
       terminalFindingId: "C",
       mergePath: ["B", "A", "C"],
     });
-    expect(out.dispositionById.get("C")).toEqual({
+    expect(out.dispositionById!.get("C")).toEqual({
       status: "retained",
       terminalFindingId: "C",
       mergePath: ["C"],
