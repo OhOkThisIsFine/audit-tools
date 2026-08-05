@@ -36,6 +36,53 @@ export interface WeightedGraph {
 export type Partition = Map<string, string>;
 
 /**
+ * Arithmetic above the exact-integer range is rejected even when JavaScript can
+ * still represent a finite approximation. Community membership must not depend
+ * on input order changing the rounding of very large repeated sums.
+ */
+const MAX_GRAPH_ARITHMETIC = Number.MAX_SAFE_INTEGER;
+
+function compareNodeIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function assertNodeId(value: unknown, context: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${context} must be a non-empty string.`);
+  }
+}
+
+function assertPositiveBounded(value: number, context: string): void {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_GRAPH_ARITHMETIC) {
+    throw new RangeError(
+      `${context} must be finite, positive, and at most ${MAX_GRAPH_ARITHMETIC}; got ${String(value)}.`,
+    );
+  }
+}
+
+function checkedAdd(left: number, right: number, context: string): number {
+  const result = left + right;
+  if (!Number.isFinite(result) || result < 0 || result > MAX_GRAPH_ARITHMETIC) {
+    throw new RangeError(`${context} arithmetic is non-finite or out of bounds.`);
+  }
+  return result;
+}
+
+function checkedMultiply(left: number, right: number, context: string): number {
+  const result = left * right;
+  if (!Number.isFinite(result) || result < 0 || result > MAX_GRAPH_ARITHMETIC) {
+    throw new RangeError(`${context} arithmetic is non-finite or out of bounds.`);
+  }
+  return result;
+}
+
+function assertSignedBounded(value: number, context: string): void {
+  if (!Number.isFinite(value) || Math.abs(value) > MAX_GRAPH_ARITHMETIC) {
+    throw new RangeError(`${context} arithmetic is non-finite or out of bounds.`);
+  }
+}
+
+/**
  * Default resolution ladder, coarse→fine. Higher resolution γ penalizes large
  * communities more, yielding more (smaller) communities — so the ladder walks
  * from few coarse subsystems to many fine ones. A boundary present at coarse γ
@@ -56,53 +103,77 @@ interface AdjacencyGraph {
 }
 
 function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
-  const nodes = [...new Set(graph.nodes)].sort((a, b) => a.localeCompare(b));
+  const normalizedEdges = graph.edges.map((edge, index) => {
+    assertNodeId(edge.a, `Edge ${index} endpoint a`);
+    assertNodeId(edge.b, `Edge ${index} endpoint b`);
+    assertPositiveBounded(edge.weight, `Edge weight at index ${index}`);
+    return compareNodeIds(edge.a, edge.b) <= 0
+      ? { a: edge.a, b: edge.b, weight: edge.weight }
+      : { a: edge.b, b: edge.a, weight: edge.weight };
+  });
+  normalizedEdges.sort(
+    (left, right) =>
+      compareNodeIds(left.a, right.a) ||
+      compareNodeIds(left.b, right.b) ||
+      left.weight - right.weight,
+  );
+
+  for (let index = 0; index < graph.nodes.length; index++) {
+    assertNodeId(graph.nodes[index], `Graph node at index ${index}`);
+  }
+  const nodes = [
+    ...new Set([
+      ...graph.nodes,
+      ...normalizedEdges.flatMap((edge) => [edge.a, edge.b]),
+    ]),
+  ].sort(compareNodeIds);
   const adjacency = new Map<string, Map<string, number>>();
   for (const node of nodes) adjacency.set(node, new Map());
 
-  const ensure = (node: string): Map<string, number> => {
-    let row = adjacency.get(node);
-    if (!row) {
-      row = new Map();
-      adjacency.set(node, row);
-      nodes.push(node);
-    }
-    return row;
-  };
-
-  for (const edge of graph.edges) {
-    if (!(edge.weight > 0)) continue; // drop zero / negative / NaN weights
+  for (const edge of normalizedEdges) {
     const a = edge.a;
     const b = edge.b;
-    const rowA = ensure(a);
+    const rowA = adjacency.get(a)!;
+    const accumulated = checkedAdd(
+      rowA.get(b) ?? 0,
+      edge.weight,
+      `Repeated-edge (${a}, ${b})`,
+    );
     if (a === b) {
-      rowA.set(a, (rowA.get(a) ?? 0) + edge.weight);
+      rowA.set(a, accumulated);
       continue;
     }
-    const rowB = ensure(b);
-    rowA.set(b, (rowA.get(b) ?? 0) + edge.weight);
-    rowB.set(a, (rowB.get(a) ?? 0) + edge.weight);
+    const rowB = adjacency.get(b)!;
+    rowA.set(b, accumulated);
+    rowB.set(a, accumulated);
   }
-
-  // Nodes may have been appended by ensure(); keep the list unique + sorted so
-  // downstream iteration order is deterministic.
-  const uniqueSorted = [...new Set(nodes)].sort((a, b) => a.localeCompare(b));
 
   const degree = new Map<string, number>();
   let degreeSum = 0;
-  for (const node of uniqueSorted) {
+  for (const node of nodes) {
     const row = adjacency.get(node) ?? new Map<string, number>();
     let deg = 0;
-    for (const w of row.values()) deg += w;
+    for (const [neighbor, weight] of row) {
+      // An undirected self-loop contributes two incident ends to degree. This is
+      // essential after aggregation, where every intra-community edge becomes a
+      // diagonal entry and must retain its original graph mass.
+      const degreeContribution = neighbor === node
+        ? checkedMultiply(weight, 2, `Degree self-loop for node ${node}`)
+        : weight;
+      deg = checkedAdd(deg, degreeContribution, `Degree for node ${node}`);
+    }
     degree.set(node, deg);
-    degreeSum += deg;
+    degreeSum = checkedAdd(degreeSum, deg, "Graph mass");
   }
 
+  const totalWeight = degreeSum / 2;
+  assertSignedBounded(totalWeight, "Graph mass");
+
   return {
-    nodes: uniqueSorted,
+    nodes,
     adjacency,
     degree,
-    totalWeight: degreeSum / 2,
+    totalWeight,
   };
 }
 
@@ -121,7 +192,7 @@ function localMoving(
   graph: AdjacencyGraph,
   resolution: number,
 ): { communityOf: Map<string, string>; moved: boolean } {
-  const twoM = graph.totalWeight * 2;
+  const twoM = checkedMultiply(graph.totalWeight, 2, "Graph mass");
   const communityOf = new Map<string, string>();
   // Σtot(C): total degree of nodes currently in community C.
   const communityDegree = new Map<string, number>();
@@ -148,10 +219,12 @@ function localMoving(
       const nodeDegree = graph.degree.get(node) ?? 0;
       const current = communityOf.get(node)!;
       // Remove node from its community.
-      communityDegree.set(
-        current,
-        (communityDegree.get(current) ?? 0) - nodeDegree,
-      );
+      const remainingDegree = (communityDegree.get(current) ?? 0) - nodeDegree;
+      assertSignedBounded(remainingDegree, `Community degree for ${current}`);
+      if (remainingDegree < -1e-12) {
+        throw new RangeError(`Community degree for ${current} became negative.`);
+      }
+      communityDegree.set(current, Math.max(0, remainingDegree));
 
       // Weight from node into each candidate community (self-loop excluded — it
       // travels with the node and cannot distinguish communities).
@@ -160,23 +233,41 @@ function localMoving(
       for (const [neighbor, weight] of row) {
         if (neighbor === node) continue;
         const comm = communityOf.get(neighbor)!;
-        weightToCommunity.set(comm, (weightToCommunity.get(comm) ?? 0) + weight);
+        weightToCommunity.set(
+          comm,
+          checkedAdd(
+            weightToCommunity.get(comm) ?? 0,
+            weight,
+            `Modularity incident weight for ${node}`,
+          ),
+        );
       }
 
       // Isolation (staying in a fresh singleton) is the baseline: gain 0.
       let bestCommunity = current;
       let bestGain = 0;
       // Evaluate candidates in lexical order for a deterministic tie-break.
-      const candidates = [...weightToCommunity.keys()].sort((a, b) =>
-        a.localeCompare(b),
-      );
+      const candidates = [...weightToCommunity.keys()].sort(compareNodeIds);
       for (const comm of candidates) {
         const kiIn = weightToCommunity.get(comm) ?? 0;
         const sigmaTot = communityDegree.get(comm) ?? 0;
-        const gain = kiIn - (resolution * nodeDegree * sigmaTot) / twoM;
+        const scaledDegree = checkedMultiply(
+          resolution,
+          nodeDegree,
+          `Modularity resolution-degree product for ${node}`,
+        );
+        const numerator = checkedMultiply(
+          scaledDegree,
+          sigmaTot,
+          `Modularity mass product for ${node}`,
+        );
+        const penalty = numerator / twoM;
+        assertSignedBounded(penalty, `Modularity penalty for ${node}`);
+        const gain = kiIn - penalty;
+        assertSignedBounded(gain, `Modularity gain for ${node}`);
         if (
           gain > bestGain + 1e-12 ||
-          (Math.abs(gain - bestGain) <= 1e-12 && comm.localeCompare(bestCommunity) < 0)
+          (Math.abs(gain - bestGain) <= 1e-12 && compareNodeIds(comm, bestCommunity) < 0)
         ) {
           bestGain = gain;
           bestCommunity = comm;
@@ -186,7 +277,11 @@ function localMoving(
       // Re-add node to the chosen community.
       communityDegree.set(
         bestCommunity,
-        (communityDegree.get(bestCommunity) ?? 0) + nodeDegree,
+        checkedAdd(
+          communityDegree.get(bestCommunity) ?? 0,
+          nodeDegree,
+          `Community degree for ${bestCommunity}`,
+        ),
       );
       communityOf.set(node, bestCommunity);
       if (bestCommunity !== current) {
@@ -209,7 +304,7 @@ function canonicalizeCommunities(
   const rep = new Map<string, string>();
   for (const [node, comm] of communityOf) {
     const existing = rep.get(comm);
-    if (existing === undefined || node.localeCompare(existing) < 0) {
+    if (existing === undefined || compareNodeIds(node, existing) < 0) {
       rep.set(comm, node);
     }
   }
@@ -239,14 +334,14 @@ function aggregate(
   }
 
   const edges: Array<{ a: string; b: string; weight: number }> = [];
-  const superNodes = [...members.keys()].sort((a, b) => a.localeCompare(b));
+  const superNodes = [...members.keys()].sort(compareNodeIds);
   // Sum weights between/within communities. Each undirected pair is visited once
   // by iterating the symmetric adjacency and only taking a ≤ b (self included).
   for (const node of graph.nodes) {
     const commA = communityOf.get(node)!;
     const row = graph.adjacency.get(node) ?? new Map<string, number>();
     for (const [neighbor, weight] of row) {
-      if (neighbor.localeCompare(node) < 0) continue; // count each pair once
+      if (compareNodeIds(neighbor, node) < 0) continue; // count each pair once
       const commB = communityOf.get(neighbor)!;
       // The adjacency already stores each cross pair on both endpoints; taking
       // node ≤ neighbor once reconstructs the undirected weight exactly.
@@ -267,6 +362,7 @@ function aggregate(
  * lexicographically smallest member). Deterministic for a given graph + γ.
  */
 export function louvain(graph: WeightedGraph, resolution: number): Partition {
+  assertPositiveBounded(resolution, "Modularity resolution");
   const base = buildAdjacency(graph);
   if (base.nodes.length === 0) return new Map();
 

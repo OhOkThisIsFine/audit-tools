@@ -119,6 +119,74 @@ describe("modularity — louvain", () => {
     const fine = communities(louvain(g, 4)).length;
     expect(fine).toBeGreaterThanOrEqual(coarse);
   });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["positive infinity", Number.POSITIVE_INFINITY],
+    ["zero", 0],
+    ["negative", -1],
+    ["out of bounds", Number.MAX_VALUE],
+  ])("rejects %s edge weights instead of dropping or partitioning them", (_label, weight) => {
+    expect(() => louvain(graph(["a", "b"], [["a", "b", weight]]), 1)).toThrow(
+      /edge weight/i,
+    );
+  });
+
+  it("rejects overflow in repeated-edge, degree, graph-mass, and modularity intermediates", () => {
+    const halfBound = Number.MAX_SAFE_INTEGER / 2;
+    expect(() => louvain(graph(["a", "b"], [
+      ["a", "b", halfBound + 1],
+      ["b", "a", halfBound + 1],
+    ]), 1)).toThrow(/repeated-edge/i);
+
+    expect(() => louvain(graph(["a", "b", "c"], [
+      ["a", "b", halfBound + 1],
+      ["a", "c", halfBound + 1],
+    ]), 1)).toThrow(/degree/i);
+
+    const quarterBound = Number.MAX_SAFE_INTEGER / 4;
+    expect(() => louvain(graph(["a", "b", "c", "d", "e", "f"], [
+      ["a", "b", quarterBound],
+      ["c", "d", quarterBound],
+      ["e", "f", quarterBound],
+    ]), 1)).toThrow(/mass/i);
+
+    expect(() => louvain(graph(["a", "b"], [["a", "b", 2]]), Number.MAX_SAFE_INTEGER))
+      .toThrow(/modularity/i);
+  });
+
+  it("canonicalizes node and repeated-edge order before deterministic partitioning", () => {
+    const forward = graph(["b", "a", "c"], [
+      ["b", "a", 0.1],
+      ["a", "b", 0.2],
+      ["b", "c", 0.3],
+      ["a", "c", 0.4],
+    ]);
+    const reversed = graph(["c", "a", "b"], [
+      ["c", "a", 0.4],
+      ["c", "b", 0.3],
+      ["b", "a", 0.2],
+      ["a", "b", 0.1],
+    ]);
+    expect(partitionObject(louvain(forward, 1))).toEqual(
+      partitionObject(louvain(reversed, 1)),
+    );
+  });
+
+  it("preserves internal-edge mass when aggregation turns communities into self-loops", () => {
+    // First-level pairs {a,b} and {c,d} each aggregate their internal unit edge
+    // into a self-loop. Counting that loop once halves both super-node degrees
+    // and incorrectly makes the 1.5 bridge look profitable at the next level.
+    const g = graph(["a", "b", "c", "d"], [
+      ["a", "b", 1],
+      ["c", "d", 1],
+      ["b", "c", 1.5],
+    ]);
+    expect(communities(louvain(g, 1))).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+  });
 });
 
 describe("resolutionSweep", () => {
@@ -134,6 +202,14 @@ describe("resolutionSweep", () => {
     expect(sweep).toHaveLength(DEFAULT_RESOLUTIONS.length);
     for (const part of sweep) expect(part.size).toBe(4);
   });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+    "rejects invalid resolution %s",
+    (resolution) => {
+      expect(() => resolutionSweep(graph(["a", "b"], [["a", "b"]]), [resolution]))
+        .toThrow(/resolution/i);
+    },
+  );
 });
 
 describe("clustersFromPartitions", () => {
