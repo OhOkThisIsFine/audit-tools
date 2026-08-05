@@ -146,6 +146,21 @@ function classifyFailureChannels<TPacket>(
 }
 
 /**
+ * Render the tail of a worker's stderr capture for inclusion in an
+ * `outcome:"error"` message, so the CAUSE of a dead worker (e.g. a headless
+ * write-permission deny) rides the packet result into the step prompt instead
+ * of sitting in an unsurfaced sidecar file. Bounded to the last 400 characters
+ * — enough for the terminal error line, not a log dump. Empty stderr renders
+ * nothing.
+ */
+function describeWorkerChannelTail(stderrText: string): string {
+  const trimmed = stderrText.trim();
+  if (trimmed.length === 0) return "";
+  const tail = trimmed.slice(-400);
+  return `; worker stderr tail: ${tail.length < trimmed.length ? "…" : ""}${tail}`;
+}
+
+/**
  * The shared launch-result finalize tail run by BOTH per-packet dispatchers
  * (audit `makeAuditProviderPacketDispatcher`, remediate `makeProviderNodeDispatcher`)
  * once `provider.launch(...)` returns. Everything here is provider/domain-neutral,
@@ -197,12 +212,16 @@ export async function finalizeProviderLaunchResult<TPacket>(
     if (classification) {
       return { packet, ...classification };
     }
-    // No classification matched — return the original error
+    // No classification matched — return the original error, carrying the worker's
+    // stderr cause (meta-review 2026-07-30b: a headless write-deny died with the
+    // cause sitting in an unsurfaced stderr file while the packet reported only
+    // `outcome:error`).
     return {
       packet,
       outcome: "error",
       error: new Error(
-        launch.error ?? `provider ${ctx.providerName} rejected ${ctx.entityLabel}`,
+        (launch.error ?? `provider ${ctx.providerName} rejected ${ctx.entityLabel}`) +
+          describeWorkerChannelTail(stderrText),
       ),
     };
   }
@@ -228,7 +247,8 @@ export async function finalizeProviderLaunchResult<TPacket>(
       packet,
       outcome: "error",
       error: new Error(
-        `worker for ${ctx.entityLabel} wrote no result at ${ctx.resultPath}`,
+        `worker for ${ctx.entityLabel} wrote no result at ${ctx.resultPath}` +
+          describeWorkerChannelTail(stderrText),
       ),
     };
   }

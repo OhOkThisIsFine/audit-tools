@@ -39,6 +39,17 @@ export interface PartitionOptions {
   riskMassBudget: number;
   /** Per-packet prompt overhead reserved against the context ceiling. */
   promptOverheadTokens?: number;
+  /**
+   * Soft per-packet content-token target for MERGING — the same budget the
+   * initial planner splits under. Without it the only merge ceiling is the
+   * model's whole context window, so a task set that fits in context greedily
+   * collapses into one giant packet (meta-review 2026-07-30b: the deepening
+   * re-partition packed 97 tasks / 655k tokens into a single packet and
+   * head-of-line-blocked the frontier). `over_budget` stays measured against
+   * the CONTEXT ceiling — a lone task over the soft target but under context
+   * still dispatches.
+   */
+  targetPacketTokens?: number;
 }
 
 /**
@@ -76,6 +87,10 @@ export function partitionTaskGraph(
 ): GraphPacket[] {
   const overhead = options.promptOverheadTokens ?? 0;
   const { contextTokenBudget, riskMassBudget } = options;
+  const mergeTokenBudget =
+    options.targetPacketTokens !== undefined
+      ? Math.min(contextTokenBudget, options.targetPacketTokens)
+      : contextTokenBudget;
   const nodes = graph.nodes;
   const indexOf = new Map<string, number>();
   nodes.forEach((n, i) => indexOf.set(n.task_id, i));
@@ -103,7 +118,7 @@ export function partitionTaskGraph(
     if (ru === rv) continue;
     const combinedTokens = clusters[ru].tokens + clusters[rv].tokens;
     const combinedRisk = clusters[ru].risk + clusters[rv].risk;
-    if (combinedTokens + overhead > contextTokenBudget) continue;
+    if (combinedTokens + overhead > mergeTokenBudget) continue;
     if (combinedRisk > riskMassBudget) continue;
     // union rv into ru
     clusters[rv].parent = ru;

@@ -812,6 +812,7 @@ export {
   AUDIT_FINDINGS_CONTRACT_VERSION,
   validateAuditFindingsReport,
   isValidAuditFindingsReport,
+  claimsAuditFindingsContract,
 } from "./validation/findingsReport.js";
 export {
   validateSessionConfig,

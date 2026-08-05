@@ -540,6 +540,12 @@ export interface BuildPartitionPacketOptions {
   contextTokenBudget: number;
   /** Risk-mass ceiling per packet. Defaults to DEFAULT_RISK_MASS_BUDGET. */
   riskMassBudget?: number;
+  /**
+   * Soft per-packet content-token merge target. Defaults to
+   * DEFAULT_TARGET_PACKET_TOKENS so the JIT re-partition splits under the SAME
+   * budget the initial planner used — never only under the context ceiling.
+   */
+  targetPacketTokens?: number;
   lineIndex?: Record<string, number>;
   sizeIndex?: Record<string, number>;
   graphBundle?: GraphBundle;
@@ -569,6 +575,7 @@ export function buildReviewPacketsFromPartition(
     contextTokenBudget: options.contextTokenBudget,
     riskMassBudget: options.riskMassBudget ?? DEFAULT_RISK_MASS_BUDGET,
     promptOverheadTokens: ESTIMATED_PACKET_PROMPT_TOKENS,
+    targetPacketTokens: options.targetPacketTokens ?? DEFAULT_TARGET_PACKET_TOKENS,
   });
 
   const packets: ReviewPacket[] = [];

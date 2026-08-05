@@ -550,3 +550,66 @@ test("finalizeProviderLaunchResult: an ACCEPTED launch with a LANDED result file
     expect(result.outcome).toBe("success");
   });
 });
+
+// Meta-review 2026-07-30b(c): a headless write-deny killed the worker with the
+// cause sitting in an unsurfaced stderr sidecar while the packet reported only
+// a bare `outcome:error`. The error message must carry the stderr tail.
+test("finalizeProviderLaunchResult: an unclassified worker death surfaces its stderr cause in the error message", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json"); // never written
+    await writeFile(
+      stderrPath,
+      "Error: write_file to /result.json was denied by the permission policy (headless auto-deny).",
+      "utf8",
+    );
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: true },
+      {
+        packet: basePacket(),
+        providerName: "agy",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: null,
+      },
+    );
+    expect(result.outcome).toBe("error");
+    expect(String((result as { error: Error }).error.message)).toContain("denied by the permission policy");
+  });
+});
+
+test("finalizeProviderLaunchResult: an empty stderr adds no tail to the error message", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+    await writeFile(stderrPath, "", "utf8");
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: true },
+      {
+        packet: basePacket(),
+        providerName: "agy",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: null,
+      },
+    );
+    expect(result.outcome).toBe("error");
+    expect(String((result as { error: Error }).error.message)).not.toContain("stderr tail");
+  });
+});

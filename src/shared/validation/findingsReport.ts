@@ -402,3 +402,23 @@ export function isValidAuditFindingsReport(
 ): value is AuditFindingsReport {
   return inspectAuditFindingsReport(value).issues.every((issue) => issue.severity !== "error");
 }
+
+/**
+ * Whether a parsed value CLAIMS to be the audit-findings contract: the
+ * canonical `contract_version` plus a `findings` array. Deliberately light —
+ * this is the ROUTING predicate (structured-contract path vs markdown/freeform
+ * input), not a validity check. A report that claims the contract but fails
+ * full validation must enter the structured path and be refused THERE with its
+ * real issues (`projectApprovedFindings` / `validateAuditFindingsReport`);
+ * routing on full validity would silently divert a malformed report to the
+ * markdown parser, laundering a contract violation into a wrong-path parse.
+ * INV-remediate-state-07 still holds: an absent or non-canonical
+ * contract_version never routes structured.
+ */
+export function claimsAuditFindingsContract(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.contract_version === AUDIT_FINDINGS_CONTRACT_VERSION &&
+    Array.isArray(value.findings)
+  );
+}

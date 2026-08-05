@@ -163,3 +163,36 @@ test("TST-63d9e3e4: two-node packet exceeding budget is NOT flagged as over_budg
     expect(p.over_budget, "disjoint two-node packets with 600 tokens each are not over_budget").toBe(undefined);
   }
 });
+
+// Meta-review 2026-07-30b(a): with only the context ceiling as merge budget, a
+// task set that fits in a large model context collapses into ONE packet (97
+// tasks / 655k tokens observed live) and head-of-line-blocks the frontier. The
+// soft targetPacketTokens is the planner's split budget, applied to merging.
+test("targetPacketTokens caps merging below a huge context ceiling", () => {
+  const one = partitionTaskGraph(COUPLED, {
+    contextTokenBudget: 1_000_000,
+    riskMassBudget: 100,
+  });
+  expect(one.length, "without a target, context is the only merge ceiling").toBe(1);
+
+  const split = partitionTaskGraph(COUPLED, {
+    contextTokenBudget: 1_000_000,
+    riskMassBudget: 100,
+    targetPacketTokens: 250,
+  });
+  expect(split.length).toBe(2);
+  expect(split.every((p) => p.token_estimate <= 250)).toBeTruthy();
+});
+
+test("a lone task over the soft target but under context is NOT over_budget", () => {
+  const graph = buildTaskAffinityGraph([
+    task({ task_id: "big", token_estimate: 500 }),
+  ]);
+  const packets = partitionTaskGraph(graph, {
+    contextTokenBudget: 1_000_000,
+    riskMassBudget: 100,
+    targetPacketTokens: 250,
+  });
+  expect(packets.length).toBe(1);
+  expect(packets[0].over_budget, "over_budget stays measured against CONTEXT").toBeUndefined();
+});

@@ -8,7 +8,7 @@ import {
 } from "../state/types.js";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport } from "audit-tools/shared";
-import { isValidAuditFindingsReport } from "audit-tools/shared";
+import { claimsAuditFindingsContract } from "audit-tools/shared";
 import { readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -26,16 +26,20 @@ import { StateStore, type HostCapabilities } from "../state/store.js";
 import { pathTokensInCommand } from "../steps/dispatch/verifyCommands.js";
 
 /**
- * Whether a parsed JSON value is a valid audit-findings report.
+ * Whether a parsed JSON value claims the audit-findings contract — the ROUTING
+ * predicate for structured vs markdown/freeform input.
  *
- * INV-remediate-state-07: delegates to the shared validator which enforces
- * contract_version presence and expected value. An absent or mismatched
- * contract_version is rejected here rather than silently trusted.
+ * INV-remediate-state-07: contract_version presence and expected value are
+ * enforced here — an absent or mismatched contract_version never routes
+ * structured. Deliberately NOT the full strict validator: a report that claims
+ * the contract but is internally invalid must enter the structured path and be
+ * refused there with its real issues, not silently fall through to the
+ * markdown parser.
  */
 export function isAuditFindingsReport(
   value: unknown,
 ): value is AuditFindingsReport {
-  return isValidAuditFindingsReport(value);
+  return claimsAuditFindingsContract(value);
 }
 
 // Block-sizing constants: now single-sourced from audit-tools/shared.

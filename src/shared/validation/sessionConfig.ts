@@ -974,7 +974,10 @@ export function validateRepoSessionIntent(value: unknown): ValidationIssue[] {
         issues,
         field,
         `${field} is dispatch inventory and cannot be persisted on session-config.json — ` +
-          `it rides the per-auditor --auditor descriptor (spec/unified-dispatch-worker-model.md).`,
+          `declare it in sources-declared.json in the tool's state dir ` +
+          `(~/.audit-code or ~/.remediate-code; per-source worker flags such as ` +
+          `parameters.dangerously_skip_permissions live there) or pass it on the per-auditor ` +
+          `--auditor descriptor (spec/unified-dispatch-worker-model.md).`,
       );
     }
   }
