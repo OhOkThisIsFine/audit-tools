@@ -24,9 +24,11 @@
 - Local enforcement remains: packet/context fit (unknown context cap now refuses rather than
   fits), capability floors, quota/headroom, concurrency, result validation, and mechanical
   self-spawn exclusion.
-- The over-swept `.audit-tools/nightly/` deletions were restored: five nightly items are still
-  OPEN and unanswered in `docs/nightly-inbox.md` (P5 triage-lane-429 and P7 probe-absence among
-  them); their proposals and `open-items.json` are back so the SessionStart surface works.
+- The over-swept `.audit-tools/nightly/` deletions were restored: TWO nightly items are still
+  open in `docs/nightly-inbox.md` — sol-1 (P5 triage-lane-429) and sol-3 (P7 probe-absence), both
+  ask-backs now carrying a revised recommendation awaiting the owner's answer. The other three from
+  the 2026-07-30 run (docs-1, docs-2, sol-2) are answered AND completed per the decisions ledger.
+  Proposals and `open-items.json` are back so the SessionStart surface works.
 - Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
   `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
   [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).
@@ -47,7 +49,7 @@
 
 1. Recover the intentionally paused CP-NODE-4 worktree using the linked review record; reconcile
    primary-checkout WIP before accepting or redispatching anything.
-2. Owner: answer the five open nightly items in `docs/nightly-inbox.md` (check a box per item).
+2. Owner: answer the two open nightly items in `docs/nightly-inbox.md` (check a box per item).
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
