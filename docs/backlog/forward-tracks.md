@@ -278,3 +278,17 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   not in play. Do not re-raise it.
 
 - **Packet `task_ids`/`lens` attribution is missing from the token-usage ledger** (`DispatchPlanEntry` carries neither). Non-blocking follow-up to the context-efficiency access-memory track, whose items 1-3 shipped.
+
+- **Prompt/process critique cluster (2026-08-05)** — spec + full census in
+  [`reviews/prompt-process-critique-2026-08-05.md`](../reviews/prompt-process-critique-2026-08-05.md);
+  that doc is the single home, this entry is the hook. Four mechanism directions, owner to pick order:
+  (1) uniform id-join contract — closed-enum return schemas for pre-existing ids, tool-minted ids via
+  ordinal reference for new items, hard-fail (never silent-skip) at every gate; census covers ~11 class-(c)
+  joins across both orchestrators. (2) Capability-conditional fan-out renderer — `semanticReviewStep.ts` is
+  the only step honoring `hostCanDispatch`; extend the branch + per-subagent prompt files + per-lane ingest
+  chokepoint to charter extraction/delta, design review, flow fallback, synthesis narrative, remediate
+  review gate. (3) Scope-confirmation context: thread `design_assessment` into `buildLensPropositions`
+  (zero reorder) and/or a deterministic `docs_digest` artifact before `intent_checkpoint` (DAG-clean;
+  charter-before-scope is DAG-blocked by DD-9 and stays put). (4) Charter scope-by-feeding — materialize
+  per-kind packets (stated=docs+extracted comments, revealed=comment-stripped code, inferred=structure
+  only) so blindness is a property of the input; teleology join by file-set overlap instead of node_id echo.
