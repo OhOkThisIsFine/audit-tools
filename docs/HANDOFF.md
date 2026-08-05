@@ -5,12 +5,20 @@
 
 ## Live state
 
-- **Plan-only remediation handoff (2026-08-03):** the repository-local run is intentionally paused at
-  `CP-NODE-4`. The backend state still says `implementing`, but all worker processes were stopped and
-  the unmerged worktree was retained at
-  `.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-4-audit-tools-approved-audit-remediation`.
-  The durable rationale and continuation plan live in
+- **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
+  three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
+  single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
+  duplicate-id refusal resolved as a declared `idDiscipline` policy axis (audit's packet-local draw
+  vs remediate's global draw) and the routing predicate split from strict validity
+  (`claimsAuditFindingsContract`). The worktree is removed. The remediation backend still says
+  `implementing` with CP-NODE-1/2/3/5–10 pending; continuation order (CP-NODE-7+1, then 2+3, then
+  the graph-lead boundary) lives in
   [`graph-derived-findings-remediation-process-review-2026-08-03.md`](reviews/graph-derived-findings-remediation-process-review-2026-08-03.md).
+- **2026-07-30 defect clusters worked (2026-08-04, `b284bc7a`/`d57480b0`):** JIT/deepening
+  partitioning under the planner's soft target (mega-packet head-of-line block gone, shrink trigger
+  exists), graceful resumable pause on `maxTransitions`, stderr causes in error packet_results,
+  refusals name `sources-declared.json`, host-path dead-worker result salvage, promotion identity
+  check. The rest of the cluster is live-run watch — see the merged ▶ entry in `open-bugs.md`.
 - Dispatch inversion is implemented and its cross-suite fallout is repaired (2026-08-04): provider
   confirmation/Gate-0, confirmed ordering, dispatch bias, and proxy catalog/populate discovery are
   retired; `llm-relay` owns concrete provider/model routing through `pool/fast` / `pool/coding` /
@@ -24,11 +32,10 @@
 - Local enforcement remains: packet/context fit (unknown context cap now refuses rather than
   fits), capability floors, quota/headroom, concurrency, result validation, and mechanical
   self-spawn exclusion.
-- The over-swept `.audit-tools/nightly/` deletions were restored: TWO nightly items are still
-  open in `docs/nightly-inbox.md` — sol-1 (P5 triage-lane-429) and sol-3 (P7 probe-absence), both
-  ask-backs now carrying a revised recommendation awaiting the owner's answer. The other three from
-  the 2026-07-30 run (docs-1, docs-2, sol-2) are answered AND completed per the decisions ledger.
-  Proposals and `open-items.json` are back so the SessionStart surface works.
+- The nightly inbox is EMPTY: sol-1 (triage-lane fixes, `391c743d`) and sol-3 (git-evidenced
+  premise probes, `3750a943`) were approved in chat 2026-08-04, executed, and recorded
+  answered+completed in the decisions ledger. One relay-side defect remains OUTSIDE this repo:
+  `pool/coding` does not fail over past a rate-limited first candidate — file against llm-relay.
 - Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
   `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
   [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).
@@ -39,17 +46,17 @@
 
 ## Verification state
 
-- Full `npm test` is green post-sweep (7,386 tests passed, 10 skipped, 0 failed). `npm run check`,
-  `check:tests`, `check:deadcode`, `check:guard-reach`, doc-manifest, and both packaged smokes pass.
-- CP-NODE-4 is not accepted: its retained worktree has six modified files, a 776-line diff, and a
-  failing duplicate-ID dedupe test. No CP-NODE-4 change was merged into the primary checkout.
+- Full `npm test` green at the closeout run (7,410 passed, 10 skipped, 0 failed — see the final
+  sprint verify). Two tests were deliberately inverted this sprint, both to retire pinned defect
+  behaviour: the N5b context-only packing assertion and the multi-block remap fixup test.
 - The pause/terminal persisted-state XOR inconsistency is recorded in `docs/backlog/open-bugs.md`.
 
 ## Immediate next
 
-1. Recover the intentionally paused CP-NODE-4 worktree using the linked review record; reconcile
-   primary-checkout WIP before accepting or redispatching anything.
-2. Owner: answer the two open nightly items in `docs/nightly-inbox.md` (check a box per item).
+1. Run the next dogfood audit under the inverted dispatch — it is the designated re-test for every
+   remaining live-run-watch property in the merged ▶ cluster entry (`open-bugs.md`).
+2. Continue the remediation plan from the backend (CP-NODE-7 + CP-NODE-1 next, per the 2026-08-03
+   review record's continuation order); the run state is still `implementing` with 9 nodes pending.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
@@ -62,11 +69,10 @@
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 2 pinned item(s).
+> `verify:checks` and at commit). 1 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
-- ▶ Meta-review run 2026-07-30b — root causes + two new loop defects. · [`open-bugs.md`](backlog/open-bugs.md)
-- ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects. · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties. · [`open-bugs.md`](backlog/open-bugs.md)
 
 <!-- END GENERATED ROADMAP -->

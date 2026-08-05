@@ -1105,28 +1105,26 @@
   (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
   minted by the registry or validated on the way in.
 
-- **▶ Meta-review run 2026-07-30b — root causes + two new loop defects.** Primary record:
+- **▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.** Primary records:
+  [`reviews/dogfood-run-2026-07-30.md`](../reviews/dogfood-run-2026-07-30.md),
   [`reviews/meta-review-audit-run-2026-07-30.md`](../reviews/meta-review-audit-run-2026-07-30.md).
-  Re-confirmed from the cluster below: re-planning shrink never fires (watched twice), exit-2-on-success,
-  promotion gap. NEW: (a) root cause of the head-of-line block — the selective-deepening re-partitioner
-  packs its whole task set into one packet (97 tasks / 655k tokens) instead of applying the initial
-  planner's budget split; (b) an ERRORED rolling-engine packet leaves `audit_tasks_completed` actionable
-  and advance cycles to the `maxTransitions(100)` crash instead of a graceful pause; (c) a worker's
-  stderr cause (headless agy write-deny) never surfaces in `packet_result` or the step prompt, and the
-  session-config refusal names the spec but not `~/.audit-code/sources-declared.json` as the fix home.
-  Properties to hold: deepening partitions under the same budget as planning; an errored packet pauses
-  resumably with its cause; a lane-config refusal names the sanctioned file.
-
-- **▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.** Primary record:
-  [`reviews/dogfood-run-2026-07-30.md`](../reviews/dogfood-run-2026-07-30.md); the
-  `no_capable_pool` watch PASSED (its watch entry is closed). Properties to hold: (1) re-planning
-  shrink fires on a blocked packet; no head-of-line block of the frontier; (2) a remedy a pause
-  names is reachable from it (declared big pool enters host-wave fitting); (3) worker death
-  reconciles written results and expires claims ([[claim-liveness-is-not-an-inflight-signal]]);
-  (4) a successful packet never cools its pool as rate_limited, and the message is surfaced;
-  (5) `present_report` completes only after the promoted deliverables verifiably exist;
-  (6) report coverage counts and lens exclusions reflect the run; (7) events/exit codes are
-  success-shaped only on success.
+  SHIPPED 2026-08-04 (b284bc7a, d57480b0): the deepening/JIT partitioner merges under the planner's
+  soft target (mega-packet head-of-line block structurally gone, and re-entry re-partitions — the
+  re-planning-shrink trigger); `maxTransitions` overflow pauses resumably instead of crashing;
+  worker stderr causes surface in error packet_results; the dispatch-inventory refusal names
+  `sources-declared.json`; host-path next-step salvages on-disk results from dead workers;
+  "already promoted" is an identity check, not existence. ⬇ **Remaining, ALL live-run watch under
+  the inverted dispatch (the 2026-07-30 evidence predates it and the run artifacts are gone):**
+  (2) a remedy a pause names is reachable from it — a declared big source pool must be reachable
+  for packets no host pool fits; (4) a successful packet never cools its pool as rate_limited
+  (statically unreproducible: the finalize success path attaches no rate-limit — re-observe), and
+  the cooldown's provider message is surfaced; (6) report coverage counts and lens exclusions
+  reflect the run (claimed 25 fully-audited files after a 60-packet full-tree wave; 1102 findings
+  on an excluded lens); (7) events/exit codes success-shaped only on success (`merge-and-ingest`
+  exit 2 on full success — `failing` non-empty on a fully-valid wave, cause unidentified); claim
+  expiry ergonomics on dead host workers ([[claim-liveness-is-not-an-inflight-signal]]).
+  **Property to hold:** next dogfood run re-tests each on the new dispatch shape; fix from live
+  evidence, not speculation.
 
 - **Audit pause/terminal persistence does not enforce its documented XOR.** The public state comment
   permits `paused_state` and a partial-completion terminal to coexist, while `pausePersist.ts` and
