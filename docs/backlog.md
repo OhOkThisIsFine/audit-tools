@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 147 entr(y/ies) indexed.
+> and at commit). 146 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -112,7 +112,6 @@
 - `open-bugs.md:1108` — ▶ Meta-review run 2026-07-30b — root causes + two new loop defects.
 - `open-bugs.md:1120` — ▶ Dogfood 2026-07-30 defect cluster — seven live dispatch/loop defects.
 - `open-bugs.md:1131` — Audit pause/terminal persistence does not enforce its documented XOR.
-- `open-bugs.md:1138` — A dedup survivor can belong to multiple blocks; block ownership is ill-defined.
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
