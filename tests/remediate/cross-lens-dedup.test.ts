@@ -482,22 +482,36 @@ describe("fixupBlocksAfterDedup", () => {
   });
 
   // OBL-C003-DEDUP / OBL-INV-RPS-07: an absorbed finding must never be silently
-  // dropped — when its survivor lives in a different block, the absorbed
-  // finding's block is remapped to the survivor id (the merged finding is still
-  // referenced), not emptied out.
-  it("remaps (never drops) an absorbed finding whose survivor lives in another block", () => {
+  // dropped — its survivor stays referenced and the mergeMap records the
+  // attribution for the coverage ledger. Ownership, however, is SINGLE-block:
+  // rewriting used to leave the survivor in BOTH its own block and the absorbed
+  // finding's block, which made block ownership ill-defined (dispatch scoping
+  // and the coverage ledger each saw the finding twice — docs/backlog entry,
+  // fixed by enforcing exactly-one-block in fixupBlocksAfterDedup).
+  it("keeps a survivor in exactly one block; a block emptied by the merge is dropped", () => {
     const blocks: RemediationBlock[] = [
       { block_id: "B-survivor", items: ["SURV"], parallel_safe: true, touched_files: [] },
       { block_id: "B-absorbed", items: ["ABS"], parallel_safe: true, touched_files: [] },
     ];
     const mergeMap = new Map([["ABS", "SURV"]]);
     const result = fixupBlocksAfterDedup(blocks, mergeMap);
-    // The absorbed finding's block now points at the survivor — not dropped.
-    const absorbedBlock = result.find((b) => b.block_id === "B-absorbed")!;
-    expect(absorbedBlock.items).toEqual(["SURV"]);
-    // Every survivor id remains referenced after fixup (no finding lost).
-    const allItems = new Set(result.flatMap((b) => b.items));
-    expect(allItems.has("SURV")).toBe(true);
-    expect(allItems.has("ABS")).toBe(false);
+    // The survivor is still referenced (no finding lost) — but exactly once.
+    const allItems = result.flatMap((b) => b.items);
+    expect(allItems.filter((id) => id === "SURV")).toHaveLength(1);
+    expect(allItems).not.toContain("ABS");
+    // The emptied block is dropped whole rather than left as a zero-item shell.
+    expect(result.map((b) => b.block_id)).toEqual(["B-survivor"]);
+  });
+
+  it("a block that partially merges away keeps its remaining items", () => {
+    const blocks: RemediationBlock[] = [
+      { block_id: "B-1", items: ["SURV"], parallel_safe: true, touched_files: [] },
+      { block_id: "B-2", items: ["ABS", "OTHER"], parallel_safe: true, touched_files: [] },
+    ];
+    const result = fixupBlocksAfterDedup(blocks, new Map([["ABS", "SURV"]]));
+    expect(result.map((b) => b.block_id)).toEqual(["B-1", "B-2"]);
+    expect(result.find((b) => b.block_id === "B-2")!.items).toEqual(["OTHER"]);
+    const allItems = result.flatMap((b) => b.items);
+    expect(allItems.filter((id) => id === "SURV")).toHaveLength(1);
   });
 });

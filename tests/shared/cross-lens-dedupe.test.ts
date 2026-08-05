@@ -25,6 +25,7 @@ const AUDIT_POLICY: CrossLensDedupePolicy = {
   mergeGrounding: true,
   sortAffectedFiles: true,
   breakOnAbsorbedSurvivor: false,
+  idDiscipline: "local",
 };
 const REMEDIATE_POLICY: CrossLensDedupePolicy = {
   categoryGate: "hard",
@@ -33,6 +34,7 @@ const REMEDIATE_POLICY: CrossLensDedupePolicy = {
   mergeGrounding: false,
   sortAffectedFiles: false,
   breakOnAbsorbedSurvivor: true,
+  idDiscipline: "global",
 };
 
 describe("crossLensDedupe — one core, per-mode policy", () => {
@@ -163,6 +165,21 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     // Chain B→A→C collapses: every mergeMap value is an id present in the output.
     expect(out.mergeMap.get("A")).toBe("C");
     expect(out.mergeMap.get("B"), "the merge chain must collapse to the FINAL survivor").toBe("C");
+    expect(out.dispositionById.get("A")).toEqual({
+      status: "merged",
+      terminalFindingId: "C",
+      mergePath: ["A", "C"],
+    });
+    expect(out.dispositionById.get("B")).toEqual({
+      status: "merged",
+      terminalFindingId: "C",
+      mergePath: ["B", "A", "C"],
+    });
+    expect(out.dispositionById.get("C")).toEqual({
+      status: "retained",
+      terminalFindingId: "C",
+      mergePath: ["C"],
+    });
     const emittedIds = new Set(out.findings.map((f) => f.id));
     for (const target of out.mergeMap.values()) {
       expect(emittedIds.has(target), `mergeMap target ${target} must be an emitted finding`).toBe(true);
@@ -218,5 +235,46 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
       AUDIT_POLICY,
     );
     expect(out.findings).toHaveLength(2);
+  });
+
+  it("rejects duplicate ids because an id-keyed terminal disposition would be ambiguous", () => {
+    expect(() =>
+      crossLensDedupe(
+        [
+          makeFinding({ id: "duplicate", lens: "security" }),
+          makeFinding({ id: "duplicate", lens: "tests" }),
+        ],
+        REMEDIATE_POLICY,
+      ),
+    ).toThrow(/duplicate finding id/i);
+  });
+
+  // Audit's draw feeds packet-scoped ids that collide across units BY
+  // CONSTRUCTION (global ids are minted downstream at assignStableFindingIds),
+  // so the local discipline must accept them — and must NOT hand back an
+  // id-keyed disposition map that would be mis-keyed.
+  it("local id discipline accepts colliding packet-scoped ids and withholds dispositionById", () => {
+    const out = crossLensDedupe(
+      [
+        makeFinding({ id: "MNT-001", title: "Unrelated one", lens: "security", affected_files: [{ path: "src/a.ts" }] }),
+        makeFinding({ id: "MNT-001", title: "Different thing", lens: "tests", affected_files: [{ path: "src/b.ts" }] }),
+      ],
+      AUDIT_POLICY,
+    );
+    expect(out.findings).toHaveLength(2);
+    expect(out.dispositionById, "packet-local ids cannot key a disposition map").toBeNull();
+  });
+
+  it("global id discipline emits a terminal disposition for every input id", () => {
+    const input = [
+      makeFinding({ id: "A", title: "Timeout not enforced", lens: "reliability", category: "net", severity: "low", evidence: ["ev-A"] }),
+      makeFinding({ id: "B", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "critical", evidence: ["ev-B"] }),
+      makeFinding({ id: "C", title: "Wholly unrelated", lens: "tests", category: "other", affected_files: [{ path: "src/z.ts" }] }),
+    ];
+    const out = crossLensDedupe(input, REMEDIATE_POLICY);
+    expect(out.dispositionById).not.toBeNull();
+    expect(out.dispositionById!.get("A")).toEqual({ status: "merged", terminalFindingId: "B", mergePath: ["A", "B"] });
+    expect(out.dispositionById!.get("B")).toEqual({ status: "retained", terminalFindingId: "B", mergePath: ["B"] });
+    expect(out.dispositionById!.get("C")).toEqual({ status: "retained", terminalFindingId: "C", mergePath: ["C"] });
   });
 });

@@ -142,6 +142,22 @@ export interface CrossLensDedupePolicy {
    * neither absorb nor be re-emitted).
    */
   breakOnAbsorbedSurvivor: boolean;
+  /**
+   * What the caller's finding ids MEAN, which decides whether id-keyed provenance
+   * is well-defined:
+   *
+   * - `global` (remediate): ids are globally unique (they come from
+   *   `audit-findings.json`, re-keyed at the synthesis boundary). Duplicate or
+   *   empty input ids are REFUSED, a merge-chain cycle is an internal invariant
+   *   failure, and the result carries `dispositionById` plus the terminal
+   *   evidence-conservation check.
+   * - `local` (audit report merge): ids are packet-scoped (`MNT-001` collides
+   *   across units by construction) and only become unique AFTER this pass, at
+   *   `assignStableFindingIds`. Id-keyed provenance is meaningless here, so no
+   *   refusal, no `dispositionById`, and a chain cycle from a reused id breaks
+   *   tolerantly instead of throwing (`mergeMap` is unused by this caller).
+   */
+  idDiscipline: "global" | "local";
   /** Called for each merge (remediate emits a structured audit log). */
   onMerge?: (info: { absorbed: Finding; survivor: Finding }) => void;
 }
@@ -154,6 +170,20 @@ export interface CrossLensDedupeResult {
    * mutate-mode callers can ignore it.
    */
   mergeMap: Map<string, string>;
+  /**
+   * Membership-closed disposition for every unique input id. Merge paths retain
+   * the direct provenance chain while `terminalFindingId` always names an
+   * emitted finding. Present ONLY under `idDiscipline: "global"` — with
+   * packet-local ids the map would be mis-keyed, and an empty map here must
+   * never read as "nothing merged" ([[success-shaped-empty-needs-affirmation]]).
+   */
+  dispositionById: Map<string, FindingDedupeDisposition> | null;
+}
+
+export interface FindingDedupeDisposition {
+  status: "retained" | "merged";
+  terminalFindingId: string;
+  mergePath: string[];
 }
 
 /**
@@ -166,6 +196,21 @@ export function crossLensDedupe(
   findings: Finding[],
   policy: CrossLensDedupePolicy,
 ): CrossLensDedupeResult {
+  const evidenceByInputId = new Map<string, string[]>();
+  if (policy.idDiscipline === "global") {
+    for (const finding of findings) {
+      if (finding.id.trim().length === 0) {
+        throw new TypeError("Finding ids must be non-empty before deduplication.");
+      }
+      if (evidenceByInputId.has(finding.id)) {
+        throw new TypeError(
+          `Duplicate finding id "${finding.id}" makes terminal dedupe disposition ambiguous.`,
+        );
+      }
+      evidenceByInputId.set(finding.id, [...(finding.evidence ?? [])]);
+    }
+  }
+
   const groups = new Map<string, Finding[]>();
   for (const finding of findings) {
     const key = primaryPath(finding);
@@ -268,10 +313,16 @@ export function crossLensDedupe(
     }
   }
 
+  // Preserve the direct edges before terminal collapse so the disposition map can
+  // explain B→A→C rather than reducing all provenance to B→C.
+  const directMergeMap = new Map(mergeMap);
+
   // Collapse merge chains (B→A recorded before A→C): every mergeMap value must be
   // the id of a finding present in the returned array, so follow each chain to its
-  // final (non-absorbed) survivor. The visited guard makes a malformed id cycle
-  // (duplicate caller-supplied ids) terminate instead of spinning.
+  // final (non-absorbed) survivor. Under `global` ids duplicates were rejected
+  // above, so a cycle is an internal invariant failure; under `local` ids a reused
+  // id can manufacture an apparent cycle from two unrelated merges, so the walk
+  // breaks tolerantly (this caller never consumes mergeMap).
   for (const [absorbedId, survivorId] of mergeMap) {
     let target = survivorId;
     const visited = new Set([absorbedId]);
@@ -279,12 +330,74 @@ export function crossLensDedupe(
       visited.add(target);
       target = mergeMap.get(target)!;
     }
+    if (visited.has(target) && mergeMap.has(target) && policy.idDiscipline === "global") {
+      throw new Error(`Dedupe merge cycle detected at finding id "${target}".`);
+    }
     if (target !== survivorId) mergeMap.set(absorbedId, target);
   }
 
+  const emittedFindings = findings
+    .filter((finding) => !removed.has(finding))
+    .map((finding) => canonical(finding));
+
+  if (policy.idDiscipline === "local") {
+    return { findings: emittedFindings, mergeMap, dispositionById: null };
+  }
+
+  const emittedById = new Map(emittedFindings.map((finding) => [finding.id, finding]));
+  if (emittedById.size !== emittedFindings.length) {
+    throw new Error("Dedupe emitted duplicate finding ids after terminal merge collapse.");
+  }
+
+  const dispositionById = new Map<string, FindingDedupeDisposition>();
+  for (const finding of findings) {
+    const mergePath = [finding.id];
+    const visited = new Set(mergePath);
+    let terminalFindingId = finding.id;
+    while (directMergeMap.has(terminalFindingId)) {
+      terminalFindingId = directMergeMap.get(terminalFindingId)!;
+      if (visited.has(terminalFindingId)) {
+        throw new Error(`Dedupe provenance cycle detected at finding id "${terminalFindingId}".`);
+      }
+      visited.add(terminalFindingId);
+      mergePath.push(terminalFindingId);
+    }
+    if (!emittedById.has(terminalFindingId)) {
+      throw new Error(
+        `Dedupe disposition for "${finding.id}" terminates at non-emitted id "${terminalFindingId}".`,
+      );
+    }
+    dispositionById.set(finding.id, {
+      status: mergePath.length === 1 ? "retained" : "merged",
+      terminalFindingId,
+      mergePath,
+    });
+  }
+
+  // Evidence is conserved by terminal destination, including through an
+  // intermediate survivor that is later absorbed. Check the invariant at the
+  // boundary so future absorb-policy edits cannot silently strand provenance.
+  const requiredEvidenceByTerminal = new Map<string, Set<string>>();
+  for (const [inputId, disposition] of dispositionById) {
+    const required = requiredEvidenceByTerminal.get(disposition.terminalFindingId) ?? new Set<string>();
+    for (const evidence of evidenceByInputId.get(inputId) ?? []) required.add(evidence);
+    requiredEvidenceByTerminal.set(disposition.terminalFindingId, required);
+  }
+  for (const [terminalFindingId, requiredEvidence] of requiredEvidenceByTerminal) {
+    const actualEvidence = new Set(emittedById.get(terminalFindingId)?.evidence ?? []);
+    for (const evidence of requiredEvidence) {
+      if (!actualEvidence.has(evidence)) {
+        throw new Error(
+          `Terminal finding "${terminalFindingId}" lost evidence from an absorbed finding.`,
+        );
+      }
+    }
+  }
+
   return {
-    findings: findings.filter((f) => !removed.has(f)).map((f) => canonical(f)),
+    findings: emittedFindings,
     mergeMap,
+    dispositionById,
   };
 }
 
