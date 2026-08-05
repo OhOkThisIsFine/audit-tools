@@ -38,7 +38,6 @@ import {
 } from "audit-tools/shared";
 import {
   buildConfirmedPools,
-  buildBlockAliasMap,
   collapseItemResults,
   enforceWriteScope,
   detectOverlappingEdits,
@@ -343,35 +342,23 @@ describe("INV-ROLL-02: rolling dispatch fills a freed slot on completion", () =>
 });
 
 // ===========================================================================
-// INV-ROLL-03: finding_id trap fix (renderer emits node id; tolerant merge)
+// INV-ROLL-03: finding_id join (renderer emits node id; registry-only resolve)
 // ===========================================================================
 
-describe("INV-ROLL-03: tolerant finding_id remap on merge", () => {
-  it("remaps an obligation id the worker mislabeled as finding_id back to the owning node", () => {
-    const blocks = [block("CP-BLOCK-N-foo", ["N-foo"])];
-    const st = findingState(blocks, {
-      "N-foo": { contract_obligation_ids: ["OBL-foo-inv-1"] },
-    });
-    const aliasMap = buildBlockAliasMap(blocks[0], st);
-    // The obligation id maps back to the node finding id.
-    expect(aliasMap.get("OBL-foo-inv-1")).toBe("N-foo");
+describe("INV-ROLL-03: finding_id join on merge (uniform id-join contract)", () => {
+  it("leaves an obligation id the worker mislabeled as finding_id unresolved — the fuzzy remap is deleted", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: "OBL-foo-inv-1", status: "resolved", evidence: ["ok"] }],
-      aliasMap,
       new Set(["N-foo"]),
     );
-    expect(unresolved).toHaveLength(0);
-    expect(collapsed).toHaveLength(1);
-    expect(collapsed[0].finding_id).toBe("N-foo");
+    expect(collapsed).toHaveLength(0);
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].finding_id).toBe("OBL-foo-inv-1");
   });
 
   it("remaps a CP-BLOCK-prefixed block id back to its bare node id (registry-first)", () => {
-    const blocks = [block("CP-BLOCK-N-bar", ["N-bar"])];
-    const st = findingState(blocks);
-    const aliasMap = buildBlockAliasMap(blocks[0], st);
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: "CP-BLOCK-N-bar", status: "resolved", evidence: ["e"] }],
-      aliasMap,
       new Set(["N-bar"]),
     );
     expect(unresolved).toHaveLength(0);
@@ -384,7 +371,6 @@ describe("INV-ROLL-03: tolerant finding_id remap on merge", () => {
         { finding_id: "N-z", status: "resolved", evidence: ["a"] },
         { finding_id: "N-z", status: "blocked", failure_reason: "boom", evidence: ["b"] },
       ],
-      new Map(),
       new Set(["N-z"]),
     );
     expect(collapsed).toHaveLength(1);
@@ -392,10 +378,9 @@ describe("INV-ROLL-03: tolerant finding_id remap on merge", () => {
     expect(collapsed[0].evidence).toEqual(expect.arrayContaining(["a", "b"]));
   });
 
-  it("an id that is neither a known finding nor a known alias is returned as unresolved (not dropped)", () => {
+  it("an id that is neither a known finding nor its block-id form is returned as unresolved (not dropped)", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: "TOTALLY-UNKNOWN", status: "resolved" }],
-      new Map(),
       new Set(["N-x"]),
     );
     expect(collapsed).toHaveLength(0);

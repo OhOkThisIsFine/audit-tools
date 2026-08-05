@@ -1,6 +1,6 @@
 import { OwnershipRegistry } from "../../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../../dispatch/amendmentClaim.js";
-import { toBlockId, fromBlockId } from "../../contractPipeline/idRegistry.js";
+import { fromBlockId } from "../../contractPipeline/idRegistry.js";
 import { AGENT_FEEDBACK_FILENAME } from "audit-tools/shared";
 import type { RemediationState } from "../../state/store.js";
 import type { RemediationBlock } from "../../state/types.js";
@@ -168,58 +168,23 @@ export function enforceAcceptWriteScope(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Merge-seam: obligation-id → node remap + multi-entry collapse (tolerance)
+// Merge-seam: registry block-id resolution + multi-entry collapse
 // ---------------------------------------------------------------------------
 
 /**
- * Build the map from a known obligation/node alias to the finding id that owns
- * it, for one block. A worker that mislabels its `finding_id` as an obligation
- * id it was assigned (or a CP-BLOCK-prefixed/unprefixed node alias) is remapped
- * to the owning node's finding rather than dropped as an orphan — the tolerant
- * seam (the host is a variable of any strength). The map only ever points at
- * findings that belong to THIS block, so a mislabel can never resolve to an
- * unrelated node.
- */
-export function buildBlockAliasMap(
-  block: RemediationBlock,
-  state: RemediationState,
-): Map<string, string> {
-  const aliasToFinding = new Map<string, string>();
-  for (const findingId of block.items) {
-    const finding = state.plan?.findings.find((f) => f.id === findingId);
-    if (!finding) continue;
-    // The node id itself, and its block-prefixed / unprefixed aliases.
-    const register = (alias: string | undefined) => {
-      if (!alias || alias === findingId) return;
-      if (!aliasToFinding.has(alias)) aliasToFinding.set(alias, findingId);
-    };
-    // CP-BLOCK- aliases are now resolved deterministically by the id registry in
-    // `collapseItemResults` (S4); registering them here is defence-in-depth only.
-    register(toBlockId(findingId));
-    register(block.block_id);
-    // The obligation ids the node satisfies/verifies — a worker may report one.
-    for (const obl of [
-      ...(finding.contract_obligation_ids ?? []),
-      ...(finding.verification_obligation_ids ?? []),
-    ]) {
-      register(obl);
-    }
-  }
-  return aliasToFinding;
-}
-
-/**
  * Collapse a worker result's `item_results` to one entry per resolved finding
- * id, applying the block alias map first (obligation/node-alias → finding). When
- * several entries collapse onto the same finding, a single `blocked` entry wins
- * over `resolved` (a node is not complete if any reported facet failed), and the
- * union of evidence / first failure_reason is preserved. Entries whose id is
- * neither a known finding nor a known alias are returned in `unresolved` so the
- * caller can record them as orphans.
+ * id. When several entries collapse onto the same finding, a single `blocked`
+ * entry wins over `resolved` (a node is not complete if any reported facet
+ * failed), and the union of evidence / first failure_reason is preserved.
+ * Entries whose id is neither a known finding nor its registry block-id form
+ * are returned in `unresolved` so the caller can account for them as orphans
+ * (OBL-INV-RSD-01). The uniform id-join contract deleted the fuzzy
+ * obligation-alias remap: the dispatch prompt enumerates the valid finding ids
+ * as a closed set, so an off-enum id is a contract violation to record, never
+ * to guess at.
  */
 export function collapseItemResults(
   itemResults: ImplementWorkerResult["item_results"],
-  aliasMap: Map<string, string>,
   knownFindingIds: Set<string>,
 ): {
   collapsed: ImplementWorkerResult["item_results"];
@@ -231,21 +196,14 @@ export function collapseItemResults(
     let targetId = entry.finding_id;
     if (!knownFindingIds.has(targetId)) {
       // Registry-authoritative (S4): a CP-BLOCK- block id maps deterministically
-      // to its bare node id via the id registry, so the common "worker reported
-      // the block id" mislabel resolves here without the tolerant alias remap —
-      // the remap is defence-in-depth for non-block aliases (e.g. a mislabelled
-      // obligation id) only.
+      // to its bare node id via the id registry — a bijective id FORM of the
+      // enum member, not a fuzzy alias, so it stays after the remap deletion.
       const nodeId = fromBlockId(targetId);
       if (nodeId && knownFindingIds.has(nodeId)) {
         targetId = nodeId;
       } else {
-        const remapped = aliasMap.get(targetId);
-        if (remapped) {
-          targetId = remapped;
-        } else {
-          unresolved.push(entry);
-          continue;
-        }
+        unresolved.push(entry);
+        continue;
       }
     }
     const normalized = { ...entry, finding_id: targetId };

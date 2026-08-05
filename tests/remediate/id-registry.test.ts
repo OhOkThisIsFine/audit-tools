@@ -70,15 +70,12 @@ describe("ensureNodeId (single fallback authority — closes the finding<->block
   });
 });
 
-describe("collapseItemResults resolves block ids via the registry (S4), not the alias remap", () => {
+describe("collapseItemResults resolves block ids via the registry (S4) only — the alias remap is deleted", () => {
   const known = new Set(["N-foo"]);
 
-  it("a worker that reports the CP-BLOCK- block id resolves to the node id with an EMPTY alias map", () => {
-    // An empty alias map proves the resolution came from the id registry, not the
-    // tolerant remap — the registry is load-bearing, the remap is not (INV-DISPATCH).
+  it("a worker that reports the CP-BLOCK- block id resolves to the node id via the registry", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: toBlockId("N-foo"), status: "resolved" }],
-      new Map(),
       known,
     );
     expect(unresolved).toEqual([]);
@@ -89,27 +86,24 @@ describe("collapseItemResults resolves block ids via the registry (S4), not the 
   it("a bare node id resolves directly", () => {
     const { collapsed } = collapseItemResults(
       [{ finding_id: "N-foo", status: "resolved" }],
-      new Map(),
       known,
     );
     expect(collapsed[0].finding_id).toBe("N-foo");
   });
 
-  it("a non-block alias (e.g. a mislabelled obligation id) still falls back to the tolerant alias map", () => {
-    const aliasMap = new Map([["OBL-x", "N-foo"]]);
+  it("a mislabelled obligation id stays unresolved (uniform id-join contract — no fuzzy remap)", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: "OBL-x", status: "resolved" }],
-      aliasMap,
       known,
     );
-    expect(unresolved).toEqual([]);
-    expect(collapsed[0].finding_id).toBe("N-foo");
+    expect(collapsed).toEqual([]);
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].finding_id).toBe("OBL-x");
   });
 
   it("a block id whose node is not known does not silently resolve (fail-closed)", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: toBlockId("N-unknown"), status: "resolved" }],
-      new Map(),
       known,
     );
     expect(collapsed).toEqual([]);

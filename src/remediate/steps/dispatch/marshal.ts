@@ -65,7 +65,6 @@ import {
 } from "./worktreeLifecycle.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduling.js";
 import {
-  buildBlockAliasMap,
   collapseItemResults,
   buildNodeDisposition,
   attributeSiblingRed,
@@ -156,31 +155,60 @@ function pendingOrDocumentedFindingIdsForBlock(
 const MAX_INCOMPLETE_COVERAGE_ATTEMPTS = 2;
 
 /**
- * Resolve the set of finding ids a worker result actually covers, alias-aware:
- * a worker may legitimately report a finding by its block id or an obligation
- * alias (the exact resolution `collapseItemResults` applies). Coverage/completeness
- * decisions MUST use this — a raw `finding_id` set would treat an alias-using-but-
- * complete result as incomplete and re-dispatch it forever.
+ * Per-block counter for the prepare-side archive-and-re-dispatch loop (sidecar,
+ * not state.json — prepare runs outside the single state-commit and must not
+ * write state). A result that repeatedly fails coverage (e.g. a worker emitting
+ * off-enum finding ids now that the fuzzy alias remap is deleted) is re-dispatched
+ * at most `MAX_INCOMPLETE_COVERAGE_ATTEMPTS` times; at the cap the result is left
+ * in place so the merge ACCEPTS it and the existing accounting converges it —
+ * unknown ids via OBL-INV-RSD-01 (block + orphan diagnostic), omissions via the
+ * E2 incomplete-coverage counter. The counter is never reset: a later triage
+ * retry that misbehaves again goes straight to merge accounting, which is the
+ * convergent direction.
+ */
+const REDISPATCH_ATTEMPTS_FILENAME = "implement-redispatch-attempts.json";
+
+async function readRedispatchAttempts(
+  artifactsDir: string,
+): Promise<Record<string, number>> {
+  return (
+    (await readOptionalJsonFile<Record<string, number>>(
+      join(artifactsDir, REDISPATCH_ATTEMPTS_FILENAME),
+    )) ?? {}
+  );
+}
+
+async function bumpRedispatchAttempts(
+  artifactsDir: string,
+  blockId: string,
+): Promise<number> {
+  const attempts = await readRedispatchAttempts(artifactsDir);
+  const next = (attempts[blockId] ?? 0) + 1;
+  attempts[blockId] = next;
+  await writeJsonFile(join(artifactsDir, REDISPATCH_ATTEMPTS_FILENAME), attempts);
+  return next;
+}
+
+/**
+ * Resolve the set of finding ids a worker result actually covers — the exact
+ * resolution `collapseItemResults` applies: the finding id itself or its
+ * registry block-id form (bijective, deterministic). The fuzzy obligation-alias
+ * remap is deleted (uniform id-join contract): the dispatch prompt enumerates
+ * the valid finding ids as a closed set, so anything off-enum is uncovered by
+ * definition and converges through the re-dispatch cap below, never guessed at.
  */
 function resolveCoveredFindingIds(
   result: ImplementWorkerResult,
-  block: RemediationBlock,
   state: RemediationState,
 ): Set<string> {
   const knownFindingIds = new Set(Object.keys(state.items ?? {}));
-  const aliasMap = buildBlockAliasMap(block, state);
   const covered = new Set<string>();
   for (const entry of result.item_results) {
     let targetId = entry.finding_id;
     if (!knownFindingIds.has(targetId)) {
       const nodeId = fromBlockId(targetId);
-      if (nodeId && knownFindingIds.has(nodeId)) {
-        targetId = nodeId;
-      } else {
-        const remapped = aliasMap.get(targetId);
-        if (!remapped) continue;
-        targetId = remapped;
-      }
+      if (!nodeId || !knownFindingIds.has(nodeId)) continue;
+      targetId = nodeId;
     }
     covered.add(targetId);
   }
@@ -190,10 +218,9 @@ function resolveCoveredFindingIds(
 function implementResultCoversFindings(
   result: ImplementWorkerResult,
   findingIds: string[],
-  block: RemediationBlock,
   state: RemediationState,
 ): boolean {
-  const covered = resolveCoveredFindingIds(result, block, state);
+  const covered = resolveCoveredFindingIds(result, state);
   return findingIds.every((findingId) => covered.has(findingId));
 }
 
@@ -381,13 +408,26 @@ export async function prepareImplementDispatch(
     const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
     if (existingResult) {
-      if (implementResultCoversFindings(existingResult, pendingFindingIds, block, state)) {
+      if (implementResultCoversFindings(existingResult, pendingFindingIds, state)) {
         reconciledCount++;
+        continue;
+      }
+      const attempts = await bumpRedispatchAttempts(options.artifactsDir, block.block_id);
+      if (attempts >= MAX_INCOMPLETE_COVERAGE_ATTEMPTS) {
+        // Convergence cap: stop archiving/re-dispatching — leave the result in
+        // place so the merge accepts and ACCOUNTS for it (RSD-01 orphans + E2
+        // omission blocking) instead of looping the worker forever.
+        process.stderr.write(
+          `[remediate-code] dispatch: existing implement result for block ${block.block_id} ` +
+            `still does not cover ${pendingFindingIds.length} pending item(s) after ` +
+            `${attempts} dispatch(es); accepting it for merge accounting instead of re-dispatching\n`,
+        );
         continue;
       }
       process.stderr.write(
         `[remediate-code] dispatch: existing implement result for block ${block.block_id} ` +
-          `does not cover ${pendingFindingIds.length} still-pending item(s); re-dispatching\n`,
+          `does not cover ${pendingFindingIds.length} still-pending item(s); re-dispatching ` +
+          `(attempt ${attempts}/${MAX_INCOMPLETE_COVERAGE_ATTEMPTS})\n`,
       );
       await archiveIncompleteImplementResult(item.result_path);
     }
@@ -735,6 +775,7 @@ async function mergeImplementResultsIntoState(
   const plannedBlockIds = new Set(
     plan.items.map((item) => item.block_id).filter((id): id is string => typeof id === "string"),
   );
+  const redispatchAttempts = await readRedispatchAttempts(options.artifactsDir);
   // Drafts, not full plan items: merge keys on identity + paths only, and the
   // reconciliation branch below re-derives items for blocks whose results already
   // exist — those have no rendered prompt to size, so they carry no estimate.
@@ -754,11 +795,14 @@ async function mergeImplementResultsIntoState(
     const item = buildImplementDispatchItem(block, state, dir);
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
     const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
-    if (
-      !existingResult ||
-      !implementResultCoversFindings(existingResult, pendingFindingIds, block, state)
-    ) {
-      continue;
+    if (!existingResult) continue;
+    if (!implementResultCoversFindings(existingResult, pendingFindingIds, state)) {
+      // A non-covering result is normally left for prepare to archive and
+      // re-dispatch — but once its block hits the re-dispatch cap it is ACCEPTED
+      // here so the merge accounting converges it (RSD-01 orphans + E2 omission
+      // blocking) instead of the worker looping forever.
+      const attempts = redispatchAttempts[block.block_id] ?? 0;
+      if (attempts < MAX_INCOMPLETE_COVERAGE_ATTEMPTS) continue;
     }
 
     itemsToMerge.push(item);
@@ -931,20 +975,17 @@ async function mergeImplementResultsIntoState(
       }
     }
 
-    // Tolerant seam: remap an obligation/node-alias finding_id to the owning
-    // node's finding, and collapse multi-entry results onto one entry per
-    // finding (blocked dominates), before applying any status. A mislabel can
-    // only ever resolve to a finding that belongs to THIS block.
+    // Collapse multi-entry results onto one entry per finding (blocked
+    // dominates) before applying any status. Ids resolve as the finding id
+    // itself or its registry block-id form only — the fuzzy obligation-alias
+    // remap is deleted (uniform id-join contract); off-enum ids land in
+    // `unresolved` and are accounted for below (OBL-INV-RSD-01).
     const owningBlock = blockId
       ? state.plan?.blocks.find((b) => b.block_id === blockId)
       : undefined;
-    const aliasMap = owningBlock
-      ? buildBlockAliasMap(owningBlock, state)
-      : new Map<string, string>();
     const knownFindingIds = new Set(Object.keys(state.items));
     const { collapsed, unresolved } = collapseItemResults(
       result.item_results,
-      aliasMap,
       knownFindingIds,
     );
 

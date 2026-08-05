@@ -281,11 +281,14 @@ export function buildAuditFindingsReport(
 }
 
 /**
- * Merge an LLM synthesis narrative into the canonical findings report: keep only
- * themes whose `finding_ids` reference real findings, tag each covered finding
- * with its (first-claiming) `theme_id`, and attach the executive summary / top
- * risks. Deterministic and idempotent — the same narrative yields the same
- * report.
+ * Merge an LLM synthesis narrative into the canonical findings report: tag each
+ * covered finding with its (first-claiming) `theme_id`, and attach the
+ * executive summary / top risks. Deterministic and idempotent — the same
+ * narrative yields the same report.
+ *
+ * Uniform id-join contract: a `finding_ids` entry that names no finding in the
+ * report REFUSES the whole narrative (throws, naming the unknown ids) — never a
+ * silent drop, which would present a theme as covering findings it does not.
  */
 export function applyNarrative(
   report: AuditFindingsReport,
@@ -295,13 +298,26 @@ export function applyNarrative(
   const themeByFinding = new Map<string, string>();
   const themes: FindingTheme[] = [];
 
+  const unknownIds = (narrative.themes ?? []).flatMap((theme) =>
+    (theme.finding_ids ?? []).filter((id) => !validFindingIds.has(id)),
+  );
+  if (unknownIds.length > 0) {
+    throw new Error(
+      `synthesis narrative refused — theme finding_ids name ${unknownIds.length} unknown ` +
+        `finding id(s): ${[...new Set(unknownIds)].join(", ")}. Every finding_ids entry ` +
+        `must be one of the ${validFindingIds.size} ids in audit-findings.json (copy ` +
+        `exactly, never retype); re-submit the whole narrative.`,
+    );
+  }
+
   for (const theme of narrative.themes ?? []) {
-    // Deduplicate within the theme first, then filter to valid ids that have not
-    // yet been claimed by a prior (first-claiming) theme. This enforces the
-    // "each finding belongs to at most one theme" contract — the first theme in
-    // narrative.themes to list a given id wins; later themes have it stripped.
+    // Deduplicate within the theme first, then drop ids already claimed by a
+    // prior (first-claiming) theme. This enforces the "each finding belongs to
+    // at most one theme" contract — the first theme in narrative.themes to list
+    // a given id wins; later themes have it stripped. (Unknown ids were refused
+    // wholesale above, so every id here is a real finding.)
     const findingIds = [
-      ...new Set((theme.finding_ids ?? []).filter((id) => validFindingIds.has(id) && !themeByFinding.has(id))),
+      ...new Set((theme.finding_ids ?? []).filter((id) => !themeByFinding.has(id))),
     ];
     themes.push({
       theme_id: theme.theme_id,

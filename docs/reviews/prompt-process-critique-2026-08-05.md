@@ -221,7 +221,8 @@ one standing obligation the settled text above does not mention.
   everywhere" applies at the *resolution/ingest gates* (closed-enum schema, membership validation,
   refuse-and-re-prompt); merge-side unknown ids keep RSD-01 semantics — which are already a hard
   refusal to advance, not a silent skip. An implementation that throws at merge inverts a pinned
-  obligation and is out of scope unless the owner says otherwise.
+  obligation and is out of scope unless the owner says otherwise. **Owner settled 2026-08-05:
+  carve out merge — RSD-01 stays; hard-fail applies at the resolution/ingest gates.**
 - **idDiscipline axis preserved:** the uniform contract must not put a duplicate-/unknown-id refusal
   into audit's packet-local draw (`idDiscipline: "local"`, settled `2ce641f7`).
 - **Adjacent strands made reachable:** (1) re-prompt livelock — hard-fail gates need a bounded retry

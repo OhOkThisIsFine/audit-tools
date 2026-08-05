@@ -163,6 +163,7 @@ import {
   buildReviewRequest,
   applyReviewResolution,
   isResolutionForRequest,
+  screenResolutionIds,
   REVIEW_REQUEST_SCHEMA_VERSION,
   type ReviewRequest,
   type ReviewResolution,
@@ -2987,6 +2988,7 @@ async function handleWaitingForReviewApproval(
   root: string,
   artifactsDir: string,
   request: ReviewRequest,
+  refusal?: string,
 ): Promise<RemediationStep> {
   return writeCurrentStep({
     stepKind: "collect_review_approval",
@@ -2994,7 +2996,7 @@ async function handleWaitingForReviewApproval(
     runId: randomRunId("REVIEW"),
     repoRoot: root,
     artifactsDir,
-    prompt: reviewApprovalPrompt(request, reviewResolutionPath(artifactsDir)),
+    prompt: reviewApprovalPrompt(request, reviewResolutionPath(artifactsDir), refusal),
     allowedCommands: [loaderCommand("next-step")],
     stopCondition:
       "Stop after presenting the findings for approval and collecting the user's approve/disapprove decision, unless the decision is already recorded and the prompt told you to continue.",
@@ -3003,6 +3005,45 @@ async function handleWaitingForReviewApproval(
       review_resolution: reviewResolutionPath(artifactsDir),
     },
   });
+}
+
+/**
+ * Uniform id-join contract pre-screen for the review gate (both paths): a
+ * resolution naming an unknown finding id or tier is REFUSED whole — archived
+ * (never applied) and the gate re-halts with the refusal and the valid set in
+ * the re-prompt. The gate's default is approve, so the silent-drop alternative
+ * turns a typo'd decline into an approval. Returns the re-halt step, or null
+ * when the resolution's ids are clean. `applyReviewResolution` re-checks as the
+ * mechanical backstop.
+ */
+async function refuseUnknownIdResolution(
+  root: string,
+  artifactsDir: string,
+  request: ReviewRequest,
+  resolution: ReviewResolution | null | undefined,
+  resolutionPath: string,
+  requestPath: string,
+): Promise<RemediationStep | null> {
+  const screen = screenResolutionIds(request, resolution);
+  if (screen.unknown_finding_ids.length === 0 && screen.unknown_tiers.length === 0) {
+    return null;
+  }
+  await withFsRetry(() =>
+    rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+  );
+  await writeJsonFile(requestPath, request);
+  const parts: string[] = [];
+  if (screen.unknown_finding_ids.length > 0) {
+    parts.push(
+      `finding id(s) not in the request: ${screen.unknown_finding_ids.map((i) => `\`${i}\``).join(", ")}`,
+    );
+  }
+  if (screen.unknown_tiers.length > 0) {
+    parts.push(
+      `unknown tier(s): ${screen.unknown_tiers.map((t) => `\`${t}\``).join(", ")}`,
+    );
+  }
+  return handleWaitingForReviewApproval(root, artifactsDir, request, parts.join("; "));
 }
 
 interface ReviewGateProceed {
@@ -3108,6 +3149,10 @@ async function runReviewApprovalGate(
         step: await handleWaitingForReviewApproval(root, artifactsDir, request),
       };
     }
+    const refusalStep = await refuseUnknownIdResolution(
+      root, artifactsDir, request, resolution, resolutionPath, requestPath,
+    );
+    if (refusalStep) return { kind: "halt", step: refusalStep };
     const decision = applyReviewResolution(request, resolution);
     const record: ReviewDecisionRecord = {
       schema_version: REVIEW_DECISION_SCHEMA_VERSION,
@@ -3846,15 +3891,37 @@ function applyClarificationActionToItem(
  * clarified → re-open (pending) for implement dispatch. Archives the file.
  */
 async function applyPlanClarificationResolution(
+  root: string,
   artifactsDir: string,
   state: RemediationState,
   store: StateStore,
-): Promise<RemediationState> {
-  if (!state.plan || !state.items) return state;
+): Promise<{ kind: "applied"; state: RemediationState } | { kind: "refused"; step: RemediationStep }> {
+  if (!state.plan || !state.items) return { kind: "applied", state };
   const resolutionPath = join(artifactsDir, "clarification_resolution.json");
   const resolutions = normalizePlanClarificationResolutions(
     await readOptionalJsonFile<unknown>(resolutionPath),
   );
+  // Uniform id-join contract: an unknown finding_id refuses the WHOLE
+  // resolution (archived, nothing applied) and re-halts with the unknown ids
+  // named — the silent-continue alternative drops the user's answer on a typo'd
+  // id and force-closes its item as abandoned at the fall-through below.
+  const unknownIds = resolutions
+    .map((r) => r.finding_id)
+    .filter((id) => !state.items?.[id]);
+  if (unknownIds.length > 0) {
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+    );
+    return {
+      kind: "refused",
+      step: await handleWaitingForClarification(
+        root,
+        artifactsDir,
+        state,
+        `finding id(s) not in the plan: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`,
+      ),
+    };
+  }
   const now = new Date().toISOString();
   for (const res of resolutions) {
     const item = state.items[res.finding_id];
@@ -3881,13 +3948,14 @@ async function applyPlanClarificationResolution(
   state.clarifications = [];
   state.closing_plan ??= { action: "none" };
   await store.saveState(state);
-  return state;
+  return { kind: "applied", state };
 }
 
 async function handleWaitingForClarification(
   root: string,
   artifactsDir: string,
   state: RemediationState,
+  refusal?: string,
 ): Promise<RemediationStep> {
   const clarifications =
     state.clarifications ??
@@ -3902,7 +3970,7 @@ async function handleWaitingForClarification(
     runId: stateRunId(state),
     repoRoot: root,
     artifactsDir,
-    prompt: clarificationPrompt(clarifications, resolutionPath),
+    prompt: clarificationPrompt(clarifications, resolutionPath, refusal),
     allowedCommands: [loaderCommand("next-step")],
     stopCondition:
       "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
@@ -3993,6 +4061,10 @@ async function runPlanningReviewGate(
     await writeJsonFile(requestPath, request);
     return handleWaitingForReviewApproval(root, artifactsDir, request);
   }
+  const refusalStep = await refuseUnknownIdResolution(
+    root, artifactsDir, request, resolution, resolutionPath, requestPath,
+  );
+  if (refusalStep) return refusalStep;
   const decision = applyReviewResolution(request, resolution);
   const record: ReviewDecisionRecord = {
     schema_version: REVIEW_DECISION_SCHEMA_VERSION,
@@ -4110,7 +4182,7 @@ async function runPlanAmbiguityGate(
       runId: stateRunId(state),
       repoRoot: root,
       artifactsDir,
-      prompt: ambiguityReviewPrompt(candidates, resolutionPath),
+      prompt: ambiguityReviewPrompt(candidates, resolutionPath, findings.map((f) => f.id)),
       allowedCommands: [loaderCommand("next-step")],
       stopCondition:
         "Stop after reviewing the candidate ambiguities (and asking the user any genuine ones), unless the resolution is already written and the prompt told you to continue.",
@@ -4126,6 +4198,42 @@ async function runPlanAmbiguityGate(
   const resolutions = normalizePlanClarificationResolutions(
     await readOptionalJsonFile<unknown>(resolutionPath),
   );
+  // Uniform id-join contract: a resolution naming a finding id outside the plan
+  // is REFUSED whole (archived, nothing applied) and the gate re-halts with the
+  // unknown ids named — the silent-continue alternative drops a host answer on a
+  // typo'd id, leaving its item to fall to mid-run triage unexplained.
+  const validIds = new Set(findings.map((f) => f.id));
+  const unknownIds = resolutions
+    .map((r) => r.finding_id)
+    .filter((id) => !validIds.has(id));
+  if (unknownIds.length > 0) {
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+    );
+    const candidates =
+      (await readOptionalJsonFile<ClarificationRequest[]>(requestPath)) ??
+      detectPlanAmbiguities(findings, state.items);
+    return writeCurrentStep({
+      stepKind: "collect_clarifications",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: ambiguityReviewPrompt(
+        candidates,
+        resolutionPath,
+        findings.map((f) => f.id),
+        `finding id(s) not in the plan: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`,
+      ),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after re-submitting a corrected ambiguity resolution, unless it is already written and the prompt told you to continue.",
+      artifactPaths: {
+        ambiguity_request: requestPath,
+        ambiguity_resolution: resolutionPath,
+      },
+    });
+  }
   const now = new Date().toISOString();
   let changed = false;
   for (const res of resolutions) {
@@ -5186,8 +5294,9 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
       execute: async (state) => {
         const s = requireState(state);
         if (existsSync(clarificationResolutionPath)) {
-          const next = await applyPlanClarificationResolution(artifactsDir, s, store);
-          return { kind: "transition", state: next };
+          const outcome = await applyPlanClarificationResolution(root, artifactsDir, s, store);
+          if (outcome.kind === "refused") return { kind: "emit", step: outcome.step };
+          return { kind: "transition", state: outcome.state };
         }
         return {
           kind: "emit",

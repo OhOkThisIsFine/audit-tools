@@ -359,7 +359,11 @@ export async function resolveIntakeStep(params: {
   let clarificationResolution: unknown = rawClarificationResolution;
   if (rawClarificationResolution !== undefined && summary && !isIntakeReady(summary)) {
     const blocking = blockingIntakeQuestions(summary);
-    const validation = validateClarificationResolution(rawClarificationResolution, blocking);
+    const validation = validateClarificationResolution(
+      rawClarificationResolution,
+      blocking,
+      summary.open_questions ?? [],
+    );
     if (!validation.valid) {
       const errorDetail = validation.errors.map((e) => `- ${e}`).join("\n");
       return {

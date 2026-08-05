@@ -11,12 +11,14 @@
   stated/structural/revealed estimators + downstream triangulated telos. Settled spec:
   §"Design resolutions" in
   [`reviews/prompt-process-critique-2026-08-05.md`](reviews/prompt-process-critique-2026-08-05.md);
-  hook in `backlog/forward-tracks.md`. `/design-check` on change 1 RAN 2026-08-05 (record:
-  §"Design-check record" in the same review doc): implementable with three binding constraints,
-  failing test pinned via `it.fails` in `tests/remediate/reviewGate.test.ts`. **One question
-  blocks implementation, owner to answer:** does "hard-fail everywhere" carve out
-  `mergeImplementResults` (keep pinned obligation OBL-INV-RSD-01: block+orphan, never throw), or
-  was RSD-01 meant to be retired? Reconciliation proposal is in the record. Then implement.
+  hook in `backlog/forward-tracks.md`. **Change 1 (uniform id-join contract) SHIPPED 2026-08-05**
+  after `/design-check` + owner carve-out ruling (merge keeps OBL-INV-RSD-01; hard-fail lives at
+  the resolution/ingest gates): review/ambiguity/clarification/triage/intake gates refuse unknown
+  ids whole (archive + re-halt with the valid set), fuzzy alias remap deleted with a bounded
+  re-dispatch cap (`implement-redispatch-attempts.json` sidecar), synthesis narrative refuses
+  unknown `finding_ids`. Independent loop-core review: approve (agy Sonnet 4.6).
+  **Immediate next among the four:** change 2 (always-materialized fan-out) — `/design-check`
+  first, it touches orchestrator step surfaces.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes

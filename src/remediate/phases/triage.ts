@@ -237,7 +237,11 @@ export async function runTriagePhase(
     }
 
     if (resolution) {
-      const triageIssues = validateTriageResolution(resolution);
+      const triageIssues = validateTriageResolution(
+        resolution,
+        undefined,
+        new Set(Object.keys(state.items)),
+      );
       if (triageIssues.filter((i) => i.severity === "error").length > 0) {
         throw new Error(
           `Invalid triage_resolution.json:\n${formatValidationIssues(triageIssues)}`,

@@ -689,7 +689,9 @@ Emit **exactly one \`item_results\` entry per node id below — no more, no fewe
 Each entry's \`finding_id\` MUST be one of the exact ids: ${items
     .map(({ finding }) => `\`${finding.id}\``)
     .join(", ")}. Do not substitute a title, an obligation id, or a block id for
-the node id, and do not emit duplicate entries for the same node.
+the node id, and do not emit duplicate entries for the same node. This is a
+closed set with no tolerant remapping: an entry whose id is off this list is
+recorded as an unaccounted orphan and BLOCKS the node instead of resolving it.
 
 \`\`\`json
 {

@@ -296,6 +296,7 @@ export function validateClarificationRequest(
 export function validateTriageResolution(
   value: unknown,
   path = "triage_resolution",
+  knownFindingIds?: ReadonlySet<string>,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   issues.push(...requireKeys(value, path, ["items"]));
@@ -319,6 +320,16 @@ export function validateTriageResolution(
           issues,
           `${path}.items[${i}].finding_id`,
           "Expected a string.",
+        );
+      } else if (knownFindingIds && !knownFindingIds.has(item.finding_id)) {
+        // Uniform id-join contract: an unknown finding_id is an ERROR, never a
+        // silent no-op — the entry it names would otherwise be dropped whole,
+        // losing the user's triage decision on a typo'd id.
+        pushValidationIssue(
+          issues,
+          `${path}.items[${i}].finding_id`,
+          `Unknown finding_id "${item.finding_id}" — not in this run's items. ` +
+            `Valid ids: ${[...knownFindingIds].join(", ")}.`,
         );
       }
       if (typeof item.action !== "string" || !validActions.has(item.action)) {

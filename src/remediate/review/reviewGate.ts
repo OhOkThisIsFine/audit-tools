@@ -151,6 +151,33 @@ export function isResolutionForRequest(
 }
 
 /**
+ * Screen a resolution's id references against the request (uniform id-join
+ * contract): every `disapproved_findings` entry must name an item in the
+ * request, and every `disapproved_tiers` entry must be one of the closed
+ * review-necessity names. A stray id here is not a no-op — the gate's default
+ * is APPROVE, so a typo'd decline would silently become an approval. Empty
+ * arrays = clean. A tier that is valid but empty in this request stays a
+ * harmless no-op (it names a real vocabulary member, not a phantom item).
+ */
+export function screenResolutionIds(
+  request: ReviewRequest,
+  resolution: ReviewResolution | null | undefined,
+): { unknown_finding_ids: string[]; unknown_tiers: string[]; valid_finding_ids: string[] } {
+  const validIds = request.tiers.flatMap((t) => t.items.map((i) => i.finding_id));
+  const validIdSet = new Set(validIds);
+  const validTiers = new Set<string>(REVIEW_NECESSITY_ORDER);
+  return {
+    unknown_finding_ids: (resolution?.disapproved_findings ?? []).filter(
+      (id) => !validIdSet.has(id),
+    ),
+    unknown_tiers: (resolution?.disapproved_tiers ?? []).filter(
+      (t) => !validTiers.has(t),
+    ),
+    valid_finding_ids: validIds,
+  };
+}
+
+/**
  * Apply the user's resolution to a request: every item is either approved (act
  * on it) or declined (recorded terminal disposition with a reason). An item is
  * declined if its id is in `disapproved_findings` OR its tier is in
@@ -175,6 +202,30 @@ export function applyReviewResolution(
   if (!isResolutionForRequest(request, resolution)) {
     throw new Error(
       `review resolution plan_id "${resolution?.plan_id}" does not answer review request plan_id "${request.plan_id}" — stale cross-run resolution rejected (INV-RSM-RESOLUTION-CORRELATE).`,
+    );
+  }
+  const screen = screenResolutionIds(request, resolution);
+  if (screen.unknown_finding_ids.length > 0 || screen.unknown_tiers.length > 0) {
+    // Uniform id-join contract: refuse the WHOLE resolution. Callers pre-screen
+    // with screenResolutionIds to archive-and-re-halt; this throw is the
+    // mechanical backstop, mirroring the plan_id-mismatch backstop above.
+    const parts: string[] = [];
+    if (screen.unknown_finding_ids.length > 0) {
+      parts.push(
+        `unknown finding id(s) ${screen.unknown_finding_ids.map((i) => `"${i}"`).join(", ")} ` +
+          `(valid: ${screen.valid_finding_ids.join(", ")})`,
+      );
+    }
+    if (screen.unknown_tiers.length > 0) {
+      parts.push(
+        `unknown tier(s) ${screen.unknown_tiers.map((t) => `"${t}"`).join(", ")} ` +
+          `(valid: ${REVIEW_NECESSITY_ORDER.join(", ")})`,
+      );
+    }
+    throw new Error(
+      `review resolution refused — ${parts.join("; ")}. The gate's default is approve, ` +
+        `so a mistyped decline would silently become an approval; re-submit the whole ` +
+        `resolution with ids drawn from the request.`,
     );
   }
   const disapprovedIds = new Set(resolution?.disapproved_findings ?? []);

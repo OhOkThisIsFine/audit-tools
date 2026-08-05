@@ -241,13 +241,21 @@ test("INV-04: applyNarrative never drops or re-severities findings — the findi
         theme_id: "T-1",
         title: "A theme",
         root_cause: "Root.",
-        finding_ids: [report.findings[0].id, "UNKNOWN-ID-XYZ"],
+        finding_ids: [report.findings[0].id],
         suggested_fix_pattern: "Fix.",
       },
     ],
     executive_summary: "Test.",
     top_risks: [],
   };
+
+  // Uniform id-join contract: an unknown id refuses the whole narrative.
+  expect(() =>
+    applyNarrative(report, {
+      ...narrative,
+      themes: [{ ...narrative.themes[0], finding_ids: [report.findings[0].id, "UNKNOWN-ID-XYZ"] }],
+    }),
+  ).toThrow(/UNKNOWN-ID-XYZ/);
 
   const enriched = applyNarrative(report, narrative);
 

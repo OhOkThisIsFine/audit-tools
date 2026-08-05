@@ -1,14 +1,15 @@
 /**
- * CP-BLOCK-N-dispatch-seam — merge-side tolerance.
+ * CP-BLOCK-N-dispatch-seam — merge-side id join + collapse.
  *
- * Covers (OBL-DS-08..11):
- *  - `buildBlockAliasMap`: a known obligation id (and node/block aliases) of the
- *    task block maps back to the owning node's finding;
- *  - `collapseItemResults`: alias remap + multi-entry collapse (blocked
- *    dominates resolved; evidence unions); truly-unknown ids stay unresolved;
- *  - end-to-end `mergeImplementResults`: a worker that mislabels its finding_id
- *    as an obligation id still resolves the owning node; multiple entries for the
- *    same node collapse; an entry whose id matches nothing orphans the block.
+ * Covers (OBL-DS-08..11, under the uniform id-join contract — the fuzzy
+ * obligation-alias remap is DELETED; the registry block-id form is the only
+ * non-canonical id form that resolves):
+ *  - `collapseItemResults`: registry block-id resolution + multi-entry collapse
+ *    (blocked dominates resolved; evidence unions); any off-enum id — including
+ *    an obligation id — stays unresolved;
+ *  - end-to-end `mergeImplementResults`: an off-enum finding_id blocks the
+ *    owning block and is recorded in the orphan diagnostic (OBL-INV-RSD-01);
+ *    multiple entries for the same node collapse.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -22,7 +23,6 @@ import type { Finding, RemediationBlock } from "../../src/remediate/state/types.
 import {
   prepareImplementDispatch,
   mergeImplementResults,
-  buildBlockAliasMap,
   collapseItemResults,
   recordNodeAcceptOutcome,
 } from "../../src/remediate/steps/dispatch.js";
@@ -209,40 +209,15 @@ describe("mergeImplementResults — missing-result cause diagnosis", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildBlockAliasMap
-// ---------------------------------------------------------------------------
-
-describe("buildBlockAliasMap", () => {
-  it("maps obligation ids, the block id, and the prefixed node alias to the owning finding", () => {
-    const state = makeNodeState();
-    const block = state.plan!.blocks[0];
-    const map = buildBlockAliasMap(block, state);
-    expect(map.get("OBL-X-01")).toBe("N-x");
-    expect(map.get("OBL-X-02")).toBe("N-x");
-    expect(map.get("OBL-X-VERIFY")).toBe("N-x");
-    expect(map.get("CP-BLOCK-N-x")).toBe("N-x");
-    // The bare node id is the canonical finding id; it is not an alias entry.
-    expect(map.has("N-x")).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // collapseItemResults
 // ---------------------------------------------------------------------------
 
 describe("collapseItemResults", () => {
   const known = new Set(["N-x"]);
-  function aliasMap(): Map<string, string> {
-    return new Map([
-      ["OBL-X-01", "N-x"],
-      ["CP-BLOCK-N-x", "N-x"],
-    ]);
-  }
 
-  it("remaps an obligation-id finding_id onto the owning node", () => {
+  it("resolves the registry block-id form onto the owning node (bijective, not fuzzy)", () => {
     const { collapsed, unresolved } = collapseItemResults(
-      [{ finding_id: "OBL-X-01", status: "resolved", evidence: ["done"] }],
-      aliasMap(),
+      [{ finding_id: "CP-BLOCK-N-x", status: "resolved", evidence: ["done"] }],
       known,
     );
     expect(unresolved).toHaveLength(0);
@@ -251,13 +226,22 @@ describe("collapseItemResults", () => {
     expect(collapsed[0].status).toBe("resolved");
   });
 
+  it("leaves an obligation-id finding_id unresolved — the fuzzy alias remap is deleted", () => {
+    const { collapsed, unresolved } = collapseItemResults(
+      [{ finding_id: "OBL-X-01", status: "resolved", evidence: ["done"] }],
+      known,
+    );
+    expect(collapsed).toHaveLength(0);
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].finding_id).toBe("OBL-X-01");
+  });
+
   it("collapses multiple entries for the same node; blocked dominates and evidence unions", () => {
     const { collapsed } = collapseItemResults(
       [
         { finding_id: "N-x", status: "resolved", evidence: ["a"] },
-        { finding_id: "OBL-X-01", status: "blocked", failure_reason: "nope", evidence: ["b"] },
+        { finding_id: "CP-BLOCK-N-x", status: "blocked", failure_reason: "nope", evidence: ["b"] },
       ],
-      aliasMap(),
       known,
     );
     expect(collapsed).toHaveLength(1);
@@ -270,7 +254,6 @@ describe("collapseItemResults", () => {
   it("leaves a truly-unknown id unresolved (not remapped, not dropped silently)", () => {
     const { collapsed, unresolved } = collapseItemResults(
       [{ finding_id: "TOTALLY-UNKNOWN", status: "resolved" }],
-      aliasMap(),
       known,
     );
     expect(collapsed).toHaveLength(0);
@@ -281,7 +264,6 @@ describe("collapseItemResults", () => {
   it("preserves a lone resolved_no_change status (not flattened to resolved)", () => {
     const { collapsed } = collapseItemResults(
       [{ finding_id: "N-x", status: "resolved_no_change", evidence: ["test passed"] }],
-      aliasMap(),
       known,
     );
     expect(collapsed).toHaveLength(1);
@@ -294,7 +276,6 @@ describe("collapseItemResults", () => {
         { finding_id: "N-x", status: "resolved_no_change", evidence: ["a"] },
         { finding_id: "N-x", status: "resolved", evidence: ["b"] },
       ],
-      aliasMap(),
       known,
     );
     expect(collapsed).toHaveLength(1);
@@ -305,9 +286,8 @@ describe("collapseItemResults", () => {
     const { collapsed } = collapseItemResults(
       [
         { finding_id: "N-x", status: "resolved_no_change", evidence: ["a"] },
-        { finding_id: "OBL-X-01", status: "resolved_no_change", evidence: ["b"] },
+        { finding_id: "CP-BLOCK-N-x", status: "resolved_no_change", evidence: ["b"] },
       ],
-      aliasMap(),
       known,
     );
     expect(collapsed).toHaveLength(1);
@@ -358,32 +338,35 @@ describe("validateImplementWorkerResult — resolved_no_change", () => {
 // End-to-end merge tolerance
 // ---------------------------------------------------------------------------
 
-describe("mergeImplementResults — tolerance end-to-end", () => {
-  it("resolves the owning node when the worker mislabels finding_id as an obligation id", async () => {
+describe("mergeImplementResults — id-join end-to-end", () => {
+  it("blocks the owning block and records an orphan when the worker mislabels finding_id as an obligation id (remap deleted)", async () => {
     await saveState(makeNodeState());
     const merged = await mergeWith([
       { finding_id: "OBL-X-01", status: "resolved", evidence: ["check passed: vitest run -> 3 pass"] },
     ]);
-    expect(merged.items!["N-x"].status).toBe("resolved");
-    // No orphan diagnostic was emitted — the id was tolerantly remapped.
+    // Uniform id-join contract: the obligation alias no longer resolves — the
+    // result is unaccounted, so RSD-01 blocks the block and records the orphan.
+    expect(merged.items!["N-x"].status).toBe("blocked");
+    const orphanPath = join(
+      ARTIFACTS_DIR, "runs", "PLAN-1", "implement", "orphaned-implement-results.json",
+    );
+    expect(existsSync(orphanPath)).toBe(true);
     expect(
-      existsSync(
-        join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement", "orphaned-implement-results.json"),
-      ),
-    ).toBe(false);
+      JSON.parse(await readFile(orphanPath, "utf8")).orphans[0].finding_id,
+    ).toBe("OBL-X-01");
   });
 
   it("collapses multiple entries that resolve to the same node (blocked dominates)", async () => {
     await saveState(makeNodeState());
     const merged = await mergeWith([
       { finding_id: "N-x", status: "resolved", evidence: ["ok"] },
-      { finding_id: "OBL-X-02", status: "blocked", failure_reason: "a facet failed" },
+      { finding_id: "CP-BLOCK-N-x", status: "blocked", failure_reason: "a facet failed" },
     ]);
     expect(merged.items!["N-x"].status).toBe("blocked");
     expect(merged.items!["N-x"].failure_reason).toBe("a facet failed");
   });
 
-  it("orphans the block when the worker reports an id that is neither a finding nor a known alias", async () => {
+  it("orphans the block when the worker reports an id that is neither a finding nor its block-id form", async () => {
     await saveState(makeNodeState());
     const merged = await mergeWith([
       { finding_id: "WRONG-9999", status: "resolved", evidence: ["x"] },
@@ -493,17 +476,18 @@ describe("mergeImplementResults — E2 incomplete-coverage convergence", () => {
     expect(after2.items!["N-y"].failure_reason).toMatch(/omitted this finding/i);
   });
 
-  it("does not penalize a finding the worker covered via an alias (alias-aware coverage)", async () => {
+  it("an obligation-alias entry no longer covers its finding — RSD-01 blocks it as unaccounted (remap deleted)", async () => {
     await saveState(makeTwoFindingState());
-    // N-y reported under its obligation alias; N-x under its bare id → both covered,
-    // no omission accounting.
+    // N-y reported under its obligation id; N-x under its bare id. Under the
+    // uniform id-join contract the alias does not resolve: N-x lands resolved,
+    // N-y is blocked by the unresolved-entry accounting (never silently dropped).
     const merged = await mergeWith([
       { finding_id: "N-x", status: "resolved", evidence: ["ok"] },
       { finding_id: "OBL-Y-01", status: "resolved", evidence: ["ok"] },
     ]);
     expect(merged.items!["N-x"].status).toBe("resolved");
-    expect(merged.items!["N-y"].status).toBe("resolved");
-    expect(merged.items!["N-y"].incomplete_coverage_attempts).toBeUndefined();
+    expect(merged.items!["N-y"].status).toBe("blocked");
+    expect(merged.items!["N-y"].failure_reason).toMatch(/unknown\s+finding_id/i);
   });
 });
 

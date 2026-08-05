@@ -128,7 +128,6 @@ export {
   declaredPathsFromPlan,
   adjudicateWriteScope,
   enforceAcceptWriteScope,
-  buildBlockAliasMap,
   collapseItemResults,
   buildNodeDisposition,
   attributeSiblingRed,

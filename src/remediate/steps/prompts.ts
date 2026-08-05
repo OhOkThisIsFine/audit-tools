@@ -33,10 +33,19 @@ function blockedItems(state: RemediationState): RemediationItemState[] {
 export function clarificationPrompt(
   clarifications: ClarificationRequest[],
   resolutionPath: string,
+  refusal?: string,
 ): string {
   return `
 # Resolve Remediation Clarifications
-
+${
+  refusal
+    ? `
+> ⚠ **Your previous resolution was REFUSED and archived — nothing was applied.**
+> ${refusal}
+> Re-submit the WHOLE resolution with ids drawn only from the set below.
+`
+    : ""
+}
 Ask the user to resolve all clarifications in one batched response.
 
 ${clarifications
@@ -70,7 +79,13 @@ ambiguity after all — proceed with the finding, put the answer/decision in
 \`rationale\`), \`"action": "reject_finding"\` (the FINDING itself is not a real
 issue — this DROPS it, so use it only to discard a finding, never just to say the
 question wasn't ambiguous), or \`"action": "defer"\` (the user explicitly chose to
-skip it this run). Then run \`${loaderCommand("next-step")}\`.
+skip it this run).
+
+\`finding_id\` MUST be drawn from this closed set (copy, never retype):
+${clarifications.map((c) => `\`${c.finding_id}\``).join(", ") || "_(none)_"}. An id
+outside it refuses the whole resolution and re-presents this step.
+
+Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 
@@ -88,6 +103,8 @@ skip it this run). Then run \`${loaderCommand("next-step")}\`.
 export function ambiguityReviewPrompt(
   candidates: ClarificationRequest[],
   resolutionPath: string,
+  validFindingIds: readonly string[] = [],
+  refusal?: string,
 ): string {
   const candidateBlock = candidates.length
     ? candidates
@@ -103,7 +120,15 @@ export function ambiguityReviewPrompt(
 
   return `
 # Resolve scoping/judgment ambiguity BEFORE implementing
-
+${
+  refusal
+    ? `
+> ⚠ **Your previous resolution was REFUSED and archived — nothing was applied.**
+> ${refusal}
+> Re-submit the WHOLE resolution with ids drawn only from the valid set below.
+`
+    : ""
+}
 Below are deterministic **candidate** ambiguities in the remediation plan. They
 are starting points, not a final list.
 
@@ -137,8 +162,13 @@ ambiguous — proceed with the finding, put the answer/decision in \`rationale\`
 it; never use it merely to say a question wasn't ambiguous, or you will lose a
 finding the review gate approved), or \`"action": "defer"\` (the user explicitly
 chose to skip it this run). Deferral is the **user's** call — never decide it
-unilaterally. Write \`[]\` if nothing is genuinely ambiguous. Then run
-\`${loaderCommand("next-step")}\`.
+unilaterally. Write \`[]\` if nothing is genuinely ambiguous.
+
+\`finding_id\` MUST be drawn from the plan's closed id set (copy, never retype):
+${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}. An id outside
+it refuses the whole resolution and re-presents this step.
+
+Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 
@@ -158,6 +188,7 @@ unilaterally. Write \`[]\` if nothing is genuinely ambiguous. Then run
 export function reviewApprovalPrompt(
   request: ReviewRequest,
   resolutionPath: string,
+  refusal?: string,
 ): string {
   const tierSections = request.tiers
     .map((tier) => {
@@ -187,9 +218,18 @@ export function reviewApprovalPrompt(
     })
     .join("\n\n");
 
+  const validIds = request.tiers.flatMap((t) => t.items.map((i) => i.finding_id));
   return `
 # Review-Approval Gate — approve or disapprove before implementation
-
+${
+  refusal
+    ? `
+> ⚠ **Your previous resolution was REFUSED and archived — nothing was recorded.**
+> ${refusal}
+> Re-submit the WHOLE resolution below with ids drawn only from the valid set.
+`
+    : ""
+}
 Before any code changes, every audit finding is presented below, bucketed by how
 much of **your** judgment it needs. This gate exists so that strategic
 (design/architecture) findings are never quietly closed without your sight — so
@@ -221,6 +261,10 @@ items the user wants to **disapprove** (skip). Write JSON to exactly:
 - Use \`disapproved_tiers\` (e.g. \`["mechanical"]\`) to decline an entire tier at once.
 - Disapproved findings are recorded as a declined disposition with a reason —
   they are not acted on, and they are not silently dropped.
+- \`disapproved_findings\` entries MUST be drawn from this closed set (copy, never
+  retype): ${validIds.map((id) => `\`${id}\``).join(", ")}. \`disapproved_tiers\`
+  entries MUST be one of \`strategic\`, \`concrete\`, \`mechanical\`. An id outside
+  these sets refuses the whole resolution and re-presents this gate.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;

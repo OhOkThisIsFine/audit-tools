@@ -363,6 +363,7 @@ export interface ClarificationValidationResult {
 export function validateClarificationResolution(
   resolution: unknown,
   blockingQuestions: IntakeOpenQuestion[],
+  allQuestions?: IntakeOpenQuestion[],
 ): ClarificationValidationResult {
   const errors: string[] = [];
 
@@ -385,6 +386,17 @@ export function validateClarificationResolution(
     }
     if (typeof answer.question_id !== "string" || !answer.question_id) {
       errors.push(`answers[${i}] is missing required field 'question_id'`);
+    } else if (allQuestions) {
+      // Uniform id-join contract: an answer naming an unknown question_id is an
+      // ERROR, never silently ignored — a typo'd id would otherwise drop the
+      // user's answer while the blocking question it meant stays unanswered.
+      const knownIds = new Set(allQuestions.map((q) => q.id));
+      if (!knownIds.has(answer.question_id)) {
+        errors.push(
+          `answers[${i}].question_id "${answer.question_id}" matches no open question. ` +
+            `Valid ids: ${[...knownIds].join(", ")}.`,
+        );
+      }
     }
     if (typeof answer.answer !== "string") {
       errors.push(`answers[${i}] is missing required field 'answer'`);

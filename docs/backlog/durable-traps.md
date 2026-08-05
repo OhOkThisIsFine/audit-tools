@@ -192,6 +192,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (c) invocation shape differs by consumer: `llm-call.mjs` takes the model as its FIRST POSITIONAL
   argument, while `--model <spec>` is the *worker/provider* form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
+  (d) the ladder's agy lane pins can go stale against the installed agy model roster (2026-08-05:
+  `agy-claude-sonnet` pinned `claude-sonnet-5`, agy only offers `Claude Sonnet 4.6 (Thinking)`; also
+  `--effort` is rejected for the Claude models). On an "invalid model selection" error, run the same
+  command with a roster model name from the error's list — a relay-config fix belongs in
+  `~/.llm-relay/config.json`, not here.
 
 - **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance
   routine runs as a local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`) and lands

@@ -97,7 +97,6 @@ function syntheticNarrative(report: AuditFindingsReport): SynthesisNarrative {
         finding_ids: [
           idOf(report, "Token check is weak"),
           idOf(report, "Missing error handling"),
-          "F-DOES-NOT-EXIST",
         ],
         suggested_fix_pattern: "Validate and normalize at every trust boundary.",
       },
@@ -137,7 +136,15 @@ test("deterministic report renders without narrative sections", () => {
   expect(markdown).not.toMatch(/- Theme:/);
 });
 
-test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id", () => {
+test("applyNarrative refuses a narrative naming an unknown finding id (uniform id-join contract)", () => {
+  const report = baseReport();
+  const narrative = syntheticNarrative(report);
+  narrative.themes![0].finding_ids.push("F-DOES-NOT-EXIST");
+  // Silent-drop retired: an off-enum id refuses the WHOLE narrative, naming it.
+  expect(() => applyNarrative(report, narrative)).toThrow(/F-DOES-NOT-EXIST/);
+});
+
+test("applyNarrative tags findings and round-trips theme_id", () => {
   const report = baseReport();
   const enriched = applyNarrative(report, syntheticNarrative(report));
 
@@ -145,7 +152,6 @@ test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id"
   const parseId = idOf(report, "Missing error handling");
 
   expect(enriched.themes!.length).toBe(1);
-  // Unknown finding id is dropped; real ones are retained.
   expect(enriched.themes![0].finding_ids).toEqual([tokenId, parseId]);
   expect(enriched.executive_summary).toBe("Two related input-trust weaknesses were found.");
   expect(enriched.top_risks).toEqual([

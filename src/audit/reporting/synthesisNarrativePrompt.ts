@@ -72,7 +72,7 @@ export function renderSynthesisNarrativePrompt(
     "}",
     "```",
     "",
-    "Prefer a handful of substantive themes over many thin ones. Every `finding_ids` entry must be an id listed above; unknown ids are dropped. A finding may belong to at most one theme.",
+    "Prefer a handful of substantive themes over many thin ones. Every `finding_ids` entry MUST be an id listed above, copied exactly (a closed set — never retype or invent one): an unknown id refuses the WHOLE narrative and you will be asked to re-submit it. A finding may belong to at most one theme.",
     "",
   ].join("\n");
 }

@@ -283,9 +283,10 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   resolutions (§"Design resolutions") in
   [`reviews/prompt-process-critique-2026-08-05.md`](../reviews/prompt-process-critique-2026-08-05.md);
   that doc is the single home, this entry is the hook. Four atomic changes, `/design-check` before the
-  loop-core ones: (1) uniform id-join contract — closed-enum schemas for pre-existing ids, tool-minted
-  ids via ordinal reference for new items, **hard-fail everywhere** on unknown ids (fuzzy alias remap
-  deleted); ~11 class-(c) joins across both orchestrators. (2) **Always-materialized fan-out** — every
+  loop-core ones: (1) ~~uniform id-join contract~~ **SHIPPED 2026-08-05** (hard-fail at every host
+  gate, alias remap deleted with bounded re-dispatch cap, narrative refusal; merge keeps
+  OBL-INV-RSD-01 per owner carve-out — see the design-check record in the review doc).
+  (2) **Always-materialized fan-out** — every
   fan-out step always writes per-subagent prompt files + per-lane ingest chokepoint; step prompt
   capability-neutral (subagents if available, else sequential); replaces `semanticReviewStep`'s
   capability branch. (3) Scope-confirmation context — thread `design_assessment` into
