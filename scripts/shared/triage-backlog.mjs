@@ -18,8 +18,15 @@
 //   node scripts/shared/triage-backlog.mjs [outPath]
 //
 // Resumable: completed ids are read back from the JSONL and skipped, so a killed
-// run continues rather than restarting. Errored rows are NOT skipped — delete
-// them from the file and re-run to retry, optionally on a stronger alias.
+// run continues rather than restarting. Errored rows are dropped from the file
+// on load and their entries re-queued, so a plain re-run retries exactly the
+// failures — no hand-editing of the JSONL.
+//
+// Entry ids are CONTENT-derived (`<file>#<hash8>` over the normalized entry
+// text), never positional: leg 2 exists to DELETE entries from these files, and
+// a positional id makes every later row name a different entry after a deletion.
+// An edited entry changes its id and is re-triaged, which is correct — the old
+// verdict was about text that no longer exists.
 //
 // PREMISE PROBES (determination ea4e616f). Each verdict carries
 // `premise_probes` — literal strings the ENTRY quotes, tied to the paths it
@@ -46,6 +53,7 @@
 // lane's generic {summary, findings[], open_questions[]} container. A misfitting
 // schema does not error; it returns valid JSON full of placeholders that reads as
 // model incapacity.
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
@@ -79,11 +87,12 @@ function chunk(file) {
     else if (cur) cur.body.push(l);
   }
   if (cur) entries.push(cur);
-  return entries.map((e, i) => ({
-    id: `${file.replace('.md', '')}#${i + 1}`,
-    file,
-    text: e.body.join('\n').trim(),
-  }));
+  return entries.map((e) => {
+    const text = e.body.join('\n').trim();
+    // Normalize whitespace so a reflow alone does not re-triage the entry.
+    const hash = createHash('sha256').update(text.replace(/\s+/g, ' ')).digest('hex').slice(0, 8);
+    return { id: `${file.replace('.md', '')}#${hash}`, file, text };
+  });
 }
 
 const entries = [...chunk('open-bugs.md'), ...chunk('forward-tracks.md'), ...chunk('deferred.md')];
@@ -154,7 +163,10 @@ function post(body) {
       (res) => {
         let buf = '';
         res.on('data', (d) => (buf += d));
-        res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (e) { reject(new Error(buf.slice(0, 400))); } });
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(buf) }); }
+          catch (e) { reject(new Error(`HTTP ${res.statusCode}: ${buf.slice(0, 400)}`)); }
+        });
       },
     );
     req.setTimeout(20 * 60 * 1000, () => req.destroy(new Error('timeout')));
@@ -175,8 +187,13 @@ if (fs.existsSync(OUT)) {
     if (!l.trim()) continue;
     try {
       const rec = JSON.parse(l);
+      // Errored rows are DROPPED and their entries re-queued: an id in `done`
+      // means a verdict exists, never that an attempt happened. (The old
+      // behaviour added errored ids too, so a re-run retried nothing and
+      // exited 0 — a false green.)
+      if (rec.error) continue;
       done.add(rec.id);
-      kept.push(rec.error ? rec : { ...rec, premise: premiseStamp(rec) });
+      kept.push({ ...rec, premise: premiseStamp(rec) });
     } catch {}
   }
   fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
@@ -190,7 +207,7 @@ async function worker() {
   const e = queue[cursor++];
   let rec;
   try {
-    const r = await post({
+    const { status, body: r } = await post({
       model: MODEL,
       max_tokens: 4000,
       messages: [
@@ -199,6 +216,15 @@ async function worker() {
       ],
       response_format: { type: 'json_schema', json_schema: SCHEMA },
     });
+    // A provider/relay error body has no choices array. Surface ITS message —
+    // it names the real cause (and often its own retry-after) — never the
+    // information-free `finish_reason=undefined` it used to be reported as.
+    // Deliberately NO retry/backoff here: pool failover is llm-relay's job,
+    // and duplicating it in the caller would hide a relay defect.
+    if (r?.error || !Array.isArray(r?.choices)) {
+      const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
+      throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
+    }
     const c = r.choices?.[0];
     if (c?.finish_reason !== 'stop') throw new Error(`finish_reason=${c?.finish_reason}`);
     // Some lanes prepend prose before the JSON despite the schema. Salvage the
