@@ -282,11 +282,9 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 - **Prompt/process critique cluster (2026-08-05) — GREEN-LIT, design settled.** Census + settled
   resolutions (§"Design resolutions") in
   [`reviews/prompt-process-critique-2026-08-05.md`](../reviews/prompt-process-critique-2026-08-05.md);
-  that doc is the single home, this entry is the hook. Four atomic changes, `/design-check` before the
-  loop-core ones: (1) ~~uniform id-join contract~~ **SHIPPED 2026-08-05** (hard-fail at every host
-  gate, alias remap deleted with bounded re-dispatch cap, narrative refusal; merge keeps
-  OBL-INV-RSD-01 per owner carve-out — see the design-check record in the review doc).
-  (2) **Always-materialized fan-out** — every
+  that doc is the single home, this entry is the hook. Change 1 (uniform id-join contract) landed
+  2026-08-05 (`442da4ca`, design-check record in the review doc) — three remain, `/design-check`
+  before the loop-core ones: (2) **Always-materialized fan-out** — every
   fan-out step always writes per-subagent prompt files + per-lane ingest chokepoint; step prompt
   capability-neutral (subagents if available, else sequential); replaces `semanticReviewStep`'s
   capability branch. (3) Scope-confirmation context — thread `design_assessment` into
