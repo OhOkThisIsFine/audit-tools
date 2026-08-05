@@ -34,7 +34,12 @@ import {
   resolveFreshSessionProviderName,
   type FreshSessionProviderDeps,
 } from "../../src/shared/providers/providerFactory.js";
-import { validateAuditFindingsReport, isValidAuditFindingsReport, AUDIT_FINDINGS_CONTRACT_VERSION } from "../../src/shared/validation/findingsReport.js";
+import {
+  validateAuditFindingsReport,
+  isValidAuditFindingsReport,
+  projectApprovedFindings,
+  AUDIT_FINDINGS_CONTRACT_VERSION,
+} from "../../src/shared/validation/findingsReport.js";
 import { validateSessionConfig } from "../../src/shared/validation/sessionConfig.js";
 import { prefixValidationIssues, requireKeys } from "../../src/shared/validation/basic.js";
 import { RunLogger } from "../../src/shared/observability/runLog.js";
@@ -331,7 +336,15 @@ test("INV-shared-core-06: validateAuditFindingsReport passes with correct contra
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     findings: [],
     work_blocks: [],
-    summary: { finding_count: 0 },
+    work_block_seams: [],
+    summary: {
+      finding_count: 0,
+      work_block_count: 0,
+      severity_breakdown: {},
+      audited_file_count: 0,
+      excluded_file_count: 0,
+      runtime_validation_status_breakdown: {},
+    },
   });
   const errors = issues.filter((i) => i.severity === "error");
   expect(errors.length, `expected no errors for valid report, got: ${JSON.stringify(errors)}`).toBe(0);
@@ -343,6 +356,80 @@ test("INV-shared-core-06: validateAuditFindingsReport rejects non-object", () =>
 
   const issues2 = validateAuditFindingsReport("not an object");
   expect(issues2.some((i) => i.severity === "error"), "string value must produce an error").toBeTruthy();
+});
+
+test("INV-shared-core-06: approved projection enforces closed membership and records provenance", () => {
+  const approved = {
+    id: "SEC-approved",
+    title: "Approved finding",
+    category: "security",
+    severity: "high",
+    confidence: "high",
+    lens: "security",
+    summary: "Approved summary.",
+    affected_files: [{ path: "src/approved.ts" }],
+    evidence: ["approved evidence"],
+  };
+  const quarantined = {
+    ...approved,
+    id: "SEC-refuted",
+    title: "Refuted finding",
+    grounding: { status: "refuted", reason: "anchor disproved the claim" },
+  };
+  const report = {
+    contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    summary: {
+      finding_count: 1,
+      work_block_count: 1,
+      severity_breakdown: { high: 1 },
+      audited_file_count: 1,
+      excluded_file_count: 0,
+      runtime_validation_status_breakdown: {},
+    },
+    findings: [approved],
+    quarantined_findings: [quarantined],
+    work_blocks: [{
+      id: "block-1",
+      finding_ids: [approved.id],
+      unit_ids: ["unit-1"],
+      owned_files: ["src/approved.ts"],
+      role: "implementation",
+      max_severity: "high",
+      rationale: "One approved finding.",
+      depends_on: [],
+    }],
+    work_block_seams: [],
+  };
+
+  const projection = projectApprovedFindings(report);
+  expect(projection.findings.map((finding) => finding.id)).toEqual([approved.id]);
+  expect(projection.dispositionById.get(approved.id)).toMatchObject({
+    status: "approved",
+    source: "findings",
+    workBlockId: "block-1",
+  });
+  expect(projection.dispositionById.get(quarantined.id)).toMatchObject({
+    status: "quarantined_refuted",
+    source: "quarantined_findings",
+    workBlockId: null,
+  });
+
+  const malformedReports = [
+    { ...report, findings: [approved, { ...approved }] },
+    { ...report, work_blocks: [{ ...report.work_blocks[0], finding_ids: ["missing-id"] }] },
+    {
+      ...report,
+      summary: { ...report.summary, finding_count: 2, severity_breakdown: { high: 2 } },
+      findings: [approved, { ...approved, id: "SEC-unassigned" }],
+    },
+    { ...report, quarantined_findings: [{ ...quarantined, grounding: { status: "ungrounded" } }] },
+  ];
+  for (const malformed of malformedReports) {
+    expect(
+      isValidAuditFindingsReport(malformed),
+      `expected strict membership rejection for ${JSON.stringify(malformed)}`,
+    ).toBe(false);
+  }
 });
 
 // ── INV-shared-core-07: ObligationEntry.depends_on cycle-checked at construction ─
