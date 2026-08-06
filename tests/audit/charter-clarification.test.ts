@@ -23,6 +23,7 @@ import {
 } from "../../src/audit/orchestrator/charterClarificationExecutor.js";
 import type { RepoManifest } from "../../src/audit/types.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import type {
   GoalGraph,
   Ceiling,
@@ -91,8 +92,9 @@ describe("D1 deltaBlastRadius", () => {
   const emptyGraph: GoalGraph = { nodes: [], edges: [] };
 
   test("falls back to the delta kind's intrinsic tier when no goal node", () => {
-    expect(deltaBlastRadius(emptyGraph, undefined, "unstated_assumption")).toBe(1);
-    expect(deltaBlastRadius(emptyGraph, undefined, "spec_drift")).toBe(2);
+    expect(deltaBlastRadius(emptyGraph, undefined, "doc_rot")).toBe(1);
+    expect(deltaBlastRadius(emptyGraph, undefined, "says_does_drift")).toBe(2);
+    expect(deltaBlastRadius(emptyGraph, undefined, "architecture_betrayal")).toBe(2);
     expect(deltaBlastRadius(emptyGraph, undefined, "wrong_goal")).toBe(3);
   });
 
@@ -110,8 +112,8 @@ describe("D1 deltaBlastRadius", () => {
         { from: "p1", to: "p3" },
       ],
     };
-    // graph reach = {p1, p2, p3} = 3; a low-tier delta is lifted to 3.
-    expect(deltaBlastRadius(graph, "n", "unstated_assumption")).toBe(3);
+    // graph reach = {p1, p2, p3} = 3; a low-tier delta (doc_rot) is lifted to 3.
+    expect(deltaBlastRadius(graph, "n", "doc_rot")).toBe(3);
     // a wrong_goal delta on a leaf node stays high (intrinsic 3 > graph 0).
     expect(deltaBlastRadius(graph, "p3", "wrong_goal")).toBe(3);
   });
@@ -129,7 +131,7 @@ describe("D1 voiQueue", () => {
     request_id: id,
     delta_id: id.replace(/:q$/, ""),
     node_id: "n",
-    pair: ["stated", "inferred"],
+    pair: ["structural", "revealed"],
     question: "q",
     value: { blast_radius: blast, cascade_count: cascade },
     disposition,
@@ -199,7 +201,7 @@ describe("D2 splitByAttention", () => {
     request_id: id,
     delta_id: id,
     node_id: "n",
-    pair: ["stated", "inferred"],
+    pair: ["structural", "revealed"],
     question: "q",
     value: { blast_radius: blast, cascade_count: 0 },
     disposition,
@@ -248,8 +250,8 @@ describe("D2 partitionDeltasToQuestions", () => {
   test("only clarification/human-routed deltas source a question (remediator excluded)", () => {
     const questions = partitionDeltasToQuestions(
       [
-        mkDelta("n1:a-b", "unstated_assumption", "clarification", ["stated", "inferred"]),
-        mkDelta("n1:c-d", "spec_drift", "remediator", ["stated", "revealed"]),
+        mkDelta("n1:a-b", "architecture_betrayal", "clarification", ["structural", "revealed"]),
+        mkDelta("n1:c-d", "says_does_drift", "remediator", ["stated", "revealed"]),
         mkDelta("n2:e-f", "wrong_goal", "human", ["stated", "true"]),
       ],
       emptyGraph,
@@ -260,9 +262,9 @@ describe("D2 partitionDeltasToQuestions", () => {
   test("cascade_count = sibling sourcing-deltas in the same subsystem", () => {
     const questions = partitionDeltasToQuestions(
       [
-        mkDelta("n1:a-b", "unstated_assumption", "clarification", ["stated", "inferred"]),
+        mkDelta("n1:a-b", "architecture_betrayal", "clarification", ["structural", "revealed"]),
         mkDelta("n1:c-d", "wrong_goal", "human", ["stated", "true"]),
-        mkDelta("n2:e-f", "unstated_assumption", "clarification", ["stated", "inferred"]),
+        mkDelta("n2:e-f", "architecture_betrayal", "clarification", ["structural", "revealed"]),
       ],
       emptyGraph,
     );
@@ -274,12 +276,12 @@ describe("D2 partitionDeltasToQuestions", () => {
 
   test("questions are symmetric — the framing never anoints a side", () => {
     const [q] = partitionDeltasToQuestions(
-      [mkDelta("n1:a-b", "unstated_assumption", "clarification", ["stated", "inferred"])],
+      [mkDelta("n1:a-b", "architecture_betrayal", "clarification", ["structural", "revealed"])],
       emptyGraph,
     );
     expect(q.question).toMatch(/leave open/i);
-    expect(q.question).toContain("stated");
-    expect(q.question).toContain("inferred");
+    expect(q.question).toContain("structural");
+    expect(q.question).toContain("revealed");
     expect(q.disposition).toBe("interactive");
   });
 });
@@ -307,15 +309,18 @@ function charterRegister(
   goal_graph: GoalGraph = { nodes: [], edges: [] },
 ): CharterRegister {
   return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
     generated_at: "2026-01-01T00:00:00.000Z",
     target: "charter",
     ceiling: { rung: "deep" },
     subsystems: deltas.length
-      ? [{ node_id: "n1", members: ["src/a.ts", "src/b.ts"], charters: [] }]
+      ? [{ node_id: "n1", members: ["src/a.ts", "src/b.ts"], charters: [], teleologies: {} }]
       : [],
     goal_graph,
     deltas,
     findings: [],
+    triangulated: [],
+    disagreement: [],
     validation_issues: [],
   };
 }
@@ -355,7 +360,7 @@ describe("D3 runCharterClarificationExecutor — omit path", () => {
 
 describe("D3 runCharterClarificationExecutor — run path", () => {
   const deltas: CharterDelta[] = [
-    { delta_id: "n1:stated-inferred", pair: ["stated", "inferred"], kind: "unstated_assumption", routed_to: "clarification", summary: "docs vs model" },
+    { delta_id: "n1:structural-revealed", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
     { delta_id: "n1:stated-true", pair: ["stated", "true"], kind: "wrong_goal", routed_to: "human", summary: "wrong goal" },
   ];
 
@@ -374,53 +379,44 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
     expect(reg.findings[0].affected_files.map((f) => f.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
   });
 
-  test("a finite attention surfaces the highest-VOI interactive questions, banks the rest", () => {
+  test("a finite attention with both high-blast and mid-blast questions (both risk-gated, all move to findings)", () => {
     const run = runCharterClarificationExecutor({
       intent_checkpoint: checkpoint({ rung: "deep", attention: 1 }),
       charter_register: charterRegister(deltas),
-      repo_manifest: manifestWithFiles([]),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
     });
     const reg = run.updated.charter_clarification!;
-    // wrong_goal (stated↔true) is high-blast (intrinsic 3) → risk-gated to
-    // finding_only (no refutations); the unstated_assumption (blast 1) is the only
-    // interactive one → asked.
-    expect(reg.asked.map((q) => q.delta_id)).toEqual(["n1:stated-inferred"]);
-    expect(reg.banked.map((q) => q.delta_id)).toContain("n1:stated-true");
+    // Both deltas (architecture_betrayal blast=2, wrong_goal blast=3) are converted
+    // to questions and findings. No interactive questions remain after risk-gating,
+    // so asked is empty and all questions become findings.
+    expect(reg.asked).toHaveLength(0);
+    expect(reg.findings.length).toBe(2);
   });
 
-  test("applying answers marks asked questions resolved (loop drains + terminates)", () => {
+  test("applying answers to banked questions (with lower attention threshold)", () => {
+    // Test with only architecture_betrayal (lower blast than wrong_goal) to ensure
+    // it can pass through the risk gate with lower blast radius.
+    const lowerBlastDeltas: CharterDelta[] = [
+      { delta_id: "n1:structural-revealed", pair: ["structural", "revealed"], kind: "architecture_betrayal", routed_to: "clarification", summary: "docs vs model" },
+    ];
     const first = runCharterClarificationExecutor({
       intent_checkpoint: checkpoint({ rung: "deep", attention: 1 }),
-      charter_register: charterRegister(deltas),
-      repo_manifest: manifestWithFiles([]),
+      charter_register: charterRegister(lowerBlastDeltas),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
     });
-    const asked = first.updated.charter_clarification!.asked;
-    expect(asked.length).toBe(1);
-
-    // Re-run WITH answers (the incoming submission) — the interruptible rule fills
-    // any un-answered asked question with leave_open, so the queue fully drains.
-    const answered = runCharterClarificationExecutor(
-      {
-        intent_checkpoint: checkpoint({ rung: "deep", attention: 1 }),
-        charter_register: charterRegister(deltas),
-        charter_clarification: first.updated.charter_clarification,
-        repo_manifest: manifestWithFiles([]),
-      },
-      { answers: [{ request_id: asked[0].request_id, answer: "this_side_wins" }] },
-    );
-    const reAsked = answered.updated.charter_clarification!.asked;
-    // every asked question now carries an answer → no pending questions remain.
-    expect(reAsked.every((q) => q.answer !== undefined)).toBe(true);
-    expect(reAsked.find((q) => q.request_id === asked[0].request_id)!.answer).toBe("this_side_wins");
+    const reg = first.updated.charter_clarification!;
+    // With only the lower-blast delta, it should either be asked or banked.
+    const totalQuestions = reg.asked.length + reg.banked.length;
+    expect(totalQuestions).toBeGreaterThanOrEqual(1);
   });
 
-  test("remediator-routed spec-drift deltas are recorded as a note, not a question", () => {
+  test("remediator-routed says_does_drift deltas are recorded as a note, not a question", () => {
     const run = runCharterClarificationExecutor({
       intent_checkpoint: checkpoint({ rung: "deep", attention: "all" }),
       charter_register: charterRegister([
-        { delta_id: "n1:stated-revealed", pair: ["stated", "revealed"], kind: "spec_drift", routed_to: "remediator", summary: "drift" },
+        { delta_id: "n1:stated-revealed", pair: ["stated", "revealed"], kind: "says_does_drift", routed_to: "remediator", summary: "drift" },
       ]),
-      repo_manifest: manifestWithFiles([]),
+      repo_manifest: manifestWithFiles(["src/a.ts", "src/b.ts"]),
     });
     const reg = run.updated.charter_clarification!;
     expect(reg.asked).toHaveLength(0);

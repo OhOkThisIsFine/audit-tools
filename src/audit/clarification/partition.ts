@@ -30,10 +30,11 @@ export interface DeltaWithNode {
 
 /**
  * A delta is CLARIFICATION-SOURCING when it routes to `clarification` (an
- * inferred−stated unstated assumption) or `human` (a wrong-goal provocation, or a
- * low-confidence delta forced to the human channel). A `remediator`-routed
- * spec-drift delta is NOT a charter question — it is a fix, handled by the
- * remediator, so it never enters the attention queue.
+ * architecture betrayed by its implementation — which account governs?) or
+ * `human` (a wrong-goal provocation, or a low-confidence delta forced to the
+ * human channel). A `remediator`-routed delta (says/does drift, doc rot) is NOT
+ * a charter question — it is a fix, handled by the remediator, so it never
+ * enters the attention queue.
  */
 function sourcesQuestion(delta: CharterDelta): boolean {
   return delta.routed_to === "clarification" || delta.routed_to === "human";

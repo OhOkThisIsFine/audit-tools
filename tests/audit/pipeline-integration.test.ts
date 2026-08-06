@@ -113,6 +113,7 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
     // obligations these tests target are reachable. Only consulted after the
     // checkpoint is present (charter extraction sits between them).
     charter_register: {
+      schema_version: "charter-register/v2",
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "charter",
       ceiling: { rung: "shallow" },
@@ -121,6 +122,8 @@ function makePostDesignAssessmentBundle(opts: PostDesignAssessmentOptions = {}):
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
     },
     // Phase D charter-clarification triangulation loop: an omitted (shallow-ceiling)

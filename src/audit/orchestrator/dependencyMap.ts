@@ -111,14 +111,19 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   ],
   // Phase C conceptual design-review: the charter LAYER. Depends on the Phase-B
   // consensus scaffold (the subsystems it charter-reviews), the confirmed intent
-  // checkpoint (the ceiling/consent dial that gates its depth), and repo_manifest
-  // (Revealed re-extracts on code change — its per-file hashes re-stale this
-  // transitively). Charters live in this OUTPUT artifact, never back on the
-  // checkpoint it depends on, so there is no cycle.
+  // checkpoint (the ceiling/consent dial that gates its depth), repo_manifest
+  // (every channel packet is a projection of member/doc content — its per-file
+  // hashes re-stale this transitively), and graph_bundle (the STRUCTURAL
+  // channel's packet embeds the dependency edges among members, and analyzer
+  // enrichment can merge new edges with NO file-content change — without this
+  // edge that would under-stale; design resolution 4). Charters live in this
+  // OUTPUT artifact, never back on the checkpoint it depends on, so there is no
+  // cycle.
   "charter_register.json": [
     "structure_decomposition.json",
     "intent_checkpoint.json",
     "repo_manifest.json",
+    "graph_bundle.json",
   ],
   // Phase D conceptual design-review: the charter-alignment TRIANGULATION LOOP.
   // Depends on the Phase-C charter register (the deltas it questions), the confirmed

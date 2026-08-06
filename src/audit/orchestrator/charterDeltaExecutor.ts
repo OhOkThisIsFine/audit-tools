@@ -1,6 +1,9 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { CharterRegister } from "../types/charterRegister.js";
+import {
+  CHARTER_REGISTER_SCHEMA_VERSION,
+  type CharterRegister,
+} from "../types/charterRegister.js";
 import {
   assembleDeltas,
   groundDesignFindings,
@@ -57,6 +60,7 @@ export function runCharterDeltaExecutor(
             : {}),
         }
       : {
+          schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
           generated_at,
           target: "charter",
           ceiling: { rung: "shallow" },
@@ -65,6 +69,8 @@ export function runCharterDeltaExecutor(
           goal_graph: { nodes: [], edges: [] },
           deltas: [],
           findings: [],
+          triangulated: [],
+          disagreement: [],
           validation_issues: [],
           deltas_pending: false,
         };
@@ -80,7 +86,14 @@ export function runCharterDeltaExecutor(
     };
   }
 
-  const assembled = assembleDeltas(submission, register.subsystems);
+  // True nominations are admissible at the DEEPEST rung only — the consent gate
+  // that used to live on the extraction lane set (design resolution 4: `true` is
+  // nominated downstream of triangulation, never extracted). Rung-keyed, matching
+  // the retired lane's semantics; `explicit_opt_in` stays the capture-time
+  // contract on setting a deepest ceiling.
+  const assembled = assembleDeltas(submission, register.subsystems, {
+    allowTrueNominations: register.ceiling.rung === "deepest",
+  });
   // Ground each surfaced delta-finding's evidence against disk (the provenance
   // grounding this pure-assembly module deferred to the ingest — parity with the
   // design-review findings path).
@@ -89,9 +102,14 @@ export function runCharterDeltaExecutor(
   const updated: CharterRegister = {
     ...register,
     generated_at,
+    // The miner may have appended gate-surviving True nominations to a unit's
+    // charters — persist the augmented subsystems, not the pre-mine ones.
+    subsystems: assembled.subsystems,
     deltas: assembled.deltas,
     findings,
     goal_graph: assembled.goal_graph,
+    triangulated: assembled.triangulated,
+    disagreement: assembled.disagreement,
     validation_issues: [
       ...register.validation_issues,
       ...assembled.validation_issues,
@@ -103,7 +121,8 @@ export function runCharterDeltaExecutor(
     artifacts_written: ["charter_register.json"],
     progress_summary:
       `Charter delta-mining complete: ${updated.deltas.length} routed delta(s) → ` +
-      `${updated.findings.length} finding(s)` +
+      `${updated.findings.length} finding(s), ${updated.triangulated.length} ` +
+      `triangulated telos(es)` +
       (assembled.validation_issues.length > 0
         ? `, ${assembled.validation_issues.length} gate drop(s).`
         : "."),

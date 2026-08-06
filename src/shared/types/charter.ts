@@ -2,27 +2,36 @@
 // conceptual-design-review build; design of record: spec/conceptual-design-review-design.md).
 //
 // This module is the deterministic, tool-owned data model every later phase plugs
-// into: the four charters (Stated/Inferred/Revealed/True), the goal DAG, the
-// ceiling (consent) meta-intent, and the routed pairwise CharterDelta. No LLM
-// content lives here — extraction and delta emission are Phase C. Language-neutral
-// by contract: goals/charters are telos statements, never code, model, provider,
-// or ecosystem literals.
+// into: the channel-pure estimator charters (Stated/Structural/Revealed) plus the
+// downstream-nominated True, per-kind leveled teleologies with file scopes, the
+// goal DAG, the ceiling (consent) meta-intent, the routed pairwise CharterDelta,
+// and the miner's triangulated telos. No LLM content lives here — extraction and
+// delta emission are Phase C. Language-neutral by contract: goals/charters are
+// telos statements, never code, model, provider, or ecosystem literals.
 
 import { z } from "zod";
 
 /**
- * The four charters, mined for their PAIRWISE DELTAS (never reconciled into one
- * truth). Each states a subsystem's purpose in telos terms:
- * - `stated`: user-expressed (docs, feedback) — the anchor of intent.
- * - `inferred`: the LLM's model of that intent — `inferred − stated` = an unstated
- *   assumption / miscommunication.
- * - `revealed`: what the code actually optimizes for — the objective anchor;
- *   `stated − revealed` = spec drift.
+ * The charter kinds. The first three are CHANNEL-PURE ESTIMATORS of a subsystem's
+ * telos — each fed a disjoint evidence channel (blindness is a property of the
+ * INPUT packet, never an instruction), held un-merged and mined for their pairwise
+ * deltas. The deltas stay the primary product; the miner's triangulated telos is a
+ * downstream ESTIMATE (a lead the owner reacts to), never a reconciliation.
+ * - `stated`: testimony — docs + extracted comments (what the authors SAY).
+ * - `structural`: intent frozen into organization — file tree / exports /
+ *   signatures / names / import graph; no bodies, no docs, no comments.
+ * - `revealed`: behavior — comment-stripped code bodies (what the code DOES).
  * - `true`: the "shining city" ideal, possibly inexpressible and the user may be
- *   unaware of it — `revealed/stated − true` = serving the wrong goal. Nominatable,
- *   never assertable (see the True-charter gate in validation/charterGate.ts).
+ *   unaware of it. Nominatable, never assertable (True-charter gate in
+ *   validation/charterGate.ts); nominated by the delta miner DOWNSTREAM of
+ *   triangulation, at the `deepest` ceiling only — never an extraction lane.
  */
-export const CharterKindSchema = z.enum(["stated", "inferred", "revealed", "true"]);
+export const CharterKindSchema = z.enum([
+  "stated",
+  "structural",
+  "revealed",
+  "true",
+]);
 export type CharterKind = z.infer<typeof CharterKindSchema>;
 
 /**
@@ -145,23 +154,85 @@ export type Ceiling = z.infer<typeof CeilingSchema>;
 /**
  * A routed pairwise charter delta — the product of the overlay-and-delta operator at
  * the charter layer (produced in Phase C). `pair` is a SYMMETRIC tuple of the two
- * charter kinds compared: the design forbids anointing Stated as ground truth, so a
- * delta is never modeled as `{ from: stated, to: X }`. `routed_to` names who acts on
- * it (a low-confidence side forces `human` regardless of kind — gateCharterDelta):
- * - `unstated_assumption` (inferred − stated) → `clarification`.
- * - `spec_drift` (stated − revealed) → `remediator`.
- * - `wrong_goal` (revealed − true / stated − true) → `human` (provocation only).
+ * charter kinds compared: the design forbids anointing any single estimator as
+ * ground truth, so a delta is never modeled as `{ from: stated, to: X }`. Each
+ * channel PAIR has one defined meaning; `routed_to` names who acts on it (a
+ * low-confidence side forces `human` regardless of kind — gateCharterDelta):
+ * - `doc_rot` (stated ↔ structural: testimony vs organization — doc rot / naming
+ *   drift) → `remediator`.
+ * - `says_does_drift` (stated ↔ revealed: testimony vs behavior) → `remediator`.
+ * - `architecture_betrayal` (structural ↔ revealed: the organization's promise vs
+ *   what the implementation actually does) → `clarification` (which governs?).
+ * - `wrong_goal` (any estimator ↔ true) → `human` (provocation only; `deepest`).
  */
 export const CharterDeltaSchema = z
   .object({
     delta_id: z.string(),
     pair: z.tuple([CharterKindSchema, CharterKindSchema]),
-    kind: z.enum(["unstated_assumption", "spec_drift", "wrong_goal"]),
+    kind: z.enum([
+      "doc_rot",
+      "says_does_drift",
+      "architecture_betrayal",
+      "wrong_goal",
+    ]),
     routed_to: z.enum(["remediator", "clarification", "human"]),
     summary: z.string(),
   })
   .strict();
 export type CharterDelta = z.infer<typeof CharterDeltaSchema>;
+
+/**
+ * One node of a kind's self-organized leveled teleology. The lane organizes its
+ * OWN view of the repo's purposes — `premise_height` is the emergent level
+ * (0 = the telos, higher = closer to a leaf mechanism; an integer, NEVER a fixed
+ * L0/L1/L2 enum), and `files` is the node's FILE SCOPE: content-derived join keys
+ * no agent can mangle. The tool joins teleologies to each other and to the
+ * decomposition hint mechanically by file-set overlap (assembleCharters).
+ */
+export const TeleologyNodeSchema = z
+  .object({
+    /** Purpose in telos terms, never mechanism (same discipline as `Charter`). */
+    purpose: z.string(),
+    /** Emergent level: 0 = the telos, higher = nearer a leaf mechanism. */
+    premise_height: z.number().int().min(0),
+    /** The node's file scope — the join key. At least one repo-relative path. */
+    files: z.array(z.string()).min(1),
+  })
+  .strict();
+export type TeleologyNode = z.infer<typeof TeleologyNodeSchema>;
+
+/**
+ * The delta miner's TRIANGULATED TELOS for one subsystem — a unified opinion the
+ * owner reacts to, distilled from the three blind estimators. A LEAD, never a
+ * reconciliation: the charters stay held un-merged, the deltas stay the primary
+ * product, and no consumer may treat this as ground truth (the spec's
+ * "never reconciled into one truth" boundary; the rejected thing is a merge that
+ * DESTROYS the deltas, and this preserves them).
+ */
+export const TriangulatedTelosSchema = z
+  .object({
+    /** The subsystem (joined unit) this estimate belongs to. */
+    node_id: z.string(),
+    /** The unified best-estimate telos, in telos terms. */
+    telos: z.string(),
+    confidence: CharterConfidenceSchema,
+  })
+  .strict();
+export type TriangulatedTelos = z.infer<typeof TriangulatedTelosSchema>;
+
+/**
+ * Tool-computed disagreement density: how many deltas one subsystem carries per
+ * channel pair — the quantitative surface for "which parts of the triangulation
+ * need clarification." Deterministic (counted at assembly), never host-supplied.
+ */
+export const ChannelDisagreementSchema = z
+  .object({
+    node_id: z.string(),
+    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
+    count: z.number().int().min(1),
+  })
+  .strict();
+export type ChannelDisagreement = z.infer<typeof ChannelDisagreementSchema>;
 
 // ── Phase D — the charter-alignment clarification / triangulation loop ──────────
 //

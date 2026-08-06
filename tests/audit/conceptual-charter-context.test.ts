@@ -9,6 +9,7 @@ import { test, expect } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import type { Charter, CharterKind, CharterConfidence } from "audit-tools/shared";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 
 const {
   renderCharterContext,
@@ -47,6 +48,7 @@ function charter(kind: CharterKind, purpose: string, confidence: CharterConfiden
 
 function populatedRegister(): CharterRegister {
   return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
     generated_at: "2026-01-01T00:00:00Z",
     target: "charter",
     ceiling: { rung: "deep" },
@@ -58,11 +60,14 @@ function populatedRegister(): CharterRegister {
           charter("stated", "quota exists so cooperating auditors share finite budgets"),
           charter("revealed", "quota actually optimizes for single-auditor throughput", "low"),
         ],
+        teleologies: {},
       },
     ],
     goal_graph: { nodes: [], edges: [] },
     deltas: [],
     findings: [],
+    triangulated: [],
+    disagreement: [],
     validation_issues: [],
   };
 }
@@ -98,6 +103,7 @@ test("renderCharterContext: empty when register absent / omitted / no surviving 
   expect(
     renderCharterContext(
       baseBundle({
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         generated_at: "2026-01-01T00:00:00Z",
         target: "charter",
         ceiling: { rung: "shallow" },
@@ -106,6 +112,8 @@ test("renderCharterContext: empty when register absent / omitted / no surviving 
         goal_graph: { nodes: [], edges: [] },
         deltas: [],
         findings: [],
+        triangulated: [],
+        disagreement: [],
         validation_issues: [],
       }),
     ),
@@ -114,13 +122,16 @@ test("renderCharterContext: empty when register absent / omitted / no surviving 
   expect(
     renderCharterContext(
       baseBundle({
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         generated_at: "2026-01-01T00:00:00Z",
         target: "charter",
         ceiling: { rung: "deep" },
-        subsystems: [{ node_id: "x", members: ["src/x.ts"], charters: [] }],
+        subsystems: [{ node_id: "x", members: ["src/x.ts"], charters: [], teleologies: {} }],
         goal_graph: { nodes: [], edges: [] },
         deltas: [],
         findings: [],
+        triangulated: [],
+        disagreement: [],
         validation_issues: [],
       }),
     ),
@@ -156,6 +167,7 @@ test("shallow conceptual prompt is byte-identical with an absent vs omitted vs e
   const absent = renderConceptualReviewPrompt(baseBundle(undefined), { max_units: 5 });
   const omitted = renderConceptualReviewPrompt(
     baseBundle({
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00Z",
       target: "charter",
       ceiling: { rung: "shallow" },
@@ -164,6 +176,8 @@ test("shallow conceptual prompt is byte-identical with an absent vs omitted vs e
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
     }),
     { max_units: 5 },
@@ -180,6 +194,7 @@ test("deep perspective prompt is byte-identical when the register is absent vs o
   });
   const omitted = renderConceptualPerspectivePrompt(
     baseBundle({
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00Z",
       target: "charter",
       ceiling: { rung: "shallow" },
@@ -188,6 +203,8 @@ test("deep perspective prompt is byte-identical when the register is absent vs o
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
     }),
     p,

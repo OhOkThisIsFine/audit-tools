@@ -66,7 +66,7 @@ describe("applyTrueCharterGate", () => {
   test("never drops non-`true` charters regardless of gate fields", () => {
     const charters = [
       charter({ charter_id: "s", kind: "stated" }),
-      charter({ charter_id: "i", kind: "inferred" }),
+      charter({ charter_id: "i", kind: "structural" }),
       charter({ charter_id: "r", kind: "revealed" }),
     ];
     const { kept, dropped } = applyTrueCharterGate(charters);
@@ -96,7 +96,7 @@ describe("gateCharterDelta", () => {
   const specDrift: CharterDelta = {
     delta_id: "d1",
     pair: ["stated", "revealed"],
-    kind: "spec_drift",
+    kind: "says_does_drift",
     routed_to: "remediator",
     summary: "code diverged from stated intent",
   };
@@ -125,7 +125,7 @@ describe("gateCharterDelta", () => {
     const charters = [
       charter({ charter_id: "s", kind: "stated", confidence: "high" }),
       charter({ charter_id: "r", kind: "revealed", confidence: "high" }),
-      charter({ charter_id: "i", kind: "inferred", confidence: "low" }),
+      charter({ charter_id: "i", kind: "structural", confidence: "low" }),
     ];
     const gated = gateCharterDelta(specDrift, charters);
     expect(gated.routed_to).toBe("remediator");

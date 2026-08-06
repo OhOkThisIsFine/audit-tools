@@ -79,12 +79,12 @@ describe("CharterDeltaSchema", () => {
   test("accepts a symmetric charter-kind pair tuple", () => {
     const d = CharterDeltaSchema.parse({
       delta_id: "d1",
-      pair: ["inferred", "stated"],
-      kind: "unstated_assumption",
+      pair: ["structural", "revealed"],
+      kind: "architecture_betrayal",
       routed_to: "clarification",
-      summary: "the LLM assumed X the docs never stated",
+      summary: "the organization's promise vs what the implementation does",
     });
-    expect(d.pair).toEqual(["inferred", "stated"]);
+    expect(d.pair).toEqual(["structural", "revealed"]);
   });
 });
 
@@ -103,32 +103,33 @@ describe("IntentCheckpointSchema back-compat", () => {
       design_review: { conceptual_depth: "deep", perspectives: 5 },
     });
     expect(parsed.design_review!.perspectives).toBe(5);
-    expect(parsed.design_review!.charters).toBeUndefined();
   });
 
-  test("accepts the new charter spine embedded in design_review", () => {
-    const parsed = IntentCheckpointSchema.parse({
-      ...base,
-      design_review: {
-        conceptual_depth: "shallow",
-        goal_graph: {
-          nodes: [{ node_id: "telos", premise_height: 0, statement: "the goal" }],
-          edges: [],
-        },
-        charters: [
-          {
-            charter_id: "s1",
-            kind: "stated",
-            purpose: "the pipeline exists to extract max value",
-            provenance: [{ kind: "doc", ref: "docs/HANDOFF.md" }],
-            confidence: "high",
+  test("strict: rejects the never-written charters/goal_graph embeds in design_review", () => {
+    // Retired by design resolution 4: charters live on charter_register.json
+    // (the output artifact), never on the checkpoint input (creates staleness).
+    expect(() =>
+      IntentCheckpointSchema.parse({
+        ...base,
+        design_review: {
+          conceptual_depth: "shallow",
+          goal_graph: {
+            nodes: [{ node_id: "telos", premise_height: 0, statement: "the goal" }],
+            edges: [],
           },
-        ],
-        ceiling: { rung: "deep" },
-      },
-    });
-    expect(parsed.design_review!.charters).toHaveLength(1);
-    expect(parsed.design_review!.ceiling!.rung).toBe("deep");
+          charters: [
+            {
+              charter_id: "s1",
+              kind: "stated",
+              purpose: "the pipeline exists to extract max value",
+              provenance: [{ kind: "doc", ref: "docs/HANDOFF.md" }],
+              confidence: "high",
+            },
+          ],
+          ceiling: { rung: "deep" },
+        },
+      }),
+    ).toThrow();
   });
 
   test("strict: rejects an unknown key inside design_review", () => {

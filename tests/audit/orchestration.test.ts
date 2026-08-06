@@ -30,6 +30,9 @@ const {
   buildAuditReportModel: buildAuditReportModelRaw,
   renderAuditReportMarkdown,
 } = await import("../../src/audit/reporting/synthesis.js");
+const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
+  "../../src/audit/types/charterRegister.js"
+);
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
 ) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
@@ -124,6 +127,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       findings: [],
     },
     charter_register: {
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "charter",
       ceiling: { rung: "shallow" },
@@ -132,6 +136,8 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
     },
     charter_clarification: {

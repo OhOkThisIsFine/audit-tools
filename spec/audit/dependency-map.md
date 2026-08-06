@@ -45,7 +45,7 @@ different analyzer version can classify files differently).
 | `design_assessment.json` | `unit_manifest.json`, `critical_flows.json` |
 | `docs_digest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
-| `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+| `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
 | `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 | `systemic_challenge.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 

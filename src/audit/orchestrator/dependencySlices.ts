@@ -29,7 +29,10 @@
 import { createHash } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { stableStringify } from "./artifactFreshness.js";
-import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
+import {
+  charterPacketReadSet,
+  memberDependencyEdgeLines,
+} from "./charterPackets.js";
 
 type SliceProjection = (bundle: ArtifactBundle) => unknown;
 
@@ -55,31 +58,29 @@ function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
 /**
  * The `repo_manifest` surface the charter_register producers consume:
  *
- *  - `files`: `{path → content proxy}` restricted to consensus MEMBER paths
- *    (the Revealed pass reads member code) PLUS every doc-intent path per the
- *    pipeline's single doc predicate (`isDocIntentFile` — the Stated pass is
- *    explicitly instructed to read docs/specs/READMEs, which are never
- *    consensus members; a `doc_only`-only set under-covered `.rst`/`.txt`/
- *    `.adoc` docs outside `docs/`). The content proxy is the manifest hash,
- *    falling back to a size marker for oversized files the intake leaves
- *    unhashed (>1 MiB carries only `size_bytes`; `hash ?? ""` erased a real
- *    change signal).
+ *  - `files`: `{path → content proxy}` over the charter layer's read-set —
+ *    DERIVED from `charterPacketReadSet` (the packet materializer's own
+ *    read-set function, `charterPackets.ts`), the single home of "what does
+ *    charter extraction read" (design-check resolution-4 constraint 6: the
+ *    slice and the packets can never drift). That set is consensus MEMBER
+ *    paths (every channel is a projection of member content) plus every
+ *    doc-intent path (the stated channel's doc universe). The content proxy is
+ *    the manifest hash, falling back to a size marker for oversized files the
+ *    intake leaves unhashed (>1 MiB carries only `size_bytes`; `hash ?? ""`
+ *    erased a real change signal).
  *  - `paths`: the COMPLETE sorted path list, content-free. The register's
  *    SECOND producer — the delta executor — grounds submitted findings against
  *    the full path set (`groundDesignFindings`: exact-path membership +
- *    basename-unique resolution), so an add/delete/rename anywhere changes what
- *    a re-derive would produce even when member∪doc content is untouched.
- *    Paths-only keeps the phantom-staleness win: pure hash churn on an
- *    unchanged path set (the live incident) still never fires this edge.
+ *    basename-unique resolution), and charter assembly grounds every teleology
+ *    node's file scope against the repo universe, so an add/delete/rename
+ *    anywhere changes what a re-derive would produce even when member∪doc
+ *    content is untouched. Paths-only keeps the phantom-staleness win: pure
+ *    hash churn on an unchanged path set (the live incident) still never fires
+ *    this edge.
  */
 function charterReadFileSlice(bundle: ArtifactBundle): unknown {
-  const relevant = new Set<string>();
-  for (const node of bundle.structure_decomposition?.consensus ?? []) {
-    for (const member of node.members) relevant.add(member);
-  }
-  for (const file of bundle.file_disposition?.files ?? []) {
-    if (isDocIntentFile(file.path, file.status)) relevant.add(file.path);
-  }
+  const { memberPaths, docPaths } = charterPacketReadSet(bundle);
+  const relevant = new Set<string>([...memberPaths, ...docPaths]);
   const files: Record<string, string> = {};
   const paths: string[] = [];
   for (const file of bundle.repo_manifest?.files ?? []) {
@@ -106,12 +107,26 @@ function charterReadFileSlice(bundle: ArtifactBundle): unknown {
  *  - `intent_checkpoint.json` edges are handled by the intent-equivalence gate
  *    (revision authority via `intent_baseline`), NOT by a slice projection.
  */
+/**
+ * The `graph_bundle` surface the charter_register consumes: exactly the
+ * member-member dependency-edge lines the STRUCTURAL channel's packet embeds —
+ * single-sourced from `memberDependencyEdgeLines` (the packet renders the same
+ * list), so what the packet shows and what re-stales it can never drift.
+ * Analyzer-enrichment churn OUTSIDE the member set (and `node_metrics` /
+ * `routes` churn entirely) never re-fires the expensive extraction, while an
+ * enrichment that merges a new member-member edge — packet-visible — fires.
+ */
+function charterGraphEdgeSlice(bundle: ArtifactBundle): unknown {
+  return memberDependencyEdgeLines(bundle);
+}
+
 export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
   Record<string, Partial<Record<string, SliceProjection>>>
 > = {
   "charter_register.json": {
     "structure_decomposition.json": consensusMembershipSlice,
     "repo_manifest.json": charterReadFileSlice,
+    "graph_bundle.json": charterGraphEdgeSlice,
   },
 };
 

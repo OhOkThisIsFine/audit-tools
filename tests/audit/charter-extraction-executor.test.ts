@@ -95,17 +95,16 @@ describe("resolveCharterCeiling / ceilingRequestsCharters", () => {
 describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scopes", () => {
   // Always-materialized (design resolution 2): each kind is its own blind LANE
   // prompt; independence is the shape of the artifacts, not a merge instruction.
-  test("deep ceiling requests THREE lanes; deepest adds the true lane", () => {
+  test("deep ceiling requests THREE estimator lanes (true is nominated, not extracted)", () => {
     expect(charterExtractionKindsForCeiling({ rung: "deep" })).toEqual([
       "stated",
-      "inferred",
+      "structural",
       "revealed",
     ]);
     expect(charterExtractionKindsForCeiling({ rung: "deepest" })).toEqual([
       "stated",
-      "inferred",
+      "structural",
       "revealed",
-      "true",
     ]);
   });
 
@@ -113,11 +112,13 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
     const stated = renderCharterKindLanePrompt(bundleWith(), {
       kind: "stated",
       submissionPath: "/tmp/charter-extraction-stated.json",
+      packetPath: "/tmp/charter-extraction-stated-packet.md",
     });
     // The stated/revealed scope separation is the whole point of independence.
-    expect(stated).toContain("Read ONLY docs / specs / READMEs / header comments");
-    expect(stated).not.toContain("ONLY the subsystem's CODE");
-    expect(stated).toContain("BLIND to the other kinds");
+    expect(stated).toContain("testimony");
+    expect(stated).toContain("repo's doc files plus the comments extracted");
+    expect(stated).not.toContain("comment-stripped");
+    expect(stated).toContain("independent, blind lanes");
     expect(stated).toContain('"kind": "stated"');
     // Deltas are still deferred to the independent miner; lanes are advance-free.
     expect(stated).toContain("do NOT emit deltas");
@@ -126,19 +127,13 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
     const revealed = renderCharterKindLanePrompt(bundleWith(), {
       kind: "revealed",
       submissionPath: "/tmp/charter-extraction-revealed.json",
+      packetPath: "/tmp/charter-extraction-revealed-packet.md",
     });
-    expect(revealed).toContain("Read ONLY the subsystem's CODE");
-    expect(revealed).not.toContain("ONLY docs / specs / READMEs");
+    expect(revealed).toContain("comment-stripped source");
+    expect(revealed).toContain("BEHAVIOR");
+    expect(revealed).not.toContain("docs");
   });
 
-  test("the true lane carries the shining-city provocation contract", () => {
-    const prompt = renderCharterKindLanePrompt(bundleWith(), {
-      kind: "true",
-      submissionPath: "/tmp/charter-extraction-true.json",
-    });
-    expect(prompt).toContain("shining city");
-    expect(prompt).toContain("nominated_alternative");
-  });
 });
 
 describe("runCharterExtractionExecutor — omit path", () => {
@@ -167,16 +162,32 @@ describe("runCharterExtractionExecutor — omit path", () => {
 describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
   test("assembles + gates charters grounded against the consensus scaffold, deferring deltas", () => {
     const submission: CharterSubmission = {
-      subsystems: [
+      nodes: [
         {
-          node_id: "src/a.ts",
-          charters: [
-            { kind: "stated", purpose: "exists so callers get audited output", provenance: [], confidence: "high" },
-            { kind: "revealed", purpose: "optimizes for fast dispatch over coverage", provenance: [], confidence: "high" },
-          ],
+          kind: "stated",
+          purpose: "exists so callers get audited output",
+          premise_height: 0,
+          files: ["src/a.ts"],
+          provenance: [],
+          confidence: "high",
         },
-        // An invented subsystem must be grounded out.
-        { node_id: "ghost.ts", charters: [] },
+        {
+          kind: "revealed",
+          purpose: "optimizes for fast dispatch over coverage",
+          premise_height: 0,
+          files: ["src/a.ts"],
+          provenance: [],
+          confidence: "high",
+        },
+        // An invented file must be grounded out.
+        {
+          kind: "structural",
+          purpose: "organize by dispatch",
+          premise_height: 0,
+          files: ["ghost.ts"],
+          provenance: [],
+          confidence: "high",
+        },
       ],
     };
     const run = runCharterExtractionExecutor(
@@ -193,22 +204,30 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     expect(reg.findings).toHaveLength(0);
     expect(reg.goal_graph).toEqual({ nodes: [], edges: [] });
     expect(reg.deltas_pending).toBe(true);
-    expect(reg.validation_issues.join()).toContain("not a consensus node");
+    expect(reg.validation_issues.join()).toContain("outside the repo universe");
   });
 
-  test("a dropped over-count charter (>1 of a kind) surfaces its message in progress_summary, not just a count", () => {
-    // "kept the first, dropped the rest" was recorded into validation_issues but
-    // the progress summary showed only "N gate drop(s)" — the operator never saw
-    // WHICH charter was discarded or why (2026-07-10 dogfooding). The message must
-    // now appear in the surfaced summary.
+  test("multiple charters of the same kind are merged into the teleology; best is selected for the charter", () => {
+    // Design v2: multiple nodes of the same kind in a unit are merged into
+    // the teleology (all preserved by premise_height + purpose), and the
+    // best-overlap node is selected for the unit's charter. No gate drop.
     const submission: CharterSubmission = {
-      subsystems: [
+      nodes: [
         {
-          node_id: "src/a.ts",
-          charters: [
-            { kind: "stated", purpose: "exists so callers get audited output", provenance: [], confidence: "high" },
-            { kind: "stated", purpose: "a SECOND stated charter — over-count, must be dropped", provenance: [], confidence: "high" },
-          ],
+          kind: "stated",
+          purpose: "exists so callers get audited output",
+          premise_height: 0,
+          files: ["src/a.ts"],
+          provenance: [],
+          confidence: "high",
+        },
+        {
+          kind: "stated",
+          purpose: "optimize for speed",
+          premise_height: 1,
+          files: ["src/a.ts", "src/b.ts"],
+          provenance: [],
+          confidence: "high",
         },
       ],
     };
@@ -217,16 +236,32 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
       submission,
     );
     requireCharterRegister(run);
-    expect(run.progress_summary).toContain("gate drop(s):");
-    expect(run.progress_summary).toContain('more than one "stated" charter');
-    // The drop is still recorded in the register too (surfacing is additive).
-    expect(run.updated.charter_register.validation_issues.join()).toContain('more than one "stated" charter');
+    const reg = run.updated.charter_register;
+    expect(reg.subsystems).toHaveLength(1);
+    const subsys = reg.subsystems[0];
+    // Both nodes persist in teleology, sorted by premise_height then purpose
+    expect(subsys.teleologies.stated).toHaveLength(2);
+    expect(subsys.teleologies.stated?.[0].purpose).toBe("exists so callers get audited output");
+    expect(subsys.teleologies.stated?.[1].purpose).toBe("optimize for speed");
+    // The best-overlap charter (src/a.ts:src/b.ts) is selected for the charter
+    expect(subsys.charters[0].purpose).toBe("optimize for speed");
+    // No gate drops — validation_issues should be empty
+    expect(reg.validation_issues).toHaveLength(0);
   });
 
   test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", () => {
-    // ghost.ts is grounded out, so no subsystem survives → nothing to mine.
+    // ghost.ts is grounded out (not in repo), so no subsystem survives → nothing to mine.
     const submission: CharterSubmission = {
-      subsystems: [{ node_id: "ghost.ts", charters: [] }],
+      nodes: [
+        {
+          kind: "stated",
+          purpose: "organize by dispatch",
+          premise_height: 0,
+          files: ["ghost.ts"],
+          provenance: [],
+          confidence: "high",
+        },
+      ],
     };
     const run = runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),

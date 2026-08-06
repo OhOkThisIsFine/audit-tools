@@ -83,7 +83,7 @@ Together these are the stop rule; blast radius (below) then ranks what remains.
 
 ### Structure decomposition sources — two families
 - **Intent-declared structure** (what humans *assert* the pieces are): docs, README, ADRs, user
-  feedback, **comments**, directory/naming. ↔ Stated/Inferred charter.
+  feedback, **comments**, directory/naming. ↔ Stated/Structural charter.
 - **Behavior-exhibited structure** (what the system *does*): call/import coupling clusters;
   **data/state coupling** (code touching the same artifact/state even with no direct call);
   **change-coupling** (git co-change — files that historically change together; temporal, independent
@@ -104,29 +104,43 @@ When structure-consensus and charter-consensus **fail** to coincide:
 - **A purpose with no behavioral cluster** → a goal *smeared* across the codebase, never modularized
   (often the highest-value refactor).
 
-## The four charters — hold all four, mine the deltas
+## The estimator charters — three blind channels, mine the deltas
 
-There is no single "charter." There are four, and the value is in their **pairwise deltas**, routed
-by *who acts on them*:
+There is no single "charter." There are three channel-pure **estimators** of a subsystem's telos —
+each fed a disjoint evidence channel (blindness is a property of the INPUT packet the tool
+materializes, never an instruction the agent must obey) — plus the downstream-nominated **True**.
+The value is in the **channel-pair deltas**, routed by *who acts on them*:
 
-| Charter | Source | Delta of interest | Routed to |
+| Charter | Channel (fed, not instructed) | Delta of interest | Routed to |
 |---|---|---|---|
-| **Stated** | user-expressed (docs, feedback) | — | (anchor of intent) |
-| **Inferred** | LLM's model of intent | Inferred − Stated → unstated assumption / miscommunication | a **clarification** prompt |
-| **Revealed** | what the code actually optimizes for | Stated − Revealed → spec drift | the **remediator** |
-| **True** | the "shining city" ideal — possibly inexpressible, the user may be unaware of it | Revealed − True, Stated − True → serves the wrong goal; "you asked for a tax app, you want Quicken" | the **human**, as a provocation |
+| **Stated** | testimony — docs + extracted comments | Stated ↔ Structural → doc rot / naming drift | the **remediator** |
+| **Structural** | intent frozen into organization — file tree / declarations / import graph; no bodies, docs, or comments | Structural ↔ Revealed → architecture betrayed by implementation | a **clarification** prompt |
+| **Revealed** | behavior — comment-stripped bodies | Stated ↔ Revealed → says/does drift | the **remediator** |
+| **True** | none — nominated by the delta miner at the `deepest` ceiling, downstream of triangulation | anything ↔ True → serves the wrong goal; "you asked for a tax app, you want Quicken" | the **human**, as a provocation |
+
+Each lane self-organizes a **leveled teleology** whose nodes carry **file scopes** — content-derived
+join keys no agent can mangle. The tool joins the lanes to each other and to the structure
+decomposition (a HINT, never a forced node list) mechanically by file-set overlap. The independent
+delta miner — the first reader to hold all channels together — mines the channel-pair deltas,
+distills a **triangulated telos** per subsystem (a unified opinion the owner reacts to: a LEAD,
+never a reconciliation — the deltas stay the product), and the tool counts **disagreement density**
+per subsystem per channel pair (the quantitative "where does the triangulation most need
+clarification" surface).
 
 - **A charter states purpose in terms of the telos, not its mechanism** — "quota/dispatch exists so N
   cooperating auditors extract max value from finite provider budgets," *not* "it manages quota." A
   charter that merely restates the code is useless as a yardstick — the delta against the impl
   collapses to zero and the review can never find under-delivery.
-- **Do not reconcile the four.** Hold all four; the deltas generate the findings.
+- **Do not reconcile the channels.** Hold them all; the deltas generate the findings. The
+  triangulated telos is a downstream *estimate* that preserves the deltas, never a merge that
+  replaces them — no consumer may key on it in place of the charters/deltas.
 - **Revealed is the objective anchor** — "what the code optimizes" is far more extractable than any
   intent charter. Not *right*, but the one you can pin down → measure the intent charters against it.
 - **True is a horizon, never asserted.** You triangulate toward it (below); you never conclude you
   found it.
-- **Persist all four with provenance** (Stated cites where the user said it; Revealed cites code) — a
-  delta is only adjudicable if each side is attributable.
+- **Persist every charter with provenance** (Stated cites where the user said it; Revealed cites
+  code; Structural cites the arrangement it reads intent from) — a delta is only adjudicable if each
+  side is attributable.
 - **Tag each charter with confidence, not just provenance** — a low-confidence charter (sparse or
   ambiguous source) **downgrades any review that depends on it to "flag for human intent input,"
   never opine.** Confident-but-wrong findings from bad charters are the whole approach's central
@@ -213,7 +227,7 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
   (one that resolves a high-blast True-delta *and* cascades to settle several downstream findings
   beats a leaf clarification). The dial = how far down the VOI-ranked queue you go, so low-appetite
   still gets the **highest-leverage** questions, not merely fewer.
-- **Questions are symmetric** — any of the four charters may move, **including Stated**. The tempting
+- **Questions are symmetric** — any charter may move, **including Stated**. The tempting
   "here's where your code violates your intent, shall we fix the code?" silently anoints Stated as
   ground truth and throws away the entire True-charter payload. A question resolves to any of:
   *this side wins / that side wins / rewrite both to a third thing / leave open.*
@@ -226,9 +240,11 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 
 ## Ties to existing machinery (reuse, don't rebuild)
 
-- **`intent_checkpoint` upgrade** — capture the goal **graph + edges** (the four charters with
-  provenance + the ceiling meta-intent), not a flat intent list. This seeds the charter
-  layer.
+- **`intent_checkpoint` carries the CEILING only** — the consent meta-intent that seeds the charter
+  layer. Charters, teleologies, deltas and the goal graph live on `charter_register.json` (the
+  OUTPUT artifact); embedding them back on the checkpoint would create a staleness cycle with the
+  checkpoint the register depends on (the never-written checkpoint embeds were deleted 2026-08-06,
+  design resolution 4).
 - **Charter-clarification reuses the clarification-pause *pattern*, NOT remediate's
   `ClarificationRequest` type or `waiting_for_clarification` status.** Charter-alignment questions are
   symmetric charter-pair arbitrations (VOI-ranked, risk-gated) resolved by an inline symmetric answer
@@ -249,7 +265,10 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 
 - **/init as the review mechanism** — wrong genre (distill-to-durable-doc vs bounded adversarial
   findings). Only its negative-constraint discipline and cross-file targeting transfer.
-- **Reconciling the four charters, or the decompositions, into one truth** — the deltas are the
-  product; a merge destroys them.
+- **Reconciling the charters, or the decompositions, into one truth** — the deltas are the
+  product; a merge that DESTROYS them is rejected. (The miner's triangulated telos is in-design
+  precisely because it is not that: a downstream estimate held BESIDE the charters and deltas, a
+  lead the owner reacts to — never a replacement any consumer keys on. Settled at the resolution-4
+  design check, 2026-08-05/06.)
 - **A separate "independent vs guided" knob** — it collapses into the ceiling.
 - **Assuming Stated is ground truth** — it forfeits the highest-value findings.

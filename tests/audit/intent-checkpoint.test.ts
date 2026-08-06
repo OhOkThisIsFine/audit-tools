@@ -11,6 +11,7 @@ import { buildPacketPrompt } from "../../src/audit/cli/dispatch.js";
 import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { ARTIFACT_DEFINITIONS } from "../../src/audit/io/artifacts.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { ObligationState } from "../../src/audit/types/auditState.js";
 import type { CoverageMatrix, CoverageFileRecord } from "../../src/audit/types.js";
@@ -39,6 +40,7 @@ function settleIntentBaseline(bundle: ArtifactBundle): ArtifactBundle {
 // so a test can assert the obligation AFTER the Phase-C charter pass.
 function omittedCharterRegister(): CharterRegister {
   return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
     generated_at: "2026-01-01T00:00:00.000Z",
     target: "charter",
     ceiling: { rung: "shallow" },
@@ -47,6 +49,8 @@ function omittedCharterRegister(): CharterRegister {
     goal_graph: { nodes: [], edges: [] },
     deltas: [],
     findings: [],
+    triangulated: [],
+    disagreement: [],
     validation_issues: [],
   };
 }
@@ -350,50 +354,9 @@ await test("validateArtifactBundle rejects a checkpoint missing a required key",
 });
 
 // ── Phase A: conceptual charter spine gate ──────────────────────────────────
-
-await test("validateArtifactBundle accepts a checkpoint carrying well-formed charters", () => {
-  const issues = validateArtifactBundle({
-    intent_checkpoint: {
-      ...validCheckpoint(),
-      design_review: {
-        conceptual_depth: "shallow",
-        charters: [
-          {
-            charter_id: "s1",
-            kind: "stated",
-            purpose: "the pipeline exists to extract max value from finite budgets",
-            provenance: [{ kind: "doc", ref: "docs/HANDOFF.md" }],
-            confidence: "high",
-          },
-        ],
-      },
-    },
-  }).filter((i) => JSON.stringify(i).includes("charters"));
-  expect(issues.length).toBe(0);
-});
-
-await test("validateArtifactBundle emits an issue for a gate-dropped (non-falsifiable) `true` charter", () => {
-  const issues = validateArtifactBundle({
-    intent_checkpoint: {
-      ...validCheckpoint(),
-      design_review: {
-        charters: [
-          {
-            charter_id: "t1",
-            kind: "true",
-            purpose: "you want a personal-finance product, not a tax calculator",
-            provenance: [],
-            confidence: "medium",
-            nominated_alternative: "Quicken",
-            // nominated_cost intentionally omitted → non-falsifiable → dropped
-          },
-        ],
-      },
-    },
-  }).filter((i) => JSON.stringify(i).includes("charters"));
-  expect(issues.length).toBe(1);
-  expect(JSON.stringify(issues[0])).toContain("t1");
-});
+// Retired by design resolution 4: charters no longer embed in the checkpoint.
+// They live on charter_register.json (the output artifact) to avoid a staleness
+// cycle. The schema now uses .strict() on design_review, rejecting extra fields.
 
 // ── A2: consume the accepted scope ──────────────────────────────────────────
 

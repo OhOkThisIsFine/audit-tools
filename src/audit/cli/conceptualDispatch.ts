@@ -83,8 +83,15 @@ export function resolveConceptualReviewSettings(
 ): ConceptualReviewSettings {
   const checkpoint = bundle.intent_checkpoint?.design_review;
   const cfg = sessionConfig.design_review;
-  const flagForHuman = (checkpoint?.charters ?? []).some(
-    (charter) => charterReviewDisposition(charter) === "flag_for_human",
+  // A low-confidence charter downgrades the dependent review to flag-for-human
+  // (charterReviewDisposition). Charters live on the REGISTER — the checkpoint
+  // carries only the ceiling as input (its never-written charter embed was
+  // deleted 2026-08-06, design resolution 4).
+  const flagForHuman = (bundle.charter_register?.subsystems ?? []).some(
+    (subsystem) =>
+      subsystem.charters.some(
+        (charter) => charterReviewDisposition(charter) === "flag_for_human",
+      ),
   );
   const conceptualDepth =
     checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow";

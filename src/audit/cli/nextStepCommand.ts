@@ -7,8 +7,10 @@ import {
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
   renderFanoutExecutionLines,
+  writeTextFile,
 } from "audit-tools/shared";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
+import { materializeCharterPacket } from "../orchestrator/charterPackets.js";
 import {
   buildEdgeReasoningPrompt,
   edgeReasoningContentHash,
@@ -696,23 +698,42 @@ async function cmdNextStepBody(
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
     const kinds = charterExtractionKindsForCeiling(ceiling);
-    const laneSpecs = kinds.map((kind) => {
-      const submissionPath = join(
-        artifactsDir,
-        "incoming",
-        `charter-extraction-${kind}.json`,
-      );
-      return {
-        id: `charter_extraction_${kind}`,
-        label: `Charter ${kind} author (blind lane)`,
-        promptFilename: `charter-extraction-${kind}-prompt.md`,
-        resultFilename: `charter-extraction-${kind}.json`,
-        promptText: renderCharterKindLanePrompt(result.bundle, {
-          kind,
-          submissionPath,
-        }),
-      };
-    });
+    // Channel purity is a property of the INPUT (design resolution 4): each
+    // lane gets a tool-materialized evidence packet holding only its channel's
+    // material. Packets are (re)written on every emission — they derive from
+    // the bundle + disk, so re-materializing is idempotent and keeps a resumed
+    // lane's evidence current.
+    const packetPaths: string[] = [];
+    const laneSpecs = await Promise.all(
+      kinds.map(async (kind) => {
+        const submissionPath = join(
+          artifactsDir,
+          "incoming",
+          `charter-extraction-${kind}.json`,
+        );
+        const packetPath = join(
+          artifactsDir,
+          "incoming",
+          `charter-extraction-${kind}-packet.md`,
+        );
+        await writeTextFile(
+          packetPath,
+          await materializeCharterPacket({ root, bundle: result.bundle, kind }),
+        );
+        packetPaths.push(packetPath);
+        return {
+          id: `charter_extraction_${kind}`,
+          label: `Charter ${kind} author (blind lane)`,
+          promptFilename: `charter-extraction-${kind}-prompt.md`,
+          resultFilename: `charter-extraction-${kind}.json`,
+          promptText: renderCharterKindLanePrompt(result.bundle, {
+            kind,
+            submissionPath,
+            packetPath,
+          }),
+        };
+      }),
+    );
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       lanes: laneSpecs,
@@ -778,10 +799,9 @@ async function cmdNextStepBody(
         "",
       ].join("\n"),
       access: {
-        read_paths: [
-          ...fanout.readPaths,
-          join(artifactsDir, "structure_decomposition.json"),
-        ],
+        // Prompts + packets only: the lanes' whole input is materialized, so no
+        // repo/artifact read grant exists to leak another channel's evidence.
+        read_paths: [...fanout.readPaths, ...packetPaths],
         write_paths: fanout.writePaths,
       },
     });

@@ -21,8 +21,10 @@ intake
   → intent_equivalence      [host_delegation for a prose-only delta; every other arm
                              (baseline stamp, gate-version stale, structured delta)
                              resolves deterministically — DD-9]
-  → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling]
-  → charter_delta           [host_delegation, independent delta-miner over the Phase-C.1 charters]
+  → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling;
+                             three blind estimator lanes fed channel-pure packets]
+  → charter_delta           [host_delegation, independent delta-miner + triangulation over
+                             the Phase-C.1 charters; True nominations at deepest]
   → design_review × 2       [parallel host_delegation: contract + conceptual]
   → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
   → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
@@ -130,33 +132,44 @@ design of record in
 ## Charter extraction
 
 The charter layer of the conceptual design review, and the first phase that
-spends LLM judgment. For each confident subsystem the structure decomposition
-surfaced, the reviewer holds **four charters** — *Stated* (what the user
-expressed), *Inferred* (the model's read of that intent), *Revealed* (what the
-code actually optimizes for), and *True* (the ideal the user may not have
-articulated) — stated in terms of the subsystem's telos, never its mechanism. The
-four are deliberately not reconciled; the value is in their pairwise deltas, each
-routed to whoever can act on it: an unstated assumption to a clarification prompt,
-spec drift to the remediator, and a wrong-goal provocation to the human.
+spends LLM judgment. Three blind lanes each author one channel-pure **estimator**
+of the code's telos — *Stated* (testimony: docs + extracted comments),
+*Structural* (intent frozen into organization: file tree, declarations, import
+graph — no bodies, docs, or comments), and *Revealed* (behavior: comment-stripped
+bodies) — each stated in terms of the telos, never mechanism, and each fed a
+tool-materialized evidence packet holding ONLY its channel, so blindness is a
+property of the input rather than an instruction. Every lane self-organizes a
+leveled teleology whose nodes carry file scopes; the tool joins the lanes to each
+other and to the structure decomposition (a hint, not a forced node list) by
+file-set overlap. The channels are deliberately not reconciled; the value is in
+their channel-pair deltas, each routed to whoever can act on it: doc rot and
+says/does drift to the remediator, an architecture betrayed by its implementation
+to a clarification prompt, and a wrong-goal provocation to the human.
 
-The division of labour is strict: the LLM contributes only judgment (the four
-charters and the deltas it reads between them); the tool owns enforcement. It
-assigns stable charter and delta ids, derives each delta's kind and routing from
-its charter pair against a fixed routing table rather than host discretion, and
-grounds every submitted subsystem against the decomposition scaffold — a subsystem
-the deterministic layer never found is an invented boundary and is dropped. The
-*True* charter carries the hardest gates, because "what you really want is X" is
-the canonical over-confident failure: a True nomination must name a concrete
-alternative and a concrete cost or it is dropped, it is never asserted as a
-verdict, and it routes only to the human. A low-confidence charter likewise
-downgrades any delta that depends on it to a human-intent flag rather than an
-opinion. Its depth is gated by the intent-checkpoint ceiling — the consent dial
-that governs how far up the premise stack the review is allowed to reach.
+The division of labour is strict: the LLM contributes only judgment (each lane's
+teleology; later the miner's deltas); the tool owns enforcement. It grounds every
+file scope against the repo universe — a scope citing files the repo does not
+contain refuses the lane — performs the overlap join, assigns stable charter and
+delta ids, and derives each delta's kind and routing from its channel pair
+against a fixed routing table rather than host discretion. The independent
+delta-miner (a later pass — no author marks its own homework) additionally
+distills a **triangulated telos** per subsystem — a unified opinion the owner
+reacts to, a lead beside the deltas, never a reconciliation — and, at the
+`deepest` ceiling only, may nominate a *True* charter. True carries the hardest
+gates, because "what you really want is X" is the canonical over-confident
+failure: a nomination must name a concrete alternative and a concrete cost or it
+is dropped, it is never asserted as a verdict, and it routes only to the human.
+A low-confidence charter likewise downgrades any delta that depends on it to a
+human-intent flag rather than an opinion. Depth is gated by the intent-checkpoint
+ceiling — the consent dial that governs how far up the premise stack the review
+is allowed to reach.
 
-Surviving deltas are persisted to `charter_register.json` and surfaced as finding
-*leads* under the architecture lens — provocations for the owner to judge, never
-verdicts. The four charters, the routing table, the gates, and the ceiling dial
-are specified in full in
+Surviving deltas are persisted to `charter_register.json` — with the per-kind
+teleologies, the triangulated teloses, and the tool-counted per-channel-pair
+disagreement density — and surfaced as finding *leads* under the architecture
+lens — provocations for the owner to judge, never verdicts. The estimator
+channels, the routing table, the gates, and the ceiling dial are specified in
+full in
 [`conceptual-design-review-design.md`](conceptual-design-review-design.md).
 
 ## Design review (two parallel passes)

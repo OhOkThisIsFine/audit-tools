@@ -496,6 +496,56 @@ override), eleven binding constraints.**
   exist — compile-red, not behavior-red). V2/V3 clean confirmed; V4/V6/V7 adopted as constraints
   1/3/8.
 
+**IMPLEMENTED 2026-08-06** under all eleven constraints, owner go received with a design gloss
+(the telos is a unified opinion the owner REACTS to; deltas are leads that also say which parts of
+the triangulation need clarification — so the telos + tool-counted disagreement density render
+beside the clarification questions). Mechanisms of record:
+
+- **Shared core** (`charterExtraction.ts` v2): teleology-first lane submission (`{nodes}` — a node
+  = charter fields + `premise_height` + `files`, composed from `TeleologyNodeSchema`); universe
+  grounding (unknown-path scopes drop at assembly AND refuse the lane whole at the chokepoint);
+  deterministic join — best-overlap hint mapping (tie → lexicographically first hint id), residual
+  union-find on any shared file across kinds, unit id = hint id or first residual file (provably
+  collision-free: a residual scope contains no hint member, and a hint id IS a hint member);
+  per-unit per-kind best-overlap charter selection with full teleologies persisted;
+  `DELTA_ROUTES` v2 (`doc_rot` stated|structural→remediator/low; `says_does_drift`
+  stated|revealed→remediator/medium; `architecture_betrayal` structural|revealed→
+  clarification/medium; `wrong_goal` any|true→human/high); `assembleDeltas` gains
+  `allowTrueNominations` (rung-keyed at the executor — preserving the retired lane's bare-deepest
+  semantics; `explicit_opt_in` stays the capture-time contract), True nominations gate through
+  `applyTrueCharterGate` at the miner's ingest, `triangulated` teloses validate node membership
+  (dup → keep-first + issue), `disagreement` density is tool-counted per unit per canonical pair.
+- **Scope-by-feeding** (`charterPackets.ts`): per-kind evidence packets (stated = doc universe +
+  `extractCommentText` per member; structural = member tree + member-member dependency edges +
+  indent-zero declaration-line heuristic over stripped source, explicitly labeled a lead;
+  revealed = `stripCommentText` bodies), bounded 6k/file + 150k/packet with honest omitted lists;
+  `true` packet request throws. The comment grammar is single-sourced: `scanCommentSpans` is the
+  one walker, extract/strip are span consumers (`commentDecomposition.ts`). Read-set single-sourced
+  (constraint 6): `charterPacketReadSet` feeds both the materializer and `charterReadFileSlice`;
+  `memberDependencyEdgeLines` feeds both the structural packet and the NEW `graph_bundle.json` DAG
+  edge + member-scoped slice (found at implementation: enrichment-merged edges changed packet
+  content with no re-stale — the edge closes it, the slice keeps outside-member churn from
+  over-firing).
+- **Lanes**: three estimator lanes at every charter ceiling (`charter-extraction-{stated,
+  structural,revealed}.json` + `-packet.md`); chokepoint validates kind purity + scope grounding
+  per lane (quarantine + re-emit naming the lane); packets re-materialize on every emission and
+  unlink with the consumed submissions; `access.read_paths` = prompts + packets only.
+- **Migration** (constraint 1): register stamped `charter-register/v2` with the DISCARD read
+  policy wired in `loadArtifactBundle` (v1/unstamped degrades to absent → the obligation
+  rebuilds); checkpoint's never-written `design_review.charters`/`goal_graph` embeds DELETED with
+  their validation reader (ceiling/attention stay live; `conceptualDispatch.flag_for_human`
+  re-pointed at the register — the real charter home); blast tiers declared
+  (`INTRINSIC_BLAST_TIER`: wrong_goal 3, architecture_betrayal 2, says_does_drift 2, doc_rot 1).
+- **Verification**: red pins flipped green (kept as anchor tests, rename-robust); the old
+  "no routing (inferred|revealed)" pin inverted per plan; new coverage — packet channel purity ×3
+  (the gate record's companion assertions), strip/extract partition, declaration heuristic,
+  read-set, version discard-and-rebuild, graph-slice fire/ignore, True consent gate, triangulation
+  validation, disagreement density. Full suite 7,438/0. Pre-commit adversarial review: 4-lens
+  find + per-finding refutation workflow — 5 raw findings, ALL 5 refuted by mechanism (delta_id
+  lastIndexOf parsing, backtick closer regex, collision proof, disagreement sort order, packet
+  unlink timing), two lenses affirmatively clean; the graph_bundle under-stale was caught and
+  fixed by the implementing session before the review ran.
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

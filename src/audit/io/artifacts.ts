@@ -52,6 +52,7 @@ import {
 import type { GraphEdgeCache } from "../extractors/graph.js";
 import {
   AGENT_FEEDBACK_FILENAME,
+  discardOnSchemaVersionMismatch,
   isFileMissingError,
   parseReflectionsNdjson,
   readOptionalJsonFile,
@@ -63,6 +64,7 @@ import {
   writeTextFile,
   type AgentReflection,
 } from "audit-tools/shared";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../types/charterRegister.js";
 import { buildToolingManifest } from "./toolingManifest.js";
 
 // ---------------------------------------------------------------------------
@@ -365,6 +367,21 @@ export async function loadArtifactBundle(
     "intent_checkpoint.json",
     "intent-checkpoint/v1",
   );
+  // charter_register is the one DISCARD-policy artifact (regenerable analysis
+  // state): the v2 taxonomy rename (design resolution 4) means a v1/unstamped
+  // register read under v2 semantics silently misroutes every persisted
+  // `inferred` value, and the content-keyed staleness DAG cannot see a
+  // code-taxonomy change — so a stale register degrades to ABSENT and the
+  // extraction obligation rebuilds it (its upstream inputs all still exist).
+  const charterRegister = discardOnSchemaVersionMismatch(
+    bundle.charter_register,
+    CHARTER_REGISTER_SCHEMA_VERSION,
+  );
+  if (charterRegister === undefined) {
+    delete bundle.charter_register;
+  } else {
+    bundle.charter_register = charterRegister;
+  }
   // agent-feedback.jsonl is appended by workers (opt-in reflections), never
   // written by the orchestrator. Parse leniently: malformed lines are skipped,
   // a present-but-unusable file is just an empty list. Synthesis surfaces the

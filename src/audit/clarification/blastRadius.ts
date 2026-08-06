@@ -11,7 +11,7 @@
 // (telos statements + serves-edges), no IO, no LLM. Exported as an importable
 // primitive so phase-e can reuse the same ranking substrate.
 
-import type { GoalGraph } from "audit-tools/shared";
+import type { CharterDelta, GoalGraph } from "audit-tools/shared";
 
 /**
  * Blast radius of a goal node = the size of its transitive PARENT closure — every
@@ -45,21 +45,34 @@ export function goalBlastRadius(graph: GoalGraph, nodeId: string): number {
 }
 
 /**
+ * The declared intrinsic blast tier per delta kind (design-check resolution-4
+ * constraint 3: the tier table rides the taxonomy, single-sourced here). A
+ * `wrong_goal` provocation is intrinsically the highest-blast (it challenges the
+ * telos); `says_does_drift` and `architecture_betrayal` challenge a channel's
+ * account of the subsystem (mid); `doc_rot` is testimony-vs-naming housekeeping
+ * (lowest).
+ */
+const INTRINSIC_BLAST_TIER: Record<CharterDelta["kind"], number> = {
+  wrong_goal: 3,
+  architecture_betrayal: 2,
+  says_does_drift: 2,
+  doc_rot: 1,
+};
+
+/**
  * Resolve the blast radius for a delta whose subsystem maps to a goal node. When a
  * delta's node is not present in the goal graph (the host supplied no DAG, or the
  * subsystem was never linked to a goal), fall back to the delta KIND's intrinsic
- * blast tier — a `wrong_goal` provocation is intrinsically the highest-blast (it
- * challenges the telos), `spec_drift` is mid, an `unstated_assumption` the lowest.
- * This keeps ranking meaningful even before a goal graph exists (the common
- * conversation-first default), and lets a real graph refine it when present.
+ * blast tier. This keeps ranking meaningful even before a goal graph exists (the
+ * common conversation-first default), and lets a real graph refine it when
+ * present.
  */
 export function deltaBlastRadius(
   graph: GoalGraph,
   goalNodeId: string | undefined,
-  deltaKind: "unstated_assumption" | "spec_drift" | "wrong_goal",
+  deltaKind: CharterDelta["kind"],
 ): number {
-  const intrinsic =
-    deltaKind === "wrong_goal" ? 3 : deltaKind === "spec_drift" ? 2 : 1;
+  const intrinsic = INTRINSIC_BLAST_TIER[deltaKind];
   if (!goalNodeId) return intrinsic;
   const graphed = goalBlastRadius(graph, goalNodeId);
   // The graph reach REFINES the intrinsic tier upward, never downward: a

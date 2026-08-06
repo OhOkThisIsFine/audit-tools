@@ -73,16 +73,29 @@ function syntaxFor(path: string): CommentSyntax {
   return SYNTAX_BY_EXT[extensionOf(path)] ?? C_FAMILY;
 }
 
+/** One comment span: outer offsets include the markers, inner offsets exclude them. */
+interface CommentSpan {
+  outerStart: number;
+  outerEnd: number;
+  innerStart: number;
+  innerEnd: number;
+}
+
 /**
- * Extract concatenated comment text from source, honoring the file's comment
- * syntax and skipping string literals (single/double/backtick, backslash-escaped)
- * so a comment marker inside a string is not misread. A single-pass char scanner:
+ * Scan a source file for its comment spans, honoring the file's comment syntax
+ * and skipping string literals (single/double/backtick, backslash-escaped) so a
+ * comment marker inside a string is not misread. A single-pass char scanner:
  * normal → string → line-comment → block-comment. Degrades gracefully (an
  * unterminated block just consumes to EOF).
+ *
+ * The ONE home of the comment grammar walk: `extractCommentText` (the stated
+ * channel's evidence) and `stripCommentText` (the revealed channel's feed) are
+ * both thin consumers of these spans, so extract and strip can never disagree on
+ * what a comment is.
  */
-export function extractCommentText(source: string, path: string): string {
+function scanCommentSpans(source: string, path: string): CommentSpan[] {
   const syntax = syntaxFor(path);
-  const out: string[] = [];
+  const spans: CommentSpan[] = [];
   const n = source.length;
   let i = 0;
 
@@ -121,9 +134,15 @@ export function extractCommentText(source: string, path: string): string {
     for (const [open, close] of syntax.block) {
       if (startsWith(open)) {
         const end = source.indexOf(close, i + open.length);
-        const stop = end === -1 ? n : end;
-        out.push(source.slice(i + open.length, stop));
-        i = end === -1 ? n : end + close.length;
+        const innerEnd = end === -1 ? n : end;
+        const outerEnd = end === -1 ? n : end + close.length;
+        spans.push({
+          outerStart: i,
+          outerEnd,
+          innerStart: i + open.length,
+          innerEnd,
+        });
+        i = outerEnd;
         matchedBlock = true;
         break;
       }
@@ -136,7 +155,12 @@ export function extractCommentText(source: string, path: string): string {
       if (startsWith(marker)) {
         const nl = source.indexOf("\n", i);
         const stop = nl === -1 ? n : nl;
-        out.push(source.slice(i + marker.length, stop));
+        spans.push({
+          outerStart: i,
+          outerEnd: stop,
+          innerStart: i + marker.length,
+          innerEnd: stop,
+        });
         i = stop;
         matchedLine = true;
         break;
@@ -147,7 +171,38 @@ export function extractCommentText(source: string, path: string): string {
     i += 1;
   }
 
-  return out.join("\n");
+  return spans;
+}
+
+/** Extract concatenated comment text from source (the spans' inner slices). */
+export function extractCommentText(source: string, path: string): string {
+  return scanCommentSpans(source, path)
+    .map((span) => source.slice(span.innerStart, span.innerEnd))
+    .join("\n");
+}
+
+/**
+ * The complement of `extractCommentText`: the source with every comment span
+ * removed (markers included) — the revealed channel's comment-blind feed. Shares
+ * the span scanner, so the two views partition the file identically. Blank-line
+ * runs left behind by removed comments are collapsed to one so the stripped view
+ * doesn't leak comment POSITIONS as blank-line negative space.
+ */
+export function stripCommentText(source: string, path: string): string {
+  const spans = scanCommentSpans(source, path);
+  if (spans.length === 0) return source;
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const span of spans) {
+    parts.push(source.slice(cursor, span.outerStart));
+    cursor = span.outerEnd;
+  }
+  parts.push(source.slice(cursor));
+  return parts
+    .join("")
+    .split("\n")
+    .filter((line, idx, all) => line.trim().length > 0 || (idx > 0 && all[idx - 1]!.trim().length > 0))
+    .join("\n");
 }
 
 /** Normalize a repo path to forward slashes for matching. */

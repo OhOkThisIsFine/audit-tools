@@ -23,6 +23,9 @@ const { computeStaleArtifacts } = await import(
 const { METADATA_SCHEMA_VERSION } = await import(
   "../../src/audit/types/artifactMetadata.js"
 );
+const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
+  "../../src/audit/types/charterRegister.js"
+);
 
 /** A full-shape consensus/contested node, defaults matching the base fixture's sole member. */
 function consensusNode(over: Partial<DecomposedNode> = {}): DecomposedNode {
@@ -55,6 +58,7 @@ function makeStructureDecomposition(
 /** A full-shape `charter_register.json` in its "omitted" (no charter layer requested) form. */
 function makeCharterRegister(over: Partial<CharterRegister> = {}): CharterRegister {
   return {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
     generated_at: "2026-07-23T00:00:00Z",
     target: "charter",
     ceiling: { rung: "deep" },
@@ -63,6 +67,8 @@ function makeCharterRegister(over: Partial<CharterRegister> = {}): CharterRegist
     goal_graph: { nodes: [], edges: [] },
     deltas: [],
     findings: [],
+    triangulated: [],
+    disagreement: [],
     validation_issues: [],
     ...over,
   };
@@ -97,19 +103,71 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   };
 }
 
-test("the registry is contract-pinned: exactly charter_register's two edges", () => {
+test("the registry is contract-pinned: exactly charter_register's three edges", () => {
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS).sort()).toEqual([
     "charter_register.json",
   ]);
+  // graph_bundle joined at design resolution 4: the STRUCTURAL channel's packet
+  // embeds member-member dependency edges, so enrichment-merged edges must
+  // re-stale the register (sliced to the member-member set the packet renders).
   expect(
     Object.keys(DEPENDENCY_SLICE_PROJECTIONS["charter_register.json"]!).sort(),
-  ).toEqual(["repo_manifest.json", "structure_decomposition.json"]);
+  ).toEqual([
+    "graph_bundle.json",
+    "repo_manifest.json",
+    "structure_decomposition.json",
+  ]);
   expect(
     hasDependencySliceProjection("charter_register.json", "intent_checkpoint.json"),
   ).toBe(false);
   expect(
     computeDependencySliceHash("systemic_challenge.json", "repo_manifest.json", makeBundle()),
   ).toBeUndefined();
+});
+
+test("graph slice fires on a member-member edge change, ignores outside-member and node_metrics churn", () => {
+  const base = makeBundle();
+  const hash = (bundle: ArtifactBundle) =>
+    computeDependencySliceHash("charter_register.json", "graph_bundle.json", bundle);
+  const withGraph = (graphs: NonNullable<ArtifactBundle["graph_bundle"]>["graphs"]): ArtifactBundle => ({
+    ...base,
+    graph_bundle: { graphs },
+  });
+  const baseline = hash(
+    withGraph({ imports: [{ from: "src/a.ts", to: "src/b.ts", kind: "import" }] }),
+  );
+  // New member-member edge (e.g. analyzer enrichment) → fires.
+  expect(
+    hash(
+      withGraph({
+        imports: [
+          { from: "src/a.ts", to: "src/b.ts", kind: "import" },
+          { from: "src/b.ts", to: "src/a.ts", kind: "call" },
+        ],
+      }),
+    ),
+  ).not.toBe(baseline);
+  // An edge to a non-member → invisible to the packet → no fire.
+  expect(
+    hash(
+      withGraph({
+        imports: [
+          { from: "src/a.ts", to: "src/b.ts", kind: "import" },
+          { from: "src/a.ts", to: "src/zz.ts", kind: "import" },
+        ],
+      }),
+    ),
+  ).toBe(baseline);
+  // node_metrics churn → invisible → no fire.
+  expect(
+    hash({
+      ...base,
+      graph_bundle: {
+        graphs: { imports: [{ from: "src/a.ts", to: "src/b.ts", kind: "import" }] },
+        node_metrics: { "src/a.ts": {} },
+      },
+    }),
+  ).toBe(baseline);
 });
 
 test("repo slice ignores non-member/non-doc CONTENT churn; fires on member content, doc content, membership, path-set changes, and oversized-file size", () => {

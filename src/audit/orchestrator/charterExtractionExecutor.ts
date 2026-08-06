@@ -1,6 +1,9 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { CharterRegister } from "../types/charterRegister.js";
+import {
+  CHARTER_REGISTER_SCHEMA_VERSION,
+  type CharterRegister,
+} from "../types/charterRegister.js";
 import {
   assembleCharters,
   type CharterSubmission,
@@ -67,6 +70,7 @@ export function runCharterExtractionExecutor(
 
   if (!submission || !ceilingRequestsCharters(ceiling)) {
     const omitted: CharterRegister = {
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at,
       target: "charter",
       ceiling,
@@ -75,6 +79,8 @@ export function runCharterExtractionExecutor(
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
     };
     return {
@@ -87,19 +93,32 @@ export function runCharterExtractionExecutor(
     };
   }
 
-  const assembled = assembleCharters(submission, consensusMembers(bundle));
+  // The repo universe every teleology node's file scope must ground against —
+  // the manifest's complete path set (the host cannot conjure files the repo
+  // does not contain).
+  const universe = new Set(
+    (bundle.repo_manifest?.files ?? []).map((file) => file.path),
+  );
+  const assembled = assembleCharters(submission, {
+    hint: consensusMembers(bundle),
+    universe,
+  });
 
   const register: CharterRegister = {
+    schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
     generated_at,
     target: "charter",
     ceiling,
     subsystems: assembled.subsystems,
-    // Deltas + goal_graph are the INDEPENDENT delta-miner's product (Phase C.2);
-    // left empty here and flagged `deltas_pending` so charter_delta_current owes a
-    // turn whenever this pass produced ≥1 subsystem to mine.
+    // Deltas + goal_graph + triangulation are the INDEPENDENT delta-miner's
+    // product (Phase C.2); left empty here and flagged `deltas_pending` so
+    // charter_delta_current owes a turn whenever this pass produced ≥1 subsystem
+    // to mine.
     goal_graph: { nodes: [], edges: [] },
     deltas: [],
     findings: [],
+    triangulated: [],
+    disagreement: [],
     validation_issues: assembled.validation_issues,
     deltas_pending: assembled.subsystems.length > 0,
   };

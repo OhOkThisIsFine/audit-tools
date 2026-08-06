@@ -402,7 +402,7 @@ export function renderCharterContext(bundle: ArtifactBundle): string {
   return [
     "### Subsystem charters (what each part is FOR)",
     "",
-    "The deterministic charter layer recorded each confident subsystem's purpose in *telos* terms (what it exists to achieve), across the four charter families — `stated` (user-expressed), `inferred` (the model's read of that intent), `revealed` (what the code actually optimizes for), `true` (the ideal it should serve). Opine PER CHARTER: judge whether the design actually delivers the purpose each subsystem claims, and surface where a subsystem's structure works against its own charter. Where a charter is marked LOW-CONFIDENCE, flag the gap for human intent confirmation instead of opining.",
+    "The charter layer recorded each confident subsystem's purpose in *telos* terms (what it exists to achieve), across the channel-pure estimator charters — `stated` (testimony: docs + comments), `structural` (intent frozen into the code's organization), `revealed` (what the code actually optimizes for) — plus, when nominated, `true` (the ideal it should serve). Opine PER CHARTER: judge whether the design actually delivers the purpose each subsystem claims, and surface where a subsystem's structure works against its own charter. Where a charter is marked LOW-CONFIDENCE, flag the gap for human intent confirmation instead of opining.",
     "",
     ...subsystemBlocks,
     "",

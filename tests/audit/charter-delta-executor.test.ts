@@ -1,6 +1,7 @@
 import { test, expect, describe } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import type {
   Charter,
   CharterConfidence,
@@ -41,6 +42,7 @@ function bundleWith(
       ],
     },
     charter_register: {
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "charter",
       ceiling: { rung: "deep" },
@@ -49,11 +51,14 @@ function bundleWith(
           node_id: "src/a.ts",
           members: ["src/a.ts", "src/b.ts"],
           charters: [charter("src/a.ts", "stated"), charter("src/a.ts", "revealed")],
+          teleologies: {},
         },
       ],
       goal_graph: { nodes: [], edges: [] },
       deltas: [],
       findings: [],
+      triangulated: [],
+      disagreement: [],
       validation_issues: [],
       deltas_pending: true,
       ...(overrides.charter_register ?? {}),
@@ -71,6 +76,8 @@ describe("runCharterDeltaExecutor — ingest path", () => {
           deltas: [{ pair: ["stated", "revealed"], summary: "code drifted from intent" }],
         },
       ],
+      triangulated: [],
+      true_nominations: [],
       goal_graph: {
         nodes: [{ node_id: "g1", premise_height: 0, statement: "g1" }],
         edges: [],
@@ -80,10 +87,10 @@ describe("runCharterDeltaExecutor — ingest path", () => {
     expect(run.artifacts_written).toEqual(["charter_register.json"]);
     const reg = run.updated.charter_register!;
     expect(reg.deltas).toHaveLength(1);
-    expect(reg.deltas[0].kind).toBe("spec_drift");
+    expect(reg.deltas[0].kind).toBe("says_does_drift");
     expect(reg.deltas[0].routed_to).toBe("remediator");
     expect(reg.findings).toHaveLength(1);
-    expect(reg.findings[0].category).toBe("charter_delta:spec_drift");
+    expect(reg.findings[0].category).toBe("charter_delta:says_does_drift");
     expect(reg.findings[0].affected_files.map((f) => f.path)).toEqual([
       "src/a.ts",
       "src/b.ts",
@@ -97,13 +104,15 @@ describe("runCharterDeltaExecutor — ingest path", () => {
 
   test("appends its own gate drops to the register's existing validation issues", () => {
     const submission: CharterDeltaSubmission = {
-      // inferred|revealed has no routing in the design's table → dropped.
       subsystems: [
         { node_id: "src/a.ts", deltas: [{ pair: ["stated", "revealed"], summary: "gap" }] },
       ],
+      triangulated: [],
+      true_nominations: [],
     };
     const bundle = bundleWith({
       charter_register: {
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         generated_at: "2026-01-01T00:00:00.000Z",
         target: "charter",
         ceiling: { rung: "deep" },
@@ -112,11 +121,14 @@ describe("runCharterDeltaExecutor — ingest path", () => {
             node_id: "src/a.ts",
             members: ["src/a.ts", "src/b.ts"],
             charters: [charter("src/a.ts", "stated"), charter("src/a.ts", "revealed")],
+            teleologies: {},
           },
         ],
         goal_graph: { nodes: [], edges: [] },
         deltas: [],
         findings: [],
+        triangulated: [],
+        disagreement: [],
         validation_issues: ["a pre-existing extraction gate drop"],
         deltas_pending: true,
       },
@@ -151,6 +163,7 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
   test("a not-pending settle carries NO dead-miner mark (nothing was awaited)", () => {
     const bundle = bundleWith({
       charter_register: {
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         generated_at: "2026-01-01T00:00:00.000Z",
         target: "charter",
         ceiling: { rung: "shallow" },
@@ -159,6 +172,8 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
         goal_graph: { nodes: [], edges: [] },
         deltas: [],
         findings: [],
+        triangulated: [],
+        disagreement: [],
         validation_issues: [],
       },
     });
@@ -169,6 +184,7 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
   test("a register not awaiting deltas is settled unchanged (deltas_pending false)", () => {
     const bundle = bundleWith({
       charter_register: {
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
         generated_at: "2026-01-01T00:00:00.000Z",
         target: "charter",
         ceiling: { rung: "shallow" },
@@ -177,10 +193,12 @@ describe("runCharterDeltaExecutor — omit / no-submission path", () => {
         goal_graph: { nodes: [], edges: [] },
         deltas: [],
         findings: [],
+        triangulated: [],
+        disagreement: [],
         validation_issues: [],
       },
     });
-    const run = runCharterDeltaExecutor(bundle, { subsystems: [], no_deltas: true });
+    const run = runCharterDeltaExecutor(bundle, { subsystems: [], no_deltas: true, triangulated: [], true_nominations: [] });
     expect(run.updated.charter_register!.deltas_pending).toBe(false);
     expect(run.updated.charter_register!.status).toBe("omitted");
   });

@@ -1300,12 +1300,18 @@ export async function handleCharterExtractionBranch(
   }
   // Per-kind blind lanes (design resolution 2): one submission file per kind,
   // each validated at THIS chokepoint — schema shape + kind purity (a lane may
-  // only carry its own kind; anything else is a mis-routed submission). An
-  // invalid lane is quarantined loudly and the step re-emits naming it; valid
-  // lanes stay on disk untouched (K-of-N resume), and only when EVERY lane is
-  // present and valid does the tool merge them into the single submission the
-  // executor ingests (`assembleCharters` merges subsystems by node_id).
+  // only carry its own kind; anything else is a mis-routed submission) + scope
+  // grounding (design resolution 4: every teleology node's file scope must be
+  // repo paths — a lane citing files the repo does not contain is refused
+  // whole, naming them, never silently narrowed). An invalid lane is
+  // quarantined loudly and the step re-emits naming it; valid lanes stay on
+  // disk untouched (K-of-N resume), and only when EVERY lane is present and
+  // valid does the tool merge them into the single submission the executor
+  // ingests (`assembleCharters` joins teleologies by file-set overlap).
   const kinds = charterExtractionKindsForCeiling(ceiling);
+  const universe = new Set(
+    (bundle.repo_manifest?.files ?? []).map((file) => file.path),
+  );
   const laneValues = new Map<CharterKind, { value: CharterSubmission; path: string }>();
   let quarantinedAny = false;
   for (const kind of kinds) {
@@ -1313,16 +1319,24 @@ export async function handleCharterExtractionBranch(
     const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
     if (!incoming) continue;
     const laneSchema = CharterSubmissionSchema.superRefine((submission, ctx) => {
-      submission.subsystems.forEach((subsystem, si) => {
-        subsystem.charters.forEach((charter, ci) => {
-          if (charter.kind !== kind) {
-            ctx.addIssue({
-              code: "custom",
-              path: ["subsystems", si, "charters", ci, "kind"],
-              message: `lane '${kind}' may only carry kind '${kind}', got '${charter.kind}'`,
-            });
-          }
-        });
+      submission.nodes.forEach((node, ni) => {
+        if (node.kind !== kind) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["nodes", ni, "kind"],
+            message: `lane '${kind}' may only carry kind '${kind}', got '${node.kind}'`,
+          });
+        }
+        const unknown = node.files.filter((f) => !universe.has(f));
+        if (unknown.length > 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["nodes", ni, "files"],
+            message:
+              `teleology node cites file(s) outside the repo: ${unknown.sort().join(", ")} — ` +
+              "scopes must be repo-relative paths exactly as the evidence packet names them",
+          });
+        }
       });
     });
     const parsed = laneSchema.safeParse(incoming.value);
@@ -1347,7 +1361,7 @@ export async function handleCharterExtractionBranch(
     // would make a later staleness-triggered re-extraction read them as fresh
     // results and silently skip re-authoring.
     const merged: CharterSubmission = {
-      subsystems: kinds.flatMap((kind) => laneValues.get(kind)!.value.subsystems),
+      nodes: kinds.flatMap((kind) => laneValues.get(kind)!.value.nodes),
     };
     const mergedPath = join(params.artifactsDir, "incoming", "charter-extraction.json");
     await writeJsonFile(mergedPath, merged);
@@ -1360,6 +1374,13 @@ export async function handleCharterExtractionBranch(
     await unlink(mergedPath).catch(() => {});
     for (const lane of laneValues.values()) {
       await unlink(lane.path).catch(() => {});
+    }
+    // Evidence packets are consumed inputs like the lane submissions — a stale
+    // packet left behind would feed a later re-extraction yesterday's evidence.
+    for (const kind of kinds) {
+      await unlink(
+        join(params.artifactsDir, "incoming", `charter-extraction-${kind}-packet.md`),
+      ).catch(() => {});
     }
     return { action: "continue" };
   }
@@ -1563,16 +1584,17 @@ export const HOST_GATE_DESCRIPTORS: Record<
   },
   synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
   // Custom: the per-kind blind-lane gate (design resolution 2) — one submission
-  // file per charter kind, each validated (shape + kind purity) and quarantined
-  // loudly per lane, tool-side merge only when every lane is present + valid.
-  // The `true` lane joins at the deepest ceiling.
+  // file per charter kind, each validated (shape + kind purity + scope
+  // grounding) and quarantined loudly per lane, tool-side merge only when every
+  // lane is present + valid. The three estimator channels are the lane set at
+  // every charter-authorizing ceiling; `true` is nominated by the delta miner
+  // at deepest, never a lane (design resolution 4).
   charter_extraction: {
     driven: "custom",
     incomingFiles: [
       "charter-extraction-stated.json",
-      "charter-extraction-inferred.json",
+      "charter-extraction-structural.json",
       "charter-extraction-revealed.json",
-      "charter-extraction-true.json",
     ],
   },
   charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
