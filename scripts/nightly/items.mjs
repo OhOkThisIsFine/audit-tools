@@ -242,7 +242,64 @@ function gitLines(root, args, { okStatuses = [0] } = {}) {
   return out.stdout.split('\n').filter((l) => l.trim() !== '');
 }
 
+// Paths the evidence chain cannot reason about. `absent` is the strongest
+// verdict this module emits — all-absent is what closes an item — and it is
+// justified by GIT evidence: the rename-protection `git grep` and the removal
+// citation both search the TRACKED tree. A file git does not track (a
+// gitignored runtime artifact under `.audit-tools/`, a build output) can
+// therefore only ever fall through to `absent` for reasons that have nothing to
+// do with whether the defect was fixed. It must abstain instead.
+//
+// The RECORD channels are the same error one step earlier: a backlog entry, a
+// dated review, HANDOFF or the inbox QUOTES the code it is about, so a probe
+// aimed at one is probing the record, not the premise. They are already
+// excluded from the rename-protection search below for exactly this reason.
+const RECORD_PATH_PREFIXES = [
+  'docs/backlog',
+  'docs/reviews',
+  'docs/HANDOFF.md',
+  'docs/nightly-inbox.md',
+  '.claude',
+];
+
+function isRecordPath(file) {
+  const norm = file.replace(/\\/g, '/').replace(/^\.\//, '');
+  return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
+}
+
+// `git ls-files --error-unmatch` exits non-zero for an untracked path, so the
+// okStatuses:[0] default already maps "untracked" to null. A git failure is
+// indistinguishable from untracked here, which errs toward abstaining — the
+// safe direction for a verdict that closes items.
+function isTrackedPath(root, file) {
+  return gitLines(root, ['ls-files', '--error-unmatch', '--', file]) !== null;
+}
+
 function evaluateOneProbe(root, probe) {
+  // Refuse the target before reading it: a probe that cannot produce evidence
+  // must not produce the verdict that closes an item.
+  if (isRecordPath(probe.file)) return { state: 'untrackable', reason: 'record_path' };
+  if (!isTrackedPath(root, probe.file)) return { state: 'untrackable', reason: 'untracked' };
+
+  // Negative form (P12): `{ file, absent }` — the string must NOT be in the
+  // file. It expresses the CODE side of a doc-vs-code divergence ("the code
+  // does not yet contain X"). It holds while the string stays absent and flips
+  // to 'appeared' the moment the string lands — direct-read evidence on a
+  // tracked file, no git chain needed (presence is directly observable; only
+  // ABSENCE claims need the rename-protection/citation chain below).
+  if (typeof probe.absent === 'string') {
+    let text = null;
+    try {
+      text = readFileSync(join(root, probe.file), 'utf8');
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') return { state: 'error' };
+      // Tracked but deleted from the worktree: the string is certainly not
+      // there — the condition holds.
+      return { state: 'holds' };
+    }
+    return text.includes(probe.absent) ? { state: 'appeared' } : { state: 'holds' };
+  }
+
   let fileText = null;
   let readErr = null;
   try {
@@ -313,23 +370,35 @@ function evaluateOneProbe(root, probe) {
  */
 export function evaluateProbes(root, item) {
   const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
+  const wellFormedString = (v) => typeof v === 'string' && v.trim() !== '';
   const probes = raw.filter(
     (p) =>
       p &&
-      typeof p.file === 'string' &&
-      p.file.trim() !== '' &&
-      typeof p.contains === 'string' &&
-      p.contains.trim() !== '',
+      wellFormedString(p.file) &&
+      // Exactly one of the two forms: positive `contains` or negative `absent`.
+      (wellFormedString(p.contains) !== wellFormedString(p.absent)) &&
+      (wellFormedString(p.contains) || wellFormedString(p.absent)),
   );
   if (probes.length === 0) return { status: 'unprobed', probes: [] };
 
   const evaluated = probes.map((p) => ({
     file: p.file,
-    contains: p.contains,
+    form: wellFormedString(p.absent) ? 'absent' : 'contains',
+    ...(wellFormedString(p.absent) ? { absent: p.absent } : { contains: p.contains }),
     ...evaluateOneProbe(root, p),
   }));
 
-  const status = evaluated.every((p) => p.state === 'absent') ? 'resolved' : 'open';
+  // A divergence item (any negative-form probe) resolves as soon as EITHER side
+  // moves: the doc-side string vanished ('absent') or the code-side string
+  // landed ('appeared') — the relation the item is about no longer holds
+  // either way. A plain positive-only item keeps the original rule: EVERY
+  // quoted fragment must have verifiably gone away.
+  const hasNegativeForm = evaluated.some((p) => p.form === 'absent');
+  const status = hasNegativeForm
+    ? (evaluated.some((p) => (p.form === 'absent' ? p.state === 'appeared' : p.state === 'absent'))
+      ? 'resolved'
+      : 'open')
+    : (evaluated.every((p) => p.state === 'absent') ? 'resolved' : 'open');
   return { status, probes: evaluated };
 }
 
@@ -356,9 +425,36 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `${raw.length > 0 ? 'the probes present are malformed' : 'none were supplied'})`,
       );
     }
-    const failing = probes.filter((p) => p.state !== 'present');
+    // Structural rule for divergence items (P12): a negative `{file, absent}`
+    // probe expresses only the code side of a relation; without a positive
+    // sibling pinning the doc/prose side, nothing anchors what the item is
+    // ABOUT, and the item could never auto-close off the doc side moving.
+    if (probes.some((p) => p.form === 'absent') && !probes.some((p) => p.form === 'contains')) {
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries only negative {file, absent} ` +
+          `probes. A divergence item needs one probe per SIDE: a {file, contains} probe quoting ` +
+          `the prose/code that asserts the wrong thing, plus the {file, absent} probe on the side ` +
+          `that lacks it.`,
+      );
+    }
+    const failing = probes.filter((p) =>
+      p.form === 'absent' ? p.state !== 'holds' : p.state !== 'present',
+    );
     if (failing.length > 0) {
-      const detail = failing.map((p) => `${p.file} [${p.state}] "${p.contains.slice(0, 60)}"`).join('; ');
+      const untrackable = failing.filter((p) => p.state === 'untrackable');
+      if (untrackable.length > 0) {
+        const detail = untrackable.map((p) => `${p.file} (${p.reason})`).join('; ');
+        throw new Error(
+          `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe whose TARGET carries ` +
+            `no evidence (${detail}). A gitignored runtime artifact under ".audit-tools/", a build ` +
+            `output, or a record file (docs/backlog, docs/reviews, docs/HANDOFF.md, ` +
+            `docs/nightly-inbox.md, .claude) says nothing about whether the defect is fixed. ` +
+            `Quote a fragment from the tracked SOURCE file the fix would touch.`,
+        );
+      }
+      const detail = failing
+        .map((p) => `${p.file} [${p.state}] "${(p.contains ?? p.absent ?? '').slice(0, 60)}"`)
+        .join('; ');
       throw new Error(
         `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe that does not pass at HEAD ` +
           `(${detail}). The premise must be TRUE at creation (status here: ${status}). ` +

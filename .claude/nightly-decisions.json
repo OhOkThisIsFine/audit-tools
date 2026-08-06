@@ -749,7 +749,9 @@
     "answer": "Drop the counts: remove the hand-typed entry counts from both spec docs (and do not pin absolute test-file counts in backlog prose); the contracts enumerate contents, the size is status-noise. No count gate is built.",
     "subject": "Two hand-typed registry counts drifted in one night, in docs that cannot be auto-fixed — add a build check that verifies the number?",
     "path": "scripts/check-doc-code-citations.mjs",
-    "decided_at": "2026-08-06T16:13:27.055Z"
+    "decided_at": "2026-08-06T16:13:27.055Z",
+    "completed_at": "2026-08-06T16:17:56.514Z",
+    "completed_ref": "d2d486c8"
   },
   "d3e50981fd854566": {
     "disposition": "settled",
@@ -770,20 +772,26 @@
     "answer": "Drop the pool names from the HANDOFF routing sentence (llm-relay owns the roster; naming pools here is a standing drift source) AND delete the pool/coding failover defect note — a defect against a lane that no longer exists is a dead record; if failover-past-rate-limit is still real it will resurface against the live pools.",
     "subject": "The handoff routes work through three llm-relay pools that no longer exist — remap them, or drop the pool names?",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-08-06T16:13:36.881Z"
+    "decided_at": "2026-08-06T16:13:36.881Z",
+    "completed_at": "2026-08-06T16:17:56.575Z",
+    "completed_ref": "d2d486c8"
   },
   "4c321d8d2b125e4d": {
     "disposition": "settled",
     "answer": "Delete resolveHostConcurrencyLimit (definition, unconsumed re-export from dispatch.ts, doc-comment mention, and its tests) and drop it from the CLAUDE.md dispatch sentence — the delete-deprecated-paths preference applied literally.",
     "subject": "instruction-file edit: CLAUDE.md documents `resolveHostConcurrencyLimit` as live concurrency machinery, but nothing in src/ calls it — correct the doc, or delete the dead symbol?",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-06T16:13:36.937Z"
+    "decided_at": "2026-08-06T16:13:36.937Z",
+    "completed_at": "2026-08-06T16:17:56.646Z",
+    "completed_ref": "d2d486c8"
   },
   "9a88507e5fe2f6d0": {
     "disposition": "settled",
     "answer": "Rehome all three durable rules (the measured checkJs:true rejection with its 8,903-error figure, the flake-baseline key-move-same-commit warning, and the conversion-assertion-parity script pointer) into durable-traps.md beside the existing conversion claim, then delete the open-bugs entry.",
     "subject": "The test-tree conversion entry is fully shipped, but it is the ONLY home for three durable rules — rehome them and delete it, or keep the entry?",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-06T16:13:36.993Z"
+    "decided_at": "2026-08-06T16:13:36.993Z",
+    "completed_at": "2026-08-06T16:17:56.697Z",
+    "completed_ref": "d2d486c8"
   }
 }

@@ -77,7 +77,7 @@ function premiseStamp(rec) {
   const { status, probes } = evaluateProbes(ROOT, rec);
   if (status === 'unprobed') return 'unprobed';
   if (status === 'resolved') return 'gone';
-  const signalFree = new Set(['bad_path', 'unknown', 'error']);
+  const signalFree = new Set(['bad_path', 'unknown', 'error', 'untrackable']);
   if (probes.every((p) => signalFree.has(p.state))) return 'unprobed';
   return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
 }

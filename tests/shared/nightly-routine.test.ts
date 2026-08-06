@@ -7,6 +7,7 @@
 // became noise. These tests pin the durable half.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -30,14 +31,26 @@ const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
 const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
 
 // Every fixture item carries a probe against this file, because writeOpenItems
-// refuses an item whose premise is not verifiably true at creation.
+// refuses an item whose premise is not verifiably true at creation. The file
+// must be git-TRACKED: P8 refuses a probe target git cannot speak about, so a
+// bare temp dir (no repo) reads as "untrackable" and every write is refused.
 const PROBE_FILE = 'src-probe.txt';
+
+function fixtureGit(cwd: string, ...args: string[]): void {
+  const out = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  if (out.status !== 0) throw new Error(`git ${args.join(' ')}: ${out.stderr}`);
+}
 
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'nightly-'));
   mkdirSync(join(root, '.claude'), { recursive: true });
   writeFileSync(join(root, PROBE_FILE), 'const ANCHOR_PRESENT = 1;\n');
+  fixtureGit(root, 'init', '-q');
+  fixtureGit(root, 'config', 'user.email', 't@example.com');
+  fixtureGit(root, 'config', 'user.name', 't');
+  fixtureGit(root, 'add', PROBE_FILE);
+  fixtureGit(root, 'commit', '-qm', 'probe anchor');
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });

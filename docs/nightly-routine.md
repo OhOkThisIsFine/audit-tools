@@ -199,20 +199,35 @@ shape:
   contract did not list the field the renderer already supported. Offer the real
   alternatives including the do-nothing one; the free-text box behind
   *Something else…* stays available for an answer the routine did not anticipate.
-- `premise_probes[]` is `{ file, contains }` pairs — repo-relative path plus a
-  literal string quoted from that file's **current** content, pinning the fact
-  the item is about (the stale prose, the code line that contradicts it).
-  **Every item carries at least one, and every probe must pass when the item is
-  written** — `writeOpenItems()` refuses the batch otherwise, because a probe
-  that fails at creation means the premise is mis-quoted or already fixed. At
-  presentation, `partitionBySettled` re-evaluates: an item ALL of whose probe
-  strings have vanished is auto-closed as `resolved` instead of surfaced — an
-  answered queue is a fact about the conversation, and the probe is what makes
-  the queue track the CODE (on 2026-07-25, 15 of 21 surfaced items were already
-  fixed at HEAD). Accepted trade-offs: a rename mis-closes, a partial fix
-  mis-holds; pick probe strings accordingly — quote the exact fragment whose
-  disappearance would mean the item is done, not a symbol name likely to
-  survive the fix.
+- `premise_probes[]` pins the fact the item is about, in one of two forms:
+  `{ file, contains }` (a literal string quoted from that file's **current**
+  content — the stale prose, the code line that contradicts it) or
+  `{ file, absent }` (a literal string that must NOT yet be in that file — the
+  code side of a doc-vs-code divergence). **Every item carries at least one,
+  every probe must pass when the item is written** (`contains` present,
+  `absent` genuinely absent) — `writeOpenItems()` refuses the batch otherwise —
+  and **every probe target must be a git-TRACKED source file**: a gitignored
+  runtime artifact or a record file (docs/backlog, docs/reviews, HANDOFF, the
+  inbox, .claude) carries no evidence and is refused at write. An item whose
+  premise is a RELATION between two locations (doc says X, code lacks X)
+  carries one probe per side — `contains` on the side that asserts, `absent`
+  on the side that lacks — and auto-closes when EITHER side moves; an item
+  with only `contains` probes closes when ALL its fragments have verifiably
+  gone. At presentation, `partitionBySettled` re-evaluates and auto-closes
+  `resolved` items instead of surfacing them — an answered queue is a fact
+  about the conversation, and the probe is what makes the queue track the CODE
+  (on 2026-07-25, 15 of 21 surfaced items were already fixed at HEAD).
+  Accepted trade-offs: a rename mis-closes (`contains`) or mis-holds
+  (`absent`); pick probe strings accordingly — quote the exact fragment whose
+  movement would mean the item is done, not a symbol name likely to survive
+  the fix.
+  **Never raise an item whose premise is a hand-typed computed value** (a
+  count, a total, a length): a computed fact has no quotable string on the
+  code side, so no probe form can track it — and the value itself is
+  status-noise the doc philosophy already bans. Remove the stated value as a
+  doc fix (or escalate removing it) instead of asking the owner to correct
+  the number (nightly sol-3 + sol-5 decisions, 2026-08-06: two count items
+  nearly served corrupting corrections after the code moved under them).
 
 Compute `subject_key` with `subjectKey(path, subject)` from
 `scripts/nightly/items.mjs`, where `subject` is the prose in question, never the
