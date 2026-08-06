@@ -51,18 +51,21 @@
   (relay pools + codex; agy unusable for write-tasks). Friction close-out: 19 observations on
   `.audit-tools/audit/friction/run.json`; run story + defect leads in
   [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md) and 8 new
-  `open-bugs.md` entries. **Immediate next:** consume the report — `/remediate-code` against
-  `.audit-tools/audit-findings.json` (mind the open CP-NODE remediation state below before
-  starting a second remediation stream).
+  `open-bugs.md` entries. **Run state + promoted reports DELETED 2026-08-06 on owner instruction**
+  (fresh slate for the next dogfood on v0.36.0); the run story survives in
+  [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
 - **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
   three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
   single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
   duplicate-id refusal resolved as a declared `idDiscipline` policy axis (audit's packet-local draw
   vs remediate's global draw) and the routing predicate split from strict validity
-  (`claimsAuditFindingsContract`). The worktree is removed. The remediation backend still says
-  `implementing` with CP-NODE-1/2/3/5–10 pending; continuation order (CP-NODE-7+1, then 2+3, then
-  the graph-lead boundary) lives in
-  [`graph-derived-findings-remediation-process-review-2026-08-03.md`](reviews/graph-derived-findings-remediation-process-review-2026-08-03.md).
+  (`claimsAuditFindingsContract`). The worktree is removed. **The remediation backend state was
+  DELETED 2026-08-06 on owner instruction** (fresh slate for the next dogfood) — the CP-NODE
+  continuation is closed as a run; the unlanded node diffs still exist on the
+  `remediate-CP-BLOCK-*` branches (1–8 commits each, deliberately NOT deleted), and the
+  continuation order remains recorded in
+  [`graph-derived-findings-remediation-process-review-2026-08-03.md`](reviews/graph-derived-findings-remediation-process-review-2026-08-03.md)
+  if that work is ever resumed.
 - **2026-07-30 defect clusters worked (2026-08-04, `b284bc7a`/`d57480b0`):** JIT/deepening
   partitioning under the planner's soft target (mega-packet head-of-line block gone, shrink trigger
   exists), graceful resumable pause on `maxTransitions`, stderr causes in error packet_results,
@@ -102,10 +105,10 @@
 
 ## Immediate next
 
-1. Run the next dogfood audit under the inverted dispatch — it is the designated re-test for every
-   remaining live-run-watch property in the merged ▶ cluster entry (`open-bugs.md`).
-2. Continue the remediation plan from the backend (CP-NODE-7 + CP-NODE-1 next, per the 2026-08-03
-   review record's continuation order); the run state is still `implementing` with 9 nodes pending.
+1. Run the next dogfood audit (fresh state, v0.36.0, full offload ON) — it is the designated
+   re-test for every remaining live-run-watch property in the merged ▶ cluster entry
+   (`open-bugs.md`) AND the first live exercise of the charter-layer v2 (channel-pure packets,
+   triangulated telos, register/v2).
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
