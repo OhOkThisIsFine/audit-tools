@@ -255,7 +255,11 @@ mechanism, one owner question, eight binding constraints.**
   Proposed reconciliation: keep the prompt capability-neutral but carry the mandate in the neutral
   text itself — "each review lane MUST be executed by an agent that did not author the work under
   review; inline execution is the explicitly-degraded no-subagent fallback" — i.e. the mandate
-  becomes lane-class-conditional, never capability-conditional. **Owner settled 2026-08-05: ______**
+  becomes lane-class-conditional, never capability-conditional. **Gate-resolved by standing
+  conviction 2026-08-05 (philosophy: "don't grade your own homework" refuses dropping the mandate;
+  the settled no-capability-branch text + that conviction jointly select the lane-class-conditional
+  form — it is the intersection of both standing decisions and loses nothing). Owner may override
+  before implementation; absent that, the reconciliation above is the contract.**
 - **Binding constraints:**
   1. **Atomic replace on `single_task_fallback`:** step-kind deletion + every consumer in one
      commit — `steps.ts` registry, 6 test files, `scripts/audit/smoke-audit-flow.mjs` (the
