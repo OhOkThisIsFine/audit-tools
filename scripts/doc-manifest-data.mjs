@@ -152,6 +152,10 @@ export const DOC_MANIFEST = [
         "nightly leg-3 proposal records — the full analysis behind an escalated item (recurrence evidence, proposed mechanism, false-positive surface). TRACKED so a proposal outlives the machine that produced it, but excluded BY CONSTRUCTION for the same reason as a dated review: each is a one-off record of a proposition as it stood that night, never a timeless concept. They deliberately cite paths that do not exist — a file the proposal proposes CREATING, or one deleted since — so reviewing them for staleness, or citation-checking them, would be checking a historical record against a present tree. Accepted outcomes land in code, `spec/`, the backlog or memory; the record stays as provenance",
       ],
       [
+        ".audit-tools/audit-report.md",
+        "runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
+      ],
+      [
         "tests/audit/fixtures/simple-app/README.md",
         "test-fixture content — a sample-app README, its own concern, not a project doc",
       ],

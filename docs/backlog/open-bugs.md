@@ -1188,6 +1188,14 @@
   re-echo, tier collapse (301/309→deep), silent >300s derivation, staleness-line spam, and the
   observability rationale all **confirmed still live**; blindness leak not reproduced.
 
+- **Pre-commit doc-manifest leg misses staged docs outside `docs/` (2026-08-06, low).** Committing
+  the newly tracked `.audit-tools/audit-report.md` passed the commit gate but failed BOTH CI
+  workflows on the doc-manifest check and its contract-test twin — the gate's
+  "staged set touches doc contracts" predicate did not treat a new tracked `.md` under
+  `.audit-tools/` as touching the doc contract, which is exactly the fail-only-in-CI class the
+  leg exists to pre-catch. **Property to hold:** any staged change that adds/removes a tracked
+  `.md` anywhere in the tree triggers the commit-time doc-manifest leg.
+
 - **Packet submit-side validation is weaker than merge-side ingest (2026-08-06, medium).** A
   steward worker's submit command accepted its result (`valid ... findings=0`) that
   merge-and-ingest later blocked as `contract_mismatch` (followup_tasks `file_paths` outside the
