@@ -6,6 +6,15 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops
+  (2026-08-05, low).** A turn that ends while waiting on harness-tracked background work (a running
+  test suite, an in-flight review workflow) is a Stop with uncommitted work, so the gate fires —
+  twice in one session during the change-3 lap, exhausting the cap before any REAL closeout
+  happened; a genuinely forgotten closeout later that session would have gone unchallenged.
+  **Property:** the gate should not consume its cap when the stop is a wait on live
+  harness-tracked background tasks (or the cap should count only stops with no such tasks
+  in flight).
+
 - **Remediation pause/recovery is not durable (2026-08-03, medium).** A plan-only stop left
   `.audit-tools/remediation/state.json` at `status: implementing`; the wrapper, backend, and detached
   worker had to be found and terminated manually, while the worktree survived only because the operator
