@@ -285,8 +285,9 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   that doc is the single home, this entry is the hook. Change 1 (uniform id-join contract) landed
   2026-08-05 (`442da4ca`); change 2 (always-materialized fan-out) landed 2026-08-05; change 3
   (scope-confirmation context) landed 2026-08-05 (`52d9b25c`; design-check + implementation
-  records in the review doc) — one remains, `/design-check` first (loop-core + schema migration):
-  (4) Charter layer — scope-by-feeding packets with
+  records in the review doc) — one remains, design-check DONE 2026-08-05 (`b73af245`; record + 11
+  binding constraints + red pins in the review doc), IMPLEMENTATION pending (loop-core + schema
+  migration): (4) Charter layer — scope-by-feeding packets with
   channel-pure kinds **stated / structural / revealed** (structural replaces inferred: shape only, no
   bodies/docs/comments; revealed gets comment-stripped bodies), self-organized leveled teleology whose
   nodes carry file scopes, joins by file-set overlap (decomposition demoted to a hint), delta miner
