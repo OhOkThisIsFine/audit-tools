@@ -1,0 +1,31 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/advance-drain-loop.test.ts tests/audit/advance-error-paths.test.ts tests/audit/quota-limits.test.ts tests/audit/quota-scheduler.test.ts tests/shared/scheduler.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-66-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/audit/quota-limits.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/shared/scheduler.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/audit/quota-scheduler.test.ts [2m([22m[2m41 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/audit/advance-error-paths.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+[audit-code] graph: built bundle — 5 nodes, 4 edges across 2 graph type(s)
+ [32m✓[39m tests/audit/advance-drain-loop.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1021[2mms[22m[39m
+   [33m[2m✓[22m[39m advanceAudit drains the consecutive deterministic regen frontier by default within one call, stopping at the first host-delegation boundary [33m 344[2mms[22m[39m
+   [33m[2m✓[22m[39m a full drain emits at most ONE staleness stderr record for the whole round-trip [33m 470[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m88 passed[39m[22m[90m (88)[39m
+[2m   Start at [22m 12:01:34
+[2m   Duration [22m 4.76s[2m (transform 2.19s, setup 42ms, collect 8.36s, tests 1.07s, environment 1ms, prepare 1.45s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      10.4s
+   shared     0.5s
+   collect≈8.4s  run≈1.1s  files=5
+   slowest files:
+     4.5s  tests/audit/advance-drain-loop.test.ts (collect 3.1s, run 1.0s)
+     3.4s  tests/audit/advance-error-paths.test.ts (collect 3.1s, run 0.0s)
+     2.0s  tests/audit/quota-scheduler.test.ts (collect 1.7s, run 0.0s)
+     0.5s  tests/audit/quota-limits.test.ts (collect 0.2s, run 0.0s)
+     0.5s  tests/shared/scheduler.test.ts (collect 0.2s, run 0.0s)
+   outcome: 88 passed, 0 failed, 0 skipped, 0 unfinished (total 88)
