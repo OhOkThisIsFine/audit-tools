@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { validateResult } from "./validate.mjs";
-import { resolveArtifactsDir } from "../wrapper/remediate-code-wrapper-io.mjs";
+import { resolveArtifactsDir } from "./artifacts-dir.mjs";
 
 const runIdIdx = process.argv.indexOf("--run-id");
 const taskIdIdx = process.argv.indexOf("--task-id");

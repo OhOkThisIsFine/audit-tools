@@ -16,7 +16,7 @@
  * recommendation is one row per family, with load-bearing ids enumerated under it.
  */
 import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectTsFiles } from "./testFileUtils.js";

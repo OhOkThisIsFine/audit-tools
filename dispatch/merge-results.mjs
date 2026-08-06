@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { validateResult } from "./validate.mjs";
 import { PACKET_SCHEMA_FILENAMES } from "../dist/audit/io/runArtifacts.js";
-import { resolveArtifactsDir } from "../wrapper/remediate-code-wrapper-io.mjs";
+import { resolveArtifactsDir } from "./artifacts-dir.mjs";
 
 const runIdIdx = process.argv.indexOf("--run-id");
 if (runIdIdx === -1 || !process.argv[runIdIdx + 1]) {

@@ -220,7 +220,7 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
     expect(typeof parsed.ts === "string", "ts present").toBeTruthy();
   }
   // completed count should be monotonically increasing
-  const counts = resultLines.map((l) => JSON.parse(l.trim()).completed).sort((a, b) => a - b);
+  const counts = resultLines.map((l) => l.completed).sort((a, b) => a - b);
   expect(counts).toEqual([1, 2]);
 });
 
