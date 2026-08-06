@@ -156,9 +156,9 @@ test.concurrent("audit-code wrapper supports repeated draining advance-audit inv
     }
 
     // The very first drained call resolved the whole deterministic pre-checkpoint
-    // frontier in ONE invocation (intake → … → structure decomposition) and handed
-    // back at the first host-input pause, the intent checkpoint.
-    expect(first.selected_executor).toBe("structure_decomposition_executor");
+    // frontier in ONE invocation (intake → … → structure decomposition → docs
+    // digest) and handed back at the first host-input pause, the intent checkpoint.
+    expect(first.selected_executor).toBe("docs_digest_executor");
     expect(first.next_likely_step).toBe("intent_checkpoint_current");
     expect(first.artifacts_written.includes("repo_manifest.json")).toBe(true);
     expect(first.artifacts_written.includes("external_analyzer_acquisition.json")).toBe(true);

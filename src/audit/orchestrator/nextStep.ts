@@ -33,6 +33,11 @@ export const PRIORITY: string[] = [
   "graph_enrichment_current",
   "design_assessment_current",
   "structure_decomposition_current",
+  // Change 3: the deterministic docs digest lands after structure (its doc
+  // universe shares the decomposition's single doc predicate) and BEFORE the
+  // checkpoint, so the confirm-intent prompt can render the repo's stated
+  // purpose alongside the scope picture.
+  "docs_digest_current",
   "intent_checkpoint_current",
   // DD-9: the equivalence gate sits between the checkpoint and EVERY consumer
   // of it (charters, coverage, tasks all derive at/below the charter slot), so

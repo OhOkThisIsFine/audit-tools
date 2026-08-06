@@ -33,6 +33,7 @@ import type { GitHistoryBaseline } from "../types/artifactMetadata.js";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
+import { buildDocsDigest } from "../extractors/docsDigest.js";
 import { buildStructureDecomposition } from "../decompose/buildStructureDecomposition.js";
 import { deriveGraphSignals } from "../extractors/graphSignals.js";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -282,6 +283,39 @@ export async function runStructureDecompositionExecutor(
       `${decomposition.contested.length} contested node(s), ` +
       `${decomposition.findings.length} non-co-localization finding(s) across ` +
       `${decomposition.node_universe_size} files.`,
+  };
+}
+
+/**
+ * Change 3 (scope-confirmation context): the deterministic docs digest — a
+ * bounded telos extraction over the doc universe, rendered into the
+ * confirm-intent prompt. Degrades to an empty digest without a root (same
+ * contract as the comment/doc intent extraction above).
+ */
+export async function runDocsDigestExecutor(
+  bundle: ArtifactBundle,
+  root?: string,
+): Promise<ExecutorRunResult> {
+  if (!bundle.file_disposition) {
+    throw new Error("Cannot run docs digest executor without file_disposition");
+  }
+
+  const docsDigest = await buildDocsDigest({
+    root,
+    disposition: bundle.file_disposition,
+  });
+
+  return {
+    updated: {
+      ...bundle,
+      docs_digest: docsDigest,
+    },
+    artifacts_written: ["docs_digest.json"],
+    progress_summary: `Docs digest complete: ${docsDigest.docs.length} doc(s) digested${
+      docsDigest.omitted_paths?.length
+        ? `, ${docsDigest.omitted_paths.length} beyond the cap`
+        : ""
+    }.`,
   };
 }
 

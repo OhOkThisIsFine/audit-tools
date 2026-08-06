@@ -74,6 +74,7 @@ function bundleWithCheckpoint(
       findings: [],
       reviewed: false,
     },
+    docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
     structure_decomposition: {
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "structure",
@@ -123,6 +124,7 @@ await test("confirm_intent prompt surfaces the blocking question and constraint_
       excluded_summary: [],
       disposition_override_proposals: [],
       lens_propositions: [],
+      docs_digest: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",

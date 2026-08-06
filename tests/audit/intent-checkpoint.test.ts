@@ -71,6 +71,7 @@ function readyForIntentBundle(): ArtifactBundle {
     risk_register: { items: [] },
     analyzer_capability: { status: "omitted", analyzers: [] },
     design_assessment: { generated_at: "2026-01-01T00:00:00.000Z", findings: [], reviewed: false },
+    docs_digest: { generated_at: "2026-01-01T00:00:00.000Z", docs: [] },
     structure_decomposition: {
       generated_at: "2026-01-01T00:00:00.000Z",
       target: "structure",
@@ -173,12 +174,13 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
     ), "node_modules vendor file should appear in excluded_summary").toBeTruthy();
 });
 
-// ── Change 3 (scope-confirmation context) — pinned RED until implemented ────
+// ── Change 3 (scope-confirmation context) ───────────────────────────────────
 // Prompt/process critique 2026-08-05 §2 / design resolution 3: the scope
-// confirmation is starved of semantic context that exists elsewhere in the
-// pipeline. Implementation removes the `.fails` modifiers (red→green).
+// confirmation was starved of semantic context that exists elsewhere in the
+// pipeline. Both tests were pinned RED (`test.fails`) by the design-check and
+// flipped green by the implementation.
 
-await test.fails("computeScopePreDigest reads design_assessment: a lens-tagged structural finding flips that lens's heuristic exclude", () => {
+await test("computeScopePreDigest reads design_assessment: a lens-tagged structural finding flips that lens's heuristic exclude", () => {
   const bundle: ArtifactBundle = {
     ...readyForIntentBundle(),
     design_assessment: {
@@ -207,13 +209,43 @@ await test.fails("computeScopePreDigest reads design_assessment: a lens-tagged s
   ).toBe("recommend_include");
 });
 
-await test.fails("docs_digest is a registered artifact feeding the confirm-intent prompt", () => {
-  // Half (b): the deterministic docs digest (repo telos extraction) does not
-  // exist — no ARTIFACT_DEFINITIONS entry, so nothing can render the repo's
-  // stated purpose into the confirm-intent prompt. Green exactly when the
-  // artifact is registered; the render-content assertion joins at
-  // implementation time (companion, like change 2's charter artifact_paths).
+await test("docs_digest is a registered artifact feeding the confirm-intent prompt", () => {
   expect(Object.keys(ARTIFACT_DEFINITIONS)).toContain("docs_digest");
+});
+
+await test("renderConfirmIntentPrompt renders the docs digest as the repo's stated purpose, and omits the section when empty", () => {
+  const base = {
+    mode: "full" as const,
+    since: null,
+    files_in_scope: 3,
+    scope_dirs: [{ dir: "src", files: 2 }],
+    excluded_summary: [],
+    disposition_override_proposals: [],
+    lens_propositions: [],
+  };
+  const opts = {
+    intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
+    continueCommand: "audit-code next-step",
+  };
+  const withDocs = renderConfirmIntentPrompt(
+    {
+      ...base,
+      docs_digest: [
+        {
+          path: "README.md",
+          title: "Fixture Project",
+          excerpt: "A tool that audits codebases and reports findings.",
+        },
+      ],
+    },
+    opts,
+  );
+  expect(withDocs).toMatch(/Repository purpose \(from its docs\)/);
+  expect(withDocs).toMatch(/`README\.md` — Fixture Project/);
+  expect(withDocs).toMatch(/audits codebases and reports findings/);
+
+  const withoutDocs = renderConfirmIntentPrompt({ ...base, docs_digest: [] }, opts);
+  expect(withoutDocs).not.toMatch(/Repository purpose/);
 });
 
 // ── Confirm-intent prompt rendering ─────────────────────────────────────────
@@ -228,6 +260,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       excluded_summary: [{ path: "dist/out.js", status: "generated", reason: "build output" }],
       disposition_override_proposals: [],
       lens_propositions: [],
+      docs_digest: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -254,6 +287,7 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
       disposition_override_proposals: [],
       // A lens proposition so the table + the mandatory-set prose render.
       lens_propositions: [{ lens: "operability", disposition: "recommend_exclude", reason: "no ops surface" }],
+      docs_digest: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -279,6 +313,7 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
       excluded_summary: [],
       disposition_override_proposals: [],
       lens_propositions: [],
+      docs_digest: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",

@@ -374,6 +374,21 @@ Verdict: **implementable — retirement-clean, eight binding constraints, zero r
   `refutes_plan`; each verified against source — one evidence citation corrected on verification
   (`isDocIntentFile` lives in `buildStructureDecomposition.ts`, not `structureExecutors.ts`).
 
+**IMPLEMENTED 2026-08-05** under all eight constraints. Half (a): `collectLensEvidence` +
+one-directional overlay in `buildLensPropositions` (evidence widens exclude→include, keyed on the
+finding's own `lens` tag across all four finding groups; absence/empty/auto-completed = no-signal).
+Half (b): `docs_digest` extractor (`extractors/docsDigest.ts`, doc universe via the single
+`isDocIntentFile` predicate, depth-then-path stable order, capped 12 docs × 1,000 chars,
+`omitted_paths` beyond the cap, empty-digest degrade without root) + full wiring (registry, DAG row
+`repo_manifest`+`file_disposition`, PRIORITY slot, executor, state derivation, CLI fold, spec
+tables) + the bounded "Repository purpose (from its docs)" section in the confirm-intent prompt
+(6 docs × 500 chars rendered, remainder named by path). The checkpoint gained NO upstream edge.
+Both design-check pins flipped green; companion render assertion added. Full suite 7,412 passed /
+0 failed. Post-implementation adversarial review: 4-lens / 8-agent workflow over the diff, 4 raw
+findings → 2 confirmed, both fixed (`firstAtxHeading` is now fence-aware; a UTF-8 BOM is stripped
+before titling — both pinned in `docs-digest.test.ts`) and 2 refuted by mechanism (CRLF handled by
+`\s` regex semantics; unreadable-doc skip is intentional, documented at the skip site).
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

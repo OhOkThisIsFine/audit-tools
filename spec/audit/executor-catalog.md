@@ -61,6 +61,7 @@ actual friction triage fires from the `present_report` terminal step
 | `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | records the graph-enrichment marker (+ refreshes `graph_bundle.json` when analyzer edges merge in) |
 | `design_assessment_executor` | deterministic | `design_assessment_current` | deterministic design pass |
 | `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | overlay-and-delta structure operator |
+| `docs_digest_executor` | deterministic | `docs_digest_current` | bounded telos extraction over the doc universe (change 3); renders into the confirm-intent prompt |
 | `charter_extraction_executor` | host_delegation | `charter_extraction_current` | Phase C.1 charter layer — charters ONLY; at a deep+ ceiling emits an LLM charter-extraction step, otherwise the runner omits deterministically at the default shallow ceiling. Sets `deltas_pending` when it produced ≥1 subsystem for the independent delta pass |
 | `charter_delta_executor` | host_delegation | `charter_delta_current` | Phase C.2 — the INDEPENDENT delta-miner routes+gates the deltas + goal_graph over the assembled charters; emits an LLM step when the register is `deltas_pending`, otherwise settles deterministically (no author marks its own homework) |
 | `design_review_contract` | host_delegation | `design_review_contract_completed` | contract-assessment mode — invariants/boundaries/obligations |

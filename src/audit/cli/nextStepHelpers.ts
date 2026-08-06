@@ -2013,6 +2013,7 @@ export function buildAuditObligations(
     },
     deterministic("design_assessment_current"),
     deterministic("structure_decomposition_current"),
+    deterministic("docs_digest_current"),
     {
       // Confirm-intent host step: the host writes intent_checkpoint.json (read by
       // deriveAuditState on re-invocation), so there is no incoming artifact to

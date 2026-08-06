@@ -43,6 +43,7 @@ different analyzer version can classify files differently).
 | `git_history.json` | `repo_manifest.json`, `file_disposition.json` |
 | `external_analyzer_acquisition.json` | `repo_manifest.json`, `file_disposition.json` |
 | `design_assessment.json` | `unit_manifest.json`, `critical_flows.json` |
+| `docs_digest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
 | `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 | `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
@@ -85,6 +86,17 @@ below the entry's previous revision: a previous revision above the baseline mean
 ordinary bumps happened while the mirror was inactive (a gate-version-stale
 window), and snapping back would hide them from downstream `dependency_revisions`
 compares.
+
+`docs_digest.json` (change 3, scope-confirmation context) is the bounded
+deterministic telos extraction over the doc universe (the single
+`isDocIntentFile` predicate), rendered into the confirm-intent prompt so the
+scope decider sees the repo's stated purpose. Its dependencies are exactly what
+the extractor reads — the disposition selects the doc universe, and
+`repo_manifest.json`'s per-file hashes re-stale it transitively when a doc's
+content changes. It deliberately has NO downstream row, and it must never be
+declared upstream of `intent_checkpoint.json`: the checkpoint is a durable
+host-input leaf whose revision mirrors the intent baseline, and an edge here
+would re-stale a confirmed checkpoint on every doc edit.
 
 `external_analyzer_acquisition.json` is the external-analyzer acquisition marker
 (gitleaks + consent-gated eslint/semgrep/jscpd) — a run-record + staleness anchor
@@ -193,6 +205,7 @@ truth remains the pair of registries — `EXECUTOR_REGISTRY`
 | `critical-flow-fallback.json` | `critical_flow_fallback_executor` | — (durable host input) |
 | `analyzer_capability.json` | `graph_enrichment_executor` | — |
 | `design_assessment.json` | `design_assessment_executor` | `design_review_contract`, `design_review_conceptual` |
+| `docs_digest.json` | `docs_digest_executor` | — |
 | `structure_decomposition.json` | `structure_decomposition_executor` | — |
 | `charter_register.json` | `charter_extraction_executor` | `charter_delta_executor` |
 | `charter_clarification.json` | `charter_clarification_executor` | — |

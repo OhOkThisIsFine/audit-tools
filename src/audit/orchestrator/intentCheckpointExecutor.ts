@@ -2,6 +2,8 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { IntentCheckpoint, FileDispositionStatus } from "audit-tools/shared";
 import type { Lens } from "../types.js";
+import type { DesignAssessment } from "../types/designAssessment.js";
+import type { DocsDigestEntry } from "../types/docsDigest.js";
 import { resolveAuditScope } from "./scope.js";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
@@ -99,6 +101,13 @@ export interface ScopePreDigest {
    * user the final table.
    */
   lens_propositions: LensProposition[];
+  /**
+   * Render-ready docs digest (change 3): the repo's STATED purpose, extracted
+   * deterministically from the doc universe (`docs_digest.json`). Empty when the
+   * digest artifact is absent (older bundles, headless pre-digest) or the repo
+   * has no prose docs — the render omits the section then.
+   */
+  docs_digest: DocsDigestEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -198,18 +207,50 @@ function buildDispositionOverrideProposals(
 }
 
 /**
+ * Count lens-tagged design-assessment findings per lens, across every finding
+ * group (base structural + the review passes when present on a re-run). A
+ * lens-tagged finding is direct evidence that lens applies to this codebase —
+ * the evidence overlay in `buildLensPropositions` consumes these counts.
+ * Absence is deliberately NO-SIGNAL: an empty or auto-completed assessment
+ * means "unreviewed / nothing detected", never "the lens does not apply".
+ */
+function collectLensEvidence(
+  assessment: DesignAssessment | undefined,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (!assessment) return counts;
+  const groups = [
+    assessment.findings,
+    assessment.contract_findings,
+    assessment.conceptual_findings,
+    assessment.review_findings,
+  ];
+  for (const group of groups) {
+    for (const finding of group ?? []) {
+      if (!finding.lens) continue;
+      counts.set(finding.lens, (counts.get(finding.lens) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
  * Derive the canonical lens proposition table from codebase character (dogfood
  * note 1). Emits exactly ONE disposition per canonical lens, in registry order:
  * mandatory lenses always `mandatory`; the rest `recommend_include` or
  * `recommend_exclude` from deterministic heuristics (network surface, test
- * units, config files, module spread). This is the deterministic first pass; the
- * host's invisible LLM review confirms/adjusts dispositions and may append
- * custom-lens rows before the final table is shown to the user.
+ * units, config files, module spread), overlaid with design-assessment evidence
+ * (change 3: a lens-tagged structural finding flips that lens's heuristic
+ * exclude to an include — evidence only ever widens, absence never narrows).
+ * This is the deterministic first pass; the host's invisible LLM review
+ * confirms/adjusts dispositions and may append custom-lens rows before the
+ * final table is shown to the user.
  */
 function buildLensPropositions(
   unitManifest: { units: Array<{ kind?: string; required_lenses?: string[] }> } | undefined,
   inScopePaths: string[],
   dispositionFiles: Array<{ path: string; status: string }>,
+  designAssessment?: DesignAssessment,
 ): LensProposition[] {
   const units = unitManifest?.units ?? [];
 
@@ -317,7 +358,21 @@ function buildLensPropositions(
     }
   }
 
-  return propositions;
+  // Design-assessment evidence overlay: a lens-tagged finding is direct
+  // evidence the lens applies, so it flips a heuristic exclude to an include.
+  // One direction only — evidence widens, absence is no-signal (see
+  // collectLensEvidence) — so an include is never demoted here.
+  const lensEvidence = collectLensEvidence(designAssessment);
+  return propositions.map((proposition) => {
+    if (proposition.disposition !== "recommend_exclude") return proposition;
+    const evidenceCount = lensEvidence.get(proposition.lens) ?? 0;
+    if (evidenceCount === 0) return proposition;
+    return {
+      lens: proposition.lens,
+      disposition: "recommend_include" as const,
+      reason: `design assessment carries ${evidenceCount} ${proposition.lens}-tagged finding(s)`,
+    };
+  });
 }
 
 export function computeScopePreDigest(
@@ -355,7 +410,12 @@ export function computeScopePreDigest(
 
   const excluded_summary = buildExcludedSummary(excluded);
   const disposition_override_proposals = buildDispositionOverrideProposals(dispositionFiles);
-  const lens_propositions = buildLensPropositions(bundle.unit_manifest, inScopePaths, dispositionFiles);
+  const lens_propositions = buildLensPropositions(
+    bundle.unit_manifest,
+    inScopePaths,
+    dispositionFiles,
+    bundle.design_assessment,
+  );
 
   return {
     mode: scope.mode === "delta" ? "delta" : "full",
@@ -365,6 +425,7 @@ export function computeScopePreDigest(
     excluded_summary,
     disposition_override_proposals,
     lens_propositions,
+    docs_digest: bundle.docs_digest?.docs ?? [],
   };
 }
 

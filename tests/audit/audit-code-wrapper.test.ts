@@ -610,8 +610,9 @@ test.concurrent("audit-code wrapper advance-audit drains the deterministic regen
     expect(step0.contract_version).toBe("audit-code/v1alpha1");
     // The drain resolved the whole deterministic frontier and stopped at the first
     // host-input pause (the intent checkpoint), so the last executor it ran is the
-    // final deterministic step and the next step it hands back is a host boundary.
-    expect(step0.selected_executor).toBe("structure_decomposition_executor");
+    // final deterministic step (the change-3 docs digest) and the next step it
+    // hands back is a host boundary.
+    expect(step0.selected_executor).toBe("docs_digest_executor");
     expect(step0.progress_made).toBe(true);
     expect(step0.next_likely_step).toBe("intent_checkpoint_current");
     expect(step0.handoff.status).toBe("active");

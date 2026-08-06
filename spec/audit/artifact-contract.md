@@ -56,6 +56,7 @@ the staleness DAG (see dependency-map.md).
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |
 | `design_assessment.json` | JSON | Deterministic + optional host-delegated design assessment (see below). |
+| `docs_digest.json` | JSON | Deterministic bounded telos extraction over the doc universe (change 3); rendered into the confirm-intent prompt. NO downstream edge, and never an upstream of `intent_checkpoint.json` (checkpoint stays a leaf). |
 | `structure_decomposition.json` | JSON | Deterministic structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent sources); emits non-co-localization findings. |
 | `charter_register.json` | JSON | Phase-C charter layer over the structure decomposition, gated by the confirmed intent-checkpoint ceiling. |
 | `charter_clarification.json` | JSON | Phase-D charter-alignment triangulation loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |

@@ -90,6 +90,15 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "file_disposition.json",
   ],
   "design_assessment.json": ["unit_manifest.json", "critical_flows.json"],
+  // Change 3 (scope-confirmation context): bounded deterministic telos
+  // extraction over the doc universe, rendered into the confirm-intent prompt.
+  // Depends on what the extractor actually reads — the disposition (doc
+  // universe via `isDocIntentFile`) plus repo_manifest, whose per-file hashes
+  // re-stale this transitively when a doc's CONTENT changes. Deliberately NO
+  // downstream edge, and NEVER an upstream of `intent_checkpoint.json` (a
+  // durable host-input leaf whose revision mirrors the intent baseline — an
+  // edge here would re-stale the confirmed checkpoint on every doc edit).
+  "docs_digest.json": ["repo_manifest.json", "file_disposition.json"],
   // Phase B conceptual design-review: the deterministic structure-layer
   // decomposition (overlay-and-delta operator). Depends on the enriched graph
   // (co-change + analyzer edges land in graph_bundle) plus the manifest +

@@ -9,6 +9,7 @@ import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
 import {
   runStructureExecutor,
   runDesignAssessmentExecutor,
+  runDocsDigestExecutor,
   runStructureDecompositionExecutor,
   runDesignReviewAutoComplete,
 } from "./structureExecutors.js";
@@ -118,6 +119,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     }),
   design_assessment_executor: async (bundle) =>
     runDesignAssessmentExecutor(bundle),
+  docs_digest_executor: async (bundle, { options }) =>
+    runDocsDigestExecutor(bundle, options.root),
   structure_decomposition_executor: async (bundle, { options }) =>
     runStructureDecompositionExecutor(bundle, options.root),
   charter_extraction_executor: async (bundle, { options }) =>

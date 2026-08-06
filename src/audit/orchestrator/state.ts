@@ -216,6 +216,20 @@ export function deriveAuditState(
     ),
   );
 
+  // Change 3: deterministic docs digest for the confirm-intent prompt (repo
+  // telos from the doc universe). Sits before the checkpoint in PRIORITY so the
+  // scope decider sees the repo's stated purpose.
+  obligations.push(
+    obligation(
+      "docs_digest_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["docs_digest.json"],
+        has(bundle.docs_digest),
+      ),
+    ),
+  );
+
   // The checkpoint is "current" only when it both exists/fresh AND every
   // unencodable free_form_intent clause has been escalated to a host-answered
   // constraint. An unanswered unencodable clause keeps this obligation unmet so

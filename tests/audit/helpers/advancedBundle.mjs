@@ -124,6 +124,9 @@ const FIXTURE_STAGES = [
   { upTo: "graph_enrichment_current", run: forcedStep("graph_enrichment_executor") },
   { upTo: "design_assessment_current", run: forcedStep("design_assessment_executor") },
   { upTo: "structure_decomposition_current", run: forcedStep("structure_decomposition_executor") },
+  // Change 3 docs digest: rootless (degrades to an empty digest), keeping the
+  // fixture offline-hermetic like the structure stages above.
+  { upTo: "docs_digest_current", run: forcedStep("docs_digest_executor") },
   { upTo: "intent_checkpoint_current", run: forcedStep("intent_checkpoint_executor", { withRoot: true }) },
   { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
   // Phase C.2 independent delta-miner. host_delegation like charter_extraction: at

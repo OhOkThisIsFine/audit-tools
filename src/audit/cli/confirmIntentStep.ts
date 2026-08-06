@@ -10,6 +10,20 @@ function isAggregatedRow(row: { prefix?: string; path?: string }): row is Aggreg
   return "prefix" in row && row.prefix !== undefined;
 }
 
+// Render caps for the docs-digest section (change 3): the digest artifact
+// carries up to 12 docs × 1,000 chars; the prompt shows a tighter cut so the
+// scope picture stays the lead. Remaining digested docs are named by path.
+const RENDERED_DOCS_MAX = 6;
+const RENDERED_EXCERPT_CHARS = 500;
+
+/** Trim an excerpt to the render cap on a line boundary (never mid-word). */
+function trimExcerptForPrompt(excerpt: string): string {
+  if (excerpt.length <= RENDERED_EXCERPT_CHARS) return excerpt;
+  const cut = excerpt.slice(0, RENDERED_EXCERPT_CHARS);
+  const lastBreak = cut.lastIndexOf("\n");
+  return `${(lastBreak > 0 ? cut.slice(0, lastBreak) : cut).trimEnd()}\n…`;
+}
+
 // One-line meaning per canonical lens, shown in the confirm-intent catalog so the
 // user can choose deliberately instead of guessing from the bare lens name.
 const LENS_DESCRIPTIONS: Record<string, string> = {
@@ -129,6 +143,31 @@ export function renderConfirmIntentPrompt(
     `**Mode:** ${preDigest.mode}${preDigest.since ? ` (since ${preDigest.since})` : ""}`,
     `**Files in scope:** ${preDigest.files_in_scope}`,
     "",
+    ...(preDigest.docs_digest.length > 0
+      ? [
+          "## Repository purpose (from its docs)",
+          "",
+          "Extracted deterministically from the repo's own documentation. Weigh this",
+          "stated purpose when confirming scope, reviewing the lens table, and",
+          "phrasing the intent summary:",
+          "",
+          ...preDigest.docs_digest.slice(0, RENDERED_DOCS_MAX).flatMap((doc) => [
+            `### \`${doc.path}\` — ${doc.title}`,
+            "",
+            trimExcerptForPrompt(doc.excerpt),
+            "",
+          ]),
+          ...(preDigest.docs_digest.length > RENDERED_DOCS_MAX
+            ? [
+                `_Also digested (full excerpts in \`docs_digest.json\`): ${preDigest.docs_digest
+                  .slice(RENDERED_DOCS_MAX)
+                  .map((doc) => `\`${doc.path}\``)
+                  .join(", ")}_`,
+                "",
+              ]
+            : []),
+        ]
+      : []),
     "## In-scope top-level directories",
     "",
     dirLines,
