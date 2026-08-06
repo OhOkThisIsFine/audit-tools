@@ -107,11 +107,18 @@
 
 ## Immediate next
 
-1. Work the 2026-08-06 dogfood output: decide triage/remediation over
-   `.audit-tools/audit-findings.json` (1,925 findings, 133 blocks; 9 critical first), and work the
-   confirmed-still-live friction items + 3 new defect leads from
-   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md) (tracked in
-   `open-bugs.md`).
+1. **Run remediate-code over the 2026-08-06 dogfood findings** on the freshly shipped version
+   (backend state is a clean slate). Triage is DONE: all 9 criticals were adversarially verified —
+   0 survived as critical (3 refuted, 6 downgraded and now tracked in `open-bugs.md`); the 3
+   tool-side defect leads are FIXED and shipped (see
+   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md) §Defect leads +
+   §Critical-findings verification). Start the remediation from the promoted
+   `.audit-tools/audit-findings.json` (1,925 findings / 133 blocks; high tier first — expect
+   severity inflation, the planning review gate is the filter).
+2. Work the 2026-08-05 minor-friction cluster (still live on v0.36.0, re-confirmed:
+   handshake re-echo, tier-routing collapse, silent long derivation, staleness-line spam,
+   observability rationale) — entry + spec refs in `open-bugs.md` §Dogfood 2026-08-05 minor
+   friction cluster.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

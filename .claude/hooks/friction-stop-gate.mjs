@@ -99,9 +99,13 @@ const AREAS = [
   {
     label: "audit-code",
     dir: join(root, ".audit-tools", "audit"),
-    // A real audit reaches at least a manifest / task ledger / dispatch / findings /
-    // steps dir; a bare session-config.json alone is not a run.
-    markers: ["repo_manifest.json", "audit_tasks.json", "active-dispatch.json", "audit-findings.json", "steps"],
+    // A real audit reaches at least a manifest / task ledger / dispatch / findings
+    // artifact; a bare session-config.json alone is not a run. A bare steps/ dir is
+    // NOT a marker either: terminal promotion deletes the artifacts dir, archives
+    // the friction record with the promoted deliverables, and the completed-step
+    // render recreates steps/ — treating that post-completion state as a run made
+    // every later stop block on a record the tool had already archived.
+    markers: ["repo_manifest.json", "audit_tasks.json", "active-dispatch.json", "audit-findings.json"],
   },
 ];
 

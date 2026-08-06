@@ -235,6 +235,8 @@
   `acceptNode.ts`) with TWO release sites visible (`rollingSession.ts` and `:744`); verify whether a failed
   or stranded implement node's claim is released at round end or leaks until lease expiry — one
   core, two draws: if the audit fix's property holds there too, wire the same `releaseOwned` sweep.
+  Named site (2026-08-06 self-audit REL-e362503b): `dispatchNodeWithWorktree` can reject between
+  claim and release — the engine's `.catch` absorbs it but the claim leaks until lease expiry.
 
 - **Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the
   service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED).**
@@ -1196,37 +1198,6 @@
   leg exists to pre-catch. **Property to hold:** any staged change that adds/removes a tracked
   `.md` anywhere in the tree triggers the commit-time doc-manifest leg.
 
-- **Packet submit-side validation is weaker than merge-side ingest (2026-08-06, medium).** A
-  steward worker's submit command accepted its result (`valid ... findings=0`) that
-  merge-and-ingest later blocked as `contract_mismatch` (followup_tasks `file_paths` outside the
-  task's file_coverage) — the worker learned nothing in-session and the host had to relay the
-  validator errors back by hand one merge later. **Property to hold:** the submit chokepoint
-  enforces the same result contract as ingestion; a result that will be rejected at merge is
-  rejected at submit, with the same error text, while the worker is still live.
-
-- **Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.**
-  RECURRED unchanged on the 2026-08-06 v0.36.0 dogfood (walk + backstop record deleted at
-  `present_report`; restored by hand again). At
-  `present_report` completion the cleanup deleted `friction/` (both records: the blocking close-out
-  walk it had itself just enforced), `runs/`, and `scratch/` — while leaving `steps/`, which is a
-  run-marker for `friction-stop-gate.mjs`; every session stop for the next 12h then blocks on a walk
-  whose record the tool erased. No consumer read the record first (the report has no friction
-  render); the 2026-08-05 walk survives only because the host had promoted it to
-  [`reviews/dogfood-run-2026-08-05.md`](../reviews/dogfood-run-2026-08-05.md) pre-close, and was
-  restored by hand post-close. **Property to hold:** the friction record outlives the run until a
-  named consumer ingests it (or is archived with the promoted deliverables); cleanup and the
-  stop-gate agree on what constitutes a run.
-
-- **Design-review multi-lane ingest is not failure-atomic; invalid lane JSON hard-fails the call
-  instead of quarantining (2026-08-06, medium).** Observed on the v0.36.0 dogfood: next-step
-  consumed `design-review-contract-findings.json`, then hit malformed JSON in the judge's
-  `design-review-conceptual-findings.json` and exited 1 — the consumed contract results were lost
-  (state re-derived `design_review_contract`; the lane had to re-run) and the host had to hand-fix
-  the judge's JSON to unblock. Charter ingest already quarantines an invalid submission and
-  re-fires only that lane. **Property to hold:** a lane result is consumed only after it
-  validates, an invalid lane submission quarantines + re-fires that lane alone, and a
-  mid-ingest failure never loses a sibling lane's validated results.
-
 - **friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run
   (2026-08-06, low).** The checkout is shared; the gate keys "a run happened in this session" on
   disk-marker recency alone (documented: no per-session signal reaches a Stop hook). Observed: a
@@ -1235,3 +1206,27 @@
   own close. **Property to hold:** a run that is visibly IN FLIGHT (fresh `steps/current-step.json`
   churn) or driven by another session never blocks a bystander's stop; the once-per-stop-cycle
   escape keeps this low-severity.
+
+- **Provider auto-selection is construction-time-only — a mid-run provider death has no
+  re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).** Auto-detect
+  snapshots PATH/env once (`providerFactory.ts`); pools bind the name at construction; a dead
+  provider's packets retry into the same defunct backend unless the operator pre-configured other
+  pools. **Property to hold:** persistent availability failure on a pool re-detects and folds in
+  an alternative, or pauses resumably naming the dead provider.
+
+- **`recordOutputRatioObservation` is dead code — output-token reservations never learn
+  (2026-08-06 self-audit ARC-426f9398, verified, medium).** No production caller;
+  `RollingDispatchResult.actualTokens` never read; ledger output reservations stay at declared
+  caps (input-side slope learning is live and unaffected). **Property to hold:** wire actual-output
+  observation into `handleResult`, or delete the mechanism (tested-but-unwired class).
+
+- **A worker task-file read/parse failure exits without writing the failed WorkerResult
+  (2026-08-06 self-audit REL-80b59c13, verified, medium).** `workerRunCommand.ts` awaits the task
+  `readJsonFile` outside the try/catch that writes failed WorkerResults, so the supervisor sees a
+  silent no-result ("stall" half refuted — process exits 1). **Property to hold:** every worker
+  failure after arg parsing writes the same failed-WorkerResult artifact.
+
+- **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
+  (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
+  [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
+  should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?

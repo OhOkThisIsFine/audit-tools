@@ -63,7 +63,12 @@ function markRemediationRun(root: string): string {
 
 function markAuditRun(root: string): string {
   const dir = join(root, '.audit-tools', 'audit');
-  mkdirSync(join(dir, 'steps'), { recursive: true });
+  // A substantive run artifact — a bare steps/ dir is NOT a run marker (it is
+  // exactly what terminal cleanup leaves behind after promotion re-renders the
+  // completed step, so treating it as a run made every post-completion stop
+  // block on a record the tool had already archived).
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'repo_manifest.json'), '{}\n');
   return dir;
 }
 
@@ -87,6 +92,19 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
     const { code, stderr } = runHook(FRICTION_GATE, stop(), { root });
     expect(code).toBe(2);
     expect(stderr).toContain('recent audit-code run');
+  });
+
+  it('allows a stop when the audit area holds only a steps/ dir (post-terminal-cleanup state)', () => {
+    // promoteFinalAuditReport deletes the artifacts dir and the completed-step
+    // render recreates steps/ — the only state a finished run leaves. That is
+    // not a run needing a walk: the record was archived with the promoted
+    // deliverables.
+    const root = tempRoot('steps-only');
+    const dir = join(root, '.audit-tools', 'audit');
+    mkdirSync(join(dir, 'steps'), { recursive: true });
+    writeFileSync(join(dir, 'steps', 'current-step.json'), '{}\n');
+
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
   });
 
   it('allows a recent run when observations and attestations cover every category', () => {

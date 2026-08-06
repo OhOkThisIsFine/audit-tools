@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import {
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
+  archiveFrictionRecords,
   auditReportPath,
   auditFindingsPath,
   promotedAuditReportPath,
@@ -470,6 +471,16 @@ export async function promoteFinalAuditReport(params: {
         (error instanceof Error ? error.message : String(error)),
     );
   }
+  // Archive the friction close-out record with the promoted deliverables BEFORE
+  // the rm below destroys it — the walk completed (the close gate enforced it),
+  // but no consumer has read the record yet. Best-effort, like the findings copy.
+  await archiveFrictionRecords({
+    artifactsDir: params.artifactsDir,
+    destDir: dirname(destination),
+    prefix: "audit-friction",
+    copyFile: copy,
+    warn: (message) => warn(`audit-code: ${message}`),
+  });
   try {
     await remove(params.artifactsDir, { recursive: true, force: true });
     return { promoted: true, cleaned: true };

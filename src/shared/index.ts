@@ -549,6 +549,8 @@ export { RunLogger } from "./observability/runLog.js";
 // IO
 export {
   isFileMissingError,
+  isJsonParseError,
+  JsonParseError,
   isTransientFsError,
   withFsRetry,
   readJsonFile,
@@ -643,6 +645,7 @@ export type {
 export {
   FRICTION_CAPTURE_SCHEMA_VERSION,
   FRICTION_CAPTURE_DIRNAME,
+  archiveFrictionRecords,
   frictionCaptureDir,
   frictionCapturePath,
   frictionCaptured,

@@ -421,6 +421,25 @@ export async function validateAndCollectResults(
     }
   }
 
+  // Packet-wide followup boundary — the SAME contract the submit chokepoint
+  // enforces (submitPacketCommand computes the union of the packet's member
+  // file_paths and passes it as `boundaryPaths`). Both sides draw the member
+  // set from the run's pending-audit-tasks.json, so the reconstruction here is
+  // exact parity: a result submit accepted can never be rejected at merge as a
+  // followup-boundary contract_mismatch, and vice versa.
+  const tasksById = new Map(allTasks.map((t) => [t.task_id, t]));
+  const boundaryByPacketId = new Map<string, string[]>();
+  for (const [packetId, members] of packetMembers) {
+    if (packetId === "__prior_dispatch__") continue;
+    const paths = new Set<string>();
+    for (const memberId of members) {
+      for (const filePath of tasksById.get(memberId)?.file_paths ?? []) {
+        paths.add(filePath);
+      }
+    }
+    if (paths.size > 0) boundaryByPacketId.set(packetId, [...paths]);
+  }
+
   /**
    * A worker that keyed its result under the synthetic packet_id (not the
    * assigned member task_id — the deepening non-convergence leak) leaves the
@@ -540,7 +559,10 @@ export async function validateAndCollectResults(
     const issues = validateAuditResults(
       [obj],
       [task],
-      { lineIndex: task.file_line_counts ?? {} },
+      {
+        lineIndex: task.file_line_counts ?? {},
+        boundaryPaths: entry ? boundaryByPacketId.get(entry.packet_id) : undefined,
+      },
     );
     resultErrors.push(
       ...issues

@@ -176,6 +176,37 @@ test("final report promotion preserves artifacts when destination is not writabl
   });
 });
 
+test("promoteFinalAuditReport archives the friction record with the promoted deliverables before deleting the artifacts dir", async () => {
+  // The friction close-out walk completes BEFORE promotion (the close gate
+  // enforces it), then promotion rm-rf'd the whole artifacts dir — destroying
+  // the record no consumer had read (2026-08-05 + 2026-08-06 dogfoods). The
+  // record must ride along with the promoted deliverables.
+  await withTempDir("audit-code-report-promotion-friction-", async (tempDir: string) => {
+    const artifactsDir = join(tempDir, "artifacts");
+    await writeCoreArtifacts(artifactsDir, {
+      audit_report: "# Audit Report\n",
+    });
+    const record = {
+      open_observations: [{ category: "tool_should_decide", note: "observed" }],
+      category_attestations: [
+        { category: "ambiguous_direction", disposition: "none" },
+        { category: "inefficient_feeding", disposition: "none" },
+      ],
+    };
+    await mkdir(join(artifactsDir, "friction"), { recursive: true });
+    await writeFile(join(artifactsDir, "friction", "run.json"), JSON.stringify(record), "utf8");
+
+    const result = await promoteFinalAuditReport({ artifactsDir });
+
+    expect(result.promoted).toBe(true);
+    expect(result.cleaned).toBe(true);
+    expect(existsSync(artifactsDir)).toBe(false);
+    const archived = join(tempDir, "audit-friction-run.json");
+    expect(existsSync(archived), "friction record must be archived beside the promoted report").toBe(true);
+    expect(JSON.parse(await readFile(archived, "utf8"))).toEqual(record);
+  });
+});
+
 test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e78e9d)", async () => {
   await withTempDir("audit-code-report-promotion-findings-warn-", async (tempDir: string) => {
     const artifactsDir = join(tempDir, "artifacts");

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { cp, readdir } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile } from "./json.js";
 import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
 
@@ -174,6 +175,50 @@ export async function frictionCaptured(
     FRICTION_CAPTURE_SCHEMA_VERSION,
   );
   return existing !== undefined && existing !== null;
+}
+
+/**
+ * Archive every per-run friction record out of `<artifactsDir>/friction/` into
+ * `destDir` as `<prefix>-<basename>` (e.g. `audit-friction-run.json`), returning
+ * the archived destination paths. The friction record must outlive terminal
+ * cleanup: both orchestrators' completion paths rm the whole artifacts dir, and
+ * before this helper existed that destroyed the close-out walk the tool itself
+ * had just enforced, with no consumer having read it (2026-08-05 + 2026-08-06
+ * dogfoods). Callers invoke it immediately BEFORE the terminal rm so the record
+ * rides along with the promoted deliverables. Best-effort per file: a failed
+ * copy is reported through `warn` and never blocks completion (parity with the
+ * promoted-findings copy).
+ */
+export async function archiveFrictionRecords(params: {
+  artifactsDir: string;
+  destDir: string;
+  prefix: string;
+  copyFile?: typeof cp;
+  warn?: (message: string) => void;
+}): Promise<string[]> {
+  const copyFile = params.copyFile ?? cp;
+  const warn = params.warn ?? ((message) => process.stderr.write(`${message}\n`));
+  const dir = frictionCaptureDir(params.artifactsDir);
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((name) => name.endsWith(".json"));
+  } catch {
+    return []; // no friction dir → nothing to archive
+  }
+  const archived: string[] = [];
+  for (const name of names) {
+    const destination = join(params.destDir, `${params.prefix}-${name}`);
+    try {
+      await copyFile(join(dir, name), destination, { force: true });
+      archived.push(destination);
+    } catch (error) {
+      warn(
+        `could not archive friction record ${name} to ${destination}: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+  return archived;
 }
 
 /**

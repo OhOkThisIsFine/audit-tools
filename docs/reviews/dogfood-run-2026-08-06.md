@@ -33,18 +33,27 @@ once (cited directory scopes not named in the evidence packet) and resubmitted c
 validator's message was sufficient to repair without seeing other lanes. Delta miner produced
 genuine cross-channel disagreement (4 deltas), suggesting blindness held. No True nominations.
 
-## Defect leads found this run (tool-side)
+## Defect leads found this run (tool-side) — ALL THREE FIXED 2026-08-06 (same-day lap)
 
-1. **Design-review multi-lane ingest not failure-atomic** — logged in `open-bugs.md` (2026-08-06)
-   and on the friction record: contract findings consumed, judge's malformed JSON hard-failed the
-   call, consumed results lost, lane re-ran; host hand-repaired the JSON.
-2. **Submit-side validation weaker than merge-side** — a steward worker's submit reported
-   `valid`, merge later blocked it as `contract_mismatch` (followup file_paths outside
-   file_coverage); the submit chokepoint should enforce the ingest contract.
-3. **Terminal-cleanup friction wipe RECURRED** — at `present_report` the cleanup again deleted
-   `friction/` (the just-enforced walk + the session-backstop record) while leaving `steps/`;
-   record restored by hand from host context, same as 2026-08-05. Existing `open-bugs.md` entry's
-   property confirmed still unheld on v0.36.0.
+1. **Design-review multi-lane ingest not failure-atomic** — contract findings consumed, judge's
+   malformed JSON hard-failed the call, consumed results lost, lane re-ran; host hand-repaired
+   the JSON. FIXED at the class chokepoint: `readJsonFile` throws a typed `JsonParseError` and
+   `tryConsumeIncoming` returns `ok|absent|malformed` — every incoming consumer (design-review
+   lanes, charter lanes, omittable gates, intent-equivalence, edge-reasoning, object/array
+   consumers) quarantines a malformed submission instead of hard-failing, so a sibling lane's
+   validated results always persist.
+2. **Submit-side validation weaker than merge-side** — root cause was the INVERSE of the lead's
+   framing: submit passes the packet-wide `boundaryPaths` union (the pinned intended contract,
+   F-6) and merge validated per-task only. Merge now reconstructs the identical packet boundary
+   from `pending-audit-tasks.json` — exact parity, same validator, same error text.
+3. **Terminal-cleanup friction wipe RECURRED** — fixed on both halves:
+   `archiveFrictionRecords` (shared) copies `friction/*.json` beside the promoted deliverables
+   (`audit-friction-*.json` / `remediation-friction-*.json`) before the terminal rm on both
+   orchestrators, and `friction-stop-gate.mjs` no longer treats a bare `steps/` dir (exactly the
+   post-terminal state) as an audit run-marker. The 2026-07-25 revert's three constraints all
+   hold: fix targets `promoteFinalAuditReport`, remediate marker semantics unchanged, and no
+   record is preserved in-place across runs (the run-id collision is moot — friction/ is deleted
+   with the dir; the archive is what survives).
 
 ## Live-run-watch cluster re-test (2026-08-05 minor-friction items, on v0.36.0)
 
@@ -57,6 +66,32 @@ genuine cross-channel disagreement (4 deltas), suggesting blindness held. No Tru
   **still present** in the confirm-intent table.
 - Resumed-run scope-echo skip — n/a (fresh run). Charter blindness leak — not reproduced (deltas
   were genuine; single quarantine was path-shape, not leakage).
+
+## Critical-findings verification (post-run, 2026-08-06)
+
+All 9 critical findings adversarially verified by mechanism against HEAD (9 independent
+verifier agents, several findings double-sampled; verdict directions stable across samples).
+**None survived as critical**: 3 refuted, 6 real at high/medium.
+
+- **Refuted (3):** ARC-03034c94 drain-memoization (fresh bundle object per iteration; WeakMap
+  cache is per-call — the claimed reuse cannot occur); ARC-843a544c file-lock stale-reap clobber
+  (token-checked 10s heartbeat + serialized steal; pinned by INV-SCC-08 in
+  `tests/shared/fileLock.test.ts`); ARC-cd75f23a contradictory merge outcomes
+  (`collapseItemResults` reconciles by status priority; pinned by
+  `dispatch-merge-tolerance.test.ts`).
+- **Confirmed, downgraded (6):** ARC-e01faa3e provider auto-selection is construction-time-only —
+  no runtime re-detection/fallback when the resolved provider dies mid-run (HIGH; new backlog
+  entry). ARC-426f9398 partial — input-side tokens-per-pct slope learning EXISTS and feeds wave
+  sizing; the real defect is `recordOutputRatioObservation` is dead code, so output reservations
+  never learn (new backlog entry). REL-80b59c13 partial — a task-file read/parse failure exits the
+  worker without writing the failed WorkerResult that validation failures write ("stall" half
+  refuted: runCli exits 1) (new backlog entry). REL-e362503b partial — remediate node-claim leak
+  on a pre-release throw; folded into the existing open-bugs LEAD on remediate's claim lifecycle.
+  REL-03034c94 — already tracked (the >2min no-progress-signal entry). ARC-c9869af2 partial —
+  analyzer parse layers are defensive (malformed → `[]`); residual (corrupt-but-parseable output
+  persisting) is what leads-not-verdicts + lens confirmation already bound; no entry.
+- **Meta-lead:** 0/9 auditor criticals justified on verification — top-tier severity assignment is
+  inflated (logged in `open-bugs.md`; calibration data for the A2 finding-quality oracle track).
 
 ## Friction close-out
 

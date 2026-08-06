@@ -628,6 +628,53 @@ describe("OBS-89a57cbd final-state persist failure is surfaced, never silently s
   });
 });
 
+describe("friction record outlives the fully-green close (archive-with-deliverables wiring)", () => {
+  it("archives friction/<run>.json beside the promoted deliverables before deleting the artifacts dir", async () => {
+    const close = (await import("../../src/remediate/phases/close.js")) as Record<
+      string,
+      unknown
+    >;
+    const cleanup = close.cleanupTempBranchesAndArtifacts as (
+      options: unknown,
+      completeState: unknown,
+      combinedTest: unknown,
+      e2eResult: unknown,
+      closingResult: unknown,
+      runLogger?: unknown,
+    ) => Promise<void>;
+    const root = join(SCRATCH, "friction-archive");
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    await mkdir(join(artifactsDir, "friction"), { recursive: true });
+    const record = { open_observations: [{ category: "tool_should_decide" }] };
+    await writeFile(
+      join(artifactsDir, "friction", "run-77.json"),
+      JSON.stringify(record),
+      "utf8",
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await cleanup(
+        { root, artifactsDir },
+        { status: "complete", items: {} },
+        { passed: true, duration_ms: 0, output: "" },
+        { ran: true, passed: true, output: "" },
+        {
+          contract_version: "remediate-code-closing-result/v1alpha1",
+          action: "none",
+          status: "skipped",
+          commands: [],
+        },
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(existsSync(artifactsDir), "fully-green close still deletes the artifacts dir").toBe(false);
+    const archived = join(root, ".audit-tools", "remediation-friction-run-77.json");
+    expect(existsSync(archived), "friction record must be archived beside the deliverables").toBe(true);
+    expect(JSON.parse(await readFile(archived, "utf8"))).toEqual(record);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COR-0b906e37/-2 — INV-RSM-RESOLUTION-CORRELATE (review side)
 // ─────────────────────────────────────────────────────────────────────────────

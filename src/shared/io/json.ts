@@ -110,6 +110,26 @@ export function isFileMissingError(error: unknown): boolean {
   );
 }
 
+/**
+ * A file that EXISTS but does not parse as JSON. Typed (rather than a bare
+ * `Error` with a message prefix) so consumers of submitted artifacts can treat
+ * a malformed submission as quarantine-able content — distinct from the
+ * infrastructure IO failures that must still propagate.
+ */
+export class JsonParseError extends Error {
+  readonly path: string;
+  constructor(path: string, cause: unknown) {
+    super(`Invalid JSON in ${path}: ${errorMessage(cause)}`);
+    this.name = "JsonParseError";
+    this.path = path;
+  }
+}
+
+/** Whether an error is `readJsonFile`'s exists-but-does-not-parse failure. */
+export function isJsonParseError(error: unknown): error is JsonParseError {
+  return error instanceof JsonParseError;
+}
+
 export async function readJsonFile<T>(path: string): Promise<T> {
   let content: string;
   try {
@@ -124,7 +144,7 @@ export async function readJsonFile<T>(path: string): Promise<T> {
   try {
     return JSON.parse(content) as T;
   } catch (error) {
-    throw new Error(`Invalid JSON in ${path}: ${errorMessage(error)}`);
+    throw new JsonParseError(path, error);
   }
 }
 

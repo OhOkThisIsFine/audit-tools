@@ -430,14 +430,14 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
 
 // ── tryConsumeIncoming ────────────────────────────────────────────────────────
 
-await test("tryConsumeIncoming returns undefined when file does not exist", async () => {
+await test("tryConsumeIncoming reports absent when file does not exist", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     // No file written under incoming/
 
     const result = await tryConsumeIncoming(artifactsDir, "nonexistent.json");
 
-    expect(result, "should resolve to undefined without throwing").toBe(undefined);
+    expect(result, "should resolve to absent without throwing").toEqual({ status: "absent" });
   });
 });
 
@@ -455,16 +455,19 @@ await test("tryConsumeIncoming returns parsed value and path when file exists", 
 
     const result = await tryConsumeIncoming(artifactsDir, filename);
 
-    expect(result !== undefined, "result should not be undefined").toBeTruthy();
-    if (result === undefined) throw new Error("expected result");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
     expect(result.value, "value should match the written payload").toEqual(payload);
     expect(result.path, "path should equal join(artifactsDir, 'incoming', filename)").toBe(join(artifactsDir, "incoming", filename));
   });
 });
 
-await test("tryConsumeIncoming re-throws non-ENOENT errors", async () => {
+await test("tryConsumeIncoming reports a JSON parse failure as malformed, never a throw", async () => {
+  // INVERTED 2026-08-06: this used to pin "re-throws JSON parse errors" — the
+  // exact defect behavior that let one malformed lane hard-fail the whole
+  // next-step call and destroy a sibling lane's consumed results. Submitted
+  // content is the caller's to quarantine; only infrastructure errors throw.
   await withTempDir(async (artifactsDir) => {
-    // Write a file with invalid JSON to trigger a parse error (non-missing-file error)
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const filename = "bad-json.json";
     await writeFile(
@@ -473,9 +476,24 @@ await test("tryConsumeIncoming re-throws non-ENOENT errors", async () => {
       "utf8",
     );
 
+    const result = await tryConsumeIncoming(artifactsDir, filename);
+    expect(result.status).toBe("malformed");
+    if (result.status !== "malformed") throw new Error("expected malformed");
+    expect(result.path).toBe(join(artifactsDir, "incoming", filename));
+    expect(/invalid json/i.test(result.reason)).toBe(true);
+  });
+});
+
+await test("tryConsumeIncoming still re-throws genuine IO errors (directory in place of the file)", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const filename = "dir-not-file.json";
+    // A DIRECTORY where the submission file should be: reading it is an
+    // infrastructure failure (EISDIR), not malformed content — must throw.
+    await mkdir(join(artifactsDir, "incoming", filename), { recursive: true });
+
     await assert.rejects(
       () => tryConsumeIncoming(artifactsDir, filename),
-      "should re-throw JSON parse errors",
+      "should re-throw non-ENOENT, non-parse IO errors",
     );
   });
 });
@@ -629,6 +647,56 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     expect(notice.includes("design-review-contract-findings.json")).toBe(true);
     expect(notice.includes(rejection.quarantine_path)).toBe(true);
     expect(notice.includes("string")).toBe(true);
+  });
+});
+
+await test("handleDesignReviewBranch quarantines a syntactically malformed conceptual lane without losing the sibling contract lane", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    // Valid contract lane + malformed-JSON conceptual lane, arriving in the
+    // same call — the 2026-08-06 dogfood loss: the contract file was consumed
+    // (unlinked), then the conceptual parse threw out of the whole branch, so
+    // the merged-but-unpersisted contract findings were destroyed and the
+    // contract lane had to re-run.
+    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    await writeFile(
+      contractPath,
+      JSON.stringify([{ id: "DR-101", title: "contract finding" }]),
+      "utf8",
+    );
+    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    await writeFile(conceptualPath, '{"findings": [ {"id": "DR-2', "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state: AuditState = { status: "active", obligations: [] };
+    const params = { artifactsDir };
+
+    // Must not throw: the malformed lane quarantines like any other bad shape.
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+
+    // The valid contract lane merged and PERSISTED.
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    expect(written.contract_reviewed).toBe(true);
+    expect(written.contract_findings).toEqual([{ id: "DR-101", title: "contract finding" }]);
+
+    // The malformed conceptual lane survives, verbatim, under quarantine/.
+    const quarantined = await quarantinedFiles(artifactsDir);
+    expect(quarantined.length).toBe(1);
+    expect(quarantined[0].startsWith("design-review-conceptual-findings.json.")).toBe(true);
+    const quarantinedContent = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
+    expect(quarantinedContent).toBe('{"findings": [ {"id": "DR-2');
+
+    // The rejection is recorded so the re-emitted step can name it.
+    const rejection = (written.rejected_submissions ?? []).find(
+      (r: RejectedDesignReviewSubmission) => r.pass === "conceptual",
+    );
+    expect(rejection).toBeTruthy();
+    expect(rejection.filename).toBe("design-review-conceptual-findings.json");
+    expect(/json/i.test(rejection.reason)).toBe(true);
   });
 });
 

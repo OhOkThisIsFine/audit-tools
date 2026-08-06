@@ -12,6 +12,7 @@ import {
   advance,
   DEFAULT_MAX_TRANSITIONS,
   isFileMissingError,
+  isJsonParseError,
   readJsonFile,
   writeJsonFile,
   type ObligationDef,
@@ -244,21 +245,37 @@ export async function driveWithNoProgressRetry<T>(
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
 /**
+ * One poll attempt over an `incoming/<filename>` submission. Every gate that
+ * consumes host/worker submissions narrows on `status`, so a malformed lane can
+ * never hard-fail the whole next-step call (the 2026-08-06 design-review loss:
+ * a SyntaxError thrown out of one lane destroyed the sibling lane's consumed,
+ * not-yet-persisted results).
+ */
+export type IncomingConsumeAttempt<T> =
+  | { status: "ok"; value: T; path: string }
+  | { status: "absent" }
+  | { status: "malformed"; path: string; reason: string };
+
+/**
  * Read a JSON file from the `incoming/` subdirectory of `artifactsDir`.
- * Returns `{ value, path }` when the file exists and parses successfully.
- * Returns `undefined` when the file is absent (ENOENT-family errors).
- * Re-throws all other IO errors unchanged.
+ * `ok` when the file exists and parses; `absent` on ENOENT-family errors;
+ * `malformed` when the file exists but is not JSON — submitted content is the
+ * CALLER's to quarantine, never an infrastructure failure. All other IO errors
+ * re-throw unchanged.
  */
 export async function tryConsumeIncoming<T>(
   artifactsDir: string,
   filename: string,
-): Promise<{ value: T; path: string } | undefined> {
+): Promise<IncomingConsumeAttempt<T>> {
   const filePath = join(artifactsDir, "incoming", filename);
   try {
     const value = await readJsonFile<T>(filePath);
-    return { value, path: filePath };
+    return { status: "ok", value, path: filePath };
   } catch (error) {
-    if (isFileMissingError(error)) return undefined;
+    if (isFileMissingError(error)) return { status: "absent" };
+    if (isJsonParseError(error)) {
+      return { status: "malformed", path: filePath, reason: error.message };
+    }
     throw error;
   }
 }
@@ -533,7 +550,21 @@ export async function handleGraphEnrichmentBranch(
         params.artifactsDir,
         "edge-reasoning.json",
       );
-      if (edgeReasoningIncoming) {
+      if (edgeReasoningIncoming.status === "malformed") {
+        const quarantinePath = await quarantineIncomingFile(
+          params.artifactsDir,
+          edgeReasoningIncoming.path,
+          "edge-reasoning.json",
+        );
+        await recordEdgeReasoningRejection(params.artifactsDir, {
+          filename: "edge-reasoning.json",
+          quarantine_path: quarantinePath,
+          reason: edgeReasoningIncoming.reason,
+          rejected_at: new Date().toISOString(),
+        });
+        return { action: "continue" };
+      }
+      if (edgeReasoningIncoming.status === "ok") {
         // Same hazard class as the design-review quarantine fix: a malformed
         // submission used to no-op silently inside applyEdgeReasoning (it never
         // throws), the unconditional unlink then destroyed the file, and the
@@ -684,22 +715,25 @@ async function quarantineIncomingFile(
 }
 
 /**
- * Quarantine a submission that failed zod validation: move it out of `incoming/`
- * (never unlink-and-discard) and write a stderr diagnostic naming the quarantined
- * file + the shape error. The single loud-quarantine path shared by every
- * schema-validated incoming gate (`runOmittableGate` + `handleIntentEquivalenceBranch`)
- * so the "quarantine loudly" property cannot drift between them. Returns the
- * quarantine path.
+ * Quarantine a submission that failed zod validation — or failed to parse as
+ * JSON at all (a plain string reason): move it out of `incoming/` (never
+ * unlink-and-discard) and write a stderr diagnostic naming the quarantined
+ * file + the error. The single loud-quarantine path shared by every
+ * schema-validated incoming gate (`runOmittableGate` + `handleIntentEquivalenceBranch`
+ * + the charter lane loop) so the "quarantine loudly" property cannot drift
+ * between them. Returns the quarantine path.
  */
 async function quarantineMisshapedIncoming(
   artifactsDir: string,
   filePath: string,
   filename: string,
-  error: ZodError,
+  error: ZodError | string,
 ): Promise<string> {
-  const reason = error.issues
-    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
+  const reason = typeof error === "string"
+    ? error
+    : error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; ");
   const quarantinePath = await quarantineIncomingFile(artifactsDir, filePath, filename);
   process.stderr.write(
     `[audit-code] ${filename} quarantined to ${quarantinePath}: ${reason}. ` +
@@ -739,7 +773,11 @@ export async function consumeArrayIncoming<T>(
   filename: string,
 ): Promise<ConsumeArrayIncomingResult<T>> {
   const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
-  if (!incoming) return { status: "absent" };
+  if (incoming.status === "absent") return { status: "absent" };
+  if (incoming.status === "malformed") {
+    const quarantinePath = await quarantineIncomingFile(artifactsDir, incoming.path, filename);
+    return { status: "quarantined", quarantinePath, originalFilename: filename, reason: incoming.reason };
+  }
   const { value, path } = incoming;
   const unwrapped = unwrapIncomingArray(value);
   if (unwrapped.ok) {
@@ -769,7 +807,15 @@ export async function consumeObjectIncoming(
   filename: string,
 ): Promise<ConsumeObjectIncomingResult> {
   const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
-  if (!incoming) return { status: "absent" };
+  if (incoming.status === "absent") return { status: "absent" };
+  if (incoming.status === "malformed") {
+    const quarantinePath = await quarantineIncomingFile(artifactsDir, incoming.path, filename);
+    process.stderr.write(
+      `[audit-code] ${filename} quarantined to ${quarantinePath}: ${incoming.reason}. ` +
+        `Fix the JSON and resubmit.\n`,
+    );
+    return { status: "quarantined", quarantinePath, reason: incoming.reason };
+  }
   const { value, path } = incoming;
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
     return { status: "ok", value: value as Record<string, unknown>, path };
@@ -1131,7 +1177,15 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
   state: AuditState,
 ): Promise<OmittableGateAction<TStepKind>> {
   const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, descriptor.filename);
-  if (incoming) {
+  if (incoming.status === "malformed") {
+    // Not-JSON submission: same quarantine-loudly lifecycle as a mis-shaped one.
+    await quarantineMisshapedIncoming(
+      params.artifactsDir,
+      incoming.path,
+      descriptor.filename,
+      incoming.reason,
+    );
+  } else if (incoming.status === "ok") {
     const parsed = descriptor.schema.safeParse(incoming.value);
     if (parsed.success) {
       await descriptor.apply(parsed.data as TIncoming, incoming.path, params);
@@ -1211,7 +1265,15 @@ export async function handleIntentEquivalenceBranch(
 ): Promise<IntentEquivalenceBranchResult> {
   const filename = "intent-equivalence-verdict.json";
   const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
-  if (incoming) {
+  if (incoming.status === "malformed") {
+    await quarantineMisshapedIncoming(
+      params.artifactsDir,
+      incoming.path,
+      filename,
+      incoming.reason,
+    );
+    // Fall through: no valid submission — re-emit or deterministically resolve.
+  } else if (incoming.status === "ok") {
     const parsed = IntentEquivalenceVerdictSchema.safeParse(incoming.value);
     if (parsed.success) {
       await runAuditStep({
@@ -1317,7 +1379,17 @@ export async function handleCharterExtractionBranch(
   for (const kind of kinds) {
     const filename = `charter-extraction-${kind}.json`;
     const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
-    if (!incoming) continue;
+    if (incoming.status === "absent") continue;
+    if (incoming.status === "malformed") {
+      quarantinedAny = true;
+      await quarantineMisshapedIncoming(
+        params.artifactsDir,
+        incoming.path,
+        filename,
+        incoming.reason,
+      );
+      continue;
+    }
     const laneSchema = CharterSubmissionSchema.superRefine((submission, ctx) => {
       submission.nodes.forEach((node, ni) => {
         if (node.kind !== kind) {

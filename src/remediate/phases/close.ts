@@ -1363,6 +1363,15 @@ export async function cleanupTempBranchesAndArtifacts(
     return;
   }
 
+  // Archive the friction close-out record with the promoted deliverables BEFORE
+  // deleting the artifacts dir — same property as the audit side's
+  // promoteFinalAuditReport: the record must outlive the run it walked.
+  const { archiveFrictionRecords, outputDirFor } = await import("audit-tools/shared");
+  await archiveFrictionRecords({
+    artifactsDir: options.artifactsDir,
+    destDir: outputDirFor(options.artifactsDir),
+    prefix: "remediation-friction",
+  });
   try {
     const { rm } = await import("node:fs/promises");
     await rm(options.artifactsDir, { recursive: true, force: true });

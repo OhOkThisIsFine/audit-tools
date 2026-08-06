@@ -306,6 +306,66 @@ test("validateAndCollectResults rejects a duplicate task_id at ingest (dedup via
   });
 });
 
+test("validateAndCollectResults accepts a followup targeting a packet sibling's file (submit/merge boundary parity)", async () => {
+  // Submit validates followup_tasks.file_paths against the PACKET-wide union of
+  // member file_paths (pinned intended by F-6 in submit-packet-command.test.ts).
+  // Merge must enforce the identical contract: a result submit accepted may
+  // never be rejected at merge as contract_mismatch for the same field.
+  await withTempDir("merge-ingest-cmd-", async (dir) => {
+    const t1: AuditTask = {
+      task_id: "t1", unit_id: "u", pass_id: "pass:correctness", lens: "correctness",
+      file_paths: ["src/a.ts"], rationale: "test", tags: ["lens_verification"],
+    };
+    const t2: AuditTask = {
+      task_id: "t2", unit_id: "u2", pass_id: "pass:correctness", lens: "correctness",
+      file_paths: ["src/b.ts"], rationale: "test",
+    };
+    const r1 = {
+      task_id: "t1", unit_id: "u", pass_id: "pass:correctness", lens: "correctness",
+      file_coverage: [{ path: "src/a.ts", total_lines: 3 }],
+      findings: [], reviewed_clean: true,
+      verification: {
+        verified: true,
+        needs_followup: true,
+        followup_tasks: [{
+          task_id: "fu-1", unit_id: "u", pass_id: "pass:correctness", lens: "correctness",
+          rationale: "cross-cutting concern surfaced in the packet", priority: "medium",
+          // In-boundary: assigned to sibling t2 in the same packet.
+          file_paths: ["src/b.ts"],
+        }],
+      },
+    };
+    const r2 = {
+      task_id: "t2", unit_id: "u2", pass_id: "pass:correctness", lens: "correctness",
+      file_coverage: [{ path: "src/b.ts", total_lines: 3 }],
+      findings: [], reviewed_clean: true,
+    };
+    const r1Path = join(dir, "r1.json");
+    const r2Path = join(dir, "r2.json");
+    await writeJson(r1Path, r1);
+    await writeJson(r2Path, r2);
+
+    const entryByTaskId = new Map([
+      ["t1", { result_path: r1Path, task_id: "t1", packet_id: "pkt" }],
+      ["t2", { result_path: r2Path, task_id: "t2", packet_id: "pkt" }],
+    ]);
+    const packetMembers = new Map([["pkt", ["t1", "t2"]]]);
+
+    const { passing, failing } = await validateAndCollectResults(
+      [t1, t2],
+      entryByTaskId,
+      new Map(),
+      packetMembers,
+    );
+
+    expect(
+      failing.map((f) => ({ id: f.task_id, errors: f.errors })),
+      "an in-packet-boundary followup must not be a merge contract_mismatch",
+    ).toEqual([]);
+    expect(passing.map((r) => r.task_id).sort()).toEqual(["t1", "t2"]);
+  });
+});
+
 test("validateAndCollectResults classifies malformed JSON as unparseable", async () => {
   await withTempDir("merge-ingest-cmd-", async (dir) => {
     const task: AuditTask = {
