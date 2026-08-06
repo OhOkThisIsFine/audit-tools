@@ -1,0 +1,19 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/remediate/contract-pipeline-semantic-staleness.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/remediate/contract-pipeline-semantic-staleness.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 386[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 11:48:30
+[2m   Duration [22m 3.41s[2m (transform 1.31s, setup 9ms, collect 2.30s, tests 386ms, environment 0ms, prepare 205ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   remediate  2.9s
+   collect≈2.3s  run≈0.4s  files=1
+   slowest files:
+     2.9s  tests/remediate/contract-pipeline-semantic-staleness.test.ts (collect 2.3s, run 0.4s)
+   outcome: 11 passed, 0 failed, 0 skipped, 0 unfinished (total 11)

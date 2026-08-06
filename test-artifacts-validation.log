@@ -1,0 +1,210 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/remediate/artifacts-validation.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation[39m
+
+ [31m❯[39m tests/remediate/artifacts-validation.test.ts [2m([22m[2m14 tests[22m[2m | [22m[31m10 failed[39m[2m)[22m[32m 53[2mms[22m[39m
+[31m   [31m×[31m validateArtifacts[2m > [22mpasses a minimal valid runtime state[39m[32m 9[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateArtifacts[2m > [22mcatches malformed implement worker results referenced by a dispatch plan[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateArtifacts[2m > [22mcatches stale worker results that no dispatch plan references[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateCurrentStep (ValidationIssue[] return style)[2m > [22mreturns issues when required string fields are missing[39m[32m 4[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateCurrentStep (ValidationIssue[] return style)[2m > [22mdoes not report issues for a well-formed current-step object[39m[32m 4[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+   [32m✓[39m validateImplementWorkerResult (exported, ValidationIssue[] return style)[2m > [22mis exported from artifacts.ts and importable[32m 3[2mms[22m[39m
+   [32m✓[39m validateImplementWorkerResult (exported, ValidationIssue[] return style)[2m > [22mreturns issues when item_results array is missing[32m 3[2mms[22m[39m
+   [32m✓[39m validateImplementWorkerResult (exported, ValidationIssue[] return style)[2m > [22mreturns issues when phase is not implement[32m 3[2mms[22m[39m
+   [32m✓[39m validateImplementWorkerResult (exported, ValidationIssue[] return style)[2m > [22mreturns empty issues for a well-formed implement worker result[32m 4[2mms[22m[39m
+[31m   [31m×[31m validateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports issues when contract_version is wrong[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports issues when items array is missing[39m[32m 4[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateDispatchPlan (ValidationIssue[] return style)[2m > [22mdoes not report plan-level issues for a valid dispatch plan with no items[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports finding_id missing on document dispatch plan item[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m validateDispatchPlan (ValidationIssue[] return style)[2m > [22mdoes not report finding_id missing on document item that has finding_id[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 10 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateArtifacts[2m > [22mpasses a minimal valid runtime state
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m70:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateArtifacts[2m > [22mcatches malformed implement worker results referenced by a dispatch plan
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m79:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateArtifacts[2m > [22mcatches stale worker results that no dispatch plan references
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m114:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateCurrentStep (ValidationIssue[] return style)[2m > [22mreturns issues when required string fields are missing
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m143:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateCurrentStep (ValidationIssue[] return style)[2m > [22mdoes not report issues for a well-formed current-step object
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m157:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports issues when contract_version is wrong
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m226:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports issues when items array is missing
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m245:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateDispatchPlan (ValidationIssue[] return style)[2m > [22mdoes not report plan-level issues for a valid dispatch plan with no items
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m264:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateDispatchPlan (ValidationIssue[] return style)[2m > [22mreports finding_id missing on document dispatch plan item
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m291:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/10]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/remediate/artifacts-validation.test.ts[2m > [22mvalidateDispatchPlan (ValidationIssue[] return style)[2m > [22mdoes not report finding_id missing on document item that has finding_id
+[31m[1mError[22m: refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[36m [2m❯[22m assertNotNodeWorktreeCwd src/shared/io/nodeWorktreeGuard.ts:[2m139:13[22m[39m
+    [90m137| [39m    [35mconst[39m worktree [33m=[39m [34mnodeWorktreeAncestor[39m(probe)[33m;[39m
+    [90m138| [39m    [35mif[39m (worktree [33m!==[39m [35mnull[39m) {
+    [90m139| [39m      [35mthrow[39m [35mnew[39m [33mError[39m([34mrefusalMessage[39m(context[33m,[39m worktree))[33m;[39m
+    [90m   | [39m            [31m^[39m
+    [90m140| [39m    }
+    [90m141| [39m  }
+[90m [2m❯[22m StateStore.saveState src/remediate/state/store.ts:[2m325:5[22m[39m
+[90m [2m❯[22m saveState tests/remediate/artifacts-validation.test.ts:[2m48:39[22m[39m
+[90m [2m❯[22m tests/remediate/artifacts-validation.test.ts:[2m317:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/10]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m10 failed[39m[22m[2m | [22m[1m[32m4 passed[39m[22m[90m (14)[39m
+[2m   Start at [22m 11:48:49
+[2m   Duration [22m 1.82s[2m (transform 755ms, setup 7ms, collect 1.39s, tests 53ms, environment 0ms, prepare 150ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   remediate  1.6s
+   collect≈1.4s  run≈0.1s  files=1
+   slowest files:
+     1.6s  tests/remediate/artifacts-validation.test.ts (collect 1.4s, run 0.1s)
+   outcome: 4 passed, 10 failed, 0 skipped, 0 unfinished (total 14)
+   failed files (advisory console echo — the ledger's `outcome` field is the source of truth):
+     - tests/remediate/artifacts-validation.test.ts
+   parallel-flake baseline (win32-cpu16-w16, load=solo):
+     10 UNRECOGNIZED — these stay RED:
+       - tests/remediate/artifacts-validation.test.ts > validateArtifacts > catches malformed implement worker results referenced by a dispatch plan
+       - tests/remediate/artifacts-validation.test.ts > validateArtifacts > catches stale worker results that no dispatch plan references
+       - tests/remediate/artifacts-validation.test.ts > validateArtifacts > passes a minimal valid runtime state
+       - tests/remediate/artifacts-validation.test.ts > validateCurrentStep (ValidationIssue[] return style) > does not report issues for a well-formed current-step object
+       - tests/remediate/artifacts-validation.test.ts > validateCurrentStep (ValidationIssue[] return style) > returns issues when required string fields are missing
+       - tests/remediate/artifacts-validation.test.ts > validateDispatchPlan (ValidationIssue[] return style) > does not report finding_id missing on document item that has finding_id
+       - tests/remediate/artifacts-validation.test.ts > validateDispatchPlan (ValidationIssue[] return style) > does not report plan-level issues for a valid dispatch plan with no items
+       - tests/remediate/artifacts-validation.test.ts > validateDispatchPlan (ValidationIssue[] return style) > reports finding_id missing on document dispatch plan item
+       - tests/remediate/artifacts-validation.test.ts > validateDispatchPlan (ValidationIssue[] return style) > reports issues when contract_version is wrong
+       - tests/remediate/artifacts-validation.test.ts > validateDispatchPlan (ValidationIssue[] return style) > reports issues when items array is missing
