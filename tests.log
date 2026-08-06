@@ -1,0 +1,136 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/shared/brokered-dispatch-no-disk-io.test.ts tests/shared/charter-gate.test.ts tests/shared/codex-antigravity-providers.test.ts tests/shared/design-check-provenanced-input.test.ts tests/shared/doc-links-gate.test.ts tests/shared/doc-manifest-gate.test.ts tests/shared/emit-validate-repair.test.ts tests/shared/finding-identity-single-source.test.ts tests/shared/finding-ranks.test.ts tests/shared/friction-derived-observations.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-38-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/shared/brokered-dispatch-no-disk-io.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/shared/charter-gate.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/shared/design-check-provenanced-input.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/shared/finding-ranks.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+warning: in the working copy of 'docs/a.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/b.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'spec/s.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m tests/shared/friction-derived-observations.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 782[2mms[22m[39m
+   [33m[2m✓[22m[39m decideFrictionTriage: re-derive is idempotent and PRESERVES host-authored observations [33m 561[2mms[22m[39m
+warning: in the working copy of 'docs/a.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/b.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'spec/s.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/dead.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/dead.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/depth.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/dead.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/depth.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/cite.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/thing.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/cite.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/thing.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/range.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/cite.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/range.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/thing.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/Cased.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/caseref.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/Cased.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/caseref.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/ref.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/ext.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/ext.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/frag.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/target.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/frag.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/target.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/enc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/my doc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/enc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/my doc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/tracked.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/enc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/my doc.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/tracked.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/backlog/x.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/dir.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m tests/shared/emit-validate-repair.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 8298[2mms[22m[39m
+   [33m[2m✓[22m[39m seam is exported from the shared barrel [33m 8118[2mms[22m[39m
+{"event":"provider_launch","provider":"codex","runId":"RID","obligationId":null,"promptPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-DTX90b\\node.md","taskPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-DTX90b\\task.json"}
+{"event":"provider_done","provider":"codex","runId":"RID","obligationId":null,"accepted":true,"exitCode":null}
+{"event":"provider_launch","provider":"codex","runId":"RID","obligationId":null,"promptPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-gD2U8w\\node.md","taskPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-gD2U8w\\task.json"}
+{"event":"provider_done","provider":"codex","runId":"RID","obligationId":null,"accepted":true,"exitCode":null}
+{"event":"provider_launch","provider":"codex","runId":"RID","obligationId":null,"promptPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-AWHSiQ\\node.md","taskPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\codex-prov-AWHSiQ\\task.json"}
+{"event":"provider_done","provider":"codex","runId":"RID","obligationId":null,"accepted":true,"exitCode":null}
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'AGENTS.md', LF will be replaced by CRLF the next time Git touches it
+{"event":"provider_launch","provider":"agy","runId":"RID","obligationId":null,"promptPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\agy-test-ODWmYE\\prompt.txt","taskPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\agy-test-ODWmYE\\task.json"}
+{"event":"provider_done","provider":"agy","runId":"RID","obligationId":null,"accepted":true,"exitCode":0}
+{"event":"provider_launch","provider":"agy","runId":"RID","obligationId":null,"promptPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\gemini-test-7CyUpA\\prompt.txt","taskPath":"C:\\Users\\ethan\\AppData\\Local\\Temp\\gemini-test-7CyUpA\\task.json"}
+{"event":"provider_done","provider":"agy","runId":"RID","obligationId":null,"accepted":true,"exitCode":0}
+ [32m✓[39m tests/shared/codex-antigravity-providers.test.ts [2m([22m[2m47 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[33m 1029[2mms[22m[39m
+   [2m[90m↓[39m[22m createFreshSessionProvider auto path writes a structured stderr diagnostic[2m[90m [an auto-resolvable agent CLI (claude/codex/opencode) is on PATH in this environment][39m[22m
+warning: in the working copy of 'docs/real.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/syntax.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m tests/shared/doc-links-gate.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 12850[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mPASSES a repo whose relative links all resolve [33m 535[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches a MISSING target — the moved/renamed/deleted class [33m 498[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches the WRONG-DEPTH form specifically — ../../ where ../ was meant [33m 510[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches a LINE-SUFFIXED citation, and says the file itself exists [33m 384[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches a RANGE suffix too (:120-140), not just a single line [33m 452[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches a CASE-ONLY mismatch — green on Windows, dead in Linux CI [33m 604[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate is RED on each real defect class[2m > [22mcatches a dead REFERENCE-STYLE definition, not only inline links [33m 523[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate stays NARROW[2m > [22mignores external, mailto, protocol-relative and pure-anchor targets [33m 668[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate stays NARROW[2m > [22mresolves a link carrying a #fragment by its path half [33m 666[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate stays NARROW[2m > [22mresolves a percent-encoded path [33m 571[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate stays NARROW[2m > [22mignores an UNTRACKED markdown file — tracked set only, so CI clones agree [33m 686[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the gate stays NARROW[2m > [22mdoes not treat a bare directory link as dead when the directory exists [33m 899[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — an ignored target is an install artifact, not a dead link[2m > [22mdoes NOT flag an ABSENT link target that git ignores [33m 495[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — an ignored target is an install artifact, not a dead link[2m > [22mSTILL fails on a genuinely dead link in the same file [33m 495[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — a link inside CODE is a syntax example, not a link[2m > [22mignores link syntax inside inline spans and fenced blocks [33m 393[2mms[22m[39m
+   [33m[2m✓[22m[39m check-doc-links — the real repo is the contract[2m > [22mTHIS repo has zero unresolvable relative links [33m 1111[2mms[22m[39m
+ [32m✓[39m tests/shared/finding-identity-single-source.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 13783[2mms[22m[39m
+   [33m[2m✓[22m[39m finding-identity-single-source/1b: no other src module reimplements the finding-identity signature [33m 7100[2mms[22m[39m
+   [33m[2m✓[22m[39m finding-identity-single-source/2b: no other src module reimplements a mint-unique-id collision loop [33m 6654[2mms[22m[39m
+ [32m✓[39m tests/shared/doc-manifest-gate.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 60080[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mBLOCKS a commit that rewrites a normative goals doc [33m 6907[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mALLOWS the same commit once a staged-tree-bound owner-decision record exists [33m 7429[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mBLOCKS when the override record binds a DIFFERENT tree (stale) [33m 5107[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mBLOCKS when the record names no owner decision [33m 5933[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mthe producer writes a record the gate accepts — round trip, no field drift [33m 8064[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — constitutional-doc refusal[2m > [22mdoes NOT fire on an ordinary doc — the refusal stays narrow [33m 9291[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — the doc-manifest trigger covers every manifest input[2m > [22mruns the doc-manifest check for markdown OUTSIDE docs/ [33m 6171[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — the doc-manifest trigger covers every manifest input[2m > [22mruns the doc-manifest check when its canonical data source is staged [33m 5114[2mms[22m[39m
+   [33m[2m✓[22m[39m pre-commit gate — the doc-manifest trigger covers every manifest input[2m > [22mstill ignores a commit that carries no markdown at all [33m 4117[2mms[22m[39m
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Errors [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
+[31m[1m
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[31m[1mError[22m: [vitest-worker]: Timeout calling "onTaskUpdate"[39m
+[90m [2m❯[22m Object.onTimeoutError ../../../node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:[2m53:10[22m[39m
+[90m [2m❯[22m Timeout._onTimeout ../../../node_modules/vitest/dist/chunks/index.B521nVV-.js:[2m59:62[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m635:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m571:7[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
+
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m148 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (149)[39m
+[2m     Errors [22m [1m[31m1 error[39m[22m
+[2m   Start at [22m 11:51:55
+[2m   Duration [22m 61.82s[2m (transform 9.85s, setup 55ms, collect 13.93s, tests 96.84s, environment 2ms, prepare 2.78s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     113.6s
+   collect≈13.9s  run≈96.8s  files=10
+   slowest files:
+     61.3s  tests/shared/doc-manifest-gate.test.ts (collect 0.9s, run 60.1s)
+     14.3s  tests/shared/finding-identity-single-source.test.ts (collect 0.2s, run 13.8s)
+     13.7s  tests/shared/doc-links-gate.test.ts (collect 0.4s, run 12.9s)
+     10.3s  tests/shared/codex-antigravity-providers.test.ts (collect 9.0s, run 1.0s)
+     9.5s  tests/shared/emit-validate-repair.test.ts (collect 1.0s, run 8.3s)
+     1.8s  tests/shared/friction-derived-observations.test.ts (collect 0.7s, run 0.8s)
+     0.8s  tests/shared/design-check-provenanced-input.test.ts (collect 0.4s, run 0.0s)
+     0.7s  tests/shared/brokered-dispatch-no-disk-io.test.ts (collect 0.5s, run 0.0s)
+     0.6s  tests/shared/charter-gate.test.ts (collect 0.3s, run 0.0s)
+     0.5s  tests/shared/finding-ranks.test.ts (collect 0.3s, run 0.0s)
+   outcome: 148 passed, 0 failed, 1 skipped, 0 unfinished (total 149)
