@@ -74,8 +74,8 @@
   check. The rest of the cluster is live-run watch — see the merged ▶ entry in `open-bugs.md`.
 - Dispatch inversion is implemented and its cross-suite fallout is repaired (2026-08-04): provider
   confirmation/Gate-0, confirmed ordering, dispatch bias, and proxy catalog/populate discovery are
-  retired; `llm-relay` owns concrete provider/model routing through `pool/fast` / `pool/coding` /
-  `pool/reasoning` at `http://127.0.0.1:8791/v1`.
+  retired; `llm-relay` owns concrete provider/model routing at `http://127.0.0.1:8791/v1` (its
+  pool roster is llm-relay's to publish — never named here).
 - The Codex handshake identifies `self.provider: codex`; an unidentified host falls back to
   `worker-command`, never Claude. Two defects from that neutral identity were found and fixed:
   pool CLASS (host vs engine-drivable source) is now construction-time data out of
@@ -85,11 +85,9 @@
 - Local enforcement remains: packet/context fit (unknown context cap now refuses rather than
   fits), capability floors, quota/headroom, concurrency, result validation, and mechanical
   self-spawn exclusion.
-- One relay-side defect remains OUTSIDE this repo: `pool/coding` does not fail over past a
-  rate-limited first candidate — file against llm-relay. (Nightly answers and their landing refs
-  live in `.claude/nightly-decisions.json`; the open queue is `docs/nightly-inbox.md`. Item ids
-  like `sol-1` are per-run and are reused across nights — the ledger's subject keys, not the ids,
-  are what identify a decision.)
+- Nightly answers and their landing refs live in `.claude/nightly-decisions.json`; the open queue
+  is `docs/nightly-inbox.md`. Item ids like `sol-1` are per-run and are reused across nights — the
+  ledger's subject keys, not the ids, are what identify a decision.
 - Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
   `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
   [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).

@@ -126,7 +126,7 @@ pending → planning → implementing → closing → complete
 - `triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)
 
-**Dispatch:** parallel waves (`src/remediate/steps/dispatch.ts`: `prepareImplementDispatch` / `mergeImplementResults`, plus `scheduleWave` / `resolveHostConcurrencyLimit` for concurrency limiting). Providers mirror audit-code's backend set.
+**Dispatch:** parallel waves (`src/remediate/steps/dispatch.ts`: `prepareImplementDispatch` / `mergeImplementResults`, plus `scheduleWave` for concurrency limiting). Providers mirror audit-code's backend set.
 
 **State persistence** (`src/remediate/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `LockedJsonStore` (`audit-tools/shared/io/lockedJsonStore.ts`, also used by the audit session-config mutator), which wraps `withFileLock` (`audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 

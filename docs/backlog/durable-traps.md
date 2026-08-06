@@ -417,11 +417,20 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-  ⚠ **CLOSED to its floor — `check:tests` reaches 563 of 564 test files.** `tsconfig.test.json`
-  sets `checkJs: false`, which silently excludes any `.mjs` test. The 1 file still outside the gate
-  is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts` guard cannot
-  detect its own exclusion). 563 is therefore the honest ceiling — "the test tree is typechecked"
-  carries exactly that asterisk, no larger.
+  ⚠ **CLOSED to its floor — `check:tests` reaches every test file except ONE.** `tsconfig.test.json`
+  sets `checkJs: false`, which silently excludes any `.mjs` test. The single file still outside the
+  gate is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts` guard
+  cannot detect its own exclusion) — "the test tree is typechecked" carries exactly that one-file
+  asterisk, no larger. (No absolute file count is pinned here: hand-typed counts drift both ways —
+  nightly sol-3 decision 2026-08-06.)
+  ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the
+  flip yields 8,903 errors across essentially every `.mjs` file, so the exclude list would cover
+  the whole tree, buy zero coverage, and leave a 451-entry config to rot (it also dirties 28 `.ts`
+  consumers). Do not rebuild this.
+  ⚠ Converting a test file named in `scripts/shared/test-flake-baseline.json` must move its
+  baseline key in the same commit, or the flake record orphans.
+  ⚠ Any future `.mjs`→`.ts` conversion runs `node scripts/shared/conversion-assertion-parity.mjs`
+  after `git mv`+edits, before commit — review ONLY the files it flags.
 
 - **Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.**
   Line numbers across the backlog drifted repo-wide while the symbol names beside them still resolved,

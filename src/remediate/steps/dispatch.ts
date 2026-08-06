@@ -36,7 +36,6 @@ export {
   resolveHostActiveSubagentLimit,
   detectHostConcurrencyFromEnv,
   normalizeSlotTokens,
-  resolveHostConcurrencyLimit,
   scheduleWave,
   buildConfirmedPools,
   buildDispatchQuota,

@@ -110,18 +110,6 @@ export interface WaveScheduleResult extends WaveSchedule {
   capacity_pools?: DispatchCapacityPoolSummary[];
 }
 
-export function resolveHostConcurrencyLimit(options: {
-  hostMaxConcurrent?: number | null;
-  sessionConfig: SessionConfig | null;
-  env?: NodeJS.ProcessEnv;
-}): HostConcurrencyLimit | null {
-  return resolveHostActiveSubagentLimit({
-    explicitLimit: options.hostMaxConcurrent,
-    sessionConfig: options.sessionConfig ?? {},
-    env: options.env,
-  });
-}
-
 /**
  * Remediate's draw over the SHARED host-pool assembly core
  * ({@link buildHostPoolPreamble} in `audit-tools/shared`): resolve this mode's provider

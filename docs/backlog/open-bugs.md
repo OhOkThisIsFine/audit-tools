@@ -665,28 +665,6 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **Test-tree `.mjs`→`.ts` conversion: COMPLETE at its floor (2026-07-29).**
-  `check:tests` reaches 563 of 564 test files (`find tests -name "*.test.*"`). The one `.mjs`
-  remaining is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts`
-  guard cannot detect its own exclusion). No config ratchet exists; the vitest `include` globs stay
-  single-sourced in `tests/helpers/testFileContract.ts`, enforced by
-  `tests/shared/test-suite-visibility.test.ts`. The ratchet's yield across the tranches: dozens of
-  real fixture-drift repairs (missing required fields, stale field names, enum values that never
-  existed — `status: "planning"`, `"passed"`, `"audit"`), six types-only src/scripts widenings
-  where a declared type undersold a tested tolerance, and one real loop-core defect
-  (the dead `buildAccountScopedQuotaSource` claude arms — settled 2026-07-29, exhaustive switch +
-  §5b contract pins in `tests/shared/dispatchable-sources.test.ts`). Per-lap semantics check for any
-  future conversion: `node scripts/shared/conversion-assertion-parity.mjs` after `git mv`+edits,
-  before commit — review ONLY the files it flags.
-  ⚠ Converting a file named in `scripts/shared/test-flake-baseline.json` (charter-extraction,
-  handoff-roadmap) must move its baseline key in the same commit, or the flake record orphans.
-  ⚠ **MEASURED and REJECTED (2026-07-28): flipping `checkJs: true` with an exclude list** — the flip
-  yields 8,903 errors across essentially every `.mjs` file, so the exclude list would cover the whole
-  tree, buy zero coverage, and leave a 451-entry config to rot (it also dirties 28 `.ts` consumers).
-  **Property:** the gate's reach is stated as a number wherever it is claimed, so "the test tree is
-  typechecked" can never again read as covering the whole tree
-  ([`durable-traps.md`](durable-traps.md) carries the narrowed claim).
-
 - **Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29):**
   (1) **tool-should-decide (low):** the Grep tool's content output rendered `/**` and `//` comment
   markers as `\**` / `\ ` in `apiPool.ts`, indistinguishable from real file corruption — cost a

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   detectHostConcurrencyFromEnv,
-  resolveHostConcurrencyLimit,
   scheduleWave,
   buildDispatchQuota,
   normalizeSlotTokens,
@@ -104,44 +103,6 @@ describe("detectHostConcurrencyFromEnv", () => {
     const result = detectHostConcurrencyFromEnv({
       REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "abc",
     } as any);
-    expect(result).toBeNull();
-  });
-});
-
-describe("resolveHostConcurrencyLimit", () => {
-  it("uses explicit hostMaxConcurrent over everything", () => {
-    const result = resolveHostConcurrencyLimit({
-      hostMaxConcurrent: 10,
-      sessionConfig: { parallel_workers: 3 },
-      env: { REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "8" } as any,
-    });
-    expect(result!.active_subagents).toBe(10);
-    expect(result!.source).toBe("cli_flags");
-  });
-
-  it("falls back to session config parallel_workers", () => {
-    const result = resolveHostConcurrencyLimit({
-      sessionConfig: { parallel_workers: 3 },
-      env: {} as any,
-    });
-    expect(result!.active_subagents).toBe(3);
-    expect(result!.source).toBe("session_config");
-  });
-
-  it("falls back to environment when no CLI or config", () => {
-    const result = resolveHostConcurrencyLimit({
-      sessionConfig: null,
-      env: { CODEX_MAX_ACTIVE_SUBAGENTS: "4" } as any,
-    });
-    expect(result!.active_subagents).toBe(4);
-    expect(result!.source).toBe("environment");
-  });
-
-  it("returns null when nothing is configured", () => {
-    const result = resolveHostConcurrencyLimit({
-      sessionConfig: null,
-      env: {} as any,
-    });
     expect(result).toBeNull();
   });
 });

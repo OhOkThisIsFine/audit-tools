@@ -43,8 +43,8 @@ export interface AuditorSelf {
   /**
    * The driver's declared parallel-worker concurrency cap (the former
    * `sessionConfig.parallel_workers`) — dispatch capability, so it rides the
-   * descriptor, not the repo config. Feeds `resolveHostConcurrencyLimit` /
-   * `resolveHostActiveSubagentLimit` via the resolved effective config.
+   * descriptor, not the repo config. Feeds `resolveHostActiveSubagentLimit`
+   * via the resolved effective config.
    */
   parallel_workers?: number;
   /** Tristate: host can dispatch subagents (was `--host-can-dispatch-subagents`). */

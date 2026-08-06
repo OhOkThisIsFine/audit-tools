@@ -729,5 +729,61 @@
     "decided_at": "2026-08-05T01:22:40.389Z",
     "completed_at": "2026-08-05T01:22:40.487Z",
     "completed_ref": "3750a943 — git-evidenced probes landed"
+  },
+  "a3552a1df15ea4ec": {
+    "disposition": "settled",
+    "answer": "Build P8 as proposed: classify the probe target; an untracked or record path yields a signal-free untrackable state that can never close an item; writeOpenItems refuses to author such a probe; ship with the red-green tests in PATCH.md.",
+    "subject": "A premise probe aimed at a gitignored runtime file still reports \"absent\", which is the verdict that CLOSES an item — refuse the target?",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-08-06T16:13:26.944Z"
+  },
+  "a66df2c54c43b85e": {
+    "disposition": "settled",
+    "answer": "Build P9: widen the pre-commit gate to the full commit-creating subcommand set (commit, merge, rebase, cherry-pick, revert, am), keep expensive legs scoped by staged set, ship red-green tests, and delete the durable-traps entry in the same commit.",
+    "subject": "The pre-commit gate still fires only on `git commit`, so merge/rebase/cherry-pick/revert/am land completely ungated — widen it and delete the trap entry?",
+    "path": ".claude/hooks/pre-commit-gate.mjs",
+    "decided_at": "2026-08-06T16:13:26.998Z"
+  },
+  "0a3a56a6738f40f4": {
+    "disposition": "settled",
+    "answer": "Drop the counts: remove the hand-typed entry counts from both spec docs (and do not pin absolute test-file counts in backlog prose); the contracts enumerate contents, the size is status-noise. No count gate is built.",
+    "subject": "Two hand-typed registry counts drifted in one night, in docs that cannot be auto-fixed — add a build check that verifies the number?",
+    "path": "scripts/check-doc-code-citations.mjs",
+    "decided_at": "2026-08-06T16:13:27.055Z"
+  },
+  "d3e50981fd854566": {
+    "disposition": "settled",
+    "answer": "Build P11 in full: resolve the triage model target live from llm-relay (never a hardcoded pool name), preflight once and abort loudly with the relay's own error when the lane is dead, and write a seen/classified/errored coverage stamp beside the JSONL.",
+    "subject": "Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool llm-relay deleted. Give the lane a health contract?",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-06T16:13:27.110Z"
+  },
+  "0441e5462e423ee0": {
+    "disposition": "settled",
+    "answer": "Both: forbid the computed-value item class outright (a count has no quotable code-side string, so no probe form can express it; per sol-3 the counts themselves are dropped rather than gated), AND add the two-sided { file, absent } probe form — an item naming two locations carries one probe per side, and either side moving closes it.",
+    "subject": "A premise probe pins ONE location, but an item's premise is a RELATION between two — so an item survives when the other side moves. Two items were nearly answered with a corrupting edit tonight.",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-08-06T16:13:36.825Z"
+  },
+  "2994bbdaf341d0c4": {
+    "disposition": "settled",
+    "answer": "Drop the pool names from the HANDOFF routing sentence (llm-relay owns the roster; naming pools here is a standing drift source) AND delete the pool/coding failover defect note — a defect against a lane that no longer exists is a dead record; if failover-past-rate-limit is still real it will resurface against the live pools.",
+    "subject": "The handoff routes work through three llm-relay pools that no longer exist — remap them, or drop the pool names?",
+    "path": "docs/HANDOFF.md",
+    "decided_at": "2026-08-06T16:13:36.881Z"
+  },
+  "4c321d8d2b125e4d": {
+    "disposition": "settled",
+    "answer": "Delete resolveHostConcurrencyLimit (definition, unconsumed re-export from dispatch.ts, doc-comment mention, and its tests) and drop it from the CLAUDE.md dispatch sentence — the delete-deprecated-paths preference applied literally.",
+    "subject": "instruction-file edit: CLAUDE.md documents `resolveHostConcurrencyLimit` as live concurrency machinery, but nothing in src/ calls it — correct the doc, or delete the dead symbol?",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-06T16:13:36.937Z"
+  },
+  "9a88507e5fe2f6d0": {
+    "disposition": "settled",
+    "answer": "Rehome all three durable rules (the measured checkJs:true rejection with its 8,903-error figure, the flake-baseline key-move-same-commit warning, and the conversion-assertion-parity script pointer) into durable-traps.md beside the existing conversion claim, then delete the open-bugs entry.",
+    "subject": "The test-tree conversion entry is fully shipped, but it is the ONLY home for three durable rules — rehome them and delete it, or keep the entry?",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-06T16:13:36.993Z"
   }
 }
