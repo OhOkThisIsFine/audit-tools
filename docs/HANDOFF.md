@@ -108,18 +108,36 @@
 
 ## Immediate next
 
-1. **Run remediate-code over the 2026-08-06 dogfood findings** on the freshly shipped version
-   (backend state is a clean slate). Triage is DONE: all 9 criticals were adversarially verified —
-   0 survived as critical (3 refuted, 6 downgraded and now tracked in `open-bugs.md`); the 3
-   tool-side defect leads are FIXED and shipped (see
-   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md) §Defect leads +
-   §Critical-findings verification). Start the remediation from the promoted
-   `.audit-tools/audit-findings.json` (1,925 findings / 133 blocks; high tier first — expect
-   severity inflation, the planning review gate is the filter).
-2. Work the 2026-08-05 minor-friction cluster (still live on v0.36.0, re-confirmed:
-   handshake re-echo, tier-routing collapse, silent long derivation, staleness-line spam,
-   observability rationale) — entry + spec refs in `open-bugs.md` §Dogfood 2026-08-05 minor
-   friction cluster.
+1. **RESUME the remediation run `dogfood-20260806-v0361-remediation` — PAUSED mid-run 2026-08-06
+   on owner instruction.** The checkout sits ON branch `remediation/dogfood-20260806-v0361-remediation`
+   (6 real commits ahead of `main`; do NOT switch back to main — the run's worktrees/state key off
+   this branch). State: `waiting_for_clarification` with **6 open clarifications**; everything is
+   persisted and resumable. Progress so far: full contract pipeline done (review gate: 46 strategic
+   findings declined after adversarial triage, record in
+   `.audit-tools/remediation/strategic-triage/triage-record.md`; contracts + test plan + assessment
+   + critic/judge all green); all 205 implement nodes dispatched and terminal-accepted once
+   (≈128 accepted, most verified no-change; 6 commits landed); a 22-node clarified re-wave landed.
+   **To resume:** `remediate-code next-step` with the usual capability flags → answer the 6
+   clarifications (the answer pattern that works is in
+   `.audit-tools/remediation/steps/` history: constituent finding ids + artifact paths + the
+   verify-or-no-change scope policy) → keep driving accept/merge rounds to the close phase.
+   ⚠ Three standing hazards: (0) `session-config.json` at repo root (untracked,
+   `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
+   is REQUIRED for plan extraction/replan sizing and something in the run deleted it once — recreate
+   it if absent; (a) the installed global dist carries a ONE-LINE HOTFIX
+   (`nextStep.js` zero-frontier null-guard) — reinstalling the global package reverts it and
+   next-step will crash again until the source fix ships; (b) the accept/reverify defect cluster in
+   `open-bugs.md` (premature whole-plan merge, tip-only quarantine replay, branch-tip left dirty on
+   failed accept, stale-result clarification loop) — recovery recipes are in that entry.
+2. **Ship the v0.36.1 loop-core source fixes** for the accept/reverify cluster + the zero-frontier
+   null-guard (`src/remediate/steps/nextStep.ts:2372`) with regression tests and attestation —
+   entry in `open-bugs.md` §Implement-dispatch accept/reverify defect cluster.
+3. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
+   2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
+   `open-bugs.md`.
+4. **CI on main (`8afb66d7`) is still queued behind a GitHub Actions outage** — the TS7006 fix is
+   verified green locally (`verify:checks` exit 0) and every CI shard that ran passed; confirm the
+   queued `ci` run goes green when Actions recovers.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

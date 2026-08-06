@@ -1218,3 +1218,29 @@
   same class as the live tier-routing-collapse item. **Property to hold:** a fresh handshake with a
   healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
   itself would use for dispatch.
+
+- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Six
+  mechanically-observed defects from the first live drive of the 205-node rolling dispatch, all
+  host-recovered mid-run; each needs a tool-side fix + regression test (loop-core, attestation):
+  (1) `reverify-node` runs a premature whole-plan `mergeImplementResults` — 205 never-dispatched
+  blocks were "rejected", swept the run to triage, and burned auto-retry attempt 1/2 on every
+  untouched item; (2) quarantine replay cherry-picks only the preserved TIP commit, so a
+  multi-commit node branch conflicts on missing context (worked around via `commit-tree` squash +
+  `update-ref`); (3) a failed accept left the node's commit ON the remediation branch while
+  reporting `merged:false` — branch tip red until a manual reset; (4) node worktrees were
+  de-registered mid-recovery leaving a dir that resolves up to MAIN (the false-green verify guard
+  caught it — that guard is load-bearing); (5) v0.36.1 hard-crash: `nextStep.ts:2372` reads
+  `rolling.quotaPath!` unguarded on a zero-node frontier (guard sits three lines later) — currently
+  HOTFIXED ONLY in this machine's installed dist, source fix pending; (6) a `clarified` resolution
+  is consumed but reconciliation reuses the stale `needs_clarification` worker results and re-asks
+  the same questions — a clarified item must supersede its stale result (worked around by deleting
+  the 22 result files). **Property to hold:** reverify touches only its node; (also observed: 20 worker scratch logs — check_output.txt, test_result.log, build_results.log, … — were tool-committed in worktrees and MERGED to the branch, so the accept write-scope gate did not refuse files outside the node's declared write set;) an accept failure
+  leaves the branch exactly as before the attempt; a clarified item always re-dispatches fresh.
+
+- **Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction,
+  low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`) falls back to
+  `python -m pytest` for pyproject/pytest.ini repos; on a Windows host without Python the App
+  Execution Alias stub OPENS THE STORE per spawn — test-fixture repos under parallel verify waves
+  popped it repeatedly. **Property to hold:** before spawning bare `python`, resolve the binary and
+  refuse the zero-byte WindowsApps stub (capture-only probe through the spawn substrate); owner
+  mitigation is disabling the python/python3 app execution aliases.
