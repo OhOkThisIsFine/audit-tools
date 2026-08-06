@@ -1208,3 +1208,13 @@
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
+
+- **Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a
+  self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).** The
+  `module_contract_drafting` prompt says "parallel sub-agents in waves of at most **1** concurrent
+  agents" for 153 modules — the backend's quota/host concurrency derivation produced 1 from a
+  3-rank `--host-models` handshake with no `--host-max-concurrent`, on a clean-slate run with no
+  learned limits. A phase designed to parallelize degrades to a multi-hour serial stall; likely the
+  same class as the live tier-routing-collapse item. **Property to hold:** a fresh handshake with a
+  healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
+  itself would use for dispatch.
