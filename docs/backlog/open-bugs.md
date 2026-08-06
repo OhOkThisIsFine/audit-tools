@@ -1203,3 +1203,12 @@
   restored by hand post-close. **Property to hold:** the friction record outlives the run until a
   named consumer ingests it (or is archived with the promoted deliverables); cleanup and the
   stop-gate agree on what constitutes a run.
+
+- **friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run
+  (2026-08-06, low).** The checkout is shared; the gate keys "a run happened in this session" on
+  disk-marker recency alone (documented: no per-session signal reaches a Stop hook). Observed: a
+  fresh dogfood run driven by another session (charter lanes mid-submission, `friction/` not yet
+  created) blocked THIS session's stop, demanding a close-out walk the driving session owes at its
+  own close. **Property to hold:** a run that is visibly IN FLIGHT (fresh `steps/current-step.json`
+  churn) or driven by another session never blocks a bystander's stop; the once-per-stop-cycle
+  escape keeps this low-severity.
