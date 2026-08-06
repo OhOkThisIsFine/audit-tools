@@ -1,0 +1,19 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/tier-routing.test.ts
+
+ RUN  v3.2.6 C:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-67-dogfood-20260806-v0361-remediation
+
+ ✓ tests/audit/tier-routing.test.ts (16 tests) 8ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  12:03:27
+   Duration  9.73s (transform 6.87s, setup 10ms, collect 8.34s, tests 8ms, environment 0ms, prepare 276ms)
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      8.6s
+   collect≈8.3s  run≈0.0s  files=1
+   slowest files:
+     8.6s  tests/audit/tier-routing.test.ts (collect 8.3s, run 0.0s)
+   outcome: 16 passed, 0 failed, 0 skipped, 0 unfinished (total 16)
