@@ -1234,8 +1234,14 @@
   HOTFIXED ONLY in this machine's installed dist, source fix pending; (6) a `clarified` resolution
   is consumed but reconciliation reuses the stale `needs_clarification` worker results and re-asks
   the same questions — a clarified item must supersede its stale result (worked around by deleting
-  the 22 result files). **Property to hold:** reverify touches only its node; (also observed: 20 worker scratch logs — check_output.txt, test_result.log, build_results.log, … — were tool-committed in worktrees and MERGED to the branch, so the accept write-scope gate did not refuse files outside the node's declared write set;) an accept failure
-  leaves the branch exactly as before the attempt; a clarified item always re-dispatches fresh.
+  the 22 result files); (7) `worktreeHoldsUnlandedWork` (`rollingSession.ts`) runs `git status`/
+  `rev-list` with cwd inside the worktree dir WITHOUT the INV-WTS-2 own-top-level check — on an
+  orphaned plain dir (defect 4's leftover) git resolves up to MAIN, whose dirt/ahead-of-main state
+  reads as "un-landed work", so the broken dir is REUSED every re-dispatch and the node strands in
+  an empty tree asking the same clarification (CP-NODE-57; worked around by deleting the 6 orphaned
+  dirs before resume). **Property to hold:** reverify touches only its node; (also observed: 20 worker scratch logs — check_output.txt, test_result.log, build_results.log, … — were tool-committed in worktrees and MERGED to the branch, so the accept write-scope gate did not refuse files outside the node's declared write set;) an accept failure
+  leaves the branch exactly as before the attempt; a clarified item always re-dispatches fresh; a
+  dir that is not its own git top-level is never treated as holding un-landed work.
 
 - **Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction,
   low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`) falls back to

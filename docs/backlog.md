@@ -127,7 +127,7 @@
 - `open-bugs.md:1207` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 - `open-bugs.md:1212` — Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).
 - `open-bugs.md:1222` — Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).
-- `open-bugs.md:1240` — Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction, low).
+- `open-bugs.md:1246` — Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
