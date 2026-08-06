@@ -22,6 +22,8 @@ interface ContractPipelineRole {
   outputSchema: string;
   /** Short description of what this role does. */
   description: string;
+  /** Whether this phase requires independent review (not the author). Defaults to false. */
+  isIndependentCritic?: boolean;
 }
 
 export const ROLES: Record<string, ContractPipelineRole> = {
@@ -190,6 +192,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
 }`,
     description:
       "Provide philosophy/alternatives/directions critique of the finalized module contracts.",
+    isIndependentCritic: true,
   },
   test_validator_plan: {
     title: "Test and Validator Plan",
@@ -243,6 +246,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
 }`,
     description:
       "Adversarially attack the design: produce concrete counterexamples that falsify design invariants, obligations, or assessment claims. Each counterexample must name the claim it falsifies, concrete reproduction steps, and the obligation(s) it violates. Search hard for inputs, orderings, and edge states the design mishandles; an empty counterexamples array is only acceptable when you genuinely cannot falsify anything.",
+    isIndependentCritic: true,
   },
   judge: {
     title: "Adversarial Judge",
@@ -264,6 +268,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
 }`,
     description:
       "Judge every counterexample from the critic: `accepted` (real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not actually falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). Verdict is `approved` only when no accepted counterexample demands a contract repair — then omit `repair_directive`. Otherwise verdict is `needs_repair` and `repair_directive` must name the single artifact whose regeneration addresses the accepted counterexamples.",
+    isIndependentCritic: true,
   },
   implementation_planning: {
     title: "Implementation Planning (DAG)",
@@ -337,16 +342,28 @@ export interface ContractPipelineRenderInput {
 
 /**
  * Phases whose value is adversarial independence — the reviewer must NOT be the
- * author of the design under review. Keyed strictly off phase identity:
- * 'critique' (conceptual design critique), 'critic' (counterexample search), and
+ * author of the design under review. Derived from ROLES' isIndependentCritic flag
+ * so the set is always in sync with the phase definitions and never hand-maintained.
+ *
+ * Currently includes 'critique' (conceptual design critique), 'critic' (counterexample search), and
  * 'judge' (adjudicates the critic's counterexamples — a judge who authored the
  * design systematically dismisses valid counterexamples against it, so the
  * adjudication is only worth anything from an independent reviewer; memory:
  * delegate the judge too). The 'assessment' phase is the author's OWN coverage
  * self-assessment (not an adversarial review of someone else's work), so it is
- * intentionally excluded.
+ * intentionally excluded (isIndependentCritic is not set).
  */
-const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic", "judge"]);
+function getIndependentCriticPhases(): Set<string> {
+  const phases = new Set<string>();
+  for (const [roleName, role] of Object.entries(ROLES)) {
+    if (role.isIndependentCritic) {
+      phases.add(roleName);
+    }
+  }
+  return phases;
+}
+
+const INDEPENDENT_CRITIC_PHASES = getIndependentCriticPhases();
 
 /**
  * Render the independent-dispatch directive for an adversarial review phase.
