@@ -42,8 +42,9 @@
   disagreement density, rendered beside the clarification questions; True nominations at deepest
   only), vestigial checkpoint charter embeds deleted, new `graph_bundle.json` register edge +
   member-scoped slice. Design-check + implementation records in the review doc; 4-lens pre-commit
-  adversarial review (5 findings, all 5 refuted by mechanism); full suite 7,438/0. **All four
-  critique-cluster changes are now SHIPPED** — nothing remains from the cluster.
+  adversarial review (5 findings, all 5 refuted by mechanism); full suite 7,438/0. Shipped as
+  **v0.36.0** (`3fb84823` + `c58cb065`; release CI green, npm live, global bins reinstalled).
+  **All four critique-cluster changes are now SHIPPED** — nothing remains from the cluster.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
