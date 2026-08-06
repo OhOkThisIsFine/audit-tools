@@ -334,6 +334,47 @@ function stageLoopCoreFile() {
   g("add", "-A");
 }
 
+describe("pre-commit gate: every commit-creating subcommand is gated (P9)", () => {
+  // git merge / rebase / cherry-pick / revert / am all WRITE HISTORY and used
+  // to skip every leg of the gate — observed live as stray-doc failures on all
+  // three merge commits of the v0.34.7 queue. With a BAD sentinel staged, a
+  // gated command must block exactly like `git commit` does.
+  const commitCreating = [
+    "git merge feature",
+    "git rebase --continue",
+    "git cherry-pick abc123",
+    "git revert abc123",
+    "git am patch.mbox",
+  ];
+  for (const cmd of commitCreating) {
+    test(`gates \`${cmd}\`, which creates a commit`, () => {
+      writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+      g("add", "sentinel.txt");
+      const r = runGate(cmd);
+      expect(r.status, `expected block (2) for "${cmd}"; stderr:\n${r.stderr}`).toBe(2);
+    });
+  }
+
+  test("still allows a git subcommand that cannot create a commit", () => {
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "sentinel.txt");
+    expect(runGate("git status").status).toBe(0);
+  });
+
+  test("still does not fire on a command merely NAMING a commit-creating word in a path", () => {
+    writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
+    g("add", "sentinel.txt");
+    expect(runGate("git status -- src/merge-results.ts").status).toBe(0);
+    expect(runGate("git log --merges").status).toBe(0);
+  });
+
+  test("a hook-bypass vector on a merge is refused like on a commit", () => {
+    const r = runGate("git merge --no-verify feature");
+    expect(r.status, `expected bypass refusal (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/bypass/i);
+  });
+});
+
 describe("pre-commit gate: bypass scoping, attester class, destination-keyed concerns", () => {
   test("sibling-statement core.hooksPath override is rejected (scoping regression)", () => {
     // The override is armed in a statement that carries no `commit`, so a

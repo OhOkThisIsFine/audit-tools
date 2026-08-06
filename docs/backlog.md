@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 159 entr(y/ies) indexed.
+> and at commit). 158 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -189,15 +189,14 @@
 - `durable-traps.md:366` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
 - `durable-traps.md:373` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
 - `durable-traps.md:378` — No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:389` — `pre-commit-gate.mjs` fires only on `git commit`, so every OTHER commit-creating git subcommand lands ungated (2026-07-22, corrected 2026-07-24, low, friction: tool-should-decide).
-- `durable-traps.md:391` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:393` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:401` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
-- `durable-traps.md:406` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:414` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:435` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
-- `durable-traps.md:446` — A backlog entry's bold title must not contain `
-- `durable-traps.md:451` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:389` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:391` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:399` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
+- `durable-traps.md:404` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:412` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:433` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
+- `durable-traps.md:444` — A backlog entry's bold title must not contain `
+- `durable-traps.md:449` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
 
 <!-- END GENERATED SEEK INDEX -->
 

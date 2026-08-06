@@ -202,9 +202,23 @@ function gitSubcommandRe(name) {
 // (collapses to `echo ""` — no match), while `git -C "path with spaces" commit`
 // collapses to `git -C "" commit` so the option-value hop can span it.
 const isGitSubcommand = (name) => (s) => gitSubcommandRe(name).test(collapseQuoted(s));
-const commitSubCmds = subCmds.filter(isGitSubcommand('commit'));
+// Every subcommand that can CREATE a commit, not just the one named "commit".
+// A merge, a rebase continuation, a cherry-pick, a revert or an `am` all write
+// history, and every one of them used to skip all legs of this gate (observed
+// live: stray-doc failures on all three v0.34.7 merge commits, main red until
+// 0c6a5a6d). Known accepted limit — pre-hoc, the gate can only validate the
+// CURRENT staged snapshot: for `--continue` forms the index already holds the
+// resolved result (fully gated), but the content a `git merge <branch>` or a
+// fresh cherry-pick will INTRODUCE does not exist yet, so an incoming bad tree
+// still lands and surfaces at the next local gate run / CI. What this widening
+// guarantees: no commit-creating command runs from an already-red snapshot,
+// and the hook-bypass vectors are refused on every history-writing form.
+const COMMIT_CREATING_SUBCOMMANDS = ['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am'];
+const commitSubCmds = subCmds.filter((s) =>
+  COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s)),
+);
 
-// Exit early if no `git commit` invocation exists in any shell statement.
+// Exit early if no commit-creating git invocation exists in any shell statement.
 if (commitSubCmds.length === 0) process.exit(0);
 
 // Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,
