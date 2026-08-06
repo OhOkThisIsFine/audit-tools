@@ -19,6 +19,7 @@ import { join } from "node:path";
 import type { CapacityPool } from "../../src/shared/quota/capacity.js";
 import type { FrontierNode } from "../../src/shared/dispatch/coordinator.js";
 import type { SessionConfig } from "../../src/shared/types/sessionConfig.js";
+import { snapshot } from "./test-helpers.js";
 
 const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.js");
 const { isInProcessAuditPool } = await import("../../src/audit/cli/hybridDispatch.js");
@@ -36,16 +37,6 @@ function tasks(count: number, tokens = 1000): FrontierNode[] {
   return Array.from({ length: count }, (_, i) => ({ id: `task-${i}`, estimatedTokens: tokens }));
 }
 
-function snapshot(pct: number): NonNullable<CapacityPool["quotaSourceSnapshot"]> {
-  return {
-    remaining_pct: pct,
-    reset_at: null,
-    requests_remaining: null,
-    tokens_remaining: null,
-    captured_at: new Date(0).toISOString(),
-    source: "test",
-  };
-}
 
 function nimPool(over: Partial<CapacityPool> = {}): CapacityPool {
   return {

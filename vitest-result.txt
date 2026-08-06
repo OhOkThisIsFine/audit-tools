@@ -1,0 +1,501 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/remediate/phase-close.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools[39m
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mthrows when plan is missing
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mreturns complete status and writes report files
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mreturns complete status and writes report files
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mreturns complete status and writes report files
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mwrites run metadata, structured verification evidence, and vacuous combined test details
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mwrites run metadata, structured verification evidence, and vacuous combined test details
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mwrites run metadata, structured verification evidence, and vacuous combined test details
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mtransitions to triage when test_command fails
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mtransitions to triage when test_command fails
+[22m[39mRunning full test suite on combined post-remediation state...
+Full test suite failed. Transitioning back to triage.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not re-block ignored items with retry/deferred rationale (reblockRetryableIgnoredItems removed)
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not re-block ignored items with retry/deferred rationale (reblockRetryableIgnoredItems removed)
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not re-block ignored items with retry/deferred rationale (reblockRetryableIgnoredItems removed)
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mpreserves quoted arguments in test_command
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mpreserves quoted arguments in test_command
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mpreserves quoted arguments in test_command
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2memits a run-log line per outcome plus an artifact-write line
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2memits a run-log line per outcome plus an artifact-write line
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2memits a run-log line per outcome plus an artifact-write line
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not require a run logger (optional argument)
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not require a run logger (optional argument)
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mdoes not require a run logger (optional argument)
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mrecords failing closing commands instead of reporting success
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mrecords failing closing commands instead of reporting success
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: custom
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mrecords failing closing commands instead of reporting success
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mcombined test failure with no re-blockable items warns and includes failure in markdown report
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mcombined test failure with no re-blockable items warns and includes failure in markdown report
+[22m[39mRunning full test suite on combined post-remediation state...
+Full test suite failed. Transitioning back to triage.
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mcombined test failure with no re-blockable items warns and includes failure in markdown report
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' and commands is empty when action is 'commit' and no files to stage
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' and commands is empty when action is 'commit' and no files to stage
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' and commands is empty when action is 'commit' and no files to stage
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' and commands is empty when action is 'commit' and no files to stage
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'push' and no files to stage
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'push' and no files to stage
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: push
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'push' and no files to stage
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'push' and no files to stage
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'open-pr' and no files to stage
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'open-pr' and no files to stage
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: open-pr
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'open-pr' and no files to stage
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'open-pr' and no files to stage
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is undefined
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is undefined
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: custom
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is undefined
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is empty array
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is empty array
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: custom
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22m[2mstatus is 'success' when action is 'custom' and custom_command is empty array
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'commit' and collectStagingFiles returns []
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'commit' and collectStagingFiles returns []
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'commit' and collectStagingFiles returns []
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'push' and collectStagingFiles returns []
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'push' and collectStagingFiles returns []
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: push
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'push' and collectStagingFiles returns []
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'success' when action is 'push' and collectStagingFiles returns []
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'failed' when a git command fails (files present)
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'failed' when a git command fails (files present)
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: custom
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22m[2mreturns status 'failed' when a git command fails (files present)
+[22m[39mRemediation report generated.
+
+Switched to a new branch 'remediation/P1'
+Switched to a new branch 'remediation/P1'
+Switched to a new branch 'remediation/P1'
+Switched to branch 'master'
+Switched to branch 'remediation/P1'
+Switched to branch 'master'
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2maggregates worker reflections from agent-feedback.jsonl into a Process Feedback section
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2maggregates worker reflections from agent-feedback.jsonl into a Process Feedback section
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2maggregates worker reflections from agent-feedback.jsonl into a Process Feedback section
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2momits the Process Feedback section when no reflections were appended
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2momits the Process Feedback section when no reflections were appended
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2momits the Process Feedback section when no reflections were appended
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mprompts for confirmation when not pre-authorized: returns state with closing_action_preview when action is 'commit'
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mproceeds directly to git commands when pre_authorized is true
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mproceeds directly to git commands when pre_authorized is true
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mproceeds directly to git commands when pre_authorized is true
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mproceeds directly to git commands when pre_authorized is true
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mdoes not generate a preview for action='none'
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mdoes not generate a preview for action='none'
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2mdoes not generate a preview for action='none'
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2muses generated commit message (not hardcoded) when executing after pre_authorized=true
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2muses generated commit message (not hardcoded) when executing after pre_authorized=true
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mclosing action preview (N-R16)[2m > [22m[2muses generated commit message (not hardcoded) when executing after pre_authorized=true
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mstages only the run's applied_edit_surface; unrelated pre-existing dirt is never committed and is reported as leftover
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mstages only the run's applied_edit_surface; unrelated pre-existing dirt is never committed and is reported as leftover
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mstages only the run's applied_edit_surface; unrelated pre-existing dirt is never committed and is reported as leftover
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mdeclared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mdeclared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mdeclared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mrun_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mrun_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mrun_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mTOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mTOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mTOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mTOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mfallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mfallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mfallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mno manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mno manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: commit
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mno manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover
+[22m[39mNo modified files to stage — skipping commit.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mmanifest-scoped staging (V2 invariant fix)[2m > [22m[2mno manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mtransitions to triage when e2e_command exits non-zero (never throws)
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mtransitions to triage when e2e_command exits non-zero (never throws)
+[22m[39mRunning full test suite on combined post-remediation state...
+Running end-to-end tests on combined post-remediation state...
+End-to-end tests failed. Transitioning back to triage.
+
+[90mstderr[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mtransitions to triage when e2e_command exits non-zero (never throws)
+[22m[39mEnd-to-end tests failed after remediation. Transitioning to triage.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mpasses when e2e_command exits zero
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mpasses when e2e_command exits zero
+[22m[39mRunning full test suite on combined post-remediation state...
+Running end-to-end tests on combined post-remediation state...
+End-to-end tests passed.
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2me2e failure → triage (N-R16)[2m > [22m[2mpasses when e2e_command exits zero
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mselective re-block on combined failure (N-R16)[2m > [22m[2mre-blocks only the item whose touched_files overlap the failing test path
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mselective re-block on combined failure (N-R16)[2m > [22m[2mre-blocks only the item whose touched_files overlap the failing test path
+[22m[39mRunning full test suite on combined post-remediation state...
+Full test suite failed. Transitioning back to triage.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mselective re-block on combined failure (N-R16)[2m > [22m[2mfalls back to re-blocking all resolved items when no touched_files overlap found
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mselective re-block on combined failure (N-R16)[2m > [22m[2mfalls back to re-blocking all resolved items when no touched_files overlap found
+[22m[39mRunning full test suite on combined post-remediation state...
+Full test suite failed. Transitioning back to triage.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are ignored
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are ignored
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are ignored
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are deemed_inappropriate
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are deemed_inappropriate
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when resolved items pass but some are deemed_inappropriate
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22m[2moverall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when closing action fails
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when closing action fails
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: custom
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when closing action fails
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when combined test suite fails
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when combined test suite fails
+[22m[39mRunning full test suite on combined post-remediation state...
+Full test suite failed. Transitioning back to triage.
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when combined test suite fails
+[22m[39mRemediation report generated.
+
+Switched to a new branch 'remediation/P1'
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when merge-to-base is skipped (no recorded base)
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when merge-to-base is skipped (no recorded base)
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: merge-to-base
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mpreserves artifacts directory when merge-to-base is skipped (no recorded base)
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mdeletes artifacts directory on fully-green close
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mdeletes artifacts directory on fully-green close
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2martifacts preserved when close is not fully green (N-R16)[2m > [22m[2mdeletes artifacts directory on fully-green close
+[22m[39mRemediation report generated.
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mbuildRemediationReportMarkdown: combined test failure section only present when passed=false
+[22m[39mRunning Close Phase...
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mbuildRemediationReportMarkdown: combined test failure section only present when passed=false
+[22m[39mRunning full test suite on combined post-remediation state...
+Executing closing action: none
+
+[90mstdout[2m | tests/remediate/phase-close.test.ts[2m > [22m[2mrunClosePhase[2m > [22m[2mbuildRemediationReportMarkdown: combined test failure section only present when passed=false
+[22m[39mRemediation report generated.
+
+ [32m✓[39m tests/remediate/phase-close.test.ts [2m([22m[2m55 tests[22m[2m)[22m[33m 23631[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mreturns complete status and writes report files [33m 305[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mwrites run metadata, structured verification evidence, and vacuous combined test details [33m 314[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mtransitions to triage when test_command fails [33m 305[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mdoes not re-block ignored items with retry/deferred rationale (reblockRetryableIgnoredItems removed) [33m 335[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mpreserves quoted arguments in test_command [33m 366[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22memits a run-log line per outcome plus an artifact-write line [33m 302[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mrecords failing closing commands instead of reporting success [33m 361[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mcombined test failure with no re-blockable items warns and includes failure in markdown report [33m 381[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22mstatus is 'success' and commands is empty when action is 'commit' and no files to stage [33m 371[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22mstatus is 'success' when action is 'push' and no files to stage [33m 419[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22mstatus is 'success' when action is 'open-pr' and no files to stage [33m 452[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22mstatus is 'success' when action is 'custom' and custom_command is undefined [33m 367[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction returns success when stageAndCommit finds no files[2m > [22mstatus is 'success' when action is 'custom' and custom_command is empty array [33m 358[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22mreturns status 'success' when action is 'commit' and collectStagingFiles returns [] [33m 449[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22mreturns status 'success' when action is 'push' and collectStagingFiles returns [] [33m 400[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mexecuteClosingAction: stageAndCommit vacuous-success (MNT-a01af494)[2m > [22mreturns status 'failed' when a git command fails (files present) [33m 382[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mB5: merge-to-base closing action[2m > [22mclean run: --no-ff merges into the recorded base and leaves HEAD on base [33m 721[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mB5: merge-to-base closing action[2m > [22mno recorded base: skips, leaves everything untouched, tells host to merge manually [33m 565[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mB5: merge-to-base closing action[2m > [22mconflict: aborts, restores the remediation branch, base left exactly as it was [33m 1118[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22maggregates worker reflections from agent-feedback.jsonl into a Process Feedback section [33m 335[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22momits the Process Feedback section when no reflections were appended [33m 360[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mclosing action preview (N-R16)[2m > [22mprompts for confirmation when not pre-authorized: returns state with closing_action_preview when action is 'commit' [33m 353[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mclosing action preview (N-R16)[2m > [22mproceeds directly to git commands when pre_authorized is true [33m 428[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mclosing action preview (N-R16)[2m > [22mdoes not generate a preview for action='none' [33m 303[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mclosing action preview (N-R16)[2m > [22muses generated commit message (not hardcoded) when executing after pre_authorized=true [33m 571[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mstages only the run's applied_edit_surface; unrelated pre-existing dirt is never committed and is reported as leftover [33m 586[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mdeclared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it [33m 484[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mrun_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged [33m 470[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mTOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true [33m 584[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mfallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files [33m 511[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mmanifest-scoped staging (V2 invariant fix)[2m > [22mno manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover [33m 463[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22me2e failure → triage (N-R16)[2m > [22mtransitions to triage when e2e_command exits non-zero (never throws) [33m 325[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22me2e failure → triage (N-R16)[2m > [22mpasses when e2e_command exits zero [33m 429[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mselective re-block on combined failure (N-R16)[2m > [22mre-blocks only the item whose touched_files overlap the failing test path [33m 327[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22moverall_status='passed' when resolved items pass but some are ignored [33m 421[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22moverall_status='passed' when resolved items pass but some are deemed_inappropriate [33m 329[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22moverall_status excludes ignored and inappropriate items (N-R16)[2m > [22moverall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain [33m 368[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22martifacts preserved when close is not fully green (N-R16)[2m > [22mpreserves artifacts directory when closing action fails [33m 363[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22martifacts preserved when close is not fully green (N-R16)[2m > [22mpreserves artifacts directory when combined test suite fails [33m 364[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22martifacts preserved when close is not fully green (N-R16)[2m > [22mpreserves artifacts directory when merge-to-base is skipped (no recorded base) [33m 497[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22martifacts preserved when close is not fully green (N-R16)[2m > [22mdeletes artifacts directory on fully-green close [33m 329[2mms[22m[39m
+   [33m[2m✓[22m[39m runClosePhase[2m > [22mbuildRemediationReportMarkdown: combined test failure section only present when passed=false [33m 387[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mstages only manifest files that are dirty; non-manifest dirty files are reported as leftover, never staged [33m 507[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mnever sweeps the repo: an empty manifest stages nothing, even with dirty files present [33m 515[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mexcludes .audit-tools/ scratch paths even when declared in the manifest [33m 528[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mexcludes .env / .env.local even when declared in the manifest (secrets safety net) [33m 563[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mstages a tool deliverable passed via `deliverables` even though it lives under .audit-tools/, but not a sibling .audit-tools/ path [33m 533[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mreturns empty files and leftover when nothing changed [33m 514[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mmatches a manifest entry differing in case and ./ prefix (normalizeRepoPath key), staging git's ORIGINAL-cased path [33m 513[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mtests the hard excludes against the NORMALIZED key so casing games cannot bypass them [33m 577[2mms[22m[39m
+   [33m[2m✓[22m[39m collectStagingFiles[2m > [22mdoes not stage a case-sibling of a manifest file when both exist (ambiguous fold) [33m 450[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m55 passed[39m[22m[90m (55)[39m
+[2m   Start at [22m 12:42:41
+[2m   Duration [22m 25.16s[2m (transform 717ms, setup 6ms, collect 1.28s, tests 23.63s, environment 0ms, prepare 72ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   remediate  25.0s
+   collect≈1.3s  run≈23.6s  files=1
+   slowest files:
+     25.0s  tests/remediate/phase-close.test.ts (collect 1.3s, run 23.6s)
+   outcome: 55 passed, 0 failed, 0 skipped, 0 unfinished (total 55)
+EXIT=0

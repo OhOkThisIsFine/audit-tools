@@ -16,9 +16,10 @@
  * recommendation is one row per family, with load-bearing ids enumerated under it.
  */
 import { test, expect } from "vitest";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectTsFiles } from "./testFileUtils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -29,18 +30,6 @@ const SRC_DIRS = [
   join(REPO_ROOT, "src", "audit"),
   join(REPO_ROOT, "src", "remediate"),
 ];
-
-/** Recursively collect every `*.ts` file under `dir`. */
-function collectTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  if (!existsSync(dir)) return out;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
-    else if (entry.name.endsWith(".ts")) out.push(full);
-  }
-  return out;
-}
 
 /**
  * Map a raw identifier token to its glossary *family key*:

@@ -239,7 +239,7 @@ export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
         if (typeof oauth.refreshToken !== "string" || oauth.refreshToken === "") return null;
 
         const grant = await this.runRefreshGrant(oauth.refreshToken);
-        if (!grant?.access_token || !grant.refresh_token || typeof grant.expires_in !== "number") {
+        if (!grant?.access_token || !grant.refresh_token || typeof grant.expires_in !== "number" || grant.expires_in <= 0) {
           return null;
         }
         const next: ClaudeOAuthCredentials & Record<string, unknown> = {

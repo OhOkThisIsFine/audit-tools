@@ -1,0 +1,11 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/shared/constitutional-doc-paths.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools[39m
+
+[31mNo test files found, exiting with code 1
+[39m
+[2mfilter: [22m[33mtests/shared/constitutional-doc-paths.test.ts[39m
+[2minclude: [22m[33mtests/audit/**/*.test.mjs[2m, [22mtests/audit/**/*.test.ts[2m, [22mtests/remediate/**/*.test.ts[2m, [22mtests/shared/**/*.test.mjs[2m, [22mtests/shared/**/*.test.ts[39m
+[2mexclude:  [22m[33m**/node_modules/**[2m, [22m**/dist/**[2m, [22m**/cypress/**[2m, [22m**/.{idea,git,cache,output,temp}/**[2m, [22m**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*[2m, [22m.audit-artifacts/**[2m, [22m.audit-code/**[2m, [22m.audit-tools/**[2m, [22m.claude/**[2m, [22m.opencode/**[2m, [22m.vscode/**[39m
+

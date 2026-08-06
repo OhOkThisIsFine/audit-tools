@@ -383,13 +383,20 @@ export function obligationScopeAnchors(
 
 // ── Verify-gate enforcement (mergeImplementResults) ────────────────────────────
 
+/**
+ * Extract test_specs array from a raw testValidatorPlanPayload.
+ * Returns an empty array if the payload is malformed or missing test_specs.
+ */
+function extractTestSpecs(testValidatorPlanPayload: unknown): unknown[] {
+  return isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
+    ? (testValidatorPlanPayload.test_specs as unknown[])
+    : [];
+}
+
 /** A test_validator_plan spec's assertions, indexed by obligation id. */
 function assertionsByObligation(testValidatorPlanPayload: unknown): Map<string, string[]> {
   const byId = new Map<string, string[]>();
-  const specs =
-    isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
-      ? (testValidatorPlanPayload.test_specs as unknown[])
-      : [];
+  const specs = extractTestSpecs(testValidatorPlanPayload);
   for (const spec of specs) {
     if (!isRecord(spec) || typeof spec.obligation_id !== "string") continue;
     const list = byId.get(spec.obligation_id) ?? [];
@@ -408,10 +415,7 @@ function obligationOptedOut(
   testValidatorPlanPayload: unknown,
   obligationId: string,
 ): boolean {
-  const specs =
-    isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
-      ? (testValidatorPlanPayload.test_specs as unknown[])
-      : [];
+  const specs = extractTestSpecs(testValidatorPlanPayload);
   return specs.some(
     (spec) =>
       isRecord(spec) &&

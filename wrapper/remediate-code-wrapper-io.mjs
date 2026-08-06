@@ -1,6 +1,16 @@
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+
+/**
+ * Resolve the artifacts directory from command-line args or default to
+ * <cwd>/.audit-tools/audit. The --artifacts-dir flag is optional; when omitted
+ * or invalid, defaults to the standard location.
+ */
+export function resolveArtifactsDir(argv, defaultDir = join(process.cwd(), '.audit-tools', 'audit')) {
+  const idx = argv.indexOf('--artifacts-dir');
+  return idx !== -1 && argv[idx + 1] ? resolve(argv[idx + 1]) : defaultDir;
+}
 
 export async function fileExists(path) {
   try {

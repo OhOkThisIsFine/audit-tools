@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 import type { RepoManifest } from "../../src/audit/types.js";
 import type { GraphSignals } from "../../src/audit/extractors/graphSignals.js";
+import { manifest, edgeBundle } from "./test-helpers.js";
 
 const { deriveGraphSignals } = await import(
   "../../src/audit/extractors/graphSignals.js"
@@ -15,29 +16,6 @@ const { computeNodeMetricsForFile } = await import(
   "../../src/audit/extractors/analyzers/complexityDuplication.js"
 );
 
-interface FixtureFile {
-  path: string;
-  content?: string;
-  size_bytes?: number;
-  language?: string;
-}
-
-function manifest(files: FixtureFile[]): RepoManifest {
-  return {
-    generated_at: new Date(0).toISOString(),
-    repository: { name: "fixture-repo" },
-    files: files.map((f) => ({
-      path: f.path,
-      size_bytes: f.size_bytes ?? (f.content ? f.content.length : 0),
-      language: f.language ?? "typescript",
-      excluded: false,
-    })),
-  };
-}
-
-function edgeBundle(edges: GraphEdge[], extra: Partial<GraphBundle> = {}): GraphBundle {
-  return { graphs: { imports: edges, calls: [], references: [], routes: [] }, ...extra };
-}
 
 test("complexity/duplication present for js/ts with measure+reach tags", () => {
   const tsSource = "if (a) { foo(); }\nfor (const x of y) { bar(); }\nfoo();\nfoo();\n";

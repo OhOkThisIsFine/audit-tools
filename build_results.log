@@ -1,0 +1,5 @@
+npm notice run audit-tools@0.36.1 prebuild
+npm notice run node scripts/shared/guard-no-suite-running.mjs
+npm notice run audit-tools@0.36.1 build
+npm notice run tsc -p tsconfig.json && node scripts/shared/copy-data-assets.mjs
+Copied 1 data-asset dir(s) into dist/

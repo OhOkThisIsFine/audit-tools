@@ -24,6 +24,7 @@ import {
   renderCodexAutomationRecipe,
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
+  INSTALLED_PROMPT_FILENAME,
 } from './remediate-code-wrapper-install-renderers.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,7 +35,6 @@ const INSTALL_MARKER_END = '<!-- remediate-code:end -->';
 const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
-const INSTALLED_PROMPT_FILENAME = 'remediate-code.import.md';
 const INSTALL_DIR = '.remediate-code';
 
 function hasFlag(argv, name) {

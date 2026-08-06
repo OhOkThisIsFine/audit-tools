@@ -10,6 +10,7 @@ import type { RemediationState } from "../../src/remediate/state/store.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { PartialCompletionTerminal } from "audit-tools/shared";
 import { scratchDir } from "../helpers/scratch.js";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-partial-terminal");
@@ -40,7 +41,7 @@ function makeImplementingState(
     ...extraItems,
   };
 
-  const state: RemediationState = {
+  const overrides: Record<string, unknown> = {
     status: "implementing",
     plan: {
       plan_id: "PLAN-TERMINAL",
@@ -80,10 +81,10 @@ function makeImplementingState(
   };
 
   if (terminalOverride) {
-    state.partial_completion_terminal = terminalOverride;
+    overrides.partial_completion_terminal = terminalOverride;
   }
 
-  return state;
+  return makeBaseState(overrides);
 }
 
 async function acknowledgeResume(): Promise<void> {

@@ -1,0 +1,33 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools[39m
+
+ [32m✓[39m tests/audit/reporting-remediation.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m tests/audit/reporting-invariants.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 87[2mms[22m[39m
+ [32m✓[39m tests/audit/rolling-audit-dispatch.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 80589[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: makeAuditProviderPacketDispatcher launches read-only against the repo root and returns success when the worker wrote a result [33m 545[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote no result file [33m 360[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: driveRollingAuditDispatch drives every packet, writes results, and folds them in via the terminal ingestor [33m 58852[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) when packets strand (DC-4) [33m 9157[2mms[22m[39m
+   [33m[2m✓[22m[39m write-scope: in a git repo, spawned review workers launch against a disposable snapshot worktree, never the real checkout [33m 721[2mms[22m[39m
+   [33m[2m✓[22m[39m claims: a round where every pending task is held by a live peer reports NO PROGRESS, never complete [33m 1780[2mms[22m[39m
+   [33m[2m✓[22m[39m claims: a peer-claimed round still SALVAGES a prior pass's landed-but-unmerged results (fold = progress) [33m 1642[2mms[22m[39m
+   [33m[2m✓[22m[39m claims: a genuinely-empty pending set still completes (ingest folds whatever landed) [33m 1542[2mms[22m[39m
+   [33m[2m✓[22m[39m claims: a full strand releases this run's task claims so the next invocation need not wait out the lease [33m 1710[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: a same-packet account wall escalates through the retained host-session source and captures a quota_escalation friction (parity with remediate) [33m 1316[2mms[22m[39m
+   [33m[2m✓[22m[39m A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) when every accepted result is ingestion-invalid [33m 1202[2mms[22m[39m
+   [33m[2m✓[22m[39m F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to an incapable pool [33m 1162[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m45 passed[39m[22m[90m (45)[39m
+[2m   Start at [22m 11:51:42
+[2m   Duration [22m 94.91s[2m (transform 8.22s, setup 19ms, collect 27.77s, tests 80.71s, environment 1ms, prepare 1.07s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      109.6s
+   collect≈27.8s  run≈80.7s  files=3
+   slowest files:
+     94.2s  tests/audit/rolling-audit-dispatch.test.ts (collect 13.3s, run 80.6s)
+     7.7s  tests/audit/reporting-invariants.test.ts (collect 7.4s, run 0.1s)
+     7.7s  tests/audit/reporting-remediation.test.ts (collect 7.1s, run 0.0s)
+   outcome: 45 passed, 0 failed, 0 skipped, 0 unfinished (total 45)

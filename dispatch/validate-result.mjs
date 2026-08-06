@@ -1,10 +1,10 @@
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { validateResult } from "./validate.mjs";
+import { resolveArtifactsDir } from "../wrapper/remediate-code-wrapper-io.mjs";
 
 const runIdIdx = process.argv.indexOf("--run-id");
 const taskIdIdx = process.argv.indexOf("--task-id");
-const artifactsDirIdx = process.argv.indexOf("--artifacts-dir");
 
 const runId = runIdIdx !== -1 ? process.argv[runIdIdx + 1] : undefined;
 const taskId = taskIdIdx !== -1 ? process.argv[taskIdIdx + 1] : undefined;
@@ -16,9 +16,7 @@ if (!runId || !taskId) {
 
 // Default must match where the orchestrator/wrapper actually writes runs:
 // <root>/.audit-tools/audit (COR-bf5c7331), not the legacy `.audit-artifacts`.
-const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
-  ? resolve(process.argv[artifactsDirIdx + 1])
-  : join(process.cwd(), ".audit-tools", "audit");
+const artifactsDir = resolveArtifactsDir(process.argv);
 
 const sanitized = taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
 const resultPath = join(artifactsDir, "runs", runId, "task-results", sanitized + ".json");

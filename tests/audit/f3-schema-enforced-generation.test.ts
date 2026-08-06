@@ -78,6 +78,30 @@ const brokerContext: Omit<BrokerDispatchInput, "slots"> = {
   hostModel: null,
 };
 
+/**
+ * Build a broker schedule fixture with standard configuration.
+ * Used by broker stub factories to reduce duplication.
+ */
+function buildBrokerSchedule(maxConcurrent: number) {
+  return {
+    max_concurrent: maxConcurrent,
+    estimated_wave_tokens: 0,
+    cooldown_until: null,
+    confidence: "high" as const,
+    source: "default" as const,
+    resolved_limits: {
+      context_tokens: 128000,
+      output_tokens: 4096,
+      requests_per_minute: null,
+      input_tokens_per_minute: null,
+      output_tokens_per_minute: null,
+    },
+    host_concurrency_limit: null,
+    model: null,
+    binding_cap: "none" as const,
+  };
+}
+
 test("F3: discovery is provider-agnostic — agentic CLIs degrade to 'none'", () => {
   for (const name of [
     "claude-code",
@@ -243,23 +267,7 @@ test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch si
       cooldownUntil: null,
       bindingCap: "none",
       capableHost: false,
-      schedule: {
-        max_concurrent: 0,
-        estimated_wave_tokens: 0,
-        cooldown_until: null,
-        confidence: "high",
-        source: "default",
-        resolved_limits: {
-          context_tokens: 128000,
-          output_tokens: 4096,
-          requests_per_minute: null,
-          input_tokens_per_minute: null,
-          output_tokens_per_minute: null,
-        },
-        host_concurrency_limit: null,
-        model: null,
-        binding_cap: "none",
-      },
+      schedule: buildBrokerSchedule(0),
     }),
     awaitNextCompletion: (c: BrokeredCompletion) => c,
   };
@@ -305,23 +313,7 @@ test("F3 inv-5 [CP-NODE-26]: capability 'none' degrades through the brokered rep
         cooldownUntil: null,
         bindingCap: "none",
         capableHost: true,
-        schedule: {
-          max_concurrent: 1,
-          estimated_wave_tokens: 0,
-          cooldown_until: null,
-          confidence: "high",
-          source: "default",
-          resolved_limits: {
-            context_tokens: 128000,
-            output_tokens: 4096,
-            requests_per_minute: null,
-            input_tokens_per_minute: null,
-            output_tokens_per_minute: null,
-          },
-          host_concurrency_limit: null,
-          model: null,
-          binding_cap: "none",
-        },
+        schedule: buildBrokerSchedule(1),
       };
     },
     awaitNextCompletion: (completion: BrokeredCompletion) => {
@@ -684,23 +676,7 @@ test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to r
           cooldownUntil: null,
           bindingCap: "none",
           capableHost: true,
-          schedule: {
-            max_concurrent: 1,
-            estimated_wave_tokens: 0,
-            cooldown_until: null,
-            confidence: "high",
-            source: "default",
-            resolved_limits: {
-              context_tokens: 128000,
-              output_tokens: 4096,
-              requests_per_minute: null,
-              input_tokens_per_minute: null,
-              output_tokens_per_minute: null,
-            },
-            host_concurrency_limit: null,
-            model: null,
-            binding_cap: "none",
-          },
+          schedule: buildBrokerSchedule(1),
         };
       },
       awaitNextCompletion: (completion) => {
@@ -790,23 +766,7 @@ test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 co
         cooldownUntil: null,
         bindingCap: "none",
         capableHost: true,
-        schedule: {
-          max_concurrent: 1,
-          estimated_wave_tokens: 0,
-          cooldown_until: null,
-          confidence: "high",
-          source: "default",
-          resolved_limits: {
-            context_tokens: 128000,
-            output_tokens: 4096,
-            requests_per_minute: null,
-            input_tokens_per_minute: null,
-            output_tokens_per_minute: null,
-          },
-          host_concurrency_limit: null,
-          model: null,
-          binding_cap: "none",
-        },
+        schedule: buildBrokerSchedule(1),
       };
     },
     awaitNextCompletion: (completion) => {

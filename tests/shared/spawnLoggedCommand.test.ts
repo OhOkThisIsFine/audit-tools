@@ -25,9 +25,13 @@ type SpawnDouble = (
 
 // A WriteStream stand-in that satisfies the surface spawnLoggedCommand uses
 // (write(chunk, cb), end(cb), on("error")) without touching the filesystem.
-function fakeWriteStream(): WriteStream {
+// Extracted shared builder for various write-callback patterns.
+function makeWriteStreamMock(
+  onWrite?: (chunk: any) => void,
+): WriteStream {
   const stream: any = new EventEmitter();
-  stream.write = (_chunk: any, cb?: (error?: Error | null) => void) => {
+  stream.write = (chunk: any, cb?: (error?: Error | null) => void) => {
+    if (onWrite) onWrite(chunk);
     if (typeof cb === "function") cb();
     return true;
   };
@@ -35,6 +39,10 @@ function fakeWriteStream(): WriteStream {
     if (typeof cb === "function") cb();
   };
   return stream as WriteStream;
+}
+
+function fakeWriteStream(): WriteStream {
+  return makeWriteStreamMock();
 }
 
 function fakeCreateWriteStream(): WriteStream {
@@ -128,16 +136,9 @@ function makeOpenChild(): any {
 // A stderr-log stand-in that records the human "[provider] ... still running"
 // lines written to the per-run stderr log file.
 function recordingWriteStream(sink: string[]): WriteStream {
-  const stream: any = new EventEmitter();
-  stream.write = (chunk: any, cb?: (error?: Error | null) => void) => {
+  return makeWriteStreamMock((chunk) => {
     sink.push(String(chunk));
-    if (typeof cb === "function") cb();
-    return true;
-  };
-  stream.end = (cb?: () => void) => {
-    if (typeof cb === "function") cb();
-  };
-  return stream as WriteStream;
+  });
 }
 
 test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.stderr, in headless mode (OBS-101)", async (t) => {
