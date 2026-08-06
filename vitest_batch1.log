@@ -1,0 +1,57 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/shared/account-identity.test.ts tests/shared/admission-loop.test.ts tests/shared/analyzerDeps-injectable-log.test.ts tests/shared/analyzerDeps.test.ts tests/shared/antigravityQuotaSource.test.ts tests/shared/apiPool-model-routing.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-19-f03-dogfood-20260806-v0361-remediation[39m
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolution order: repo node_modules wins
+[22m[39m[analyzerDeps] resolved typescript via repo: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-AFN6lJ\node_modules\typescript
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolution order: version-keyed cache when repo lacks it
+[22m[39m[analyzerDeps] resolved typescript@5.8.0 via cache: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-EgEJyI\cache\typescript@5.8.0\node_modules\typescript
+
+ [32m✓[39m tests/shared/analyzerDeps-injectable-log.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolution order: newest cached version chosen when unpinned
+[22m[39m[analyzerDeps] resolved tool via cache: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-MKxeFc\cache\tool@2.0.0\node_modules\tool
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolution order: version-keyed cache for scoped+versioned package
+[22m[39m[analyzerDeps] resolved @scope/pkg@1.2.3 via cache: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-B4DH4X\cache\@scope+pkg@1.2.3\node_modules\@scope\pkg
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolution order: newest cached version chosen when scoped package is unpinned
+[22m[39m[analyzerDeps] resolved @scope/tool via cache: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-qeHjo2\cache\@scope+tool@2.0.0\node_modules\@scope\tool
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mabsent when neither repo nor cache has the package
+[22m[39m[analyzerDeps] typescript not found in repo or cache (absent)
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolveAnalyzerDep returns via='repo' when package.json exists under repo node_modules
+[22m[39m[analyzerDeps] resolved typescript via repo: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-bPUEra\repo\node_modules\typescript
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2mresolveAnalyzerDep returns via='repo' for a scoped package (@scope/pkg) resolved via packageDirIn
+[22m[39m[analyzerDeps] resolved @scope/pkg via repo: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-Xc7Dom\repo\node_modules\@scope\pkg
+
+[90mstderr[2m | tests/shared/analyzerDeps.test.ts[2m > [22m[2minstallToCache returns ok:true for a scoped package (@scope/pkg@version)
+[22m[39m[analyzerDeps] installing @scope/pkg@1.0.0 into cache: C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-gfjdHP\@scope+pkg@1.0.0
+[analyzerDeps] installed @scope/pkg@1.0.0 -> C:\Users\ethan\AppData\Local\Temp\audit-tools-analyzer-gfjdHP\@scope+pkg@1.0.0\node_modules\@scope\pkg
+
+ [32m✓[39m tests/shared/antigravityQuotaSource.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/shared/analyzerDeps.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 184[2mms[22m[39m
+ [32m✓[39m tests/shared/account-identity.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/shared/apiPool-model-routing.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/shared/admission-loop.test.ts [2m([22m[2m46 tests[22m[2m)[22m[33m 531[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m103 passed[39m[22m[90m (103)[39m
+[2m   Start at [22m 11:49:30
+[2m   Duration [22m 1.32s[2m (transform 491ms, setup 36ms, collect 1.55s, tests 761ms, environment 1ms, prepare 918ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     3.3s
+   collect≈1.5s  run≈0.8s  files=6
+   slowest files:
+     1.0s  tests/shared/admission-loop.test.ts (collect 0.3s, run 0.5s)
+     0.7s  tests/shared/account-identity.test.ts (collect 0.6s, run 0.0s)
+     0.7s  tests/shared/apiPool-model-routing.test.ts (collect 0.5s, run 0.0s)
+     0.4s  tests/shared/analyzerDeps.test.ts (collect 0.0s, run 0.2s)
+     0.2s  tests/shared/antigravityQuotaSource.test.ts (collect 0.1s, run 0.0s)
+     0.2s  tests/shared/analyzerDeps-injectable-log.test.ts (collect 0.1s, run 0.0s)
+   outcome: 103 passed, 0 failed, 0 skipped, 0 unfinished (total 103)

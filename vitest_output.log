@@ -1,0 +1,19 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/shared/providerLaunchFinalize.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-19-f03-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/shared/providerLaunchFinalize.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m17 passed[39m[22m[90m (17)[39m
+[2m   Start at [22m 11:49:10
+[2m   Duration [22m 629ms[2m (transform 93ms, setup 7ms, collect 56ms, tests 68ms, environment 0ms, prepare 166ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     0.3s
+   collect≈0.1s  run≈0.1s  files=1
+   slowest files:
+     0.3s  tests/shared/providerLaunchFinalize.test.ts (collect 0.1s, run 0.1s)
+   outcome: 17 passed, 0 failed, 0 skipped, 0 unfinished (total 17)
