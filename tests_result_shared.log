@@ -1,0 +1,21 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/shared/account-identity.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/shared/ambient-auditor-descriptor.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/shared/admission-loop.test.ts [2m([22m[2m46 tests[22m[2m)[22m[33m 437[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m64 passed[39m[22m[90m (64)[39m
+[2m   Start at [22m 12:19:15
+[2m   Duration [22m 931ms[2m (transform 276ms, setup 20ms, collect 881ms, tests 444ms, environment 0ms, prepare 369ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     1.7s
+   collect≈0.9s  run≈0.4s  files=3
+   slowest files:
+     0.7s  tests/shared/admission-loop.test.ts (collect 0.2s, run 0.4s)
+     0.5s  tests/shared/ambient-auditor-descriptor.test.ts (collect 0.4s, run 0.0s)
+     0.5s  tests/shared/account-identity.test.ts (collect 0.3s, run 0.0s)
+   outcome: 64 passed, 0 failed, 0 skipped, 0 unfinished (total 64)

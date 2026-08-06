@@ -1,0 +1,66 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/remediate/step-utils.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [31m❯[39m tests/remediate/store.test.ts [2m([22m[2m16 tests[22m[2m | [22m[31m11 failed[39m[2m)[22m[32m 43[2mms[22m[39m
+   [32m✓[39m StateStore[2m > [22mLOCK_TIMEOUT_MS stays below the shared stale-lock threshold (no boundary race)[32m 3[2mms[22m[39m
+   [32m✓[39m StateStore[2m > [22mshould return null if no state exists[32m 2[2mms[22m[39m
+[31m   [31m×[31m StateStore[2m > [22mshould save and load state successfully[39m[32m 6[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore[2m > [22mconcurrent saves serialize correctly — last write wins[39m[32m 3[2mms[22m[39m
+[31m     → expected false to be true // Object.is equality[39m
+[31m   [31m×[31m StateStore[2m > [22mtimes out and throws when lock file is fresh and never released[39m[32m 7[2mms[22m[39m
+[31m     → expected [Function] to throw error matching /Timed out acquiring lock/i but got 'refusing to run a remediation state.j…'[39m
+[31m   [31m×[31m StateStore[2m > [22mreclaims a stale lock file (mtime-based staleness)[39m[32m 3[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore[2m > [22msecond save succeeds after first save releases lock[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore[2m > [22mleaves no .tmp residue after a successful save[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+   [32m✓[39m StateStore.loadState — INV-remediate-state-01: schema validation[2m > [22mthrows on corrupt JSON (not parseable)[32m 3[2mms[22m[39m
+   [32m✓[39m StateStore.loadState — INV-remediate-state-01: schema validation[2m > [22mthrows when status field is missing[32m 3[2mms[22m[39m
+   [32m✓[39m StateStore.loadState — INV-remediate-state-01: schema validation[2m > [22mthrows when status is an unknown value[32m 4[2mms[22m[39m
+[31m   [31m×[31m StateStore.loadState — INV-remediate-state-01: schema validation[2m > [22msucceeds for a valid state[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions[2m > [22mmutate on empty store receives null and saves first state[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json transition from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions[2m > [22mmutate receives the current state written by saveState[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions[2m > [22msequential mutate calls each observe the prior transition's result[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json transition from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+[31m   [31m×[31m StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions[2m > [22mconcurrent mutate calls serialize — second observes first's write (no lost update)[39m[32m 1[2mms[22m[39m
+[31m     → refusing to run a remediation state.json write from inside a tool-created node worktree (C:\Code\audit-tools\.audit-tools\worktrees\remediate-CP-BLOCK-CP-NODE-109-f22-dogfood-20260806-v0361-remediation). This working directory is a dispatched worker's isolated checkout; driver lifecycle commands invoked here resolve to — and mutate — the SHARED run state the driving session owns (the live-run clobber this guard exists to prevent). If you are a dispatched worker: never run remediate-code/audit-code lifecycle CLIs — make your assigned edits and write your declared result file instead. If you are the driver/operator: re-run from the repository root that owns .audit-tools/.[39m
+ [32m✓[39m tests/remediate/validate-artifact-envelope.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/remediate/validate-artifact-cross-gates.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 199[2mms[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m11 failed[39m[22m[2m | [22m[1m[32m46 passed[39m[22m[90m (57)[39m
+[2m   Start at [22m 12:18:54
+[2m   Duration [22m 2.44s[2m (transform 1.12s, setup 49ms, collect 4.53s, tests 251ms, environment 1ms, prepare 501ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   remediate  5.3s
+   collect≈4.5s  run≈0.3s  files=4
+   slowest files:
+     2.2s  tests/remediate/validate-artifact-cross-gates.test.ts (collect 1.9s, run 0.2s)
+     1.5s  tests/remediate/store.test.ts (collect 1.3s, run 0.0s)
+     1.5s  tests/remediate/validate-artifact-envelope.test.ts (collect 1.3s, run 0.0s)
+     0.2s  tests/remediate/step-utils.test.ts (collect 0.0s, run 0.0s)
+   outcome: 46 passed, 11 failed, 0 skipped, 0 unfinished (total 57)
+   failed files (advisory console echo — the ledger's `outcome` field is the source of truth):
+     - tests/remediate/store.test.ts
+   parallel-flake baseline (win32-cpu16-w16, load=parallel):
+     11 UNRECOGNIZED — these stay RED:
+       - tests/remediate/store.test.ts > StateStore > concurrent saves serialize correctly — last write wins
+       - tests/remediate/store.test.ts > StateStore > leaves no .tmp residue after a successful save
+       - tests/remediate/store.test.ts > StateStore > reclaims a stale lock file (mtime-based staleness)
+       - tests/remediate/store.test.ts > StateStore > second save succeeds after first save releases lock
+       - tests/remediate/store.test.ts > StateStore > should save and load state successfully
+       - tests/remediate/store.test.ts > StateStore > times out and throws when lock file is fresh and never released
+       - tests/remediate/store.test.ts > StateStore.loadState — INV-remediate-state-01: schema validation > succeeds for a valid state
+       - tests/remediate/store.test.ts > StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions > concurrent mutate calls serialize — second observes first's write (no lost update)
+       - tests/remediate/store.test.ts > StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions > mutate on empty store receives null and saves first state
+       - tests/remediate/store.test.ts > StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions > mutate receives the current state written by saveState
+       - tests/remediate/store.test.ts > StateStore.mutate — INV-remediate-state-02: no lost updates under concurrent transitions > sequential mutate calls each observe the prior transition's result
+     this run saw something the baseline does not record — NOT written. Re-baseline deliberately on a tree you have decided is green: `npm run test:rebaseline-flakes`.
