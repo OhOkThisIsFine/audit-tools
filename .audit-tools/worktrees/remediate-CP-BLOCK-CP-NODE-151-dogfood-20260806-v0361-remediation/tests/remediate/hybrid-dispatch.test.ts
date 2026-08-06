@@ -1,0 +1,322 @@
+/**
+ * A-8 hybrid dispatch split (FINDING-020 capstone) — `planHybridDispatch`.
+ *
+ * The assignment layer that splits one eligible frontier across the host-subagent
+ * pool and the in-process backend pool(s) via the shared coordinator, then
+ * partitions the claimed assignments into the work each driver runs. Asserts the
+ * spec's acceptance criteria at the partition level:
+ *
+ *  - both pools receive nodes when both have capacity (proactive split, crit. 2);
+ *  - each node is claimed to exactly one pool — partitions are disjoint, every
+ *    assignment carries an ownerToken (single claimant, crit. 1);
+ *  - a pool with a degraded live quota signal still uses its explicitly declared
+ *    context capability (safe degrade, crit. 4);
+ *  - the host-only and backend-only configs fall out with one partition empty.
+ */
+
+import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ClaimRegistry } from "../../src/shared/quota/claimRegistry.js";
+import { planHybridDispatch } from "audit-tools/shared";
+import type { CapacityPool, FrontierNode, SessionConfig } from "audit-tools/shared";
+
+// Configured hosted concurrency so the shared fold yields a wave > 1 — which is
+// what makes the cross-pool split observable (the fold still owns every cap).
+const SESSION: SessionConfig = {
+  quota: {
+    unknown_hosted_concurrency: 8,
+    default_context_tokens: 200_000,
+    reserved_output_tokens: 8_000,
+  },
+} as SessionConfig;
+
+function nodes(count: number, tokens = 1000): FrontierNode[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `blk-${i}`,
+    estimatedTokens: tokens,
+  }));
+}
+
+function snapshot(remainingPct: number): CapacityPool["quotaSourceSnapshot"] {
+  return {
+    remaining_pct: remainingPct,
+    reset_at: null,
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: new Date(0).toISOString(),
+    source: "test",
+  };
+}
+
+/** The conversation host's subagent pool (turn-based driver). */
+function hostPool(over: Partial<CapacityPool> = {}): CapacityPool {
+  return {
+    id: "pool/claude-code",
+    // Unattributable in-test pool → meters alone under its own pool id, the
+    // documented `deriveAccountKey` fallback.
+    accountKey: "pool/claude-code",
+    providerName: "claude-code",
+    hostModel: null,
+    hostConcurrencyLimit: {
+      active_subagents: 4,
+      source: "host_reported",
+      description: "host subagent budget",
+    },
+    quotaSourceSnapshot: snapshot(0.95),
+    ...over,
+  };
+}
+
+/** An in-process backend pool (the NIM / openai-compatible worker). */
+function nimPool(over: Partial<CapacityPool> = {}): CapacityPool {
+  return {
+    id: "pool/openai-compatible",
+    accountKey: "pool/openai-compatible",
+    providerName: "openai-compatible",
+    hostModel: null,
+    hostConcurrencyLimit: null,
+    quotaSourceSnapshot: snapshot(0.95),
+    ...over,
+  };
+}
+
+function settledStore() {
+  const set = new Set<string>();
+  return {
+    readSettled: () => set as ReadonlySet<string>,
+    onSettle: (poolId: string) => {
+      set.add(poolId);
+    },
+    set,
+  };
+}
+
+/** Always-granting in-memory ClaimRegistry stand-in for the deterministic tests. */
+function fakeRegistry(): ClaimRegistry {
+  const held = new Set<string>();
+  const stub = {
+    async claim(nodeId: string) {
+      if (held.has(nodeId)) return { acquired: false as const, heldBy: "other" };
+      held.add(nodeId);
+      return { acquired: true as const, ownerToken: `tok-${nodeId}` };
+    },
+    async release(nodeId: string) {
+      return held.delete(nodeId);
+    },
+  };
+  return stub as unknown as ClaimRegistry;
+}
+
+// The in-process classification injected into the shared split (remediate's view:
+// the conversation host is `claude-code`; every backend pool runs in-process).
+const IN_PROCESS = (p: { providerName: string }): boolean => p.providerName !== "claude-code";
+
+describe("A-8 planHybridDispatch", () => {
+  it("hybrid [host + nim], both healthy: both partitions receive nodes (proactive split, crit. 2)", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(12),
+      pools: [hostPool(), nimPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // Both pools carry load concurrently when both have headroom.
+    expect(part.host.length).toBeGreaterThan(0);
+    expect(part.inProcess.length).toBeGreaterThan(0);
+    // Correct classification: in-process is the backend pool, host is claude-code.
+    expect(part.inProcess.every((a) => a.providerName === "openai-compatible")).toBe(true);
+    expect(part.host.every((a) => a.providerName === "claude-code")).toBe(true);
+  });
+
+  it("each node claimed to exactly one pool: disjoint partitions, every assignment carries an ownerToken (crit. 1)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hybrid-claim-"));
+    try {
+      const registry = new ClaimRegistry(join(dir, "node-claims.json"));
+      const store = settledStore();
+      const part = await planHybridDispatch({
+        frontier: nodes(12),
+        pools: [hostPool(), nimPool()],
+        sessionConfig: SESSION,
+        claimRegistry: registry,
+        readSettled: store.readSettled,
+        onSettle: store.onSettle,
+        isInProcess: IN_PROCESS,
+      });
+
+      const hostIds = part.host.map((a) => a.nodeId);
+      const inProcIds = part.inProcess.map((a) => a.nodeId);
+      // No node appears in both partitions.
+      expect(hostIds.filter((id) => inProcIds.includes(id))).toEqual([]);
+      // Every claimed node carries a real ownerToken (the release credential).
+      for (const a of [...part.host, ...part.inProcess]) {
+        expect(typeof a.ownerToken).toBe("string");
+        expect(a.ownerToken.length).toBeGreaterThan(0);
+      }
+      // Every claimed id is unique across the whole split.
+      const all = [...hostIds, ...inProcIds];
+      expect(new Set(all).size).toBe(all.length);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("safe degrade: a backend pool with a silent quota-usage signal retains its declared capacity (crit. 4)", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(3, 500),
+      // The live usage probe degraded, but TEST_SESSION_CONFIG still supplies a
+      // real context window. Usage degradation must not erase known capability.
+      pools: [nimPool({ quotaSignalDegraded: true, quotaSourceSnapshot: null })],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+    expect(part.inProcess.length).toBeGreaterThanOrEqual(1);
+    expect(part.host).toEqual([]);
+  });
+
+  it("host-only config: every node lands in the host partition", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(6),
+      pools: [hostPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+    expect(part.host.length).toBeGreaterThan(0);
+    expect(part.inProcess).toEqual([]);
+  });
+
+  it("backend-only config: every node lands in the in-process partition", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(6),
+      pools: [nimPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+    expect(part.inProcess.length).toBeGreaterThan(0);
+    expect(part.host).toEqual([]);
+  });
+
+  it("a settled pool is excluded from the split (co-owned exclusion set)", async () => {
+    const store = settledStore();
+    store.set.add("pool/openai-compatible");
+    const part = await planHybridDispatch({
+      frontier: nodes(8),
+      pools: [hostPool(), nimPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+    // The settled backend pool receives nothing; all work routes to the host pool.
+    expect(part.inProcess).toEqual([]);
+    expect(part.host.length).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Unplaceable nodes — the discriminator that keeps an all-unfitting frontier
+  // out of the "nothing to do" merge (see HybridDispatchPartition.unplaceable).
+  // -------------------------------------------------------------------------
+
+  it("a node too large for EVERY declared cap is reported in `unplaceable`, not silently absent", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      // 90k against two 32k pools — nothing can take these.
+      frontier: nodes(3, 90_000),
+      pools: [
+        hostPool({ contextCapTokens: 32_000 }),
+        nimPool({ contextCapTokens: 32_000 }),
+      ],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // Both partitions empty — which on its own is indistinguishable from "the
+    // backend carried the batch" or "a peer holds the claims". `unplaceable` is
+    // what makes the structural case decidable by the caller.
+    expect(part.inProcess).toEqual([]);
+    expect(part.host).toEqual([]);
+    expect(part.unplaceable).toEqual(["blk-0", "blk-1", "blk-2"]);
+  });
+
+  it("a node that fits the explicit session capability is not unplaceable", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(2, 90_000),
+      pools: [
+        // The host pool inherits the explicitly configured 200k test window.
+        hostPool(),
+        nimPool({ contextCapTokens: 32_000 }),
+      ],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    expect(part.unplaceable).toEqual([]);
+    expect(part.host.length).toBeGreaterThan(0);
+  });
+
+  it("a MIXED frontier still places what fits — so the caller's both-partitions-empty pause guard cannot fire", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: [
+        { id: "blk-huge", estimatedTokens: 90_000 },
+        { id: "blk-ok", estimatedTokens: 1_000 },
+      ],
+      pools: [nimPool({ contextCapTokens: 32_000 })],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // The oversized node is reported, but the fitting one still gets placed — so
+    // the structural-refusal pause (which requires BOTH partitions empty) is out
+    // of reach here and the run keeps making progress. `blk-huge` is simply
+    // re-offered next cycle, and only pauses once it is all that is left.
+    expect(part.unplaceable).toEqual(["blk-huge"]);
+    expect(part.inProcess.map((a) => a.nodeId)).toEqual(["blk-ok"]);
+  });
+
+  it("`unplaceable` is empty on an ordinary split — it never fires for capacity pressure", async () => {
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      frontier: nodes(24),
+      pools: [hostPool(), nimPool()],
+      sessionConfig: SESSION,
+      claimRegistry: fakeRegistry(),
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
+    });
+
+    // Nodes beyond this cycle's capacity go unassigned and are re-offered next
+    // cycle — that is NOT unplaceability, and reporting it as such would pause a
+    // perfectly healthy run.
+    expect(part.unplaceable).toEqual([]);
+  });
+});

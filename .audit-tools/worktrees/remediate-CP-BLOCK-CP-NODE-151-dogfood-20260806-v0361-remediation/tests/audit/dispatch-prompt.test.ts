@@ -1,0 +1,50 @@
+import { test, expect } from "vitest";
+import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
+
+const { DISPATCH_PROMPT_HANDOFF_NOTE } = await import("audit-tools/shared");
+const { renderDispatchReviewPrompt, renderEdgeReasoningDispatchPrompt } =
+  await import("../../src/audit/cli/prompts.js");
+
+const MINIMAL_ACTIVE_RUN: ActiveReviewRun = {
+  run_id: "run-1",
+  task_path: "/artifacts/tasks.json",
+  prompt_path: "/artifacts/prompt.md",
+  audit_results_path: "/artifacts/results.json",
+  worker_command: ["audit-code", "worker"],
+};
+
+test("renderDispatchReviewPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
+  const prompt = renderDispatchReviewPrompt({
+    root: "/repo",
+    artifactsDir: "/repo/.audit-tools/audit",
+    activeReviewRun: MINIMAL_ACTIVE_RUN,
+    dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
+    dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
+  });
+
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
+});
+
+test("renderDispatchReviewPrompt without quota path includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
+  const prompt = renderDispatchReviewPrompt({
+    root: "/repo",
+    artifactsDir: "/repo/.audit-tools/audit",
+    activeReviewRun: MINIMAL_ACTIVE_RUN,
+    dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
+    dispatchQuotaPath: null,
+  });
+
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt (no-quota variant) must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
+});
+
+test("renderEdgeReasoningDispatchPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
+  const prompt = renderEdgeReasoningDispatchPrompt({
+    promptPath: "/repo/.audit-tools/audit/edge-reasoning.md",
+    resultsPath: "/repo/.audit-tools/audit/edge-results.json",
+    continueCommand: "audit-code next-step --root /repo --artifacts-dir /repo/.audit-tools/audit",
+    contentHash: "abc123def456",
+    candidateCount: 3,
+  });
+
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "edge reasoning dispatch prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
+});

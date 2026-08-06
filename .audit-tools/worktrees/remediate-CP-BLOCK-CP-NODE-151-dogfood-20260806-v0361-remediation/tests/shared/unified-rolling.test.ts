@@ -1,0 +1,339 @@
+// Unified in-process rolling driver (driveRolling) — the ONE loop both orchestrators
+// drive above createRollingDispatcher. These isolate the driver's own behaviour: the
+// read-only degenerate case (audit runs full-parallel), the contrast that an
+// empty/unresolved scope serializes (the audit-serial regression read_only guards
+// against), and the rebuild-between-levels boundary.
+
+import { describe, it, expect } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { driveRolling, resolveLedgerBudgets } from "../../src/shared/dispatch/unifiedRolling.js";
+import { ReservationLedger } from "../../src/shared/quota/reservationLedger.js";
+import { setQuotaStateDir } from "../../src/shared/quota/state.js";
+import type { CapacityPool } from "../../src/shared/quota/capacity.js";
+import type {
+  RollingDispatchPacket,
+  RollingDispatchResult,
+} from "../../src/shared/dispatch/rollingDispatch.js";
+import type { SessionConfig } from "../../src/shared/types/sessionConfig.js";
+
+/** A packet payload used throughout: an item's own id. */
+interface Payload {
+  id: string;
+}
+
+/** An item under test: an id plus an optional write-scope file. */
+interface Item {
+  id: string;
+  f?: string;
+}
+
+const POOL: CapacityPool = {
+  id: "stub/*",
+  accountKey: "stub/*",
+  providerName: "claude-code",
+  hostModel: null,
+  hostConcurrencyLimit: {
+    active_subagents: 16,
+    source: "session_config",
+    description: "test host concurrency limit",
+  },
+  contextCapTokens: 200_000,
+};
+const SESSION: SessionConfig = { quota: {} };
+
+interface Track {
+  inFlight: number;
+  peak: number;
+  results: number;
+}
+
+/**
+ * A dispatchPacket that records peak concurrency. A short yield lets every packet in a
+ * sub-wave be admitted before any completes, so the recorded peak reflects the sub-wave's
+ * true admitted concurrency.
+ */
+function makeDispatch(track: Track) {
+  return async (packet: RollingDispatchPacket<Payload>): Promise<RollingDispatchResult<Payload>> => {
+    track.inFlight += 1;
+    track.peak = Math.max(track.peak, track.inFlight);
+    await new Promise((r) => setTimeout(r, 5));
+    track.inFlight -= 1;
+    track.results += 1;
+    return { packet, outcome: "success" };
+  };
+}
+
+const packetFor = (it: Item): RollingDispatchPacket<Payload> => ({
+  id: it.id,
+  payload: { id: it.id },
+  estimatedTokens: 0,
+  complexity: 0.5,
+});
+
+describe("driveRolling — unified in-process rolling driver", () => {
+  it("read-only level collapses into ONE maximal parallel sub-wave (audit degenerate case)", async () => {
+    const track: Track = { inFlight: 0, peak: 0, results: 0 };
+    // Shuffled ids to prove the collapse is order-independent (block_id tie-break inside).
+    const items: Item[] = [{ id: "a3" }, { id: "a1" }, { id: "a2" }];
+    const run = await driveRolling({
+      levels: [items],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+      toPacket: packetFor,
+      dispatchPacket: makeDispatch(track),
+    });
+    // All 3 read-only nodes ran concurrently in one sub-wave — NOT serialized.
+    expect(track.peak).toBe(3);
+    expect(run.allResults).toHaveLength(3);
+    expect(run.levels).toHaveLength(1);
+    expect(run.levels[0]?.results).toHaveLength(3);
+    expect(run.rebuilds).toBe(0);
+    expect(run.terminal).toBeUndefined();
+  });
+
+  it("REGRESSION GUARD: without read_only, empty/unresolved-scope nodes serialize (peak 1)", async () => {
+    // Same nodes, but empty write_paths WITHOUT read_only ⇒ conservative solo gating
+    // (unresolved scope). This is the fully-serial behaviour that read_only:true AVOIDS —
+    // the exact audit-serial regression a naive unification would silently introduce.
+    const track: Track = { inFlight: 0, peak: 0, results: 0 };
+    const items: Item[] = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
+    const run = await driveRolling({
+      levels: [items],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [] }),
+      toPacket: packetFor,
+      dispatchPacket: makeDispatch(track),
+    });
+    expect(track.peak).toBe(1);
+    expect(run.allResults).toHaveLength(3);
+  });
+
+  it("disjoint-file writers in one level parallelize; same-file writers serialize", async () => {
+    const track: Track = { inFlight: 0, peak: 0, results: 0 };
+    const items: Item[] = [
+      { id: "b1", f: "src/a.ts" },
+      { id: "b2", f: "src/b.ts" },
+      { id: "b3", f: "src/a.ts" },
+    ];
+    const run = await driveRolling({
+      levels: [items],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: it.f ? [it.f] : [] }),
+      toPacket: packetFor,
+      dispatchPacket: makeDispatch(track),
+    });
+    // {b1,b2} disjoint → parallel (peak 2); b3 shares src/a.ts with b1 → next sub-wave.
+    expect(track.peak).toBe(2);
+    expect(run.allResults).toHaveLength(3);
+  });
+
+  it("forwards the reservation ledger: two co-located runs over one ledger never exceed the shared budget", async () => {
+    // The C4 wiring: driveRolling forwards reservationLedger + resolvePoolConstraints to the
+    // engine, so two co-located in-process loops on ONE account (same ledger file) reserve
+    // before dispatch and never collectively over-admit — the spec's central overshoot
+    // criterion, exercised through the unified driver rather than the raw engine.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-ledger-")));
+    const ledgerPath = join(await mkdtemp(join(tmpdir(), "unified-ledger-")), "ledger.json");
+    const BUDGET = 100;
+    const COST = 60; // COST <= BUDGET < 2*COST → at most one in flight across BOTH loops
+
+    const m = { inFlight: 0, peak: 0 };
+    const dispatchPacket = async (
+      packet: RollingDispatchPacket<Payload>,
+    ): Promise<RollingDispatchResult<Payload>> => {
+      m.inFlight += COST;
+      m.peak = Math.max(m.peak, m.inFlight);
+      await new Promise((r) => setTimeout(r, 15));
+      m.inFlight -= COST;
+      return { packet, outcome: "success", actualTokens: COST };
+    };
+
+    const mkRun = (prefix: string, ledger: ReservationLedger) =>
+      driveRolling({
+        levels: [[{ id: `${prefix}-1` }, { id: `${prefix}-2` }, { id: `${prefix}-3` }] as Item[]],
+        confirmedPools: [POOL],
+        sessionConfig: SESSION,
+        toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+        toPacket: (it): RollingDispatchPacket<Payload> => ({
+          id: it.id,
+          payload: { id: it.id },
+          estimatedTokens: COST,
+          complexity: 0.5,
+        }),
+        dispatchPacket,
+        reservationLedger: ledger,
+        resolvePoolConstraints: (poolId, tokens) => ({
+          constraints: [{ resourceKey: poolId, budget: BUDGET, cost: tokens }],
+          unpriced: [],
+        }),
+      });
+
+    // Two SEPARATE ledger instances → SAME file (two co-located loops coordinating only
+    // through the locked file).
+    const [a, b] = await Promise.all([
+      mkRun("a", new ReservationLedger(ledgerPath)),
+      mkRun("b", new ReservationLedger(ledgerPath)),
+    ]);
+    expect(a.allResults).toHaveLength(3);
+    expect(b.allResults).toHaveLength(3);
+    // The combined in-flight reservation never breached the shared budget.
+    expect(m.peak).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("resolveLedgerBudgets omits the ledger when no pool has a finite budget (claude-code path)", () => {
+    // Quota-disabled + no snapshot ⇒ remaining_token_budget is null for every pool ⇒ no
+    // absolute ceiling to protect ⇒ the ledger is NOT wired (the reactive 429 floor is the
+    // safety), so in-process dispatch stays lock-overhead-free and fully parallel.
+    const cfg = resolveLedgerBudgets({ pools: [POOL], sessionConfig: SESSION, pendingItemTokens: [100, 100] });
+    expect(cfg.reservationLedger).toBeUndefined();
+    // No windows and no scalar ceiling ⇒ one unbounded pool-keyed constraint.
+    const resolved = cfg.resolvePoolConstraints("stub/*", 100);
+    expect(resolved.unpriced).toEqual([]);
+    expect(resolved.constraints).toEqual([
+      { resourceKey: "stub/*", budget: Number.POSITIVE_INFINITY, cost: 100 },
+    ]);
+  });
+
+  it("reactive cost verification: a declared-free pool that charges stays demoted across levels — onCostDrift fires ONCE per drive", async () => {
+    // Two levels ⇒ two dispatchers (the sub-wave/level boundary). A per-dispatcher
+    // demotion set would reset at the boundary and re-fire onCostDrift for level 2;
+    // the drive-level shared set persists the demotion so it fires exactly once.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-costdrift-")));
+    const freePool: CapacityPool = {
+      ...POOL,
+      id: "free/*",
+      accountKey: "free/*",
+      declaredCostPerMtok: 0,
+    };
+    const drifts: { poolId: string; observedCostUsd: number; declaredCostPerMtok: number }[] = [];
+    const run = await driveRolling({
+      levels: [[{ id: "L1" }] as Item[], [{ id: "L2" }] as Item[]],
+      confirmedPools: [freePool],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [`src/${it.id}.ts`] }),
+      toPacket: packetFor,
+      // Declared-free pool reports a positive cost on every completion (lapsed free tier).
+      dispatchPacket: async (packet): Promise<RollingDispatchResult<Payload>> => ({
+        packet,
+        outcome: "success",
+        observedCostUsd: 0.02,
+      }),
+      onCostDrift: (info) => drifts.push(info),
+      rebuildBetweenLevels: async () => {},
+    });
+    expect(run.allResults).toHaveLength(2);
+    expect(drifts, "demotion persists across the level boundary → one emit").toHaveLength(1);
+    expect(drifts[0]).toEqual({ poolId: "free/*", observedCostUsd: 0.02, declaredCostPerMtok: 0 });
+  });
+
+  it("NEGATIVE TERMINAL MERGE: quota_paused is preferred over empty_pool; stranded ids union; earliest reset kept", { timeout: 20_000 }, async () => {
+    // TST-37d441fa / TST-caab6d8f: construct BOTH partial-terminal reasons in one
+    // drive — a bare-429 empty_pool from the first sub-wave and a retryable
+    // session-limit pause (parseable "Resets in …") from the second — and assert
+    // the merged terminal keeps the retryable quota_paused shape with the union
+    // of stranded ids. The two packets share a write path, so ONE level splits
+    // into TWO sequential sub-waves (each with its own dispatcher + terminal);
+    // same-level sub-waves are peers, so a terminal from the first must NOT stop
+    // the second (only LEVEL advance halts on a terminal — INV-SCC-06), which is
+    // exactly what keeps this cross-dispatcher merge reachable.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-terminal-")));
+    const items: Item[] = [
+      { id: "E1", f: "src/shared.ts" },
+      { id: "P1", f: "src/shared.ts" },
+    ];
+    const run = await driveRolling({
+      levels: [items],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: it.f ? [it.f] : [] }),
+      toPacket: packetFor,
+      dispatchPacket: async (packet): Promise<RollingDispatchResult<Payload>> =>
+        packet.id === "P1"
+          ? {
+              packet,
+              outcome: "rate_limited",
+              // Session-limit sentinel with a parseable duration → the pool is
+              // PAUSED until the reset (retryable), not permanently exhausted.
+              rateLimit: {
+                channel: "error",
+                text: "You've hit your session limit · Resets in 2h30m",
+              },
+            }
+          : { packet, outcome: "rate_limited" }, // bare 429 → exhaust → empty_pool
+    });
+    expect(run.terminal, "a partially-completed run must surface a terminal").toBeTruthy();
+    expect(run.terminal?.reason, "quota_paused (retryable) must win the merge over empty_pool").toBe(
+      "quota_paused",
+    );
+    expect([...(run.terminal?.stranded_ids ?? [])].sort(), "no stranded id may be lost across waves").toEqual([
+      "E1",
+      "P1",
+    ]);
+    expect(typeof run.terminal?.earliest_reset_at, "the retryable pause must carry its reset").toBe(
+      "string",
+    );
+    expect(Number.isNaN(Date.parse(run.terminal?.earliest_reset_at ?? ""))).toBe(false);
+    // No packet ever completed.
+    expect(run.allResults).toHaveLength(0);
+  });
+
+  // COR-74f8e4cd / INV-SCC-06 regression pin: the level loop in `driveRolling`
+  // must consult the merged partial terminal at every level boundary. After
+  // level 1 strands (quota_paused OR empty_pool) the driver must NOT run
+  // `rebuildBetweenLevels` and must NOT dispatch later levels — those depend on
+  // level-1 outputs that never landed, and dispatching them burns attempts on a
+  // known-dead/paused pool. Undispatched later-level items are folded into the
+  // terminal's stranded_ids so no node is silently dropped.
+  it("NEGATIVE TRANSITION: after a level-1 partial terminal, driveRolling must NOT advance to later levels", { timeout: 20_000 }, async () => {
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-noadvance-")));
+    const dispatched: string[] = [];
+    let rebuilds = 0;
+    const run = await driveRolling({
+      levels: [[{ id: "L1a" }] as Item[], [{ id: "L2a" }] as Item[]],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+      toPacket: packetFor,
+      dispatchPacket: async (packet): Promise<RollingDispatchResult<Payload>> => {
+        dispatched.push(packet.id);
+        return { packet, outcome: "rate_limited" }; // bare 429 → level-1 empty_pool terminal
+      },
+      rebuildBetweenLevels: async () => {
+        rebuilds += 1;
+      },
+    });
+    expect(run.terminal?.reason).toBe("empty_pool");
+    // The negative transition: a stranded level must HALT the drive.
+    expect(dispatched, "level-2 packets must not be dispatched after a level-1 terminal").toEqual([
+      "L1a",
+    ]);
+    expect(rebuilds, "no inter-level rebuild after a terminal").toBe(0);
+    // The undispatched level-2 item is stranded on the terminal, not dropped.
+    expect(run.terminal?.stranded_ids).toContain("L2a");
+  });
+
+  it("rebuilds once between dependency levels (single-flight)", async () => {
+    const track: Track = { inFlight: 0, peak: 0, results: 0 };
+    let rebuilds = 0;
+    const run = await driveRolling({
+      levels: [[{ id: "L1a" }, { id: "L1b" }] as Item[], [{ id: "L2a" }] as Item[]],
+      confirmedPools: [POOL],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [`src/${it.id}.ts`] }),
+      toPacket: packetFor,
+      dispatchPacket: makeDispatch(track),
+      rebuildBetweenLevels: async () => {
+        rebuilds += 1;
+      },
+    });
+    expect(rebuilds).toBe(1); // exactly one inter-level boundary
+    expect(run.rebuilds).toBe(1);
+    expect(run.levels).toHaveLength(2);
+    expect(run.allResults).toHaveLength(3);
+  });
+});

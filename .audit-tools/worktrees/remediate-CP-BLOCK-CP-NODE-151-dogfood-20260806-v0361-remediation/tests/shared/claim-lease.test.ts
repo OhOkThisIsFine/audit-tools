@@ -1,0 +1,320 @@
+/**
+ * claim-lease.test.ts
+ *
+ * Slice 1 of multi-agent cooperative runs (spec/multi-ide-concurrent-runs-design.md):
+ * the claimWithBackoff (OD1 bounded backoff) + withClaimHeartbeat (OD3 layer 1:
+ * heartbeat-driven ownership re-validation) helpers on top of ClaimRegistry.
+ */
+
+import { test, expect } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ClaimRegistry, type ClaimResult } from "../../src/shared/quota/claimRegistry.js";
+import {
+  claimWithBackoff,
+  withClaimHeartbeat,
+  DEFAULT_CLAIM_BACKOFF_MS,
+} from "../../src/shared/quota/claimLease.js";
+
+async function tempRegistry() {
+  const dir = await mkdtemp(join(tmpdir(), "claim-lease-"));
+  const registry = new ClaimRegistry(join(dir, "node-claims.json"));
+  return { dir, registry, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+/** Narrow a ClaimResult to its acquired arm, failing the test loudly otherwise. */
+function acquiredToken(r: ClaimResult): string {
+  if (!r.acquired) throw new Error(`expected an acquired claim, but it is held by ${r.heldBy}`);
+  return r.ownerToken;
+}
+
+/** Minimal deterministic timer fakes for ClaimHeartbeatOptions' injectable factory. */
+function fakeTimers(capture: (cb: () => void) => void) {
+  return {
+    setIntervalFn: ((cb: () => void) => {
+      capture(cb);
+      return { unref() {} };
+    }) as unknown as typeof setInterval,
+    clearIntervalFn: (() => {}) as unknown as typeof clearInterval,
+  };
+}
+
+test("releaseOwned releases only the caller's own claims, never a peer's", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    await registry.claimMany(["a", "b"], "mine");
+    await registry.claimMany(["c"], "peer");
+    const released = await registry.releaseOwned(["a", "b", "c", "absent"], "mine");
+    expect(released.sort()).toEqual(["a", "b"]);
+    const claims = await registry.listClaims();
+    expect(claims["a"], "own claim released").toBeUndefined();
+    expect(claims["b"], "own claim released").toBeUndefined();
+    expect(claims["c"]?.poolId, "a peer's live claim is untouchable").toBe("peer");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimWithBackoff acquires an unheld node on the first attempt", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    const sleeps: number[] = [];
+    const res = await claimWithBackoff(registry, "n1", {
+      poolId: "p",
+      sleepFn: async (ms) => void sleeps.push(ms),
+    });
+    expect(res.acquired).toBe(true);
+    expect(sleeps.length, "no backoff waits when uncontended").toBe(0);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimWithBackoff exhausts the backoff then returns not-acquired when held", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    // A peer holds it with a live (freshly heartbeated) claim.
+    const held = await registry.claim("n1", "peer");
+    const heldToken = acquiredToken(held);
+
+    const sleeps: number[] = [];
+    const res = await claimWithBackoff(registry, "n1", {
+      poolId: "p",
+      backoffMs: [1, 2, 3],
+      sleepFn: async (ms) => void sleeps.push(ms),
+    });
+    expect(res.acquired).toBe(false);
+    expect(res).toMatchObject({ heldBy: heldToken });
+    expect(sleeps, "waited through the full backoff before giving up").toEqual([1, 2, 3]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimWithBackoff picks up a node freed mid-backoff", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    const held = await registry.claim("n1", "peer");
+    const heldToken = acquiredToken(held);
+    const sleeps: number[] = [];
+    // Release the peer's claim on the first backoff wait, so the 2nd attempt wins.
+    const res = await claimWithBackoff(registry, "n1", {
+      poolId: "p",
+      backoffMs: [1, 1, 1],
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+        if (sleeps.length === 1) await registry.release("n1", heldToken);
+      },
+    });
+    expect(res.acquired).toBe(true);
+    expect(sleeps.length, "won on the retry right after the first wait").toBe(1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("DEFAULT_CLAIM_BACKOFF_MS is a non-empty increasing schedule", () => {
+  expect(DEFAULT_CLAIM_BACKOFF_MS.length >= 1).toBeTruthy();
+  for (let i = 1; i < DEFAULT_CLAIM_BACKOFF_MS.length; i++) {
+    expect(DEFAULT_CLAIM_BACKOFF_MS[i] > DEFAULT_CLAIM_BACKOFF_MS[i - 1]).toBeTruthy();
+  }
+});
+
+test("withClaimHeartbeat refreshes a held claim and runs fn to completion", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    const held = await registry.claim("n1", "me");
+    let ticks = 0;
+    // Deterministic fake timer: capture the callback, fire it manually.
+    let fired: (() => void) | undefined;
+    const out = await withClaimHeartbeat(
+      registry,
+      "n1",
+      acquiredToken(held),
+      { intervalMs: 10, ...fakeTimers((cb) => (fired = cb)) },
+      async () => {
+        fired!(); // simulate one heartbeat tick during execution
+        await new Promise((r) => setTimeout(r, 5));
+        ticks++;
+        return "done";
+      },
+    );
+    expect(out).toBe("done");
+    expect(ticks).toBe(1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimMany grants only free nodes; a second peer gets the disjoint remainder", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const peerA = new ClaimRegistry(path);
+    const peerB = new ClaimRegistry(path);
+
+    const a = await peerA.claimMany(["t1", "t2", "t3", "t4"], "A");
+    expect(a.granted.sort()).toEqual(["t1", "t2", "t3", "t4"]);
+    for (const id of a.granted) expect(typeof a.ownerTokenByNode[id]).toBe("string");
+
+    // Peer B asks for an overlapping set; gets only the tasks A didn't already hold.
+    const b = await peerB.claimMany(["t3", "t4", "t5", "t6"], "B");
+    expect(b.granted.sort(), "disjoint from A's live claims").toEqual(["t5", "t6"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimMany re-grants the SAME pool's own live claims (idempotent re-partition)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const reg = new ClaimRegistry(path);
+
+    // Run "R1" claims its partition, then re-runs the SAME partition (e.g. a
+    // second prepare-dispatch within one audit run before ingest): it must
+    // re-grant its own in-flight tasks, not skip them.
+    const first = await reg.claimMany(["t1", "t2", "t3"], "R1");
+    expect(first.granted.sort()).toEqual(["t1", "t2", "t3"]);
+    const again = await reg.claimMany(["t1", "t2", "t3"], "R1");
+    expect(again.granted.sort(), "same run re-grants its own claims").toEqual(["t1", "t2", "t3"]);
+
+    // A DIFFERENT run (distinct poolId) is still partitioned off.
+    const other = await reg.claimMany(["t1", "t2", "t4"], "R2");
+    expect(other.granted.sort(), "different run skips R1's live claims").toEqual(["t4"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimMany re-grant ROTATES the token even though the granted set is unchanged (D-66/67 slice-1 gate load-bearing semantic)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const reg = new ClaimRegistry(path);
+
+    const first = await reg.claimMany(["t1", "t2"], "R1");
+    expect(first.granted.sort()).toEqual(["t1", "t2"]);
+
+    // Same pool re-partitions the SAME nodes — granted set is identical, but the
+    // merge-time ownership gate (compares the ORIGINAL persisted token against
+    // the live claim) depends on this re-grant minting a FRESH token per node,
+    // not reusing the old one: otherwise a peer's re-partition could never be
+    // distinguished from our own still-live claim.
+    const again = await reg.claimMany(["t1", "t2"], "R1");
+    expect(again.granted.sort()).toEqual(["t1", "t2"]);
+    for (const id of ["t1", "t2"]) {
+      expect(again.ownerTokenByNode[id]).not.toBe(first.ownerTokenByNode[id]);
+    }
+
+    // The rotation is real, not cosmetic: the FIRST call's token no longer heartbeats.
+    expect(await reg.heartbeat("t1", first.ownerTokenByNode.t1)).toBe(false);
+    expect(await reg.heartbeat("t1", again.ownerTokenByNode.t1)).toBe(true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("listLiveClaims filters stale records by the registry's own staleMs window (listClaims keeps them)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    let clock = 1_000;
+    const reg = new ClaimRegistry(join(dir, "live-claims.json"), () => clock, 10_000);
+
+    const stale = await reg.claim("t-stale", "A");
+    clock = 12_000; // t-stale is now past the 10s window
+    const live = await reg.claim("t-live", "B");
+    expect(stale.acquired && live.acquired).toBe(true);
+
+    const all = await reg.listClaims();
+    expect(Object.keys(all).sort(), "raw snapshot keeps stale records").toEqual(["t-live", "t-stale"]);
+
+    const liveOnly = await reg.listLiveClaims();
+    expect(Object.keys(liveOnly), "live snapshot drops the stale record").toEqual(["t-live"]);
+    expect(liveOnly["t-live"].ownerToken).toBe(acquiredToken(live));
+  } finally {
+    await cleanup();
+  }
+});
+
+test("clear removes claims unconditionally (no token) and reports the count", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const reg = new ClaimRegistry(path);
+    await reg.claimMany(["t1", "t2", "t3"], "A");
+
+    const removed = await reg.clear(["t1", "t3", "missing"]);
+    expect(removed, "only present nodes count; missing ignored").toBe(2);
+
+    // t1/t3 are now free for anyone; t2 still held.
+    const re = await reg.claimMany(["t1", "t2", "t3"], "B");
+    expect(re.granted.sort(), "cleared nodes reclaimable, t2 still held").toEqual(["t1", "t3"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("ClaimRegistry honors a per-registry stale window (OD3 long lease)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    let clock = 1_000;
+    const now = () => clock;
+    // Long lease: 10_000ms window on a registry pointed at the same file.
+    const longPath = join(dir, "long-claims.json");
+    const reg = new ClaimRegistry(longPath, now, 10_000);
+
+    const mine = await reg.claim("t1", "peerA");
+    expect(mine.acquired).toBe(true);
+
+    // 5s later: within the 10s window → still owned, a rival cannot claim.
+    clock = 6_000;
+    const rivalEarly = await reg.claim("t1", "peerB");
+    expect(rivalEarly.acquired, "not stale before the configured window").toBe(false);
+
+    // 11s after the claim: past the 10s window → reclaimable.
+    clock = 12_000;
+    const rivalLate = await reg.claim("t1", "peerB");
+    expect(rivalLate.acquired, "reclaimable once past the configured window").toBe(true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("withClaimHeartbeat fires onRevoked when the claim was reclaimed by a peer", async () => {
+  const { registry, cleanup } = await tempRegistry();
+  try {
+    const mine = await registry.claim("n1", "me");
+    const mineToken = acquiredToken(mine);
+    // Force-steal: overwrite with a peer's fresh claim via a stale-window trick —
+    // simplest is to release mine and let a peer take it, so my token no longer owns.
+    await registry.release("n1", mineToken);
+    await registry.claim("n1", "peer");
+
+    let revoked = false;
+    let fired: (() => void) | undefined;
+    const out = await withClaimHeartbeat(
+      registry,
+      "n1",
+      mineToken, // no longer the owner
+      {
+        intervalMs: 10,
+        ...fakeTimers((cb) => (fired = cb)),
+        onRevoked: () => {
+          revoked = true;
+        },
+      },
+      async () => {
+        fired!(); // heartbeat tick observes we no longer own it
+        // give the async heartbeat().then() a turn to resolve
+        await new Promise((r) => setTimeout(r, 20));
+        return "finished-anyway";
+      },
+    );
+    expect(out).toBe("finished-anyway");
+    expect(revoked, "onRevoked fired because heartbeat returned false").toBe(true);
+  } finally {
+    await cleanup();
+  }
+});

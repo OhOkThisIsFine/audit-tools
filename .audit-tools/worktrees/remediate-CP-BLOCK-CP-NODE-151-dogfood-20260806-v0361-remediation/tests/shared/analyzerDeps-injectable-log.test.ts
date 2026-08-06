@@ -1,0 +1,147 @@
+/**
+ * Regression test for MNT-fe5e6061: analyzerDeps accepts an injectable logger.
+ *
+ * Verifies that both resolveAnalyzerDep and installToCache accept an optional
+ * `log` function and route all observability output through it, so callers can
+ * redirect or suppress output without intercepting console.error globally.
+ */
+
+import { test, expect } from "vitest";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveAnalyzerDep, installToCache } from "../../src/shared/tooling/analyzerDeps.js";
+import type { RunTrackedResult } from "../../src/shared/tooling/exec.js";
+
+async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "mnt-fe5e6061-"));
+  try {
+    return await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// ── resolveAnalyzerDep injectable log ─────────────────────────────────────────
+
+test("MNT-fe5e6061: resolveAnalyzerDep routes repo-hit log through injected log function", async () => {
+  await withTempDir(async (base) => {
+    const repoRoot = join(base, "repo");
+    const pkgDir = join(repoRoot, "node_modules", "typescript");
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }), "utf8");
+
+    const captured: string[] = [];
+    const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
+
+    // Inject a no-op console.error guard to ensure output goes through log only
+    const origError = console.error;
+    const consoleCapture: string[] = [];
+    console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
+    try {
+      const resolved = resolveAnalyzerDep("typescript", repoRoot, {
+        cacheRoot: join(base, "no-cache"),
+        log,
+      });
+      expect(resolved.via).toBe("repo");
+      // injected log must have received the repo-hit message
+      expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("repo")), `expected repo-hit in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
+      // console.error must NOT have received any analyzerDeps messages
+      expect(!consoleCapture.some((l) => l.includes("[analyzerDeps]")), `console.error should not receive analyzerDeps output when log is injected; got: ${JSON.stringify(consoleCapture)}`).toBeTruthy();
+    } finally {
+      console.error = origError;
+    }
+  });
+});
+
+test("MNT-fe5e6061: resolveAnalyzerDep routes absent log through injected log function", async () => {
+  await withTempDir(async (base) => {
+    const captured: string[] = [];
+    const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
+
+    const origError = console.error;
+    const consoleCapture: string[] = [];
+    console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
+    try {
+      const resolved = resolveAnalyzerDep("nonexistent-pkg", join(base, "repo"), {
+        cacheRoot: join(base, "cache"),
+        log,
+      });
+      expect(resolved.via).toBe("absent");
+      expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("absent")), `expected absent log in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
+      expect(!consoleCapture.some((l) => l.includes("[analyzerDeps]")), `console.error should not receive analyzerDeps output when log is injected`).toBeTruthy();
+    } finally {
+      console.error = origError;
+    }
+  });
+});
+
+// ── installToCache injectable log ─────────────────────────────────────────────
+
+test("MNT-fe5e6061: installToCache routes install log through injected log function", async () => {
+  await withTempDir(async (cacheRoot) => {
+    const captured: string[] = [];
+    const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
+
+    const run = (_argv: string[], cwd: string): RunTrackedResult => {
+      const pkgDir = join(cwd, "node_modules", "typescript");
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "typescript" }));
+      return { status: 0, stdout: "", stderr: "", argv: _argv, duration_ms: 0 };
+    };
+
+    const origError = console.error;
+    const consoleCapture: string[] = [];
+    console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
+    try {
+      const result = installToCache("typescript@5.8.0", { cacheRoot, run, log });
+      expect(result.ok).toBe(true);
+      expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("installing")), `expected install-start in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
+      expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("installed")), `expected install-done in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
+      expect(!consoleCapture.some((l) => l.includes("[analyzerDeps]")), `console.error should not receive analyzerDeps output when log is injected`).toBeTruthy();
+    } finally {
+      console.error = origError;
+    }
+  });
+});
+
+test("MNT-fe5e6061: installToCache routes failure log through injected log function", async () => {
+  await withTempDir(async (cacheRoot) => {
+    const captured: string[] = [];
+    const log = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
+
+    const run = (): RunTrackedResult => ({ status: 1, stdout: "", stderr: "E404 not found", argv: [], duration_ms: 0 });
+
+    const origError = console.error;
+    const consoleCapture: string[] = [];
+    console.error = (...args: unknown[]) => { consoleCapture.push(args.map(String).join(" ")); };
+    try {
+      const result = installToCache("typescript@5.8.0", { cacheRoot, run, log });
+      expect(result.ok).toBe(false);
+      expect(captured.some((l) => l.includes("[analyzerDeps]") && l.includes("failed")), `expected failure log in injected log; got: ${JSON.stringify(captured)}`).toBeTruthy();
+      expect(!consoleCapture.some((l) => l.includes("[analyzerDeps]")), `console.error should not receive analyzerDeps output when log is injected`).toBeTruthy();
+    } finally {
+      console.error = origError;
+    }
+  });
+});
+
+// ── Default behavior (no log option) still uses console.error ─────────────────
+
+test("MNT-fe5e6061: resolveAnalyzerDep still logs to console.error when no log option given", async () => {
+  await withTempDir(async (base) => {
+    const captured: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(" ")); };
+    try {
+      resolveAnalyzerDep("nonexistent-pkg", join(base, "repo"), {
+        cacheRoot: join(base, "cache"),
+        // no log option — should default to console.error
+      });
+      expect(captured.some((l) => l.includes("[analyzerDeps]")), `expected console.error to receive analyzerDeps output when no log is injected; got: ${JSON.stringify(captured)}`).toBeTruthy();
+    } finally {
+      console.error = origError;
+    }
+  });
+});
