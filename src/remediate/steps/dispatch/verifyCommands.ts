@@ -180,7 +180,7 @@ export function partitionDistDependentVerifyCommands(
  * Used to decide whether a targeted verify command is self-contained.
  */
 export function pathTokensInCommand(cmd: string): string[] {
-  const tokens = cmd.match(/(?:[\w.@-]+\/)+[\w.@-]+\.\w+/g) ?? [];
+  const tokens = cmd.match(/(?:[\w.@-]+[\/\\])+[\w.@-]+\.\w+/g) ?? [];
   return [...new Set(tokens.map((t) => t.replace(/\\/g, "/")))];
 }
 

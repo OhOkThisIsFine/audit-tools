@@ -107,8 +107,8 @@ export async function writeMergedGeneratedJson(targetPath, description, buildVal
   };
 }
 
-const INSTALL_MARKER_START = '<!-- remediate-code:begin -->';
-const INSTALL_MARKER_END = '<!-- remediate-code:end -->';
+export const INSTALL_MARKER_START = '<!-- remediate-code:begin -->';
+export const INSTALL_MARKER_END = '<!-- remediate-code:end -->';
 
 function normalizeNewlines(value) {
   return value.replace(/\r\n/g, '\n');

@@ -28,6 +28,12 @@ function isQuotaState(value: unknown): value is QuotaState {
   return (version === 1 || version === 2) && typeof obj["entries"] === "object";
 }
 
+function isValidIsoDateString(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const date = new Date(value);
+  return !isNaN(date.getTime()) && date.toISOString() === value;
+}
+
 /**
  * The cold-start quota state. This is the ONLY value that legitimately means
  * "nothing learned yet" — it must never be manufactured from a read failure.
@@ -613,7 +619,12 @@ async function recordWaveOutcomeUnsafe(
       const backoffMs = computeBackoffCooldownMs(new429Count);
       entry.cooldown_until = new Date(Date.now() + backoffMs).toISOString();
     } else if (outcome.cooldown_until) {
-      entry.cooldown_until = outcome.cooldown_until;
+      // Validate cooldown_until is a valid ISO date string before persisting
+      if (isValidIsoDateString(outcome.cooldown_until)) {
+        entry.cooldown_until = outcome.cooldown_until;
+      } else {
+        throw new Error(`Invalid cooldown_until timestamp in quota outcome: ${outcome.cooldown_until}`);
+      }
     }
   }
 
