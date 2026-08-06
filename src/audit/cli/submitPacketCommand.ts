@@ -13,6 +13,7 @@ import {
   entriesByTaskId,
 } from "./dispatch.js";
 import { fromBase64Url, getArtifactsDir, getFlag, readStdinText } from "./args.js";
+import { outputJson, buildLineIndexFromTasks } from "./cliHelpers.js";
 
 export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   const runId = resolveRunScopedArg(argv, "--run-id", "--run-id-b64");
@@ -74,9 +75,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   }
   const tasks = packetTasks as AuditTask[];
   const expectedTaskIds = new Set(tasks.map((task) => task.task_id));
-  const lineIndex = Object.fromEntries(
-    tasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
-  );
+  const lineIndex = buildLineIndexFromTasks(tasks);
   // Packet boundary: the union of every sibling task's assigned file_paths.
   // A result in this packet may declare coverage of, or queue a followup over,
   // any file a sibling task was assigned without a hard reject — the evidence
@@ -177,16 +176,10 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
     (sum, result) => sum + result.findings.length,
     0,
   );
-  console.log(
-    JSON.stringify(
-      {
-        run_id: runId,
-        packet_id: resolvedPacketId,
-        accepted_count: (payload as AuditResult[]).length,
-        finding_count: findingCount,
-      },
-      null,
-      2,
-    ),
-  );
+  outputJson({
+    run_id: runId,
+    packet_id: resolvedPacketId,
+    accepted_count: (payload as AuditResult[]).length,
+    finding_count: findingCount,
+  });
 }

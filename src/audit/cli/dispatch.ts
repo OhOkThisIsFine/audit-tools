@@ -38,6 +38,7 @@ import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { taskResultPath, packetPromptPath, artifactNameForId } from "./args.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { quotaPoolKey } from "../quota/index.js";
+import { buildLineIndexFromTasks } from "./cliHelpers.js";
 import {
   HostSessionQuotaSource,
   type HostSessionEscalation,
@@ -374,11 +375,7 @@ export async function prepareDispatchArtifacts(params: {
     await mergeOwnerTokens(runDir, ownerTokenByNode);
   }
 
-  const lineIndex = Object.fromEntries(
-    dispatchTasks.flatMap((task) =>
-      Object.entries(task.file_line_counts ?? {}),
-    ),
-  );
+  const lineIndex = buildLineIndexFromTasks(dispatchTasks);
   const sizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
   // Access-memory continuity bias (increment 2b): score files by how connected
   // they are to already-touched code, JIT from the persisted access_memory

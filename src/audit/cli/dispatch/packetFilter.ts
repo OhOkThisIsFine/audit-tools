@@ -17,6 +17,7 @@ import {
 import { LARGE_FILE_PACKET_TARGET_LINES } from "./types.js";
 import { resolveDispatchTier, TIER_ORDER } from "./tierRouting.js";
 import { derivePendingTaskPartition } from "../../orchestrator/pendingTasks.js";
+import { buildLineIndexFromTasks } from "../cliHelpers.js";
 
 // Packet filtering and fitting: budget cap, pending-task derivation,
 // JIT task-graph resolution, per-tier re-fit pass, oversized warnings, and
@@ -63,9 +64,7 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
   // disagree on which tasks still need work. A drifted task re-dispatches even
   // though its stale result left it status `complete` (O3).
   const { pendingTasks } = derivePendingTaskPartition(bundle);
-  const lineIndex = Object.fromEntries(
-    pendingTasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
-  );
+  const lineIndex = buildLineIndexFromTasks(pendingTasks);
   // No continuity bias here: this returns a task ORDER that every downstream
   // consumer re-derives (the JIT partitioner + admission re-order independently),
   // so a continuity pass would be discarded work. The bias lives where it bites —

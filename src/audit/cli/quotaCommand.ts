@@ -9,6 +9,7 @@ import {
 } from "../quota/index.js";
 import { buildDispatchPool } from "./dispatch/quotaPool.js";
 import { resolveDispatchDriverIdentity } from "./prepareDispatchCommand.js";
+import { outputJson } from "./cliHelpers.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
   // This command is a read-only PREVIEW of what `prepare-dispatch` builds, so it
@@ -51,36 +52,30 @@ export async function cmdQuota(argv: string[]): Promise<void> {
     hostModelId: self.model_id ?? null,
   });
 
-  console.log(
-    JSON.stringify(
-      {
-        provider: providerName,
-        model: hostModel,
-        provider_model_key: providerModelKey,
-        resolved_limits: limits,
-        confidence,
-        source,
-        host_concurrency_limit: hostConcurrencyLimit,
-        // Reactive backoff state — what the last 429 taught us. There is no
-        // learned concurrency cap to report: concurrency is declared or absent.
-        reactive_state: quotaStateEntry
-          ? {
-              cooldown_until: quotaStateEntry.cooldown_until,
-              last_429_at: quotaStateEntry.last_429_at,
-              consecutive_429_count: quotaStateEntry.consecutive_429_count ?? 0,
-            }
-          : null,
-        quota_source_snapshot: quotaSourceSnapshot,
-        discovered_limits: queryDiscoveredLimits,
-        capacity_preview: {
-          pools: dispatchPool.pools,
-          context_budget_tokens: dispatchPool.contextBudgetTokens,
-          tier_budgets: dispatchPool.tierBudgets,
-        },
-        quota_state_path: getQuotaStatePath(),
-      },
-      null,
-      2,
-    ),
-  );
+  outputJson({
+    provider: providerName,
+    model: hostModel,
+    provider_model_key: providerModelKey,
+    resolved_limits: limits,
+    confidence,
+    source,
+    host_concurrency_limit: hostConcurrencyLimit,
+    // Reactive backoff state — what the last 429 taught us. There is no
+    // learned concurrency cap to report: concurrency is declared or absent.
+    reactive_state: quotaStateEntry
+      ? {
+          cooldown_until: quotaStateEntry.cooldown_until,
+          last_429_at: quotaStateEntry.last_429_at,
+          consecutive_429_count: quotaStateEntry.consecutive_429_count ?? 0,
+        }
+      : null,
+    quota_source_snapshot: quotaSourceSnapshot,
+    discovered_limits: queryDiscoveredLimits,
+    capacity_preview: {
+      pools: dispatchPool.pools,
+      context_budget_tokens: dispatchPool.contextBudgetTokens,
+      tier_budgets: dispatchPool.tierBudgets,
+    },
+    quota_state_path: getQuotaStatePath(),
+  });
 }

@@ -17,6 +17,7 @@ import {
   readOptionalTextFile,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { outputJson } from "./cliHelpers.js";
 
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
@@ -67,18 +68,12 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   await writeFile(outputFindingsPath, JSON.stringify(normalized, null, 2), "utf8");
   await writeFile(outputReportPath, markdown, "utf8");
 
-  console.log(
-    JSON.stringify(
-      {
-        source: inputPath,
-        findings_output: outputFindingsPath,
-        report_output: outputReportPath,
-        finding_count: normalized.summary.finding_count,
-        work_block_count: normalized.summary.work_block_count,
-        contract_version: normalized.contract_version,
-      },
-      null,
-      2,
-    ),
-  );
+  outputJson({
+    source: inputPath,
+    findings_output: outputFindingsPath,
+    report_output: outputReportPath,
+    finding_count: normalized.summary.finding_count,
+    work_block_count: normalized.summary.work_block_count,
+    contract_version: normalized.contract_version,
+  });
 }
