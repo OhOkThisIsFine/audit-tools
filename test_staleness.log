@@ -1,0 +1,29 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/staleness.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-143-dogfood-20260806-v0361-remediation[39m
+
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"ts":"2026-08-06T19:25:21.679Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"ts":"2026-08-06T19:25:21.680Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","repo_manifest.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"ts":"2026-08-06T19:25:21.681Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","repo_manifest.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"ts":"2026-08-06T19:25:21.682Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","requeue_tasks.json"],"ts":"2026-08-06T19:25:21.682Z"}
+{"kind":"staleness","stale_artifacts":["file_disposition.json"],"ts":"2026-08-06T19:25:21.682Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","requeue_tasks.json"],"ts":"2026-08-06T19:25:21.683Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","repo_manifest.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"reason":"metadata_schema_version_migration","ts":"2026-08-06T19:25:21.684Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","repo_manifest.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"reason":"metadata_schema_version_migration","ts":"2026-08-06T19:25:21.685Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","audit_tasks.json","coverage_matrix.json","critical_flows.json","file_disposition.json","flow_coverage.json","graph_bundle.json","repo_manifest.json","requeue_tasks.json","risk_register.json","runtime_validation_tasks.json","surface_manifest.json","unit_manifest.json"],"reason":"metadata_schema_version_migration","ts":"2026-08-06T19:25:21.687Z"}
+ [32m✓[39m tests/audit/staleness.test.ts [2m([22m[2m31 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m31 passed[39m[22m[90m (31)[39m
+[2m   Start at [22m 12:25:20
+[2m   Duration [22m 1.63s[2m (transform 676ms, setup 7ms, collect 1.28s, tests 23ms, environment 0ms, prepare 129ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      1.4s
+   collect≈1.3s  run≈0.0s  files=1
+   slowest files:
+     1.4s  tests/audit/staleness.test.ts (collect 1.3s, run 0.0s)
+   outcome: 31 passed, 0 failed, 0 skipped, 0 unfinished (total 31)
