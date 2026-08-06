@@ -84,10 +84,11 @@
 - Local enforcement remains: packet/context fit (unknown context cap now refuses rather than
   fits), capability floors, quota/headroom, concurrency, result validation, and mechanical
   self-spawn exclusion.
-- The nightly inbox is EMPTY: sol-1 (triage-lane fixes, `391c743d`) and sol-3 (git-evidenced
-  premise probes, `3750a943`) were approved in chat 2026-08-04, executed, and recorded
-  answered+completed in the decisions ledger. One relay-side defect remains OUTSIDE this repo:
-  `pool/coding` does not fail over past a rate-limited first candidate — file against llm-relay.
+- One relay-side defect remains OUTSIDE this repo: `pool/coding` does not fail over past a
+  rate-limited first candidate — file against llm-relay. (Nightly answers and their landing refs
+  live in `.claude/nightly-decisions.json`; the open queue is `docs/nightly-inbox.md`. Item ids
+  like `sol-1` are per-run and are reused across nights — the ledger's subject keys, not the ids,
+  are what identify a decision.)
 - Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
   `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
   [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).
