@@ -116,7 +116,7 @@ describe("two-sided divergence probes", () => {
   it("stays open while both sides hold", () => {
     const { status, probes } = evaluateProbes(root, divergence());
     expect(status).toBe("open");
-    expect(probes.map((p) => p.state).sort()).toEqual(["holds", "present"]);
+    expect(probes.map((p: { state: string }) => p.state).sort()).toEqual(["holds", "present"]);
   });
 
   it("resolves when the CODE side moves (the negative string appears)", () => {
@@ -125,7 +125,7 @@ describe("two-sided divergence probes", () => {
       "export const KEPT = 1;\nexport const FIXED = 2;\n",
     );
     const { status, probes } = evaluateProbes(root, divergence());
-    expect(probes.find((p) => p.form === "absent")?.state).toBe("appeared");
+    expect(probes.find((p: { form?: string }) => p.form === "absent")?.state).toBe("appeared");
     expect(status).toBe("resolved");
   });
 
