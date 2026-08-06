@@ -8,7 +8,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { evaluateProbes, writeOpenItems } from "../../scripts/nightly/items.mjs";
@@ -17,7 +17,7 @@ let root: string;
 
 /** A real git repo — the probe evidence chain shells out to git, so a fake tree proves nothing. */
 function git(...args: string[]): void {
-  const out = spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+  const out = spawnSyncHidden("git", args, { cwd: root, encoding: "utf8" });
   if (out.status !== 0) throw new Error(`git ${args.join(" ")}: ${out.stderr}`);
 }
 

@@ -7,7 +7,6 @@
 // became noise. These tests pin the durable half.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -37,7 +36,7 @@ const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
 const PROBE_FILE = 'src-probe.txt';
 
 function fixtureGit(cwd: string, ...args: string[]): void {
-  const out = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  const out = spawnSyncHidden('git', args, { cwd, encoding: 'utf8' });
   if (out.status !== 0) throw new Error(`git ${args.join(' ')}: ${out.stderr}`);
 }
 
