@@ -1,0 +1,148 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/reporting-invariants.test.ts tests/audit/review-packets.test.ts tests/audit/semantic-review-step.test.ts tests/audit/submit-packet-command.test.ts tests/audit/supervisor-remediation.test.ts tests/audit/systemic-challenge.test.ts tests/audit/typescript-analyzer.test.ts tests/audit/work-blocks.test.ts tests/audit/audit-tests-invariants.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-42-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/audit/work-blocks.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/audit/reporting-invariants.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 75[2mms[22m[39m
+ [32m✓[39m tests/audit/systemic-challenge.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/audit/supervisor-remediation.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1411[2mms[22m[39m
+   [33m[2m✓[22m[39m many concurrent persistAnalyzerSettings writers each land their own key (no lost update) [33m 539[2mms[22m[39m
+[quota] audit dispatch pool build: Quota state dir not set — call setQuotaStateDir() first.; degrading to no learned quota state (no cooldowns, no learned limits)
+ [32m✓[39m tests/audit/audit-tests-invariants.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 1542[2mms[22m[39m
+   [33m[2m✓[22m[39m INV-audit-tests-01: no test file imports from dist/ at module load time (outside allowlist) [33m 436[2mms[22m[39m
+   [33m[2m✓[22m[39m INV-audit-tests-02: no test file uses a relative path into shared/dist/ [33m 1091[2mms[22m[39m
+ [32m✓[39m tests/audit/submit-packet-command.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 1208[2mms[22m[39m
+[quota] audit dispatch pool build: Quota state dir not set — call setQuotaStateDir() first.; degrading to no learned quota state (no cooldowns, no learned limits)
+[quota] audit dispatch pool build: Quota state dir not set — call setQuotaStateDir() first.; degrading to no learned quota state (no cooldowns, no learned limits)
+ [32m✓[39m tests/audit/semantic-review-step.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 2563[2mms[22m[39m
+   [33m[2m✓[22m[39m renderSemanticReviewStep is capability-unconditional (always-materialized fan-out)[2m > [22ma full-handshake host gets the materialized dispatch step with no capability flag consumed [33m 1244[2mms[22m[39m
+   [33m[2m✓[22m[39m renderSemanticReviewStep is capability-unconditional (always-materialized fan-out)[2m > [22ma handshake-less host degrades to one-task-per-packet with a loud warning, never a refusal [33m 827[2mms[22m[39m
+ [31m❯[39m tests/audit/review-packets.test.ts [2m([22m[2m26 tests[22m[2m | [22m[31m4 failed[39m[2m)[22m[32m 137[2mms[22m[39m
+   [32m✓[39m review packets group related lenses without changing task identity[32m 16[2mms[22m[39m
+   [32m✓[39m packet ordering keeps related tasks adjacent for provider batches[32m 1[2mms[22m[39m
+   [32m✓[39m review packets merge graph-connected task groups within packet budgets[32m 2[2mms[22m[39m
+   [32m✓[39m review packets co-pack source and test tasks linked by graph evidence[32m 1[2mms[22m[39m
+   [32m✓[39m review packets co-pack route files with imported handlers and expose entrypoints[32m 1[2mms[22m[39m
+   [32m✓[39m review packets bridge entrypoint flow paths through boundary-only files[32m 1[2mms[22m[39m
+   [32m✓[39m entrypoint flow bridges do not traverse high fan shared files[32m 2[2mms[22m[39m
+   [32m✓[39m review packets cluster bounded subsystem tasks without graph evidence[32m 1[2mms[22m[39m
+   [32m✓[39m review packets cluster bounded package-owned tasks across subdirectories[32m 1[2mms[22m[39m
+   [32m✓[39m ownership root clustering: workspace package links seed package ownership clustering[32m 1[2mms[22m[39m
+   [32m✓[39m ownership root clustering: typescript project references seed module ownership clustering[32m 1[2mms[22m[39m
+   [32m✓[39m ownership root clustering: go workspace module links seed module ownership clustering[32m 0[2mms[22m[39m
+   [32m✓[39m ownership root clustering: cargo workspace member links seed module ownership clustering[32m 1[2mms[22m[39m
+   [32m✓[39m ownership root clustering: maven module links seed module ownership clustering[32m 1[2mms[22m[39m
+   [32m✓[39m ownership root clustering: analyzer ownership root links seed module ownership clustering[32m 1[2mms[22m[39m
+   [32m✓[39m module ownership clustering ignores repository root tsconfig files[32m 0[2mms[22m[39m
+   [32m✓[39m package ownership clustering ignores repository root package manifests[32m 1[2mms[22m[39m
+   [32m✓[39m subsystem clustering ignores broad source directories[32m 0[2mms[22m[39m
+   [32m✓[39m weak graph edges remain boundary context instead of forcing packet expansion[32m 1[2mms[22m[39m
+   [32m✓[39m high fan-in graph edges do not collapse shared files into every packet[32m 16[2mms[22m[39m
+   [32m✓[39m directory-proximity merge combines small packets sharing a deep directory[32m 1[2mms[22m[39m
+   [32m✓[39m tiny test files batch across unit boundaries per lens[32m 1[2mms[22m[39m
+[31m   [31m×[31m prepare-dispatch writes one packet prompt for multiple task outputs[39m[32m 23[2mms[22m[39m
+[31m     → Unexpected end of JSON input[39m
+[31m   [31m×[31m prepare-dispatch marks tiny low-risk packets for small model routing[39m[32m 40[2mms[22m[39m
+[31m     → ENOENT: no such file or directory, open 'C:\Users\ethan\AppData\Local\Temp\audit-code-packets-IDk5lH\runs\run-small\dispatch-plan.json'[39m
+[31m   [31m×[31m prepare-dispatch keeps colliding sanitized task ids on distinct result paths[39m[32m 13[2mms[22m[39m
+[31m     → ENOENT: no such file or directory, open 'C:\Users\ethan\AppData\Local\Temp\audit-code-packets-hew1KA\runs\run-collision\dispatch-result-map.json'[39m
+[31m   [31m×[31m large single-file packets stay isolated and get mechanical anchors[39m[32m 8[2mms[22m[39m
+[31m     → Unexpected end of JSON input[39m
+ [32m✓[39m tests/audit/typescript-analyzer.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 8937[2mms[22m[39m
+   [33m[2m✓[22m[39m typescript analyzer resolves imports, re-exports, inheritance, and a cross-file call [33m 2652[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-import edge for a static import declaration [33m 1299[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-reexport edge for a re-export declaration [33m 1044[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-import edge for a dynamic import call expression [33m 1089[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-call edge and deduplicates repeated calls [33m 841[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-extends edge for class heritage [33m 1126[2mms[22m[39m
+   [33m[2m✓[22m[39m collectFileEdges: emits ts-implements edge for interface heritage [33m 881[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/audit/review-packets.test.ts[2m > [22mprepare-dispatch writes one packet prompt for multiple task outputs
+[31m[1mSyntaxError[22m: Unexpected end of JSON input[39m
+[36m [2m❯[22m tests/audit/review-packets.test.ts:[2m1100:26[22m[39m
+    [90m1098| [39m    )[33m;[39m
+    [90m1099| [39m
+    [90m1100| [39m    [35mconst[39m summary [33m=[39m [33mJSON[39m[33m.[39m[34mparse[39m(captured[33m.[39mstdout)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m1101| [39m    [34mexpect[39m(summary[33m.[39mrun_id)[33m.[39m[34mtoBe[39m(runId)[33m;[39m
+    [90m1102| [39m    [34mexpect[39m(summary[33m.[39mpacket_count)[33m.[39m[34mtoBe[39m([34m1[39m)[33m;[39m
+[90m [2m❯[22m withTempDir tests/audit/review-packets.test.ts:[2m55:12[22m[39m
+[90m [2m❯[22m tests/audit/review-packets.test.ts:[2m1071:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/audit/review-packets.test.ts[2m > [22mprepare-dispatch marks tiny low-risk packets for small model routing
+[31m[1mError[22m: ENOENT: no such file or directory, open 'C:\Users\ethan\AppData\Local\Temp\audit-code-packets-IDk5lH\runs\run-small\dispatch-plan.json'[39m
+[36m [2m❯[22m tests/audit/review-packets.test.ts:[2m1213:7[22m[39m
+    [90m1211| [39m
+    [90m1212| [39m    [35mconst[39m plan [33m=[39m [33mJSON[39m[33m.[39m[34mparse[39m(
+    [90m1213| [39m      [35mawait[39m [34mreadFile[39m([34mjoin[39m(runDir[33m,[39m [32m"dispatch-plan.json"[39m)[33m,[39m [32m"utf8"[39m)[33m,[39m
+    [90m   | [39m      [31m^[39m
+    [90m1214| [39m    )[33m;[39m
+    [90m1215| [39m    [34mexpect[39m(plan[[34m0[39m][33m.[39mcomplexity[33m.[39mpriority)[33m.[39m[34mtoBe[39m([32m"low"[39m)[33m;[39m
+[90m [2m❯[22m withTempDir tests/audit/review-packets.test.ts:[2m55:12[22m[39m
+[90m [2m❯[22m tests/audit/review-packets.test.ts:[2m1179:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/audit/review-packets.test.ts[2m > [22mprepare-dispatch keeps colliding sanitized task ids on distinct result paths
+[31m[1mError[22m: ENOENT: no such file or directory, open 'C:\Users\ethan\AppData\Local\Temp\audit-code-packets-hew1KA\runs\run-collision\dispatch-result-map.json'[39m
+[36m [2m❯[22m tests/audit/review-packets.test.ts:[2m1255:7[22m[39m
+    [90m1253| [39m
+    [90m1254| [39m    [35mconst[39m resultMap [33m=[39m [33mJSON[39m[33m.[39m[34mparse[39m(
+    [90m1255| [39m      [35mawait[39m [34mreadFile[39m([34mjoin[39m(runDir[33m,[39m [32m"dispatch-result-map.json"[39m)[33m,[39m [32m"utf8"[39m)[33m,[39m
+    [90m   | [39m      [31m^[39m
+    [90m1256| [39m    )[33m;[39m
+    [90m1257| [39m    [34mexpect[39m(resultMap[33m.[39mentries[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+[90m [2m❯[22m withTempDir tests/audit/review-packets.test.ts:[2m55:12[22m[39m
+[90m [2m❯[22m tests/audit/review-packets.test.ts:[2m1225:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/audit/review-packets.test.ts[2m > [22mlarge single-file packets stay isolated and get mechanical anchors
+[31m[1mSyntaxError[22m: Unexpected end of JSON input[39m
+[36m [2m❯[22m tests/audit/review-packets.test.ts:[2m1326:26[22m[39m
+    [90m1324| [39m    )[33m;[39m
+    [90m1325| [39m
+    [90m1326| [39m    [35mconst[39m summary [33m=[39m [33mJSON[39m[33m.[39m[34mparse[39m(captured[33m.[39mstdout)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m1327| [39m    [34mexpect[39m(summary[33m.[39mwarning_count)[33m.[39m[34mtoBe[39m([34m0[39m)[33m;[39m
+    [90m1328| [39m    [35mconst[39m plan [33m=[39m [33mJSON[39m[33m.[39m[34mparse[39m(
+[90m [2m❯[22m withTempDir tests/audit/review-packets.test.ts:[2m55:12[22m[39m
+[90m [2m❯[22m tests/audit/review-packets.test.ts:[2m1287:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m8 passed[39m[22m[90m (9)[39m
+[2m      Tests [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m129 passed[39m[22m[90m (133)[39m
+[2m   Start at [22m 11:54:06
+[2m   Duration [22m 16.49s[2m (transform 15.52s, setup 69ms, collect 57.10s, tests 15.92s, environment 1ms, prepare 3.43s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      76.5s
+   collect≈57.1s  run≈15.9s  files=9
+   slowest files:
+     15.4s  tests/audit/typescript-analyzer.test.ts (collect 6.1s, run 8.9s)
+     10.2s  tests/audit/review-packets.test.ts (collect 9.6s, run 0.1s)
+     9.6s  tests/audit/semantic-review-step.test.ts (collect 6.4s, run 2.6s)
+     8.2s  tests/audit/submit-packet-command.test.ts (collect 6.5s, run 1.2s)
+     8.2s  tests/audit/audit-tests-invariants.test.ts (collect 6.4s, run 1.5s)
+     7.3s  tests/audit/supervisor-remediation.test.ts (collect 5.3s, run 1.4s)
+     6.4s  tests/audit/systemic-challenge.test.ts (collect 6.1s, run 0.0s)
+     6.0s  tests/audit/reporting-invariants.test.ts (collect 5.7s, run 0.1s)
+     5.3s  tests/audit/work-blocks.test.ts (collect 4.9s, run 0.0s)
+   outcome: 129 passed, 4 failed, 0 skipped, 0 unfinished (total 133)
+   failed files (advisory console echo — the ledger's `outcome` field is the source of truth):
+     - tests/audit/review-packets.test.ts
+   parallel-flake baseline (win32-cpu16-w16, load=parallel):
+     4 UNRECOGNIZED — these stay RED:
+       - tests/audit/review-packets.test.ts > large single-file packets stay isolated and get mechanical anchors
+       - tests/audit/review-packets.test.ts > prepare-dispatch keeps colliding sanitized task ids on distinct result paths
+       - tests/audit/review-packets.test.ts > prepare-dispatch marks tiny low-risk packets for small model routing
+       - tests/audit/review-packets.test.ts > prepare-dispatch writes one packet prompt for multiple task outputs
+     this run saw something the baseline does not record — NOT written. Re-baseline deliberately on a tree you have decided is green: `npm run test:rebaseline-flakes`.

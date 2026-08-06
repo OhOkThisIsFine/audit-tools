@@ -1,0 +1,40 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/finding-identity.test.ts tests/audit/grounding-surfacing.test.ts tests/audit/intent-equivalence-executor.test.ts tests/audit/lens-selection.test.ts tests/audit/merge-findings-dedup.test.ts tests/audit/merge-ownership-gate-unit.test.ts tests/audit/pipeline-integration.test.ts tests/audit/planning-executors.test.ts tests/audit/poll-log-throttle.test.ts tests/audit/quote-grounding.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-42-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/audit/poll-log-throttle.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/audit/lens-selection.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/audit/quote-grounding.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/audit/merge-findings-dedup.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/audit/finding-identity.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m tests/audit/grounding-surfacing.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+[audit-code] intent-equivalence verdict discarded: it judged pair not-the-pair:still-not but the live pair is 4aef87d4f83c0768:6d3d8a643665bbdb (the checkpoint changed again mid-judgment). The judge step re-fires with the current pair.
+ [32m✓[39m tests/audit/intent-equivalence-executor.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+{"kind":"intent_keyword_interpretation","boosted_lenses":["security"],"encoded_signals":["lens_weight:security"],"ts":"2026-08-06T18:53:58.977Z"}
+{"kind":"intent_keyword_interpretation","boosted_lenses":["security"],"encoded_signals":["lens_weight:security"],"ts":"2026-08-06T18:53:58.978Z"}
+ [32m✓[39m tests/audit/planning-executors.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/audit/pipeline-integration.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/audit/merge-ownership-gate-unit.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m140 passed[39m[22m[90m (140)[39m
+[2m   Start at [22m 11:53:56
+[2m   Duration [22m 2.94s[2m (transform 2.23s, setup 237ms, collect 15.60s, tests 185ms, environment 1ms, prepare 1.32s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      17.3s
+   collect≈15.6s  run≈0.2s  files=10
+   slowest files:
+     2.7s  tests/audit/merge-ownership-gate-unit.test.ts (collect 2.5s, run 0.0s)
+     2.2s  tests/audit/pipeline-integration.test.ts (collect 2.0s, run 0.0s)
+     2.2s  tests/audit/planning-executors.test.ts (collect 2.0s, run 0.0s)
+     1.8s  tests/audit/intent-equivalence-executor.test.ts (collect 1.7s, run 0.0s)
+     1.7s  tests/audit/grounding-surfacing.test.ts (collect 1.6s, run 0.0s)
+     1.7s  tests/audit/finding-identity.test.ts (collect 1.6s, run 0.0s)
+     1.6s  tests/audit/quote-grounding.test.ts (collect 1.4s, run 0.0s)
+     1.6s  tests/audit/lens-selection.test.ts (collect 1.4s, run 0.0s)
+     1.5s  tests/audit/merge-findings-dedup.test.ts (collect 1.4s, run 0.0s)
+     0.2s  tests/audit/poll-log-throttle.test.ts (collect 0.1s, run 0.0s)
+   outcome: 140 passed, 0 failed, 0 skipped, 0 unfinished (total 140)

@@ -1,0 +1,71 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/advance-drain-loop.test.ts tests/audit/agent-feedback-reflections.test.ts tests/audit/analyzer-acquisition-engine.test.ts tests/audit/anchor-grounding.test.ts tests/audit/binary-acquisition.test.ts tests/audit/charter-extraction-executor.test.ts tests/audit/design-assessment.test.ts tests/audit/different-auditor-resume-no-inherit.test.ts tests/audit/finalization-convergence.test.ts tests/audit/finalization-cycle-guard.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-42-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/audit/charter-extraction-executor.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/audit/binary-acquisition.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/audit/anchor-grounding.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m tests/audit/design-assessment.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 50[2mms[22m[39m
+ [32m✓[39m tests/audit/analyzer-acquisition-engine.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+{"kind":"staleness","stale_artifacts":["audit-report.md"],"ts":"2026-08-06T18:53:42.298Z"}
+[quota] audit dispatch pool build: Quota state dir not set — call setQuotaStateDir() first.; degrading to no learned quota state (no cooldowns, no learned limits)
+ [32m✓[39m tests/audit/different-auditor-resume-no-inherit.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+[audit-code] graph: built bundle — 5 nodes, 4 edges across 2 graph type(s)
+ [32m✓[39m tests/audit/finalization-cycle-guard.test.ts [2m([22m[2m6 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[32m 133[2mms[22m[39m
+[audit-code] graph: built bundle — 5 nodes, 4 edges across 2 graph type(s)
+[audit-code] graph: built bundle — 0 nodes, 0 edges across 0 graph type(s)
+[90mstderr[2m | tests/audit/finalization-convergence.test.ts[2m > [22m[2mfinalization converges through the real persist/reload loop without oscillating
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/finalization-convergence.test.ts[2m > [22m[2mfinalization converges through the real persist/reload loop without oscillating
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[audit-code] criticalFlowFallback: host submission did not conform (Required); recording an empty enrichment
+[audit-code] graph: built bundle — 0 nodes, 0 edges across 0 graph type(s)
+[90mstderr[2m | tests/audit/agent-feedback-reflections.test.ts[2m > [22m[2ma reflection appended after synthesis re-synthesizes once and the run still converges
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/agent-feedback-reflections.test.ts[2m > [22m[2ma reflection appended after synthesis re-synthesizes once and the run still converges
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+ [32m✓[39m tests/audit/advance-drain-loop.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 605[2mms[22m[39m
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:43.905Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:43.962Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:43.971Z"}
+{"kind":"runtime_spawn_resolved","wrap":"cmd.exe","executable":"npm","shell_command":"C:\\Windows\\system32\\cmd.exe","platform":"win32","ts":"2026-08-06T18:53:43.975Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.027Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.035Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.099Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.108Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.171Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.176Z"}
+ [32m✓[39m tests/audit/agent-feedback-reflections.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 2027[2mms[22m[39m
+   [33m[2m✓[22m[39m a reflection appended after synthesis re-synthesizes once and the run still converges [33m 1972[2mms[22m[39m
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.455Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.520Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T18:53:44.526Z"}
+ [32m✓[39m tests/audit/finalization-convergence.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 2432[2mms[22m[39m
+   [33m[2m✓[22m[39m finalization converges through the real persist/reload loop without oscillating [33m 2381[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m119 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (120)[39m
+[2m   Start at [22m 11:53:39
+[2m   Duration [22m 5.61s[2m (transform 2.69s, setup 180ms, collect 23.24s, tests 5.42s, environment 1ms, prepare 1.24s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      30.1s
+   collect≈23.2s  run≈5.4s  files=10
+   slowest files:
+     5.3s  tests/audit/finalization-convergence.test.ts (collect 2.8s, run 2.4s)
+     5.0s  tests/audit/agent-feedback-reflections.test.ts (collect 2.8s, run 2.0s)
+     3.5s  tests/audit/advance-drain-loop.test.ts (collect 2.8s, run 0.6s)
+     3.1s  tests/audit/finalization-cycle-guard.test.ts (collect 2.8s, run 0.1s)
+     3.0s  tests/audit/different-auditor-resume-no-inherit.test.ts (collect 2.9s, run 0.1s)
+     2.4s  tests/audit/analyzer-acquisition-engine.test.ts (collect 2.3s, run 0.0s)
+     2.0s  tests/audit/design-assessment.test.ts (collect 1.8s, run 0.1s)
+     2.0s  tests/audit/anchor-grounding.test.ts (collect 1.8s, run 0.0s)
+     1.9s  tests/audit/charter-extraction-executor.test.ts (collect 1.7s, run 0.0s)
+     1.9s  tests/audit/binary-acquisition.test.ts (collect 1.7s, run 0.0s)
+   outcome: 119 passed, 0 failed, 1 skipped, 0 unfinished (total 120)
