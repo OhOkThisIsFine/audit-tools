@@ -1,0 +1,305 @@
+/**
+ * DC-6: host-subagent rolling driver pulled through the SHARED a8/a10 claim
+ * registry, so the host-subagent loop and the in-process provider engine are
+ * mutually exclusive on a node (exactly-one-claimant across both drivers — no
+ * double-dispatch), every completion routes through the IDENTICAL
+ * acceptNodeWorktree → recordNodeAcceptOutcome lifecycle (lock-guarded, idempotent
+ * re-accept), and the legacy host-fanned wave stays the conversation-first fallback
+ * when the rolling engine is off.
+ *
+ * Real git worktrees; no state.json needed (loadState → null → empty verify
+ * auto-passes), so these isolate the driver/registry wiring.
+ *
+ * Granted-set model (admission control): the whole granted set has its worktree
+ * created + claimed upfront (worktrees == granted set); `advanceHostRolling` only runs
+ * each finished node's accept lifecycle + releases its claim, then reports wait/done.
+ * There is no per-completion JIT refill — the pending remainder is re-granted at the
+ * next next-step. Cross-driver exclusion happens at claim time (`prepareHostRollingDispatch`):
+ * a node a peer driver holds is recorded `contested` and never dispatched here.
+ *
+ * Verifies:
+ *   claim lifecycle       each accept releases the finished node's claim; the granted
+ *                         set completes with no dangling claim.
+ *   cross-driver accept   a node a PEER driver holds (recorded `contested`, not
+ *                         dispatched) does not keep this session waiting — it finishes
+ *                         on its own granted nodes; the peer's claim is untouched.
+ *   session-lock race     concurrent accept-node callbacks for distinct nodes are
+ *                         serialized by the session lock (no lost acceptance / no
+ *                         double-accept); a re-run for one node stays idempotent.
+ *   legacy fallback       when the rolling engine is off, the implement step is the
+ *                         host-fanned wave (`dispatch_implement`), not a rolling step.
+ */
+
+import { describe, it, expect } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  realpathSync,
+} from "node:fs";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+import { ClaimRegistry } from "../../src/shared/quota/claimRegistry.js";
+import {
+  createWorktree,
+  worktreePath,
+  worktreeBranchForBlock,
+} from "../../src/remediate/steps/dispatch.js";
+import {
+  advanceHostRolling,
+  nodeClaimRegistry,
+  nodeClaimRegistryPath,
+  type RollingSession,
+} from "../../src/remediate/steps/rollingSession.js";
+import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
+
+const RID = "RID";
+
+function git(repo: string, ...args: string[]) {
+  return spawnSync("git", args, { cwd: repo, encoding: "utf8", shell: false });
+}
+
+function initRepo(): { repo: string; ok: boolean } {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "dc6-roll-")));
+  if (git(repo, "init").status !== 0) return { repo, ok: false };
+  git(repo, "config", "user.email", "t@t");
+  git(repo, "config", "user.name", "t");
+  // Trivial cross-platform `check` script: the per-node verify derives + runs
+  // `npm run check`; `node --version` exits 0 and needs no deps.
+  writeFileSync(
+    join(repo, "package.json"),
+    JSON.stringify(
+      { name: "dc6-roll-fixture", private: true, scripts: { check: "node --version" } },
+      null,
+      2,
+    ) + "\n",
+  );
+  git(repo, "add", "package.json");
+  git(repo, "commit", "-m", "base");
+  return { repo, ok: true };
+}
+
+/**
+ * Seed a rolling session in the GRANTED-SET model + the per-node result files. Every
+ * granted node (frontier minus `contested`) has its worktree created + claimed upfront
+ * (worktrees == granted set); a `contested` node is one a PEER driver holds — it is NOT
+ * claimed/dispatched here and is recorded in `session.contested`.
+ */
+async function seedSession(
+  repo: string,
+  frontierIds: string[],
+  opts: { contested?: string[] } = {},
+): Promise<{ artifactsDir: string; registry: ClaimRegistry }> {
+  const artifactsDir = join(repo, ".audit-tools", "remediation");
+  const implDir = join(artifactsDir, "runs", RID, "implement");
+  mkdirSync(implDir, { recursive: true });
+  const contested = opts.contested ?? [];
+  const frontier = frontierIds.map((id) => ({
+    block_id: id,
+    prompt_path: join(implDir, `${id}.md`),
+    result_path: join(artifactsDir, `${id}.result.json`),
+  }));
+  // A resolved-no-change result per node → resultOutcome = "success", claimsEdit =
+  // false. NOT "resolved" (a real-edit claim): every node's worktree here is created
+  // with zero commits, which is exactly the new stray-worktree guard's trigger
+  // condition for a "resolved" claim.
+  for (const node of frontier) {
+    writeFileSync(
+      node.result_path,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          { finding_id: node.block_id, status: "resolved_no_change", evidence: ["ok"] },
+        ],
+      }),
+    );
+  }
+  const registry = nodeClaimRegistry(artifactsDir, RID);
+  // Worktrees == granted set: create + claim EVERY non-contested node upfront (parity
+  // with prepareHostRollingDispatch), so the persisted session carries owner tokens.
+  const dispatched = frontierIds.filter((id) => !contested.includes(id));
+  const claims: Record<string, string> = {};
+  for (const id of dispatched) {
+    createWorktree(repo, worktreePath(repo, id, RID), worktreeBranchForBlock(id, RID));
+    const claim = await registry.claim(id, "host-subagent");
+    if (claim.acquired) claims[id] = claim.ownerToken;
+  }
+  const session: RollingSession = {
+    run_id: RID,
+    frontier,
+    dispatched,
+    accepted: [],
+    claims,
+    contested,
+  };
+  writeFileSync(join(implDir, "rolling-session.json"), JSON.stringify(session));
+  return { artifactsDir, registry };
+}
+
+function readSession(artifactsDir: string): RollingSession {
+  return JSON.parse(
+    readFileSync(join(artifactsDir, "runs", RID, "implement", "rolling-session.json"), "utf8"),
+  );
+}
+
+// ===========================================================================
+// Claim lifecycle: the whole granted set is claimed upfront; each accept releases
+// the finished node's claim; the set completes with no dangling claim.
+// ===========================================================================
+
+describe("DC-6 granted-set claim lifecycle through the shared registry", () => {
+  it("releases each node's claim on accept and finishes the granted set with no dangling claim", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // 3 granted nodes: all worktrees created + claimed upfront (worktrees == granted set).
+    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3"]);
+
+    // All three hold live claims before any completion.
+    expect(await registry.isClaimed("B1")).toBe(true);
+    expect(await registry.isClaimed("B2")).toBe(true);
+    expect(await registry.isClaimed("B3")).toBe(true);
+
+    const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(d1.kind).toBe("wait"); // no JIT dispatch; B2/B3 still in flight
+    // B1's claim was released on accept; the session dropped its token.
+    expect(await registry.isClaimed("B1")).toBe(false);
+    expect(readSession(artifactsDir).claims.B1).toBeUndefined();
+
+    const d2 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" });
+    expect(d2.kind).toBe("wait");
+    expect(await registry.isClaimed("B2")).toBe(false);
+
+    // B3 finishes; all accepted → done, and no claim is left dangling.
+    const d3 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B3" });
+    expect(d3.kind).toBe("done");
+    if (d3.kind === "done") expect(d3.accepted).toBe(3);
+    expect(await registry.isClaimed("B3")).toBe(false);
+    expect(Object.keys(await registry.listClaims())).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Cross-driver single-accept: a node a PEER driver holds (recorded `contested`,
+// never dispatched here) does not keep this session waiting — exactly-one-claimant.
+// ===========================================================================
+
+describe("DC-6 cross-driver single-accept concurrency", () => {
+  it("finishes on its own granted nodes without waiting on a peer's contested node", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // A PEER driver (the in-process engine) holds B2 against the SAME registry path, so
+    // prepareHostRollingDispatch would record it `contested` and never dispatch it. Seed
+    // that state: the host's granted set is {B1, B3}; B2 is the peer's.
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    mkdirSync(join(artifactsDir, "runs", RID, "implement"), { recursive: true });
+    const peer = new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, RID));
+    expect((await peer.claim("B2", "in-process")).acquired).toBe(true);
+
+    const seeded = await seedSession(repo, ["B1", "B2", "B3"], { contested: ["B2"] });
+    expect(seeded.artifactsDir).toBe(artifactsDir);
+
+    const s0 = readSession(artifactsDir);
+    expect(s0.contested).toContain("B2");
+    expect(s0.dispatched).not.toContain("B2"); // host never dispatched the peer's node
+    expect(s0.dispatched.sort()).toEqual(["B1", "B3"]);
+
+    // This session owns 2 of the 3 nodes (B2 is the peer's).
+    const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(d1.kind).toBe("wait");
+    if (d1.kind === "wait") {
+      expect(d1.total).toBe(2);
+      expect(d1.accepted).toBe(1);
+    }
+
+    // B3 finishes. B2 is the peer's, so the host session is DONE on its own 2 nodes
+    // rather than waiting forever on the contested node.
+    const d2 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B3" });
+    expect(d2.kind).toBe("done");
+    if (d2.kind === "done") expect(d2.total).toBe(2);
+
+    // The host loop never touched the peer's claim on B2.
+    expect(await peer.isClaimed("B2")).toBe(true);
+  });
+});
+
+// ===========================================================================
+// Session-lock race: concurrent accept-node callbacks for distinct nodes are
+// serialized by the session lock — no lost acceptance, no double-accept — and a
+// re-run for an already-accepted node stays idempotent.
+// ===========================================================================
+
+describe("DC-6 session-lock race", () => {
+  it("serializes concurrent completions: every node accepted once, claims released", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // 4 granted nodes all dispatched upfront; B1,B2 complete CONCURRENTLY.
+    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3", "B4"]);
+
+    // The session lock must serialize the two read-modify-writes so neither acceptance
+    // is lost and neither node is double-accepted. Both return `wait` (B3/B4 still in
+    // flight) — there is no JIT dispatch in the granted-set model.
+    const [r1, r2] = await Promise.all([
+      advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" }),
+      advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" }),
+    ]);
+    expect(r1.kind).toBe("wait");
+    expect(r2.kind).toBe("wait");
+
+    const s = readSession(artifactsDir);
+    // Both B1 and B2 were accepted exactly once (neither acceptance lost to the race).
+    expect(s.accepted.sort()).toEqual(["B1", "B2"]);
+    // The two finished nodes' claims were released; the two still-in-flight ones held.
+    expect(await registry.isClaimed("B1")).toBe(false);
+    expect(await registry.isClaimed("B2")).toBe(false);
+    expect(await registry.isClaimed("B3")).toBe(true);
+    expect(await registry.isClaimed("B4")).toBe(true);
+  });
+
+  it("is idempotent: a re-run for an already-accepted node does not double-accept or double-release", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const { artifactsDir, registry } = await seedSession(repo, ["B1"]);
+    const first = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(first.kind).toBe("done");
+    expect(await registry.isClaimed("B1")).toBe(false);
+
+    // Re-run: no throw, still done, accepted count unchanged (1, not 2), and the
+    // already-released claim is not touched again.
+    const again = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(again.kind).toBe("done");
+    if (again.kind === "done") expect(again.accepted).toBe(1);
+    expect(Object.keys(await registry.listClaims())).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Legacy fallback: when the rolling engine is off, the implement step is the
+// host-fanned wave, NOT a rolling step. (resolveRollingEngineEnabled is the gate.)
+// ===========================================================================
+
+describe("DC-6 legacy host-fanned wave fallback", () => {
+  it("rolling engine off → host-fanned wave is selected over the rolling driver", async () => {
+    // The selection gate the implement step consults: rolling driver only when the
+    // engine is enabled; otherwise the legacy host-fanned wave (`dispatch_implement`).
+    const { resolveRollingEngineEnabled } = await import(
+      "../../src/remediate/steps/nextStep.js"
+    );
+    // Explicit off (session config) → disabled regardless of env/default.
+    expect(
+      resolveRollingEngineEnabled({
+        sessionConfig: { dispatch: { rolling_engine: false } } as never,
+        env: {},
+      }),
+    ).toBe(false);
+    // Env off likewise disables.
+    expect(
+      resolveRollingEngineEnabled({ env: { REMEDIATE_ROLLING_ENGINE: "false" } as never }),
+    ).toBe(false);
+    // Default (no signal) → rolling enabled, so the legacy wave is the explicit opt-OUT.
+    expect(resolveRollingEngineEnabled({ env: {} as never })).toBe(true);
+  });
+});
