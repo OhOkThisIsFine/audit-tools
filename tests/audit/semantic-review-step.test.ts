@@ -113,6 +113,66 @@ describe("renderSemanticReviewStep hostCanDispatch=false returns a single_task_f
 });
 
 // ---------------------------------------------------------------------------
+// Always-materialized fan-out (design resolution 2, 2026-08-05): the capability
+// branch is replaced by the unconditional form — a host that reports it cannot
+// dispatch subagents still receives the SAME materialized dispatch step (packet
+// files on disk, dispatch_plan in artifact_paths) with a capability-neutral
+// prompt, executing the lanes sequentially itself. Today the branch instead
+// emits single_task_fallback, so materialization silently depends on host
+// capability — the exact per-IDE artifact divergence the resolution retires.
+// Pinned RED via it.fails so the tree stays green: implementing the
+// unconditional form makes it.fails itself fail, forcing the flip to it().
+// ---------------------------------------------------------------------------
+
+describe("renderSemanticReviewStep is capability-unconditional (always-materialized fan-out)", () => {
+  it.fails("hostCanDispatch=false with a full handshake still materializes the dispatch step", async () => {
+    const artifactsDir = await makeTempArtifactsDir();
+    try {
+      const runId = "test-run-unconditional";
+      const runDir = join(artifactsDir, "runs", runId);
+      await mkdir(join(runDir, "task-results"), { recursive: true });
+      await writeFile(
+        join(runDir, "pending-audit-tasks.json"),
+        JSON.stringify([
+          {
+            task_id: "t-abc123",
+            unit_id: "unit-abc",
+            pass_id: "pass:correctness",
+            lens: "correctness",
+            file_paths: ["src/foo/foo.ts"],
+            file_line_counts: { "src/foo/foo.ts": 50 },
+            rationale: "review foo",
+            priority: "medium",
+          },
+        ]),
+        "utf8",
+      );
+      const activeRun = makeActiveReviewRun(artifactsDir, runId);
+      const step = await renderSemanticReviewStep({
+        root: artifactsDir,
+        artifactsDir,
+        activeReviewRun: activeRun,
+        hostCanDispatch: false,
+        hostMaxActiveSubagents: null,
+        hostCanRestrictSubagentTools: false,
+        hostCanSelectSubagentModel: false,
+        hostContextTokens: DISPATCH_DESCRIPTOR.self.context_tokens ?? null,
+        hostOutputTokens: DISPATCH_DESCRIPTOR.self.output_tokens ?? null,
+        descriptor: DISPATCH_DESCRIPTOR,
+      });
+      expect(step.step_kind).toBe("dispatch_review");
+      expect(
+        typeof step.artifact_paths.dispatch_plan === "string" &&
+          step.artifact_paths.dispatch_plan.length > 0,
+        "dispatch_plan must be materialized regardless of host capability",
+      ).toBeTruthy();
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // hostCanDispatch=true — dispatch_review branch
 // ---------------------------------------------------------------------------
 

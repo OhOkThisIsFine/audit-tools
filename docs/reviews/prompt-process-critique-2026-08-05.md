@@ -234,6 +234,75 @@ one standing obligation the settled text above does not mention.
   and the typo'd decline becomes an approval (gate default approves); green only under the refusal
   contract. Independent refutation lane: agy-gemini (7 typed verdicts, all verified against source).
 
+## Design-check record — resolution 2 (always-materialized fan-out), 2026-08-05
+
+Gate run pre-implementation (loop-core). Verdict: **implementable — retirement-clean on the
+mechanism, one owner question, eight binding constraints.**
+
+- **Retirement verdict: clean.** Always-writing prompt/packet files was never retired; the
+  contract + conceptual design-review dispatch already runs the unconditional materialized form
+  (`prepareContractDispatch` / `prepareConceptualDispatch` — so the §3 table's design-review row is
+  **stale at HEAD** on materialization), and the 2026-07-25 owner decision (open-bugs, host
+  fan-out gate entry: "route every fan-out through a prescribed step, so 'ad-hoc' stops existing")
+  pushes the same direction, as does [[universal-host-prompts-single-source]] (the
+  inline-vs-write contradiction named as the bug, 2026-06-15).
+- **Owner question — mandate wording:** "only a concurrency hint is capability-sensitive"
+  collides with **CP-BLOCK-IMPL-mandatory-independent-critic** (`34bab094`;
+  `renderIndependentReviewerDirective`, `designReviewPrompt.ts:202-222` + remediate twin
+  `contractPipelinePrompts.ts:371-386`): review-class lanes carry a capability-sensitive MANDATE
+  (independent subagent; inline self-review only as the explicitly-degraded fallback). Strictly
+  neutral phrasing deletes that distinction and licenses author-self-review at full strength.
+  Proposed reconciliation: keep the prompt capability-neutral but carry the mandate in the neutral
+  text itself — "each review lane MUST be executed by an agent that did not author the work under
+  review; inline execution is the explicitly-degraded no-subagent fallback" — i.e. the mandate
+  becomes lane-class-conditional, never capability-conditional. **Owner settled 2026-08-05: ______**
+- **Binding constraints:**
+  1. **Atomic replace on `single_task_fallback`:** step-kind deletion + every consumer in one
+     commit — `steps.ts` registry, 6 test files, `scripts/audit/smoke-audit-flow.mjs` (the
+     2026-08-05 dogfood flagged it for accepting the fallback as dispatch-ready — that finding
+     dissolves with the branch), `docs/audit-pkg/contracts.md:96-102` (doc-contract commit gate
+     fires).
+  2. **Handshake-less sizing is a decision, not an inheritance:** the fallback branch never sizes
+     packets; the dispatch branch deliberately REFUSES unknown context caps. The unconditional
+     form must define what a can't-dispatch, no-handshake host gets — honest refusal (consistent
+     with "unknown cap refuses rather than fits") or degenerate single-task-sized lanes. Silently
+     inheriting the refusal regresses the weakest hosts with no recorded decision.
+  3. **Routing consumers of capability survive:** `hostCanDispatch` stays for engine routing
+     (`nextStepHelpers.ts:2152-2188` hybrid/headless; `waveScheduling.ts:302` headless pools).
+     Change 2 deletes capability branching from step RENDERING only.
+  4. **Per-lane ingest rides the existing engines:** `runOmittableGate` (the 6 schema-validated,
+     quarantining host-gate ingests) + the change-1 refusal pattern (refuse whole, archive +
+     re-halt naming the valid set, bounded re-dispatch cap) are the substrate — no parallel
+     validation layer. The charter per-lane split moves the merge from host to tool
+     (`assembleCharters` currently ingests one merged submission).
+  5. **Fan-out quota-gate scope:** extending `gateHostFanout` past the current 5 emitters is
+     pushed by the 2026-07-25 decision but makes quota-wall pauses + the killed-wave 20-min lease
+     TTL newly reachable on charter/synthesis/critical-flow/edge-reasoning steps
+     (reconcile-before-regrant bounds it). Gate extension rides the shared renderer, leased per
+     family.
+  6. **Resumability contract:** K-of-N partial lane results on disk survive a re-run — re-emit
+     only missing lanes, never regenerate/overwrite completed lane results (identical artifacts
+     across IDEs/providers is the point of the change).
+  7. **Sequencing vs resolution 4:** charter lanes materialize with CURRENT content rules under
+     change 2 (per-kind prompt files, mechanism only); channel-pure packet feeding + the kind
+     rename ride change 4 — never entangled in one commit.
+  8. **Census corrections:** `edge_reasoning` (`nextStepCommand.ts:915-985`) is a SECOND
+     capability branch of the same class, unnamed in the settled text — in scope, replaced in the
+     same change. `systemic_challenge` is quota-gated but renders inline (single lane). The
+     remediate review-approval gate is operator-interactive, not a fan-out — its context items
+     stay under §C2/C5, outside this renderer.
+- **Failing test pinned red:** `tests/audit/semantic-review-step.test.ts` — "hostCanDispatch=false
+  with a full handshake still materializes the dispatch step" (`it.fails`; verified
+  red-for-the-right-reason: `expected 'single_task_fallback' to be 'dispatch_review'`). Companion
+  implementation-time assertion: the `charter_extraction` step names per-lane prompt files in
+  `artifact_paths` and the files exist on disk (`charter-extraction-executor.test.ts` harness
+  exists).
+- Independent refutation lane: agy-gemini (gemini-3.6-flash-medium), 9 typed verdicts, each
+  verified against source before adoption; two downgraded on verification (the
+  one-task-pacing "collision" is a consequence the settled text already embraces — no recorded
+  one-task-pacing decision exists; the mandate "collision" is the reconcilable owner question
+  above).
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

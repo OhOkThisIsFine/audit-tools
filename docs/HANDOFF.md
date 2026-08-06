@@ -17,8 +17,12 @@
   ids whole (archive + re-halt with the valid set), fuzzy alias remap deleted with a bounded
   re-dispatch cap (`implement-redispatch-attempts.json` sidecar), synthesis narrative refuses
   unknown `finding_ids`. Independent loop-core review: approve (agy Sonnet 4.6).
-  **Immediate next among the four:** change 2 (always-materialized fan-out) — `/design-check`
-  first, it touches orchestrator step surfaces.
+  **Change 2 (always-materialized fan-out): `/design-check` DONE 2026-08-05** — implementable,
+  retirement-clean, red test pinned (`it.fails` in `tests/audit/semantic-review-step.test.ts`);
+  record in the review doc. ONE owner question open before implementing: mandate wording for
+  review-class lanes (capability-neutral text vs `CP-BLOCK-IMPL-mandatory-independent-critic`;
+  proposed lane-class-conditional reconciliation in the record). **Immediate next:** owner answers
+  the mandate question, then implement change 2 under the record's 8 binding constraints.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
