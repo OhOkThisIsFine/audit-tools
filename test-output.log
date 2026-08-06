@@ -1,0 +1,18 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-1-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/shared/gitignore-artifacts.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 475[2mms[22m[39m
+   [33m[2m✓[22m[39m private re-include chain actually tracks deliverables under real git (and ignores runtime state) [33m 467[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m21 passed[39m[22m[90m (21)[39m
+[2m   Start at [22m 11:40:43
+[2m   Duration [22m 1.32s[2m (transform 131ms, setup 8ms, collect 147ms, tests 475ms, environment 0ms, prepare 250ms)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   shared     0.9s
+   collect≈0.1s  run≈0.5s  files=1
+   slowest files:
+     0.9s  tests/shared/gitignore-artifacts.test.ts (collect 0.1s, run 0.5s)
+   outcome: 21 passed, 0 failed, 0 skipped, 0 unfinished (total 21)
