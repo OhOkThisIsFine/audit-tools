@@ -318,6 +318,62 @@ result paths, vacuous assertions dropped) and 2 refuted; two reviewer misreading
 internal `edge_reasoning` RESULT kind; the standard post-apply consumed-submission unlink)
 hardened with clarifying comments at the misread sites.
 
+## Design-check record — resolution 3 (scope-confirmation context), 2026-08-05
+
+Gate run pre-implementation (loop-core: `src/audit/orchestrator/` is a `LOOP_CORE_PATTERNS`
+prefix — the HANDOFF's "not loop-core heavy" understated it; the commit needs an attestation).
+Verdict: **implementable — retirement-clean, eight binding constraints, zero refutations.**
+
+- **Retirement verdict: clean.** No docs-digest/README-reading mechanism was ever built or
+  retired (`git log -S'docs_digest'`/`-S'docsDigest'` → only this review's commits; grep
+  readme/telos → nothing); `buildLensPropositions` was born with the invisible-LLM-review design
+  in `d4623bc3` and design_assessment threading was never added-then-removed; the plan respects
+  DD-9 (no charter-before-scope reorder) and leaves the invisible-review flow intact.
+- **Binding constraints:**
+  1. **The checkpoint stays a leaf:** NO `intent_checkpoint.json` ← `docs_digest.json` DAG edge.
+     Its revision mirrors `artifact_metadata.intent_baseline` (dependency-map.md:75-87); an edge
+     would re-stale the confirmed checkpoint on every doc edit and fight the DD-9 mirror. The
+     pre-digest already reads bundle artifacts (unit_manifest et al.) without checkpoint edges —
+     same pattern for both new inputs.
+  2. **One doc predicate:** the digest's doc universe REUSES `isDocIntentFile`
+     (`src/audit/decompose/buildStructureDecomposition.ts:31` — "the pipeline's single doc
+     predicate", `dependencySlices.ts:60`); a second "what is a doc" rule is the fork the
+     charter-slice residual (open-bugs DD-9 entry (b)) exists to prevent.
+  3. **A new PRIORITY obligation lands whole, one commit:** `docs_digest_current` (between
+     `structure_decomposition_current` and `intent_checkpoint_current`) + exactly-one executor
+     registry entry (load-time assert `nextStep.ts:69-87`) + a hand-pushed derivation in
+     `buildAuditObligations` (`state.ts` — obligations are pushed per artifact, a PRIORITY id
+     with no derivation is silently never selected) + `ARTIFACT_DEFINITIONS` +
+     `ARTIFACT_DEPENDS_ON_MAP` row (`docs_digest.json` ← repo_manifest, file_disposition,
+     structure_decomposition) + the `spec/audit/dependency-map.md` row (doc-contract commit gate
+     fires on it).
+  4. **Empty is no-signal:** absent design_assessment, empty findings, or auto-completed stamps
+     (`contract_auto_completed` = UNREVIEWED, never clean — `designAssessment.ts:39-46`) keep the
+     heuristic dispositions; evidence only ever flips exclude→include or confirms, never
+     absence→exclude.
+  5. **Weak-path degradation:** `computeScopePreDigest` and `runIntentCheckpointAutoComplete`
+     (`intentCheckpointExecutor.ts:386-442`, which ignores `lens_propositions`) must run cleanly
+     on older bundles missing the new artifact — blast radius of half (a) is render-only
+     (`lens_propositions` consumer census: `confirmIntentStep.ts:85` alone).
+  6. **Extractor determinism:** stable path-sorted doc order, bounded per-doc extraction
+     (budget-context rule); no volatile fields beyond the registry norm. No downstream edge
+     exists, so digest churn cascades nowhere — keep it that way unless a consumer earns it.
+  7. **Sequencing vs resolution 4:** docs_digest is telos extraction for the scope decider only;
+     charter stated-kind packet feeding rides change 4 — shared doc predicate, never entangled in
+     one commit.
+  8. **Threading keys on the finding's own `lens` tag** (every deterministic detector emits one —
+     `extractors/designAssessment.ts`), and the improved proposal set remains the recommended
+     default at the user question (standing feedback: lens default follows the proposal).
+- **Failing tests pinned red** (`test.fails` × 2, `tests/audit/intent-checkpoint.test.ts`;
+  verified red-for-the-right-reason before pinning): (a) "computeScopePreDigest reads
+  design_assessment…" — `expected 'recommend_exclude' to be 'recommend_include'`; (b)
+  "docs_digest is a registered artifact…" — `expected [ 'repo_manifest', …(36) ] to include
+  'docs_digest'`. Companion implementation-time assertion: the confirm-intent prompt renders the
+  digest section (compile-bound today, joins with the implementation).
+- Independent refutation lane: agy-gemini (gemini-3.6-flash-medium), 9 typed verdicts, zero
+  `refutes_plan`; each verified against source — one evidence citation corrected on verification
+  (`isDocIntentFile` lives in `buildStructureDecomposition.ts`, not `structureExecutors.ts`).
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

@@ -10,6 +10,7 @@ import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.j
 import { buildPacketPrompt } from "../../src/audit/cli/dispatch.js";
 import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
+import { ARTIFACT_DEFINITIONS } from "../../src/audit/io/artifacts.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { ObligationState } from "../../src/audit/types/auditState.js";
 import type { CoverageMatrix, CoverageFileRecord } from "../../src/audit/types.js";
@@ -170,6 +171,49 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
     pre.excluded_summary.some(
       (e) => "prefix" in e && e.prefix === "node_modules" && e.status === "vendor",
     ), "node_modules vendor file should appear in excluded_summary").toBeTruthy();
+});
+
+// ── Change 3 (scope-confirmation context) — pinned RED until implemented ────
+// Prompt/process critique 2026-08-05 §2 / design resolution 3: the scope
+// confirmation is starved of semantic context that exists elsewhere in the
+// pipeline. Implementation removes the `.fails` modifiers (red→green).
+
+await test.fails("computeScopePreDigest reads design_assessment: a lens-tagged structural finding flips that lens's heuristic exclude", () => {
+  const bundle: ArtifactBundle = {
+    ...readyForIntentBundle(),
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      findings: [
+        {
+          id: "DA-001",
+          title: "Duplicated code: src/a.ts",
+          category: "code_duplication",
+          severity: "low",
+          confidence: "medium",
+          lens: "maintainability",
+          summary: "src/a.ts duplication evidence from the deterministic assessment",
+          affected_files: [{ path: "src/a.ts" }],
+        },
+      ],
+    },
+  };
+  // Today buildLensPropositions receives only unit manifest + paths +
+  // disposition (intentCheckpointExecutor.ts), so maintainability stays an
+  // unconditional recommend_exclude even when the deterministic design
+  // assessment carries direct lens-tagged evidence for it.
+  const pre = computeScopePreDigest(bundle, "/repo");
+  expect(
+    pre.lens_propositions.find((p) => p.lens === "maintainability")?.disposition,
+  ).toBe("recommend_include");
+});
+
+await test.fails("docs_digest is a registered artifact feeding the confirm-intent prompt", () => {
+  // Half (b): the deterministic docs digest (repo telos extraction) does not
+  // exist — no ARTIFACT_DEFINITIONS entry, so nothing can render the repo's
+  // stated purpose into the confirm-intent prompt. Green exactly when the
+  // artifact is registered; the render-content assertion joins at
+  // implementation time (companion, like change 2's charter artifact_paths).
+  expect(Object.keys(ARTIFACT_DEFINITIONS)).toContain("docs_digest");
 });
 
 // ── Confirm-intent prompt rendering ─────────────────────────────────────────
