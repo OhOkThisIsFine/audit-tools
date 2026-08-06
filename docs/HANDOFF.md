@@ -45,15 +45,16 @@
   adversarial review (5 findings, all 5 refuted by mechanism); full suite 7,438/0. Shipped as
   **v0.36.0** (`3fb84823` + `c58cb065`; release CI green, npm live, global bins reinstalled).
   **All four critique-cluster changes are now SHIPPED** — nothing remains from the cluster.
-- **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
-  on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
-  `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
-  (relay pools + codex; agy unusable for write-tasks). Friction close-out: 19 observations on
-  `.audit-tools/audit/friction/run.json`; run story + defect leads in
-  [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md) and 8 new
-  `open-bugs.md` entries. **Run state + promoted reports DELETED 2026-08-06 on owner instruction**
-  (fresh slate for the next dogfood on v0.36.0); the run story survives in
-  [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
+- **Dogfood self-audit COMPLETED 2026-08-06** (run `20260806T054657426Z_audit_tasks_completed_001`
+  on `2b6ba83e`, v0.36.0, offload ON): **1,925 findings / 133 work blocks** promoted to
+  `.audit-tools/audit-report.md` + `audit-findings.json` (9 critical / 125 high). First live
+  exercise of charter-layer v2 (worked end-to-end; one stated-lane quarantine repaired) and the
+  designated live-run-watch re-test — 5 of the 2026-08-05 minor-friction items **confirmed still
+  live**. 3 new tool-side defect leads (design-review ingest atomicity — new `open-bugs.md` entry;
+  submit-vs-ingest validator gap; terminal-cleanup friction wipe RECURRED, record restored by
+  hand). Run story + full re-test outcomes in
+  [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md). The 2026-08-05 run
+  story remains in [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
 - **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
   three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
   single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
@@ -106,10 +107,11 @@
 
 ## Immediate next
 
-1. Run the next dogfood audit (fresh state, v0.36.0, full offload ON) — it is the designated
-   re-test for every remaining live-run-watch property in the merged ▶ cluster entry
-   (`open-bugs.md`) AND the first live exercise of the charter-layer v2 (channel-pure packets,
-   triangulated telos, register/v2).
+1. Work the 2026-08-06 dogfood output: decide triage/remediation over
+   `.audit-tools/audit-findings.json` (1,925 findings, 133 blocks; 9 critical first), and work the
+   confirmed-still-live friction items + 3 new defect leads from
+   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md) (tracked in
+   `open-bugs.md`).
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

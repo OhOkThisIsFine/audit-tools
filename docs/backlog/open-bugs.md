@@ -1183,9 +1183,22 @@
   roster dead weight); observability lens rationale factually wrong ("no logging surface" beside a
   JSONL ledger); resumed runs skip the loader scope echo; charter stated↔revealed blindness leaks in
   comment-dense repos. **Property to hold:** each is a small tool-side fix; work them from the
-  review record.
+  review record. Re-tested on the 2026-08-06 v0.36.0 dogfood
+  ([`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md)): handshake
+  re-echo, tier collapse (301/309→deep), silent >300s derivation, staleness-line spam, and the
+  observability rationale all **confirmed still live**; blindness leak not reproduced.
 
-- **Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.** At
+- **Packet submit-side validation is weaker than merge-side ingest (2026-08-06, medium).** A
+  steward worker's submit command accepted its result (`valid ... findings=0`) that
+  merge-and-ingest later blocked as `contract_mismatch` (followup_tasks `file_paths` outside the
+  task's file_coverage) — the worker learned nothing in-session and the host had to relay the
+  validator errors back by hand one merge later. **Property to hold:** the submit chokepoint
+  enforces the same result contract as ingestion; a result that will be rejected at merge is
+  rejected at submit, with the same error text, while the worker is still live.
+
+- **Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.**
+  RECURRED unchanged on the 2026-08-06 v0.36.0 dogfood (walk + backstop record deleted at
+  `present_report`; restored by hand again). At
   `present_report` completion the cleanup deleted `friction/` (both records: the blocking close-out
   walk it had itself just enforced), `runs/`, and `scratch/` — while leaving `steps/`, which is a
   run-marker for `friction-stop-gate.mjs`; every session stop for the next 12h then blocks on a walk
