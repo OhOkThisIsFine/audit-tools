@@ -38,9 +38,24 @@
 // record whose quoted code has since vanished reads `premise: "gone"` rather
 // than surviving as a stale verdict.
 //
-//   TRIAGE_MODEL=<spec>        default pool/fast (llm-relay spec: pool/<name>
-//                              or <provider>/<model>); pool/coding for retries
+//   TRIAGE_MODEL=<spec>        explicit llm-relay spec (pool/<name> or
+//                              <provider>/<model>). DEFAULT IS DISCOVERED LIVE:
+//                              the script asks `llm-relay config get
+//                              routing.pools` and picks medium > low > high >
+//                              xhigh — a hardcoded pool name is a hand-held
+//                              copy of the relay's config and went stale twice
+//                              (pool/fast + pool/coding died at relay v0.15.4).
 //   TRIAGE_CONCURRENCY=<n>     default 3
+//
+// HEALTH CONTRACT (P11, owner decision sol-4 2026-08-06). Three consecutive
+// nights degraded silently to a partial sweep, each for a different transport
+// fault. Now: (1) the model target is resolved live (above) and an unresolvable
+// lane ABORTS at startup naming the escape; (2) one PREFLIGHT call runs before
+// the sweep — a dead lane fails loudly at entry 0, not silently at entry 154
+// (single attempt, matching the per-entry policy: failover is the relay's job);
+// (3) a COVERAGE STAMP (<out>-coverage.json) records model/attempted/
+// classified/errored/aborted, rewritten as the sweep progresses, so "did leg 2
+// actually cover the backlog" is a number the routine reads, never a wc -l.
 //
 // ⚠ ALIAS CHOICE IS THE WHOLE COST. `glm-5.2` (rank 1) spent ~4 min per entry on
 // this — ~7h for the file — because it is a heavy reasoning model doing a
@@ -54,18 +69,84 @@
 // schema does not error; it returns valid JSON full of placeholders that reads as
 // model incapacity.
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { evaluateProbes } from '../nightly/items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = process.argv[2] || join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
+const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
+
 // llm-relay on :8791 — the LiteLLM proxy this script was born against (:4000)
 // was retired 2026-07-28, which left the whole lane dead transport.
-const MODEL = process.env.TRIAGE_MODEL || 'pool/fast';
-const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
+
+function defaultPoolsCli() {
+  // shell:true so the platform shim (.cmd on Windows) resolves — the same
+  // reason product spawns route through resolveWindowsShimSpawnCommand.
+  const r = spawnSync('llm-relay config get routing.pools', {
+    shell: true,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15_000,
+  });
+  if (r.error || r.status !== 0) {
+    throw new Error(r.error?.message || (r.stderr || '').trim() || `llm-relay exited ${r.status}`);
+  }
+  return r.stdout;
+}
+
+/**
+ * Resolve the model spec: an explicit TRIAGE_MODEL wins verbatim; otherwise the
+ * live pool roster is asked for. Never a hardcoded pool name — the relay owns
+ * its roster and renames it without telling this script.
+ */
+export function resolveTriageModel(env = process.env, poolsCli = defaultPoolsCli) {
+  const explicit = env.TRIAGE_MODEL;
+  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit.trim();
+  let raw;
+  try {
+    raw = poolsCli();
+  } catch (err) {
+    throw new Error(
+      `triage lane cannot resolve a model target: llm-relay pool discovery failed ` +
+        `(${err?.message ?? err}). The lane is DEAD, not slow — fix the relay or set ` +
+        `TRIAGE_MODEL=<spec> to bypass discovery.`,
+    );
+  }
+  let pools;
+  try {
+    pools = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `triage lane cannot resolve a model target: llm-relay returned unparseable pool config ` +
+        `(${String(raw).slice(0, 120)}). Set TRIAGE_MODEL=<spec> to bypass discovery.`,
+    );
+  }
+  const names = Object.keys(pools ?? {});
+  if (names.length === 0) {
+    throw new Error(
+      'triage lane cannot resolve a model target: llm-relay reports no configured pools. ' +
+        'Set TRIAGE_MODEL=<spec> to bypass discovery.',
+    );
+  }
+  // Mechanical classification wants the flash tier (the header notes measure a
+  // heavy reasoner at ~4min/entry vs seconds): medium first, then cheaper, then
+  // heavier, then whatever the roster offers.
+  const preferred = ['medium', 'low', 'high', 'xhigh'].find((n) => names.includes(n)) ?? names[0];
+  return `pool/${preferred}`;
+}
+
+/** `<out minus .jsonl>-coverage.json` — the leg-2 coverage stamp sidecar. */
+export function coverageStampPath(outPath) {
+  return outPath.replace(/\.jsonl$/, '') + '-coverage.json';
+}
+
+export function writeCoverageStamp(path, stamp) {
+  fs.writeFileSync(path, JSON.stringify(stamp, null, 2) + '\n');
+}
 
 // Map the shared evaluator's item-level view onto a per-record stamp. `partial`
 // is surfaced separately from `holds` because a half-vanished premise is
@@ -181,73 +262,161 @@ function post(body) {
   });
 }
 
-// Re-evaluate the premise of every stored record before doing anything else:
-// running this script IS the presentation event for triage verdicts, so a
-// record whose quoted code vanished since the last run must read
-// `premise: "gone"` now, not carry last week's stamp.
-const done = new Set();
-if (fs.existsSync(OUT)) {
-  const kept = [];
-  for (const l of fs.readFileSync(OUT, 'utf8').split('\n')) {
-    if (!l.trim()) continue;
+async function main() {
+  let MODEL;
+  const stampPath = coverageStampPath(OUT);
+  // Best-effort telemetry: a failed stamp write (missing dir, locked file) must
+  // never mask the real abort message or kill a healthy sweep.
+  let stampWarned = false;
+  const stampSafe = (data) => {
     try {
-      const rec = JSON.parse(l);
-      // Errored rows are DROPPED and their entries re-queued: an id in `done`
-      // means a verdict exists, never that an attempt happened. (The old
-      // behaviour added errored ids too, so a re-run retried nothing and
-      // exited 0 — a false green.)
-      if (rec.error) continue;
-      done.add(rec.id);
-      kept.push({ ...rec, premise: premiseStamp(rec) });
-    } catch {}
+      writeCoverageStamp(stampPath, data);
+    } catch (err) {
+      if (!stampWarned) {
+        stampWarned = true;
+        process.stderr.write(`coverage stamp not writable (${err?.message ?? err}) — continuing without it\n`);
+      }
+    }
+  };
+  try {
+    MODEL = resolveTriageModel();
+  } catch (err) {
+    stampSafe({
+      model: null,
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      aborted: String(err.message || err),
+      total_entries: entries.length,
+      prior_classified: 0,
+      attempted: 0,
+      classified: 0,
+      errored: 0,
+    });
+    process.stderr.write(`${err.message}\n`);
+    process.exit(1);
   }
-  fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
-}
 
-const queue = entries.filter((e) => !done.has(e.id));
-let cursor = 0;
+  // Re-evaluate the premise of every stored record before doing anything else:
+  // running this script IS the presentation event for triage verdicts, so a
+  // record whose quoted code vanished since the last run must read
+  // `premise: "gone"` now, not carry last week's stamp.
+  const done = new Set();
+  if (fs.existsSync(OUT)) {
+    const kept = [];
+    for (const l of fs.readFileSync(OUT, 'utf8').split('\n')) {
+      if (!l.trim()) continue;
+      try {
+        const rec = JSON.parse(l);
+        // Errored rows are DROPPED and their entries re-queued: an id in `done`
+        // means a verdict exists, never that an attempt happened. (The old
+        // behaviour added errored ids too, so a re-run retried nothing and
+        // exited 0 — a false green.)
+        if (rec.error) continue;
+        done.add(rec.id);
+        kept.push({ ...rec, premise: premiseStamp(rec) });
+      } catch {}
+    }
+    fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
+  }
 
-async function worker() {
-  while (cursor < queue.length) {
-  const e = queue[cursor++];
-  let rec;
+  const queue = entries.filter((e) => !done.has(e.id));
+  const stamp = {
+    model: MODEL,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    aborted: null,
+    total_entries: entries.length,
+    prior_classified: done.size,
+    attempted: 0,
+    classified: 0,
+    errored: 0,
+  };
+  stampSafe(stamp);
+
+  // Preflight: one call before the sweep, SINGLE attempt (matching the
+  // per-entry no-retry policy — failover is the relay's job). A dead lane must
+  // fail loudly at entry 0, with the relay's own message, not silently at
+  // entry 154.
   try {
     const { status, body: r } = await post({
       model: MODEL,
-      max_tokens: 4000,
-      messages: [
-        { role: 'system', content: SYS },
-        { role: 'user', content: `Backlog entry (from docs/backlog/${e.file}):\n\n${e.text}` },
-      ],
-      response_format: { type: 'json_schema', json_schema: SCHEMA },
+      max_tokens: 16,
+      messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
     });
-    // A provider/relay error body has no choices array. Surface ITS message —
-    // it names the real cause (and often its own retry-after) — never the
-    // information-free `finish_reason=undefined` it used to be reported as.
-    // Deliberately NO retry/backoff here: pool failover is llm-relay's job,
-    // and duplicating it in the caller would hide a relay defect.
     if (r?.error || !Array.isArray(r?.choices)) {
       const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
       throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
     }
-    const c = r.choices?.[0];
-    if (c?.finish_reason !== 'stop') throw new Error(`finish_reason=${c?.finish_reason}`);
-    // Some lanes prepend prose before the JSON despite the schema. Salvage the
-    // object, but only from a response that finished cleanly (checked above), so
-    // a truncated body can never be laundered into a valid-looking record.
-    const raw = c.message.content ?? '';
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start < 0 || end <= start) throw new Error('no JSON object in response');
-    rec = { id: e.id, file: e.file, ...JSON.parse(raw.slice(start, end + 1)) };
-    rec.premise = premiseStamp(rec);
   } catch (err) {
-    rec = { id: e.id, file: e.file, error: String(err.message || err) };
+    stamp.aborted = `preflight failed: ${String(err.message || err)}`;
+    stampSafe(stamp);
+    process.stderr.write(
+      `${stamp.aborted}\nThe lane is DEAD, not slow — nothing was attempted. ` +
+        `Fix the relay, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
+    );
+    process.exit(1);
   }
-  fs.appendFileSync(OUT, JSON.stringify(rec) + '\n');
-  process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
+
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < queue.length) {
+      const e = queue[cursor++];
+      let rec;
+      try {
+        const { status, body: r } = await post({
+          model: MODEL,
+          max_tokens: 4000,
+          messages: [
+            { role: 'system', content: SYS },
+            { role: 'user', content: `Backlog entry (from docs/backlog/${e.file}):\n\n${e.text}` },
+          ],
+          response_format: { type: 'json_schema', json_schema: SCHEMA },
+        });
+        // A provider/relay error body has no choices array. Surface ITS message —
+        // it names the real cause (and often its own retry-after) — never the
+        // information-free `finish_reason=undefined` it used to be reported as.
+        // Deliberately NO retry/backoff here: pool failover is llm-relay's job,
+        // and duplicating it in the caller would hide a relay defect.
+        if (r?.error || !Array.isArray(r?.choices)) {
+          const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
+          throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
+        }
+        const c = r.choices?.[0];
+        if (c?.finish_reason !== 'stop') throw new Error(`finish_reason=${c?.finish_reason}`);
+        // Some lanes prepend prose before the JSON despite the schema. Salvage the
+        // object, but only from a response that finished cleanly (checked above), so
+        // a truncated body can never be laundered into a valid-looking record.
+        const raw = c.message.content ?? '';
+        const start = raw.indexOf('{');
+        const end = raw.lastIndexOf('}');
+        if (start < 0 || end <= start) throw new Error('no JSON object in response');
+        rec = { id: e.id, file: e.file, ...JSON.parse(raw.slice(start, end + 1)) };
+        rec.premise = premiseStamp(rec);
+      } catch (err) {
+        rec = { id: e.id, file: e.file, error: String(err.message || err) };
+      }
+      stamp.attempted += 1;
+      if (rec.error) stamp.errored += 1;
+      else stamp.classified += 1;
+      // Rewritten per completion (cheap, atomic-enough for a progress sidecar):
+      // a killed run leaves an honest partial stamp, not silence.
+      stampSafe(stamp);
+      fs.appendFileSync(OUT, JSON.stringify(rec) + '\n');
+      process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
+    }
   }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+  stamp.finished_at = new Date().toISOString();
+  stampSafe(stamp);
+  process.stderr.write(
+    `leg-2 coverage: ${stamp.classified} classified / ${stamp.errored} errored of ` +
+      `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ${stampPath}\n`,
+  );
 }
 
-await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-console.error('DONE');
+// Import-safe: tests import the exported helpers without starting a sweep.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

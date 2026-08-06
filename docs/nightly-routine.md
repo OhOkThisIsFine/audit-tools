@@ -59,6 +59,15 @@ instead of asking live.
 a 2026-07-19 pass found ~21% of entries stale or already closed, in both
 directions. Deletion requires the same code anchor a doc auto-apply requires.
 
+*Coverage is read from the stamp, never eyeballed.* The mechanical sweep
+(`scripts/shared/triage-backlog.mjs`) resolves its model target live from
+llm-relay, preflights once (a dead lane aborts at entry 0 with the relay's own
+error), and writes `<out>-coverage.json` — model, attempted, classified,
+errored, aborted — beside the JSONL as it runs. Report leg-2 coverage from that
+stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
+and saying so is the honest sentence three partial runs had to reconstruct by
+hand (P11, sol-4 decision 2026-08-06).
+
 ### Leg 3 — recurring-problem solutions
 
 Read the project memory store

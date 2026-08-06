@@ -744,7 +744,9 @@
     "answer": "Build P9: widen the pre-commit gate to the full commit-creating subcommand set (commit, merge, rebase, cherry-pick, revert, am), keep expensive legs scoped by staged set, ship red-green tests, and delete the durable-traps entry in the same commit.",
     "subject": "The pre-commit gate still fires only on `git commit`, so merge/rebase/cherry-pick/revert/am land completely ungated — widen it and delete the trap entry?",
     "path": ".claude/hooks/pre-commit-gate.mjs",
-    "decided_at": "2026-08-06T16:13:26.998Z"
+    "decided_at": "2026-08-06T16:13:26.998Z",
+    "completed_at": "2026-08-06T16:27:57.470Z",
+    "completed_ref": "d81a86f4"
   },
   "0a3a56a6738f40f4": {
     "disposition": "settled",
