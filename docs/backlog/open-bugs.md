@@ -990,16 +990,8 @@
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
 
-- **Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).**
-  `verify:checks` was 95.8s, of which `smoke:packaged-audit-code` alone was 70.2s; inside it the next-step
-  round-trips were 35.9s (real audit-flow coverage, explicitly NOT a target) and `npm pack` 7.2s including
-  a prepack rebuild.
-  **SPEC — build the tarball ONCE, assert many; do NOT build an in-process smoke driver.** The duplicated
-  work is the REBUILD, so an in-process driver optimizes the wrong axis AND erodes the one thing the smoke
-  exists to exercise (the real packaged/global-install path). One build phase produces the tarball; every
-  packaged smoke installs THAT artifact into its own fresh sandbox and runs its own assertions — semantics
-  and coverage unchanged, only the redundant rebuild removed.
-  Suite side: the tail is subprocess wall in a few audit integration files, not isolation overhead, so
+- **Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured
+  2026-07-06).** It sits in a few audit integration files, so
   `pool:'threads'` / `isolate:false` will not help — the lever is the sharding already shipped, plus
   possibly splitting the 100s+ files across more shards (verify per-file: many tests spawn/mutate fs, so
   isolation-off risks bleed). Live numbers are in `.audit-tools-profile/*-history.ndjson`, never here.

@@ -102,27 +102,27 @@
 - `open-bugs.md:936` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
 - `open-bugs.md:953` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
 - `open-bugs.md:976` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:993` — Top gate optimization lead — both packaged smokes REBUILD the identical package (measured 2026-07-06).
-- `open-bugs.md:1007` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1029` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1044` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1058` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1077` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1099` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
-- `open-bugs.md:1108` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:1117` — ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.
-- `open-bugs.md:1138` — Audit pause/terminal persistence does not enforce its documented XOR.
-- `open-bugs.md:1145` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
-- `open-bugs.md:1152` — submit-packet can report success on a result merge later refuses.
-- `open-bugs.md:1160` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:1166` — Staleness events re-log identically within one next-step.
-- `open-bugs.md:1170` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:1175` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:1181` — Dispatch-step prompt conflates merge rejections with failure.
-- `open-bugs.md:1187` — Dogfood 2026-08-05 minor friction cluster
-- `open-bugs.md:1196` — Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.
-- `open-bugs.md:1207` — Design-review multi-lane ingest is not failure-atomic; invalid lane JSON hard-fails the call instead of quarantining (2026-08-06, medium).
-- `open-bugs.md:1217` — friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run (2026-08-06, low).
+- `open-bugs.md:993` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:999` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1021` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1036` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1050` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1069` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1091` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
+- `open-bugs.md:1100` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:1109` — ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.
+- `open-bugs.md:1130` — Audit pause/terminal persistence does not enforce its documented XOR.
+- `open-bugs.md:1137` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
+- `open-bugs.md:1144` — submit-packet can report success on a result merge later refuses.
+- `open-bugs.md:1152` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:1158` — Staleness events re-log identically within one next-step.
+- `open-bugs.md:1162` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:1167` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:1173` — Dispatch-step prompt conflates merge rejections with failure.
+- `open-bugs.md:1179` — Dogfood 2026-08-05 minor friction cluster
+- `open-bugs.md:1188` — Terminal cleanup destroys the friction walk unconsumed and re-trips the stop-gate.
+- `open-bugs.md:1199` — Design-review multi-lane ingest is not failure-atomic; invalid lane JSON hard-fails the call instead of quarantining (2026-08-06, medium).
+- `open-bugs.md:1209` — friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run (2026-08-06, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
