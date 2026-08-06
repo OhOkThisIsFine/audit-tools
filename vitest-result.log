@@ -1,0 +1,205 @@
+npm notice run audit-tools@0.36.1 npx
+npm notice run vitest run tests/audit/a7.test.ts tests/audit/access-memory.test.ts tests/audit/advance-drain-loop.test.ts tests/audit/advance-error-paths.test.ts tests/audit/agent-feedback-reflections.test.ts tests/audit/agent-reflections.test.ts tests/audit/analyzer-seam.test.ts tests/audit/audit-cli-correctness.test.ts tests/audit/audit-cli-invariants.test.ts tests/audit/audit-code-completion.test.ts
+
+[1m[46m RUN [49m[22m [36mv3.2.6 [39m[90mC:/Code/audit-tools/.audit-tools/worktrees/remediate-CP-BLOCK-CP-NODE-109-f09-dogfood-20260806-v0361-remediation[39m
+
+ [32m✓[39m tests/audit/access-memory.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/audit/agent-reflections.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/audit/a7.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 148[2mms[22m[39m
+[90mstdout[2m | tests/audit/audit-cli-correctness.test.ts[2m > [22m[2mCOR-a278fbe0: runSample task_id matches the unit_id:lens pattern
+[22m[39m{
+  "audit_state": {
+    "status": "active",
+    "blockers": [],
+    "obligations": [
+      {
+        "id": "repo_manifest",
+        "state": "satisfied"
+      },
+      {
+        "id": "file_disposition",
+        "state": "satisfied"
+      },
+      {
+        "id": "auto_fixes_applied",
+        "state": "missing"
+      },
+      {
+        "id": "syntax_resolved",
+        "state": "missing"
+      },
+      {
+        "id": "external_analyzers_current",
+        "state": "missing"
+      },
+      {
+        "id": "structure_artifacts",
+        "state": "missing"
+      },
+      {
+        "id": "critical_flow_fallback_current",
+        "state": "satisfied"
+      },
+      {
+        "id": "graph_enrichment_current",
+        "state": "missing"
+      },
+      {
+        "id": "design_assessment_current",
+        "state": "missing"
+      },
+      {
+        "id": "structure_decomposition_current",
+        "state": "missing"
+      },
+      {
+        "id": "docs_digest_current",
+        "state": "missing"
+      },
+      {
+        "id": "intent_checkpoint_current",
+        "state": "missing"
+      },
+      {
+        "id": "intent_equivalence_current",
+        "state": "satisfied"
+      },
+      {
+        "id": "charter_extraction_current",
+        "state": "missing"
+      },
+      {
+        "id": "charter_delta_current",
+        "state": "missing"
+      },
+      {
+        "id": "design_review_contract_completed",
+        "state": "missing"
+      },
+      {
+        "id": "design_review_conceptual_completed",
+        "state": "missing"
+      },
+      {
+        "id": "charter_clarification_current",
+        "state": "missing"
+      },
+      {
+        "id": "systemic_challenge_current",
+        "state": "missing"
+      },
+      {
+        "id": "planning_artifacts",
+        "state": "missing"
+      },
+      {
+        "id": "audit_results_ingested",
+        "state": "satisfied"
+      },
+      {
+        "id": "runtime_validation_current",
+        "state": "satisfied"
+      },
+      {
+        "id": "synthesis_current",
+        "state": "satisfied"
+      },
+      {
+        "id": "synthesis_narrative_current",
+        "state": "missing"
+      }
+    ]
+  },
+  "artifacts_dir": "C:\\Users\\ethan\\AppData\\Local\\Temp\\audit-cli-cor-4c4FRD\\.audit-tools\\audit"
+}
+
+[90mstderr[2m | tests/audit/analyzer-seam.test.ts[2m > [22m[2mrunGraphEnrichmentExecutor omits and leaves the floor byte-identical when the dep is absent
+[22m[39m[analyzerDeps] typescript@5 not found in repo or cache (absent)
+
+[90mstderr[2m | tests/audit/analyzer-seam.test.ts[2m > [22m[2mrunSingleAnalyzer (via executor): returns ok:false with note when dependency is absent
+[22m[39m[analyzerDeps] typescript@5 not found in repo or cache (absent)
+
+{"kind":"graph_enrichment_analyzer_failed","analyzer_id":"throwing","resolution":"repo","note":"Analyzer failed [TypeError]: Deliberate test failure — stack: TypeError: Deliberate test failure |     at Object.analyze (C:\\Code\\audit-tools\\.audit-tools\\worktrees\\remediate-CP-BLOCK-CP-NODE-109-f09-dogfood-20260806-v0361-remediation\\tests\\audit\\analyzer-seam.test.ts:175:28) |     at runSingleAnalyzer (C:\\Code\\audit-tools\\.audit-tools\\worktrees\\remediate-CP-BLOCK-CP-NODE-109-f09-dogfood-20260806-v0361-remediation\\src\\audit\\orchestrator\\graphEnrichmentExecutor.ts:120:35) |     at runGraphEnrichmentExecutor (C:\\Code\\audit-tools\\.audit-tools\\worktrees\\remediate-CP-BLOCK-CP-NODE-109-f09-dogfood-20260806-v0361-remediation\\src\\audit\\orchestrator\\graphEnrichmentExecutor.ts:256:26)","ts":"2026-08-06T19:17:37.120Z"}
+[90mstderr[2m | tests/audit/analyzer-seam.test.ts[2m > [22m[2mresolveAnalyzerPlan flags an auto+absent analyzer with in-scope files for an install decision
+[22m[39m[analyzerDeps] typescript@5 not found in repo or cache (absent)
+
+ [32m✓[39m tests/audit/analyzer-seam.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/audit/advance-error-paths.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+[audit-code] graph: built bundle — 5 nodes, 4 edges across 2 graph type(s)
+{"kind":"staleness","stale_artifacts":["audit-report.md"],"ts":"2026-08-06T19:17:38.099Z"}
+ [32m✓[39m tests/audit/audit-cli-correctness.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 1295[2mms[22m[39m
+   [33m[2m✓[22m[39m COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape [33m 1221[2mms[22m[39m
+ [32m✓[39m tests/audit/audit-cli-invariants.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+[audit-code] graph: built bundle — 0 nodes, 0 edges across 0 graph type(s)
+[audit-code] criticalFlowFallback: host submission did not conform (Required); recording an empty enrichment
+[audit-code] graph: built bundle — 0 nodes, 0 edges across 0 graph type(s)
+[90mstderr[2m | tests/audit/agent-feedback-reflections.test.ts[2m > [22m[2ma reflection appended after synthesis re-synthesizes once and the run still converges
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/agent-feedback-reflections.test.ts[2m > [22m[2ma reflection appended after synthesis re-synthesizes once and the run still converges
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+ [32m✓[39m tests/audit/advance-drain-loop.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1369[2mms[22m[39m
+   [33m[2m✓[22m[39m advanceAudit drains the consecutive deterministic regen frontier by default within one call, stopping at the first host-delegation boundary [33m 573[2mms[22m[39m
+   [33m[2m✓[22m[39m a full drain emits at most ONE staleness stderr record for the whole round-trip [33m 543[2mms[22m[39m
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mnext-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mnext-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:44.788Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.114Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.137Z"}
+{"kind":"staleness","stale_artifacts":["audit-report.md","task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.463Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.474Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.957Z"}
+{"kind":"staleness","stale_artifacts":["task_affinity_graph.json"],"ts":"2026-08-06T19:17:45.967Z"}
+ [32m✓[39m tests/audit/agent-feedback-reflections.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 8813[2mms[22m[39m
+   [33m[2m✓[22m[39m loadArtifactBundle parses agent-feedback.jsonl leniently and persist never touches it [33m 462[2mms[22m[39m
+   [33m[2m✓[22m[39m a reflection appended after synthesis re-synthesizes once and the run still converges [33m 8339[2mms[22m[39m
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mnext-step presents the rendered report instead of a run-limit block
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mnext-step presents the rendered report instead of a run-limit block
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mforce-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mforce-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+[90mstderr[2m | tests/audit/audit-code-completion.test.ts[2m > [22m[2mingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md
+[22m[39m[analyzerDeps] resolved typescript@5 via cache: C:\Users\ethan\.audit-tools\analyzer-cache\typescript@5\node_modules\typescript
+
+ [32m✓[39m tests/audit/audit-code-completion.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 19498[2mms[22m[39m
+   [33m[2m✓[22m[39m next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle [33m 10089[2mms[22m[39m
+   [33m[2m✓[22m[39m next-step presents the rendered report instead of a run-limit block [33m 3833[2mms[22m[39m
+   [33m[2m✓[22m[39m force-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger [33m 2805[2mms[22m[39m
+   [33m[2m✓[22m[39m ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md [33m 2770[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m74 passed[39m[22m[90m (74)[39m
+[2m   Start at [22m 12:17:34
+[2m   Duration [22m 23.52s[2m (transform 3.82s, setup 150ms, collect 24.54s, tests 31.21s, environment 2ms, prepare 1.74s)[22m
+
+
+⏱ vitest timing (per-file wall, summed across workers):
+   audit      57.6s
+   collect≈24.5s  run≈31.2s  files=10
+   slowest files:
+     23.1s  tests/audit/audit-code-completion.test.ts (collect 3.4s, run 19.5s)
+     11.9s  tests/audit/agent-feedback-reflections.test.ts (collect 2.8s, run 8.8s)
+     4.4s  tests/audit/advance-drain-loop.test.ts (collect 2.9s, run 1.4s)
+     3.6s  tests/audit/audit-cli-correctness.test.ts (collect 2.1s, run 1.3s)
+     3.5s  tests/audit/audit-cli-invariants.test.ts (collect 3.3s, run 0.0s)
+     3.0s  tests/audit/advance-error-paths.test.ts (collect 2.8s, run 0.0s)
+     2.5s  tests/audit/analyzer-seam.test.ts (collect 2.3s, run 0.0s)
+     2.0s  tests/audit/a7.test.ts (collect 1.6s, run 0.1s)
+     1.9s  tests/audit/agent-reflections.test.ts (collect 1.8s, run 0.0s)
+     1.8s  tests/audit/access-memory.test.ts (collect 1.6s, run 0.0s)
+   outcome: 74 passed, 0 failed, 0 skipped, 0 unfinished (total 74)
