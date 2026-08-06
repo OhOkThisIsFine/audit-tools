@@ -6,7 +6,9 @@ import {
   applyGuidanceFile,
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
+  renderFanoutExecutionLines,
 } from "audit-tools/shared";
+import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
   buildEdgeReasoningPrompt,
   edgeReasoningContentHash,
@@ -25,7 +27,10 @@ import { deriveIntentEquivalenceStatus } from "../orchestrator/intentEquivalence
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { renderCriticalFlowFallbackPrompt } from "../reporting/criticalFlowFallbackPrompt.js";
-import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
+import {
+  charterExtractionKindsForCeiling,
+  renderCharterKindLanePrompt,
+} from "./charterExtractionPrompt.js";
 import { renderCharterDeltaPrompt } from "./charterDeltaPrompt.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
 import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
@@ -45,7 +50,6 @@ import {
   nextStepCommand,
   renderAnalyzerInstallPrompt,
   renderEdgeReasoningDispatchPrompt,
-  renderEdgeReasoningStepPrompt,
   renderPresentReportPrompt,
 } from "./prompts.js";
 import type { AuditorDescriptor } from "audit-tools/shared";
@@ -489,7 +493,6 @@ async function cmdNextStepBody(
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
-      hostCanSelectSubagentModel,
       reReviewSection: conceptualNotesSection || undefined,
     });
 
@@ -631,7 +634,6 @@ async function cmdNextStepBody(
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
-      hostCanSelectSubagentModel,
       reReviewSection: conceptualNotesSection || undefined,
     });
 
@@ -686,14 +688,56 @@ async function cmdNextStepBody(
   }
 
   if (result.kind === "charter_extraction") {
-    // Phase C charter layer (conceptual, teleological): the host extracts the four
-    // charter families per confident subsystem + the deltas it sees; the tool gates
-    // + routes them at ingest. Only reached at a deep+ ceiling (shallow omits
-    // deterministically without a host turn).
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    // Phase C charter layer (conceptual, teleological): one blind, materialized
+    // LANE per charter kind (design resolution 2 — independence is the shape of
+    // the artifacts, not a merge instruction); the tool merges the per-kind
+    // submissions and gates + routes them at ingest. Only reached at a deep+
+    // ceiling (shallow omits deterministically without a host turn).
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    const submissionPath = join(artifactsDir, "incoming", "charter-extraction.json");
     const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
+    const kinds = charterExtractionKindsForCeiling(ceiling);
+    const laneSpecs = kinds.map((kind) => {
+      const submissionPath = join(
+        artifactsDir,
+        "incoming",
+        `charter-extraction-${kind}.json`,
+      );
+      return {
+        id: `charter_extraction_${kind}`,
+        label: `Charter ${kind} author (blind lane)`,
+        promptFilename: `charter-extraction-${kind}-prompt.md`,
+        resultFilename: `charter-extraction-${kind}.json`,
+        promptText: renderCharterKindLanePrompt(result.bundle, {
+          kind,
+          submissionPath,
+        }),
+      };
+    });
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: laneSpecs,
+    });
+    const pendingIds = new Set(fanout.pendingLanes.map((lane) => lane.id));
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig: effectiveConfig,
+        hostDescriptor,
+        continueCommand,
+        bundle: result.bundle,
+        family: "charter_extraction",
+        units: laneSpecs
+          .filter((spec) => pendingIds.has(spec.id))
+          .map((spec) => ({
+            id: spec.id,
+            estInputBytes: Buffer.byteLength(spec.promptText, "utf8"),
+          })),
+      })
+    ) {
+      return;
+    }
+    const completedLanes = fanout.lanes.filter((lane) => lane.resultExists);
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "charter_extraction",
@@ -701,19 +745,44 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the charter families per subsystem to the submission path, then run next-step.",
+        "Execute each pending charter lane prompt (one blind agent per kind — subagents if available, else sequentially), write each lane's submission to its results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: {
-        charter_extraction_submission: submissionPath,
-      },
-      prompt: renderCharterExtractionPrompt(result.bundle, {
-        submissionPath,
-        continueCommand,
-        ceiling,
-      }),
+      artifactPaths: fanout.artifactPaths,
+      prompt: [
+        "# audit-code charter extraction (per-kind blind lanes)",
+        "",
+        "Each charter kind is authored by its OWN blind lane: a lane must not see another lane's prompt or output, so the later stated↔revealed delta is genuine disagreement rather than one author's self-consistent story. The tool merges the per-kind submissions at ingest.",
+        "",
+        ...renderFanoutExecutionLines({
+          lanes: fanout.pendingLanes.map((lane) => ({
+            label: lane.label,
+            promptPath: lane.promptPath,
+            resultPath: lane.resultPath,
+          })),
+          concurrencyHint: hostMaxActiveSubagents,
+        }),
+        "",
+        ...(completedLanes.length > 0
+          ? [
+              `Already complete (results on disk — do NOT redo these lanes): ${completedLanes
+                .map((lane) => lane.label)
+                .join(", ")}.`,
+              "",
+            ]
+          : []),
+        "When every pending lane's result file exists, run:",
+        "",
+        `  ${continueCommand}`,
+        "",
+        "Read and follow only the new step prompt returned by that command.",
+        "",
+      ].join("\n"),
       access: {
-        read_paths: [join(artifactsDir, "structure_decomposition.json")],
-        write_paths: [submissionPath],
+        read_paths: [
+          ...fanout.readPaths,
+          join(artifactsDir, "structure_decomposition.json"),
+        ],
+        write_paths: fanout.writePaths,
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -726,9 +795,41 @@ async function cmdNextStepBody(
     // to the gaps) and mines the pairwise deltas + the goal DAG; the tool routes +
     // gates them at ingest. Only reached at a deep+ ceiling whose extraction pass
     // produced ≥1 subsystem (charter_register.deltas_pending).
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    // Always-materialized (design resolution 2): the miner prompt is a lane FILE.
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const submissionPath = join(artifactsDir, "incoming", "charter-delta.json");
+    const lanePrompt = renderCharterDeltaPrompt(result.bundle, { submissionPath });
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: [
+        {
+          id: "charter_delta",
+          label: "Independent charter delta-miner",
+          promptFilename: "charter-delta-prompt.md",
+          resultFilename: "charter-delta.json",
+          promptText: lanePrompt,
+        },
+      ],
+    });
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig: effectiveConfig,
+        hostDescriptor,
+        continueCommand,
+        bundle: result.bundle,
+        family: "charter_delta",
+        units: [
+          {
+            id: "charter_delta",
+            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
+          },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "charter_delta",
@@ -736,18 +837,38 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the mined charter deltas + goal graph to the submission path, then run next-step.",
+        "Execute the delta-miner lane prompt (subagent if available, else yourself), write the mined deltas + goal graph to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: {
-        charter_delta_submission: submissionPath,
-      },
-      prompt: renderCharterDeltaPrompt(result.bundle, {
-        submissionPath,
-        continueCommand,
-      }),
+      artifactPaths: fanout.artifactPaths,
+      prompt: [
+        "# audit-code charter delta-mining",
+        "",
+        "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
+        "",
+        ...renderFanoutExecutionLines({
+          lanes: fanout.pendingLanes.map((lane) => ({
+            label: lane.label,
+            promptPath: lane.promptPath,
+          })),
+        }),
+        "",
+        "The executor must write its CharterDeltaSubmission JSON to:",
+        "",
+        `  ${submissionPath}`,
+        "",
+        "When the result file exists, run:",
+        "",
+        `  ${continueCommand}`,
+        "",
+        "Read and follow only the new step prompt returned by that command.",
+        "",
+      ].join("\n"),
       access: {
-        read_paths: [join(artifactsDir, "charter_register.json")],
-        write_paths: [submissionPath],
+        read_paths: [
+          ...fanout.readPaths,
+          join(artifactsDir, "charter_register.json"),
+        ],
+        write_paths: fanout.writePaths,
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -797,7 +918,6 @@ async function cmdNextStepBody(
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
     // the round's improvement findings (true-lens) back, and the executor folds them
     // + decides convergence. An empty submission converges the loop.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const submissionPath = join(artifactsDir, "incoming", "systemic-challenge.json");
     const metrics =
@@ -807,7 +927,20 @@ async function cmdNextStepBody(
       priorFindingCount: result.bundle.systemic_challenge?.findings.length ?? 0,
       metrics,
       submissionPath,
-      continueCommand,
+    });
+    // Always-materialized (design resolution 2): the adversary prompt is a lane
+    // FILE — the adversary is a SEPARATE agent by lane class, on every host.
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: [
+        {
+          id: "systemic_challenge",
+          label: "Second-order adversary (improvement-seeking challenge)",
+          promptFilename: "systemic-challenge-prompt.md",
+          resultFilename: "systemic-challenge.json",
+          promptText: adversaryPrompt,
+        },
+      ],
     });
     if (
       await gateHostFanoutOrPause({
@@ -835,15 +968,40 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Run a separate second-order-adversary agent (optimization/better-way mandate), write its findings to the submission path, then run next-step. An empty findings array converges the loop.",
+        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. An empty findings array converges the loop.",
       repoRoot: root,
-      artifactPaths: {
-        systemic_challenge_submission: submissionPath,
-      },
-      prompt: adversaryPrompt,
+      artifactPaths: fanout.artifactPaths,
+      prompt: [
+        "# audit-code systemic challenge (second-order adversary)",
+        "",
+        "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
+        "",
+        ...renderFanoutExecutionLines({
+          lanes: fanout.pendingLanes.map((lane) => ({
+            label: lane.label,
+            promptPath: lane.promptPath,
+          })),
+        }),
+        "",
+        "The executor must write its findings JSON to:",
+        "",
+        `  ${submissionPath}`,
+        "",
+        "An EMPTY findings array is the deliberate loop terminator (this round found nothing new).",
+        "",
+        "When the result file exists, run:",
+        "",
+        `  ${continueCommand}`,
+        "",
+        "Read and follow only the new step prompt returned by that command.",
+        "",
+      ].join("\n"),
       access: {
-        read_paths: [join(artifactsDir, "systemic_challenge.json")],
-        write_paths: [submissionPath],
+        read_paths: [
+          ...fanout.readPaths,
+          join(artifactsDir, "systemic_challenge.json"),
+        ],
+        write_paths: fanout.writePaths,
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -927,72 +1085,46 @@ async function cmdNextStepBody(
     // fixes the shape instead of resubmitting the same honest mistake forever.
     const rejectionNotice = await renderEdgeReasoningRejectionNotice(artifactsDir);
 
-    if (hostCanDispatch) {
-      // Dispatch path: isolate the (potentially large) edge-list prompt in a file
-      // and have the host fan it out to one subagent, mirroring the packet review
-      // dispatch contract. The subagent writes the rewrites file; next-step applies.
-      const edgeReasoningPromptPath = join(
-        artifactsDir,
-        "incoming",
-        "edge-reasoning-prompt.md",
-      );
-      await writeFile(
-        edgeReasoningPromptPath,
-        rejectionNotice ? `${basePrompt}\n\n${rejectionNotice}` : basePrompt,
-        "utf8",
-      );
-      const step = await writeCurrentStep({
-        artifactsDir,
-        stepKind: "edge_reasoning_dispatch",
-        status: "ready",
-        runId: null,
-        allowedCommands: [continueCommand],
-        stopCondition:
-          "Dispatch one subagent to write the edge-reasoning rewrites, then run next-step.",
-        repoRoot: root,
-        artifactPaths: {
-          edge_reasoning_prompt: edgeReasoningPromptPath,
-          edge_reasoning_results: edgeReasoningResultsPath,
+    // Always-materialized (design resolution 2): the (potentially large)
+    // edge-list prompt lives in a lane file on every host — a subagent-capable
+    // host fans it out, any other host reads and follows the same file itself.
+    // The retired inline `edge_reasoning` step kind was this branch's other
+    // arm. Routed through the same lane materializer as every other fan-out
+    // step so the K-of-N/result-exists semantics stay single-sourced.
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: [
+        {
+          id: "edge_reasoning",
+          label: "Edge-reasoning rewrites",
+          promptFilename: "edge-reasoning-prompt.md",
+          resultFilename: "edge-reasoning.json",
+          promptText: rejectionNotice
+            ? `${basePrompt}\n\n${rejectionNotice}`
+            : basePrompt,
         },
-        prompt: renderEdgeReasoningDispatchPrompt({
-          promptPath: edgeReasoningPromptPath,
-          resultsPath: edgeReasoningResultsPath,
-          continueCommand,
-          contentHash,
-          candidateCount: result.candidates.length,
-        }),
-        access: {
-          read_paths: [edgeReasoningPromptPath],
-          write_paths: [edgeReasoningResultsPath],
-        },
-      });
-      console.log(JSON.stringify(step, null, 2));
-      return;
-    }
-
-    // One-step fallback (no callable subagent facility): the host produces the
-    // rewrites itself in a single bounded turn, mirroring the narrative step.
+      ],
+    });
+    const edgeReasoningPromptPath = fanout.lanes[0]!.promptPath;
     const step = await writeCurrentStep({
       artifactsDir,
-      stepKind: "edge_reasoning",
+      stepKind: "edge_reasoning_dispatch",
       status: "ready",
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the edge-reasoning rewrites to the results path, then run next-step.",
+        "Execute the edge-reasoning lane prompt (subagent if available, else yourself), write the rewrites to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: {
-        edge_reasoning_results: edgeReasoningResultsPath,
-      },
-      prompt: renderEdgeReasoningStepPrompt({
-        basePrompt,
+      artifactPaths: fanout.artifactPaths,
+      prompt: renderEdgeReasoningDispatchPrompt({
+        promptPath: edgeReasoningPromptPath,
         resultsPath: edgeReasoningResultsPath,
         continueCommand,
         contentHash,
-        rejectionNotice,
+        candidateCount: result.candidates.length,
       }),
       access: {
-        read_paths: [],
+        read_paths: [edgeReasoningPromptPath],
         write_paths: [edgeReasoningResultsPath],
       },
     });
@@ -1089,12 +1221,13 @@ async function cmdNextStepBody(
       "incoming",
       "critical-flow-fallback.json",
     );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const basePrompt = result.bundle.critical_flows
       ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows)
       : "# Critical-flow fallback\n\nNo critical_flows manifest is available; write an empty flows array.";
-    const fullPrompt = [
+    // Always-materialized (design resolution 2): the (potentially ~340-line)
+    // flow-stub prompt is a lane FILE, never inlined into the step prompt.
+    const lanePrompt = [
       basePrompt,
       "## Results path",
       "",
@@ -1102,9 +1235,38 @@ async function cmdNextStepBody(
       "",
       `  ${fallbackResultsPath}`,
       "",
-      `Then run: ${continueCommand}`,
-      "",
     ].join("\n");
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: [
+        {
+          id: "critical_flow_fallback",
+          label: "Critical-flow fallback enrichment",
+          promptFilename: "critical-flow-fallback-prompt.md",
+          resultFilename: "critical-flow-fallback.json",
+          promptText: lanePrompt,
+        },
+      ],
+    });
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig: effectiveConfig,
+        hostDescriptor,
+        continueCommand,
+        bundle: result.bundle,
+        family: "critical_flow_fallback",
+        units: [
+          {
+            id: "critical_flow_fallback",
+            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
+          },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "critical_flow_fallback",
@@ -1112,15 +1274,33 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the critical-flow fallback enrichment to the results path, then run next-step.",
+        "Execute the critical-flow lane prompt (subagent if available, else yourself), write the enrichment to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: {
-        critical_flow_fallback_results: fallbackResultsPath,
-      },
-      prompt: fullPrompt,
+      artifactPaths: fanout.artifactPaths,
+      prompt: [
+        "# audit-code critical-flow fallback",
+        "",
+        ...renderFanoutExecutionLines({
+          lanes: fanout.pendingLanes.map((lane) => ({
+            label: lane.label,
+            promptPath: lane.promptPath,
+          })),
+        }),
+        "",
+        "The executor must write the CriticalFlowFallbackResult JSON object to:",
+        "",
+        `  ${fallbackResultsPath}`,
+        "",
+        "When the result file exists, run:",
+        "",
+        `  ${continueCommand}`,
+        "",
+        "Read and follow only the new step prompt returned by that command.",
+        "",
+      ].join("\n"),
       access: {
-        read_paths: [],
-        write_paths: [fallbackResultsPath],
+        read_paths: fanout.readPaths,
+        write_paths: fanout.writePaths,
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -1133,12 +1313,14 @@ async function cmdNextStepBody(
       "incoming",
       "synthesis-narrative.json",
     );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const basePrompt = result.bundle.audit_findings
       ? renderSynthesisNarrativePrompt(result.bundle.audit_findings)
       : "# Synthesis narrative\n\nNo findings report is available; write an empty themes array.";
-    const fullPrompt = [
+    // Always-materialized (design resolution 2): the findings digest (up to 120
+    // findings) is a lane FILE, never inlined into the step prompt. This step
+    // previously carried no access block at all — the lane form declares one.
+    const lanePrompt = [
       basePrompt,
       "## Results path",
       "",
@@ -1146,9 +1328,38 @@ async function cmdNextStepBody(
       "",
       `  ${narrativeResultsPath}`,
       "",
-      `Then run: ${continueCommand}`,
-      "",
     ].join("\n");
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      lanes: [
+        {
+          id: "synthesis_narrative",
+          label: "Synthesis narrative (themes / exec summary / top risks)",
+          promptFilename: "synthesis-narrative-prompt.md",
+          resultFilename: "synthesis-narrative.json",
+          promptText: lanePrompt,
+        },
+      ],
+    });
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig: effectiveConfig,
+        hostDescriptor,
+        continueCommand,
+        bundle: result.bundle,
+        family: "synthesis_narrative",
+        units: [
+          {
+            id: "synthesis_narrative",
+            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
+          },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "synthesis_narrative",
@@ -1156,12 +1367,34 @@ async function cmdNextStepBody(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the synthesis narrative to the results path, then run next-step.",
+        "Execute the synthesis-narrative lane prompt (subagent if available, else yourself), write the narrative to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: {
-        synthesis_narrative_results: narrativeResultsPath,
+      artifactPaths: fanout.artifactPaths,
+      prompt: [
+        "# audit-code synthesis narrative",
+        "",
+        ...renderFanoutExecutionLines({
+          lanes: fanout.pendingLanes.map((lane) => ({
+            label: lane.label,
+            promptPath: lane.promptPath,
+          })),
+        }),
+        "",
+        "The executor must write the SynthesisNarrative JSON object to:",
+        "",
+        `  ${narrativeResultsPath}`,
+        "",
+        "When the result file exists, run:",
+        "",
+        `  ${continueCommand}`,
+        "",
+        "Read and follow only the new step prompt returned by that command.",
+        "",
+      ].join("\n"),
+      access: {
+        read_paths: fanout.readPaths,
+        write_paths: fanout.writePaths,
       },
-      prompt: fullPrompt,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -1171,14 +1404,11 @@ async function cmdNextStepBody(
     root,
     artifactsDir,
     activeReviewRun: result.activeReviewRun,
-    hostCanDispatch,
     hostMaxActiveSubagents,
     hostContextTokens,
     hostOutputTokens,
     hostModelRoster,
     hostModelId,
-    hostCanRestrictSubagentTools,
-    hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,
     inProcessMadeProgress: result.inProcessMadeProgress,
     // G2: the RESOLVED descriptor. renderSemanticReviewStep loads the repo INTENT from

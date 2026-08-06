@@ -153,12 +153,6 @@ export async function prepareConceptualDispatch(opts: {
   bundle: ArtifactBundle;
   settings: ConceptualReviewSettings;
   /**
-   * Render each subagent's `model_hint.tier` into the instruction lines. Only
-   * set when the host reported it can act on model hints — otherwise the tiers
-   * stay inert metadata on `modelHints`, mirroring the packet-dispatch path.
-   */
-  hostCanSelectSubagentModel?: boolean;
-  /**
    * Diff-based re-review section (B2 parity port). Present only when the
    * conceptual pass is being re-emitted after staleness. Appended to the single
    * reviewer's prompt when shallow, and to the JUDGE's prompt when deep — the
@@ -221,8 +215,11 @@ export async function prepareConceptualDispatch(opts: {
       reasons: ["conceptual_judge_synthesis"],
     },
   } satisfies ConceptualDispatch["modelHints"];
+  // Capability-neutral (design resolution 2): tier tags render on every host;
+  // the instruction line below tells a host without model selection to ignore
+  // them, so the artifact never branches on the capability handshake.
   const renderTier = (hint: DispatchModelHint): string =>
-    opts.hostCanSelectSubagentModel ? ` [model_hint.tier: ${hint.tier}]` : "";
+    ` [model_hint.tier: ${hint.tier}]`;
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveFiles: Array<{
@@ -292,15 +289,11 @@ export async function prepareConceptualDispatch(opts: {
     instructionLines: [
       ...(settings.reuse_notice ? [settings.reuse_notice] : []),
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
-      `1. Dispatch these ${total} independent perspective subagents **in parallel**. Each reviews only through its own value system and must NOT see the others' output:`,
+      `1. Execute these ${total} independent perspective lanes — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
       ...perspectiveLines,
-      `2. When all ${total} perspectives have written their findings, dispatch ONE **independent judge** subagent — it must be a different agent than any of the perspectives: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.${renderTier(modelHints.judge)}`,
-      "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the subagent as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
-      ...(opts.hostCanSelectSubagentModel
-        ? [
-            "Map each `model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names.",
-          ]
-        : []),
+      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.${renderTier(modelHints.judge)}`,
+      "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
+      "If your harness supports selecting a subagent model, map each `model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names; otherwise the tier tags are inert — ignore them.",
     ],
     artifactPaths,
     // Perspective result files must be in readPaths: the judge subagent reads

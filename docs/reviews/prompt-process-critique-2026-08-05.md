@@ -279,11 +279,12 @@ mechanism, one owner question, eight binding constraints.**
      re-halt naming the valid set, bounded re-dispatch cap) are the substrate — no parallel
      validation layer. The charter per-lane split moves the merge from host to tool
      (`assembleCharters` currently ingests one merged submission).
-  5. **Fan-out quota-gate scope:** extending `gateHostFanout` past the current 5 emitters is
-     pushed by the 2026-07-25 decision but makes quota-wall pauses + the killed-wave 20-min lease
-     TTL newly reachable on charter/synthesis/critical-flow/edge-reasoning steps
-     (reconcile-before-regrant bounds it). Gate extension rides the shared renderer, leased per
-     family.
+  5. **Fan-out quota-gate scope** *(corrected at implementation recon)*: at HEAD
+     `gateHostFanout` is a permissive no-op hand-off (host/relay own admission since the dispatch
+     inversion — no leases, no pauses; the lease/TTL framing in the original constraint was stale,
+     read from the pre-inversion backlog entry rather than the file). Extension = broaden
+     `HostFanoutFamily` + call the gate uniformly at every fan-out emitter so the seam exists when
+     admission returns; no quota-wall behavior is introduced today.
   6. **Resumability contract:** K-of-N partial lane results on disk survive a re-run — re-emit
      only missing lanes, never regenerate/overwrite completed lane results (identical artifacts
      across IDEs/providers is the point of the change).
@@ -306,6 +307,16 @@ mechanism, one owner question, eight binding constraints.**
   one-task-pacing "collision" is a consequence the settled text already embraces — no recorded
   one-task-pacing decision exists; the mandate "collision" is the reconcilable owner question
   above).
+
+**IMPLEMENTED 2026-08-05** under all 8 constraints (constraint 2 decided: handshake-less hosts
+degrade to one-task-per-packet with a loud `unknown_host_window` dispatch warning — never refused,
+never fitted to an invented window; the old fallback's exact weak-host semantics in the
+materialized form). Post-implementation adversarial review: 4-lens / 17-agent workflow over the
+diff, 11 raw findings → 9 confirmed (all fixed or comment-hardened: prompt re-materialized when
+missing, edge lane routed through the shared materializer, zero-lane text guard, explicit per-lane
+result paths, vacuous assertions dropped) and 2 refuted; two reviewer misreadings (the surviving
+internal `edge_reasoning` RESULT kind; the standard post-apply consumed-submission unlink)
+hardened with clarifying comments at the misread sites.
 
 ## Checked and clean
 

@@ -66,7 +66,6 @@ async function withFloorOnlyRepo(
 // Legitimate non-pause kinds the early chain may terminate at.
 const TERMINAL_KINDS = new Set([
   "dispatch_review",
-  "single_task_fallback",
   "single_task",
   "synthesis",
   "present_report",
@@ -155,7 +154,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         );
         continue;
       }
-      if (step.step_kind === "edge_reasoning" || step.step_kind === "edge_reasoning_dispatch") {
+      if (step.step_kind === "edge_reasoning_dispatch") {
         await mkdir(incomingDir, { recursive: true });
         await writeFile(
           step.artifact_paths.edge_reasoning_results,

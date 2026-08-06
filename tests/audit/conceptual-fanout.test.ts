@@ -202,7 +202,6 @@ test("deep fan-out carries standard tier on perspectives and deep on the judge",
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 3 },
-    hostCanSelectSubagentModel: true,
   });
   expect(dispatch.modelHints).toEqual({
     perspectives: { tier: "standard", reasons: ["conceptual_perspective_ideation"] },
@@ -212,10 +211,12 @@ test("deep fan-out carries standard tier on perspectives and deep on the judge",
   const perspectiveTierCount = (instr.match(/\[model_hint\.tier: standard\]/g) ?? []).length;
   expect(perspectiveTierCount, "each perspective line renders its tier").toBe(3);
   expect(instr).toMatch(/independent judge.*\[model_hint\.tier: deep\]/s);
-  expect(instr).toMatch(/Map each `model_hint\.tier`/);
+  expect(instr).toMatch(/map each `model_hint\.tier`/);
 });
 
-test("tiers stay inert metadata when the host cannot select subagent models", async (t) => {
+test("tier tags render unconditionally with the capability-neutral otherwise-ignore line", async (t) => {
+  // Design resolution 2: identical artifacts on every host — the instruction
+  // itself tells a host without model selection to ignore the inert tags.
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
@@ -224,7 +225,9 @@ test("tiers stay inert metadata when the host cannot select subagent models", as
     settings: { conceptual_depth: "deep", perspectives: 3 },
   });
   expect(dispatch.modelHints?.judge.tier).toBe("deep");
-  expect(dispatch.instructionLines.join("\n")).not.toMatch(/model_hint/);
+  const instr = dispatch.instructionLines.join("\n");
+  expect(instr).toMatch(/If your harness supports selecting a subagent model/);
+  expect(instr).toMatch(/otherwise the tier tags are inert/);
 });
 
 test("perspective tier is overridable via settings; shallow path carries no hints", async (t) => {
@@ -234,7 +237,6 @@ test("perspective tier is overridable via settings; shallow path carries no hint
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 2, perspective_tier: "deep" },
-    hostCanSelectSubagentModel: true,
   });
   expect(deep.modelHints?.perspectives.tier).toBe("deep");
 
@@ -242,7 +244,6 @@ test("perspective tier is overridable via settings; shallow path carries no hint
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "shallow" },
-    hostCanSelectSubagentModel: true,
   });
   expect(shallow.modelHints).toBe(undefined);
   expect(shallow.instructionLines.join("\n")).not.toMatch(/model_hint/);

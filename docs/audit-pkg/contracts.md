@@ -93,13 +93,19 @@ backend writes the current step contract to:
 includes `step_kind`, `prompt_path`, `status`, `run_id`, `allowed_commands`,
 `stop_condition`, `repo_root`, `artifacts_dir`, and relevant `artifact_paths`.
 
-When semantic review is reached, the backend resolves host dispatch capability
-from the `--auditor` descriptor's `self.can_dispatch_subagents` (optional boolean;
-carried in the single `--auditor <json>` handshake) → session config
-(`host_can_dispatch_subagents`) → `AUDIT_CODE_HOST_CAN_DISPATCH` → default
-`true`, then renders exactly one review path: packet dispatch (`dispatch_review`)
-or the single-task fallback (`single_task_fallback`). No capability handshake is
-required; set `self.can_dispatch_subagents` only to override the resolved default.
+When semantic review is reached, the backend renders ONE review path on every
+host: `dispatch_review`, with per-packet prompt files and the dispatch plan
+materialized on disk (always-materialized fan-out — there is no
+capability-conditional rendering and no fallback step kind). The step prompt is
+capability-neutral: dispatch one subagent per plan entry if a subagent facility
+exists, else execute each entry's `prompt_path` sequentially; identical
+artifacts either way. The `--auditor` handshake's `context_tokens` /
+`output_tokens` size the packets; when no window is resolvable (no handshake,
+no learned limits, no models.dev match) packets degrade to one task each with
+no fit claim and a `unknown_host_window` entry in `dispatch-warnings.json` —
+never a refusal. `self.can_dispatch_subagents` still routes ENGINE selection
+(hybrid vs headless in-process dispatch); it no longer changes what is
+rendered.
 
 `next-step` is the only execution loop; there is no batch entrypoint. Every
 invocation advances one bounded step and renders the actionable step contract

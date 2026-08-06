@@ -1,7 +1,11 @@
 // Parity with the remediate contract pipeline: the audit-side adversarial
-// design-review prompt MANDATES dispatch to an independent sub-agent reviewer
-// when the host can dispatch one, and degrades to an explicit inline self-review
-// instruction when it cannot. Fail-safe: mandate when the flag is missing.
+// design-review prompt carries the LANE-CLASS-conditional independence mandate
+// (design resolution 2, gate-resolved 2026-08-05) — one capability-neutral text
+// with the independent-subagent requirement AND the explicitly-degraded
+// no-subagent fallback, rendered identically on every host. The old
+// capability-conditional branch (mandate vs degraded text keyed on
+// hostCanDispatchSubagents) is deleted; author self-review is never licensed at
+// full strength on any host.
 import { test, expect } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
@@ -25,23 +29,18 @@ function minimalBundle(): ArtifactBundle {
   };
 }
 
-test("POSITIVE: design review MANDATES an independent sub-agent when host can dispatch", () => {
-  const p = renderDesignReviewPrompt(minimalBundle(), { hostCanDispatchSubagents: true });
-  expect(p).toMatch(/Independent review — MANDATORY/);
-  expect(p).toMatch(/MUST dispatch/);
-  expect(p).toMatch(/independent sub-agent/);
-  expect(p).not.toMatch(/degraded to inline self-review/);
-});
-
-test("NEGATIVE: design review degrades to inline (no hard mandate) when host cannot dispatch", () => {
-  const p = renderDesignReviewPrompt(minimalBundle(), { hostCanDispatchSubagents: false });
-  expect(p).toMatch(/degraded to inline self-review/);
-  expect(p).not.toMatch(/Independent review — MANDATORY/);
-  expect(p).not.toMatch(/MUST dispatch/);
-});
-
-test("FAIL-SAFE: design review defaults to MANDATE when the flag is missing", () => {
+test("design review carries the capability-neutral independence MANDATE", () => {
   const p = renderDesignReviewPrompt(minimalBundle());
-  expect(p).toMatch(/Independent review — MANDATORY/);
+  expect(p).toMatch(/Independent Review — MANDATORY/);
+  expect(p).toMatch(/MUST be executed by an agent that did not author/);
+  expect(p).toMatch(/independent sub-agent/);
+});
+
+test("the same text carries the explicitly-degraded no-subagent fallback (never a separate render)", () => {
+  const p = renderDesignReviewPrompt(minimalBundle());
+  expect(p).toMatch(/no sub-agent facility exists/);
+  expect(p).toMatch(/explicitly-degraded fallback/);
+  // The retired capability-branch wording must not resurface as a second form.
   expect(p).not.toMatch(/degraded to inline self-review/);
+  expect(p).not.toMatch(/This host reported it cannot dispatch/);
 });

@@ -536,8 +536,12 @@ export function buildReviewPackets(
 export interface BuildPartitionPacketOptions {
   /** The task-affinity graph to partition (restricted to the dispatch tasks). */
   graph: TaskAffinityGraph;
-  /** Context-token ceiling per packet (dispatching model's input budget). */
-  contextTokenBudget: number;
+  /**
+   * Context-token ceiling per packet (dispatching model's input budget).
+   * `null` = unknown window → degenerate one-task-per-packet partition with no
+   * fit claim (see `PartitionOptions.contextTokenBudget`).
+   */
+  contextTokenBudget: number | null;
   /** Risk-mass ceiling per packet. Defaults to DEFAULT_RISK_MASS_BUDGET. */
   riskMassBudget?: number;
   /**

@@ -7,12 +7,12 @@ import type { ArtifactBundle } from "../io/artifacts.js";
  * outside critic — finding the real GAPS between charter kinds within each
  * subsystem and building the goal DAG across subsystems. The tool supplies the
  * ENFORCEMENT half at ingest (the routing table, the Phase-A low-confidence gate);
- * the miner never picks routing. Mirrors renderCharterExtractionPrompt's style
+ * the miner never picks routing. Mirrors renderCharterKindLanePrompt's style
  * (design of record spec/conceptual-design-review-design.md).
  */
 export function renderCharterDeltaPrompt(
   bundle: ArtifactBundle,
-  opts: { submissionPath: string; continueCommand: string },
+  opts: { submissionPath: string },
 ): string {
   const subsystems = bundle.charter_register?.subsystems ?? [];
 
@@ -98,10 +98,6 @@ export function renderCharterDeltaPrompt(
     "  the parent). It is a DAG, not a tree — a node may serve multiple parents.",
     "- Do NOT use `{id,label}` nodes or `{from,to,kind}` edges — those hard-fail the",
     "  validator.",
-    "",
-    "When the submission is written, run:",
-    "",
-    `  ${opts.continueCommand}`,
     "",
   ].join("\n");
 }

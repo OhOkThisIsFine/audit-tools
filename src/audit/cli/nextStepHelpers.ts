@@ -46,6 +46,8 @@ import {
   SynthesisNarrativeSchema,
   SystemicChallengeSubmissionSchema,
 } from "audit-tools/shared";
+import type { CharterKind, CharterSubmission } from "audit-tools/shared";
+import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
 import type { ZodError, ZodTypeAny } from "zod";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
@@ -1291,26 +1293,79 @@ export async function handleCharterExtractionBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<CharterExtractionBranchResult> {
-  return runOmittableGate<unknown, "charter_extraction">(
-    {
-      kind: "charter_extraction",
-      filename: "charter-extraction.json",
-      schema: CharterSubmissionSchema,
-      apply: async (_value, path, p) => {
-        await runAuditStep({
-          root: p.root,
-          artifactsDir: p.artifactsDir,
-          preferredExecutor: "charter_extraction_executor",
-          charterSubmissionPath: path,
+  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
+  // Shallow ceiling (default): omit deterministically, no host turn, no lanes.
+  if (!ceilingRequestsCharters(ceiling)) {
+    return { action: "run_omit" };
+  }
+  // Per-kind blind lanes (design resolution 2): one submission file per kind,
+  // each validated at THIS chokepoint — schema shape + kind purity (a lane may
+  // only carry its own kind; anything else is a mis-routed submission). An
+  // invalid lane is quarantined loudly and the step re-emits naming it; valid
+  // lanes stay on disk untouched (K-of-N resume), and only when EVERY lane is
+  // present and valid does the tool merge them into the single submission the
+  // executor ingests (`assembleCharters` merges subsystems by node_id).
+  const kinds = charterExtractionKindsForCeiling(ceiling);
+  const laneValues = new Map<CharterKind, { value: CharterSubmission; path: string }>();
+  let quarantinedAny = false;
+  for (const kind of kinds) {
+    const filename = `charter-extraction-${kind}.json`;
+    const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
+    if (!incoming) continue;
+    const laneSchema = CharterSubmissionSchema.superRefine((submission, ctx) => {
+      submission.subsystems.forEach((subsystem, si) => {
+        subsystem.charters.forEach((charter, ci) => {
+          if (charter.kind !== kind) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["subsystems", si, "charters", ci, "kind"],
+              message: `lane '${kind}' may only carry kind '${kind}', got '${charter.kind}'`,
+            });
+          }
         });
-      },
-      // Shallow ceiling (default): omit deterministically, no host turn.
-      shouldOmit: (b) => !ceilingRequestsCharters(resolveCharterCeiling(b.intent_checkpoint)),
-    },
-    params,
-    bundle,
-    state,
-  );
+      });
+    });
+    const parsed = laneSchema.safeParse(incoming.value);
+    if (parsed.success) {
+      laneValues.set(kind, { value: parsed.data, path: incoming.path });
+    } else {
+      quarantinedAny = true;
+      await quarantineMisshapedIncoming(
+        params.artifactsDir,
+        incoming.path,
+        filename,
+        parsed.error,
+      );
+    }
+  }
+  if (!quarantinedAny && laneValues.size === kinds.length) {
+    // Complete + valid: tool-side merge (stable by lane order = canonical kind
+    // order), then one executor ingest; unlink lane files only after apply.
+    // The post-apply unlink is the standard consumed-submission lifecycle
+    // (every gate unlinks after a successful apply) — K-of-N persistence
+    // applies only WHILE lanes are pending. Leaving consumed lane files behind
+    // would make a later staleness-triggered re-extraction read them as fresh
+    // results and silently skip re-authoring.
+    const merged: CharterSubmission = {
+      subsystems: kinds.flatMap((kind) => laneValues.get(kind)!.value.subsystems),
+    };
+    const mergedPath = join(params.artifactsDir, "incoming", "charter-extraction.json");
+    await writeJsonFile(mergedPath, merged);
+    await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      preferredExecutor: "charter_extraction_executor",
+      charterSubmissionPath: mergedPath,
+    });
+    await unlink(mergedPath).catch(() => {});
+    for (const lane of laneValues.values()) {
+      await unlink(lane.path).catch(() => {});
+    }
+    return { action: "continue" };
+  }
+  // Missing or quarantined lane(s): a host turn is still owed — the emitter
+  // re-materializes only the missing lanes (completed lane results stay).
+  return { action: "return", result: { kind: "charter_extraction", state, bundle } };
 }
 
 /**
@@ -1507,7 +1562,19 @@ export const HOST_GATE_DESCRIPTORS: Record<
     incomingFiles: ["intent-equivalence-verdict.json"],
   },
   synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
-  charter_extraction: { driven: "generic", incomingFiles: ["charter-extraction.json"] },
+  // Custom: the per-kind blind-lane gate (design resolution 2) — one submission
+  // file per charter kind, each validated (shape + kind purity) and quarantined
+  // loudly per lane, tool-side merge only when every lane is present + valid.
+  // The `true` lane joins at the deepest ceiling.
+  charter_extraction: {
+    driven: "custom",
+    incomingFiles: [
+      "charter-extraction-stated.json",
+      "charter-extraction-inferred.json",
+      "charter-extraction-revealed.json",
+      "charter-extraction-true.json",
+    ],
+  },
   charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
   charter_clarification: { driven: "generic", incomingFiles: ["charter-clarification.json"] },
   systemic_challenge: { driven: "generic", incomingFiles: ["systemic-challenge.json"] },

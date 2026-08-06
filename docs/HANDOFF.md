@@ -19,10 +19,17 @@
   unknown `finding_ids`. Independent loop-core review: approve (agy Sonnet 4.6).
   **Change 2 (always-materialized fan-out): `/design-check` DONE 2026-08-05** — implementable,
   retirement-clean, red test pinned (`it.fails` in `tests/audit/semantic-review-step.test.ts`);
-  record in the review doc. The mandate-wording tension (capability-neutral text vs
-  `CP-BLOCK-IMPL-mandatory-independent-critic`) is gate-resolved to the lane-class-conditional
-  form by standing conviction — owner may override before implementation. **Immediate next:**
-  implement change 2 under the record's 8 binding constraints.
+  record in the review doc. **Change 2 IMPLEMENTED 2026-08-05** (single atomic replace, this
+  commit): shared lane materializer (`fanoutLanes.ts` + `renderFanoutExecutionLines` +
+  lane-class-conditional `renderIndependentReviewMandate` in `src/shared/prompts.ts`), all
+  emitters converted (charter per-kind blind lanes with multi-lane kind-purity ingest;
+  charter-delta/systemic/critical-flow/synthesis/edge lanes; `single_task_fallback` + inline
+  `edge_reasoning` step kinds deleted), handshake-less hosts degrade to one-task-per-packet with
+  a loud `unknown_host_window` warning (never refused). Verified: full suite green, 17-agent
+  adversarial review (9 confirmed findings fixed or comment-hardened, 2 refuted by mechanism).
+  **Immediate next among the four:** change 3 (scope-confirmation context) — thread
+  `design_assessment` into `buildLensPropositions` + deterministic `docs_digest`; not loop-core
+  heavy, `/design-check` per standing rule before starting.
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes

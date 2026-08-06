@@ -17,18 +17,21 @@
 import type { AggregateMetricsDigest } from "./aggregateMetricsDigest.js";
 
 /**
- * Render the second-order-adversary host prompt for one challenge round. `round` is
+ * Render the second-order-adversary LANE prompt for one challenge round. `round` is
  * the 1-based loop ordinal; `priorFindingCount` orients the adversary on what already
  * surfaced (so it pushes for NEW improvements, not re-statements). `submissionPath`
  * is where the agent writes its findings; an EMPTY findings array is the deliberate
  * loop-until-dry terminator (this round found nothing new).
+ *
+ * Advance-free (design resolution 2): the lane prompt is materialized to a file
+ * and carries no continue-command — the step prompt owns the advance, so a lane
+ * executor can never become a second orchestrator driver.
  */
 export function renderSecondOrderAdversaryPrompt(opts: {
   round: number;
   priorFindingCount: number;
   metrics: AggregateMetricsDigest;
   submissionPath: string;
-  continueCommand: string;
 }): string {
   const metricLines = opts.metrics.rollups.map(
     (r) => `- ${r.label}: ${r.count} ${r.unit}`,
@@ -87,10 +90,6 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "  ]",
     "}",
     "```",
-    "",
-    "When the submission is written, run:",
-    "",
-    `  ${opts.continueCommand}`,
     "",
   ].join("\n");
 }

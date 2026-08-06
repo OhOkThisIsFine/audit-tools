@@ -42,8 +42,6 @@ function makeReviewRunParams(
     },
     dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
     dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
     ...overrides,
   };
 }

@@ -19,6 +19,7 @@ interface WrapperStep {
   prompt_path: string;
   artifact_paths?: {
     friction_record?: string;
+    synthesis_narrative_prompt?: string;
     synthesis_narrative_results?: string;
   };
 }
@@ -144,7 +145,16 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     if (typeof narrativeResultsPath !== "string") {
       throw new TypeError("synthesis narrative results path was not emitted");
     }
-    const prompt = await readFile(paused.prompt_path, "utf8");
+    // Always-materialized (design resolution 2): the findings digest lives in
+    // the LANE file; the step prompt is the capability-neutral instruction.
+    const stepPrompt = await readFile(paused.prompt_path, "utf8");
+    expect(stepPrompt).toMatch(/synthesis narrative/i);
+    const lanePromptPath = paused.artifact_paths.synthesis_narrative_prompt;
+    expect(lanePromptPath).toMatch(/synthesis-narrative-prompt\.md$/);
+    if (typeof lanePromptPath !== "string") {
+      throw new TypeError("synthesis narrative lane prompt path was not emitted");
+    }
+    const prompt = await readFile(lanePromptPath, "utf8");
     expect(prompt).toMatch(/Synthesis narrative/i);
 
     // Findings are re-keyed to content-derived ids at synthesis, so discover the

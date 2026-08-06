@@ -534,6 +534,21 @@ export async function prepareDispatchArtifacts(params: {
   let largestLines = 0;
   let largestEstimatedTokens = 0;
   const warnings: Array<{ code: string; message: string }> = [];
+  // Unknown host window (no handshake limits, no learned limits, no models.dev
+  // resolution): the partition above degraded to one task per packet — honest
+  // progress with no fit claim, never a refusal (change-2 constraint 2). Loud
+  // here so the missing handshake reads as the integration gap it is instead
+  // of silently shipping N single-task packets forever.
+  if (dispatchPool.contextBudgetTokens == null) {
+    warnings.push({
+      code: "unknown_host_window",
+      message:
+        "The host's context/output token limits could not be resolved (no capability handshake, " +
+        "no learned limits, no models.dev match), so packets were degraded to one task each with " +
+        "no fit claim. Report context_tokens + output_tokens in the auditor handshake to restore " +
+        "sized packets.",
+    });
+  }
 
   const hasAnalyzerSignalTask = orderedTasks.some(
     (t) => t.tags?.includes("external_analyzer_signal"),

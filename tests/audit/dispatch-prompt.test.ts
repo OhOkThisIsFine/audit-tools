@@ -20,8 +20,6 @@ test("renderDispatchReviewPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
     activeReviewRun: MINIMAL_ACTIVE_RUN,
     dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
     dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
   });
 
   expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
@@ -34,8 +32,6 @@ test("renderDispatchReviewPrompt without quota path includes DISPATCH_PROMPT_HAN
     activeReviewRun: MINIMAL_ACTIVE_RUN,
     dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
     dispatchQuotaPath: null,
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
   });
 
   expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt (no-quota variant) must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();

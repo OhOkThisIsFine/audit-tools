@@ -13,7 +13,14 @@ export interface HostFanoutUnit {
   estInputBytes: number;
 }
 
-export type HostFanoutFamily = "design_review" | "systemic_challenge";
+export type HostFanoutFamily =
+  | "design_review"
+  | "systemic_challenge"
+  | "charter_extraction"
+  | "charter_delta"
+  | "critical_flow_fallback"
+  | "synthesis_narrative"
+  | "edge_reasoning";
 
 /** Legacy return shape retained for callers that have not yet dropped the old boundary. */
 export interface HostFanoutGateOutcome {

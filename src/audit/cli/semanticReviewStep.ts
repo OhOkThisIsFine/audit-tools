@@ -1,24 +1,29 @@
-import { join } from "node:path";
 import type { HostModelRosterEntry, AuditorDescriptor } from "audit-tools/shared";
 import { resolveSessionConfig, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
-import { renderCommand } from "./args.js";
 import { writeCurrentStep } from "./steps.js";
 import {
   mergeAndIngestCommand,
   nextStepCommand,
   renderDispatchReviewPrompt,
-  renderSingleTaskFallbackStepPrompt,
 } from "./prompts.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
 
-// Renders the actionable semantic-review step (packet dispatch or single-task
-// fallback) and writes steps/current-step.json, so the backend produces the
-// actionable step itself rather than handing the host a second command. Host
-// dispatch capability is resolved by the caller (flag -> session config -> env
-// -> default true) and is never required from the host to make progress.
+// Renders the actionable semantic-review step and writes
+// steps/current-step.json, so the backend produces the actionable step itself
+// rather than handing the host a second command.
+//
+// ALWAYS-MATERIALIZED (design resolution 2, 2026-08-05): there is no capability
+// branch here. Every host — subagent-capable or not — receives the SAME
+// materialized dispatch step (packet prompt files on disk, dispatch plan in
+// artifact_paths) with a capability-neutral prompt; a host with no subagent
+// facility executes the packets sequentially itself. A handshake-less host is
+// sized degenerately (one task per packet, no fit claim) rather than refused —
+// see `buildDispatchPool`. The retired `single_task_fallback` step kind was
+// this branch's other arm; the smoke-flow ambiguity it caused (a capable host
+// silently landing on the fallback) is structurally gone with it.
 //
 // When selectedExecutor is 'rolling_dispatch_executor', uses the rolling
 // dispatch prompt (inline AuditResult[] emit, no submit-packet shell command).
@@ -26,7 +31,6 @@ export async function renderSemanticReviewStep(params: {
   root: string;
   artifactsDir: string;
   activeReviewRun: ActiveReviewRun;
-  hostCanDispatch: boolean;
   hostMaxActiveSubagents: number | null;
   /** Context window the host reports for its dispatch model (handshake). */
   hostContextTokens?: number | null;
@@ -46,8 +50,6 @@ export async function renderSemanticReviewStep(params: {
    * (spec/unified-dispatch-worker-model.md, [[capability-is-per-auditor-not-per-audit]]).
    */
   descriptor: AuditorDescriptor;
-  hostCanRestrictSubagentTools: boolean;
-  hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
   selectedExecutor?: string | null;
   /**
@@ -58,39 +60,6 @@ export async function renderSemanticReviewStep(params: {
   inProcessMadeProgress?: boolean;
 }): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
-  if (!params.hostCanDispatch) {
-    const singleTaskPromptPath = join(
-      artifactsDir,
-      "dispatch",
-      "current-single-task-prompt.md",
-    );
-    const workerCommand = renderCommand(activeReviewRun.worker_command);
-    return writeCurrentStep({
-      artifactsDir,
-      stepKind: "single_task_fallback",
-      status: "ready",
-      runId: activeReviewRun.run_id,
-      allowedCommands: [workerCommand],
-      stopCondition:
-        "Run the exact worker_command after one result, then stop without looping.",
-      repoRoot: root,
-      artifactPaths: {
-        active_review_task: activeReviewRun.task_path,
-        active_review_prompt: activeReviewRun.prompt_path,
-        pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
-        audit_results: activeReviewRun.audit_results_path,
-        single_task_prompt: singleTaskPromptPath,
-      },
-      prompt: renderSingleTaskFallbackStepPrompt({
-        singleTaskPromptPath,
-        activeReviewRun,
-      }),
-      access: {
-        read_paths: [singleTaskPromptPath],
-        write_paths: [activeReviewRun.audit_results_path],
-      },
-    });
-  }
 
   // Fail closed: an invalid/tampered session-config must abort the step, never
   // silently degrade to an empty (permissive) default. `loadSessionConfig`
@@ -259,8 +228,6 @@ export async function renderSemanticReviewStep(params: {
       // The quota artifact remains diagnostic, but its admission subset is not
       // an instruction: host/relay own the complete packet fan-out.
       dispatchQuotaPath: null,
-      hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-      hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
       hostDescriptor,
     }),
     access: {

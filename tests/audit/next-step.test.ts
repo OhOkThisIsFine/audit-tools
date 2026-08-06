@@ -100,16 +100,15 @@ test.concurrent("next-step emits present_report for a complete audit", { timeout
 // Known pause kinds that are advanced past automatically:
 //   - analyzer_install: write an empty analyzer-decisions.json to skip
 //   - design_review: write an empty design-review-findings.json
-//   - edge_reasoning / edge_reasoning_dispatch: write an empty edge-reasoning.json
+//   - edge_reasoning_dispatch: write an empty edge-reasoning.json
 //
 // Terminal (non-pause) kinds that are returned to callers:
-//   dispatch_review, single_task_fallback, single_task, synthesis, present_report
+//   dispatch_review, single_task, synthesis, present_report
 //
 // Any other unrecognised kind causes an immediate descriptive throw rather than
 // silently returning a mismatched step to the caller.
 const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
   "dispatch_review",
-  "single_task_fallback",
   "single_task",
   "synthesis",
   "present_report",
@@ -201,10 +200,7 @@ async function advancePastDesignReview(
       );
       continue;
     }
-    if (
-      step.step_kind === "edge_reasoning" ||
-      step.step_kind === "edge_reasoning_dispatch"
-    ) {
+    if (step.step_kind === "edge_reasoning_dispatch") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
         step.artifact_paths.edge_reasoning_results,
@@ -372,7 +368,7 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
   });
 });
 
-test.concurrent("next-step false emits single_task_fallback and does not prepare dispatch", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step with can_dispatch_subagents:false still materializes the dispatch step (no capability branch)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -384,12 +380,12 @@ test.concurrent("next-step false emits single_task_fallback and does not prepare
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    expect(step.step_kind).toBe("single_task_fallback");
-    expect(prompt).toMatch(/exactly one AuditResult/i);
-    expect(await readFile(step.artifact_paths.single_task_prompt, "utf8")).toMatch(/single-task fallback/i);
-    await assert.rejects(() =>
-      stat(join(root, ".audit-tools/audit", "runs", step.run_id, "dispatch-plan.json")),
-    );
+    // Always-materialized fan-out (design resolution 2): identical artifacts on
+    // every host — the capability-neutral prompt covers sequential self-execution.
+    expect(step.step_kind).toBe("dispatch_review");
+    const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
+    expect(Array.isArray(plan) && plan.length > 0).toBeTruthy();
+    expect(prompt).toMatch(/sequentially yourself/);
   });
 });
 
@@ -423,7 +419,7 @@ test.concurrent("advancePastDesignReview throws on unknown pause kind", { timeou
     // fake wrapper path so we don't spin up a real audit run.
     const fakeIncomingDir = join(tempDir, "incoming");
     const TERMINAL = new Set([
-      "dispatch_review", "single_task_fallback", "single_task",
+      "dispatch_review", "single_task",
       "synthesis", "present_report",
     ]);
     async function runFakeWrapper() {
@@ -442,7 +438,7 @@ test.concurrent("advancePastDesignReview throws on unknown pause kind", { timeou
         const step = JSON.parse((await runFakeWrapper()).stdout);
         if (step.step_kind === "analyzer_install") { continue; }
         if (step.step_kind === "design_review") { continue; }
-        if (step.step_kind === "edge_reasoning" || step.step_kind === "edge_reasoning_dispatch") {
+        if (step.step_kind === "edge_reasoning_dispatch") {
           continue;
         }
         if (TERMINAL.has(step.step_kind)) { return step; }

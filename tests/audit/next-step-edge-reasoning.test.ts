@@ -98,7 +98,7 @@ async function persistEdgeReasoningState(
   );
 }
 
-test.concurrent("next-step emits a single host edge-reasoning step, then rewrites only the reason", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step emits the materialized edge-reasoning step for a no-dispatch host, then rewrites only the reason", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -106,21 +106,24 @@ test.concurrent("next-step emits a single host edge-reasoning step, then rewrite
     await writeFixtureRepo(root);
     await persistEdgeReasoningState(root, artifactsDir, { flag: true });
 
-    // No callable subagent facility → a single one-shot host step.
+    // Always-materialized (design resolution 2): a no-dispatch host receives
+    // the SAME edge_reasoning_dispatch step — the lane prompt lives in a file
+    // and the capability-neutral step prompt covers sequential self-execution.
     const paused: NextStepOutput = JSON.parse(
       (await runWrapper(
         ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":false}}'],
         { cwd: root },
       )).stdout,
     );
-    expect(paused.step_kind).toBe("edge_reasoning");
+    expect(paused.step_kind).toBe("edge_reasoning_dispatch");
     expect(paused.status).toBe("ready");
     const resultsPath = paused.artifact_paths.edge_reasoning_results;
     expect(resultsPath).toMatch(/edge-reasoning\.json$/);
-    const prompt = await readFile(paused.prompt_path, "utf8");
-    expect(prompt).toMatch(/heuristic-cross-module-link/);
-    expect(prompt).toMatch(/"rewrites"/);
-    expect(prompt).toMatch(/edge-reasoning\.json/);
+    const lanePrompt = await readFile(paused.artifact_paths.edge_reasoning_prompt, "utf8");
+    expect(lanePrompt).toMatch(/heuristic-cross-module-link/);
+    expect(lanePrompt).toMatch(/"rewrites"/);
+    const stepPrompt = await readFile(paused.prompt_path, "utf8");
+    expect(stepPrompt).toMatch(/else read and follow it yourself/);
 
     // Host supplies the rewrites.
     await writeFile(
@@ -220,7 +223,6 @@ test.concurrent("next-step does not pause for edge reasoning when the flag is of
         { cwd: root },
       )).stdout,
     );
-    expect(step.step_kind).not.toBe("edge_reasoning");
     expect(step.step_kind).not.toBe("edge_reasoning_dispatch");
 
     // The low-confidence edge keeps its original reason — graph untouched.
@@ -252,7 +254,6 @@ test.concurrent("next-step does not pause for edge reasoning when there are no l
         { cwd: root },
       )).stdout,
     );
-    expect(step.step_kind).not.toBe("edge_reasoning");
     expect(step.step_kind).not.toBe("edge_reasoning_dispatch");
   } finally {
     await rm(tempDir, { recursive: true, force: true });

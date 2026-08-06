@@ -104,7 +104,7 @@ export async function buildSyntheticResults(tasks, root, smokeLabel) {
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause headlessly (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
-// dispatch-ready step (dispatch_review or single_task_fallback).
+// dispatch-ready step (dispatch_review).
 async function advanceToDispatchReady(runNextStep, root, log) {
   const incomingDir = join(root, ".audit-tools", "audit", "incoming");
   for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
@@ -162,18 +162,12 @@ async function advanceToDispatchReady(runNextStep, root, log) {
       await writeFile(join(incomingDir, "design-review-conceptual-findings.json"), "[]\n");
       continue;
     }
-    if (
-      step.step_kind === "edge_reasoning" ||
-      step.step_kind === "edge_reasoning_dispatch"
-    ) {
+    if (step.step_kind === "edge_reasoning_dispatch") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
       continue;
     }
-    if (
-      step.step_kind === "dispatch_review" ||
-      step.step_kind === "single_task_fallback"
-    ) {
+    if (step.step_kind === "dispatch_review") {
       return step;
     }
     // Diagnosability: a gate that catches a broken CLI must say WHY —
@@ -658,7 +652,7 @@ export async function runAuditFlowPhase({
   const dispatchStep = await advanceToDispatchReady(runNextStep, root, log);
   assert.equal(dispatchStep.contract_version, STEP_CONTRACT_VERSION);
   assert.equal(dispatchStep.status, "ready");
-  assert.match(dispatchStep.step_kind, /^(dispatch_review|single_task_fallback)$/);
+  assert.equal(dispatchStep.step_kind, "dispatch_review");
   assert.ok(dispatchStep.run_id);
   const tasks = JSON.parse(
     await readFile(join(root, ".audit-tools", "audit", "audit_tasks.json"), "utf8"),

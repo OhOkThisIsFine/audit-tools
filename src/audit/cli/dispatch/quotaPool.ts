@@ -48,8 +48,11 @@ export interface ResolvedDispatchPool {
    * rank's resolved context window minus its reserved output budget. Coherent
    * clusters partition under the most generous window first; the per-tier
    * re-fit pass then re-splits any packet routed to a smaller rank.
+   * `null` = the window is unresolvable (handshake-less host, no learned or
+   * models.dev limits): the partition degrades to one task per packet with no
+   * fit claim, and dispatch surfaces a warning (change-2 constraint 2).
    */
-  contextBudgetTokens: number;
+  contextBudgetTokens: number | null;
   /**
    * Per-tier packet input budgets (context − output) when the host reported a
    * model roster; null for the single-window handshake (every tier shares
@@ -199,10 +202,18 @@ export async function buildDispatchPool(params: {
       hostSession,
     };
   }
+  // Single-pool path: an unresolvable window is NOT a refusal here (change-2
+  // constraint 2, settled 2026-08-05). A handshake-less host still gets the
+  // degenerate one-task-per-packet partition — the minimum unit makes no fit
+  // claim, exactly the semantics the retired single-task fallback gave the
+  // weakest hosts — and the caller surfaces a loud dispatch warning naming the
+  // missing handshake. The roster path above keeps `requireProbeBudget`: a
+  // roster IS the handshake, so a roster entry without limits is a malformed
+  // integration and stays a loud throw.
   return {
     pools,
     hostModel,
-    contextBudgetTokens: requireProbeBudget(pools[0]!),
+    contextBudgetTokens: probeBudget(pools[0]!),
     tierBudgets: null,
     hostSession,
   };

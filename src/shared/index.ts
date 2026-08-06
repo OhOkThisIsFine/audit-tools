@@ -1184,6 +1184,8 @@ export {
   buildCacheablePrompt,
   DISPATCH_PROMPT_HANDOFF_NOTE,
   renderHostScratchNote,
+  renderIndependentReviewMandate,
+  renderFanoutExecutionLines,
 } from "./prompts.js";
 
 // Host-asset renderers — every IDE asset derives from the one canonical prompt body.

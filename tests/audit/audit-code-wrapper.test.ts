@@ -372,7 +372,7 @@ const MAX_PRE_DISPATCH_PAUSES = 8;
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause headlessly (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
-// dispatch-ready step (dispatch_review or single_task_fallback).
+// dispatch-ready step (dispatch_review).
 async function startDispatchRun(root: string): Promise<any> {
   const incomingDir = join(root, ".audit-tools/audit", "incoming");
   for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
@@ -432,18 +432,12 @@ async function startDispatchRun(root: string): Promise<any> {
       );
       continue;
     }
-    if (
-      step.step_kind === "edge_reasoning" ||
-      step.step_kind === "edge_reasoning_dispatch"
-    ) {
+    if (step.step_kind === "edge_reasoning_dispatch") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
       continue;
     }
-    if (
-      step.step_kind === "dispatch_review" ||
-      step.step_kind === "single_task_fallback"
-    ) {
+    if (step.step_kind === "dispatch_review") {
       return step;
     }
     throw new Error(
@@ -664,7 +658,7 @@ test.concurrent("next-step reaches a ready review dispatch step from repo root u
 
     expect(step.contract_version).toBe("audit-code-step/v1alpha1");
     expect(step.status).toBe("ready");
-    expect(step.step_kind).toMatch(/^(dispatch_review|single_task_fallback)$/);
+    expect(step.step_kind).toBe("dispatch_review");
     expect(step.run_id).toBeTruthy();
     expect(step.repo_root).toBe(toPromptPathToken(root));
     expect(step.artifacts_dir).toBe(toPromptPathToken(join(root, ".audit-tools/audit")));

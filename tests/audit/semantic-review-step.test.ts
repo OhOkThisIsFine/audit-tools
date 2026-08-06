@@ -9,8 +9,9 @@ const { renderSemanticReviewStep } = await import("../../src/audit/cli/semanticR
 // Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
 const { toPromptPathToken } = await import("audit-tools/shared");
 
-// A minimal ambient descriptor (no host handshake) — sufficient for the
-// single_task_fallback branch, which doesn't size dispatch packets.
+// A minimal ambient descriptor (no host handshake): under the unconditional
+// materialized form this sizes DEGENERATELY (one task per packet, no fit
+// claim) instead of refusing or falling back — change-2 constraint 2.
 const AMBIENT_DESCRIPTOR: AuditorDescriptor = { self: {} };
 
 // The dispatch branch sizes packets against the host pool, so the handshake must
@@ -53,79 +54,16 @@ function makeActiveReviewRun(artifactsDir: string, runId: string): ActiveReviewR
 }
 
 // ---------------------------------------------------------------------------
-// hostCanDispatch=false — single_task_fallback branch
-// ---------------------------------------------------------------------------
-
-describe("renderSemanticReviewStep hostCanDispatch=false returns a single_task_fallback step contract", () => {
-  let artifactsDir: string;
-  let activeReviewRun: ActiveReviewRun;
-  let result: Awaited<ReturnType<typeof renderSemanticReviewStep>>;
-
-  beforeAll(async () => {
-    artifactsDir = await makeTempArtifactsDir();
-
-    const runId = "test-run-fallback";
-    activeReviewRun = makeActiveReviewRun(artifactsDir, runId);
-
-    result = await renderSemanticReviewStep({
-      root: artifactsDir,
-      artifactsDir,
-      activeReviewRun,
-      hostCanDispatch: false,
-      hostMaxActiveSubagents: null,
-      hostCanRestrictSubagentTools: false,
-      hostCanSelectSubagentModel: false,
-      descriptor: AMBIENT_DESCRIPTOR,
-    });
-  });
-
-  afterAll(() => rm(artifactsDir, { recursive: true, force: true }));
-
-  it("stepKind is single_task_fallback", () => {
-    expect(result.step_kind).toBe("single_task_fallback");
-  });
-
-  it("status is ready", () => {
-    expect(result.status).toBe("ready");
-  });
-
-  it("runId matches activeReviewRun.run_id", () => {
-    expect(result.run_id).toBe(activeReviewRun.run_id);
-  });
-
-  it("artifactPaths.single_task_prompt is a non-empty string", () => {
-    expect(typeof result.artifact_paths.single_task_prompt === "string" &&
-        result.artifact_paths.single_task_prompt.length > 0, "single_task_prompt must be a non-empty string").toBeTruthy();
-  });
-
-  it("artifactPaths.audit_results equals normalized activeReviewRun.audit_results_path", () => {
-    expect(result.artifact_paths.audit_results).toBe(toPromptPathToken(activeReviewRun.audit_results_path));
-  });
-
-  it("allowedCommands has length >= 1 and contains the rendered worker command", () => {
-    expect(result.allowed_commands.length >= 1, "allowed_commands must be non-empty").toBeTruthy();
-    // The rendered worker command is built from renderCommand(activeReviewRun.worker_command)
-    const hasWorkerCommand = result.allowed_commands.some((cmd) =>
-      cmd.includes("audit-code") && cmd.includes("submit-packet"),
-    );
-    expect(hasWorkerCommand, "allowed_commands must contain the rendered worker command").toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Always-materialized fan-out (design resolution 2, 2026-08-05): the capability
-// branch is replaced by the unconditional form — a host that reports it cannot
-// dispatch subagents still receives the SAME materialized dispatch step (packet
-// files on disk, dispatch_plan in artifact_paths) with a capability-neutral
-// prompt, executing the lanes sequentially itself. Today the branch instead
-// emits single_task_fallback, so materialization silently depends on host
-// capability — the exact per-IDE artifact divergence the resolution retires.
-// Pinned RED via it.fails so the tree stays green: implementing the
-// unconditional form makes it.fails itself fail, forcing the flip to it().
+// Always-materialized fan-out (design resolution 2, 2026-08-05): there is no
+// capability branch — renderSemanticReviewStep no longer takes hostCanDispatch,
+// and every host receives the SAME materialized dispatch step (packet files on
+// disk, dispatch_plan in artifact_paths) with a capability-neutral prompt. This
+// was the design-check's pinned-red test (it.fails until the branch deletion);
+// it is now the standing contract for the unconditional form.
 // ---------------------------------------------------------------------------
 
 describe("renderSemanticReviewStep is capability-unconditional (always-materialized fan-out)", () => {
-  it.fails("hostCanDispatch=false with a full handshake still materializes the dispatch step", async () => {
+  it("a full-handshake host gets the materialized dispatch step with no capability flag consumed", async () => {
     const artifactsDir = await makeTempArtifactsDir();
     try {
       const runId = "test-run-unconditional";
@@ -152,10 +90,7 @@ describe("renderSemanticReviewStep is capability-unconditional (always-materiali
         root: artifactsDir,
         artifactsDir,
         activeReviewRun: activeRun,
-        hostCanDispatch: false,
         hostMaxActiveSubagents: null,
-        hostCanRestrictSubagentTools: false,
-        hostCanSelectSubagentModel: false,
         hostContextTokens: DISPATCH_DESCRIPTOR.self.context_tokens ?? null,
         hostOutputTokens: DISPATCH_DESCRIPTOR.self.output_tokens ?? null,
         descriptor: DISPATCH_DESCRIPTOR,
@@ -170,13 +105,61 @@ describe("renderSemanticReviewStep is capability-unconditional (always-materiali
       await rm(artifactsDir, { recursive: true, force: true });
     }
   });
+
+  // Change-2 constraint 2 (settled): a handshake-less host is sized
+  // DEGENERATELY — one task per packet, no fit claim — never refused (that
+  // would strand the weakest hosts) and never silently fitted to an invented
+  // window. The missing handshake surfaces as a loud dispatch warning.
+  it("a handshake-less host degrades to one-task-per-packet with a loud warning, never a refusal", async () => {
+    const artifactsDir = await makeTempArtifactsDir();
+    try {
+      const runId = "test-run-degenerate";
+      const runDir = join(artifactsDir, "runs", runId);
+      await mkdir(join(runDir, "task-results"), { recursive: true });
+      const tasks = ["abc", "def", "ghi"].map((tag, i) => ({
+        task_id: `t-${tag}`,
+        unit_id: `unit-${tag}`,
+        pass_id: `pass:correctness`,
+        lens: "correctness",
+        file_paths: [`src/${tag}/${tag}.ts`],
+        file_line_counts: { [`src/${tag}/${tag}.ts`]: 50 + i },
+        rationale: `review ${tag}`,
+        priority: "medium",
+      }));
+      await writeFile(
+        join(runDir, "pending-audit-tasks.json"),
+        JSON.stringify(tasks),
+        "utf8",
+      );
+      const activeRun = makeActiveReviewRun(artifactsDir, runId);
+      const step = await renderSemanticReviewStep({
+        root: artifactsDir,
+        artifactsDir,
+        activeReviewRun: activeRun,
+        hostMaxActiveSubagents: null,
+        descriptor: AMBIENT_DESCRIPTOR,
+      });
+      expect(step.step_kind).toBe("dispatch_review");
+      // One task per packet: no merge is a fit claim the tool cannot make.
+      expect(step.progress?.pending_packets).toBe(tasks.length);
+      // The integration gap stays loud: a dispatch warning names the missing
+      // handshake instead of the degradation shipping silently forever.
+      expect(
+        typeof step.artifact_paths.dispatch_warnings === "string" &&
+          step.artifact_paths.dispatch_warnings.length > 0,
+        "unknown-window degradation must surface a dispatch warning",
+      ).toBeTruthy();
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
 // hostCanDispatch=true — dispatch_review branch
 // ---------------------------------------------------------------------------
 
-describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_review step contract", () => {
+describe("renderSemanticReviewStep returns a dispatch_review step contract", () => {
   let artifactsDir: string;
   let activeReviewRun: ActiveReviewRun;
   let result: Awaited<ReturnType<typeof renderSemanticReviewStep>>;
@@ -235,10 +218,7 @@ describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_revie
       root: artifactsDir,
       artifactsDir,
       activeReviewRun,
-      hostCanDispatch: true,
       hostMaxActiveSubagents: null,
-      hostCanRestrictSubagentTools: false,
-      hostCanSelectSubagentModel: false,
       // The real caller (nextStepCommand) lifts these from the handshake's
       // self.context_tokens/output_tokens — mirror that derivation here.
       hostContextTokens: DISPATCH_DESCRIPTOR.self.context_tokens ?? null,

@@ -371,66 +371,51 @@ describe("contract pipeline prompt renderer — isolation", () => {
   });
 });
 
-describe("contract pipeline — mandatory independent critic (paired positive/negative)", () => {
+describe("contract pipeline — mandatory independent critic (lane-class-conditional)", () => {
   // Adversarial review phases keyed strictly off phase identity. The judge
   // adjudicates the critic's counterexamples, so it too must be independent of
-  // the design author (memory: delegate the judge too).
+  // the design author (memory: delegate the judge too). The mandate is
+  // LANE-CLASS-conditional, never capability-conditional (design resolution 2,
+  // gate-resolved 2026-08-05): one capability-neutral text carries both the
+  // mandate and the explicitly-degraded no-subagent fallback on every host.
   for (const role of ["critique", "critic", "judge"] as const) {
-    it(`POSITIVE: ${role} MANDATES an independent sub-agent when host can dispatch`, () => {
+    it(`${role} carries the capability-neutral independence MANDATE`, () => {
       const result = renderContractPipelinePrompt({
         role,
         artifactPaths: ALL_PATHS,
-        hostCanDispatchSubagents: true,
       });
       expect(result.prompt).toContain("Independent Review — MANDATORY");
-      expect(result.prompt).toContain("MUST dispatch");
+      expect(result.prompt).toContain("MUST be executed by an agent that did not author");
       expect(result.prompt).toContain("independent sub-agent");
-      // Must NOT render the degrade-to-inline path.
+      // The same text carries the degraded fallback; the retired
+      // capability-branch wording must not resurface as a second form.
+      expect(result.prompt).toContain("explicitly-degraded fallback");
       expect(result.prompt).not.toContain("degraded to inline self-review");
+      expect(result.prompt).not.toContain("This host reported it cannot dispatch");
     });
 
-    it(`NEGATIVE: ${role} degrades to inline (no hard mandate) when host cannot dispatch`, () => {
+    it(`${role} at light adversarial depth keeps the proportionate inline self-check floor`, () => {
       const result = renderContractPipelinePrompt({
         role,
         artifactPaths: ALL_PATHS,
-        hostCanDispatchSubagents: false,
+        adversarialDepth: "light",
       });
-      expect(result.prompt).toContain("degraded to inline self-review");
+      expect(result.prompt).toContain("light inline self-check");
       expect(result.prompt).not.toContain("Independent Review — MANDATORY");
-      expect(result.prompt).not.toContain("MUST dispatch");
-    });
-
-    it(`FAIL-SAFE: ${role} defaults to MANDATE when the flag is missing`, () => {
-      const result = renderContractPipelinePrompt({
-        role,
-        artifactPaths: ALL_PATHS,
-      });
-      expect(result.prompt).toContain("Independent Review — MANDATORY");
-      expect(result.prompt).not.toContain("degraded to inline self-review");
     });
   }
 
   // The assessment phase is the author's OWN coverage self-assessment, not an
   // adversarial review of someone else's work, so it must NOT carry the
-  // independent-critic mandate regardless of dispatch capability.
+  // independent-critic mandate.
   for (const role of ["assessment"] as const) {
-    it(`${role} carries no independent-critic directive (true)`, () => {
+    it(`${role} carries no independent-critic directive`, () => {
       const result = renderContractPipelinePrompt({
         role,
         artifactPaths: ALL_PATHS,
-        hostCanDispatchSubagents: true,
       });
       expect(result.prompt).not.toContain("Independent Review — MANDATORY");
-      expect(result.prompt).not.toContain("degraded to inline self-review");
-    });
-    it(`${role} carries no independent-critic directive (false)`, () => {
-      const result = renderContractPipelinePrompt({
-        role,
-        artifactPaths: ALL_PATHS,
-        hostCanDispatchSubagents: false,
-      });
-      expect(result.prompt).not.toContain("Independent Review — MANDATORY");
-      expect(result.prompt).not.toContain("degraded to inline self-review");
+      expect(result.prompt).not.toContain("explicitly-degraded fallback");
     });
   }
 });

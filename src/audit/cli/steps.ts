@@ -11,7 +11,6 @@ export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
 
 export const StepKindSchema = z.enum([
   "dispatch_review",
-  "single_task_fallback",
   "design_review",
   "design_review_parallel",
   "design_review_contract",
@@ -23,7 +22,6 @@ export const StepKindSchema = z.enum([
   "confirm_intent",
   "intent_equivalence",
   "analyzer_install",
-  "edge_reasoning",
   "edge_reasoning_dispatch",
   "critical_flow_fallback",
   "synthesis_narrative",

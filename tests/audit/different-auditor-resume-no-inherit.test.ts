@@ -176,12 +176,9 @@ describe("host-review dispatch for a codex-configured run never inherits the cod
       root: artifactsDir,
       artifactsDir,
       activeReviewRun,
-      hostCanDispatch: true,
       hostMaxActiveSubagents: null,
       hostContextTokens: 200000,
       hostOutputTokens: 32000,
-      hostCanRestrictSubagentTools: false,
-      hostCanSelectSubagentModel: false,
       descriptor: hostDescriptor,
     });
   });

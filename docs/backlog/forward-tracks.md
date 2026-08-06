@@ -283,11 +283,9 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   resolutions (§"Design resolutions") in
   [`reviews/prompt-process-critique-2026-08-05.md`](../reviews/prompt-process-critique-2026-08-05.md);
   that doc is the single home, this entry is the hook. Change 1 (uniform id-join contract) landed
-  2026-08-05 (`442da4ca`, design-check record in the review doc) — three remain, `/design-check`
-  before the loop-core ones: (2) **Always-materialized fan-out** — every
-  fan-out step always writes per-subagent prompt files + per-lane ingest chokepoint; step prompt
-  capability-neutral (subagents if available, else sequential); replaces `semanticReviewStep`'s
-  capability branch. (3) Scope-confirmation context — thread `design_assessment` into
+  2026-08-05 (`442da4ca`); change 2 (always-materialized fan-out) landed 2026-08-05 (design-check
+  + implementation records in the review doc) — two remain, `/design-check`
+  before the loop-core ones: (3) Scope-confirmation context — thread `design_assessment` into
   `buildLensPropositions` AND add deterministic `docs_digest` before `intent_checkpoint`
   (charter-before-scope stays DAG-blocked by DD-9). (4) Charter layer — scope-by-feeding packets with
   channel-pure kinds **stated / structural / revealed** (structural replaces inferred: shape only, no

@@ -6,6 +6,7 @@
  */
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import type { AdversarialDepth } from "../riskSignal.js";
+import { renderIndependentReviewMandate } from "audit-tools/shared";
 import { loaderCommand } from "./prompts.js";
 
 // ── Role definitions ──────────────────────────────────────────────────────────
@@ -326,16 +327,6 @@ export interface ContractPipelineRenderInput {
    */
   pathASeedPath?: string;
   /**
-   * Whether the host can dispatch independent sub-agents. Threaded from the
-   * resolved `host_can_dispatch_subagents` handshake (NOT a manual flag). The
-   * adversarial review phases ('critique' / 'critic') MANDATE an independent
-   * sub-agent when true (an author marking their own homework misses gaps) and
-   * degrade to an explicit inline-self-review instruction when false. Fail-safe:
-   * when omitted, the mandate is rendered (a host that genuinely cannot dispatch
-   * opts out explicitly), so the stronger guarantee is the default.
-   */
-  hostCanDispatchSubagents?: boolean;
-  /**
    * Adversarial-depth dial (T1 slice 3), derived from the intake risk signal.
    * `light` (low-risk) renders critique/critic as an inline lightweight
    * self-check; `full` (the fail-safe default when omitted) renders the
@@ -368,32 +359,17 @@ const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic", "judge"]);
  */
 function renderIndependentCriticDirective(
   role: string,
-  hostCanDispatchSubagents: boolean | undefined,
   adversarialDepth: AdversarialDepth | undefined,
 ): string {
   if (!INDEPENDENT_CRITIC_PHASES.has(role)) return "";
-  // Light depth: a low-risk run earns the inline lightweight self-check. This is
-  // the floor — proportionate, never zero. A genuine concern here is evidence
-  // the change is harder than assessed → escalate to full independent review.
-  if (adversarialDepth === "light") {
-    return `\n## Adversarial Review — light inline self-check
-
-The assessed risk for this change is low, so this adversarial phase runs as a **lightweight inline self-check** rather than a full independent review. Do a quick, honest adversarial pass yourself: scan the design for obvious gaps, contradictions, or unhandled cases and record any real concern you find. Keep it proportionate — this is a floor (never skipped), not an exhaustive independent counterexample search. If your self-check surfaces a genuine concern, treat that as evidence the change is harder than assessed and escalate to a full independent review.
-`;
-  }
-  // Fail-safe default: undefined ⇒ mandate. A host that genuinely cannot
-  // dispatch opts out by passing false explicitly.
-  const mandate = hostCanDispatchSubagents !== false;
-  if (mandate) {
-    return `\n## Independent Review — MANDATORY
-
-This is an adversarial review phase: its value comes from a reviewer who is **not** the author of the design under review. You MUST dispatch this review to a fresh, independent sub-agent — one that did NOT author the upstream contract artifacts and does not see the author's reasoning. An author grading their own work systematically misses the gaps this phase exists to catch. Do NOT perform this review inline yourself.
-`;
-  }
-  return `\n## Independent Review — degraded to inline self-review
-
-This host reported it cannot dispatch an independent sub-agent, so this adversarial review runs inline. Compensate deliberately: adopt a fresh adversarial stance, set aside the author's reasoning, and attack the design as a hostile outside reviewer would. (When sub-agent dispatch is available this review is MANDATED to an independent agent — inline self-review is the degraded fallback, not the intended path.)
-`;
+  // LANE-CLASS-conditional, never capability-conditional (design resolution 2,
+  // gate-resolved 2026-08-05): the shared mandate text carries both the
+  // independent-subagent requirement and the explicitly-degraded no-subagent
+  // fallback in one capability-neutral form. Depth stays a policy axis: light
+  // (low-risk floor) keeps its proportionate inline self-check.
+  return renderIndependentReviewMandate(
+    adversarialDepth === "light" ? "light" : "full",
+  );
 }
 
 export interface ContractPipelineRenderResult {
@@ -461,7 +437,6 @@ export function renderContractPipelinePrompt(
 
   const independentCriticDirective = renderIndependentCriticDirective(
     input.role,
-    input.hostCanDispatchSubagents,
     input.adversarialDepth,
   );
 

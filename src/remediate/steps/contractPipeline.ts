@@ -616,14 +616,6 @@ export interface ContractPipelineStepOptions {
    * dispatch uses. Threaded explicitly only so tests can inject it deterministically.
    */
   sessionConfig?: SessionConfig | null;
-  /**
-   * Whether the host can dispatch independent sub-agents. Threaded from the
-   * resolved `host_can_dispatch_subagents` handshake (`resolveHostDispatchCapability`),
-   * NOT a manual flag. The adversarial 'critique' / 'critic' phase prompts MANDATE
-   * an independent sub-agent reviewer when true and degrade to inline self-review
-   * when false. Fail-safe: when omitted, the mandate is rendered.
-   */
-  hostCanDispatchSubagents?: boolean;
 }
 
 // ── Path-A seed ───────────────────────────────────────────────────────────────
@@ -1661,7 +1653,6 @@ After writing the output file, run:
       sourcePaths,
       repoRoot: root,
       pathASeedPath,
-      hostCanDispatchSubagents: options.hostCanDispatchSubagents,
       adversarialDepth,
     });
     return buildStep({
@@ -1687,7 +1678,6 @@ After writing the output file, run:
         sourcePaths,
         repoRoot: root,
         pathASeedPath,
-        hostCanDispatchSubagents: options.hostCanDispatchSubagents,
         adversarialDepth,
       });
       return { phase, rendered };

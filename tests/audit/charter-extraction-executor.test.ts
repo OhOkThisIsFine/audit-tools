@@ -13,7 +13,7 @@ const {
   ceilingRequestsCharters,
 } = await import("../../src/audit/orchestrator/charterExtractionExecutor.js");
 
-const { renderCharterExtractionPrompt } = await import(
+const { renderCharterKindLanePrompt, charterExtractionKindsForCeiling } = await import(
   "../../src/audit/cli/charterExtractionPrompt.js"
 );
 
@@ -92,39 +92,52 @@ describe("resolveCharterCeiling / ceilingRequestsCharters", () => {
   });
 });
 
-describe("renderCharterExtractionPrompt — ceiling-aware charter count", () => {
-  const opts = (rung: Ceiling["rung"]) => ({
-    submissionPath: "/tmp/charter-extraction.json",
-    continueCommand: "node audit-code.mjs next-step",
-    ceiling: { rung },
+describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scopes", () => {
+  // Always-materialized (design resolution 2): each kind is its own blind LANE
+  // prompt; independence is the shape of the artifacts, not a merge instruction.
+  test("deep ceiling requests THREE lanes; deepest adds the true lane", () => {
+    expect(charterExtractionKindsForCeiling({ rung: "deep" })).toEqual([
+      "stated",
+      "inferred",
+      "revealed",
+    ]);
+    expect(charterExtractionKindsForCeiling({ rung: "deepest" })).toEqual([
+      "stated",
+      "inferred",
+      "revealed",
+      "true",
+    ]);
   });
 
-  test("deep ceiling asks for THREE charters (True is not nominatable)", () => {
-    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deep"));
-    expect(prompt).toContain("state up to **three charters**");
-    expect(prompt).toContain("). The three:");
-    expect(prompt).not.toContain("four charters");
-    // The True bullet must still say "do not nominate one" at deep.
-    expect(prompt).toContain("do not nominate one");
+  test("each lane prompt carries ONLY its own kind's scope, blind to the others", () => {
+    const stated = renderCharterKindLanePrompt(bundleWith(), {
+      kind: "stated",
+      submissionPath: "/tmp/charter-extraction-stated.json",
+    });
+    // The stated/revealed scope separation is the whole point of independence.
+    expect(stated).toContain("Read ONLY docs / specs / READMEs / header comments");
+    expect(stated).not.toContain("ONLY the subsystem's CODE");
+    expect(stated).toContain("BLIND to the other kinds");
+    expect(stated).toContain('"kind": "stated"');
+    // Deltas are still deferred to the independent miner; lanes are advance-free.
+    expect(stated).toContain("do NOT emit deltas");
+    expect(stated).not.toContain("next-step");
+
+    const revealed = renderCharterKindLanePrompt(bundleWith(), {
+      kind: "revealed",
+      submissionPath: "/tmp/charter-extraction-revealed.json",
+    });
+    expect(revealed).toContain("Read ONLY the subsystem's CODE");
+    expect(revealed).not.toContain("ONLY docs / specs / READMEs");
   });
 
-  test("directs INDEPENDENT, access-scoped per-kind subagents (blind authoring)", () => {
-    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deep"));
-    expect(prompt).toContain("one blind, access-scoped subagent per kind");
-    expect(prompt).toContain("stated, inferred, revealed");
-    // The revealed/stated scope separation is the whole point of independence.
-    expect(prompt).toMatch(/\*\*revealed\*\* subagent.*ONLY the subsystem's CODE/s);
-    expect(prompt).toMatch(/\*\*stated\*\* subagent.*ONLY docs/s);
-    // Deltas are still deferred to the independent miner.
-    expect(prompt).toContain("do NOT emit deltas here");
-  });
-
-  test("deepest ceiling asks for FOUR charters (True nominatable)", () => {
-    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deepest"));
-    expect(prompt).toContain("state up to **four charters**");
-    expect(prompt).toContain("). The four:");
-    expect(prompt).not.toContain("three charters");
+  test("the true lane carries the shining-city provocation contract", () => {
+    const prompt = renderCharterKindLanePrompt(bundleWith(), {
+      kind: "true",
+      submissionPath: "/tmp/charter-extraction-true.json",
+    });
     expect(prompt).toContain("shining city");
+    expect(prompt).toContain("nominated_alternative");
   });
 });
 

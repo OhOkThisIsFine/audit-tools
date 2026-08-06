@@ -196,8 +196,6 @@ test("N-worker-prompt-and-result-contract: rolling-dispatch step prompt and pack
     runId: "run-1",
     dispatchPlanPath: "/repo/.audit-tools/audit/runs/run-1/dispatch-plan.json",
     dispatchQuotaPath: "/repo/.audit-tools/audit/runs/run-1/dispatch-quota.json",
-    hostCanRestrictSubagentTools: true,
-    hostCanSelectSubagentModel: false,
   });
   const resultPath = "/repo/.audit-tools/audit/runs/run-1/task-results/abc-inline-result.json";
   const packetPrompt = buildPacketPrompt({

@@ -497,15 +497,16 @@ await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 9 audit ho
   expect([...HOST_GATE_KINDS].sort()).toEqual([...expected].sort());
   expect(Object.keys(HOST_GATE_DESCRIPTORS).sort()).toEqual([...expected].sort());
 
-  // The 6 gates driven by the shared runOmittableGate engine vs. the 3 that
-  // keep bespoke bodies (graph_enrichment, design_review, intent_equivalence)
-  // because their shape genuinely deviates from the common one.
+  // The 5 gates driven by the shared runOmittableGate engine vs. the 4 that
+  // keep bespoke bodies (graph_enrichment, design_review, intent_equivalence,
+  // and the per-kind multi-lane charter_extraction gate) because their shape
+  // genuinely deviates from the common one.
   const generic = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "generic");
   const custom = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "custom");
   expect(generic.sort()).toEqual(
-    ["critical_flow_fallback", "synthesis_narrative", "charter_extraction", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
+    ["critical_flow_fallback", "synthesis_narrative", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
   );
-  expect(custom.sort()).toEqual(["graph_enrichment", "design_review", "intent_equivalence"].sort());
+  expect(custom.sort()).toEqual(["graph_enrichment", "design_review", "intent_equivalence", "charter_extraction"].sort());
 });
 
 // ── handleDesignReviewBranch — malformed-submission quarantine ───────────────
@@ -1053,7 +1054,19 @@ await test("consumeObjectIncoming quarantines an array (never a valid id→decis
 
 type OmittableGateParams = Pick<NextStepParams, "root" | "artifactsDir">;
 
-const OMITTABLE_GATES = [
+type OmittableGateCase = {
+  kind: string;
+  filename: string;
+  /** Bundle override for gates whose lanes are only consulted under a specific state. */
+  bundle?: ArtifactBundle;
+  handler: (
+    params: OmittableGateParams,
+    bundle: ArtifactBundle,
+    state: AuditState,
+  ) => Promise<{ action: string }>;
+};
+
+const OMITTABLE_GATES: OmittableGateCase[] = [
   {
     kind: "synthesis_narrative",
     filename: "synthesis-narrative.json",
@@ -1069,7 +1082,22 @@ const OMITTABLE_GATES = [
   },
   {
     kind: "charter_extraction",
-    filename: "charter-extraction.json",
+    // Multi-lane gate (design resolution 2): the malformed submission sits in
+    // ONE kind's lane file; the gate must quarantine that lane and re-emit the
+    // step (action "return"), never crash or silently merge around it. The
+    // lanes are only consulted at a deep+ ceiling, so this entry carries the
+    // checkpoint that requests charters.
+    filename: "charter-extraction-stated.json",
+    bundle: {
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: "2026-01-01T00:00:00Z",
+        confirmed_by: "host",
+        scope_summary: "s",
+        intent_summary: "i",
+        design_review: { conceptual_depth: "deep" },
+      },
+    } satisfies ArtifactBundle,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleCharterExtractionBranch(params, bundle, state),
   },
@@ -1103,7 +1131,7 @@ for (const gate of OMITTABLE_GATES) {
       await writeFile(incomingPath, JSON.stringify(42), "utf8");
 
       const params = { root: artifactsDir, artifactsDir };
-      const bundle = {};
+      const bundle = gate.bundle ?? {};
       const state: AuditState = { status: "active", obligations: [] };
 
       // Mute the quarantine stderr diagnostic for a clean test log.

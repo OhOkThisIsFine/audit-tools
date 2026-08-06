@@ -138,8 +138,6 @@ export function renderDispatchReviewPrompt(params: {
   activeReviewRun: ActiveReviewRun;
   dispatchPlanPath: string;
   dispatchQuotaPath: string | null;
-  hostCanRestrictSubagentTools: boolean;
-  hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
   /** The current driver's handshake, re-emitted onto the continue-command. */
   hostDescriptor?: AuditorDescriptor;
@@ -149,15 +147,11 @@ export function renderDispatchReviewPrompt(params: {
     params.activeReviewRun.run_id,
   );
   const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
-  // Only mention model_hint when the host can actually act on it. When it
-  // cannot, the field is left as inert plan metadata rather than surfacing a
-  // contradictory "here is model_hint, now ignore it" instruction.
-  const modelLine = params.hostCanSelectSubagentModel
-    ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
-    : null;
-  const toolsLine = params.hostCanRestrictSubagentTools
-    ? "Restrict review subagents to read/search plus the packet submit command named in their prompt. Do not give them source edit/write tools."
-    : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
+  // Capability-neutral (design resolution 2): the same prompt renders on every
+  // host — hints are phrased "if your harness supports…", so a host without the
+  // facility ignores them instead of receiving a different artifact.
+  const modelLine = CAPABILITY_NEUTRAL_MODEL_HINT_LINE;
+  const toolsLine = CAPABILITY_NEUTRAL_TOOL_RESTRICTION_LINE;
 
   const dispatchDataLines = buildDispatchDataLines(
     params.dispatchPlanPath,
@@ -185,14 +179,16 @@ export function renderDispatchReviewPrompt(params: {
       hostScratchDir(params.artifactsDir, params.activeReviewRun.run_id),
     ),
     "",
+    "Execute every entry in the dispatch plan: dispatch one subagent per entry if a subagent facility exists, else read and follow each entry's `prompt_path` sequentially yourself. The same packet files and result contract apply either way.",
+    "",
     "Subagent prompt shape:",
     "",
     '  Read and follow the audit instructions in: <entry.prompt_path>',
     "",
-    ...(modelLine ? [modelLine] : []),
+    modelLine,
     toolsLine,
     "",
-    "Each subagent must submit its packet through the submit command printed in its packet prompt and stop after successful submission.",
+    "Each packet's executor must submit through the submit command printed in its packet prompt and stop after successful submission.",
     "",
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths`, `write_paths`, and `forbidden_patterns`. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` and `entry.access.write_paths` for each subagent. Do not grant broad workspace or task-results directory write access. Workers should not access files outside their declared paths.",
     "",
@@ -213,57 +209,17 @@ export function renderDispatchReviewPrompt(params: {
   ].join("\n");
 }
 
-export function renderSingleTaskFallbackStepPrompt(params: {
-  singleTaskPromptPath: string;
-  activeReviewRun: ActiveReviewRun;
-}): string {
-  return [
-    "# audit-code single-task fallback step",
-    "",
-    "Use this step only because the host reported no callable subagent facility.",
-    "",
-    "Read and follow exactly this generated single-task prompt:",
-    "",
-    `  ${params.singleTaskPromptPath}`,
-    "",
-    "Complete exactly one AuditResult for the task named there, write the JSON array to the prompt's audit_results_path, run the exact worker_command from that prompt, then stop.",
-    "",
-    "Do not run dispatch commands, do not prepare packets, do not run next-step again in this turn, and do not read a report after the worker command.",
-    "",
-    "The only backend command allowed after writing the result is:",
-    "",
-    `  ${renderCommand(params.activeReviewRun.worker_command)}`,
-    "",
-  ].join("\n");
-}
+/**
+ * Capability-neutral hint lines (design resolution 2, 2026-08-05): identical
+ * text on every host — "if your harness supports…" phrasing lets a host without
+ * the facility skip the hint instead of receiving a different artifact, so the
+ * rendered step never branches on the capability handshake.
+ */
+export const CAPABILITY_NEUTRAL_MODEL_HINT_LINE =
+  "If your harness supports selecting a subagent model, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names; otherwise `model_hint` is inert plan metadata — ignore it.";
 
-export function renderEdgeReasoningStepPrompt(params: {
-  basePrompt: string;
-  resultsPath: string;
-  continueCommand: string;
-  contentHash: string;
-  /** Notice for a prior quarantined submission (shape error + quarantine path). */
-  rejectionNotice?: string;
-}): string {
-  return [
-    params.basePrompt,
-    ...(params.rejectionNotice ? ["", params.rejectionNotice] : []),
-    "",
-    "## Results path",
-    "",
-    'Write the JSON object ({"rewrites":[{"from":"...","to":"...","kind":"...","reason":"..."}]}) to:',
-    "",
-    `  ${params.resultsPath}`,
-    "",
-    `Cache key (edge-set content hash): ${params.contentHash}.`,
-    "If you already produced rewrites for this exact key, you may reuse them instead of regenerating.",
-    "",
-    `Then run: ${params.continueCommand}`,
-    "",
-    "Read and follow only the new step prompt returned by that command.",
-    "",
-  ].join("\n");
-}
+export const CAPABILITY_NEUTRAL_TOOL_RESTRICTION_LINE =
+  "If your harness supports per-subagent tool restriction, restrict review subagents to read/search plus the packet submit command named in their prompt (no source edit/write tools); otherwise proceed without restrictions and do not ask the user about them.";
 
 export function renderEdgeReasoningDispatchPrompt(params: {
   promptPath: string;
@@ -280,7 +236,7 @@ export function renderEdgeReasoningDispatchPrompt(params: {
     "optional pass: it only rewrites the `reason` string of those edges — it never",
     "adds, removes, re-targets, or re-weights an edge.",
     "",
-    "Dispatch exactly ONE subagent (via the `task` tool or equivalent).",
+    "Execute the ONE lane prompt file below: dispatch one subagent to read and follow it if a subagent facility exists, else read and follow it yourself. The same file and result path apply either way.",
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
@@ -290,7 +246,7 @@ export function renderEdgeReasoningDispatchPrompt(params: {
     "",
     "  Read and follow the edge-reasoning instructions in: <prompt path above>",
     "",
-    'The subagent must write its JSON result ({"rewrites":[...]}) to:',
+    'The executor must write its JSON result ({"rewrites":[...]}) to:',
     "",
     `  ${params.resultsPath}`,
     "",
@@ -323,8 +279,6 @@ export function renderRollingDispatchPrompt(params: {
   runId: string;
   dispatchPlanPath: string;
   dispatchQuotaPath: string | null;
-  hostCanRestrictSubagentTools: boolean;
-  hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
   /** The current driver's handshake, re-emitted onto the continue-command. */
   hostDescriptor?: AuditorDescriptor;
@@ -332,12 +286,10 @@ export function renderRollingDispatchPrompt(params: {
   const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
   const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
 
-  const modelLine = params.hostCanSelectSubagentModel
-    ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
-    : null;
-  const toolsLine = params.hostCanRestrictSubagentTools
-    ? "Restrict review subagents to read/search tools plus a Write tool scoped to their own `entry.result_path` (they write exactly that one results file and run no shell commands). Do not give them source edit tools."
-    : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
+  // Capability-neutral (design resolution 2): identical text on every host.
+  const modelLine = CAPABILITY_NEUTRAL_MODEL_HINT_LINE;
+  const toolsLine =
+    "If your harness supports per-subagent tool restriction, restrict review subagents to read/search tools plus a Write tool scoped to their own `entry.result_path` (they write exactly that one results file and run no shell commands; no source edit tools); otherwise proceed without restrictions and do not ask the user about them.";
 
   const dispatchDataLines = buildDispatchDataLines(
     params.dispatchPlanPath,
@@ -350,6 +302,8 @@ export function renderRollingDispatchPrompt(params: {
     "# audit-code rolling dispatch",
     "",
     ...dispatchDataLines,
+    "",
+    "Execute every entry in the dispatch plan: dispatch one subagent per entry if a subagent facility exists, else read and follow each entry's `prompt_path` sequentially yourself. The same packet files and result contract apply either way.",
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
@@ -379,7 +333,7 @@ export function renderRollingDispatchPrompt(params: {
     "capped at a conservative cold-start batch. Skip it if your host reports no",
     "per-dispatch usage figure.",
     "",
-    ...(modelLine ? [modelLine] : []),
+    modelLine,
     toolsLine,
     "",
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for reading and grant write access to that subagent's `entry.result_path` (the one file it writes). Do not grant broader workspace or task-results directory write access.",

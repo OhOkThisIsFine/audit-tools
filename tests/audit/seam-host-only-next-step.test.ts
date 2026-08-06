@@ -104,6 +104,10 @@ function baseParams(artifactsDir: string): {
 // The test verifies the sets are consistent without importing the function
 // body (which would require a live filesystem and session config).
 
+// NOTE: "edge_reasoning" here is the INTERNAL fold RESULT kind (the branch
+// nextStepHelpers returns), which survives design resolution 2 — only the
+// inline `edge_reasoning` STEP kind was retired; the handler renders the
+// result kind as an `edge_reasoning_dispatch` step on every host.
 const RETURN_KINDS_FROM_NEXT_STEP_HELPERS = new Set([
   "complete",
   "blocked",
@@ -208,14 +212,12 @@ test("C2: the terminal status values align with the semantic contract (complete/
 // "complete" and "blocked" are terminal — allowed_commands can be empty.
 const NON_TERMINAL_STEP_KINDS: StepKind[] = [
   "dispatch_review",
-  "single_task_fallback",
   "design_review",
   "design_review_parallel",
   "design_review_contract",
   "design_review_conceptual",
   "confirm_intent",
   "analyzer_install",
-  "edge_reasoning",
   "edge_reasoning_dispatch",
   "synthesis_narrative",
 ];
@@ -335,14 +337,12 @@ test("E4: artifact_paths always includes current_step and current_prompt keys", 
 
 const ALL_STEP_KINDS: StepKind[] = [
   "dispatch_review",
-  "single_task_fallback",
   "design_review",
   "design_review_parallel",
   "design_review_contract",
   "design_review_conceptual",
   "confirm_intent",
   "analyzer_install",
-  "edge_reasoning",
   "edge_reasoning_dispatch",
   "synthesis_narrative",
   "present_report",

@@ -3648,16 +3648,10 @@ async function handleReadyIntakeContractPipeline(
     );
   }
 
-  // Resolve the independent-critic dispatch capability from the SAME handshake
-  // (`resolveHostDispatchCapability`) implement dispatch uses — never a manual
-  // flag. Threaded into the contract pipeline so the adversarial 'critique' /
-  // 'critic' prompts MANDATE an independent sub-agent reviewer when the host can
-  // dispatch one (fail-safe: mandate by default). The config itself was loaded
-  // once, above the review gate (COR-5f8fb354).
-  const hostCanDispatchSubagents = resolveHostDispatchCapability({
-    hostCanDispatchSubagents: options?.hostCanDispatchSubagents,
-    sessionConfig: sessionConfigForDispatch,
-  });
+  // The adversarial 'critique' / 'critic' / 'judge' prompts carry the
+  // LANE-CLASS-conditional independence mandate (shared
+  // `renderIndependentReviewMandate`) — capability-neutral by design resolution
+  // 2, so no dispatch-capability resolution is threaded into the pipeline here.
 
   const step = await buildNextContractPipelineStep({
     root,
@@ -3665,7 +3659,6 @@ async function handleReadyIntakeContractPipeline(
     runId: randomRunId("CONTRACT"),
     sourcePaths: [...sourcePaths],
     sessionConfig: sessionConfigForDispatch,
-    hostCanDispatchSubagents,
   });
   if (step) {
     return step;

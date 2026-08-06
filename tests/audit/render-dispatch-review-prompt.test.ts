@@ -23,39 +23,29 @@ function makeParams(overrides: Partial<DispatchReviewParams> = {}): DispatchRevi
     activeReviewRun: makeRun(),
     dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
     dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
-    hostCanRestrictSubagentTools: true,
-    hostCanSelectSubagentModel: true,
     ...overrides,
   };
 }
 
-test("hostCanSelectSubagentModel:true — model-hint line is included", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ hostCanSelectSubagentModel: true }),
-  );
-  expect(result.includes("map `entry.model_hint.tier`"), "expected model-hint line to be present").toBeTruthy();
+// Capability-neutral prompt text (design resolution 2, 2026-08-05): the SAME
+// hint lines render on every host — "if your harness supports…" phrasing lets a
+// host without the facility skip them, so the artifact never branches on the
+// capability handshake and no capability params exist on the renderer.
+test("model-hint line renders unconditionally in the capability-neutral form", () => {
+  const result = renderDispatchReviewPrompt(makeParams());
+  expect(result.includes("If your harness supports selecting a subagent model"), "expected the neutral model-hint line").toBeTruthy();
+  expect(result.includes("map `entry.model_hint.tier`"), "expected model-hint mapping guidance").toBeTruthy();
 });
 
-test("hostCanSelectSubagentModel:false — model-hint line is omitted", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ hostCanSelectSubagentModel: false }),
-  );
-  expect(!result.includes("map `entry.model_hint.tier`"), "expected model-hint line to be absent").toBeTruthy();
+test("tool-restriction line renders unconditionally in the capability-neutral form", () => {
+  const result = renderDispatchReviewPrompt(makeParams());
+  expect(result.includes("If your harness supports per-subagent tool restriction"), "expected the neutral tool-restriction line").toBeTruthy();
+  expect(result.includes("restrict review subagents to read/search"), "expected restriction guidance").toBeTruthy();
 });
 
-test("hostCanRestrictSubagentTools:true — restrict-tools line is included", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ hostCanRestrictSubagentTools: true }),
-  );
-  expect(result.includes("Restrict review subagents"), "expected restrict-tools line to be present").toBeTruthy();
-});
-
-test("hostCanRestrictSubagentTools:false — no-restriction-facility line is included", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ hostCanRestrictSubagentTools: false }),
-  );
-  expect(result.includes("did not report a callable restriction facility"), "expected no-restriction-facility line to be present").toBeTruthy();
-  expect(!result.includes("Restrict review subagents"), "expected restrict-tools line to be absent").toBeTruthy();
+test("capability-neutral execution line covers both subagent and sequential-self hosts", () => {
+  const result = renderDispatchReviewPrompt(makeParams());
+  expect(result.includes("else read and follow each entry's `prompt_path` sequentially yourself"), "expected the sequential-self fallback in the neutral execution line").toBeTruthy();
 });
 
 test("dispatchQuotaPath non-null — quota lines are included", () => {
@@ -81,12 +71,12 @@ test("prompt does not contain canary-round text", () => {
 });
 
 test("FINDING-018: access pre-approval instruction references entry.access read and write paths", () => {
-  const result = renderDispatchReviewPrompt(makeParams({ hostCanRestrictSubagentTools: true }));
+  const result = renderDispatchReviewPrompt(makeParams());
   expect(result.includes("entry.access.read_paths") && result.includes("entry.access.write_paths"), "expected pre-approval instruction to reference entry.access read_paths and write_paths").toBeTruthy();
 });
 
 test("FINDING-018: access pre-approval warns not to grant broad workspace write access", () => {
-  const result = renderDispatchReviewPrompt(makeParams({ hostCanRestrictSubagentTools: true }));
+  const result = renderDispatchReviewPrompt(makeParams());
   expect(result.includes("Do not grant broad workspace"), "expected warning against broad workspace write access").toBeTruthy();
 });
 
@@ -105,8 +95,6 @@ test("FRIC-006: renderRollingDispatchPrompt uses 'After all packets complete:' n
     runId: "run-test-1",
     dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
     dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
   });
   expect(result.includes("After all packets complete:"), "rolling dispatch prompt must use 'After all packets complete:'").toBeTruthy();
   expect(!result.includes("After all waves complete:"), "rolling dispatch prompt must not use stale 'After all waves complete:' wording").toBeTruthy();
@@ -123,8 +111,6 @@ test("MNT-7cef02e2: both prompts emit the granted-set instruction when quota pat
     runId: "run-test-1",
     dispatchPlanPath: params.dispatchPlanPath,
     dispatchQuotaPath: params.dispatchQuotaPath,
-    hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-    hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
   });
   for (const prompt of [review, rolling]) {
     expect(prompt.includes("admission.granted_packet_ids"), "quota prompt must include the granted-set instruction").toBeTruthy();
@@ -142,8 +128,6 @@ test("MNT-7cef02e2: both prompts emit simple launch line when quota path is null
     runId: "run-test-1",
     dispatchPlanPath: params.dispatchPlanPath,
     dispatchQuotaPath: null,
-    hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-    hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
   };
   const rollingResult = renderRollingDispatchPrompt(rolling);
   for (const prompt of [review, rollingResult]) {

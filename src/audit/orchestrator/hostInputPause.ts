@@ -14,7 +14,7 @@ import {
 /**
  * Inputs the fold-level host-input pauses depend on. These mirror the fields the
  * `next-step` fold reads when deciding whether to emit an interactive host step
- * (`analyzer_install` / `edge_reasoning`) instead of running the deterministic
+ * (`analyzer_install` / `edge_reasoning_dispatch`) instead of running the deterministic
  * graph-enrichment executor. Single-sourcing them here keeps the drain loop and
  * the primary fold from drifting on WHERE the pipeline pauses for the operator.
  */
@@ -82,7 +82,7 @@ export function graphEnrichmentLowConfidenceEdges(
  *  2. A FOLD-LEVEL interactive pause the registry cannot see: the
  *     `graph_enrichment_executor` is registered `deterministic`, but the fold
  *     emits an `analyzer_install` consent step (undecided analyzer installs) or
- *     an `edge_reasoning` step (low-confidence edges + flag on) BEFORE running it.
+ *     an `edge_reasoning_dispatch` step (low-confidence edges + flag on) BEFORE running it.
  *     A registry-only gate (`isHostDelegationExecutor`) is blind to (2), so an
  *     unconditional drain would silently skip an operator-interactive step —
  *     exactly the latent failure this predicate closes. It reuses the SAME

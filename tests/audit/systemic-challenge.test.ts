@@ -334,7 +334,6 @@ describe("renderSecondOrderAdversaryPrompt", () => {
       priorFindingCount: 0,
       metrics: aggregateMetricsDigest({ repo_manifest: repoManifest }),
       submissionPath: "/x/incoming/systemic-challenge.json",
-      continueCommand: "audit-code next-step",
     });
     expect(prompt).toMatch(/optimization/i);
     expect(prompt).toMatch(/redundant/i);

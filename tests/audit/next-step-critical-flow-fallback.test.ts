@@ -103,10 +103,19 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
         p.endsWith("critical-flow-fallback.json"),
       ),
     ).toBeTruthy();
-    const prompt = await readFile(paused.prompt_path, "utf8");
-    expect(prompt).toMatch(/Critical-flow fallback/);
-    expect(prompt).toMatch(/"flows"/);
-    expect(prompt).toMatch(/critical-flow-fallback\.json/);
+    // Always-materialized (design resolution 2): the flow-stub body lives in
+    // the LANE file; the step prompt is the capability-neutral instruction.
+    const stepPrompt = await readFile(paused.prompt_path, "utf8");
+    expect(stepPrompt).toMatch(/critical-flow fallback/i);
+    expect(stepPrompt).toMatch(/critical-flow-fallback\.json/);
+    expect(stepPrompt).toMatch(/sequentially yourself|else read and follow/);
+    const lanePromptPath = paused.artifact_paths.critical_flow_fallback_prompt;
+    expect(lanePromptPath).toMatch(/critical-flow-fallback-prompt\.md$/);
+    const lanePrompt = await readFile(lanePromptPath, "utf8");
+    expect(lanePrompt).toMatch(/Critical-flow fallback/i);
+    expect(lanePrompt).toMatch(/"flows"/);
+    // Lane files are advance-free — the continue lives in the step prompt.
+    expect(lanePrompt).not.toMatch(/next-step/);
 
     // Host authors the enrichment.
     await writeFile(

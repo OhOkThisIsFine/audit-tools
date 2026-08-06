@@ -33,8 +33,18 @@ export interface GraphPacket {
 }
 
 export interface PartitionOptions {
-  /** Context-token ceiling for one packet (the dispatching model's window). */
-  contextTokenBudget: number;
+  /**
+   * Context-token ceiling for one packet (the dispatching model's window).
+   * `null` = the window is UNKNOWN (no handshake, no learned limits, no
+   * models.dev resolution): the partitioner makes no fit claim at all — no
+   * merging, one task per packet (the minimum expressible unit, the same
+   * semantics the retired single-task fallback established for handshake-less
+   * hosts), and `over_budget` is never set (there is no ceiling to exceed).
+   * Degenerate-not-refused is deliberate (change-2 constraint 2): refusing
+   * would strand the weakest hosts, and inventing a default window would be a
+   * fabricated fit claim; the caller surfaces a dispatch warning instead.
+   */
+  contextTokenBudget: number | null;
   /** Risk-mass ceiling — max aggregate risk one agent should hold at once. */
   riskMassBudget: number;
   /** Per-packet prompt overhead reserved against the context ceiling. */
@@ -88,9 +98,11 @@ export function partitionTaskGraph(
   const overhead = options.promptOverheadTokens ?? 0;
   const { contextTokenBudget, riskMassBudget } = options;
   const mergeTokenBudget =
-    options.targetPacketTokens !== undefined
-      ? Math.min(contextTokenBudget, options.targetPacketTokens)
-      : contextTokenBudget;
+    contextTokenBudget === null
+      ? null
+      : options.targetPacketTokens !== undefined
+        ? Math.min(contextTokenBudget, options.targetPacketTokens)
+        : contextTokenBudget;
   const nodes = graph.nodes;
   const indexOf = new Map<string, number>();
   nodes.forEach((n, i) => indexOf.set(n.task_id, i));
@@ -109,21 +121,25 @@ export function partitionTaskGraph(
     return a.to < b.to ? -1 : a.to > b.to ? 1 : 0;
   });
 
-  for (const edge of sortedEdges) {
-    const ui = indexOf.get(edge.from);
-    const vi = indexOf.get(edge.to);
-    if (ui === undefined || vi === undefined) continue;
-    const ru = find(clusters, ui);
-    const rv = find(clusters, vi);
-    if (ru === rv) continue;
-    const combinedTokens = clusters[ru].tokens + clusters[rv].tokens;
-    const combinedRisk = clusters[ru].risk + clusters[rv].risk;
-    if (combinedTokens + overhead > mergeTokenBudget) continue;
-    if (combinedRisk > riskMassBudget) continue;
-    // union rv into ru
-    clusters[rv].parent = ru;
-    clusters[ru].tokens = combinedTokens;
-    clusters[ru].risk = combinedRisk;
+  // Unknown window (mergeTokenBudget null): no merges at all — every task
+  // stays its own packet, because any merge would be an unfounded fit claim.
+  if (mergeTokenBudget !== null) {
+    for (const edge of sortedEdges) {
+      const ui = indexOf.get(edge.from);
+      const vi = indexOf.get(edge.to);
+      if (ui === undefined || vi === undefined) continue;
+      const ru = find(clusters, ui);
+      const rv = find(clusters, vi);
+      if (ru === rv) continue;
+      const combinedTokens = clusters[ru].tokens + clusters[rv].tokens;
+      const combinedRisk = clusters[ru].risk + clusters[rv].risk;
+      if (combinedTokens + overhead > mergeTokenBudget) continue;
+      if (combinedRisk > riskMassBudget) continue;
+      // union rv into ru
+      clusters[rv].parent = ru;
+      clusters[ru].tokens = combinedTokens;
+      clusters[ru].risk = combinedRisk;
+    }
   }
 
   // Gather members per root.
@@ -142,7 +158,9 @@ export function partitionTaskGraph(
     const riskMass = list.reduce((s, n) => s + n.risk_estimate, 0);
     const routingRisk = list.reduce((m, n) => Math.max(m, n.risk_estimate), 0);
     const overBudget =
-      list.length === 1 && tokenEstimate + overhead > contextTokenBudget;
+      contextTokenBudget !== null &&
+      list.length === 1 &&
+      tokenEstimate + overhead > contextTokenBudget;
     packets.push({
       packet_id: "",
       task_ids: taskIds,
