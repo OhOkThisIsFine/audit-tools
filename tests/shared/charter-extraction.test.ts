@@ -6,6 +6,7 @@ import {
   CharterDeltaSubmissionSchema,
 } from "../../src/shared/decompose/charterExtraction.js";
 import type { Charter, CharterKind, CharterConfidence, GoalGraph } from "../../src/shared/types/charter.js";
+import { CharterKindSchema } from "../../src/shared/types/charter.js";
 
 /** Minimal charter-input factory (no charter_id — the tool assigns it). */
 function charterInput(overrides: Partial<Omit<Charter, "charter_id">> = {}): Omit<Charter, "charter_id"> {
@@ -311,5 +312,55 @@ describe("assembleCharters / assembleDeltas — determinism + goal graph", () =>
   test("CharterDeltaSubmissionSchema rejects an unknown top-level key (strict)", () => {
     const parsed = CharterDeltaSubmissionSchema.safeParse({ subsystems: [], bogus: 1 });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// Design resolution 4 pins (design-check 2026-08-05, record in
+// docs/reviews/prompt-process-critique-2026-08-05.md): channel-pure estimator
+// kinds + the structure↔behavior channel routed as work. Red at HEAD by design
+// (`test.fails`); they go green only when change 4 lands, at which point the
+// `.fails` markers are removed. The "no routing (inferred|revealed)" test above
+// is the pinned CURRENT behaviour these deliberately invert at implementation.
+describe("design resolution 4 — channel-pure charter kinds (pinned red)", () => {
+  test.fails("charter kinds are the channel-pure estimator set (stated/structural/revealed/true)", () => {
+    expect(CharterKindSchema.options).toEqual([
+      "stated",
+      "structural",
+      "revealed",
+      "true",
+    ]);
+  });
+
+  test.fails("the intent-model↔revealed channel pair routes as work instead of dropping", () => {
+    // The middle channel derived at runtime ("inferred" today, "structural"
+    // after the rename) so this pin compiles across the schema migration.
+    const middle = CharterKindSchema.options.find(
+      (k) => k !== "stated" && k !== "revealed" && k !== "true",
+    )!;
+    const { subsystems } = assembleCharters(
+      {
+        subsystems: [
+          {
+            node_id: "a.ts",
+            charters: [charterInput({ kind: middle }), charterInput({ kind: "revealed" })],
+          },
+        ],
+      },
+      members,
+    );
+    const out = assembleDeltas(
+      {
+        subsystems: [
+          { node_id: "a.ts", deltas: [{ pair: [middle, "revealed"], summary: "structure says X, behaviour does Y" }] },
+        ],
+      },
+      subsystems,
+    );
+    // Today: dropped as "no routing in the design's table" (deliberately
+    // unrouted while the middle kind was "inferred" — the LLM's model of intent
+    // had no owner). Channel-pure kinds give the pair a meaning (architecture
+    // betrayed by implementation) and a route.
+    expect(out.deltas).toHaveLength(1);
+    expect(out.validation_issues).toHaveLength(0);
   });
 });

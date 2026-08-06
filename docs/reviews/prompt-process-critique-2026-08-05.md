@@ -389,6 +389,113 @@ findings → 2 confirmed, both fixed (`firstAtxHeading` is now fence-aware; a UT
 before titling — both pinned in `docs-digest.test.ts`) and 2 refuted by mechanism (CRLF handled by
 `\s` regex semantics; unreadable-doc skip is intentional, documented at the skip site).
 
+## Design-check record — resolution 4 (charter layer), 2026-08-05
+
+Gate run pre-implementation (loop-core + persisted-schema migration). Verdict: **implementable —
+retirement-clean on every mechanism, ONE named knowing-refinement of a spec invariant (owner may
+override), eleven binding constraints.**
+
+- **Retirement verdict: clean on mechanism.** No "structural" kind, file-scope field, teleology
+  tree, or triangulated-telos output has ever existed (git `-S` probes → zero relevant hits; kinds
+  unchanged since Phase A1 `f28479a2`); the consensus node list was a size-robustness *repair*
+  (`68802512`), not a rejected free-form alternative; C3a/C3b split extraction/delta as a
+  refinement. Change 2's retired `single_task_fallback`/`edge_reasoning` step kinds are rendering
+  machinery, orthogonal to the charter model.
+- **The one knowing refinement — "never reconciled into one truth"**
+  (`spec/conceptual-design-review-design.md:252` "the deltas are the product; a merge destroys
+  them"; echoed `charter.ts:13-14`). The refutation lane called this a hard collision; verification
+  downgrades it: the rejection's own rationale is *delta destruction*, and change 4 preserves the
+  deltas as primary (disagreement density per channel-pair IS the quantitative surface) while the
+  spec already endorses triangulating toward True (`:126-127`) under leads-not-verdicts
+  (`:244-245`). Contract: the **triangulated telos ships as a LEAD artifact** — no consumer may key
+  on it in place of the charters/deltas — "true" stays nominated-never-asserted downstream, and the
+  spec's rejected-bullet is reworded in the same commit to state the boundary (a merge that
+  destroys deltas stays rejected; a downstream estimate that preserves them is in-design). Owner
+  may override before implementation; absent that, this is the contract.
+- **Binding constraints:**
+  1. **The persisted-rename hazard is live and silent:** `charter_register.json` carries NO
+     `schema_version`, NO zod parse, NO validation-pass reference on read (`artifacts.ts:252` is a
+     plain `jsonArtifact`; `validation/artifacts.ts` never names it). An old register
+     (`kind:"inferred"`) read by post-rename code flows silently through `keptByKind`/`DELTA_ROUTES`
+     misses, and the staleness DAG cannot catch a code-taxonomy change (content-keyed — an old
+     register looks fresh). The migration stamps `schema_version` + wires an explicit read policy
+     (`schemaVersion.ts` two named directions; decide discard-vs-throw for this LLM-costly but
+     regenerable artifact) in the SAME commit as the enum rename. Enumerate on-disk state first
+     (the 2026-08-05 dogfood bundle at minimum) — the catalog-cache incident class.
+  2. **Atomic taxonomy replace:** kind enum + `KIND_ORDER` + `DELTA_ROUTES` + `canonicalPair` +
+     `charterExtractionKindsForCeiling` + `KIND_LANE_TEXT` + lane filenames
+     (`charter-extraction-<kind>.json`) + kind-purity superRefine + `charter_id`/`delta_id`
+     derivations + fixtures, one commit. The word-collision `CharterProvenanceSchema.kind`
+     `"inferred"` (provenance-SOURCE sense, `charter.ts:47-54`; prompt example
+     `charterExtractionPrompt.ts:144`) is NOT co-renamed.
+  3. **Blast/VOI tiers ride the taxonomy:** `blastRadius.ts:59-62` keys intrinsic tiers on the OLD
+     delta kinds (`wrong_goal` 3 / `spec_drift` 2 / else 1); partition + VOI consume it. The new
+     channel-pair kinds get a declared tier table in the same commit; `wrong_goal`'s home moves
+     downstream with "true".
+  4. **The deepest-rung consent gate survives the move:** the true lane leaves extraction
+     (`charterExtractionKindsForCeiling` drops its 4th lane) but `Ceiling` `deepest` +
+     `explicit_opt_in` must gate True provocations at their NEW emission point (the miner,
+     downstream of triangulation), where `applyTrueCharterGate` (falsifiable-or-drop) also applies.
+     A `deep` run never emits a true nomination.
+  5. **Vestigial checkpoint fields are deleted, not migrated:**
+     `IntentCheckpoint.design_review.charters`/`.goal_graph` (`intentCheckpoint.ts:141-142`) have
+     NO writer anywhere in src (grep-verified) and one validation reader
+     (`validation/artifacts.ts:333-344`); the register's own doc records the deliberate
+     keep-charters-off-the-checkpoint decision (`charterRegister.ts:17-19`). Delete the pair + the
+     reader in the same replace; `ceiling`/`attention`/`conceptual_depth`/`perspectives` stay
+     live; the checkpoint stays `intent-checkpoint/v1` (no real payload ever carried the deleted
+     fields); DD-9 leaf-ness untouched — feeding packets add NO checkpoint DAG edges.
+  6. **The staleness slice is re-derived from the new reads:** `charterReadFileSlice`
+     (`dependencySlices.ts:75-92`) models the instruction-scope read set. Feeding changes what
+     extraction reads — re-derive the slice from the packet materializer's actual input set, keep
+     the single doc predicate `isDocIntentFile` (change-3 constraint 2 carries), and make the
+     materializer the ONE place the read-set is defined so slice and packets cannot drift.
+  7. **Ingest joins keep the refusal discipline:** file-scope overlap joins are tool-side; a lane
+     whose scopes cite files outside the repo universe must be refused/flagged at the lane
+     chokepoint — no silent-drop reintroduction (change-1 discipline; audit's packet-local
+     idDiscipline untouched). The K-of-N lane resume + kind-purity chokepoint
+     (`nextStepHelpers.ts:1291-1364`) is the substrate the per-kind packets ride (change-2
+     constraints 4/6 carry). The current invented-node drop-with-issue contract
+     (`charterExtraction.ts:247-254`) is REPLACED by file-universe grounding — "cannot conjure
+     boundaries" survives in file-set form (scopes ⊆ universe), decided explicitly, never
+     inherited silently.
+  8. **Miner authority under the open author/critic gap:** open-bugs:487 — `charter_delta`
+     defaults its miner to the extraction-merging host, and change 4 GIVES that miner
+     triangulated-telos authority. Must not worsen: triangulation stays in the separate
+     `charter_delta` step (C3a boundary), and the open bug stays open and named unless the change
+     mechanically enforces a distinct lane.
+  9. **Leveled teleology stays emergent:** `premise_height` integer, self-organized levels, NO
+     fixed L0/L1/L2 enum in any schema or prompt mandate (`charter.ts:93-97`; spec `:69-70`).
+     File scopes are content-derived join keys; stable path-sorted ordering everywhere
+     (extractor-determinism invariant).
+  10. **Sequencing + doc gate:** the always-materialized lane mechanism is already in (change 2,
+     constraint 7 carries) — change 4 changes packet CONTENT rules, kinds, and teleology only;
+     spec rows (`artifact-contract.md:61-63`, `dependency-map.md:48-56`,
+     `executor-catalog.md:65-70`) + `conceptual-design-review-design.md` §§107-160/216-229/248-256
+     + `audit-workflow-design.md:24-25/134-160` updated in the same commit (doc-contract gate).
+  11. **DD-16 carries:** audit's `CharterClarificationRequest` keying (`delta_id`/`node_id`/`pair`)
+     migrates with the taxonomy but never merges with remediate's `ClarificationRequest`.
+- **Failing tests pinned red** (`test.fails` × 2, `tests/shared/charter-extraction.test.ts`,
+  verified red-for-the-right-reason before pinning): (a) "charter kinds are the channel-pure
+  estimator set" — `expected [ 'stated', 'inferred', … ] to deeply equal [ 'stated', 'structural',
+  … ]`; (b) "the intent-model↔revealed channel pair routes as work instead of dropping" —
+  `expected [] to have a length of 1` (the middle kind is derived at runtime so both pins compile
+  across the rename; the adjacent "no routing (inferred|revealed)" test is the pinned CURRENT
+  behaviour deliberately inverted at implementation). Companion implementation-time assertions
+  (compile-bound, join with the implementation): packet channel-purity — the revealed packet
+  contains no comment text, the structural packet contains no bodies/docs/comments, the stated
+  packet contains docs + extracted comments only. Note: `extractCommentText` exists
+  (`commentDecomposition.ts:83`); NO language-neutral comment-STRIPPING or signature-surface
+  utility exists yet — both are new build, on the two-tier dependency policy (vetted lib vs tiny
+  owned bit) at implementation.
+- Independent refutation lane: agy-gemini (gemini-3.6-flash-medium), 8 typed verdicts over the
+  hand-verified recon map (6-lane census workflow, every load-bearing claim re-verified against
+  source). One `refutes_plan` downgraded on verification (the reconciliation refinement above);
+  one corrected (V5 claimed legacy checkpoints carry charters — no writer exists, the field is
+  vestigial; deletion, not migration); one test proposal replaced (it named functions that do not
+  exist — compile-red, not behavior-red). V2/V3 clean confirmed; V4/V6/V7 adopted as constraints
+  1/3/8.
+
 ## Checked and clean
 
 Selective-deepening + syntax-resolution + intent-equivalence + acquisition executors and

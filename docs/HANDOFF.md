@@ -33,9 +33,14 @@
   deterministic `docs_digest` artifact renders the repo's stated purpose into the confirm-intent
   prompt (`docs_digest_current` before the checkpoint; `intent_checkpoint.json` stays a DAG leaf).
   Gate + implementation records in the review doc; 4-lens/8-agent post-implementation review, 2
-  findings fixed+pinned, full suite 7,412/0. **Immediate next among the four:** change 4 (charter
-  layer: scope-by-feeding + channel-pure stated/structural/revealed + self-organized teleology) —
-  loop-core AND a schema migration; `/design-check` per standing rule before starting.
+  findings fixed+pinned, full suite 7,412/0. **Change 4 (charter layer): `/design-check` DONE
+  2026-08-05** — implementable; retirement-clean on every mechanism; ONE owner-visible knowing
+  refinement (the triangulated telos ships as a LEAD, never a reconciliation — spec's
+  "never reconciled" bullet reworded in the same commit; owner may override); 11 binding
+  constraints (persisted-rename hazard on the unversioned `charter_register.json` is the sharpest);
+  2 red pins in `tests/shared/charter-extraction.test.ts` (`test.fails`, rename-robust). Full
+  record in the review doc. **Immediate next among the four:** implement change 4 under the
+  record's constraints (loop-core attestation + doc-contract gate will fire).
 - **Dogfood self-audit COMPLETED 2026-08-05** (run `20260805T031732854Z_audit_tasks_completed_001`
   on `fa06d358`): 2,179 findings / 169 work blocks promoted to `.audit-tools/audit-report.md` +
   `audit-findings.json`; full lens set + deep conceptual review; bulk dispatch rode free lanes
