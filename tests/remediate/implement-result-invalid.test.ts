@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareImplementDispatch } from "../../src/remediate/steps/dispatch.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
-import type { Finding } from "audit-tools/shared";
+import { makeFinding } from "./test-helpers.js";
 
 // ---------------------------------------------------------------------------
 // A worker result file that is PRESENT but INVALID (malformed JSON or a result
@@ -21,20 +21,6 @@ import type { Finding } from "audit-tools/shared";
 const RUN_ID = "run-invalid-result";
 const BLOCK_ID = "TEST-BLOCK-INVALID";
 const FINDING_ID = "F-INV-1";
-
-function makeFinding(): Finding {
-  return {
-    id: FINDING_ID,
-    title: "A finding",
-    category: "correctness",
-    severity: "medium",
-    confidence: "medium",
-    lens: "maintainability",
-    summary: "Something to fix.",
-    affected_files: [{ path: "src/remediate/phases/plan.ts" }],
-    evidence: [],
-  };
-}
 
 async function makeMinimalState(artifactsDir: string): Promise<void> {
   const finding = makeFinding();
