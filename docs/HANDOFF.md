@@ -50,9 +50,12 @@
   `.audit-tools/audit-report.md` + `audit-findings.json` (9 critical / 125 high). First live
   exercise of charter-layer v2 (worked end-to-end; one stated-lane quarantine repaired) and the
   designated live-run-watch re-test — 5 of the 2026-08-05 minor-friction items **confirmed still
-  live**. 3 new tool-side defect leads (design-review ingest atomicity — new `open-bugs.md` entry;
-  submit-vs-ingest validator gap; terminal-cleanup friction wipe RECURRED, record restored by
-  hand). Run story + full re-test outcomes in
+  live**. Post-run same-day (shipped **v0.36.1**): all 9 criticals adversarially verified — 0
+  survived as critical (3 refuted, 6 downgraded → `open-bugs.md`) — and the run's 3 tool-side
+  defect leads were FIXED (malformed-lane quarantine at the shared consume chokepoint, submit/merge
+  boundary parity, friction-record archival + stop-gate marker agreement). All 8 nightly-inbox
+  items were answered by the owner and EXECUTED (P8/P9/P11/P12 + 4 doc decisions; ledger has the
+  landing refs). Run story + verification record in
   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md). The 2026-08-05 run
   story remains in [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
 - **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as

@@ -762,7 +762,9 @@
     "answer": "Build P11 in full: resolve the triage model target live from llm-relay (never a hardcoded pool name), preflight once and abort loudly with the relay's own error when the lane is dead, and write a seen/classified/errored coverage stamp beside the JSONL.",
     "subject": "Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool llm-relay deleted. Give the lane a health contract?",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-08-06T16:13:27.110Z"
+    "decided_at": "2026-08-06T16:13:27.110Z",
+    "completed_at": "2026-08-06T16:33:00.250Z",
+    "completed_ref": "12722548"
   },
   "0441e5462e423ee0": {
     "disposition": "settled",
