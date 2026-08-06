@@ -1,2 +1,0 @@
-npm notice run audit-tools@0.36.1 check:tests
-npm notice run tsc -p tsconfig.test.json
