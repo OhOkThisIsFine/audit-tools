@@ -1204,6 +1204,16 @@
   named consumer ingests it (or is archived with the promoted deliverables); cleanup and the
   stop-gate agree on what constitutes a run.
 
+- **Design-review multi-lane ingest is not failure-atomic; invalid lane JSON hard-fails the call
+  instead of quarantining (2026-08-06, medium).** Observed on the v0.36.0 dogfood: next-step
+  consumed `design-review-contract-findings.json`, then hit malformed JSON in the judge's
+  `design-review-conceptual-findings.json` and exited 1 — the consumed contract results were lost
+  (state re-derived `design_review_contract`; the lane had to re-run) and the host had to hand-fix
+  the judge's JSON to unblock. Charter ingest already quarantines an invalid submission and
+  re-fires only that lane. **Property to hold:** a lane result is consumed only after it
+  validates, an invalid lane submission quarantines + re-fires that lane alone, and a
+  mid-ingest failure never loses a sibling lane's validated results.
+
 - **friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run
   (2026-08-06, low).** The checkout is shared; the gate keys "a run happened in this session" on
   disk-marker recency alone (documented: no per-session signal reaches a Stop hook). Observed: a
