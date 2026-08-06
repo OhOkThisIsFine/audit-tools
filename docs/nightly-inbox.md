@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-05 at `563f7c09`.*
+*Last run: 2026-08-06 at `2b6ba83e`.*
 
 
 ---
@@ -31,25 +31,30 @@ records them in the tracked ledger, and does the work.
 # Documentation
 
 
-<!-- nightly:item key=d58dbfc3bbc8ef8b -->
+<!-- nightly:item key=2994bbdaf341d0c4 -->
 
-## `docs-1` — Constitutional doc states the artifact registry has 38 entries; it has 37 — correct it, or stop stating a count?
+## `docs-3` — The handoff routes work through three llm-relay pools that no longer exist — remap them, or drop the pool names?
 
-*Documentation · open 1 night · `spec/audit/artifact-contract.md`*
+*Documentation · open 1 night · `docs/HANDOFF.md`*
 
 ### In plain terms
 
-One of the project's "constitutional" documents — spec/audit/artifact-contract.md, a file the nightly routine is mechanically forbidden from editing on its own — opens by saying the artifact registry in src/audit/io/artifacts.ts has 38 entries. It has 37. The missing one is provider_confirmation, which was deleted by the dispatch inversion (commit 6df1f477) when llm-relay took over provider routing. Two independent reviewers counted the registry from source and both got 37, and running the compiled module reports 37 as well, so this is not in doubt. The routine cannot fix it itself: constitutional docs require an explicit attestation from you before a commit touching them is allowed, and that refusal exists precisely so a doc-review sweep cannot quietly rewrite a normative contract. So the choice is yours. Correcting the number is a one-character edit. The alternative worth considering is that a hand-typed count of a code registry will go stale again on the very next commit that adds or removes an artifact — this one drifted within days and nobody noticed — so you may prefer to have a build check verify the number instead (that mechanism is proposed separately), or to drop the count from the sentence entirely.
+The handoff document describes how this project sends work to other AI providers. It says the work is routed through three named lanes: `pool/fast`, `pool/coding` and `pool/reasoning`. Those three names were retired by llm-relay (the routing proxy) when it renamed its lanes after how much thinking effort they represent: `low`, `medium`, `high` and `xhigh`. So all three names in the handoff now resolve to nothing — sending work to `pool/fast` gets a flat error naming the four real lanes.
+
+The reason this is a question rather than a silent fix is that there is no obvious translation. Is `fast` the `low` lane or the `medium` one? Is `coding` `high` or `xhigh`? Each is a guess about what the sentence originally meant, and writing the wrong guess into the handoff is worse than leaving a name that is visibly dead — a dead name fails loudly, a plausible wrong name routes work to the wrong lane quietly.
+
+The same dead name appears a second time further down the document, in a note about a routing defect ("`pool/coding` does not fail over past a rate-limited first candidate"). If that pool no longer exists, it is worth deciding whether that defect note is still live at all, or whether it describes a lane that has been gone for weeks.
 
 ### The question
 
-spec/audit/artifact-contract.md line 17 says "`src/audit/io/artifacts.ts` — 38 entries". The registry has 37. How should this be resolved?
+docs/HANDOFF.md says routing goes "through `pool/fast` / `pool/coding` / `pool/reasoning`", but llm-relay defines only `low`, `medium`, `high`, `xhigh`. Supply the intended mapping, drop the pool names from the sentence, or re-verify whether the `pool/coding` failover defect note below it still describes anything real?
 
 ### Your answer
 
-- [ ] **1. Correct it to 37** — Correct the count in spec/audit/artifact-contract.md from 38 to 37 under a constitutional-doc attestation. Keep the count in the prose.
-- [ ] **2. Correct it AND gate it** — Correct the count to 37, and additionally build the mechanical check proposed in P10 so a registry count can never silently drift again.
-- [ ] **3. Drop the count** — Remove the entry count from the sentence entirely. The contract enumerates what the registry must contain; the size does not need restating in prose.
+- [ ] **1. Map them to effort tiers** — Rewrite the sentence with the current effort-tier pool names, using the mapping in the global CLAUDE.md (offload-fast → pool/medium, offload-coding → pool/high, opus/fable → pool/xhigh). Keep the `pool/coding` defect note but restate it against its new pool name.
+- [ ] **2. Drop the pool names** — Delete the three pool names from the sentence and let it say only that llm-relay owns concrete provider/model routing. The pool roster is llm-relay's to publish and drifts independently of this repo, so naming specific pools here is a standing drift source.
+- [ ] **3. Drop the names AND retire the defect note** — Drop the pool names, and delete the `pool/coding` failover defect note as well — a defect against a pool that no longer exists cannot be filed or verified, so it is a dead record rather than open work.
+- [ ] **4. Leave it** — Leave the sentence as it is. A visibly-dead pool name fails loudly and is preferable to a plausible wrong one; correct it when someone next touches that routing.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -61,36 +66,41 @@ spec/audit/artifact-contract.md line 17 says "`src/audit/io/artifacts.ts` — 38
 <details>
 <summary>Evidence (5) — what was verified against code, and how</summary>
 
-- spec/audit/artifact-contract.md:17 reads "`src/audit/io/artifacts.ts` — 38 entries, each declaring a filename, a phase".
-- Runtime count: node --input-type=module -e "import('./dist/audit/io/artifacts.js').then(m=>console.log(Object.keys(m.ARTIFACT_DEFINITIONS).length))" prints 37.
-- A reviewer lane and an independent adversary lane each counted ARTIFACT_DEFINITIONS from source and both reported 37; the adversary enumerated all 37 by name.
-- The removed entry is provider_confirmation, deleted in commit 6df1f477 ("dispatch inversion — llm-relay owns provider routing; Gate-0 retired").
-- spec/audit/artifact-contract.md is listed in src/shared/constitutionalDocPaths.ts (CONSTITUTIONAL_DOC_PATHS), so .claude/hooks/pre-commit-gate.mjs blocks a commit touching it without an attestation. The nightly applied nothing here by design.
+- docs/HANDOFF.md:76 reads "`llm-relay` owns concrete provider/model routing through `pool/fast` / `pool/coding` / `pool/reasoning` at `http://127.0.0.1:8791/v1`."
+- C:\Users\ethan\.llm-relay\config.json → routing.pools has exactly the keys `low, medium, high, xhigh` (read directly this run). None of fast/coding/reasoning exist.
+- Corroborated by the still-open sol-4, which records llm-relay answering POST /v1/chat/completions for model "pool/fast" with: no pool "fast" configured (available: low, medium, high, xhigh). The rename landed at llm-relay v0.15.4.
+- docs/HANDOFF.md carries `pool/coding` a SECOND time in the relay-defect bullet, so the question covers two sites, not one.
+- Reviewer and independent adversary both reached ESCALATE rather than auto-apply: the old-name → new-tier mapping is a judgment call, not a code-anchored fact.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=e0c4fbe93a7814ef -->
+<!-- nightly:item key=4c321d8d2b125e4d -->
 
-## `docs-2` — Constitutional doc states the executor registry has 28 entries; it has 27 — correct it, or stop stating a count?
+## `docs-4` — instruction-file edit: CLAUDE.md documents `resolveHostConcurrencyLimit` as live concurrency machinery, but nothing in src/ calls it — correct the doc, or delete the dead symbol?
 
-*Documentation · open 1 night · `spec/audit/executor-catalog.md`*
+*Documentation · open 1 night · `CLAUDE.md`*
 
 ### In plain terms
 
-The same problem as the artifact-contract item, in the other normative catalogue. spec/audit/executor-catalog.md opens by saying the executor registry in src/audit/orchestrator/executors.ts has 28 entries. It has 27. The missing one is provider_confirmation_executor, removed by the same dispatch-inversion commit (6df1f477) that took provider routing out of the audit graph and gave it to llm-relay. Two independent lanes counted the registry from source and agreed on 27, and the compiled module reports 27. Like its sibling, this file is constitutional, so the routine is blocked from editing it without your explicit sign-off — the block is working as intended here. Your options are the same: correct the number, correct it and add a build check so the class of error cannot recur, or decide the prose should not carry a count at all.
+The project instruction file describes how remediation work is spread across parallel workers. It names two functions as the machinery that limits how much runs at once: `scheduleWave` and `resolveHostConcurrencyLimit`. The first is real and heavily used. The second is not called by any production code at all — it has a definition, one re-export in a barrel file that nothing consumes, a mention in a comment, and six references from its own tests. So the instruction file tells every future agent that a piece of machinery is load-bearing when it is actually dead.
+
+This matters more than a normal stale reference because of where it lives. Instruction files are what agents read to decide how the system works, and this routine is forbidden from editing them on its own — a wrong edit there changes the behaviour of every future session. So it comes to you.
+
+There are two different repairs and they are not equivalent. One is to fix the sentence, leaving the dead function in place. The other is to delete the function, its unconsumed re-export and its tests, and then fix the sentence — which is what the project's "delete deprecated paths" preference would normally call for. Worth knowing: the dead-code release gate does NOT catch this, because the barrel re-export counts as a consumer. That is the known blind spot where whole unwired modules hide.
 
 ### The question
 
-spec/audit/executor-catalog.md line 10 says "`src/audit/orchestrator/executors.ts` — 28 entries". The registry has 27. How should this be resolved?
+CLAUDE.md line 129 says remediation dispatch limits concurrency "plus `scheduleWave` / `resolveHostConcurrencyLimit`". `resolveHostConcurrencyLimit` has no production caller. Correct the sentence only, or delete the symbol (and its unconsumed re-export and tests) and then correct the sentence?
 
 ### Your answer
 
-- [ ] **1. Correct it to 27** — Correct the count in spec/audit/executor-catalog.md from 28 to 27 under a constitutional-doc attestation. Keep the count in the prose.
-- [ ] **2. Correct it AND gate it** — Correct the count to 27, and additionally build the mechanical check proposed in P10 so a registry count can never silently drift again.
-- [ ] **3. Drop the count** — Remove the entry count from the sentence entirely. The catalogue enumerates the executors; the size does not need restating in prose.
+- [ ] **1. Delete the symbol, then fix the doc** — Delete `resolveHostConcurrencyLimit`, its re-export from src/remediate/steps/dispatch.ts, its doc-comment mention, and its tests; then drop it from the CLAUDE.md sentence. This is the standing "delete deprecated/legacy paths" preference applied literally.
+- [ ] **2. Fix the doc only** — Leave the symbol in place and just remove it from the CLAUDE.md sentence, so the instruction file stops presenting it as live machinery. Keep the function if it is intended for imminent wiring.
+- [ ] **3. Fix the doc and log the deletion** — Remove it from the sentence now, and add a backlog entry to delete the symbol, so the instruction file is correct immediately without bundling a code deletion into a doc fix.
+- [ ] **4. Leave it** — Leave both the sentence and the symbol as they are.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -100,13 +110,64 @@ spec/audit/executor-catalog.md line 10 says "`src/audit/orchestrator/executors.t
 ```
 
 <details>
-<summary>Evidence (5) — what was verified against code, and how</summary>
+<summary>Evidence (7) — what was verified against code, and how</summary>
 
-- spec/audit/executor-catalog.md:10 reads "`src/audit/orchestrator/executors.ts` — 28 entries, each declaring an `id`, a".
-- Runtime count: node --input-type=module -e "import('./dist/audit/orchestrator/executors.js').then(m=>console.log(m.EXECUTOR_REGISTRY.length))" prints 27.
-- A reviewer lane and an independent adversary lane each counted EXECUTOR_REGISTRY from source and both reported 27; the adversary enumerated all 27 by name.
-- The removed entry is provider_confirmation_executor, deleted in commit 6df1f477.
-- spec/audit/executor-catalog.md is listed in src/shared/constitutionalDocPaths.ts, so the pre-commit gate blocks an unattested change. The nightly applied nothing here by design.
+- CLAUDE.md:129 — "**Dispatch:** parallel waves (`src/remediate/steps/dispatch.ts`: `prepareImplementDispatch` / `mergeImplementResults`, plus `scheduleWave` / `resolveHostConcurrencyLimit` for concurrency limiting)."
+- Every occurrence of `resolveHostConcurrencyLimit` under src/ this run: src/remediate/steps/dispatch/waveScheduling.ts:113 (the definition), src/remediate/steps/dispatch.ts:39 (a barrel re-export), and src/shared/types/auditorDescriptor.ts:46 (a doc comment). No call site.
+- tests/ references it 6 times — i.e. it is exercised only by its own tests, the tested-but-unwired class CLAUDE.md describes under the dead-code gate.
+- CONTRAST, so the sentence is only half wrong: `scheduleWave` IS live — called at src/remediate/steps/dispatch/marshal.ts:508, src/remediate/steps/contractPipeline.ts:1731, src/shared/dispatch/rollingDispatch.ts:785, src/shared/quota/capacity.ts:772 and src/shared/repair/brokeredDispatch.ts:270.
+- npm run check:deadcode (knip default mode) passes, so no gate catches this: the barrel re-export counts as a consumer. Known blind spot — [[orphan-modules-are-invisible-to-both-knip-modes]].
+- Independently corroborated by the repo's own backlog: docs/backlog/forward-tracks.md:24-25 already records "`CLAUDE.md` documents `resolveHostConcurrencyLimit` as dispatch concurrency machinery (zero call sites in `src/` — definition, one unconsumed re-export, and its own tests)". Verified independently against the tree this run rather than trusted.
+- ESCALATE-ONLY by rule: CLAUDE.md is an instruction file and is never auto-edited.
+
+</details>
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=9a88507e5fe2f6d0 -->
+
+## `backlog-1` — The test-tree conversion entry is fully shipped, but it is the ONLY home for three durable rules — rehome them and delete it, or keep the entry?
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+
+### In plain terms
+
+The backlog is meant to be a list of things still to do; once work ships, its entry is deleted, because git already records what happened. One entry — the conversion of the test files from one format to another — announces itself as COMPLETE. By the normal rule it should simply be deleted.
+
+It cannot be deleted as-is, because it is the only place three still-useful rules are written down. First, a measured rejection: someone tried turning on type-checking for the remaining files and it produced 8,903 errors, so the idea was rejected with numbers attached — exactly the kind of record that stops a future agent rebuilding something that was already tried and found bad. Second, a warning that converting a file listed in the flaky-test baseline must move its baseline entry in the same commit, or that record is orphaned. Third, a pointer to the script that checks a conversion did not silently change what a test asserts.
+
+The related reference file already carries a fourth fact from this entry (that exactly one file is deliberately outside the type-check gate), so part of the rehoming is already done and the rest is not. Deleting the entry without moving those three first would quietly destroy them, which is why this is a question rather than a cleanup.
+
+### The question
+
+The entry's work is verifiably complete. Move its three durable rules (the measured checkJs rejection, the flake-baseline key-move warning, and the conversion-parity script) into docs/backlog/durable-traps.md and delete the entry, or leave the entry standing as their home?
+
+### Your answer
+
+- [ ] **1. Rehome the three rules, then delete** — Move the measured checkJs:true rejection, the flake-baseline key-move warning and the conversion-parity script pointer into docs/backlog/durable-traps.md beside the claim it already carries, then delete the open-bugs entry outright. This is the standing "durable rule worth keeping → move it to its durable home in the same edit, then delete the entry" rule applied literally.
+- [ ] **2. Keep only the rejection, delete the rest** — Rehome only the measured checkJs:true rejection (the one that prevents rebuilding a retired idea) and delete the entry with its other two notes, treating the parity script and baseline warning as spent now that no further conversion is planned.
+- [ ] **3. Leave the entry** — Leave the entry in open-bugs.md as the home for those rules, accepting a completed item sitting in the open list.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- The entry declares itself complete: "**Test-tree `.mjs`→`.ts` conversion: COMPLETE at its floor (2026-07-29).**" — so by the shipped-entry rule it is a deletion candidate.
+- Verified complete at HEAD: tests/** holds 558 files matching *.test.*, of which exactly ONE is .mjs — tests/shared/shared-tests-invariants.test.mjs, the documented permanent holdout. CLAUDE.md already states this ("all `.test.ts` except the one permanent holdout"), so that fact is independently homed.
+- BLOCKER on deleting: three durable rules appear ONLY in this entry. (1) the measured rejection "flipping `checkJs: true` with an exclude list — the flip yields 8,903 errors"; (2) "Converting a file named in `scripts/shared/test-flake-baseline.json` must move its baseline key in the same commit, or the flake record orphans"; (3) the per-lap check `node scripts/shared/conversion-assertion-parity.mjs`.
+- docs/backlog/durable-traps.md:420-424 carries the NARROWED claim (the 1-file floor and the checkJs:false exclusion) but none of those three rules — checked directly this run.
+- Escalated rather than auto-applied: the shipped half is code-proven, but the "nothing durable is lost" half is not, and the rubric says to escalate rather than guess when the proof is incomplete.
+- SEPARATE but related, and NOT auto-fixed: both this entry and durable-traps.md:420 state "563 of 564" test files; the real count is 558. A pinned count is status-noise, so it is not bumped — it is folded into sol-3 as a third drift instance.
 
 </details>
 
@@ -120,7 +181,7 @@ spec/audit/executor-catalog.md line 10 says "`src/audit/orchestrator/executors.t
 
 ## `sol-1` — A premise probe aimed at a gitignored runtime file still reports "absent", which is the verdict that CLOSES an item — refuse the target?
 
-*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/nightly/items.mjs`*
 
 ### In plain terms
 
@@ -167,7 +228,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P8-probe-on-untracked-path-yield
 
 ## `sol-2` — The pre-commit gate still fires only on `git commit`, so merge/rebase/cherry-pick/revert/am land completely ungated — widen it and delete the trap entry?
 
-*Recurring-problem solutions · open 1 night · `.claude/hooks/pre-commit-gate.mjs`*
+*Recurring-problem solutions · open 2 nights · `.claude/hooks/pre-commit-gate.mjs`*
 
 ### In plain terms
 
@@ -211,7 +272,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P9-gate-misses-commit-creating-s
 
 ## `sol-3` — Two hand-typed registry counts drifted in one night, in docs that cannot be auto-fixed — add a build check that verifies the number?
 
-*Recurring-problem solutions · open 1 night · `scripts/check-doc-code-citations.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/check-doc-code-citations.mjs`*
 
 ### In plain terms
 
@@ -238,7 +299,7 @@ Should scripts/check-doc-code-citations.mjs be extended to verify a stated regis
 Full proposal: [`.audit-tools/nightly/proposals/P10-registry-counts-are-hand-maintained/PROPOSAL.md`](../.audit-tools/nightly/proposals/P10-registry-counts-are-hand-maintained/PROPOSAL.md)
 
 <details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
+<summary>Evidence (9) — what was verified against code, and how</summary>
 
 - spec/audit/artifact-contract.md:17 says "38 entries"; ARTIFACT_DEFINITIONS has 37 (verified at runtime and by two independent lanes).
 - spec/audit/executor-catalog.md:10 says "28 entries"; EXECUTOR_REGISTRY has 27 (verified at runtime and by two independent lanes).
@@ -247,6 +308,8 @@ Full proposal: [`.audit-tools/nightly/proposals/P10-registry-counts-are-hand-mai
 - Both docs are in src/shared/constitutionalDocPaths.ts, so neither can be corrected without a constitutional-doc attestation.
 - Scope is small and precise: `grep -rnE '[0-9]+ entries, each' --include='*.md' .` matches exactly these two sites in the whole corpus.
 - Precedent for replacing a hand-maintained restatement: check:philosophy-brief (README philosophy block) and check:gate-enumeration (P6, shipped 6b8f8d7a — "24 gate steps rendered identically in 2 docs").
+- RECURRENCE 2026-08-06: the same two counts moved again, in the OPPOSITE direction and within 24 hours. Commit 3fb84823 added `docs_digest: jsonArtifact("docs_digest.json", "analysis")` to src/audit/io/artifacts.ts and `id: "docs_digest_executor"` to src/audit/orchestrator/executors.ts, taking the registries from 37→38 and 27→28 — so the doc sentences that were WRONG last night are RIGHT tonight, with no doc edit. A hand-typed count drifts in both directions; only a computed one cannot.
+- THIRD INSTANCE, same night, different docs: docs/backlog/open-bugs.md and docs/backlog/durable-traps.md BOTH state that `check:tests` reaches "563 of 564" test files. The tree holds 558 (tests/** matching *.test.*: 557 .ts + 1 .mjs; tracked count identical). The RATIO the claim exists to make — exactly one file outside the gate — is still true; only the absolute numbers rotted, because six test files were removed since 2026-07-29. Deliberately NOT auto-bumped: a pinned count is status-noise, and the rubric says to derive or drop it rather than bump the number. That decision is this item.
 
 </details>
 
@@ -257,7 +320,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P10-registry-counts-are-hand-mai
 
 ## `sol-4` — Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool llm-relay deleted. Give the lane a health contract?
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/shared/triage-backlog.mjs`*
 
 ### In plain terms
 
@@ -298,11 +361,67 @@ Full proposal: [`.audit-tools/nightly/proposals/P11-leg2-lane-cannot-sweep-the-b
 ---
 
 
+<!-- nightly:item key=0441e5462e423ee0 -->
+
+## `sol-5` — A premise probe pins ONE location, but an item's premise is a RELATION between two — so an item survives when the other side moves. Two items were nearly answered with a corrupting edit tonight.
+
+*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
+
+### In plain terms
+
+Every question this routine puts to you carries a "premise probe": a literal snippet of text quoted from a file. Before the question is shown again, the routine re-checks that the snippet is still there. If it has vanished, the question is closed automatically on the grounds that whatever it was about has been dealt with. That is what stops answered questions from nagging forever.
+
+The flaw is that a probe describes ONE place, while almost every question is about a MISMATCH between two places — the document says one thing, the code says another. The probe watches the document. If the document gets fixed, the question closes correctly. But if the CODE moves instead, and the mismatch disappears that way, the probe still finds its snippet, the question comes back, and its stored answer buttons now describe the wrong repair.
+
+That happened tonight, twice. Last night you were asked whether two spec documents overstated how many entries two registries hold — the docs said 38 and 28, the code had 37 and 27. Since then a feature commit added exactly one new entry to each registry, so the code now holds 38 and 28 and both documents are simply correct. Nothing was wrong any more. But both questions would have been put back in front of you tonight offering "Correct it to 37" and "Correct it to 27" — clicking either would have written a fresh error into a document that had just become right. This run dropped both by hand after counting the registries; no mechanism would have.
+
+This is the second defect in this probe machinery in two nights. The other one — still open as sol-1 — is a probe that cannot READ its file and reports "gone", closing a live question. Both are the same underlying thing: what the probe measures is not what the question is about.
+
+### The question
+
+How should the routine handle an item whose premise is a doc-vs-code divergence? Forbid the item class for computed values (a count has no string to quote, so probes cannot work at all — build the gate in sol-3 instead), add a two-sided probe form so either side moving closes the item, or leave the one-sided probe and accept that a code-side fix leaves a stale question carrying a corrupting option?
+
+### Your answer
+
+- [ ] **1. Forbid the class; build the gate** — Do not raise a hand-typed count as a doc-review item at all. A count has no literal string on the code side, so a probe is not weak there but inapplicable. Raise it once as the gate request (sol-3) and let the machine-verified number make the whole item class impossible in both directions.
+- [ ] **2. Add a two-sided probe** — Extend premise_probes with a negative form { file, absent } and require an item naming two locations to carry a probe on each. writeOpenItems enforces the count structurally; partitionBySettled closes the item as soon as EITHER side stops holding, which is the correct semantics for a divergence.
+- [ ] **3. Both** — Build the two-sided probe for divergences whose two sides are both quotable text, AND forbid the computed-value class outright, since no probe form can express a count.
+- [ ] **4. Leave it** — Leave the probe contract as is. The routine re-verifies items by hand each run anyway, and tonight it caught both — accept that the mechanical half is one-sided.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P12-one-sided-probe-cannot-track-a-divergence/PROPOSAL.md`](../.audit-tools/nightly/proposals/P12-one-sided-probe-cannot-track-a-divergence/PROPOSAL.md)
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- scripts/nightly/items.mjs:332 — `const status = evaluated.every((p) => p.state === 'absent') ? 'resolved' : 'open';` — resolution is a function of the probes alone, and a probe is a single {file, contains} assertion about one location (the filter at :316-323).
+- INSTANCE: items docs-1 (subject d58dbfc3bbc8ef8b) and docs-2 (subject e0c4fbe93a7814ef) were written 2026-08-05 at HEAD 563f7c09, when spec/audit/artifact-contract.md:17 said "— 38 entries" against a 37-entry ARTIFACT_DEFINITIONS, and spec/audit/executor-catalog.md:10 said "— 28 entries" against a 27-entry EXECUTOR_REGISTRY.
+- Their probes were the DOC side only: {spec/audit/artifact-contract.md, "— 38 entries"} and {spec/audit/executor-catalog.md, "— 28 entries"}.
+- Commit 3fb84823 then added `docs_digest: jsonArtifact("docs_digest.json", "analysis")` and `id: "docs_digest_executor"`, taking the registries to 38 and 28. Verified three ways this run: a direct count from the built registries, an independent spec-reviewer lane, and an independent adversary lane — all three returned 38 and 28.
+- So both docs are CORRECT at HEAD, both probes still PASS, and partitionBySettled would have re-surfaced both items tonight carrying the options "Correct it to 37" and "Correct it to 27" — edits that would introduce the error the items existed to remove.
+- RECURRENCE: this is the second probe-contract defect in two nights. sol-1 (2026-08-05, still open) is the read-failure branch — a probe on a gitignored path reports absent, which is the verdict that CLOSES an item. Same class: the probe's truth value is not the item's.
+- Full analysis, both candidate mechanisms and their false-positive surfaces: .audit-tools/nightly/proposals/P12-one-sided-probe-cannot-track-a-divergence/PROPOSAL.md
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- .claude/skills/start-lap/SKILL.md — the roadmap step pointed at a HANDOFF section called "Suggested ordering" that no longer exists; corrected to "Immediate next". Verified both ways: docs/HANDOFF.md has exactly "## Live state" (6), "## Verification state" (56) and "## Immediate next" (63), and "Suggested ordering" appeared nowhere else in the tracked tree. The section was dropped by commit 90032173 and the skill was never updated. Reviewer and adversary agreed.
+- docs/HANDOFF.md — deleted a FALSE claim and its status-log tail. The bullet asserted "The nightly inbox is EMPTY" and then narrated two 2026-08-04 completions (sol-1 `391c743d`, sol-3 `3750a943`). The inbox is not empty: .audit-tools/nightly/open-items.json held 6 items and docs/nightly-inbox.md rendered all 6. Both commits and both completion refs are recorded in .claude/nightly-decisions.json (subjects 41b0006a30468211 and 5938b991779c1cd2), so no record was lost. The still-open remainder (the relay-side pool/coding failover defect) was kept verbatim and NOT restated. The independent adversary agreed the narration should go but flagged that item ids are reused across runs, so a reader could confuse the 2026-08-04 sol-1/sol-3 with tonight's different sol-1/sol-3; its proposed pointer was adopted rather than contested, and the replacement text names the ledger as the identifying record.
+
+- CLOSED WITHOUT AN EDIT — docs-1 (d58dbfc3bbc8ef8b) and docs-2 (e0c4fbe93a7814ef), last night's two registry-count items. They are resolved because the CODE moved to match the docs: 3fb84823 added the `docs_digest` artifact and `docs_digest_executor`, taking the registries from 37→38 and 27→28, so spec/audit/artifact-contract.md and spec/audit/executor-catalog.md are now correct as written. Verified three independent ways. They are dropped BY HAND: their probes pin the doc side, which still matches, so partitionBySettled would have re-surfaced both offering "Correct it to 37"/"Correct it to 27" — edits that would have introduced the error. That failure mode is filed as the new sol-5.
+
+- LEG 2 SWEPT IN FULL, and established NO deletions — the first complete backlog sweep in four runs (the previous three were partial). 114 entries examined: 96 in open-bugs.md across three bounded line ranges (29 + 32 + 35), 15 in forward-tracks.md, 3 in deferred.md. Zero entries were deleted, and that is a VERIFIED result rather than an unexamined one. Four lane verdicts of SHIPPED were checked individually and ALL FOUR failed verification: three entries whose titles are explicitly about their own accepted residuals ("four accepted residuals", "one low residual"), and one whose open property is refuted at HEAD — the merge is supposed to name WHICH failure per task, and src/audit/cli/dispatch.ts:739 still lumps them ("All 430 assigned task result(s) were missing or invalid"). A naive apply of the lane verdicts would have deleted three live entries. The fourth SHIPPED (the test-tree conversion) is genuinely complete but holds durable rules with no other home, so it is escalated as backlog-1 rather than deleted.
 
 
 </details>
@@ -312,11 +431,9 @@ Full proposal: [`.audit-tools/nightly/proposals/P11-leg2-lane-cannot-sweep-the-b
 <summary>What the last run could NOT cover</summary>
 
 
-- The weekly /insights pass — DUE and FAILED TO RUN, so it is a skipped leg, not a quiet one. The stamp .audit-tools/nightly/insights-last-run.json is absent (the file the 2026-07-30 run recorded as reading 2026-07-25 is gone from disk), which makes the pass due by the routine's own rule. The nested session `claude -p "/insights"` exited 1 with "Failed to authenticate: OAuth session expired and could not be refreshed" — the nested-session lane cannot authenticate on this machine tonight. No stamp was written, deliberately: leaving it absent makes the pass due again tomorrow rather than parking the failure for a week. Leg 3 therefore ran on the written surfaces (memory, global CLAUDE.md, backlog traps/open-bugs, friction records) but WITHOUT the cross-session friction counts /insights measures from the outside.
+- Leg 2 lane ROUTING — the codex lane produced NOTHING and the work was re-routed, so this is a lane failure to record even though coverage was preserved. `codex exec` was handed all 113 backlog entries in ONE call; it stayed alive for over 100 minutes and emitted zero bytes, and was still running when the run finished. That is a CALLER error, not a lane defect — the oversized-batch shape this repo has recorded before ([[offload-lane-failures-are-usually-the-caller]]) — and it is the same class sol-4 tracks. Coverage was preserved by re-routing to four bounded subagent lanes (three over open-bugs.md by line range, one over forward-tracks + deferred), which is why leg 2 is NOT partial this run. Standing lesson for the next run: bound the batch per lane up front rather than after the timeout.
 
-- Leg 2 (backlog) — the EXHAUSTIVE per-entry shipped-detection pass is PARTIAL for the THIRD consecutive run, and this time the cause is a dead default rather than a rate limit: scripts/shared/triage-backlog.mjs asks for `pool/fast`, a pool llm-relay deleted when it renamed its pools to low/medium/high/xhigh, so an unmodified run 400s on every entry. Re-run on pool/medium it reached ~32 of 154 entries, with 2 rows lost to unparseable model output. NO entry classified already_shipped, so leg 2 established NO deletions this run — "no shipped entries found" is again NOT what this run established. What leg 2 DID cover: all four backlog gates green via verify:checks (budget, status, index, doc-links) plus check:doc-code-citations; the ~32 classified entries each carry a mechanically evaluated premise stamp; and the three `premise: gone` stamps were hand-verified rather than trusted — two proved FALSE (see sol-1) and none justified a deletion. In particular "Remediation pause/recovery is not durable" was stamped gone but is unbuilt at HEAD (`plan_only` appears nowhere in src/remediate), so no entry was deleted on the strength of a stamp. Filed as sol-4 with a full proposal.
-
-- Second independent model family — degraded. The six doc-review reviewer lanes and the independent adversary lane all ran through the relay's tier mapping rather than across distinct providers, and the two peer-CLI lanes were not exercised: the nested-session lane is the one that failed OAuth above. Coverage was preserved in the sense that every in-scope doc was reviewed by a reviewer lane and independently re-attacked by a separate adversary lane, and both surfaced findings were confirmed twice from source plus once mechanically by the routine itself — but the cross-family check ran on fewer distinct providers than the routine intends.
+- The weekly /insights pass — DUE and FAILED TO RUN for the second consecutive week, so it is a skipped leg rather than a quiet one. The stamp .audit-tools/nightly/insights-last-run.json is still absent, which makes the pass due by the routine's own rule. Re-probed directly this run rather than assumed from the prior record: `claude -p` in the repo root exits 1 with "Failed to authenticate: OAuth session expired and could not be refreshed" (plus a non-fatal "this workspace has not been trusted" warning). No stamp was written, deliberately — leaving it absent keeps the pass due tomorrow instead of parking the failure for a week. Unblocking it needs an interactive `claude` login on this machine so the nested spawn inherits a live token. Leg 3 therefore ran on the written surfaces only (project + global memory, backlog durable-traps and open-bugs, friction records) and again lacks the cross-session friction counts /insights measures from the outside.
 
 
 </details>
