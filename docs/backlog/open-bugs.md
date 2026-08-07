@@ -465,7 +465,12 @@
   and is not. `scripts/shared/triage-backlog.mjs` now salvages the object between the first `{` and last
   `}`, but ONLY after `finish_reason === "stop"`, so a truncated body cannot be laundered into a
   valid-looking record. The general property is unbuilt: schema non-adherence is a per-alias trait the
-  roster does not record, so every new caller rediscovers it.
+  roster does not record, so every new caller rediscovers it. **Recurrence 2026-08-07:** the nightly
+  leg-2 sweep on `pool/medium` classified 72 of 112 entries and lost 40 to the same fault (prose before
+  the JSON, or none at all), degrading as it ran — the preflight passed and the lane never died, so
+  P11's health contract reported a 64%-coverage sweep instead of a silent partial one, which is the
+  stamp working. Coverage is recovered by re-running (errored rows re-queue); the per-alias trait is
+  what would stop it recurring.
   (3) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
   (`api_key_env` type narrowing, the leaked tool-call XML, the doc-path typo) — the standing
   verify-against-HEAD rule caught them, but only after each was opened. The triage lane cannot check
