@@ -13,14 +13,13 @@ import {
 } from "../validation/anchorGrounding.js";
 import { runAuditStep } from "./auditStep.js";
 import {
-  type ActiveDispatchState,
   DISPATCH_RESULT_MAP_FILENAME,
-  ACTIVE_DISPATCH_FILENAME,
   AUDIT_TASK_CLAIM_LEASE_MS,
   loadDispatchResultMap,
   entriesByTaskId,
   buildPendingAuditTasks,
 } from "./dispatch.js";
+import { markDispatchStatus } from "./dispatch/pausePersist.js";
 import { addFileLineCountHints } from "./lineIndex.js";
 import { artifactNameForId, isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
@@ -988,23 +987,21 @@ export async function mergeAndIngest(params: {
     await claimRegistry.clear(passing.map((r) => r.task_id));
   }
 
-  const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  try {
-    const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
-    if (dispatch.run_id === runId) {
-      // "merged" only when this round is fully drained: every dispatched task
-      // accepted AND nothing held back (budget-capped notDispatched > 0,
-      // still-in-flight deferred > 0, or peer-reclaimed unowned > 0, stay
-      // "active" — a follow-up round on the same run-id still has to merge the
-      // rest).
-      dispatch.status =
-        failing.length > 0 || notDispatched.length > 0 || unowned.length > 0 ||
-        deferred.length > 0
-          ? "active"
-          : "merged";
-      await writeJsonFile(activeDispatchPath, dispatch);
-    }
-  } catch { /* no active dispatch file — skip */ }
+  // "merged" only when this round is fully drained: every dispatched task
+  // accepted AND nothing held back (budget-capped notDispatched > 0,
+  // still-in-flight deferred > 0, or peer-reclaimed unowned > 0, stay
+  // "active" — a follow-up round on the same run-id still has to merge the
+  // rest). A locked field-level flip: the old whole-artifact read→write here
+  // could clobber a pause/terminal stamped between its read and its write.
+  // Absent file / other run's artifact → no-op inside the mutator.
+  await markDispatchStatus(
+    artifactsDir,
+    runId,
+    failing.length > 0 || notDispatched.length > 0 || unowned.length > 0 ||
+      deferred.length > 0
+      ? "active"
+      : "merged",
+  );
 
   let retryDispatchPath: string | null = null;
   if (failing.length > 0) {

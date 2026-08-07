@@ -25,7 +25,7 @@ import type {
   DispatchModelTier,
 } from "audit-tools/shared";
 import { isFileMissingError, ClaimRegistry, taskClaimsPath, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
-import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
+import { advanceHostDispatchPause, replaceActiveDispatchForRun } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import { recordAttemptedPackets } from "./dispatchAttempted.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -803,66 +803,55 @@ export async function prepareDispatchArtifacts(params: {
   // exclude them under a budget cap (present only when actually capped).
   const deferredPacketIds = deferredPackets.map((packet) => packet.packet_id);
   const deferredTaskIds = deferredPackets.flatMap((packet) => packet.task_ids);
-  // Carry forward the resumable DC-4 pause across re-preparation: a paused rolling
-  // run re-prepares its dispatch plan each pass, so a fresh artifact would clobber
-  // the persisted `paused_state` (settled exclusions + pause_count) and reset the
-  // run to pause-0 forever. Preserve it for the SAME run id so `advanceRollingPause`
-  // reads the prior pause and advances it toward resume-or-livelock.
-  const priorActiveDispatch = await readJsonFile<ActiveDispatchState>(
-    join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
-  ).catch(() => null);
-  const carriedPausedState =
-    priorActiveDispatch?.run_id === runId
-      ? priorActiveDispatch.paused_state
-      : undefined;
-  // Bug 8 / Slice A4: the interactive confirmation recommendation fires once
-  // per run, not once per pass. `confirmation_shown` only carries forward for
-  // the SAME run_id — a fresh run (new run_id, or no prior state) recommends
-  // again. Computed here (ahead of `computeDispatchFanout` below) so the
-  // carried flag can be persisted on this pass's `activeDispatch` write in the
-  // same round-trip, rather than reopening the file a second time.
-  const carriedConfirmationShown =
-    priorActiveDispatch?.run_id === runId
-      ? (priorActiveDispatch.confirmation_shown ?? false)
-      : false;
-  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on. The
-  // width is the GRANTED set size (emergent from budget + any declared cap),
-  // not a computed concurrency number.
-  const fanout = computeDispatchFanout({
-    agentCount: plan.length,
-    grantedCount: grantedPacketIds.length,
-    declaredCap,
-    confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
-    confirmationAlreadyShown: carriedConfirmationShown,
+  // Rebuild the run's active-dispatch artifact through the locked store's
+  // replace op — the prior same-run state arrives in the callback read UNDER
+  // the lock, so nothing can stamp a terminal or clear a pause between the
+  // read and this pass's write (the old lockless read→rebuild→write here was
+  // the one writer that could erase a concurrently-stamped terminal).
+  //
+  // Carried fields, all same-run-id only:
+  //   • paused_state — a paused rolling run re-prepares its plan each pass; a
+  //     fresh artifact would clobber the persisted pause (settled exclusions +
+  //     pause_count) and reset the run to pause-0 forever (DC-4).
+  //   • confirmation_shown — Bug 8 / Slice A4: the interactive confirmation
+  //     recommendation fires once per RUN, not once per pass.
+  //   • partial_completion_terminal — the CP-NODE-6 one-way ratchet, enforced
+  //     by `replaceActiveDispatchForRun` ITSELF (the writer re-attaches a
+  //     same-run terminal this build omits), not by this call site.
+  //
+  // FINDING-012: `fanout` is the pure-arithmetic fan-out summary the loader
+  // gates on — the width is the GRANTED set size, not a computed concurrency
+  // number. Computed inside the callback because it consumes the carried
+  // confirmation flag; it escapes for the return payload below.
+  let fanout!: ReturnType<typeof computeDispatchFanout>;
+  await replaceActiveDispatchForRun(artifactsDir, runId, (prior) => {
+    const carriedPausedState = prior?.paused_state;
+    const carriedConfirmationShown = prior?.confirmation_shown ?? false;
+    fanout = computeDispatchFanout({
+      agentCount: plan.length,
+      grantedCount: grantedPacketIds.length,
+      declaredCap,
+      confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
+      confirmationAlreadyShown: carriedConfirmationShown,
+    });
+    const confirmationShown = carriedConfirmationShown || fanout.confirmation_recommended;
+    return {
+      run_id: runId,
+      created_at: new Date().toISOString(),
+      packet_count: plan.length,
+      task_count: orderedTasks.length,
+      status: "active",
+      ...(budgetCapped
+        ? {
+            budget_packet_count: packets.length,
+            deferred_packet_ids: deferredPacketIds,
+            deferred_task_ids: deferredTaskIds,
+          }
+        : {}),
+      ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
+      ...(confirmationShown ? { confirmation_shown: true } : {}),
+    } satisfies ActiveDispatchState;
   });
-  const confirmationShown = carriedConfirmationShown || fanout.confirmation_recommended;
-  const activeDispatch: ActiveDispatchState = {
-    run_id: runId,
-    created_at: new Date().toISOString(),
-    packet_count: plan.length,
-    task_count: orderedTasks.length,
-    status: "active",
-    ...(budgetCapped
-      ? {
-          budget_packet_count: packets.length,
-          deferred_packet_ids: deferredPacketIds,
-          deferred_task_ids: deferredTaskIds,
-        }
-      : {}),
-    ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
-    // CP-NODE-6 ratchet: partial_completion_terminal is a ONE-WAY ratchet for the
-    // run — once the dispatch engine stamps it (livelock/empty-pool), every later
-    // same-run_id re-preparation of THIS artifact must carry it forward, or a
-    // routine follow-up pass (a pending task outside the terminal's stranded_ids)
-    // silently erases the completion gate's basis. pause_count bookkeeping is
-    // already carried above via carriedPausedState (paused_state.lifecycle).
-    ...(priorActiveDispatch?.run_id === runId &&
-    priorActiveDispatch.partial_completion_terminal
-      ? { partial_completion_terminal: priorActiveDispatch.partial_completion_terminal }
-      : {}),
-    ...(confirmationShown ? { confirmation_shown: true } : {}),
-  };
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
 
   // Increment B — host-path pause-at-wall. When admission grants ZERO packets, OR a
   // cooldown is active (F1: during cooldown admission over-grants the whole frontier,

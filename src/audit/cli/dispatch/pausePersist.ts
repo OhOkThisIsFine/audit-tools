@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  buildOperatorForcedTerminal,
   checkLivelockGuard,
   createLockedJsonStore,
   SKIP_WRITE,
@@ -115,6 +116,101 @@ export async function recordPartialCompletionTerminal(
       ...rest,
       partial_completion_terminal: terminal,
     } satisfies ActiveDispatchState;
+  });
+}
+
+/**
+ * Replace the run's active-dispatch artifact for a (re-)preparation pass —
+ * the ONLY sanctioned way to rebuild the whole record. `build` receives the
+ * prior SAME-RUN state (or null for a fresh run / other run's artifact) read
+ * UNDER the store lock, so carried fields (paused_state, confirmation_shown)
+ * are derived from a snapshot no concurrent mutator can interleave with —
+ * this closes the lockless read→rebuild→write TOCTOU where a terminal stamped
+ * between the two was silently erased.
+ *
+ * The CP-NODE-6 terminal ratchet is enforced HERE, by the writer, not by the
+ * callback remembering to carry it: a same-run `partial_completion_terminal`
+ * survives even a `build` that drops it.
+ */
+export async function replaceActiveDispatchForRun(
+  artifactsDir: string,
+  runId: string,
+  build: (prior: ActiveDispatchState | null) => ActiveDispatchState,
+): Promise<void> {
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    const prior = current && current.run_id === runId ? current : null;
+    const next = build(prior);
+    if (prior?.partial_completion_terminal && !next.partial_completion_terminal) {
+      return {
+        ...next,
+        partial_completion_terminal: prior.partial_completion_terminal,
+      } satisfies ActiveDispatchState;
+    }
+    return next;
+  });
+}
+
+/**
+ * Stamp the operator-forced terminal (`audit-code force-synthesis`) — the
+ * recovery escape for a wedged run. Deliberately NOT run_id-guarded, unlike
+ * `recordPartialCompletionTerminal`: the operator strands whatever run's state
+ * exists (the completion gate keys only on `stranded_ids`, so run identity
+ * never affects the unblock), and when NO artifact exists (the pending tasks
+ * came from a host-subagent dispatch that wrote none) a minimal state is
+ * minted under the synthetic `operator-forced` run id — run-scoped readers
+ * (`readActiveDispatch`) intentionally never see that minted record.
+ *
+ * Same invariant as the engine's stamp: `stranded_ids` are unioned with any
+ * already-stamped terminal's ids INSIDE the locked mutate (a terminal stamped
+ * concurrently since the caller computed its set is merged, not overwritten),
+ * and any `paused_state` is cleared in the SAME write.
+ */
+export async function recordOperatorForcedTerminalState(
+  artifactsDir: string,
+  strandedIds: string[],
+): Promise<void> {
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    const union = [
+      ...new Set([
+        ...(current?.partial_completion_terminal?.stranded_ids ?? []),
+        ...strandedIds,
+      ]),
+    ];
+    const terminal = buildOperatorForcedTerminal(union);
+    if (current) {
+      const { paused_state: _dropped, ...rest } = current;
+      return {
+        ...rest,
+        partial_completion_terminal: terminal,
+      } satisfies ActiveDispatchState;
+    }
+    return {
+      run_id: "operator-forced",
+      created_at: new Date().toISOString(),
+      packet_count: 0,
+      task_count: union.length,
+      status: "active",
+      partial_completion_terminal: terminal,
+    } satisfies ActiveDispatchState;
+  });
+}
+
+/**
+ * Flip the run's `status` ("active" ↔ "merged") as a locked field-level
+ * transition, preserving every other field — the merge path used to read the
+ * whole artifact locklessly and write it back, clobbering any pause/terminal
+ * stamped between its read and write.
+ */
+export async function markDispatchStatus(
+  artifactsDir: string,
+  runId: string,
+  status: ActiveDispatchState["status"],
+): Promise<void> {
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    if (!current || current.run_id !== runId || current.status === status) {
+      return SKIP_WRITE;
+    }
+    return { ...current, status } satisfies ActiveDispatchState;
   });
 }
 

@@ -13,6 +13,9 @@ const {
   readActiveDispatch,
   persistPausedState,
   recordPartialCompletionTerminal,
+  recordOperatorForcedTerminalState,
+  replaceActiveDispatchForRun,
+  markDispatchStatus,
 } = await import("../../src/audit/cli/dispatch/pausePersist.js");
 const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/types/activeDispatch.js");
 
@@ -340,4 +343,115 @@ await test("CP-NODE-6: concurrent persistPausedState calls on the same run_id ne
   // readActiveDispatch (the public lockless read) sees the same coherent value.
   const viaHelper = await readActiveDispatch(dir, RUN_ID_RATCHET);
   expect(viaHelper?.paused_state).toEqual(state);
+});
+
+// ── Single-writer ops: every remaining writer of active-dispatch.json rides the
+// same locked store (the three ops below replaced the last lockless bypasses —
+// prepare's whole-artifact rebuild, force-synthesis's overlay, merge's status
+// flip). tests/audit/active-dispatch-single-writer.test.ts pins the tree-wide
+// property; these pin each op's semantics.
+
+await test("recordOperatorForcedTerminalState: overlay clears paused_state, unions stranded ids, preserves run identity", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  await persistPausedState(dir, RUN_ID_RATCHET, {
+    lifecycle: {
+      kind: "waiting_for_provider",
+      paused_at: "2026-01-01T00:00:00Z",
+      pause_count: 1,
+      stranded_node_ids: ["p1"],
+    },
+    settled_exclusions: [],
+  });
+  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
+    reason: "livelock_guard",
+    stranded_ids: ["T-engine"],
+  });
+
+  // The operator stamp arrives after the engine already stamped a terminal for a
+  // DIFFERENT subset — the union inside the locked mutate merges, never overwrites.
+  await recordOperatorForcedTerminalState(dir, ["T-operator"]);
+
+  const ad = await readActiveDispatchRaw(dir);
+  expect((ad as { run_id?: string }).run_id, "existing run identity survives the overlay").toBe(RUN_ID_RATCHET);
+  expect(ad.paused_state, "the operator stamp clears paused_state in the same write").toBeUndefined();
+  expect(ad.partial_completion_terminal?.reason).toBe("operator_forced");
+  expect([...(ad.partial_completion_terminal?.stranded_ids ?? [])].sort()).toEqual(["T-engine", "T-operator"]);
+});
+
+await test("recordOperatorForcedTerminalState: no artifact → mints the minimal operator-forced state", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "terminal-ratchet-"));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  await recordOperatorForcedTerminalState(dir, ["T1", "T2"]);
+
+  const ad = await readActiveDispatchRaw(dir);
+  expect((ad as { run_id?: string }).run_id).toBe("operator-forced");
+  expect((ad as { task_count?: number }).task_count).toBe(2);
+  expect(ad.partial_completion_terminal?.reason).toBe("operator_forced");
+  expect(ad.partial_completion_terminal?.stranded_ids).toEqual(["T1", "T2"]);
+  // Run-scoped readers deliberately never see the minted record.
+  expect(await readActiveDispatch(dir, "some-real-run")).toBeNull();
+});
+
+await test("replaceActiveDispatchForRun: the WRITER re-attaches a same-run terminal the build callback drops (ratchet by construction)", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
+    reason: "empty_pool",
+    stranded_ids: ["T-stranded"],
+  });
+
+  // A re-preparation build that (wrongly) forgets the terminal entirely — the
+  // op itself must carry it forward; call sites no longer hold the ratchet.
+  await replaceActiveDispatchForRun(dir, RUN_ID_RATCHET, (prior) => {
+    expect(prior?.run_id, "build receives the prior same-run state").toBe(RUN_ID_RATCHET);
+    return {
+      run_id: RUN_ID_RATCHET,
+      created_at: "2026-03-01T00:00:00Z",
+      packet_count: 9,
+      task_count: 9,
+      status: "active",
+    };
+  });
+
+  const ad = await readActiveDispatchRaw(dir);
+  expect((ad as { packet_count?: number }).packet_count, "the rebuild's own fields land").toBe(9);
+  expect(
+    ad.partial_completion_terminal,
+    "a same-run terminal survives a build that omitted it — enforced by the writer, not the call site",
+  ).toBeTruthy();
+  expect(ad.partial_completion_terminal?.stranded_ids).toEqual(["T-stranded"]);
+});
+
+await test("markDispatchStatus: flips status under the lock, preserves pause + terminal, no-ops on another run's artifact", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
+    reason: "livelock_guard",
+    stranded_ids: ["T-x"],
+  });
+  await persistPausedState(dir, RUN_ID_RATCHET, {
+    lifecycle: {
+      kind: "waiting_for_provider",
+      paused_at: "2026-01-01T00:00:00Z",
+      pause_count: 0,
+      stranded_node_ids: [],
+    },
+    settled_exclusions: [],
+  });
+
+  // Another run's merge must not touch this artifact.
+  await markDispatchStatus(dir, "some-other-run", "merged");
+  let ad = await readActiveDispatchRaw(dir);
+  expect((ad as { status?: string }).status).toBe("active");
+
+  await markDispatchStatus(dir, RUN_ID_RATCHET, "merged");
+  ad = await readActiveDispatchRaw(dir);
+  expect((ad as { status?: string }).status).toBe("merged");
+  expect(ad.paused_state, "status flip preserves the pause").toBeTruthy();
+  expect(ad.partial_completion_terminal?.stranded_ids, "status flip preserves the terminal").toEqual(["T-x"]);
 });

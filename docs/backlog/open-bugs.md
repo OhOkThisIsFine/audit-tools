@@ -1137,13 +1137,6 @@
   **Property to hold:** the next run that hits a pause/cooldown re-tests those; fix from live
   evidence, not speculation.
 
-- **Audit pause/terminal persistence does not enforce its documented XOR.** The public state comment
-  permits `paused_state` and a partial-completion terminal to coexist, while `pausePersist.ts` and
-  lifecycle tests require exactly one. Separate writers can preserve the opposite field, so the
-  persisted result depends on call order. **Property to hold:** choose one lifecycle invariant and
-  enforce it in a single atomic state-transition writer used by pause, forced synthesis, and rolling
-  terminal paths.
-
 - **Incoming design-review/charter/challenge artifacts have no submit chokepoint.** 2026-08-05
   dogfood: 5 of 8 design-review agents drifted on the output contract (wrong filename ×2, wrong
   directory, invalid JSON ×2) and the host hand-repaired all of them; the charter delta-miner also

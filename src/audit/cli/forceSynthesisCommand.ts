@@ -1,15 +1,12 @@
-import { join } from "node:path";
 import {
   artifactTreeLockPath,
-  buildOperatorForcedTerminal,
   resolveSessionConfig,
   withFileLock,
-  writeJsonFile,
 } from "audit-tools/shared";
 import { runAuditStep } from "./auditStep.js";
 import { getArtifactsDir, getRootDir } from "./args.js";
 import { loadArtifactBundle, type ArtifactBundle } from "../io/artifacts.js";
-import { ACTIVE_DISPATCH_FILENAME, type ActiveDispatchState } from "../types/activeDispatch.js";
+import { recordOperatorForcedTerminalState } from "./dispatch/pausePersist.js";
 import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { computeStaleResultTaskIds } from "../orchestrator/resultBaseline.js";
 import { getAuditorDescriptor } from "./args.js";
@@ -49,7 +46,10 @@ export async function cmdForceSynthesis(argv: string[]): Promise<void> {
 
   // Stamp the terminal under the artifact-tree lock, then RELEASE it before
   // runAuditStep (which re-acquires the same non-reentrant lock — a nested
-  // acquire would self-deadlock).
+  // acquire would self-deadlock). The stamp itself rides the active-dispatch
+  // locked store (tree lock outer, dispatch lock inner — the one sanctioned
+  // ordering), which unions stranded ids with any concurrently-stamped
+  // terminal and clears paused_state in the same write.
   const stamp = await withFileLock(artifactTreeLockPath(artifactsDir), async () => {
     const bundle = await loadArtifactBundle(artifactsDir);
     const { strandedIds, newlyStranded } = computeForcedStrandedTaskIds(bundle);
@@ -57,8 +57,7 @@ export async function cmdForceSynthesis(argv: string[]): Promise<void> {
       // Nothing pending → no terminal needed; synthesis runs from the ledger as-is.
       return { strandedIds, newlyStranded };
     }
-    const active = mergeOperatorForcedTerminal(bundle.active_dispatch, strandedIds);
-    await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), active);
+    await recordOperatorForcedTerminalState(artifactsDir, strandedIds);
     return { strandedIds, newlyStranded };
   });
 
@@ -127,28 +126,3 @@ function computeForcedStrandedTaskIds(bundle: ArtifactBundle): {
   return { strandedIds, newlyStranded: pending.length };
 }
 
-/**
- * Overlay an `operator_forced` terminal onto the run's active-dispatch state,
- * preserving every other field when the artifact already exists, or minting a
- * minimal state when the run never wrote one (the pending tasks came from a
- * host-subagent dispatch that left no active-dispatch artifact). The state gate
- * keys only on `partial_completion_terminal.stranded_ids`, so the synthetic
- * run_id never affects the unblock.
- */
-function mergeOperatorForcedTerminal(
-  active: ActiveDispatchState | undefined,
-  strandedIds: string[],
-): ActiveDispatchState {
-  const terminal = buildOperatorForcedTerminal(strandedIds);
-  if (active) {
-    return { ...active, partial_completion_terminal: terminal };
-  }
-  return {
-    run_id: "operator-forced",
-    created_at: new Date().toISOString(),
-    packet_count: 0,
-    task_count: strandedIds.length,
-    status: "active",
-    partial_completion_terminal: terminal,
-  };
-}
