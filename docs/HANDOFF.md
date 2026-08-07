@@ -5,7 +5,7 @@
 
 ## Live state
 
-- **v0.39.3 in flight 2026-08-07 (analyzer sweep + T4 splits).** One attested commit carries:
+- **v0.39.3 SHIPPED 2026-08-07 (analyzer sweep + T4 splits).** One attested commit (`c15d3ac4`) carries:
   the external-analyzer sweep verified/fixed/adopted (record:
   [`reviews/analysis-tools-plan-2026-08-07.md`](reviews/analysis-tools-plan-2026-08-07.md) — three
   new dev gates `check:lint` / `check:dup` / `check:depgraph` in `verify:checks`, ts-prune + madge
@@ -23,11 +23,12 @@
 
 ## Verification state
 
-- Full suite green on the pre-release tree 2026-08-07 (584 files + 5 split families; the one red on
-  the first full run was the gate-enumeration parity test catching the three unglossed new gates —
-  fixed, re-run green). All gates green: lint/dup/depgraph (new), guard-reach, knip (project now
-  includes `tests/**`), both typechecks, doc/backlog gates. Loop-core diff attested
-  (staged-tree-bound, agent class).
+- Full suite 585/0 files green locally on the release tree 2026-08-07 (the one red on the first
+  full run was the gate-enumeration parity test catching the three unglossed new gates — fixed,
+  re-run green). Release CI green for v0.39.3 (run 31220796273): needs-DAG critical-path **253s**
+  (v0.39.2: 282s), test shards 205/198/151/132s — duration-balanced sharding + the T4 splits at
+  work (old spread was 259/138/103/89). npm live at 0.39.3; global bins reinstalled + postinstall
+  run, both report 0.39.3. Loop-core commit `c15d3ac4` attested (staged-tree-bound, agent class).
 
 ## Immediate next
 
