@@ -5,8 +5,10 @@
 
 ## Live state
 
-- **2026-08-06 backlog sprint SHIPPED** (multi-agent waves + orchestrator integration; full record
-  in [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md)):
+- **2026-08-06 backlog sprint SHIPPED as v0.37.0** (`348d9fa8` + smoke fix `7f615f64` + bump
+  `bba85f36`; release CI fully green — gate + 4 test shards + publish; npm live; global bins
+  reinstalled with postinstall. Multi-agent waves + orchestrator integration; full record in
+  [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md)):
   - **Mechanical analyzer layer items A/B/D** — safety-derived default set
     (hadolint/actionlint/type-coverage promoted; jscpd stays gated `executable`; semgrep pinned;
     `duration_ms` measured), **consent surfacing live end-to-end** (fold-level batched
@@ -40,9 +42,10 @@
 
 ## Verification state
 
-- `npm run build` / `check` / `check:tests` / `check:guard-reach` all 0 at the sprint tree.
-  Touched suites green (analyzer/consent/e2e/next-step/wrapper/narrative/gates). Final full suite
-  + release CI are the ship gate.
+- Full suite 7,551 passed / 0 failed at the ship tree; `build`/`check`/`check:tests`/
+  `check:guard-reach`/`check:deadcode`/doc gates all 0; both packaged smokes green; **release CI
+  green on v0.37.0** (the authoritative signal). Known noise: the suite still prints the tracked
+  RPC-timeout "1 error" line (open false-RED/false-GREEN entry in `open-bugs.md`).
 
 ## Immediate next
 
