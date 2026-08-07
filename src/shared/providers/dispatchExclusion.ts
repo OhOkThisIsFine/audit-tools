@@ -41,3 +41,51 @@ export function buildSelfSpawnExclusion(
     excludedBy,
   };
 }
+
+/**
+ * Exclude backends whose provider names have died mid-run (recorded in a persisted
+ * pause state). Dead providers are names observed to fail at spawn with
+ * `provider_unavailable` outcomes; excluding them here means re-detection on
+ * resume will fold in alternatives without re-offering the dead provider.
+ *
+ * The exclusion lives exactly as long as the pause record that carries the dead
+ * provider names — once the pause is cleared (on resume or terminal), dead
+ * providers are offered again on the next run. Undefined/empty dead provider list
+ * excludes nothing.
+ */
+export function buildDeadProviderExclusion(
+  deadProviders: ReadonlyArray<{ pool_id: string; provider_name: string }> | undefined,
+): DispatchExclusion {
+  const deadProviderSet = new Set<string>(
+    deadProviders?.map((d) => d.provider_name) ?? [],
+  );
+
+  const excludedBy = (backend: ExcludableBackend): DispatchExclusionPattern | null =>
+    deadProviderSet.has(backend.transport)
+      ? (`transport:${backend.transport}` as DispatchExclusionPattern)
+      : null;
+
+  return {
+    excludes: (backend) => excludedBy(backend) !== null,
+    excludedBy,
+  };
+}
+
+/**
+ * Compose multiple dispatch exclusions: a backend is excluded if ANY exclusion
+ * excludes it (OR logic). The `excludedBy` pattern matched is the FIRST one to
+ * exclude the backend, so pattern order is deterministic (exclusions applied in
+ * order; first match wins).
+ */
+export function composeDispatchExclusions(...exclusions: DispatchExclusion[]): DispatchExclusion {
+  return {
+    excludes: (backend) => exclusions.some((e) => e.excludes(backend)),
+    excludedBy: (backend) => {
+      for (const exclusion of exclusions) {
+        const pattern = exclusion.excludedBy(backend);
+        if (pattern !== null) return pattern;
+      }
+      return null;
+    },
+  };
+}

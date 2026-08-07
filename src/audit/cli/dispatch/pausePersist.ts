@@ -5,6 +5,10 @@ import {
   SKIP_WRITE,
   type LockedJsonStore,
   type PartialCompletionTerminal,
+  buildSelfSpawnExclusion,
+  buildDeadProviderExclusion,
+  composeDispatchExclusions,
+  type DispatchExclusion,
 } from "audit-tools/shared";
 import {
   ACTIVE_DISPATCH_FILENAME,
@@ -221,4 +225,21 @@ export async function advanceHostDispatchPause(params: {
     settled_exclusions: priorPaused.settled_exclusions,
   });
   return { paused: true, livelocked: false };
+}
+
+/**
+ * Build dispatch exclusion from a persisted paused state's dead providers.
+ * When a prior pass paused on provider_unavailable outcomes, the dead provider
+ * names are composed with the self-spawn exclusion so re-detection on resume
+ * excludes the dead backend and folds in alternatives instead of re-offering it.
+ *
+ * The exclusion lives exactly as long as the pause record — once the pause clears
+ * (on resume or terminal), dead providers are offered again on the next run.
+ */
+export function buildAuditDispatchExclusionFromPause(
+  pausedState: DispatchPausedState | undefined,
+): DispatchExclusion {
+  const selfSpawnExcluded = buildSelfSpawnExclusion();
+  const deadProviderExcluded = buildDeadProviderExclusion(pausedState?.dead_providers);
+  return composeDispatchExclusions(selfSpawnExcluded, deadProviderExcluded);
 }

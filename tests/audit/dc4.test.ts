@@ -448,3 +448,108 @@ test.concurrent("DC-4 fold-ingest (CE-009): folded ingestion leaves the SAME sta
     expect(separate.stale.length > 0, "ingestion propagated staleness along the dependency DAG").toBeTruthy();
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// ARC-e01faa3e — Dead provider exclusion during mid-run re-detection
+// ───────────────────────────────────────────────────────────────────────────
+
+test.concurrent("ARC-e01faa3e: dead providers in paused state are excluded during pool selection", async (t) => {
+  const { artifactsDir, runDir } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // Create a paused state with dead_providers naming the session provider.
+  const pausedState = {
+    lifecycle: {
+      kind: "waiting_for_provider" as const,
+      paused_at: new Date().toISOString(),
+      pause_count: 0,
+      stranded_node_ids: ["packet-1"],
+    },
+    settled_exclusions: [],
+    // Dead providers from a prior pass that hit provider_unavailable outcomes.
+    dead_providers: [
+      { pool_id: "pool-openai-compat", provider_name: "openai-compatible" },
+    ],
+  };
+
+  // Write the paused state to active-dispatch.json.
+  const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+  const activeDispatchState = {
+    run_id: RUN_ID,
+    created_at: new Date().toISOString(),
+    packet_count: 0,
+    task_count: 0,
+    status: "active" as const,
+    paused_state: pausedState,
+  };
+  await writeFile(activeDispatchPath, JSON.stringify(activeDispatchState), "utf8");
+
+  // Test the helper function that reads the paused state and builds the exclusion.
+  const { buildAuditDispatchExclusionFromPause } = await import(
+    "../../src/audit/cli/dispatch/pausePersist.js"
+  );
+  const exclusion = buildAuditDispatchExclusionFromPause(pausedState);
+
+  // The dead provider should be excluded.
+  expect(
+    exclusion.excludes({ transport: "openai-compatible" }),
+    "dead provider is excluded"
+  ).toBe(true);
+
+  // Other providers should not be excluded (unless they're also dead or self-spawn blocked).
+  expect(
+    exclusion.excludes({ transport: "agy" }),
+    "non-dead provider is not excluded"
+  ).toBe(false);
+
+  // The excludedBy pattern should match the dead provider.
+  expect(exclusion.excludedBy({ transport: "openai-compatible" })).toBe(
+    "transport:openai-compatible"
+  );
+});
+
+test.concurrent("ARC-e01faa3e: empty dead_providers list excludes nothing beyond self-spawn", async (t) => {
+  // A paused state with no dead_providers.
+  const pausedState = {
+    lifecycle: {
+      kind: "waiting_for_provider" as const,
+      paused_at: new Date().toISOString(),
+      pause_count: 0,
+      stranded_node_ids: ["packet-1"],
+    },
+    settled_exclusions: [],
+    dead_providers: [],
+  };
+
+  const { buildAuditDispatchExclusionFromPause } = await import(
+    "../../src/audit/cli/dispatch/pausePersist.js"
+  );
+  const exclusion = buildAuditDispatchExclusionFromPause(pausedState);
+
+  // No dead providers, so nothing extra is excluded.
+  expect(exclusion.excludes({ transport: "openai-compatible" }), "no exclusion when no dead providers").toBe(false);
+  expect(exclusion.excludes({ transport: "agy" }), "no exclusion when no dead providers").toBe(false);
+});
+
+test.concurrent("ARC-e01faa3e: undefined dead_providers excludes nothing beyond self-spawn", async (t) => {
+  // A paused state with undefined dead_providers (backward compat with old records).
+  const pausedState = {
+    lifecycle: {
+      kind: "waiting_for_provider" as const,
+      paused_at: new Date().toISOString(),
+      pause_count: 0,
+      stranded_node_ids: ["packet-1"],
+    },
+    settled_exclusions: [],
+    // dead_providers field is absent (undefined)
+  };
+
+  const { buildAuditDispatchExclusionFromPause } = await import(
+    "../../src/audit/cli/dispatch/pausePersist.js"
+  );
+  const exclusion = buildAuditDispatchExclusionFromPause(pausedState);
+
+  // No dead providers defined, so nothing extra is excluded.
+  expect(exclusion.excludes({ transport: "openai-compatible" }), "no exclusion when dead_providers undefined").toBe(false);
+  expect(exclusion.excludes({ transport: "agy" }), "no exclusion when dead_providers undefined").toBe(false);
+});

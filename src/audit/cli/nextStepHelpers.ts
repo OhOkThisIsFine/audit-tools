@@ -92,6 +92,7 @@ import {
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 import { clearDispatchFiles } from "../io/runArtifacts.js";
+import { readActiveDispatch, buildAuditDispatchExclusionFromPause } from "./dispatch/pausePersist.js";
 import { runAuditStep } from "./auditStep.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
@@ -2418,7 +2419,16 @@ async function runHostDelegationObligation(
   // host exists to launch the review packets.
   let auditSourcePools: Awaited<ReturnType<typeof buildAuditSourcePools>>["pools"] = [];
   if (!hostCanDispatch) {
-    const auditExcludedBackends = buildSelfSpawnExclusion();
+    // Build dispatch exclusion from any persisted paused state's dead providers.
+    // When a prior pass paused on provider_unavailable outcomes, exclude those dead
+    // providers here so re-discovery folds in alternatives instead of re-offering them.
+    let auditExcludedBackends = buildSelfSpawnExclusion();
+    const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
+    if (currentRun) {
+      const pausedState = await readActiveDispatch(ctx.params.artifactsDir, currentRun.run_id);
+      auditExcludedBackends = buildAuditDispatchExclusionFromPause(pausedState?.paused_state);
+    }
+
     const sourceBuild = await buildAuditSourcePools(hybridCfg, {
       excludedBackends: auditExcludedBackends,
       capabilityRanks: null,

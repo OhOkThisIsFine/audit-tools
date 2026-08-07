@@ -1494,7 +1494,7 @@ export type {
 export { ROLLING_DISPATCH_ENGINE_VERSION } from "./types/rollingDispatch.js";
 
 export type { DispatchExclusionPattern, DispatchExclusion, ExcludableBackend } from "./providers/dispatchExclusion.js";
-export { buildSelfSpawnExclusion } from "./providers/dispatchExclusion.js";
+export { buildSelfSpawnExclusion, buildDeadProviderExclusion, composeDispatchExclusions } from "./providers/dispatchExclusion.js";
 
 export type {
   EncodedClause,
