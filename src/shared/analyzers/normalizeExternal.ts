@@ -1,7 +1,7 @@
 import type {
   ExternalAnalyzerGraphEdge,
   ExternalAnalyzerResults,
-} from "../types/externalAnalyzer.js";
+} from "./types.js";
 
 type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
 

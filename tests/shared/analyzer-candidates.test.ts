@@ -24,8 +24,8 @@ import {
   parseTypeCoverage,
   lizardCandidate,
   parseLizard,
-} from "../../src/audit/extractors/analyzers/candidates.js";
-import { OWNED_TOOL_IDS, registerExternalAnalyzers } from "../../src/audit/extractors/analyzers/acquisitionEngine.js";
+} from "../../src/shared/analyzers/candidates.js";
+import { OWNED_TOOL_IDS, registerExternalAnalyzers } from "../../src/shared/analyzers/acquisitionEngine.js";
 
 test("secret scanning is ACQUIRED, not owned — gitleaks is registered and admitted", () => {
   expect(OWNED_TOOL_IDS.has("secrets")).toBe(false);

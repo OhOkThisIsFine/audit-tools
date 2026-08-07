@@ -6,7 +6,7 @@ import {
   confidenceRank,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask, Finding, Lens } from "../../types.js";
-import type { ExternalAnalyzerResults } from "../../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 
 // Shared primitives for the selective-deepening strategies. Each strategy
 // module under this directory builds one kind of follow-up task; they all draw

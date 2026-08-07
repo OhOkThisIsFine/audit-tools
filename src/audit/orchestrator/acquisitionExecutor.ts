@@ -4,16 +4,16 @@ import type { AnalyzerSetting } from "audit-tools/shared";
 import {
   runAcquisitionEngine,
   resolveBinaryCandidates,
-} from "../extractors/analyzers/acquisitionEngine.js";
-import { EXTERNAL_ANALYZER_CANDIDATES } from "../extractors/analyzers/candidates.js";
+} from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import type {
   BinaryFetcher,
   BinaryCommandRunner,
-} from "../extractors/analyzers/binaryAcquisition.js";
+} from "audit-tools/shared";
 import {
   upsertExternalToolResults,
   type ExternalAnalyzerAcquisitionMarker,
-} from "../types/externalAnalyzer.js";
+} from "audit-tools/shared";
 
 /**
  * Advance-level options for the external-analyzer acquisition executor.

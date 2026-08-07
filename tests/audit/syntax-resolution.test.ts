@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
-import type { ExternalAnalyzerResultItem } from "../../src/audit/types/externalAnalyzer.js";
+import type { ExternalAnalyzerResultItem } from "../../src/shared/analyzers/types.js";
 
 const { runSyntaxResolutionExecutor } = await import("../../src/audit/orchestrator/syntaxResolutionExecutor.js");
 

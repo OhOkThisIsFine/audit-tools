@@ -4,9 +4,9 @@ import { normalizeCoverageSummary } from "../../src/audit/adapters/coverageSumma
 import { normalizeEslintJson } from "../../src/audit/adapters/eslint.js";
 import { normalizeNpmAuditJson } from "../../src/audit/adapters/npmAudit.js";
 import { normalizeSemgrepJson } from "../../src/audit/adapters/semgrep.js";
-import { normalizeGenericExternalResults } from "../../src/audit/adapters/normalizeExternal.js";
-import { normalizeClippyJson, parseClippy } from "../../src/audit/adapters/clippy.js";
-import { normalizeRubocopJson, parseRubocop } from "../../src/audit/adapters/rubocop.js";
+import { normalizeGenericExternalResults } from "../../src/shared/analyzers/normalizeExternal.js";
+import { normalizeClippyJson, parseClippy } from "../../src/shared/analyzers/clippy.js";
+import { normalizeRubocopJson, parseRubocop } from "../../src/shared/analyzers/rubocop.js";
 
 test("normalizeCoverageSummary keeps only below-threshold files and preserves severity boundaries", () => {
   const normalized = normalizeCoverageSummary([

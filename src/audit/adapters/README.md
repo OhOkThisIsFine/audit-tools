@@ -9,13 +9,14 @@ Implemented:
 - `astGrep.ts` — ast-grep structural matches (graph edges)
 - `codeql.ts` — CodeQL SARIF dataflow queries (graph edges)
 - `eslint.ts` — JS/TS lint diagnostics
-- `clippy.ts` — Rust (`cargo clippy`) diagnostics
-- `rubocop.ts` — Ruby (rubocop) diagnostics
 - `npmAudit.ts` — npm dependency vulnerabilities
 - `coverageSummary.ts` — test coverage summaries
 
+The generic normalize seam plus the clippy/rubocop parse adapters moved to `src/shared/analyzers/`
+with the acquisition substrate (item-C relocation) — both orchestrator draws consume them there.
+
 Secret scanning is ACQUIRED, not owned — it's the default-run `gitleaksCandidate` member of the
-F5 analyzer-acquisition-engine's curated candidate registry (`src/audit/extractors/analyzers/candidates.ts`),
+F5 analyzer-acquisition-engine's curated candidate registry (`src/shared/analyzers/candidates.ts`),
 normalized through the acquisition engine's own seam rather than this directory's per-tool adapters.
 Git-history mining (F6) is the one deterministically-*owned* analyzer signal (own-vs-acquire — see
 `spec/backlog-remediation-design.md` F5↔F6) — by design it has no file here.

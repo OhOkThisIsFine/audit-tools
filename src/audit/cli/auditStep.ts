@@ -41,7 +41,7 @@ import { buildLineIndex } from "./lineIndex.js";
 import type { AuditResult } from "../types.js";
 import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 
 async function maybeArchiveLegacyPendingResults(

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type {
   ExternalAnalyzerCandidate,
   EcosystemRunner,
-} from "../../src/audit/extractors/analyzers/acquisitionEngine.js";
+} from "../../src/shared/analyzers/acquisitionEngine.js";
 
 const {
   OWNED_TOOL_IDS,
@@ -16,7 +16,7 @@ const {
   registerExternalAnalyzers,
   runAcquisitionEngine,
   detectNodeEcosystem,
-} = await import("../../src/audit/extractors/analyzers/acquisitionEngine.js");
+} = await import("../../src/shared/analyzers/acquisitionEngine.js");
 
 // F5 inv-8 imports the SAME pre-shipped merge-helper seam pair F6 consumes. The
 // top-level await below means a half-shipped state (F5 producers present, seam
@@ -445,7 +445,7 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
 // Note: hadolint, actionlint, type-coverage, and jscpd are now defaultRun:true
 // (they meet the safety profile requirements) and are no longer consent-gated.
 const { EXTERNAL_ANALYZER_CANDIDATES } = await import(
-  "../../src/audit/extractors/analyzers/candidates.js"
+  "../../src/shared/analyzers/candidates.js"
 );
 
 for (const id of ["clippy", "rubocop"]) {
@@ -554,7 +554,7 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
 // .strict(). `.strict()` is load-bearing here: it would REJECT any extra/parallel
 // field, so a green parse proves the acquired path emits the exact contract shape.
 const { ExternalAnalyzerResultsSchema } = await import(
-  "../../src/audit/types/externalAnalyzer.js"
+  "../../src/shared/analyzers/types.js"
 );
 
 test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing adapter seam, validates ExternalAnalyzerResultsSchema.strict()", () => {

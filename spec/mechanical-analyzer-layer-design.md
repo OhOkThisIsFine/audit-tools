@@ -39,8 +39,8 @@ leads → default set. Repo-code-execution or network-egress risk → consent-ga
 
 Safety facts become per-candidate DATA; `defaultRun` eligibility derives from them mechanically.
 
-- `AnalyzerSafetyProfile` on the candidate contract (`src/audit/extractors/analyzers/`
-  `acquisitionEngine.ts`, beside `ExternalAnalyzerCandidate`):
+- `AnalyzerSafetyProfile` on the candidate contract (`src/shared/analyzers/acquisitionEngine.ts`
+  since the item-C relocation, beside `ExternalAnalyzerCandidate`):
   `{ config_execution: "none" | "inert-data" | "executable", network_egress: boolean,
   version_pinning: "pinned" | "toolchain-resolved" | "unpinned" }`.
 <!-- doc-citation-exempt: planned test file — created when item A is implemented -->
@@ -75,7 +75,7 @@ per-run.
   Declined persists; re-offer only when a new candidate id has no recorded decision.
 - `admitSpawn` admission becomes: default set ∨ recorded `granted` ∨ per-run token. This
   **deliberately revises the CE-005 analyzer contract** pinned by
-  `tests/audit/analyzer-acquisition-engine.test.ts` ("permanent pre-installed non-default tool
+  `tests/shared/analyzer-acquisition-engine.test.ts` ("permanent pre-installed non-default tool
   still needs the token") — the old rule guarded a consent that was never offered. Test revised in
   the SAME commit (atomic-replace). Open sub-question, flag at implementation: whether a per-run
   token overrides a recorded `declined` (default: yes — fresher, explicit signal).
@@ -86,23 +86,32 @@ Findings born from analyzer leads are closed by the same analyzer re-run — ver
 not host claim. The one place mechanical output is authoritative rather than a lead: "the lead no
 longer fires" is a fact.
 
-1. **Engine relocation (one core, two draws):** acquisition substrate (`admitSpawn`,
-   `runSafetyGate`, runner probe/spawn plumbing, candidate + safety-profile contracts) moves to
-   `src/shared/analyzers/`; `src/audit/extractors/analyzers/` keeps the concrete candidate registry
-   and audit-side orchestration (read draw); remediate imports the shared substrate (verify draw).
-   No remediate→audit import. One atomic move commit.
+1. **Engine relocation (one core, two draws) — SHIPPED, with one recorded deviation:**
+   acquisition substrate (`admitSpawn`, `runSafetyGate`, runner probe/spawn plumbing, candidate +
+   safety-profile contracts) moved to `src/shared/analyzers/`. **Deviation from the original text:
+   the concrete candidate registry (`candidates.ts`) and its parse adapters (`clippy`, `rubocop`)
+   moved to shared too** — the verify draw must re-run "the same pinned spec", which requires the
+   candidate definitions (`spec`/`buildArgv`/`parse`); keeping them audit-side would force either a
+   banned remediate→audit import or a forked spec copy. Audit keeps orchestration
+   (`acquisitionExecutor`, packet policy, the in-tree `LanguageAnalyzer` registry) and re-exports
+   the shared surface through `src/audit/extractors/analyzers/registry.ts`. No remediate→audit
+   import. One atomic move commit.
 2. **Provenance join:** `AnalyzerLeadProvenance` `{analyzer_id, rule, path, snippet_hash}` —
    content-anchored (hash of the normalized flagged snippet), never line numbers (edits shift
-   lines). Attached at normalization (`src/audit/adapters/normalizeExternal.ts`), carried task
+   lines). Attached at normalization (`src/shared/analyzers/normalizeExternal.ts`), carried task
    signal → `AuditResult` → finding → `extracted-plan.json` item via the existing id-join
    architecture. Optional everywhere.
-3. **Close integration:** new closing action `verify_analyzer_leads`
-   (`src/remediate/state/closingActions.ts` + handler in `src/remediate/phases/close.ts`): group
-   provenance-carrying resolved items by analyzer; re-run same pinned spec through the shared
-   engine (admission still via `admitSpawn`; an audit-time grant covers the verify draw), scoped to
-   lead file set ∪ files touched by the fix. **Instance-level semantics:** pass = that provenance
+3. **Close integration — recorded deviation from the original text:** `verify_analyzer_leads` is
+   NOT a `CLOSING_ACTIONS` entry (that enum is the operator's one-per-plan repo-landing choice —
+   commit/push/tag/…); it is a close-gate **verify leg** in `src/remediate/phases/close.ts`,
+   sequenced with the combined-suite / deferred-verify / e2e legs (design-check catch, confirmed
+   by the independent refutation lane): group provenance-carrying resolved items by analyzer;
+   re-run same pinned spec through the shared engine (admission still via `admitSpawn` reading the
+   same session config; an unadmitted analyzer records a per-item skip, never a silent pass),
+   identity-matched over the re-run results. **Instance-level semantics:** pass = that provenance
    identity no longer appears; a clone pair is fixed when that pair is gone — residual findings
-   elsewhere in the file do not fail it.
+   elsewhere in the file do not fail it. Unlike the suite legs (which re-block ALL resolved items
+   on red), a persisting lead re-blocks only ITS item — attribution is exact.
 4. **Outcome routing:** per-item `verified_mechanically` / `lead_persists` in the outcomes
    contract; a persisting lead does not hard-block close — it routes the item to triage as
    objective evidence.

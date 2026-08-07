@@ -1,5 +1,5 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import { normalizeGenericExternalResults } from "./normalizeExternal.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import { normalizeGenericExternalResults } from "audit-tools/shared";
 
 interface NpmAuditVuln {
   name?: string;

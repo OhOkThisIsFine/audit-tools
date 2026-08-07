@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 
 export type FileAnchorKind =

@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import type { GraphBundle } from "audit-tools/shared";
-import type { ExternalAnalyzerResults } from "../../src/audit/types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "../../src/shared/analyzers/types.js";
 import { buildFileAnchorSummary } from "../../src/audit/orchestrator/fileAnchors.js";
 import { buildLargeFileSection } from "../../src/audit/cli/dispatch/packetPrompt.js";
 

@@ -3,7 +3,7 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type {
   BinaryFetcher,
   BinaryCommandRunner,
-} from "../../src/audit/extractors/analyzers/binaryAcquisition.js";
+} from "../../src/shared/analyzers/binaryAcquisition.js";
 
 // Slice D — production wiring of the external-analyzer acquisition engine.
 // Covers the hermeticity gate (disabled ⇒ empty marker, nothing spawned) and the

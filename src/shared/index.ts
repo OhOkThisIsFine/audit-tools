@@ -1504,3 +1504,84 @@ export {
 } from "./engine/obligationEngine.js";
 export { LOOP_CORE_PATTERNS, isLoopCorePath } from "./loopCorePaths.js";
 export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";
+
+// External analyzer acquisition substrate (one core, two draws: audit's read
+// draw and remediate's close-verify draw both run analyzers through this).
+export {
+  OWNED_TOOL_IDS,
+  admitSpawn,
+  runSafetyGate,
+  runExternalAnalyzer,
+  registerExternalAnalyzers,
+  runAcquisitionEngine,
+  resolveBinaryCandidates,
+  detectNodeEcosystem,
+  detectPythonEcosystem,
+} from "./analyzers/acquisitionEngine.js";
+export type {
+  EcosystemRunner,
+  AnalyzerSafetyProfile,
+  ExternalAnalyzerCandidate,
+  AcquisitionRunner,
+  AcquisitionEngineOptions,
+  AcquisitionOutcome,
+  RunAllOutcome,
+  ResolvedBinaries,
+} from "./analyzers/acquisitionEngine.js";
+export { resolveBinary, expectedSha256For } from "./analyzers/binaryAcquisition.js";
+export type {
+  BinarySpec,
+  BinaryFetcher,
+  BinaryCommandRunner,
+  BinaryResolveOptions,
+  BinaryResolution,
+} from "./analyzers/binaryAcquisition.js";
+export {
+  ExternalAnalyzerResultItemSchema,
+  ExternalAnalyzerGraphEdgeSchema,
+  ExternalAnalyzerOwnershipRootSchema,
+  ExternalAnalyzerToolStatusSchema,
+  ExternalAnalyzerResultsSchema,
+  ExternalAnalyzerAcquisitionMarkerSchema,
+  upsertExternalToolResults,
+} from "./analyzers/types.js";
+export type {
+  ExternalAnalyzerResultItem,
+  ExternalAnalyzerGraphEdge,
+  ExternalAnalyzerToolStatus,
+  ExternalAnalyzerResults,
+  ExternalAnalyzerAcquisitionMarker,
+} from "./analyzers/types.js";
+export {
+  normalizeGenericExternalResults,
+  normalizeGenericExternalEdges,
+} from "./analyzers/normalizeExternal.js";
+export {
+  EXTERNAL_ANALYZER_CANDIDATES,
+  gitleaksCandidate,
+  semgrepCandidate,
+  knipCandidate,
+  parseKnip,
+  eslintCandidate,
+  parseGitleaks,
+  GITLEAKS_VERSION,
+  jscpdCandidate,
+  parseJscpd,
+  osvScannerCandidate,
+  parseOsvScanner,
+  OSV_SCANNER_VERSION,
+  clippyCandidate,
+  rubocopCandidate,
+  hadolintCandidate,
+  parseHadolint,
+  HADOLINT_VERSION,
+  actionlintCandidate,
+  parseActionlint,
+  ACTIONLINT_VERSION,
+  typeCoverageCandidate,
+  parseTypeCoverage,
+  lizardCandidate,
+  parseLizard,
+} from "./analyzers/candidates.js";
+export { parseClippy } from "./analyzers/clippy.js";
+export { parseRubocop } from "./analyzers/rubocop.js";

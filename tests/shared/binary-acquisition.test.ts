@@ -9,15 +9,15 @@ import type {
   BinarySpec,
   BinaryFetcher,
   BinaryCommandRunner,
-} from "../../src/audit/extractors/analyzers/binaryAcquisition.js";
-import type { ExternalAnalyzerCandidate } from "../../src/audit/extractors/analyzers/acquisitionEngine.js";
+} from "../../src/shared/analyzers/binaryAcquisition.js";
+import type { ExternalAnalyzerCandidate } from "../../src/shared/analyzers/acquisitionEngine.js";
 import type { RunTrackedResult } from "audit-tools/shared";
 
 const { resolveBinary, expectedSha256For } = await import(
-  "../../src/audit/extractors/analyzers/binaryAcquisition.js"
+  "../../src/shared/analyzers/binaryAcquisition.js"
 );
 const { resolveBinaryCandidates, runExternalAnalyzer } = await import(
-  "../../src/audit/extractors/analyzers/acquisitionEngine.js"
+  "../../src/shared/analyzers/acquisitionEngine.js"
 );
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");

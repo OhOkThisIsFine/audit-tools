@@ -9,7 +9,7 @@ import type { RuntimeValidationTask } from "../../src/audit/types/runtimeValidat
 import type { LogEntry, ExecutorRunResult } from "../../src/audit/orchestrator/executorResult.js";
 
 const { checkFileIntegrity } = await import("../../src/audit/orchestrator/fileIntegrity.js");
-const { normalizeGenericExternalResults } = await import("../../src/audit/adapters/normalizeExternal.js");
+const { normalizeGenericExternalResults } = await import("../../src/shared/analyzers/normalizeExternal.js");
 const { runCommand } = await import("../../src/audit/orchestrator/runtimeCommand.js");
 
 function sha256(content: string): string {

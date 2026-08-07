@@ -10,7 +10,7 @@ import {
   resolveAnalyzerPlan,
   needsInstallDecision,
 } from "../extractors/analyzers/registry.js";
-import { EXTERNAL_ANALYZER_CANDIDATES } from "../extractors/analyzers/candidates.js";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 
 /**
  * Inputs the fold-level host-input pauses depend on. These mirror the fields the

@@ -38,7 +38,7 @@ export {
   resolveBinaryCandidates,
   detectNodeEcosystem,
   detectPythonEcosystem,
-} from "./acquisitionEngine.js";
+} from "audit-tools/shared";
 export type {
   EcosystemRunner,
   ExternalAnalyzerCandidate,
@@ -47,19 +47,19 @@ export type {
   AcquisitionOutcome,
   RunAllOutcome,
   ResolvedBinaries,
-} from "./acquisitionEngine.js";
-export { resolveBinary, expectedSha256For } from "./binaryAcquisition.js";
+} from "audit-tools/shared";
+export { resolveBinary, expectedSha256For } from "audit-tools/shared";
 export {
   EXTERNAL_ANALYZER_CANDIDATES,
   gitleaksCandidate,
   GITLEAKS_VERSION,
-} from "./candidates.js";
+} from "audit-tools/shared";
 export type {
   BinarySpec,
   BinaryFetcher,
   BinaryResolveOptions,
   BinaryResolution,
-} from "./binaryAcquisition.js";
+} from "audit-tools/shared";
 
 function settingFor(
   analyzers: Record<string, AnalyzerSetting> | undefined,

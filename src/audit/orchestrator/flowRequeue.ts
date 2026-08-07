@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { AuditTask, CoverageMatrix, Lens } from "../types.js";
 import { isLens } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";

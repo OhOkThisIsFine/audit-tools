@@ -11,7 +11,7 @@ import type {
 } from "audit-tools/shared";
 import { hashContent, stableStringify, resolveWithinRoot } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   extractChromeExtensionManifestEdges,

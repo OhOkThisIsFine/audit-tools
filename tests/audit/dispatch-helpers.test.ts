@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { DispatchModelTier, SessionConfig } from "audit-tools/shared";
 import type { AuditTask } from "../../src/audit/types.js";
 import type { ReviewPacket } from "../../src/audit/types/reviewPlanning.js";
-import type { ExternalAnalyzerResults } from "../../src/audit/types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "../../src/shared/analyzers/types.js";
 
 const {
   filterPackets,

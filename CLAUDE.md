@@ -254,7 +254,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `knip.json`; wired into `verify:release`) fails the build on any
   exported symbol with zero consumers anywhere, including tests. This gates our own source tree at release
   time — distinct from knip's separate use as an *acquired product analyzer* audit-code runs against
-  repos it audits (`src/audit/extractors/analyzers/candidates.ts`). Default-mode, not the literal
+  repos it audits (`src/shared/analyzers/candidates.ts`). Default-mode, not the literal
   `--production` zero-non-test-consumers check, because `--production` has real false positives here — it
   can't trace dispatch-table / re-export-alias / dynamic wiring, so live functions like
   `resolveFreshSessionProviderName` flag as unused and it isn't gate-able. The tested-but-unwired class

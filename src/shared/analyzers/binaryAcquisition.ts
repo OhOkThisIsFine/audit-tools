@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runTracked, type RunTrackedResult } from "audit-tools/shared";
+import { runTracked, type RunTrackedResult } from "../tooling/exec.js";
 
 /**
  * Generic acquisition of a standalone mature analyzer BINARY (gitleaks,

@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 
 /**
  * Extract the set of file paths that have at least one external-analyzer

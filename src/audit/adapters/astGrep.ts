@@ -1,8 +1,8 @@
 import type {
   ExternalAnalyzerGraphEdge,
   ExternalAnalyzerResults,
-} from "../types/externalAnalyzer.js";
-import { normalizeGenericExternalEdges } from "./normalizeExternal.js";
+} from "audit-tools/shared";
+import { normalizeGenericExternalEdges } from "audit-tools/shared";
 
 /**
  * One match from `ast-grep scan --json`. The matched file is `file`; a capture

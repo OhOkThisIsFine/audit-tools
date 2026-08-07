@@ -1,5 +1,5 @@
 import type { CoverageMatrix } from "../types.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 
 const TRIVIAL_DOTFILES = new Set([".gitignore", ".gitattributes"]);
 

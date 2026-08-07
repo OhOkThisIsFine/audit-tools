@@ -10,7 +10,7 @@ import type {
   UnitManifest,
 } from "../types.js";
 import type { FileDisposition } from "audit-tools/shared";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import { hasBrowserExtensionManifestFile } from "../extractors/browserExtension.js";
 import { deriveRequiredLensesForPath } from "./unitBuilder.js";

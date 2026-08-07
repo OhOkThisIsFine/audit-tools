@@ -24,7 +24,7 @@ import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type {
   ExternalAnalyzerResults,
   ExternalAnalyzerAcquisitionMarker,
-} from "../types/externalAnalyzer.js";
+} from "audit-tools/shared";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { AuditPlanMetrics } from "../types/reviewPlanning.js";
 import type { TaskAffinityGraph } from "../orchestrator/taskAffinityGraph.js";

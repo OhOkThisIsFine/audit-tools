@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { pendingAnalyzerConsent } from "../../src/audit/orchestrator/hostInputPause.js";
 import { persistAnalyzerConsent } from "../../src/audit/supervisor/sessionConfig.js";
 import { renderAnalyzerConsentPrompt } from "../../src/audit/cli/prompts.js";
-import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/audit/extractors/analyzers/candidates.js";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/shared/analyzers/candidates.js";
 
 const RM_DIRS: string[] = [];
 const tempDir = (prefix: string): string => {

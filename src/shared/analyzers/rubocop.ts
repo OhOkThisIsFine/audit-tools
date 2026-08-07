@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "./types.js";
 import { normalizeGenericExternalResults } from "./normalizeExternal.js";
 
 /**

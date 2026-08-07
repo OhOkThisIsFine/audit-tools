@@ -5,7 +5,7 @@ import {
   type ExternalAnalyzerResults,
   type ExternalAnalyzerResultItem,
   type ExternalAnalyzerToolStatus,
-} from "../types/externalAnalyzer.js";
+} from "audit-tools/shared";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveNodeTool, runFirstAvailableCommand } from "./localCommands.js";

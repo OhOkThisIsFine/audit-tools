@@ -15,7 +15,7 @@ import { RepoManifestSchema, UnitManifestSchema } from "../../src/audit/types.js
 import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
 import { AuditPlanMetricsSchema } from "../../src/audit/types/reviewPlanning.js";
 import { RuntimeValidationTaskManifestSchema } from "../../src/audit/types/runtimeValidation.js";
-import { ExternalAnalyzerResultsSchema } from "../../src/audit/types/externalAnalyzer.js";
+import { ExternalAnalyzerResultsSchema } from "../../src/shared/analyzers/types.js";
 import {
   WorkerAuditResultSchema,
   WorkerAuditResultsSchema,

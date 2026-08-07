@@ -1,5 +1,5 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import { normalizeGenericExternalResults } from "./normalizeExternal.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import { normalizeGenericExternalResults } from "audit-tools/shared";
 
 /** Minimum acceptable line coverage percentage; files below this are flagged. */
 const COVERAGE_THRESHOLD_LOW = 80;

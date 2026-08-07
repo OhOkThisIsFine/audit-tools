@@ -1,5 +1,5 @@
 import { readJsonFile } from "audit-tools/shared";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { runAuditStep } from "./auditStep.js";
 import { getArtifactsDir, getFlag, getRootDir } from "./args.js";
 

@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildRequeueTasks } from "./requeue.js";
 import { buildFlowRequeueTasks } from "./flowRequeue.js";
 import type { CoverageMatrix } from "../types.js";

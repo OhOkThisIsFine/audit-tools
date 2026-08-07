@@ -1,8 +1,8 @@
 import type {
   ExternalAnalyzerGraphEdge,
   ExternalAnalyzerResults,
-} from "../types/externalAnalyzer.js";
-import { normalizeGenericExternalEdges } from "./normalizeExternal.js";
+} from "audit-tools/shared";
+import { normalizeGenericExternalEdges } from "audit-tools/shared";
 
 /**
  * Minimal SARIF 2.1.0 shape for CodeQL dataflow queries. Only the fields needed

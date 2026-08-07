@@ -1,11 +1,11 @@
 import type {
   ExternalAnalyzerGraphEdge,
   ExternalAnalyzerResults,
-} from "../types/externalAnalyzer.js";
+} from "audit-tools/shared";
 import {
   normalizeGenericExternalEdges,
   normalizeGenericExternalResults,
-} from "./normalizeExternal.js";
+} from "audit-tools/shared";
 
 interface SemgrepDataflowTraceNode {
   location?: { path?: string };

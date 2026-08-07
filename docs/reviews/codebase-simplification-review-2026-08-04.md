@@ -92,7 +92,7 @@ consolidation. Per-item dispositions:
    ([audit/validation/sessionConfig.ts:65–132](../../src/audit/validation/sessionConfig.ts)),
    global-asset install ([remediate/index.ts:742–823](../../src/remediate/index.ts)),
    platform→asset mapping repeated per external binary
-   ([candidates.ts:32–55 and 423–679](../../src/audit/extractors/analyzers/candidates.ts)).
+   ([candidates.ts:32–55 and 423–679](../../src/shared/analyzers/candidates.ts)).
    Agent-verified. Each is N near-identical blocks iterable from one data table; the
    candidates case duplicates the win32→windows mapping five times. Fix: registry/table +
    one loop; extract `platformToAssetOs` / `archToAssetCpu` helpers.

@@ -4,7 +4,7 @@ import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import {
   upsertExternalToolResults,
   type ExternalAnalyzerResults,
-} from "../types/externalAnalyzer.js";
+} from "audit-tools/shared";
 import { runCommand } from "./runtimeCommand.js";
 import { buildFlowCoverage } from "./flowCoverage.js";
 import { buildRequeuePayload } from "./requeueCommand.js";

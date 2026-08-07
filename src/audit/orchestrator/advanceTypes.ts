@@ -2,7 +2,7 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult, SessionConfig, WorkPartitionPolicy } from "audit-tools/shared";
 import type { IntentEquivalenceVerdictSubmission } from "./intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";

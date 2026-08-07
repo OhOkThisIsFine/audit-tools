@@ -3,7 +3,7 @@ import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "./findingRanks.js";
 import {

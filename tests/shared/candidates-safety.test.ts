@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   EXTERNAL_ANALYZER_CANDIDATES,
-} from "../../src/audit/extractors/analyzers/candidates.js";
+} from "../../src/shared/analyzers/candidates.js";
 
 describe("AnalyzerSafetyProfile contract", () => {
   it("every candidate carries a safety profile", () => {

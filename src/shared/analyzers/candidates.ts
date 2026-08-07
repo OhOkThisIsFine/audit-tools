@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readdirSync } from "node:fs";
-import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
+import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 import type { ExternalAnalyzerCandidate } from "./acquisitionEngine.js";
 import {
   detectNodeEcosystem,
@@ -12,8 +12,8 @@ import {
   detectGithubActionsEcosystem,
 } from "./acquisitionEngine.js";
 import type { BinarySpec } from "./binaryAcquisition.js";
-import { parseClippy } from "../../adapters/clippy.js";
-import { parseRubocop } from "../../adapters/rubocop.js";
+import { parseClippy } from "./clippy.js";
+import { parseRubocop } from "./rubocop.js";
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place

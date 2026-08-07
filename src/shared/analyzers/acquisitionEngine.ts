@@ -1,18 +1,15 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import {
-  runTracked,
-  type AnalyzerSetting,
-  type RunTrackedResult,
-} from "audit-tools/shared";
+import { runTracked, type RunTrackedResult } from "../tooling/exec.js";
+import type { AnalyzerSetting } from "../types/sessionConfig.js";
 import {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,
-} from "../../adapters/normalizeExternal.js";
+} from "./normalizeExternal.js";
 import type {
   ExternalAnalyzerResults,
   ExternalAnalyzerToolStatus,
-} from "../../types/externalAnalyzer.js";
+} from "./types.js";
 import {
   resolveBinary,
   type BinarySpec,

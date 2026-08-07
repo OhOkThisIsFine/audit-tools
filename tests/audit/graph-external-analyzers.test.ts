@@ -11,7 +11,7 @@ const { deriveGraphSignals } = await import(
 );
 const { GraphBundleSchema } = await import("../../src/shared/index.js");
 const { normalizeGenericExternalEdges } = await import(
-  "../../src/audit/adapters/normalizeExternal.js"
+  "../../src/shared/analyzers/normalizeExternal.js"
 );
 const { normalizeSemgrepDataflowJson } = await import(
   "../../src/audit/adapters/semgrep.js"

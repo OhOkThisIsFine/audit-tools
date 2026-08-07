@@ -84,7 +84,7 @@ import {
   pendingAnalyzerConsent,
 } from "../orchestrator/hostInputPause.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
-import type { ExternalAnalyzerCandidate } from "../extractors/analyzers/acquisitionEngine.js";
+import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
 import {
   persistAnalyzerSettings,
   persistAnalyzerConsent,
