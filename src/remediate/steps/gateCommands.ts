@@ -54,6 +54,13 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
   return [
     { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
     { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
+    // The TEST-tree typecheck (tsconfig.test.json) is a distinct gate from
+    // `check` and is part of CI's `verify:checks` — an accept leg that omits it
+    // lands type-RED test files invisible to vitest and `check` (accept/reverify
+    // cluster defect 12: the 2026-08-06 run landed 4 such files, the fourth
+    // CP-NODE-26 accept regression). Build-free: it typechecks tests + src
+    // directly, no dist involved.
+    { argv: ["npm", "run", "check:tests"], build_free: true, layer: "check" },
     // BUILD-FREE unit suite at the repo root (single package — no `npm -w`, never
     // `npm test`, which prepends a build). ONE vitest runner covers all three areas
     // (tests/shared, tests/audit, tests/remediate) per vitest.config.ts `include` —
@@ -80,17 +87,20 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
 }
 
 /**
- * The pinned argv for the per-node merged-base cross-package check (INV-2): the
+ * The pinned argvs for the per-node merged-base cross-package check (INV-2): EVERY
  * `check`-layer (typecheck) command from the tool-owned gate set, derived from the
  * repo structure rather than a hardcoded string. Catches a cross-package type break
  * that a per-node worktree verify cannot (its `@audit-tools` junction resolves to an
- * unfaithful main). Returns `null` when the audit-tools suite is inapplicable
- * (non-monorepo target) — the merged-base check is then skipped, exactly as the old
- * explicit-`null` did, rather than fabricating a check command for an arbitrary repo.
+ * unfaithful main). Plural on purpose (accept/reverify cluster defect 12): the check
+ * layer carries both `check` and `check:tests`, and an accept that runs only the
+ * first lands test files that are type-RED under CI's `verify:checks`. Returns `[]`
+ * when the audit-tools suite is inapplicable (non-monorepo target) — the merged-base
+ * check is then skipped rather than fabricating a command for an arbitrary repo.
  */
-export function mergedBaseCheckArgv(root: string): string[] | null {
-  const check = toolOwnedFinalGateCommands(root).find((c) => c.layer === "check");
-  return check ? check.argv : null;
+export function mergedBaseCheckArgvs(root: string): string[][] {
+  return toolOwnedFinalGateCommands(root)
+    .filter((c) => c.layer === "check")
+    .map((c) => c.argv);
 }
 
 /**
@@ -104,7 +114,7 @@ export function mergedBaseCheckArgv(root: string): string[] | null {
  * node-local verify and surfaces only late at close with a coarse, un-attributable
  * reblock; running the guard suite here attributes the break to the node that caused
  * it and rolls it back. Returns `null` when the audit-tools suite is inapplicable
- * (non-monorepo target) — same scoped-out contract as `mergedBaseCheckArgv` — since
+ * (non-monorepo target) — same scoped-out contract as `mergedBaseCheckArgvs` — since
  * the guard suite is the audit-tools-specific `verify:guards` script (this remediation
  * run remediates the audit-tools monorepo itself), never fabricated for an arbitrary
  * target repo.

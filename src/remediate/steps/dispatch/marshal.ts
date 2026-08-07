@@ -651,6 +651,11 @@ async function diagnoseMissingResultCause(
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
+  // Cluster defect 1: a single-node recovery (reverify-node) must finalize ONLY
+  // its own block — an unscoped merge sweeps every OTHER planned block through
+  // the missing-result branch, blocking never-dispatched siblings to triage.
+  // One shared finalizer, two draws: the run-level callers omit the scope.
+  scope?: { onlyBlockId: string },
 ): Promise<RemediationState> {
   const quotaFilePath = join(
     runDir(options.artifactsDir, runId, "implement"),
@@ -718,10 +723,20 @@ export async function mergeImplementResults(
       throw new Error("Cannot merge implement results without items.");
     }
 
-    return mergeImplementResultsIntoState(options, runId, plan, state, {
-      admissionRefusals,
-      capabilityFloor,
-    });
+    const scopedPlan = scope
+      ? { ...plan, items: plan.items.filter((i) => i.block_id === scope.onlyBlockId) }
+      : plan;
+    return mergeImplementResultsIntoState(
+      options,
+      runId,
+      scopedPlan,
+      state,
+      {
+        admissionRefusals,
+        capabilityFloor,
+      },
+      scope,
+    );
   });
 }
 
@@ -743,6 +758,7 @@ async function mergeImplementResultsIntoState(
     /** The wave's resolved capability window, for the refusal's honest message. */
     capabilityFloor: number | null;
   },
+  scope?: { onlyBlockId: string },
 ): Promise<RemediationState> {
   if (!state.items) {
     throw new Error("Cannot merge implement results without items.");
@@ -781,6 +797,9 @@ async function mergeImplementResultsIntoState(
   // exist — those have no rendered prompt to size, so they carry no estimate.
   const itemsToMerge: DispatchPlanItemDraft[] = [...plan.items];
   for (const block of state.plan?.blocks ?? []) {
+    // Scoped (single-node) finalize: reconcile nothing beyond the named block —
+    // the whole-plan reconciliation is the run-level draw (cluster defect 1).
+    if (scope && block.block_id !== scope.onlyBlockId) continue;
     if (plannedBlockIds.has(block.block_id)) {
       continue;
     }

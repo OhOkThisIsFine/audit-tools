@@ -118,17 +118,18 @@
 
 ## Immediate next
 
-1. **Ship the loop-core source fixes** for the accept/reverify cluster (TWELVE defects incl.
-   the commit-before-cwd-check MAIN-dirt commit, the sticky merged:true outcome, the accept_failed
-   re-report ledger, the accept guard leg skipping `check:tests`) + the zero-frontier null-guard
-   (`src/remediate/steps/nextStep.ts:2372`) with
-   regression tests and attestation — entry in `open-bugs.md` §Implement-dispatch accept/reverify
-   defect cluster; run forensics in memory `remediation-run-2026-08-06-paused-midflight`.
-   ⚠ Standing hazards until this ships: `session-config.json` at repo root (untracked,
+1. **Publish the accept/reverify cluster fixes** (all TWELVE numbered defects SHIPPED to source
+   2026-08-06 with red-green regression tests + loop-core attestation: own-top-level guard
+   INV-WTS-9, evidence-based merged:true downgrade, accept_failed↔outcome reconcile, scoped
+   reverify finalize, full-range quarantine replay, worktree-hostile verify deferral,
+   `check:tests` in the accept gate, zero-frontier null-guard, clarified-result archival,
+   base-rollback honesty) — run `/ship` so the global bins pick up the source fix and the
+   dist-only zero-frontier hotfix note below dissolves. The two unfixed residuals (write-scope
+   scratch-log/seed admission) are their own entry in `open-bugs.md`.
+   ⚠ Standing hazards until the publish lands: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
    is load-bearing — recreate if absent; the installed global dist carries a ONE-LINE HOTFIX
-   (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the source fix
-   ships.
+   (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the publish.
 2. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
    2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
    `open-bugs.md`.

@@ -157,21 +157,55 @@ export function isDistDependentVerifyCommand(cmd: string, treeRoot?: string): bo
 }
 
 /**
- * Partition verify commands into the per-node-runnable set and the
- * dist-dependent set (deferred to the central close gate). Content-level
- * detection: `treeRoot` should be the WORKTREE the verify would run in, so the
- * scanned test files are the node's own post-edit versions.
+ * True when a verify command names a test FILE that is WORKTREE-HOSTILE: its
+ * content spawns the `audit-code` / `remediate-code` driver CLIs, which the
+ * worker-context guard (v0.34.19, cwd-discriminated) mechanically refuses from
+ * inside a node worktree — so the test deterministically fails there and the
+ * node can NEVER accept (accept/reverify cluster defect 8). Same
+ * conservative-toward-deferral contract as the dist probe: a false positive
+ * only moves the command to the close gate (root cwd, where it runs fine).
  */
-export function partitionDistDependentVerifyCommands(
+export function isWorktreeHostileVerifyCommand(cmd: string, treeRoot: string): boolean {
+  for (const token of pathTokensInCommand(cmd)) {
+    if (!/\.test\.(mjs|cjs|js|ts|tsx)$/.test(token)) continue;
+    const p = join(treeRoot, token);
+    if (!existsSync(p)) continue;
+    let content: string;
+    try {
+      content = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    // The driver CLI names (bin or wrapper .mjs) appearing in test content —
+    // spawn targets the worker-context guard refuses inside a worktree.
+    if (/\b(?:audit|remediate)-code(?:\.mjs)?\b/.test(content)) return true;
+  }
+  return false;
+}
+
+/**
+ * Partition verify commands into the per-node-runnable set and the DEFERRED set
+ * (dist-dependent OR worktree-hostile — both deterministically false-red inside
+ * a build-free node worktree; the central close gate runs them on the merged
+ * tree at the repo root). Content-level detection: `treeRoot` should be the
+ * WORKTREE the verify would run in, so the scanned test files are the node's
+ * own post-edit versions. The deferred list is DEDUPLICATED — the close gate's
+ * replay drains it verbatim, so a doubled entry would run twice there.
+ */
+export function partitionDeferredVerifyCommands(
   commands: string[],
   treeRoot: string,
 ): { kept: string[]; deferred: string[] } {
   const kept: string[] = [];
-  const deferred: string[] = [];
+  const deferred = new Set<string>();
   for (const c of commands) {
-    (isDistDependentVerifyCommand(c, treeRoot) ? deferred : kept).push(c);
+    if (isDistDependentVerifyCommand(c, treeRoot) || isWorktreeHostileVerifyCommand(c, treeRoot)) {
+      deferred.add(c);
+    } else {
+      kept.push(c);
+    }
   }
-  return { kept, deferred };
+  return { kept, deferred: [...deferred] };
 }
 
 /**

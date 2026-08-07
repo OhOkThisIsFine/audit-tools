@@ -8,6 +8,7 @@ import {
   refSafeSegment,
   gitTopLevel,
   canonicalPathKey,
+  isOwnGitTopLevel,
   gitBranchExists,
   gitEditedFilesForBranch,
 } from "./common.js";
@@ -367,6 +368,16 @@ export function rebaseBranchOntoHead(
     return { ok: false, error: `could not resolve remediation HEAD for rebase: ${detail}` };
   }
   const target = head.stdout.trim();
+  // INV-WTS-9 (cluster defect 4): a rebase with an orphan-dir cwd resolves up to
+  // the enclosing checkout and rebases MAIN's checked-out branch. Refuse first.
+  if (!isOwnGitTopLevel(worktreePath)) {
+    return {
+      ok: false,
+      error:
+        `rebase REFUSED: \`${worktreePath}\` is not its own git top-level (an orphan ` +
+        `dir or deleted worktree — the rebase would run against the enclosing checkout).`,
+    };
+  }
   const rebase = spawnSyncHidden("git", ["rebase", target], {
     cwd: worktreePath,
     encoding: "utf8",
@@ -533,6 +544,9 @@ export function quarantineUncommittedWorktreeEdits(
   runId: string,
   blockId: string,
 ): { ref: string; commit: string } | null {
+  // INV-WTS-9: staging/committing with an orphan-dir cwd would preserve the
+  // ENCLOSING checkout's dirt, not the worker's edits. Nothing to preserve.
+  if (!isOwnGitTopLevel(worktreeRoot)) return null;
   // Stage tracked modifications + new (non-ignored) source files. `git add -A`
   // honours .gitignore, so the incidental ignored churn (node_modules/dist) and
   // the offending generated artifact stay out — what we preserve is the worker's
@@ -866,6 +880,20 @@ export function commitWorktree(
   message: string,
   declaredWritePaths?: string[],
 ): { committed: boolean; error?: string } {
+  // INV-WTS-9 (cluster defects 4/11): the commit step is the FIRST git write of
+  // the accept flow, and it ran before any cwd check — an orphan dir (worktree
+  // de-registered mid-recovery) made `git add -A`/`git commit` resolve up to the
+  // MAIN checkout and commit its dirt onto the run branch. Refuse before any
+  // git write when this cwd is not its own top-level.
+  if (!isOwnGitTopLevel(worktreeRoot)) {
+    return {
+      committed: false,
+      error:
+        `commit REFUSED: \`${worktreeRoot}\` is not its own git top-level (an orphan ` +
+        `dir or deleted worktree — git calls would escape to the enclosing checkout ` +
+        `and commit ITS state). Rebuild the node worktree and re-drive.`,
+    };
+  }
   // Force-add worker-created new SOURCE files that `.gitignore` shadows (and fail
   // loudly on a generated-artifact / out-of-scope new file) BEFORE `git add -A`,
   // which on its own silently drops every untracked-ignored path (CE-003/CE-004).

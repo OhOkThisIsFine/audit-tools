@@ -6,6 +6,21 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Full-suite vitest exits 1 on a worker RPC timeout while every test passes (2026-08-06,
+  friction, medium).** Two consecutive full runs: 7,510 passed / 0 failed, but `Errors 1 error` —
+  `[vitest-worker]: Timeout calling "onTaskUpdate"` — flips the exit code to 1. The worker channel
+  starves while a spawnSync-heavy audit e2e (`audit-code-completion.test.ts`, ~311s single-file
+  wall) blocks its worker's event loop. A green suite reading RED is the false-RED class.
+  **Property:** the full suite's exit code reflects test outcomes; long spawnSync e2es must not
+  starve the worker RPC channel (isolate/serialize the offender, or lift the RPC timeout for it).
+
+- **Session-start offload-liveness probe reads a live llm-relay as DOWN (2026-08-06, friction, low).**
+  `session-start-guards.mjs` probes `http://127.0.0.1:8791/health` and treats any non-2xx as
+  lane-down; the running relay answers that path 403, so every session start reports "OFFLOAD LANE
+  DOWN" while `llm-relay offload status` shows the lane fully live. **Property:** the liveness probe
+  distinguishes no-listener from an answering-but-403 relay (any HTTP response = process alive), or
+  probes an endpoint the relay actually serves 2xx.
+
 - **closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops
   (2026-08-05, low).** A turn that ends while waiting on harness-tracked background work (a running
   test suite, an in-flight review workflow) is a Stop with uncommitted work, so the gate fires —
@@ -1219,32 +1234,14 @@
   healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
   itself would use for dispatch.
 
-- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Twelve
-  mechanically-observed defects from the first live 205-node rolling drive; each needs a tool-side
-  fix + regression test (loop-core, attestation). Recovery recipes: memory
-  `remediation-run-2026-08-06-paused-midflight`. (1) `reverify-node` runs a premature whole-plan
-  merge — never-dispatched blocks "rejected", swept to triage; (2) quarantine replay cherry-picks
-  only the preserved TIP commit; (3) a failed accept can leave the node's commit ON the run branch
-  while reporting `merged:false`; (4) worktrees de-registered mid-recovery leave an orphan dir
-  whose git calls resolve up to MAIN; (5) v0.36.1 zero-frontier null-crash (`nextStep.ts:2372`,
-  dist-hotfixed only); (6) a consumed `clarified` resolution still reuses stale
-  `needs_clarification` results and re-asks; (7) `worktreeHoldsUnlandedWork` lacks the
-  own-top-level check — an orphan dir reads MAIN's dirt as un-landed work and is reused every
-  re-dispatch; (8) the accept's node-verify runs branch-touched tests INSIDE the worktree, where
-  driver-lifecycle tests are refused by the cwd guard — such a node cannot accept; (9)
-  terminal-accept idempotency keys on the session `accept_failed` ledger, so a fixed cause
-  re-reports forever and the ledger contradicts outcome ground truth both ways; (10)
-  `recordNodeAcceptOutcome` never lets an honest lesser outcome replace `merged:true`, so a stale
-  `committed_oid` trips INV-WTS-7 on every no-change re-accept; (11) the accept's COMMIT step runs
-  before the INV-WTS-2 cwd check, so a deleted worktree commits MAIN dirt onto the run branch;
-  (12) the accept guard leg omits `check:tests`, landing test files that are type-RED under CI's
-  `verify:checks` (CP-NODE-26 landed 4; fixed `ecec16bc`). Plus: worker scratch logs MERGED
-  (write-scope gate refused nothing); untracked-target seeding swept `session-config.json` into a
-  node commit. **Property to hold:** an accept failure leaves branch, worktree, ledger, and outcome
-  record mutually consistent and re-drivable; a no-change claim is judged against CURRENT ground
-  truth only; no git write runs against a cwd that is not its own top-level; nothing outside the
-  declared write scope enters a node commit; reverify touches only its node; accept runs every gate
-  the destination's CI will run.
+- **Accept write-scope gate admits worker scratch logs and untracked-target seeds (2026-08-06
+  remediation run, medium).** The two unfixed residuals of the accept/reverify cluster (the twelve
+  numbered defects shipped with regression tests 2026-08-06; recovery recipes stay in memory
+  `remediation-run-2026-08-06-paused-midflight`): worker scratch logs MERGED through the gate
+  (it refused nothing), and untracked-target seeding swept the operator's root
+  `session-config.json` into a node commit. **Property to hold:** nothing outside the declared
+  write scope enters a node commit — including untracked seeds copied into the worktree by the
+  tool itself.
 
 - **Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction,
   medium).** Deferred dist-dependent verify commands are queued as literal command lists and

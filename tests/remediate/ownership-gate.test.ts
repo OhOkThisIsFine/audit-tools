@@ -458,4 +458,110 @@ describe("recordNodeAcceptOutcome — sidecar merged:true regression guard", () 
     const loaded = await loadNodeAcceptOutcome(artifactsDir, "R1", "SC2");
     expect(loaded?.merged).toBe(true);
   });
+
+  // Cluster defect 10: the guard is monotonic-BY-EVIDENCE, not unconditionally.
+  // A stale merged:true whose recorded landing is provably GONE from HEAD's
+  // history (rolled back / purged scratch commit) must not freeze the sidecar
+  // forever — that blocked every honest no-change re-accept on INV-WTS-7.
+
+  it("(defect 10) an evidence-backed downgrade replaces a merged:true whose landing is NOT an ancestor", async () => {
+    const { repo, ok } = initRepo("og-sidecar-evd-");
+    if (!ok) return;
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8", shell: false });
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    // A commit that is then discarded — the "landing" the stale sidecar records.
+    const baseOid = revParse(repo, "HEAD");
+    writeFileSync(join(repo, "landed.txt"), "landed\n");
+    git("add", "landed.txt");
+    git("commit", "-m", "landing later rolled back");
+    const purgedOid = revParse(repo, "HEAD");
+    git("reset", "--hard", baseOid);
+
+    await recordNodeAcceptOutcome(artifactsDir, "R1", "SC3", {
+      outcome: "success",
+      verifyPassed: true,
+      merged: true,
+      committedOid: purgedOid,
+      landedHeadOid: purgedOid,
+    });
+    // Honest re-accept: genuine no-change against CURRENT ground truth.
+    await recordNodeAcceptOutcome(
+      artifactsDir,
+      "R1",
+      "SC3",
+      { outcome: "success", verifyPassed: false, merged: false },
+      { root: repo },
+    );
+    const loaded = await loadNodeAcceptOutcome(artifactsDir, "R1", "SC3");
+    expect(loaded?.merged).toBe(false);
+    expect(loaded?.committedOid).toBeUndefined();
+  });
+
+  it("(defect 10) the downgrade is REFUSED while the recorded landing IS still an ancestor", async () => {
+    const { repo, ok } = initRepo("og-sidecar-anc-");
+    if (!ok) return;
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8", shell: false });
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    writeFileSync(join(repo, "landed.txt"), "landed\n");
+    git("add", "landed.txt");
+    git("commit", "-m", "genuine landing, still in HEAD");
+    const landedOid = revParse(repo, "HEAD");
+
+    await recordNodeAcceptOutcome(artifactsDir, "R1", "SC4", {
+      outcome: "success",
+      verifyPassed: true,
+      merged: true,
+      landedHeadOid: landedOid,
+    });
+    // An out-of-order stale failed write — the §8 case the guard exists for.
+    await recordNodeAcceptOutcome(
+      artifactsDir,
+      "R1",
+      "SC4",
+      { outcome: "error", verifyPassed: false, merged: false },
+      { root: repo },
+    );
+    const loaded = await loadNodeAcceptOutcome(artifactsDir, "R1", "SC4");
+    expect(loaded?.merged).toBe(true);
+    expect(loaded?.outcome).toBe("success");
+  });
+
+  it("(defect 3) base_rollback_failed round-trips through the sidecar with merged:true ground truth", async () => {
+    const { repo, ok } = initRepo("og-sidecar-rbf-");
+    if (!ok) return;
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    // The shape the RED-gate paths emit when rollbackBaseToOid FAILS: the pick is
+    // still applied, so merged stays TRUE alongside the failure outcome + flag.
+    await recordNodeAcceptOutcome(artifactsDir, "R1", "SC6", {
+      outcome: "error",
+      verifyPassed: true,
+      merged: true,
+      landedHeadOid: "1234567890123456789012345678901234567890",
+      baseRollbackFailed: true,
+      diagnostic: "ROLLBACK FAILED: restore manually",
+    });
+    const loaded = await loadNodeAcceptOutcome(artifactsDir, "R1", "SC6");
+    expect(loaded?.merged).toBe(true);
+    expect(loaded?.baseRollbackFailed).toBe(true);
+    expect(loaded?.outcome).toBe("error");
+  });
+
+  it("(defect 10) without a root to probe, the monotonic refusal is kept (safe direction)", async () => {
+    const { repo, ok } = initRepo("og-sidecar-noroot-");
+    if (!ok) return;
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    await recordNodeAcceptOutcome(artifactsDir, "R1", "SC5", {
+      outcome: "success",
+      verifyPassed: true,
+      merged: true,
+      landedHeadOid: "0000000000000000000000000000000000000000",
+    });
+    await recordNodeAcceptOutcome(artifactsDir, "R1", "SC5", {
+      outcome: "error",
+      verifyPassed: false,
+      merged: false,
+    });
+    const loaded = await loadNodeAcceptOutcome(artifactsDir, "R1", "SC5");
+    expect(loaded?.merged).toBe(true);
+  });
 });

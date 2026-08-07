@@ -21,6 +21,8 @@ import {
   blockScopesFromPlan,
   quarantineRef,
   mergeImplementResults,
+  isOwnGitTopLevel,
+  loadNodeAcceptOutcome,
   type DispatchOptions,
 } from "./dispatch.js";
 import type {
@@ -208,6 +210,13 @@ const HOST_SUBAGENT_CLAIM_POOL = "host-subagent";
  */
 export function worktreeHoldsUnlandedWork(wt: string, root: string): boolean {
   if (!existsSync(wt)) return false;
+  // INV-WTS-9 (cluster defect 7): an orphan plain dir (worktree de-registered
+  // mid-recovery, no `.git`) makes the status/rev-list below resolve UP to the
+  // MAIN checkout, so MAIN's dirt read as this node's un-landed work and the
+  // orphan was reused on every re-dispatch. Not its own top-level ⇒ nothing of
+  // the NODE's is here (its committed work lives on the branch, which survives)
+  // ⇒ safe to reset+recreate.
+  if (!isOwnGitTopLevel(wt)) return false;
   const status = spawnSyncHidden("git", ["status", "--porcelain"], {
     cwd: wt,
     encoding: "utf8",
@@ -641,6 +650,29 @@ export async function advanceHostRolling(opts: {
     const acceptStray = (session.accept_stray ??= []);
     const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
 
+    // Cluster defect 9: `accept_failed` is terminal-with-signal, but the ledger
+    // must never contradict outcome ground truth — a later `reverify-node`
+    // re-drive that LANDED writes a success+merged sidecar while the session
+    // still lists the block failed, so every re-run accept-node re-reported the
+    // fixed cause forever. Reconcile against the outcome FILE before the
+    // idempotency skip: landed ⇒ move the id failed → accepted. (A failed
+    // accept still never latches accepted from THIS call's own lifecycle — the
+    // move keys solely on the recorded, tool-written landing.)
+    const failedIdx = acceptFailed.indexOf(opts.blockId);
+    if (failedIdx >= 0) {
+      const recorded = await loadNodeAcceptOutcome(
+        opts.artifactsDir,
+        opts.runId,
+        opts.blockId,
+      );
+      if (recorded?.outcome === "success" && recorded.merged === true) {
+        acceptFailed.splice(failedIdx, 1);
+        if (!session.accepted.includes(opts.blockId)) {
+          session.accepted.push(opts.blockId);
+        }
+      }
+    }
+
     if (
       !session.accepted.includes(opts.blockId) &&
       !acceptFailed.includes(opts.blockId) &&
@@ -701,7 +733,9 @@ export async function advanceHostRolling(opts: {
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
       // Persisted BEFORE the stray-worktree throw below so triage has the diagnostic on
       // disk even though this accept-node call itself rejects.
-      await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept);
+      await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept, {
+        root: opts.root,
+      });
       if (accept.strayWorktreeSuspected) {
         // A stray IS terminal — the node will never be accepted by this session — so
         // it must be counted and unclaimed BEFORE the guard throws. Leaving the throw
@@ -863,11 +897,25 @@ export async function reverifyQuarantinedNode(
     await declaredPathsForBlockSafe(artifactsDir, runId, blockId),
   );
 
-  // 3. Replay the preserved commit's patch as UNCOMMITTED edits on the current HEAD.
+  // 3. Replay the preserved work as UNCOMMITTED edits on the current HEAD.
   //    `commitWorktree` (inside acceptNodeWorktree) then commits them and the standard
   //    lifecycle runs. A conflict = a genuine seam with a sibling merged since the
   //    quarantine; discard the worktree and keep the ref for a later retry.
-  const replay = spawnSyncHidden("git", ["cherry-pick", "--no-commit", commit], {
+  //    Cluster defect 2: the quarantine ref points at the branch TIP, whose
+  //    ANCESTORS carry the rest of a multi-commit node — replay the whole
+  //    `merge-base(HEAD, tip)..tip` range, not the single tip commit (which
+  //    silently dropped every earlier commit's changes). Falls back to the tip
+  //    alone when the merge-base probe fails (detached/odd histories).
+  const mergeBase = spawnSyncHidden("git", ["merge-base", "HEAD", commit], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  const replayBase =
+    !mergeBase.error && mergeBase.status === 0 ? (mergeBase.stdout ?? "").trim() : "";
+  const replaySpec =
+    replayBase.length > 0 && replayBase !== commit ? `${replayBase}..${commit}` : commit;
+  const replay = spawnSyncHidden("git", ["cherry-pick", "--no-commit", replaySpec], {
     cwd: wt,
     encoding: "utf8",
     shell: false,
@@ -908,7 +956,7 @@ export async function reverifyQuarantinedNode(
     // claim anywhere — it replays a preserved commit as a fresh operator-triggered
     // recovery, not a dispatch-loop node — so there is no lease to heartbeat here.
   });
-  await recordNodeAcceptOutcome(artifactsDir, runId, blockId, accept);
+  await recordNodeAcceptOutcome(artifactsDir, runId, blockId, accept, { root });
 
   if (accept.outcome === "success" && !accept.merged && accept.diagnostic === undefined) {
     // acceptNodeWorktree's no-commit branch: the replay added nothing on the current
@@ -929,10 +977,27 @@ export async function reverifyQuarantinedNode(
     };
   }
 
-  // 5. Landed green → re-finalize the run so the node's item(s) flip blocked → resolved
-  //    from the freshly-written accept-outcome sidecar. Pure finalizer: it never re-runs
+  // 5. Landed green → retire the block from the session's accept_failed ledger
+  //    (cluster defect 9, writer side): the outcome sidecar written above is the
+  //    ground truth, and a ledger still listing the block failed would re-report
+  //    the fixed cause on every subsequent accept-node call.
+  await withFileLock(sessionLockPath(artifactsDir, runId), async () => {
+    const session = await readOptionalJsonFile<RollingSession>(
+      sessionPath(artifactsDir, runId),
+    );
+    const idx = session?.accept_failed?.indexOf(blockId) ?? -1;
+    if (!session || idx < 0) return;
+    session.accept_failed!.splice(idx, 1);
+    if (!session.accepted.includes(blockId)) session.accepted.push(blockId);
+    await writeSessionFile(artifactsDir, runId, session);
+  });
+
+  //    Then re-finalize THIS NODE ONLY so its item(s) flip blocked → resolved from
+  //    the freshly-written accept-outcome sidecar (cluster defect 1: the unscoped
+  //    whole-plan merge swept never-dispatched sibling blocks through the
+  //    missing-result branch to blocked/triage). Pure finalizer: it never re-runs
   //    the cherry-pick, so the just-landed commit is not double-applied.
-  const merged = await mergeImplementResults(options, runId);
+  const merged = await mergeImplementResults(options, runId, { onlyBlockId: blockId });
   const findingIds = merged.plan?.blocks.find((b) => b.block_id === blockId)?.items ?? [];
   const itemStatuses = findingIds.map((finding_id) => ({
     finding_id,

@@ -108,6 +108,7 @@ import {
   executeNodeInWorktree,
   blockScopesFromPlan,
   targetedCommandsForBlock,
+  readDispatchPlan,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
@@ -401,6 +402,23 @@ export function detectStructuralRefusalPause(quota: unknown): {
       classifyEmptyGrantCause(explains) === "no_capable_pool",
     refusedIds,
   };
+}
+
+/**
+ * Read the admission record backing the zero-frontier structural-refusal
+ * discriminator. `quotaPath` is null for an ATTENDED host (hostOwnedDispatch —
+ * the host owns provider selection/pacing, so NO admission record exists); a
+ * null path is the no-signal case, never a crash: no record ⇒ no structural
+ * refusal ⇒ the caller folds the empty frontier straight to merge. (v0.36.1
+ * zero-frontier crash, accept/reverify cluster defect 5: the call site asserted
+ * `quotaPath!` and the read threw on the attended-host null.)
+ */
+export async function structuralRefusalForZeroFrontier(
+  quotaPath: string | null,
+): Promise<{ pause: boolean; refusedIds: string[] }> {
+  return detectStructuralRefusalPause(
+    quotaPath ? await readOptionalJsonFile(quotaPath) : undefined,
+  );
 }
 
 function randomRunId(prefix = "RUN"): string {
@@ -2368,9 +2386,7 @@ async function buildImplementDispatchStep(ctx: {
       // stay PENDING, and the quota_paused step renders the fit-mismatch cause
       // ("free a larger pool or split the node"), never "wait for a reset".
       if (rolling.session.frontier.length === 0) {
-        const structuralRefusal = detectStructuralRefusalPause(
-          await readOptionalJsonFile(rolling.quotaPath!),
-        );
+        const structuralRefusal = await structuralRefusalForZeroFrontier(rolling.quotaPath);
         if (structuralRefusal.pause) {
           if (rolling.quotaPath) {
             await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
@@ -3955,6 +3971,43 @@ async function applyPlanClarificationResolution(
   }
   if (existsSync(resolutionPath)) {
     await withFsRetry(() => rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`));
+  }
+  // Accept/reverify cluster defect 6: the worker's needs_clarification result
+  // survives at the block's CONSTANT result_path, so the very next merge
+  // (often within this same drain) re-reads it, flips the just-answered item
+  // back to needs_clarification, and re-asks the operator. Archive each
+  // clarified finding's block result at consume time — an ABSENT result file
+  // is the benign "worker hasn't run yet → re-dispatch from scratch" branch,
+  // exactly the state the answer re-opens the item into. (reject_finding /
+  // defer close their items terminally, so the stale file cannot re-open them
+  // — only `clarified` needs the retire.)
+  const clarifiedIds = new Set(
+    resolutions
+      .filter((r) => r.action !== "reject_finding" && r.action !== "defer")
+      .map((r) => r.finding_id),
+  );
+  if (clarifiedIds.size > 0) {
+    const owningBlockIds = new Set(
+      (state.plan.blocks ?? [])
+        .filter((b) => b.items.some((id) => clarifiedIds.has(id)))
+        .map((b) => b.block_id),
+    );
+    const dispatchPlan = await readDispatchPlan(
+      artifactsDir,
+      stateRunId(state),
+      "implement",
+    ).catch(() => null);
+    for (const planItem of dispatchPlan?.items ?? []) {
+      if (
+        typeof planItem.block_id === "string" &&
+        owningBlockIds.has(planItem.block_id) &&
+        existsSync(planItem.result_path)
+      ) {
+        await withFsRetry(() =>
+          rename(planItem.result_path, `${planItem.result_path}.consumed-${Date.now()}`),
+        );
+      }
+    }
   }
   const remainingPending = state.plan.findings.some(
     (f) => state.items?.[f.id]?.status === "pending",

@@ -31,7 +31,7 @@ import {
   COARSE_REBLOCK_BOUND,
   type GateRunner,
 } from "../../src/remediate/steps/nextStep.js";
-import { mergedBaseCheckArgv } from "../../src/remediate/steps/gateCommands.js";
+import { mergedBaseCheckArgvs } from "../../src/remediate/steps/gateCommands.js";
 import { isTerminalStatus } from "../../src/remediate/state/itemStatus.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationBlock, RemediationItemState } from "../../src/remediate/state/types.js";
@@ -596,16 +596,23 @@ describe("INV-RS-10 / CE-001 / CE-002: tool-owned final gate command list", () =
     expect(isAuditToolsMonorepo(join(__dirname, ".does-not-exist"))).toBe(false);
   });
 
-  it("A3: the merged-base check is PINNED to the gate's `check`-layer argv (not a hardcoded string)", () => {
+  it("A3: the merged-base check runs EVERY `check`-layer argv, incl. check:tests (cluster defect 12)", () => {
     // Single-sourced from the same derivation as the final gate — the per-node
-    // merged-base check (INV-2) and the final gate can never drift apart.
-    const checkLayer = toolOwnedFinalGateCommands(REPO_ROOT).find((c) => c.layer === "check");
-    expect(mergedBaseCheckArgv(REPO_ROOT)).toEqual(checkLayer?.argv);
-    expect(mergedBaseCheckArgv(REPO_ROOT)).toEqual(["npm", "run", "check"]);
+    // merged-base check (INV-2) and the final gate can never drift apart. The
+    // check layer carries BOTH typecheck gates: `check` (source) and
+    // `check:tests` (test tree, tsconfig.test.json) — the 2026-08-06 run landed
+    // 4 type-RED test files because the accept leg ran only `check` while CI's
+    // `verify:checks` runs both (a fourth CP-NODE-26 accept regression).
+    const checkLayers = toolOwnedFinalGateCommands(REPO_ROOT).filter((c) => c.layer === "check");
+    expect(checkLayers.map((c) => c.argv)).toEqual([
+      ["npm", "run", "check"],
+      ["npm", "run", "check:tests"],
+    ]);
+    expect(mergedBaseCheckArgvs(REPO_ROOT)).toEqual(checkLayers.map((c) => c.argv));
   });
 
-  it("A3: merged-base check is null (skipped) on a non-audit-tools target", () => {
-    expect(mergedBaseCheckArgv(join(__dirname, ".does-not-exist"))).toBeNull();
+  it("A3: merged-base check is EMPTY (skipped) on a non-audit-tools target", () => {
+    expect(mergedBaseCheckArgvs(join(__dirname, ".does-not-exist"))).toEqual([]);
   });
 });
 
@@ -619,8 +626,8 @@ describe("INV-RS-10: runToolOwnedFinalGate execution + CE-002 residual", () => {
     const result = await runToolOwnedFinalGate(REPO_ROOT, { runner });
     expect(result.passed).toBe(true);
     expect(result.scoped_out).toBe(false);
-    // All three commands ran (build, check, single vitest unit suite).
-    expect(seen.length).toBe(3);
+    // All four commands ran (build, check, check:tests, single vitest unit suite).
+    expect(seen.length).toBe(4);
     // CE-002: the runtime/packaged-bin smoke surface is declared as a residual.
     expect(result.runtime_residual.surface).toMatch(/smoke/i);
     expect(result.runtime_residual.commands.length).toBeGreaterThan(0);

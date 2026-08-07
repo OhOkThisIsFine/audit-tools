@@ -69,12 +69,20 @@ async function setupRun(
   blockId: string,
   findingId: string,
   file: string,
-  opts: { targetedCommands?: string[] } = {},
+  opts: {
+    targetedCommands?: string[];
+    /** Extra files in the node's write scope (multi-commit replay fixtures). */
+    extraWriteFiles?: string[];
+    /** A sibling block IN the dispatch plan that was never dispatched (no result file). */
+    siblingNeverDispatched?: { blockId: string; findingId: string; file: string };
+  } = {},
 ): Promise<string> {
   const artifactsDir = join(repo, ".audit-tools", "remediation");
   const resultDir = join(artifactsDir, "runs", RID, "implement");
   mkdirSync(resultDir, { recursive: true });
   const resultPath = join(resultDir, `implement-${blockId}.result.json`);
+  const writeFiles = [file, ...(opts.extraWriteFiles ?? [])];
+  const sib = opts.siblingNeverDispatched;
   writeFileSync(
     join(resultDir, "dispatch-plan.json"),
     JSON.stringify({
@@ -89,8 +97,20 @@ async function setupRun(
           block_id: blockId,
           prompt_path: join(resultDir, `implement-${blockId}.md`),
           result_path: resultPath,
-          access: { read_paths: [file], write_paths: [file] },
+          access: { read_paths: writeFiles, write_paths: writeFiles },
         },
+        ...(sib
+          ? [
+              {
+                task_id: `implement-${sib.blockId}`,
+                block_id: sib.blockId,
+                prompt_path: join(resultDir, `implement-${sib.blockId}.md`),
+                // Never dispatched: this result file does NOT exist.
+                result_path: join(resultDir, `implement-${sib.blockId}.result.json`),
+                access: { read_paths: [sib.file], write_paths: [sib.file] },
+              },
+            ]
+          : []),
       ],
     }),
   );
@@ -102,31 +122,43 @@ async function setupRun(
       item_results: [{ finding_id: findingId, status: "resolved", summary: "did it", evidence: ["e"] }],
     }),
   );
+  const findingOf = (id: string, path: string) => ({
+    id,
+    title: "t",
+    category: "correctness",
+    severity: "high",
+    confidence: "high",
+    lens: "correctness",
+    summary: "s",
+    affected_files: [{ path }],
+    evidence: ["e"],
+  });
   const state = {
     status: "implementing",
     plan: {
       plan_id: RID,
       findings: [
-        {
-          id: findingId,
-          title: "t",
-          category: "correctness",
-          severity: "high",
-          confidence: "high",
-          lens: "correctness",
-          summary: "s",
-          affected_files: [{ path: file }],
-          evidence: ["e"],
-        },
+        findingOf(findingId, file),
+        ...(sib ? [findingOf(sib.findingId, sib.file)] : []),
       ],
       blocks: [
         {
           block_id: blockId,
           items: [findingId],
           parallel_safe: true,
-          touched_files: [file],
+          touched_files: writeFiles,
           ...(opts.targetedCommands ? { targeted_commands: opts.targetedCommands } : {}),
         },
+        ...(sib
+          ? [
+              {
+                block_id: sib.blockId,
+                items: [sib.findingId],
+                parallel_safe: true,
+                touched_files: [sib.file],
+              },
+            ]
+          : []),
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
@@ -143,6 +175,21 @@ async function setupRun(
           not_applicable_steps: [],
         },
       },
+      ...(sib
+        ? {
+            [sib.findingId]: {
+              finding_id: sib.findingId,
+              status: "pending",
+              block_id: sib.blockId,
+              item_spec: {
+                finding_id: sib.findingId,
+                concrete_change: "x",
+                tests_to_write: [{ name: "t", assertions: ["a"] }],
+                not_applicable_steps: [],
+              },
+            },
+          }
+        : {}),
     },
     closing_plan: { action: "none" },
   } as unknown as RemediationState;
@@ -201,6 +248,73 @@ describe("reverifyQuarantinedNode", () => {
     expect(result.item_statuses).toContainEqual({ finding_id: findingId, status: "resolved" });
     const persisted = await new StateStore(artifactsDir).loadState();
     expect(persisted?.items?.[findingId]?.status).toBe("resolved");
+  });
+
+  it("(defect 1) reverify finalizes ONLY its node — a never-dispatched sibling stays pending", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const blockId = "B-SCOPE";
+    const findingId = "F-SCOPE";
+    const file = "scope.ts";
+    const artifactsDir = await setupRun(repo, blockId, findingId, file, {
+      siblingNeverDispatched: { blockId: "B-SIB", findingId: "F-SIB", file: "sib.ts" },
+    });
+    await induceQuarantine(repo, artifactsDir, blockId, file);
+
+    const result = await reverifyQuarantinedNode({ root: repo, artifactsDir }, RID, blockId);
+    expect(result.status).toBe("reverified");
+
+    const persisted = await new StateStore(artifactsDir).loadState();
+    expect(persisted?.items?.[findingId]?.status).toBe("resolved");
+    // Pre-fix, the whole-plan merge swept the never-dispatched sibling through
+    // the missing-result branch to blocked (→ triage). It was never this
+    // recovery's to touch.
+    expect(persisted?.items?.["F-SIB"]?.status).toBe("pending");
+  });
+
+  it("(defect 2) replays the FULL multi-commit range, not just the preserved tip", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const blockId = "B-MULTI";
+    const findingId = "F-MULTI";
+    const artifactsDir = await setupRun(repo, blockId, findingId, "first.ts", {
+      extraWriteFiles: ["second.ts"],
+    });
+    // A node branch with TWO commits; the quarantine ref lands on the tip, whose
+    // ancestry carries the first commit.
+    const wt = worktreePath(repo, blockId, RID);
+    const branch = worktreeBranchForBlock(blockId, RID);
+    createWorktree(repo, wt, branch);
+    const gitWt = (...args: string[]) =>
+      spawnSync("git", args, { cwd: wt, encoding: "utf8", shell: false });
+    writeFileSync(join(wt, "first.ts"), `export const first = 1;\n`);
+    gitWt("add", "first.ts");
+    gitWt("commit", "-m", "commit 1 of 2");
+    // Left UNCOMMITTED: acceptNodeWorktree's tool-commit creates commit 2 of 2
+    // (the branch tip the quarantine ref preserves, with commit 1 as ancestor).
+    writeFileSync(join(wt, "second.ts"), `export const second = 2;\n`);
+    const accept = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId,
+      worktreeRoot: wt,
+      branch,
+      workerOutcome: "success",
+      scope: { allBlockScopes: [{ block_id: blockId, write_paths: ["first.ts", "second.ts"] }] },
+      writePaths: ["first.ts", "second.ts"],
+      // Force the verify RED so the two-commit branch is quarantined.
+      targetedCommands: ["git rev-parse --verify refs/heads/__nope__"],
+    });
+    await recordNodeAcceptOutcome(artifactsDir, RID, blockId, accept);
+    expect(accept.merged).toBe(false);
+    expect(refExists(repo, quarantineRef(RID, blockId))).toBe(true);
+
+    const result = await reverifyQuarantinedNode({ root: repo, artifactsDir }, RID, blockId);
+    expect(result.status).toBe("reverified");
+    // BOTH commits' changes land — pre-fix the single-tip cherry-pick silently
+    // dropped first.ts.
+    expect(headHas(repo, "second.ts")).toBe(true);
+    expect(headHas(repo, "first.ts")).toBe(true);
   });
 
   it("returns no_quarantine for a block with no preserved ref", async () => {

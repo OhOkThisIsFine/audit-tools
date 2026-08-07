@@ -23,7 +23,7 @@ import { isTerminalStatus } from "../../state/itemStatus.js";
 import { runDir, uniquePaths } from "./common.js";
 import {
   buildFreeVerifyCommands,
-  partitionDistDependentVerifyCommands,
+  partitionDeferredVerifyCommands,
 } from "./verifyCommands.js";
 import { nodeFieldsOf, reconciliationExpectationsOf } from "./dagNodeFields.js";
 
@@ -490,7 +490,7 @@ function perNodeVerificationSection(
   // scan runs against the MAIN tree (the worker's worktree does not exist yet);
   // an auditor-targeted existing suite that spawns dist/ is exactly the
   // observed case. Accept-time re-partitions against the worktree as authority.
-  const { kept: nodeCommands, deferred } = partitionDistDependentVerifyCommands(
+  const { kept: nodeCommands, deferred } = partitionDeferredVerifyCommands(
     uniquePaths(
       block.items.flatMap((findingId) => {
         const finding = state.plan?.findings.find((f) => f.id === findingId);

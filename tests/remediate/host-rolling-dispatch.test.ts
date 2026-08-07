@@ -22,6 +22,7 @@ import {
   resetNodeWorktreeAndBranch,
   worktreePath,
   worktreeBranchForBlock,
+  recordNodeAcceptOutcome,
 } from "../../src/remediate/steps/dispatch.js";
 import {
   advanceHostRolling,
@@ -498,6 +499,54 @@ describe("advanceHostRolling", () => {
     const again = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(again.kind).toBe("done");
     if (again.kind === "done") expect(again.accepted).toBe(1);
+  });
+
+  it("(defect 9) reconciles a stale accept_failed entry against a landed outcome sidecar", async () => {
+    // The re-report trap: a block sits in `accept_failed` from a prior failed
+    // attempt, then a reverify-node re-drive LANDS it (success+merged sidecar).
+    // The ledger must follow ground truth: the re-run accept-node moves the id
+    // failed → accepted instead of re-reporting the fixed cause forever.
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = await seedSession(repo, ["B1"]);
+    // Simulate the prior failure: ledger lists B1 failed.
+    const sessionFile = join(artifactsDir, "runs", RID, "implement", "rolling-session.json");
+    const session = JSON.parse(readFileSync(sessionFile, "utf8"));
+    session.accept_failed = ["B1"];
+    writeFileSync(sessionFile, JSON.stringify(session));
+    // The reverify re-drive landed: the outcome FILE is the ground truth.
+    await recordNodeAcceptOutcome(artifactsDir, RID, "B1", {
+      outcome: "success",
+      verifyPassed: true,
+      merged: true,
+    });
+
+    const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(d.kind).toBe("done");
+    if (d.kind === "done") {
+      expect(d.accept_failed).toEqual([]);
+      expect(d.accepted).toBe(1);
+    }
+  });
+
+  it("(defect 9) a still-failed outcome keeps the accept_failed report (no silent latch)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = await seedSession(repo, ["B1"]);
+    const sessionFile = join(artifactsDir, "runs", RID, "implement", "rolling-session.json");
+    const session = JSON.parse(readFileSync(sessionFile, "utf8"));
+    session.accept_failed = ["B1"];
+    writeFileSync(sessionFile, JSON.stringify(session));
+    await recordNodeAcceptOutcome(artifactsDir, RID, "B1", {
+      outcome: "error",
+      verifyPassed: false,
+      merged: false,
+      diagnostic: "still red",
+    });
+
+    const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    if (d.kind === "done") expect(d.accept_failed).toEqual(["B1"]);
+    else expect(d.accept_failed).toEqual(["B1"]);
   });
 
   it("throws for a block id that is not in the frontier", async () => {

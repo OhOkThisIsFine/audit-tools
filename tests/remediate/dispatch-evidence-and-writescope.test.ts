@@ -42,7 +42,8 @@ import {
   verifyCommandsForEdits,
   selfContainedVerifyCommands,
   isDistDependentVerifyCommand,
-  partitionDistDependentVerifyCommands,
+  isWorktreeHostileVerifyCommand,
+  partitionDeferredVerifyCommands,
   pathTokensInCommand,
   buildNodeDisposition,
   attributeSiblingRed,
@@ -283,7 +284,7 @@ describe("isBuildFreeVerifyCommand", () => {
 // the central close gate instead).
 // ---------------------------------------------------------------------------
 
-describe("isDistDependentVerifyCommand / partitionDistDependentVerifyCommands", () => {
+describe("isDistDependentVerifyCommand / partitionDeferredVerifyCommands", () => {
   it("flags a command string that references a dist path directly", () => {
     expect(isDistDependentVerifyCommand("node dist/audit/index.js status")).toBe(true);
     expect(isDistDependentVerifyCommand("node dist\\remediate\\index.js validate")).toBe(true);
@@ -322,7 +323,7 @@ describe("isDistDependentVerifyCommand / partitionDistDependentVerifyCommands", 
     // A named file that does not exist in the tree cannot vouch either way.
     expect(isDistDependentVerifyCommand("npx vitest run tests/absent.test.mjs", root)).toBe(false);
 
-    const partition = partitionDistDependentVerifyCommands(
+    const partition = partitionDeferredVerifyCommands(
       [
         "npm run check",
         "npx vitest run tests/spawns-dist.test.mjs",
@@ -332,6 +333,72 @@ describe("isDistDependentVerifyCommand / partitionDistDependentVerifyCommands", 
     );
     expect(partition.kept).toEqual(["npm run check", "npx vitest run tests/clean.test.mjs"]);
     expect(partition.deferred).toEqual(["npx vitest run tests/spawns-dist.test.mjs"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWorktreeHostileVerifyCommand — driver-lifecycle deferral (accept/reverify
+// cluster defect 8): a test file that spawns the `audit-code` / `remediate-code`
+// CLIs cannot pass INSIDE a node worktree — the v0.34.19 worker-context guard
+// mechanically refuses driver lifecycle commands there — so a node touching such
+// a test could NEVER accept. Same conservative-toward-deferral family as the
+// dist-dependence probe: defer to the central close gate (root cwd).
+// ---------------------------------------------------------------------------
+
+describe("isWorktreeHostileVerifyCommand / partitionDeferredVerifyCommands", () => {
+  it("flags a command whose named test FILE spawns a driver CLI (content scan)", () => {
+    const root = mkdtempSync(join(tmpdir(), "wthostile-"));
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(
+      join(root, "tests", "drives-cli.test.mjs"),
+      `import { spawnSyncHidden } from "../helpers/spawn.mjs";\n` +
+        `spawnSyncHidden("node", ["remediate-code.mjs", "next-step"]);\n`,
+    );
+    writeFileSync(
+      join(root, "tests", "clean.test.mjs"),
+      `import { expect, it } from "vitest";\nit("x", () => expect(1).toBe(1));\n`,
+    );
+    expect(
+      isWorktreeHostileVerifyCommand("npx vitest run tests/drives-cli.test.mjs", root),
+    ).toBe(true);
+    expect(
+      isWorktreeHostileVerifyCommand("npx vitest run tests/clean.test.mjs", root),
+    ).toBe(false);
+    expect(
+      isWorktreeHostileVerifyCommand("npx vitest run tests/absent.test.mjs", root),
+    ).toBe(false);
+    expect(isWorktreeHostileVerifyCommand("npm run check", root)).toBe(false);
+  });
+
+  it("partitionDeferredVerifyCommands defers BOTH classes, deduplicated, keeps the rest", () => {
+    const root = mkdtempSync(join(tmpdir(), "wthostile2-"));
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(
+      join(root, "tests", "drives-cli.test.mjs"),
+      `spawn("audit-code", ["next-step"]);\n`,
+    );
+    writeFileSync(
+      join(root, "tests", "spawns-dist.test.mjs"),
+      `const entry = join(root, "dist", "audit", "index.js");\n`,
+    );
+    writeFileSync(join(root, "tests", "clean.test.mjs"), `it("x", () => {});\n`);
+    const partition = partitionDeferredVerifyCommands(
+      [
+        "npm run check",
+        "npx vitest run tests/drives-cli.test.mjs",
+        "npx vitest run tests/spawns-dist.test.mjs",
+        "npx vitest run tests/clean.test.mjs",
+        // Duplicate — the close gate's replay has no dedup of its own, so the
+        // deferred list itself must not double an entry (refutation-lane concern).
+        "npx vitest run tests/drives-cli.test.mjs",
+      ],
+      root,
+    );
+    expect(partition.kept).toEqual(["npm run check", "npx vitest run tests/clean.test.mjs"]);
+    expect(partition.deferred).toEqual([
+      "npx vitest run tests/drives-cli.test.mjs",
+      "npx vitest run tests/spawns-dist.test.mjs",
+    ]);
   });
 });
 

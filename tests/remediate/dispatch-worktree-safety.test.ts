@@ -35,6 +35,7 @@ import {
   baseBranchLockPath,
   quarantineRef,
   quarantineCommitByOid,
+  rebaseBranchOntoHead,
   gitCommitIsAncestor,
   gitBranchExists,
   acceptNodeWorktree,
@@ -173,6 +174,82 @@ describe("INV-WTS-2 — verify fails loud when the worktree was deleted (topleve
     createWorktree(repo, wt, worktreeBranchForBlock("V2", "R"));
     const res = verifyNodeInWorktree(wt, ["node --version"], true);
     expect(res.passed).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INV-WTS-9 — own-top-level guard (accept/reverify cluster defects 4/7/11): an
+// orphan plain dir (worktree de-registered mid-recovery, `.git` link gone) makes
+// every git call with that cwd resolve UP to the MAIN checkout. No git WRITE may
+// run against a cwd that is not its own top-level, and MAIN's dirt must never
+// read as the node's un-landed work.
+// ---------------------------------------------------------------------------
+
+describe("INV-WTS-9 — orphan worktree dirs never operate on MAIN", () => {
+  /** An orphan node-worktree dir: plain directory, no `.git`, inside the repo. */
+  function makeOrphan(repo: string, blockId: string): string {
+    const wt = worktreePath(repo, blockId, "R");
+    mkdirSync(wt, { recursive: true });
+    return wt;
+  }
+
+  it("(11/4) commitWorktree REFUSES an orphan dir instead of committing MAIN's dirt", async () => {
+    const { commitWorktree } = await import("../../src/remediate/steps/dispatch.js");
+    const repo = initRepo("wts-orphan-commit-");
+    const wt = makeOrphan(repo, "OC");
+    // Dirty the MAIN tree — the exact dirt a cwd-escaped `git add -A` would commit.
+    writeFileSync(join(repo, "package.json"), "{\n  \"name\": \"dirty\"\n}\n");
+    const before = headOid(repo);
+
+    const res = commitWorktree(wt, "remediate OC (R)");
+
+    expect(res.committed).toBe(false);
+    expect(res.error ?? "").toMatch(/top-level|orphan|escape/i);
+    // MAIN is untouched: same HEAD, dirt still uncommitted.
+    expect(headOid(repo)).toBe(before);
+    expect(git(repo, "status", "--porcelain").stdout).toMatch(/package\.json/);
+  });
+
+  it("(4) rebaseBranchOntoHead REFUSES an orphan dir instead of rebasing MAIN's branch", () => {
+    const repo = initRepo("wts-orphan-rebase-");
+    const wt = makeOrphan(repo, "OR");
+    const res = rebaseBranchOntoHead(repo, wt, worktreeBranchForBlock("OR", "R"));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/top-level|orphan|escape/i);
+  });
+
+  it("(7) worktreeHoldsUnlandedWork reads an orphan dir as NOT un-landed work (MAIN dirt ignored)", async () => {
+    const { worktreeHoldsUnlandedWork } = await import(
+      "../../src/remediate/steps/rollingSession.js"
+    );
+    const repo = initRepo("wts-orphan-holds-");
+    const wt = makeOrphan(repo, "OH");
+    // MAIN is dirty — pre-fix, the cwd-escaped `git status` read this as the
+    // node's uncommitted edits and reused the orphan on every re-dispatch.
+    writeFileSync(join(repo, "package.json"), "{\n  \"name\": \"dirty\"\n}\n");
+    expect(worktreeHoldsUnlandedWork(wt, repo)).toBe(false);
+  });
+
+  it("POSITIVE: a genuine registered worktree with uncommitted edits still holds un-landed work", async () => {
+    const { worktreeHoldsUnlandedWork } = await import(
+      "../../src/remediate/steps/rollingSession.js"
+    );
+    const repo = initRepo("wts-own-holds-");
+    const wt = worktreePath(repo, "GH", "R");
+    createWorktree(repo, wt, worktreeBranchForBlock("GH", "R"));
+    writeFileSync(join(wt, "package.json"), "{\n  \"name\": \"edited\"\n}\n");
+    expect(worktreeHoldsUnlandedWork(wt, repo)).toBe(true);
+  });
+
+  it("POSITIVE: commitWorktree still commits inside a genuine registered worktree", async () => {
+    const { commitWorktree } = await import("../../src/remediate/steps/dispatch.js");
+    const repo = initRepo("wts-own-commit-");
+    const wt = worktreePath(repo, "GC", "R");
+    createWorktree(repo, wt, worktreeBranchForBlock("GC", "R"));
+    writeFileSync(join(wt, "package.json"), "{\n  \"name\": \"edited\"\n}\n");
+    const res = commitWorktree(wt, "remediate GC (R)");
+    expect(res.error).toBeUndefined();
+    expect(res.committed).toBe(true);
   });
 });
 

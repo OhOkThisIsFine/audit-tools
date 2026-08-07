@@ -3,7 +3,7 @@ import { spawnSyncHidden } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { isLoopCorePath } from "audit-tools/shared";
 import { runTracked } from "audit-tools/shared";
-import { mergedBaseCheckArgv, mergedGuardSuiteArgv } from "../gateCommands.js";
+import { mergedBaseCheckArgvs, mergedGuardSuiteArgv } from "../gateCommands.js";
 import { readJsonFile, writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
 import type { RemediationBlock } from "../../state/types.js";
 import type { ProviderSlot, RollingDispatchResult } from "audit-tools/shared";
@@ -12,6 +12,7 @@ import {
   runDir,
   worktreeBranchForBlock,
   gitEditedFilesForBranch,
+  gitCommitIsAncestor,
 } from "./common.js";
 import {
   removeWorktree,
@@ -34,7 +35,7 @@ import {
   deriveVerifyCommandsFromBranch,
   selfContainedVerifyCommands,
   buildFreeVerifyCommands,
-  partitionDistDependentVerifyCommands,
+  partitionDeferredVerifyCommands,
 } from "./verifyCommands.js";
 import { enforceAcceptWriteScope } from "./writeScope.js";
 
@@ -100,12 +101,13 @@ export interface AcceptNodeWorktreeParams {
   /**
    * The cross-package check command (argv) run in the MAIN checkout AFTER the
    * cherry-pick lands (INV-2): a RED check rolls the base back to its captured HEAD
-   * OID. When omitted, the command is PINNED — derived from the repo via
-   * `mergedBaseCheckArgv` (the `check`-layer of the tool-owned gate set), not a
-   * hardcoded string — and skipped (`null`) on a non-monorepo target. Tests inject a
-   * deterministic pass/fail argv (a `t.mock.module` seam is unusable under tsx/esm).
-   * Pass `null` to skip the merged-base check entirely (legacy lifecycle unit tests
-   * on a minimal repo with no check script).
+   * OID. When omitted, the commands are PINNED — derived from the repo via
+   * `mergedBaseCheckArgvs` (EVERY `check`-layer argv of the tool-owned gate set,
+   * incl. `check:tests` — cluster defect 12), not a hardcoded string — and skipped
+   * (empty) on a non-monorepo target. Tests inject a deterministic pass/fail argv
+   * (a `t.mock.module` seam is unusable under tsx/esm). Pass `null` to skip the
+   * merged-base check entirely (legacy lifecycle unit tests on a minimal repo with
+   * no check script).
    */
   mergedBaseCheckCommand?: string[] | null;
   /**
@@ -205,6 +207,15 @@ export interface AcceptNodeWorktreeResult {
    * full-suite run is what subsumes them. Absent when nothing was deferred.
    */
   deferredVerifyCommands?: string[];
+  /**
+   * Set when a RED merged-base check / loop-core guard tried to roll the base
+   * back to its pre-pick OID and the rollback itself FAILED (cluster defect 3):
+   * the node's cherry-pick is still applied to the base, so `merged` stays TRUE
+   * (the ground truth) while `outcome` is the failure — a merged:false report
+   * here would leave the branch and the outcome record contradicting each
+   * other. The diagnostic carries the manual-restore instruction.
+   */
+  baseRollbackFailed?: boolean;
 }
 
 /**
@@ -519,7 +530,7 @@ async function acceptNodeWorktreeLocked(
       // false-reds in a build-free worktree (no dist exists there; a central
       // build cannot materialize one). Defer it to the central close gate —
       // same drop family as whole-suite and cross-node commands — and say so.
-      const partition = partitionDistDependentVerifyCommands(
+      const partition = partitionDeferredVerifyCommands(
         [...new Set([...baseCommands, ...additional])],
         wt,
       );
@@ -636,6 +647,17 @@ async function acceptNodeWorktreeLocked(
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       return { outcome: "error", verifyPassed, merged, committedOid, diagnostic: mergeRes.error };
     }
+    // The HEAD the pick just landed — needed by the RED-gate rollback paths below:
+    // when the rollback itself fails, the pick is STILL applied, and the outcome
+    // must say so (merged:true + this oid) rather than report merged:false against
+    // a base that holds the commit (cluster defect 3).
+    const pickedHead = spawnSyncHidden("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+    });
+    const pickedHeadOid =
+      !pickedHead.error && pickedHead.status === 0 ? pickedHead.stdout.trim() : undefined;
 
     // Merged-base-green (INV-2): the cherry-pick landed in the MAIN checkout, where
     // node_modules is faithful (the worktree's @audit-tools junction resolves to main
@@ -643,11 +665,13 @@ async function acceptNodeWorktreeLocked(
     // break). Run the REAL cross-package check in the main tree. On RED, roll the base
     // back to its captured OID bit-identically, scoped-clean the cherry-pick's emitted
     // untracked files, quarantine, and fail — never leave a broken base for the sibling.
-    const checkArgv =
+    const checkArgvs: string[][] =
       params.mergedBaseCheckCommand === undefined
-        ? mergedBaseCheckArgv(root)
-        : params.mergedBaseCheckCommand;
-    if (checkArgv !== null) {
+        ? mergedBaseCheckArgvs(root)
+        : params.mergedBaseCheckCommand === null
+          ? []
+          : [params.mergedBaseCheckCommand];
+    for (const checkArgv of checkArgvs) {
       // runTracked scrubs CLAUDECODE / CLAUDE_CODE_* and applies the shared
       // Windows `.cmd` wrapping — never `shell: true`.
       const check = runTracked(checkArgv, { cwd: root, encoding: "utf8" });
@@ -670,11 +694,20 @@ async function acceptNodeWorktreeLocked(
           nodeEditedFiles.available ? nodeEditedFiles.files : [],
         );
         quarantineFailedNodeCommit(root, branch, runId, blockId);
+        // Cluster defect 3: a FAILED rollback leaves the pick applied — report
+        // the base's ACTUAL state (merged:true + landed oid + the loud flag),
+        // never a merged:false that contradicts the branch.
         return {
           outcome: "error",
           verifyPassed,
-          merged: false,
+          merged: !rollback.ok,
           committedOid,
+          ...(rollback.ok
+            ? {}
+            : {
+                ...(pickedHeadOid !== undefined ? { landedHeadOid: pickedHeadOid } : {}),
+                baseRollbackFailed: true,
+              }),
           diagnostic: withRollbackDiagnostic(
             `$ ${checkArgv.join(" ")}\n${detail}`,
             rollback,
@@ -714,11 +747,19 @@ async function acceptNodeWorktreeLocked(
             guardEdited.available ? guardEdited.files : [],
           );
           quarantineFailedNodeCommit(root, branch, runId, blockId);
+          // Cluster defect 3 (same as the merged-base path above): a FAILED
+          // rollback leaves the pick applied — report the base's actual state.
           return {
             outcome: "error",
             verifyPassed,
-            merged: false,
+            merged: !rollback.ok,
             committedOid,
+            ...(rollback.ok
+              ? {}
+              : {
+                  ...(pickedHeadOid !== undefined ? { landedHeadOid: pickedHeadOid } : {}),
+                  baseRollbackFailed: true,
+                }),
             diagnostic: withRollbackDiagnostic(
               `$ ${guardArgv.join(" ")}\n${detail}`,
               rollback,
@@ -787,19 +828,35 @@ export async function recordNodeAcceptOutcome(
   runId: string,
   blockId: string,
   result: AcceptNodeWorktreeResult,
+  opts?: { root?: string },
 ): Promise<void> {
   const path = nodeAcceptOutcomePath(artifactsDir, runId, blockId);
   // Regression guard (§8, D-66/67 slice-1 hardening): this write happens OUTSIDE
   // the per-node worktree lock, so two attempts for the SAME blockId can (in a
   // starved-process edge) land out of order — a stale `merged:false` clobbering an
   // already-recorded `merged:true` would make finalization treat a LANDED fix as
-  // blocked. Never let a write regress merged:true -> merged:false for one blockId.
+  // blocked. Never let a write regress merged:true -> merged:false for one blockId
+  // WITHOUT ANCESTRY EVIDENCE. Cluster defect 10: an unconditional monotonic guard
+  // also froze a stale record whose landing no longer exists (rolled back / purged
+  // scratch commit), so INV-WTS-7 blocked every honest no-change re-accept forever.
+  // The downgrade is allowed ONLY when every oid the existing record carries is
+  // verifiably NOT in the current HEAD's history (a genuine concurrent landing's
+  // landed_head_oid IS an ancestor, so the §8 protection is preserved); with no
+  // `opts.root` there is no repo to probe — keep the monotonic refusal.
   // The read+decide+write runs under a sidecar-scoped file lock so two truly-
   // concurrent writers can't both read stale state and last-write-win past the
   // guard (mirrors the audit side's mergeOwnerTokens).
   await withFileLock(`${path}.lock`, async () => {
     const existing = await loadNodeAcceptOutcome(artifactsDir, runId, blockId);
-    if (existing?.merged === true && result.merged === false) return;
+    if (existing?.merged === true && result.merged === false) {
+      const root = opts?.root;
+      if (!root) return;
+      const oids = [existing.landedHeadOid, existing.committedOid].filter(
+        (o): o is string => typeof o === "string" && o.length > 0,
+      );
+      if (oids.length === 0) return;
+      if (oids.some((o) => gitCommitIsAncestor(root, o))) return;
+    }
     await writeJsonFile(path, {
       schema_version: "remediate-code-implement/node-accept-outcome/v1alpha1",
       block_id: blockId,
@@ -814,6 +871,9 @@ export async function recordNodeAcceptOutcome(
       ...(result.landedHeadOid !== undefined ? { landed_head_oid: result.landedHeadOid } : {}),
       ...(result.strayWorktreeSuspected !== undefined
         ? { stray_worktree_suspected: result.strayWorktreeSuspected }
+        : {}),
+      ...(result.baseRollbackFailed !== undefined
+        ? { base_rollback_failed: result.baseRollbackFailed }
         : {}),
       // Ground truth for the close-phase staging manifest (see AcceptNodeWorktreeResult.editedFiles).
       ...(result.editedFiles !== undefined ? { edited_files: result.editedFiles } : {}),
@@ -835,6 +895,7 @@ export async function loadNodeAcceptOutcome(
     committed_oid?: string;
     landed_head_oid?: string;
     stray_worktree_suspected?: boolean;
+    base_rollback_failed?: boolean;
     edited_files?: string[];
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
@@ -847,6 +908,9 @@ export async function loadNodeAcceptOutcome(
     ...(raw.landed_head_oid !== undefined ? { landedHeadOid: raw.landed_head_oid } : {}),
     ...(raw.stray_worktree_suspected !== undefined
       ? { strayWorktreeSuspected: raw.stray_worktree_suspected }
+      : {}),
+    ...(raw.base_rollback_failed !== undefined
+      ? { baseRollbackFailed: raw.base_rollback_failed }
       : {}),
     ...(raw.edited_files !== undefined ? { editedFiles: raw.edited_files } : {}),
   };
@@ -953,12 +1017,12 @@ export async function executeNodeInWorktree(args: {
       writePaths: allBlockScopes.find((b) => b.block_id === block.block_id)?.write_paths ?? [],
       ownership,
     });
-    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
+    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept, { root });
     return { result, accept };
   } catch (err) {
     removeWorktree(root, wt);
     const accept: AcceptNodeWorktreeResult = { outcome: "error", verifyPassed: false, merged: false };
-    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
+    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept, { root });
     return {
       result: {
         packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },

@@ -29,6 +29,7 @@ import {
 import {
   decideNextStep,
   detectStructuralRefusalPause,
+  structuralRefusalForZeroFrontier,
 } from "../../src/remediate/steps/nextStep.js";
 import { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import {
@@ -177,6 +178,38 @@ describe("FIX-B-PAUSE — empty rolling frontier discriminates structural refusa
       }).pause,
     ).toBe(false);
     expect(detectStructuralRefusalPause(undefined).pause).toBe(false);
+  });
+
+  it("zero-frontier with a NULL quotaPath (attended host) is no-signal — folds to merge, never a crash", async () => {
+    // v0.36.1 crash (cluster defect 5): the zero-frontier branch asserted
+    // `rolling.quotaPath!` before readOptionalJsonFile, so an ATTENDED host
+    // (hostOwnedDispatch → quotaPath null) with an empty frontier threw instead
+    // of folding to merge. A null path means no admission record exists — the
+    // no-signal case, never a structural refusal.
+    await expect(structuralRefusalForZeroFrontier(null)).resolves.toEqual({
+      pause: false,
+      refusedIds: [],
+    });
+  });
+
+  it("zero-frontier with a real quota file still discriminates structural refusal", async () => {
+    const dir = join(TEST_DIR, "zero-frontier-quota");
+    await mkdir(dir, { recursive: true });
+    const quotaPath = join(dir, "dispatch-quota.json");
+    await writeFile(
+      quotaPath,
+      JSON.stringify({
+        admission: {
+          granted_packet_ids: [],
+          explains: [{ packet_id: "CP-BLOCK-9", admitted: false, reason: "no_capable_pool" }],
+        },
+      }),
+      "utf8",
+    );
+    await expect(structuralRefusalForZeroFrontier(quotaPath)).resolves.toEqual({
+      pause: true,
+      refusedIds: ["CP-BLOCK-9"],
+    });
   });
 
   it("does NOT pause on a budget/transient zero-grant (that is the quota wall's case)", () => {

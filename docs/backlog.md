@@ -23,112 +23,114 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 163 entr(y/ies) indexed.
+> and at commit). 165 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops (2026-08-05, low).
-- `open-bugs.md:18` — Remediation pause/recovery is not durable (2026-08-03, medium).
-- `open-bugs.md:26` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
-- `open-bugs.md:33` — Dispatch accepts work against an incomplete source/obligation boundary (2026-08-03, medium).
-- `open-bugs.md:42` — LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at `.` inside filenames.
-- `open-bugs.md:49` — LIVE (remediation run 2026-07-30, low): `--guidance-file` combined with `--input` silently drops the guidance from the intake source manifest.
-- `open-bugs.md:58` — A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI (2026-07-25, low, friction: inefficient-feeding).
-- `open-bugs.md:72` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
-- `open-bugs.md:82` — LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined, not unwrapped.
-- `open-bugs.md:95` — CLI-worker write-scope — four accepted residuals, revisit on live evidence only (2026-07-22, low).
-- `open-bugs.md:116` — FLW-COR-003 claim-release livelock — one low residual (2026-07-22; downgraded from HIGH after a 2026-07-24 code trace).
-- `open-bugs.md:131` — ⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace): a lane can return success-shaped EMPTY results and nothing in routing notices.
-- `open-bugs.md:150` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `open-bugs.md:175` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `open-bugs.md:189` — ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
-- `open-bugs.md:197` — ⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from weaker models when the true answer is empty.
-- `open-bugs.md:213` — ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `open-bugs.md:231` — LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release defect the audit side just fixed?
-- `open-bugs.md:241` — Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED).
-- `open-bugs.md:267` — LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.
-- `open-bugs.md:286` — ⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply (2026-07-21, low).
-- `open-bugs.md:292` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `open-bugs.md:297` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:318` — Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason (2026-07-19).
-- `open-bugs.md:338` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
-- `open-bugs.md:358` — Ranked-pool composition — live-wave watch + the absolute-floor question.
-- `open-bugs.md:374` — H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).
-- `open-bugs.md:382` — Pre-existing back-compat fold survives, now against standing policy (2026-07-18; re-verified at HEAD 2026-07-26 — NOT low).
-- `open-bugs.md:384` — "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).
-- `open-bugs.md:415` — Friction walk (determinations-execution lap, 2026-07-29):
-- `open-bugs.md:429` — Friction walk (duplicated-guard lap, 2026-07-25):
-- `open-bugs.md:441` — Friction walk (backlog triage + clearance lap, 2026-07-25):
-- `open-bugs.md:460` — Friction walk (backlog clear-out lap, 2026-07-24):
-- `open-bugs.md:477` — Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).
-- `open-bugs.md:489` — The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium).
-- `open-bugs.md:500` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:512` — `AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an unmeasured estimate, and the lane cannot currently measure it (low, live-gated; the rest of the 2026-07-17 feedback-gap residuals are closed — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`).
-- `open-bugs.md:514` — Declared-source duplicates can resolve to one pool id and silently clobber their launch source (2026-07-16, low-medium).
-- `open-bugs.md:526` — A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).
-- `open-bugs.md:539` — Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).
-- `open-bugs.md:541` — A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).
-- `open-bugs.md:544` — Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).
-- `open-bugs.md:546` — G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (2026-07-16, medium).
-- `open-bugs.md:574` — A declared source that verified reach and then lies at dispatch is never ejected — the reactive `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).
-- `open-bugs.md:586` — A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (2026-07-16, tool-should-decide, low-medium).
-- `open-bugs.md:602` — Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].
-- `open-bugs.md:616` — Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.
-- `open-bugs.md:622` — Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).
-- `open-bugs.md:630` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `open-bugs.md:632` — ⬇ LIVE-run watch only — unified routing A–G.
-- `open-bugs.md:641` — SPEC — probe the local OpenAI-compatible ENDPOINT, the way CLI providers are probed on PATH.
-- `open-bugs.md:654` — agy quota may reuse the wrong credential store (unverified, live-check).
-- `open-bugs.md:656` — Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).
-- `open-bugs.md:658` — Accept-latch — two low residuals stay open.
-- `open-bugs.md:666` — Node-worktree guard — accepted residuals only (each low, on-evidence-only).
-- `open-bugs.md:668` — Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29):
-- `open-bugs.md:680` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:694` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
-- `open-bugs.md:706` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:732` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:749` — Friction walk (inline-api_key retirement lap, 2026-07-26):
-- `open-bugs.md:761` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:775` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:796` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:805` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
-- `open-bugs.md:828` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
-- `open-bugs.md:849` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
-- `open-bugs.md:853` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
-- `open-bugs.md:875` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
-- `open-bugs.md:888` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
-- `open-bugs.md:907` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
-- `open-bugs.md:916` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
-- `open-bugs.md:933` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:956` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:973` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:979` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
-- `open-bugs.md:1001` — Quota-aware dispatch — live validation env-bound.
-- `open-bugs.md:1016` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
-- `open-bugs.md:1030` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
-- `open-bugs.md:1049` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:1071` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
-- `open-bugs.md:1080` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:1089` — ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.
-- `open-bugs.md:1110` — Audit pause/terminal persistence does not enforce its documented XOR.
-- `open-bugs.md:1117` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
-- `open-bugs.md:1124` — submit-packet can report success on a result merge later refuses.
-- `open-bugs.md:1132` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:1138` — Staleness events re-log identically within one next-step.
-- `open-bugs.md:1142` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:1147` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:1153` — Dispatch-step prompt conflates merge rejections with failure.
-- `open-bugs.md:1159` — Dogfood 2026-08-05 minor friction cluster
-- `open-bugs.md:1171` — Pre-commit doc-manifest leg misses staged docs outside `docs/` (2026-08-06, low).
-- `open-bugs.md:1179` — friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run (2026-08-06, low).
-- `open-bugs.md:1188` — Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).
-- `open-bugs.md:1195` — `recordOutputRatioObservation` is dead code — output-token reservations never learn (2026-08-06 self-audit ARC-426f9398, verified, medium).
-- `open-bugs.md:1201` — A worker task-file read/parse failure exits without writing the failed WorkerResult (2026-08-06 self-audit REL-80b59c13, verified, medium).
-- `open-bugs.md:1207` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:1212` — Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).
-- `open-bugs.md:1222` — Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).
-- `open-bugs.md:1249` — Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction, medium).
-- `open-bugs.md:1256` — Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction, low).
+- `open-bugs.md:9` — Full-suite vitest exits 1 on a worker RPC timeout while every test passes (2026-08-06, friction, medium).
+- `open-bugs.md:17` — Session-start offload-liveness probe reads a live llm-relay as DOWN (2026-08-06, friction, low).
+- `open-bugs.md:24` — closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops (2026-08-05, low).
+- `open-bugs.md:33` — Remediation pause/recovery is not durable (2026-08-03, medium).
+- `open-bugs.md:41` — Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).
+- `open-bugs.md:48` — Dispatch accepts work against an incomplete source/obligation boundary (2026-08-03, medium).
+- `open-bugs.md:57` — LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at `.` inside filenames.
+- `open-bugs.md:64` — LIVE (remediation run 2026-07-30, low): `--guidance-file` combined with `--input` silently drops the guidance from the intake source manifest.
+- `open-bugs.md:73` — A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI (2026-07-25, low, friction: inefficient-feeding).
+- `open-bugs.md:87` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
+- `open-bugs.md:97` — LEAD (2026-07-23, low, surfaced reviewing the shipped DEFECT-2 design-review object envelope): a `json_object` worker that adds a SIBLING key beside `findings` is quarantined, not unwrapped.
+- `open-bugs.md:110` — CLI-worker write-scope — four accepted residuals, revisit on live evidence only (2026-07-22, low).
+- `open-bugs.md:131` — FLW-COR-003 claim-release livelock — one low residual (2026-07-22; downgraded from HIGH after a 2026-07-24 code trace).
+- `open-bugs.md:146` — ⬇ LIVE (re-dogfood 2026-07-22, medium, LEAD — mechanism RESTATED 2026-07-24 after a HEAD trace): a lane can return success-shaped EMPTY results and nothing in routing notices.
+- `open-bugs.md:165` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `open-bugs.md:190` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `open-bugs.md:204` — ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
+- `open-bugs.md:212` — ⬇ LIVE (re-dogfood 2026-07-22, low): a json_schema-required array elicits FILLER entries from weaker models when the true answer is empty.
+- `open-bugs.md:228` — ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `open-bugs.md:246` — LEAD (2026-07-22, low): does remediate's node-claim lifecycle share the merge-only-release defect the audit side just fixed?
+- `open-bugs.md:256` — Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED).
+- `open-bugs.md:282` — LEAD (low): NIM roster latency is bimodal — a slow model can read as a DEAD lane.
+- `open-bugs.md:301` — ⬇ LIVE (re-dogfood): token_usage stamping asks for a split real harnesses cannot supply (2026-07-21, low).
+- `open-bugs.md:307` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `open-bugs.md:312` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:333` — Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason (2026-07-19).
+- `open-bugs.md:353` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
+- `open-bugs.md:373` — Ranked-pool composition — live-wave watch + the absolute-floor question.
+- `open-bugs.md:389` — H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).
+- `open-bugs.md:397` — Pre-existing back-compat fold survives, now against standing policy (2026-07-18; re-verified at HEAD 2026-07-26 — NOT low).
+- `open-bugs.md:399` — "The free model can't handle reasoning work" is a MYTH built from unset request parameters — check `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).
+- `open-bugs.md:430` — Friction walk (determinations-execution lap, 2026-07-29):
+- `open-bugs.md:444` — Friction walk (duplicated-guard lap, 2026-07-25):
+- `open-bugs.md:456` — Friction walk (backlog triage + clearance lap, 2026-07-25):
+- `open-bugs.md:475` — Friction walk (backlog clear-out lap, 2026-07-24):
+- `open-bugs.md:492` — Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).
+- `open-bugs.md:504` — The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium).
+- `open-bugs.md:515` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:527` — `AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an unmeasured estimate, and the lane cannot currently measure it (low, live-gated; the rest of the 2026-07-17 feedback-gap residuals are closed — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`).
+- `open-bugs.md:529` — Declared-source duplicates can resolve to one pool id and silently clobber their launch source (2026-07-16, low-medium).
+- `open-bugs.md:541` — A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).
+- `open-bugs.md:554` — Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).
+- `open-bugs.md:556` — A post-worker LANDING stage is still misfiled as dispatch — 2,845 of 5,978 lines under `src/remediate/steps/dispatch/`, plus marshal's merge half (owner question 2026-07-16, re-verified at HEAD 2026-07-24, medium).
+- `open-bugs.md:559` — Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).
+- `open-bugs.md:561` — G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (2026-07-16, medium).
+- `open-bugs.md:589` — A declared source that verified reach and then lies at dispatch is never ejected — the reactive `lies reachably` quarantine has no catcher (found G4/G5 premise-check 2026-07-16, low).
+- `open-bugs.md:601` — A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (2026-07-16, tool-should-decide, low-medium).
+- `open-bugs.md:617` — Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].
+- `open-bugs.md:631` — Doc/lint gaps exposed by the G3 re-plan lap (2026-07-16) — three standing asks, all unbuilt at HEAD.
+- `open-bugs.md:637` — Contract-pipeline planning bills HOST quota only — no route to a $0 pool (inefficient-feeding, medium, two OWNER CALLS).
+- `open-bugs.md:645` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `open-bugs.md:647` — ⬇ LIVE-run watch only — unified routing A–G.
+- `open-bugs.md:656` — SPEC — probe the local OpenAI-compatible ENDPOINT, the way CLI providers are probed on PATH.
+- `open-bugs.md:669` — agy quota may reuse the wrong credential store (unverified, live-check).
+- `open-bugs.md:671` — Dispatch routing: JIT reservation on the HOST path + the headless/hybrid branch collapse — the remaining two thirds of the pool-agnostic-claims design (2026-07-13; concept spec 2026-07-16; re-verified against HEAD 2026-07-24).
+- `open-bugs.md:673` — Accept-latch — two low residuals stay open.
+- `open-bugs.md:681` — Node-worktree guard — accepted residuals only (each low, on-evidence-only).
+- `open-bugs.md:683` — Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29):
+- `open-bugs.md:695` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:709` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
+- `open-bugs.md:721` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:747` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:764` — Friction walk (inline-api_key retirement lap, 2026-07-26):
+- `open-bugs.md:776` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:790` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:811` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:820` — Remediation must never switch the primary checkout off its base branch (2026-07-22, medium; product fix planned).
+- `open-bugs.md:843` — "Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).
+- `open-bugs.md:864` — NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).
+- `open-bugs.md:868` — Abandoned HOST-path grants hold reservation leases to the 20-min TTL, walling a fresh grant (2026-07-11 live run, low — backstop works; not a release bug).
+- `open-bugs.md:890` — A2b unmatched-quota fallback — two residuals (each low, documented at the code site).
+- `open-bugs.md:903` — Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).
+- `open-bugs.md:922` — Host fan-out quota gate — residual: AD-HOC host Agent spawns sit outside every ledger (re-verified 2026-07-24, low, [[host-fanout-quota-gate]]).
+- `open-bugs.md:931` — Design-review independence — the solo contract branch is pinned by a shared helper, not by a test (2026-07-24, low).
+- `open-bugs.md:948` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:971` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:988` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:994` — Dispatch admission-control rework — two residuals (env-bound / architectural, not blocking).
+- `open-bugs.md:1016` — Quota-aware dispatch — live validation env-bound.
+- `open-bugs.md:1031` — SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.
+- `open-bugs.md:1045` — Friction detection — M-QUOTA escalation chain: remediate-side friction assertion missing; live validation env-bound.
+- `open-bugs.md:1064` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:1086` — A design-review auto-complete is now RECORDED but not yet CONSUMED — the stamped half shipped, the acting half is open.
+- `open-bugs.md:1095` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:1104` — ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties.
+- `open-bugs.md:1125` — Audit pause/terminal persistence does not enforce its documented XOR.
+- `open-bugs.md:1132` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
+- `open-bugs.md:1139` — submit-packet can report success on a result merge later refuses.
+- `open-bugs.md:1147` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:1153` — Staleness events re-log identically within one next-step.
+- `open-bugs.md:1157` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:1162` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:1168` — Dispatch-step prompt conflates merge rejections with failure.
+- `open-bugs.md:1174` — Dogfood 2026-08-05 minor friction cluster
+- `open-bugs.md:1186` — Pre-commit doc-manifest leg misses staged docs outside `docs/` (2026-08-06, low).
+- `open-bugs.md:1194` — friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run (2026-08-06, low).
+- `open-bugs.md:1203` — Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).
+- `open-bugs.md:1210` — `recordOutputRatioObservation` is dead code — output-token reservations never learn (2026-08-06 self-audit ARC-426f9398, verified, medium).
+- `open-bugs.md:1216` — A worker task-file read/parse failure exits without writing the failed WorkerResult (2026-08-06 self-audit REL-80b59c13, verified, medium).
+- `open-bugs.md:1222` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:1227` — Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).
+- `open-bugs.md:1237` — Accept write-scope gate admits worker scratch logs and untracked-target seeds (2026-08-06 remediation run, medium).
+- `open-bugs.md:1246` — Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction, medium).
+- `open-bugs.md:1253` — Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

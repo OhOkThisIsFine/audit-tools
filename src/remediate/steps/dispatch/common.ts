@@ -97,6 +97,21 @@ export function gitTopLevel(cwd: string): string | null {
   return top.length > 0 ? top : null;
 }
 
+/**
+ * True when `dir` is ITS OWN git top-level — i.e. a real (registered) worktree
+ * or repo root, not an orphan plain directory whose git calls resolve UP to an
+ * enclosing checkout. The accept/reverify cluster's defects 4/7/11 all shared
+ * one mechanism: a node worktree de-registered mid-recovery leaves a plain dir,
+ * and any git call with that cwd silently operates on the MAIN checkout
+ * (committing its dirt onto the run branch, or reading its dirty status as the
+ * node's un-landed work). Every worktree-cwd git WRITE and every
+ * worktree-state READ that feeds a reuse decision must pass this first.
+ */
+export function isOwnGitTopLevel(dir: string): boolean {
+  const top = gitTopLevel(dir);
+  return top !== null && canonicalPathKey(top) === canonicalPathKey(dir);
+}
+
 /** True when `root` is inside a git work tree (the git tool is present and it's a repo). */
 export function isGitWorkTree(root: string): boolean {
   const probe = spawnSyncHidden(

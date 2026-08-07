@@ -17,6 +17,7 @@ export type {
 } from "./dispatch/common.js";
 export {
   gitTopLevel,
+  isOwnGitTopLevel,
   worktreeBranchForBlock,
   gitEditedFilesForBranch,
   gitHunksForBranch,
@@ -95,7 +96,8 @@ export {
   normalizeNodeTestCommand,
   isWholeSuiteTestCommand,
   isDistDependentVerifyCommand,
-  partitionDistDependentVerifyCommands,
+  isWorktreeHostileVerifyCommand,
+  partitionDeferredVerifyCommands,
   pathTokensInCommand,
   selfContainedVerifyCommands,
   verifyCommandsForEdits,

@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -361,5 +362,111 @@ describe("(b) the dead-end sweep does not blame an unanswered question", () => {
     expect(finalState.items.F2.failure_reason ?? "").toMatch(
       /verified-complete|INV-RS-01|skipped|blocked|cyclic/i,
     );
+  });
+});
+
+// ===========================================================================
+// (c) a consumed `clarified` answer retires the stale question result
+// (accept/reverify cluster defect 6): the worker's needs_clarification result
+// file survives at the block's constant result_path, so a re-entered merge
+// re-reads it, flips the answered item BACK to needs_clarification, and
+// re-asks the operator the same question.
+// ===========================================================================
+
+describe("(c) a consumed clarified answer retires the stale question result", () => {
+  const harness = createNextStepHarness(".test-deferred-clarification-stale");
+  const { REPO_DIR, ARTIFACTS_DIR } = harness;
+  const runId = "PLAN-DC";
+
+  beforeEach(async () => {
+    await harness.resetTestRepo();
+  });
+  afterEach(async () => {
+    await harness.cleanupTestRepo();
+  });
+
+  it("archives the needs_clarification result on consume; a re-merge does not re-ask", async () => {
+    const st = stateWith([block("B1", ["F1"]), block("B2", ["F2"])], {
+      F1: item("F1", "B1", "pending"),
+      F2: item("F2", "B2", "resolved"),
+    });
+    await new StateStore(ARTIFACTS_DIR).saveState(st);
+    await harness.acknowledgeResume();
+    await harness.writeIntentCheckpoint();
+
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+    await mkdir(resultDir, { recursive: true });
+    const resultPath = join(resultDir, "implement-B1.result.json");
+    await writeFile(
+      join(resultDir, "dispatch-plan.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+        phase: "implement",
+        run_id: runId,
+        repo_root: REPO_DIR,
+        artifacts_dir: ARTIFACTS_DIR,
+        items: [
+          {
+            task_id: "implement-B1",
+            block_id: "B1",
+            prompt_path: join(resultDir, "implement-B1.md"),
+            result_path: resultPath,
+          },
+        ],
+      }),
+    );
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          {
+            finding_id: "F1",
+            status: "needs_clarification",
+            clarification_question: "How far should the boundary refactor reach?",
+          },
+        ],
+      }),
+    );
+    const merged = await mergeImplementResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+    expect(merged.status).toBe("waiting_for_clarification");
+
+    // The operator answers `clarified` — the item re-opens pending.
+    await writeFile(
+      join(ARTIFACTS_DIR, "clarification_resolution.json"),
+      JSON.stringify({
+        resolutions: [
+          { finding_id: "F1", action: "clarified", rationale: "Reach only the module boundary." },
+        ],
+      }),
+      "utf8",
+    );
+    // The consume persists state BEFORE the drain moves on to re-dispatching the
+    // re-opened item; the minimal harness repo cannot host that dispatch (no git
+    // worktree), which is irrelevant to the property under test.
+    await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false }).catch(
+      () => undefined,
+    );
+
+    const afterConsume = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    expect(afterConsume.items.F1.status).toBe("pending");
+    // The stale question result is ARCHIVED at consume time — absent means
+    // "worker hasn't run yet → re-dispatch from scratch", the benign branch.
+    expect(existsSync(resultPath)).toBe(false);
+
+    // A re-entered merge (crash-recovery / reverify re-finalize) must NOT
+    // resurrect the consumed question from the stale file.
+    const remerged = await mergeImplementResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+    expect(remerged.items?.F1.status).not.toBe("needs_clarification");
+    expect(remerged.clarifications ?? []).toEqual([]);
   });
 });
