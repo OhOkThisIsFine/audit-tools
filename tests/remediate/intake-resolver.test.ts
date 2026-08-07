@@ -1085,6 +1085,159 @@ describe("resolveIntakeStep", () => {
     expect(result.step.step_kind).toBe("synthesize_intake");
     expect(result.step.status).toBe("ready");
   });
+
+  it("--guidance-file + --input: manifest lists BOTH sources with correct created_from", async () => {
+    // When both inputResolution.supplied (--input) AND intake.conversationStart
+    // (--guidance-file) are present, the built manifest must include BOTH sources,
+    // not silently drop the guidance file. created_from must be "mixed" to indicate
+    // multiple sources were combined.
+    const artifactsDir = join(TEST_DIR, "artifacts-mixed-input-guidance");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    // Write the guidance file
+    await writeFile(
+      join(intakeDir, "conversation-start.md"),
+      "Please fix the performance issue.",
+      "utf8",
+    );
+
+    // Write the input document
+    const inputDocPath = join(TEST_DIR, "remediation-plan.md");
+    await writeFile(inputDocPath, "# Remediation Plan\nFix the slow endpoint.", "utf8");
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true, // --input was provided
+        existing: [inputDocPath],
+        missing: [],
+        checked: [inputDocPath],
+        allExisting: [inputDocPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+    expect(result.step.status).toBe("ready");
+
+    // source-manifest.json must include BOTH the input document AND the conversation-start
+    const manifestRaw = await readFile(join(intakeDir, "source-manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as IntakeSourceManifest;
+
+    // Must have exactly 2 sources
+    expect(manifest.sources.length).toBe(2);
+
+    // First source: the input document
+    expect(manifest.sources[0]).toEqual({
+      type: "document",
+      path: inputDocPath,
+      label: "input-01",
+    });
+
+    // Second source: the conversation-start guidance
+    expect(manifest.sources[1]).toEqual({
+      type: "conversation",
+      path: join(intakeDir, "conversation-start.md"),
+      label: "conversation-start",
+    });
+
+    // created_from must be "mixed" to indicate both sources are present
+    expect(manifest.created_from).toBe("mixed");
+  });
+
+  it("--input-only (without --guidance-file): manifest contains only input sources", async () => {
+    // When --input is supplied but NO --guidance-file is present, the manifest
+    // should contain only the input sources and created_from should be "input".
+    // This verifies the fix doesn't break the existing input-only path.
+    const artifactsDir = join(TEST_DIR, "artifacts-input-only");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const inputDocPath = join(TEST_DIR, "issues-report.md");
+    await writeFile(inputDocPath, "# Issues Report\nList of issues.", "utf8");
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true,
+        existing: [inputDocPath],
+        missing: [],
+        checked: [inputDocPath],
+        allExisting: [inputDocPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+
+    const manifestRaw = await readFile(join(intakeDir, "source-manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as IntakeSourceManifest;
+
+    // Should have exactly 1 source (the input document only)
+    expect(manifest.sources.length).toBe(1);
+    expect(manifest.sources[0].path).toBe(inputDocPath);
+    expect(manifest.sources[0].type).toBe("document");
+
+    // created_from should be "input", not "mixed"
+    expect(manifest.created_from).toBe("input");
+  });
+
+  it("--guidance-file-only (without --input): manifest contains only conversation source", async () => {
+    // When --guidance-file is supplied but NO --input flag was provided,
+    // the manifest should contain only the conversation source.
+    // This verifies the fix doesn't break the guidance-only path.
+    const artifactsDir = join(TEST_DIR, "artifacts-guidance-only");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    // Write the guidance file but no inputs
+    await writeFile(
+      join(intakeDir, "conversation-start.md"),
+      "Fix the failing tests.",
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false, // NO --input supplied
+        existing: [],
+        missing: [],
+        checked: [],
+        allExisting: [],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+
+    const manifestRaw = await readFile(join(intakeDir, "source-manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as IntakeSourceManifest;
+
+    // Should have exactly 1 source (the conversation-start only)
+    expect(manifest.sources.length).toBe(1);
+    expect(manifest.sources[0].type).toBe("conversation");
+    expect(manifest.sources[0].label).toBe("conversation-start");
+
+    // created_from should be "conversation", not "mixed"
+    expect(manifest.created_from).toBe("conversation");
+  });
 });
 
 // N-R02: intakeSummaryContentErrors unit tests

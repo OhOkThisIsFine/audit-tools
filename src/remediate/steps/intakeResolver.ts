@@ -9,6 +9,8 @@ import {
   buildConversationSourceManifest,
   buildDocumentSourceManifest,
   buildStructuredAuditSourceManifest,
+  buildMixedSourceManifest,
+  manifestIsInputBound,
   intakePaths,
   intakeSummaryContentErrors,
   isIntakeReady,
@@ -125,7 +127,7 @@ export async function resolveIntakeStep(params: {
   if (
     !inputResolution.supplied &&
     manifest &&
-    manifest.created_from !== "input" &&
+    !manifestIsInputBound(manifest) &&
     inputResolution.existing.length > 0
   ) {
     // Re-derive the manifest from the current default candidates so on-disk
@@ -312,7 +314,15 @@ export async function resolveIntakeStep(params: {
       );
     }
 
-    manifest = nextManifest;
+    // If both --input and --guidance-file (intake.conversationStart) are present,
+    // merge them into a mixed manifest that includes both sources. This ensures
+    // the operator's guidance is NOT evicted when they supply both inputs and guidance.
+    if (inputResolution.supplied && intake.conversationStart) {
+      manifest = buildMixedSourceManifest(nextManifest, paths.conversationStart);
+    } else {
+      manifest = nextManifest;
+    }
+
     await writeJsonFile(paths.sourceManifest, manifest);
     if (!sourceManifestsEquivalent(previousManifest, manifest)) {
       manifestRefreshed = true;

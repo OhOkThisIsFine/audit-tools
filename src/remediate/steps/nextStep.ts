@@ -175,6 +175,7 @@ import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter
 import {
   intakePaths,
   isIntakeReady,
+  manifestIsInputBound,
   readIntakeArtifacts,
   resolveManifestSources,
   type IntakeSourceManifest,
@@ -548,13 +549,15 @@ function resolveInputPaths(
 
 /**
  * True when a supplied `--input` is the SAME input the existing run was already
- * built from (its recorded intake source manifest, `created_from: "input"`, with
- * a path set equal to the supplied paths). The `/remediate-code` loader re-passes
- * the same `--input` on every `next-step`; treating that unchanged input as a
- * RESUME — not an `input_conflict` — spares the host a needless resume/restart ack
- * dance, while a genuinely DIFFERENT input still trips the conflict gate. Enforced
- * in the tool, never by asking the loader to remember to drop the flag (a needed
- * manual flag is a bug signal).
+ * built from (its recorded intake source manifest is input-bound — `"input"`, or
+ * `"mixed"` when a guidance file rode along — with an input path set equal to the
+ * supplied paths; the guidance entry is not an input, so it is excluded from the
+ * comparison). The `/remediate-code` loader re-passes the same `--input` on every
+ * `next-step`; treating that unchanged input as a RESUME — not an
+ * `input_conflict` — spares the host a needless resume/restart ack dance, while a
+ * genuinely DIFFERENT input still trips the conflict gate. Enforced in the tool,
+ * never by asking the loader to remember to drop the flag (a needed manual flag
+ * is a bug signal).
  */
 /**
  * True when `candidatePath` (the best default-discovered input, e.g.
@@ -583,9 +586,13 @@ function suppliedInputMatchesRun(
   manifest: IntakeSourceManifest | undefined,
 ): boolean {
   if (!inputResolution.supplied) return false;
-  if (!manifest || manifest.created_from !== "input") return false;
+  if (!manifest || !manifestIsInputBound(manifest)) return false;
   const supplied = new Set(inputResolution.checked.map((p) => resolve(p)));
-  const recorded = new Set(manifest.sources.map((s) => resolve(s.path)));
+  const recorded = new Set(
+    manifest.sources
+      .filter((s) => s.type !== "conversation")
+      .map((s) => resolve(s.path)),
+  );
   if (supplied.size === 0 || supplied.size !== recorded.size) return false;
   for (const p of supplied) if (!recorded.has(p)) return false;
   return true;

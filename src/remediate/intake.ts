@@ -198,6 +198,40 @@ export function buildConversationSourceManifest(
   };
 }
 
+/**
+ * Build the manifest for a run supplied with BOTH `--input` and `--guidance-file`:
+ * the input manifest's sources plus the conversation-start guidance doc. Precedence
+ * may order sources, never evict one — the guidance file must be listed or the
+ * synthesize_intake worker ("read only the listed source files") never sees it.
+ */
+export function buildMixedSourceManifest(
+  inputSourceManifest: IntakeSourceManifest,
+  conversationPath: string,
+): IntakeSourceManifest {
+  return {
+    schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+    created_from: "mixed",
+    sources: [
+      ...inputSourceManifest.sources,
+      {
+        type: "conversation",
+        path: conversationPath,
+        label: "conversation-start",
+      },
+    ],
+  };
+}
+
+/**
+ * True when a manifest's source set was fixed by an explicit `--input` — alone
+ * (`"input"`) or alongside a guidance file (`"mixed"`). Input-bound manifests are
+ * user-chosen: a bare next-step must never re-derive them from default candidates,
+ * and re-passing the same `--input` must resume rather than conflict.
+ */
+export function manifestIsInputBound(manifest: IntakeSourceManifest): boolean {
+  return manifest.created_from === "input" || manifest.created_from === "mixed";
+}
+
 // ── Content hashing ───────────────────────────────────────────────────────────
 
 /**

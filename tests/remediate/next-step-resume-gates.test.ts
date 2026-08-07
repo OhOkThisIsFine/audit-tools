@@ -77,6 +77,76 @@ describe("N-R01: --guidance-file against an advanced run trips input_conflict", 
     // Bare call → the resume gate handles it, not input_conflict.
     expect(step.step_kind).not.toBe("input_conflict");
   });
+
+  it("re-passing the SAME --input against a mixed (input+guidance) run resumes, not input_conflict", async () => {
+    // A run started with --input + --guidance-file records a created_from:"mixed"
+    // manifest (input sources + the conversation-start entry). The loader re-passes
+    // --input on every next-step, so a mixed manifest must count as input-bound and
+    // the comparison must ignore the guidance entry — else every mixed run trips a
+    // phantom conflict on its second step. The pinned property is PARITY: mixed
+    // yields the same step a pure "input" manifest does, whatever gate that is.
+    const inputPath = join(REPO_DIR, "notes.md");
+    const seedManifest = async (manifest: Record<string, unknown>) => {
+      const intakeDir = join(ARTIFACTS_DIR, "intake");
+      await mkdir(intakeDir, { recursive: true });
+      await writeFile(inputPath, "# notes", "utf8");
+      await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
+      await saveState(makePlanningState({ status: "planning" }));
+    };
+
+    await seedManifest({
+      schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+      created_from: "input",
+      sources: [{ type: "document", path: inputPath, label: "input-01" }],
+    });
+    const inputBoundStep = await decideNextStep({ root: REPO_DIR, input: inputPath });
+    expect(inputBoundStep.step_kind).not.toBe("input_conflict");
+
+    await harness.resetTestRepo();
+    await seedManifest({
+      schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+      created_from: "mixed",
+      sources: [
+        { type: "document", path: inputPath, label: "input-01" },
+        {
+          type: "conversation",
+          path: join(ARTIFACTS_DIR, "intake", "conversation-start.md"),
+          label: "conversation-start",
+        },
+      ],
+    });
+
+    const mixedStep = await decideNextStep({ root: REPO_DIR, input: inputPath });
+
+    expect(mixedStep.step_kind).not.toBe("input_conflict");
+    expect(mixedStep.step_kind).toBe(inputBoundStep.step_kind);
+  });
+
+  it("a genuinely DIFFERENT --input against a mixed run still trips input_conflict", async () => {
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    const originalInput = join(REPO_DIR, "notes.md");
+    const otherInput = join(REPO_DIR, "other.md");
+    await writeFile(originalInput, "# notes", "utf8");
+    await writeFile(otherInput, "# other", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "mixed",
+        sources: [
+          { type: "document", path: originalInput, label: "input-01" },
+          { type: "conversation", path: join(intakeDir, "conversation-start.md"), label: "conversation-start" },
+        ],
+      }),
+      "utf8",
+    );
+    await saveState(makePlanningState({ status: "planning" }));
+
+    const step = await decideNextStep({ root: REPO_DIR, input: otherInput });
+
+    expect(step.step_kind).toBe("input_conflict");
+  });
 });
 
 describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () => {
