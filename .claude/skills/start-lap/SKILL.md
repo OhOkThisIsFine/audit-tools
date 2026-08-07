@@ -65,13 +65,22 @@ git log --oneline "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD
 
 Any commits listed = un-released work sitting on main (HANDOFF's "live state" usually names why).
 
-## 5. Surface open nightly items
+## 5. ASK the open nightly questions — never just list them
 
 Read `.audit-tools/nightly/open-items.json` (the nightly routine's output — docs, backlog and
-recurring-problem items). List anything open tersely so the owner can decide. An answer is recorded
-with `node scripts/nightly/answer.mjs <ID> "the answer"`, which settles that subject permanently —
-including "leave it as it is", which is a valid answer and the one that stops a question recurring.
-Don't auto-apply instruction-file edits or land leg-3 proposals; those are the owner's call.
+recurring-problem items). Each open item already carries a `question` and ready-made `options` —
+so ASK it: pose the actual question to the owner with the options spelled out, via the
+AskUserQuestion tool where available (batch up to 4 per call; more than that → ask the
+highest-value ones now, the rest after they answer). Naming the item, labelling it "your
+decision", or pointing at the inbox / `answer.mjs` WITHOUT posing the question is the exact
+anti-pattern this step exists to kill — the owner must never have to go fetch a question the
+agent already holds in hand.
+
+When the owner answers, record it immediately with `node scripts/nightly/answer.mjs <ID> "the
+answer"` — that settles the subject permanently, including "leave it as it is" (a valid answer,
+and the one that stops a question recurring). An explicit "skip / not now" leaves the item open
+and is NOT re-asked this session. Don't auto-apply instruction-file edits or land leg-3
+proposals; those are the owner's call.
 
 ## 6. Hand back — oriented + begin the next item
 

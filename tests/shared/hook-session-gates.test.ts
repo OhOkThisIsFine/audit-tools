@@ -219,6 +219,14 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(stderr).toMatch(/HANDOFF/);
   });
 
+  it('demands owner decisions be ASKED in the hand-back, not pointed at', () => {
+    // The recurring failure: "your decision — item X" with the actual question
+    // (which the agent holds, options and all) never posed to the owner.
+    const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('ask-decisions')), { root: repo });
+    expect(stderr).toContain('ASKED as a direct question');
+    expect(stderr).toContain('a pointer, not a question');
+  });
+
   it('does not re-ask about a tree state it already challenged', () => {
     const session = sid('same-state');
     expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);

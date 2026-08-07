@@ -37,6 +37,16 @@ so a silent omission can't masquerade as "nothing to report".
 - <durable design / status> → project memory + `MEMORY.md`
 - <durable how-to> → `CLAUDE.md`
 
+### Decisions needed from you — ASKED here, not pointed at
+> Every decision only the owner can make that is live at hand-back MUST be posed in this same
+> hand-back as an actual answerable question — the question stated, the options spelled out,
+> via AskUserQuestion where the harness offers it. "Your decision: see queue X / run command Y"
+> is a pointer, not a question, and does not satisfy this section. Write "none" explicitly when
+> no decision is pending; record each answer in its durable home (e.g. `answer.mjs <id>`, the
+> named doc) once given.
+- <the question, options included> → recorded at <answer.mjs id | doc | backlog entry>
+- … (or "none")
+
 ### Friction this sprint
 > Categories are the single-sourced friction vocabulary (`FRICTION_CATEGORIES`,
 > `src/shared/friction/frictionRecord.ts`) — one taxonomy for sprint retros and the
@@ -53,6 +63,10 @@ so a silent omission can't masquerade as "nothing to report".
 
 - **Next steps + doc homes is mandatory.** The closeout exists partly so a remaining obligation
   is never lost to chat-only memory. If truly nothing remains, the report must say so explicitly.
+- **Owner decisions are asked, not referenced.** The recurring failure this section exists to
+  stop: hand-backs that say "your decision — item X" while the actual question (which the agent
+  holds, options and all) never reaches the owner. If the owner would have to open a file or run
+  a command to find out what is being asked, the closeout has not asked it.
 - **Friction is named-dimensions + open-ended.** A fixed taxonomy silently drops the unanticipated
   friction that is most of real friction; the open-ended line is load-bearing, not optional.
 - **One home per fact.** The report points at where durable content lives; it does not duplicate it.

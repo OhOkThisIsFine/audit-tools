@@ -15,11 +15,14 @@
   (2026-07-24); the unlocated ≥60s blocking worker stays open in `open-bugs.md` with today's
   mechanism-level diagnosis, and an offloaded candidate sweep (relay CLI lane) was in flight at
   hand-back — its report lands in the session scratchpad, advisory only.
-- **Offload topology (2026-08-07, this session):** the Desktop→relay **CLI dispatch lane is
-  VERIFIED by traffic** (`llm-relay dispatch` rung `claude-deepseek-credits` started and
-  traversed the relay). The Desktop session's own `/v1/messages` remain pinned to
-  api.anthropic.com (CC 2.1.222 launcher env) — harness subagents spend primary quota; use
-  dispatch rungs for offload.
+- **Offload topology (2026-08-07, this session):** the Desktop→relay CLI dispatch lane
+  (`llm-relay dispatch` rung `claude-deepseek-credits`) starts correctly, but the first run
+  failed `ConnectionRefused` — **llm-relay was DOWN mid-session** (CLI child startup notices are
+  NOT traffic evidence; only a completed relay-routed response is). Relay restarted via its
+  Startup `.vbs` and re-probed listening; the sweep was re-dispatched. The Desktop session's own
+  `/v1/messages` remain pinned to api.anthropic.com (CC 2.1.222 launcher env) — harness
+  subagents spend primary quota; use dispatch rungs for offload, and verify the relay is
+  LISTENING before trusting a lane.
 
 ## Verification state
 

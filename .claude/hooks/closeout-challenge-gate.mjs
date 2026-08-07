@@ -229,7 +229,10 @@ console.error(
     '  - no half-done state, and any DELIBERATE intermediate state called out so it does not read as a bug;\n' +
     '  - HANDOFF trimmed to immediate-next-only; backlog status current; memory + index synced;\n' +
     '  - every remaining step stated WITH its home doc — or an explicit "nothing pending". A step that ' +
-    'lives only in this chat is lost when the session ends.\n\n' +
+    'lives only in this chat is lost when the session ends;\n' +
+    '  - every decision only the OWNER can make ASKED as a direct question, options spelled out ' +
+    '(AskUserQuestion where available) — "your decision: see queue X / run command Y" is a pointer, ' +
+    'not a question, and the owner never has to go fetch a question the agent already holds.\n\n' +
     'Fix what is real, then stop again. If it genuinely was all handled, say so explicitly and stop — ' +
     `this asks at most ${CHALLENGE_CAP}x per session. (Bypass: AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1.)`,
 );
