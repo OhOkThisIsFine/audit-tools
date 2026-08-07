@@ -18,8 +18,12 @@
   some worker. Attribution to `audit-code-completion.test.ts` is UNCONFIRMED: a solo run (244s)
   does not reproduce, and an event-loop stall probe (>5s threshold) in that file's worker
   recorded ZERO stalls during a full run in which the error fired — the blocker is another
-  file, or emerges only under contention. Offloaded candidate sweep pending
-  (relay lane, 2026-08-07). ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
+  file, or emerges only under contention. Candidate sweep LANDED (relay lane, verified against
+  source): [`reviews/rpc-starvation-candidates-2026-08-07.md`](../reviews/rpc-starvation-candidates-2026-08-07.md)
+  — the one confirmed defect-class instance (sync full-CLI `next-step` children in
+  `next-step-pipeline-dispatch.test.ts`, unbounded below the 120s test timeout) was converted to
+  async spawn the same day; gate-script spawns in `tests/shared/*-gate.test.ts` are the next
+  leads if the error recurs. ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
   at the TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config
   (false GREEN); any config split must nest under `test.projects` and prove both exit
   polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then

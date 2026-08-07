@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+import { spawnHidden } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
@@ -17,6 +17,33 @@ import {
 
 const harness = createNextStepHarness(".test-next-step-pipeline-dispatch");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag } = harness;
+
+// Async CLI spawn — the child (a full `remediate-code next-step` boot) can run for
+// seconds, and a sync spawn would hold this worker's event loop for the child's whole
+// wall-time in ONE stretch. vitest workers must answer birpc within 60s, so a test
+// worker never blocks on a long child synchronously (backlog: RPC starvation).
+// Mirrors spawnSync's return shape so assertions read identically.
+function spawnCli(
+  args: string[],
+  options: { cwd: string },
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawnHidden(process.execPath, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk: unknown) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk: unknown) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (status: number | null) => resolve({ status, stdout, stderr }));
+  });
+}
 
 let prevRollingEngine: string | undefined;
 beforeEach(async () => {
@@ -662,13 +689,9 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     // Past the review-approval gate (approve-all) so the run reaches the pipeline.
     await approveReviewGate();
 
-    const result = spawnSync(
-      process.execPath,
+    const result = await spawnCli(
       [WRAPPER, "next-step", "--root", REPO_DIR, "--input", AUDIT_FIXTURE],
-      {
-        cwd: REPO_DIR,
-        encoding: "utf8",
-      },
+      { cwd: REPO_DIR },
     );
 
     expect(result.status).toBe(0);
@@ -682,27 +705,18 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
   });
 
   it("CLI run alias is deleted (next-step is the only loop)", async () => {
-    const result = spawnSync(
-      process.execPath,
-      [WRAPPER, "run", "--root", REPO_DIR],
-      {
-        cwd: REPO_DIR,
-        encoding: "utf8",
-      },
-    );
+    const result = await spawnCli([WRAPPER, "run", "--root", REPO_DIR], {
+      cwd: REPO_DIR,
+    });
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/unknown command/i);
   });
 
-  it("CLI next-step accepts the backend-rendered --force-replan flag", () => {
-    const result = spawnSync(
-      process.execPath,
+  it("CLI next-step accepts the backend-rendered --force-replan flag", async () => {
+    const result = await spawnCli(
       [WRAPPER, "next-step", "--root", REPO_DIR, "--force-replan"],
-      {
-        cwd: REPO_DIR,
-        encoding: "utf8",
-      },
+      { cwd: REPO_DIR },
     );
 
     expect(result.status).toBe(0);
