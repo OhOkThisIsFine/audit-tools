@@ -35,6 +35,70 @@ export interface ProviderLaunchFinalizeContext<TPacket> {
 }
 
 /**
+ * Detection result for provider-unavailable error class (spawn-level provider death).
+ */
+interface ProviderUnavailableDetectionResult {
+  isProviderUnavailable: boolean;
+  rawMatch: string | null;
+}
+
+/**
+ * Detect a spawn-level provider death (binary missing, PATH resolution failure, or
+ * process death before any channel output). Platform-agnostic, case-insensitive
+ * patterns: ENOENT / EACCES on posix, "is not recognized as an internal or external
+ * command" or "The system cannot find the (file|path) specified" on Windows, plus
+ * generic "command not found" / "no such file or directory".
+ *
+ * CONSERVATIVE: only matches when either the string "spawn" or an exact Windows/posix
+ * not-found phrase is present in the text, so an ordinary worker error mentioning a
+ * missing data file does not classify.
+ *
+ * Returns a match when a spawn-level pattern is detected; null otherwise.
+ */
+function detectProviderUnavailable(
+  launchError: string | undefined,
+  stderrText: string,
+  stdoutText: string,
+): ProviderUnavailableDetectionResult {
+  const patterns = [
+    /\bENOENT\b/i,
+    /\bEACCES\b/i,
+    /is not recognized as an internal or external command/i,
+    /The system cannot find the (?:file|path) specified/i,
+    /command not found/i,
+    /no such file or directory/i,
+  ];
+
+  // Require either "spawn" in the text OR an exact Windows/posix not-found phrase
+  const hasSpawnContext = /\bspawn\b/i.test(launchError ?? "");
+  const combinedText = [launchError ?? "", stderrText, stdoutText].join("\n");
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(combinedText);
+    if (match) {
+      // Conservatism gate: spawn context, or one of the exact cmd.exe-level
+      // phrases — those two mean the provider COMMAND itself failed to launch
+      // (the commonest Windows shim-death shape carries no "spawn" text at
+      // all). Bare posix phrases ("command not found", "no such file or
+      // directory", ENOENT) stay spawn-gated: a worker that RAN can emit them
+      // about its own missing data files.
+      if (
+        hasSpawnContext ||
+        /is not recognized as an internal or external command/i.test(combinedText) ||
+        /The system cannot find the (?:file|path) specified/i.test(combinedText)
+      ) {
+        return {
+          isProviderUnavailable: true,
+          rawMatch: match[0],
+        };
+      }
+    }
+  }
+
+  return { isProviderUnavailable: false, rawMatch: null };
+}
+
+/**
  * Classify a worker's failure text by scanning stderr and stdout in order for known
  * quota/API-error patterns. Reused identically by both not-accepted (exit ≠ 0) and
  * accepted-but-no-result-file branches so they cannot drift.
@@ -205,9 +269,25 @@ export async function finalizeProviderLaunchResult<TPacket>(
   const stderrText = (await readOptionalTextFile(ctx.stderrPath)) ?? "";
   const stdoutText = (await readOptionalTextFile(ctx.stdoutPath)) ?? "";
 
-  // The not-accepted branch NOW runs the channel classifier BEFORE returning error.
-  // This fixes the dogfood gap: a nonzero-exit worker's 429/404/413 text is now scanned.
+  // The not-accepted branch NOW runs the provider-death detector FIRST (before
+  // classifyFailureChannels — a spawn death produces no meaningful channels, and quota
+  // patterns cannot be present in a process that never ran; document the ordering).
+  // Then the channel classifier BEFORE returning error. This fixes the dogfood gap:
+  // a nonzero-exit worker's 429/404/413 text is now scanned.
   if (!launch.accepted) {
+    // Provider-death detection (spawn-level failures): run FIRST, before channel classification
+    const providerUnavailableMatch = detectProviderUnavailable(launch.error, stderrText, stdoutText);
+    if (providerUnavailableMatch.isProviderUnavailable) {
+      return {
+        packet,
+        outcome: "provider_unavailable",
+        providerUnavailable: {
+          text: launch.error ?? stderrText ?? stdoutText ?? "(no error text)",
+          rawMatch: providerUnavailableMatch.rawMatch,
+        },
+      };
+    }
+
     const classification = classifyFailureChannels(packet, stderrText, stdoutText);
     if (classification) {
       return { packet, ...classification };

@@ -212,6 +212,9 @@ function normalizeEntry(entry: QuotaStateEntry): QuotaStateEntry {
   if (entry.consecutive_429_count !== undefined) {
     normalized.consecutive_429_count = entry.consecutive_429_count;
   }
+  if (entry.consecutive_spawn_failure_count !== undefined) {
+    normalized.consecutive_spawn_failure_count = entry.consecutive_spawn_failure_count;
+  }
   if (entry.tokens_per_pct !== undefined) normalized.tokens_per_pct = entry.tokens_per_pct;
   return normalized;
 }
@@ -539,6 +542,8 @@ async function recordWaveOutcomeUnsafe(
       entry.consecutive_429_count = 0;
       entry.cooldown_until = null;
     }
+    // Reset spawn failure counter on success
+    entry.consecutive_spawn_failure_count = 0;
   } else {
     const prev429Count = entry.consecutive_429_count ?? 0;
     const new429Count = outcome.outcome === "rate_limited" ? prev429Count + 1 : prev429Count;
@@ -549,6 +554,15 @@ async function recordWaveOutcomeUnsafe(
     // field's meaning (and any consumer keying off it) is corrupted.
     if (outcome.outcome === "rate_limited") {
       entry.last_429_at = new Date().toISOString();
+    }
+
+    // Spawn-level provider death: bump the spawn-failure streak at THIS single
+    // chokepoint (never inline in the engine — one write path to quota state).
+    // No cooldown_until and no 429 stamp: a dead binary is not a quota signal
+    // and does not heal on a timer.
+    if (outcome.outcome === "provider_unavailable") {
+      entry.consecutive_spawn_failure_count =
+        (entry.consecutive_spawn_failure_count ?? 0) + 1;
     }
 
     if (outcome.outcome === "rate_limited" && new429Count > 0) {

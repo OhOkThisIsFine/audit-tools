@@ -1514,12 +1514,14 @@ export async function driveRollingImplementDispatch(
       pool_id: slot.poolId,
     });
     // Release the claim ONLY on a terminal accept. A `rate_limited`,
-    // `credit_exhausted`, or `quota_unclassified` worker re-queues (still owned
-    // work — keep the claim so a peer can't grab it mid-retry); success / error /
-    // timeout is terminal → free it through the shared registry (token-checked).
+    // `credit_exhausted`, `provider_unavailable`, or `quota_unclassified` worker
+    // re-queues (still owned work — keep the claim so a peer can't grab it
+    // mid-retry); success / error / timeout is terminal → free it through the
+    // shared registry (token-checked).
     if (
       result.outcome !== "rate_limited" &&
       result.outcome !== "credit_exhausted" &&
+      result.outcome !== "provider_unavailable" &&
       result.outcome !== "quota_unclassified"
     ) {
       await releaseNodeClaim(registry, claimTokens, block.block_id);

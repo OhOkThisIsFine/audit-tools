@@ -54,7 +54,8 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
     | "credit_exhausted"
     | "model_unavailable"
     | "packet_too_large"
-    | "quota_unclassified";
+    | "quota_unclassified"
+    | "provider_unavailable";
   actualTokens?: number;
   error?: unknown;
   /**
@@ -91,6 +92,14 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
    * improvement. Absent on other outcomes.
    */
   quotaUnclassified?: { channel: "error" | "status" | "result"; text: string };
+  /**
+   * Launch-error or channel evidence that classified a `provider_unavailable`
+   * outcome (spawn-level provider death — binary missing, PATH resolution failure,
+   * or process death before any channel output). Carried so the consumer's
+   * `onProviderUnavailable` hook can surface it as reviewable friction. Absent on
+   * non-provider_unavailable outcomes.
+   */
+  providerUnavailable?: { text: string; rawMatch: string | null };
 }
 
 /**
@@ -180,6 +189,16 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
    * skip silent (no friction, skip still happens).
    */
   onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
+  /**
+   * Provider unavailable (spawn-level provider death — binary missing, PATH
+   * resolution failure, or process death before any channel output): invoked once
+   * per pool the first time a `provider_unavailable` result lands, after the
+   * engine has already permanently excluded the pool from this run's admissible
+   * set (monotonic — no timed cooldown). The consumer wires it to friction
+   * emission. Optional — omit to leave the exclusion silent (no friction,
+   * exclusion still happens).
+   */
+  onProviderUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
   /**
    * Engine decision-record sink (legibility invariant, spec Resolved decision
    * 3): receives every stamped per-packet admission decision (admit / ledger

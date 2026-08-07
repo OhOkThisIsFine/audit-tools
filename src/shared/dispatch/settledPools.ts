@@ -44,6 +44,8 @@ export async function readSettledPools(path: string): Promise<Set<string>> {
  * Qualifying outcomes:
  *   - `credit_exhausted`   — the account is out of credit; no reset timer.
  *   - `model_unavailable`  — the backend does not serve this model (404-class).
+ *   - `provider_unavailable` — the provider binary/process is missing or dead;
+ *                             operator intervention required.
  *   - `rate_limited`       — cross-cycle the in-memory reversible pause evaporates,
  *                            so a hybrid cycle records it here; the learned
  *                            cooldown additionally paces the next build.
@@ -58,6 +60,7 @@ export function isPoolSettlingOutcome(outcome: string): boolean {
   return (
     outcome === "credit_exhausted" ||
     outcome === "model_unavailable" ||
+    outcome === "provider_unavailable" ||
     outcome === "rate_limited" ||
     outcome === "quota_unclassified"
   );

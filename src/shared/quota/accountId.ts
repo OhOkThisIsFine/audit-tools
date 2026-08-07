@@ -158,6 +158,9 @@ export function foldAccountCooldown(
     ...(ownEntry?.consecutive_429_count !== undefined
       ? { consecutive_429_count: ownEntry.consecutive_429_count }
       : {}),
+    ...(ownEntry?.consecutive_spawn_failure_count !== undefined
+      ? { consecutive_spawn_failure_count: ownEntry.consecutive_spawn_failure_count }
+      : {}),
     ...(ownEntry?.tokens_per_pct !== undefined ? { tokens_per_pct: ownEntry.tokens_per_pct } : {}),
   };
 }

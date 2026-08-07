@@ -49,7 +49,8 @@ export type NodeWorkerOutcome =
   | "credit_exhausted"
   | "model_unavailable"
   | "packet_too_large"
-  | "quota_unclassified";
+  | "quota_unclassified"
+  | "provider_unavailable";
 
 export interface AcceptNodeWorktreeParams {
   root: string;

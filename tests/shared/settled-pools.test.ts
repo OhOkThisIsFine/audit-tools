@@ -55,6 +55,7 @@ test("isPoolSettlingOutcome: terminal exhaustion settles; sizing faults and tran
   // Genuine terminal pool conditions → settle.
   expect(isPoolSettlingOutcome("credit_exhausted")).toBe(true);
   expect(isPoolSettlingOutcome("model_unavailable")).toBe(true);
+  expect(isPoolSettlingOutcome("provider_unavailable")).toBe(true);
   expect(isPoolSettlingOutcome("rate_limited")).toBe(true);
   expect(isPoolSettlingOutcome("quota_unclassified")).toBe(true);
   // A 413 is a per-(item,pool) sizing fact — must NEVER kill the pool.

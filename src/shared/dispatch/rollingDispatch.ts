@@ -153,7 +153,8 @@ export interface RollingDispatchResult<TPacket> {
     | "credit_exhausted"
     | "model_unavailable"
     | "packet_too_large"
-    | "quota_unclassified";
+    | "quota_unclassified"
+    | "provider_unavailable";
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
   /**
@@ -234,6 +235,17 @@ export interface RollingDispatchResult<TPacket> {
   quotaUnclassified?: {
     channel: WorkerOutputChannel;
     text: string;
+  };
+  /**
+   * The launch-error or channel evidence that classified a `provider_unavailable`
+   * outcome (spawn-level provider death — binary missing, PATH resolution failure,
+   * or process death before any channel output). Carried so the consumer's
+   * `onProviderUnavailable` hook can surface it as reviewable friction. Absent on
+   * non-provider_unavailable outcomes.
+   */
+  providerUnavailable?: {
+    text: string;
+    rawMatch: string | null;
   };
 }
 
@@ -444,6 +456,18 @@ export interface RollingDispatchConfig<TPacket> {
    * silent (no friction, degrade still happens).
    */
   onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
+  /**
+   * Provider unavailable (spawn-level provider death — binary missing, PATH
+   * resolution failure, or process death before any channel output): invoked once
+   * per pool the FIRST time a `provider_unavailable` result lands for it — the
+   * provider binary/process itself is missing or dead, not a transient quota
+   * issue. The engine has already permanently excluded the pool from this run's
+   * admissible set (monotonic exhaustedPoolIds — no timed cooldown) by the time
+   * this fires. The consumer wires it to friction emission. Best-effort — a
+   * throwing hook never aborts dispatch. Omit to leave the exclusion silent (no
+   * friction emitted, exclusion still happens).
+   */
+  onProviderUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
   /**
    * Shared cost-demotion set for reactive cost verification. When a driver runs
    * several dispatchers over one logical run (`driveRolling` creates one per
@@ -879,6 +903,7 @@ export function createRollingDispatcher<TPacket>(
     onModelUnavailable,
     onPacketTooLarge,
     onQuotaUnclassified,
+    onProviderUnavailable,
     costDemotedPoolIds: injectedCostDemotedPoolIds,
     isPacketEscalated,
     recordRateLimit,
@@ -1268,6 +1293,9 @@ export function createRollingDispatcher<TPacket>(
     // model_unavailable and packet_too_large record as 'error' — no cooldown
     // semantics. A 404 is permanent (model not served), a 413 is a per-packet
     // sizing fault; neither carries reset timing.
+    // provider_unavailable (spawn-level death) records as 'error' — no cooldown
+    // semantics. The provider is dead and needs operator intervention; a timer
+    // cannot fix it.
     // quota_unclassified records as 'rate_limited' — NOT 'error' — precisely so
     // recordWaveOutcomeUnsafe DOES apply its exponential-backoff cooldown_until
     // (state.ts:412-430). That reversible, timed cooldown IS the "conservative
@@ -1280,6 +1308,7 @@ export function createRollingDispatcher<TPacket>(
       : result.outcome === "credit_exhausted" ? "error"
       : result.outcome === "model_unavailable" ? "error"
       : result.outcome === "packet_too_large" ? "error"
+      : result.outcome === "provider_unavailable" ? "provider_unavailable"
       : result.outcome === "quota_unclassified" ? "rate_limited"
       : "timeout" as const;
 
@@ -1458,6 +1487,53 @@ export function createRollingDispatcher<TPacket>(
       } catch {
         // Observability must never abort a run.
       }
+      return;
+    }
+
+    // Provider unavailable (spawn-level provider death — binary missing, PATH
+    // resolution failure, or process death before any channel output): the provider
+    // is not accessible, so the pool is permanently excluded from this run's
+    // admissible set (monotonic exhaustedPoolIds). Unlike rate_limited/quota_unclassified
+    // (which carry transient reset/retry semantics), provider death is permanent for
+    // this run: operator intervention is required. The pool is added to exhaustedPoolIds
+    // and the packet is re-queued so a different pool absorbs it. If this was the
+    // last admissible pool, the run degrades to the SAME empty_pool / quota_paused
+    // stranding path (INV-QD-07).
+    if (result.outcome === "provider_unavailable") {
+      // Fire the hook only the FIRST time a given pool goes provider-unavailable
+      // (mirrors the `firstForPool` gate on `onCreditExhausted`).
+      const firstForPool = !state.exhaustedPoolIds.has(providerSlot.poolId);
+      state.exhaustedPoolIds.add(providerSlot.poolId);
+      if (firstForPool) {
+        try {
+          onProviderUnavailable?.({
+            poolId: providerSlot.poolId,
+            rawMatch: result.providerUnavailable?.rawMatch ?? null,
+          });
+        } catch {
+          // Best-effort: a throwing friction hook must never abort dispatch.
+        }
+      }
+      if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
+        state.pendingQueue.unshift(packet);
+      }
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "rolling_dispatch_requeue_provider_unavailable",
+            packet_id: packet.id,
+            exhausted_pool_id: providerSlot.poolId,
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a run.
+      }
+      // The spawn-failure streak is recorded by the ONE quota chokepoint: the
+      // wave-outcome mapping above sends this result to `recordWaveOutcome` as
+      // outcome "provider_unavailable", which increments
+      // `consecutive_spawn_failure_count` (and success resets it) — never a
+      // second inline write path to quota state from the engine.
       return;
     }
 

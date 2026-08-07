@@ -656,3 +656,52 @@ test("INV-QD-15: a legacy `buckets` blob is dropped on the next v2 write, not ca
     expect(persisted.entries[KEY].consecutive_429_count).toBe(1);
   });
 });
+
+// ARC-e01faa3e (provider mid-run re-detection): quota counter round-trip test
+// — an entry with consecutive_spawn_failure_count set survives normalizeEntry +
+// a persist/read cycle.
+test("recordWaveOutcome provider_unavailable increments the spawn-failure streak at the chokepoint — no cooldown, no 429 stamp — and success resets it", async () => {
+  await withTempStateDir(async () => {
+    await recordWaveOutcome(KEY, { outcome: "provider_unavailable" });
+    await recordWaveOutcome(KEY, { outcome: "provider_unavailable" });
+
+    let state = await readQuotaState();
+    let entry = state.entries[KEY];
+    expect(entry.consecutive_spawn_failure_count).toBe(2);
+    // A dead binary is not a quota signal: no cooldown, no 429 timestamp, no 429 streak.
+    expect(entry.cooldown_until).toBe(null);
+    expect(entry.last_429_at).toBe(null);
+    expect(entry.consecutive_429_count ?? 0).toBe(0);
+
+    await recordWaveOutcome(KEY, { outcome: "success" });
+    state = await readQuotaState();
+    entry = state.entries[KEY];
+    expect(entry.consecutive_spawn_failure_count).toBe(0);
+  });
+});
+
+test("normalizeEntry + persist/read round-trip: consecutive_spawn_failure_count survives", async () => {
+  await withTempStateDir(async () => {
+    // Create an entry with consecutive_spawn_failure_count set.
+    const entry: QuotaStateEntry = {
+      updated_at: new Date().toISOString(),
+      cooldown_until: null,
+      last_429_at: null,
+      consecutive_429_count: 0,
+      consecutive_spawn_failure_count: 3,
+    };
+
+    // Write it as part of a full state.
+    await writeQuotaState({
+      version: 2,
+      entries: { [KEY]: entry },
+    });
+
+    // Read it back.
+    const state = await readQuotaState();
+    const readEntry = state.entries[KEY];
+
+    // consecutive_spawn_failure_count must be preserved.
+    expect(readEntry.consecutive_spawn_failure_count).toBe(3);
+  });
+});

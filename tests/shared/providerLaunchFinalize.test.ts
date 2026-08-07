@@ -29,6 +29,80 @@ async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * ARC-e01faa3e (provider mid-run re-detection) — the classification gap: a
+ * launch REJECTED at spawn level (binary missing / PATH resolution failure /
+ * process death before any channel output) matches no quota pattern and today
+ * degrades to a generic `error` outcome, indistinguishable from a worker that
+ * ran and failed on content. The rolling engine therefore has no signal to
+ * count per-pool spawn failures, so a dead provider is retried forever
+ * instead of pausing into `waiting_for_provider` naming it. Pins the NEW
+ * distinct `provider_unavailable` outcome (naming per the existing
+ * `model_unavailable` convention): RED until the provider-death
+ * classification lands, GREEN after.
+ */
+test("finalizeProviderLaunchResult: a spawn-level provider death classifies as provider_unavailable, never a generic error", async () => {
+  await withTmpDir(async (dir) => {
+    // None of the three files exist — the worker process never spawned, so
+    // there are no channels to scan; the ONLY evidence is the launch error.
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: false, error: "spawn codex ENOENT" },
+      {
+        packet: basePacket(),
+        providerName: "codex",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "codex/*",
+      },
+    );
+
+    expect(result.outcome).toBe("provider_unavailable");
+  });
+});
+
+test("finalizeProviderLaunchResult: the Windows shim death phrase (no 'spawn' text at all) still classifies provider_unavailable", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+    // cmd.exe-level failure: the provider COMMAND itself did not launch. This is
+    // the commonest win32 provider-death shape and carries no "spawn" context.
+    await writeFile(
+      stderrPath,
+      "'codex' is not recognized as an internal or external command,\noperable program or batch file.",
+      "utf8",
+    );
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: false, error: "worker exited 1" },
+      {
+        packet: basePacket(),
+        providerName: "codex",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "codex/*",
+      },
+    );
+
+    expect(result.outcome).toBe("provider_unavailable");
+  });
+});
+
 test("finalizeProviderLaunchResult: credit-exhaustion stderr classifies as credit_exhausted, never falls through to a raw error", async () => {
   await withTmpDir(async (dir) => {
     const stderrPath = join(dir, "stderr.txt");
@@ -611,5 +685,38 @@ test("finalizeProviderLaunchResult: an empty stderr adds no tail to the error me
     );
     expect(result.outcome).toBe("error");
     expect(String((result as { error: Error }).error.message)).not.toContain("stderr tail");
+  });
+});
+
+// Detector conservatism: a not-accepted launch whose error is "worker failed: no such file or
+// directory reading data.json" (no "spawn", no Windows phrase) must NOT classify
+// provider_unavailable (stays generic error path or channel classification).
+test("finalizeProviderLaunchResult: detector conservatism — ordinary worker error with 'no such file or directory' does not classify provider_unavailable", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+    await writeFile(stderrPath, "", "utf8");
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: false, error: "worker failed: no such file or directory reading data.json" },
+      {
+        packet: basePacket(),
+        providerName: "test-provider",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "test-pool",
+      },
+    );
+
+    // Must NOT be provider_unavailable (no spawn context, so stays in error classification)
+    expect(result.outcome).toBe("error");
+    expect(result.outcome).not.toBe("provider_unavailable");
   });
 });

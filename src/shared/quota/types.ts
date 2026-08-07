@@ -54,6 +54,13 @@ export interface QuotaStateEntry {
   last_429_at: string | null;
   consecutive_429_count?: number;
   /**
+   * Consecutive spawn-level provider failures (provider binary missing, PATH
+   * resolution failure, process death before channel output). Incremented on
+   * `provider_unavailable` outcomes; reset to 0 on success. No cooldown_until
+   * — a dead provider cannot recover on a timer and needs operator intervention.
+   */
+  consecutive_spawn_failure_count?: number;
+  /**
    * Learned tokens→percent slope (EWMA), keyed by `windowSlopeKey(scope, label)`
    * (e.g. "account:session", "model:session") — NOT by bare label: an account-scoped
    * and a model-scoped window can share a group name while pricing different
@@ -210,11 +217,15 @@ export interface ObservedWaveOutcome {
    * - `timeout`: execution deadline exceeded — no rate-limit cooldown.
    * - `error`: provider returned a non-quota error (crash, network failure) — no
    *   rate-limit cooldown (distinct from quota exhaustion).
+   * - `provider_unavailable`: spawn-level provider death (binary missing / PATH
+   *   failure / process death before any output) — increments the
+   *   `consecutive_spawn_failure_count` streak; NO cooldown and NO 429 stamp
+   *   (a dead binary does not heal on a timer, and it is not a quota signal).
    *
    * The outcome carries no `concurrency`: concurrency is DECLARED by the provider
    * or ABSENT, never inferred from an outcome stream.
    */
-  outcome: "success" | "rate_limited" | "timeout" | "error";
+  outcome: "success" | "rate_limited" | "timeout" | "error" | "provider_unavailable";
   cooldown_until?: string | null;
   reset_at?: string | null;
 }
