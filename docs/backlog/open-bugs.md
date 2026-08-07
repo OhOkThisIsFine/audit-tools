@@ -700,6 +700,12 @@
   ([[parallel-dispatch-bounded-current-verified]]); driver swept them before commit.
   (3) **ambiguous-direction: none** — the two backlog entries stated their properties precisely
   enough that both fixes landed against them verbatim.
+  (4) **tool-should-decide (low, observed post-fix):** the closeout-challenge gate cannot
+  attribute tree dirt, so a CONCURRENT session's uncommitted WIP in the shared checkout re-fired
+  the challenge after each of this session's commits (new stateKey, same foreign dirt) and spent
+  the full cap on paths this session never touched. Property: the gate's dirty-tree evidence
+  should exclude (or at least mark) paths whose dirt predates the session or is named deliberate
+  in HANDOFF — same attribution principle as the phase-boundary-gate entry above.
 
 - **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
   (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15
