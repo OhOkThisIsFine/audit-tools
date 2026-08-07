@@ -15,6 +15,10 @@
 //    that moves HEAD cannot ping-pong the gate forever;
 //  - deliberately does NOT key on stop_hook_active alone: two other Stop hooks
 //    share this event, and a block from either would otherwise starve this one;
+//  - skips (spending nothing) while the payload shows live background tasks or
+//    scheduled session crons: that stop is a WAIT the harness resumes, not a
+//    closeout, and challenging there was exactly how both cap slots kept being
+//    burned mid-lap;
 //  - only fires when the session actually did work (HEAD moved recently, dirty
 //    tree, or unpushed commits) — nothing to close out means nothing to ask;
 //  - swallows every fs/git/spawn fault → exit 0.
@@ -25,6 +29,7 @@ import { readFileSync, readdirSync, mkdirSync, existsSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
+import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
 
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
@@ -42,6 +47,12 @@ try {
   process.exit(0);
 }
 if ((payload?.hook_event_name ?? 'Stop') !== 'Stop') process.exit(0);
+
+// A wait is not a closeout: with live background tasks (or scheduled crons) the
+// harness re-invokes this session, so the challenge belongs to a later, real
+// stop. Exit BEFORE any cap/state accounting — a skipped wait must leave both
+// untouched.
+if (sessionHasLiveBackgroundWork(payload)) process.exit(0);
 
 const sessionId = String(payload?.session_id ?? '').replace(/[^\w.-]/g, '');
 if (!sessionId) process.exit(0); // no session key → cannot cap → fail open

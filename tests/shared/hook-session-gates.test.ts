@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
+import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter } from 'node:path';
@@ -27,6 +28,8 @@ interface HookPayload {
   tool_input?: Record<string, unknown>;
   transcript_path?: string;
   stop_hook_active?: boolean;
+  background_tasks?: Array<Record<string, unknown>>;
+  session_crons?: Array<Record<string, unknown>>;
 }
 
 interface RunHookOptions {
@@ -240,6 +243,52 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(r.code).toBe(0);
   });
 
+  // The mid-task misfire class (backlog 2026-08-05/07-28): a stop that is a WAIT
+  // on live background work is a turn boundary the harness resumes, not a
+  // closeout — challenging there spends the cap before the real close.
+  describe('live background work — the challenge waits for the real closeout', () => {
+    it('does not spend the cap while a background task is live, and still challenges at the real stop', () => {
+      const session = sid('live-bg');
+      const live = {
+        ...stop(session),
+        background_tasks: [{ id: 'a1', type: 'subagent', status: 'running', agent_type: 'Explore' }],
+      };
+      expect(runHook(CLOSEOUT_GATE, live, { root: repo }).code).toBe(0);
+      // Same session, same tree, no live work: the cap and the state-dedupe must
+      // both be untouched by the skipped stop, so THIS one challenges.
+      expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
+    });
+
+    it('ignores task type — a live workflow blocks the challenge like a subagent does', () => {
+      const live = {
+        ...stop(sid('live-wf')),
+        background_tasks: [{ id: 'wf_x', type: 'workflow', status: 'running' }],
+      };
+      expect(runHook(CLOSEOUT_GATE, live, { root: repo }).code).toBe(0);
+    });
+
+    it('still challenges when every background task is terminal', () => {
+      const harvested = {
+        ...stop(sid('terminal-bg')),
+        background_tasks: [
+          { id: 'a1', type: 'subagent', status: 'completed' },
+          { id: 'b2', type: 'shell', status: 'failed' },
+        ],
+      };
+      expect(runHook(CLOSEOUT_GATE, harvested, { root: repo }).code).toBe(2);
+    });
+
+    it('treats an unknown task status as live — the cheap failure is a skipped challenge', () => {
+      const odd = { ...stop(sid('odd-bg')), background_tasks: [{ id: 'x' }] };
+      expect(runHook(CLOSEOUT_GATE, odd, { root: repo }).code).toBe(0);
+    });
+
+    it('skips while session crons are scheduled — a loop session stop is not an end', () => {
+      const cron = { ...stop(sid('cron')), session_crons: [{ id: 'c1' }] };
+      expect(runHook(CLOSEOUT_GATE, cron, { root: repo }).code).toBe(0);
+    });
+  });
+
   it('fails OPEN outside a git repo — no work signal, nothing to challenge', () => {
     const bare = mkdtempSync(join(tmpdir(), 'closeout-bare-'));
     expect(runHook(CLOSEOUT_GATE, stop(sid('nogit')), { root: bare }).code).toBe(0);
@@ -381,5 +430,46 @@ describe('latestFailedWorkflows: reading ONE workflow is not reading CI', () => 
     expect(latestFailedWorkflows([null, {}, run('', 'failure', '2026-07-26T02:00:00Z')])).toEqual([]);
     // An unparseable timestamp must not sort as newest.
     expect(latestFailedWorkflows([run('suite', 'failure', 'not-a-date')])).toEqual([]);
+  });
+});
+
+// Both Stop gates read this ONE definition of "the stop is a wait, not an end";
+// the payload fields are harness-version-dependent (probed 2026-08-07 on
+// CC 2.1.222), so the junk-tolerance cases are the contract that matters.
+describe('sessionHasLiveBackgroundWork: the wait-vs-end predicate', () => {
+  it('is false on payloads from builds without the fields — the gates keep their old behavior', () => {
+    expect(sessionHasLiveBackgroundWork({})).toBe(false);
+    expect(sessionHasLiveBackgroundWork(undefined)).toBe(false);
+    expect(sessionHasLiveBackgroundWork({ hook_event_name: 'Stop' })).toBe(false);
+  });
+
+  it('is true for any non-terminal task regardless of type', () => {
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'running', type: 'shell' }] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'running', type: 'subagent' }] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'queued', type: 'never-seen' }] })).toBe(true);
+  });
+
+  it('is false when every task is terminal', () => {
+    expect(
+      sessionHasLiveBackgroundWork({
+        background_tasks: [{ status: 'completed' }, { status: 'failed' }, { status: 'killed' }],
+      }),
+    ).toBe(false);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [] })).toBe(false);
+  });
+
+  it('counts unknown shapes as live — the conservative direction for a capped gate', () => {
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [{}] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [null] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: ['garbage'] })).toBe(true);
+  });
+
+  it('tolerates non-array junk in the fields themselves', () => {
+    expect(sessionHasLiveBackgroundWork({ background_tasks: 'x', session_crons: 42 })).toBe(false);
+  });
+
+  it('treats a scheduled session cron as live work', () => {
+    expect(sessionHasLiveBackgroundWork({ session_crons: [{ id: 'c1' }] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ session_crons: [] })).toBe(false);
   });
 });

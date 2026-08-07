@@ -132,6 +132,22 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
     expect(runHook(FRICTION_GATE, stop({ stop_hook_active: true }), { root }).code).toBe(0);
   });
 
+  it('allows a stop while background tasks are live — the walk is owed at the real close', () => {
+    const root = tempRoot('live-bg');
+    markRemediationRun(root);
+
+    const live = stop({ background_tasks: [{ id: 'a1', type: 'subagent', status: 'running' }] });
+    expect(runHook(FRICTION_GATE, live, { root }).code).toBe(0);
+  });
+
+  it('still blocks when every background task is terminal', () => {
+    const root = tempRoot('terminal-bg');
+    markRemediationRun(root);
+
+    const harvested = stop({ background_tasks: [{ id: 'a1', type: 'shell', status: 'completed' }] });
+    expect(runHook(FRICTION_GATE, harvested, { root }).code).toBe(2);
+  });
+
   it('honours the kill switch', () => {
     const root = tempRoot('kill');
     markRemediationRun(root);

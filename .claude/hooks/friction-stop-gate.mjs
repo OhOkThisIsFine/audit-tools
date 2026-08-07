@@ -21,6 +21,7 @@
 // Exit 0 = allow stop, exit 2 = block (stderr is fed back to the agent).
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { sessionHasLiveBackgroundWork } from "../../scripts/shared/liveSessionWork.mjs";
 
 // Fail open on the kill-switch or a re-entrant stop (already blocked once).
 if (process.env.AUDIT_TOOLS_NO_FRICTION_STOP_GATE) process.exit(0);
@@ -36,6 +37,11 @@ try {
 // Claude sets stop_hook_active when it is ALREADY continuing from a prior stop-hook
 // block: we blocked once, gave the agent its chance, so let this stop through.
 if (payload?.stop_hook_active) process.exit(0);
+
+// A stop while background tasks are live (or session crons are scheduled) is a
+// turn boundary the harness resumes, not the session ending — the friction walk
+// is owed at the REAL close, and forcing it mid-wait records a partial lap.
+if (sessionHasLiveBackgroundWork(payload)) process.exit(0);
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
