@@ -801,5 +801,12 @@
     "decided_at": "2026-08-06T16:13:36.993Z",
     "completed_at": "2026-08-06T16:17:56.697Z",
     "completed_ref": "d2d486c8"
+  },
+  "e248d7dc8d561ecf": {
+    "disposition": "settled",
+    "answer": "Drop the status sentence — remove the shipped/version pin from the preamble; the doc keeps the decided-against list and design deviations, git log owns release attribution. (Owner answered via AskUserQuestion, 2026-08-07.)",
+    "subject": "A durable spec doc opens by naming the releases its work shipped in - drop the version sentence, or retire the doc.",
+    "path": "spec/mechanical-analyzer-layer-design.md",
+    "decided_at": "2026-08-07T18:28:48.674Z"
   }
 }

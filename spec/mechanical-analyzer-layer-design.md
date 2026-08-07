@@ -1,9 +1,9 @@
 # Mechanical analyzer layer — shipped program + standing refusals
 
 The four-item program (A: safety-derived default set, B: consent surfacing, D: lizard candidate,
-C: mechanical re-verify at remediation close) is **fully shipped** — A/B/D in v0.37.0, C in the
-following release. Durable outcomes live in the code and its contract tests; this doc keeps only
-what is not derivable from them: the decided-against list and the two recorded design deviations.
+C: mechanical re-verify at remediation close) has durable outcomes that live in the code and its
+contract tests; this doc keeps only what is not derivable from them: the decided-against list and
+the two recorded design deviations. Which release carried which item is git's job, not this doc's.
 
 Where the shipped mechanisms live:
 
