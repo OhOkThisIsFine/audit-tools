@@ -807,6 +807,8 @@
     "answer": "Drop the status sentence — remove the shipped/version pin from the preamble; the doc keeps the decided-against list and design deviations, git log owns release attribution. (Owner answered via AskUserQuestion, 2026-08-07.)",
     "subject": "A durable spec doc opens by naming the releases its work shipped in - drop the version sentence, or retire the doc.",
     "path": "spec/mechanical-analyzer-layer-design.md",
-    "decided_at": "2026-08-07T18:28:48.674Z"
+    "decided_at": "2026-08-07T18:28:48.674Z",
+    "completed_at": "2026-08-07T18:29:17.133Z",
+    "completed_ref": "080e48ca"
   }
 }
