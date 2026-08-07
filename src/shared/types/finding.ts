@@ -162,7 +162,9 @@ export const FindingSchema = z.object({
    * remediation's close-verify draw re-runs the analyzer and checks this exact
    * identity no longer fires. Absent on findings not born from analyzer leads.
    */
-  analyzer_provenance: AnalyzerLeadProvenanceSchema.optional(),
+  analyzer_provenance: AnalyzerLeadProvenanceSchema.optional().describe(
+    "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead.",
+  ),
 });
 export type Finding = z.infer<typeof FindingSchema>;
 

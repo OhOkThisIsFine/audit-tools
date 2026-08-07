@@ -249,6 +249,30 @@
       "items": {
         "type": "string"
       }
+    },
+    "analyzer_provenance": {
+      "type": "object",
+      "properties": {
+        "analyzer_id": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "snippet_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "analyzer_id",
+        "path",
+        "snippet_hash"
+      ],
+      "additionalProperties": false,
+      "description": "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead."
     }
   },
   "required": [
