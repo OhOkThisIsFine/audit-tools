@@ -30,12 +30,10 @@
 
 ## Immediate next
 
-1. **Ship the release** if not already done this session — the `/ship` flow (verify green →
-   version → publish → verify live → reinstall bins). Today's mainline carries the re-landed
-   stack + the re-detection feature on top of v0.38.1.
-2. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — the one remaining pinned
-   item: live-run-watch properties.
-3. Host-memory chore (not repo work): `/consolidate-memory` — the memory index needs a real
+1. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — the one remaining pinned
+   item: live-run-watch properties. (v0.39.0 SHIPPED 2026-08-07 — re-landed stack +
+   re-detection; release CI green, npm live, bins reinstalled.)
+2. Host-memory chore (not repo work): `/consolidate-memory` — the memory index needs a real
    consolidation pass (pointer note at the top of `MEMORY.md`).
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
