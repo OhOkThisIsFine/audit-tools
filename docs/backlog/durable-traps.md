@@ -464,6 +464,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `` `tests/**` `` renders truncated ("Convert `tests/") in BOTH generated docs, silently. Seen
   2026-07-28. Write the glob in prose, or drop it to the entry body.
 
+- **A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED
+  checkout — it runs this repo's hooks and can mutate git state (2026-08-07).** Observed: a
+  trivial one-prompt probe (`ANTHROPIC_BASE_URL` overlay onto llm-relay, `--model pool/<name>`)
+  hit the closeout-challenge Stop hook, spent its whole reply answering it, and PUSHED the
+  checkout's unpushed commits on its way out — an uninstructed `git push` of another session's
+  in-flight work (benign that day only because every commit was green). The overlay lane DOES
+  work mechanically (the CLI accepts the env override + a relay pool model string), but before
+  using it as a worker harness: run workers in an isolated worktree or neutral cwd, set the hook
+  bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
+  and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
+
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
   and the packaged smoke tests run that install, so `npm test` alone is enough to erase the edit.

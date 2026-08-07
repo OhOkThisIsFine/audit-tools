@@ -122,7 +122,6 @@
 - `open-bugs.md:1185` — ▶ Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).
 - `open-bugs.md:1196` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 - `open-bugs.md:1201` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
-- `open-bugs.md:1210` — Unlanded 2026-07-30 remediation stack — kept on `remediation/remediate-audit-2026-07-30` (2026-08-06, medium, owner decision).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -196,7 +195,8 @@
 - `durable-traps.md:430` — An untypechecked fixture can sit inert for months while its suite reads green.
 - `durable-traps.md:451` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
 - `durable-traps.md:462` — A backlog entry's bold title must not contain `
-- `durable-traps.md:467` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:467` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
+- `durable-traps.md:478` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
 
 <!-- END GENERATED SEEK INDEX -->
 

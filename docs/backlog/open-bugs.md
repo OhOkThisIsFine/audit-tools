@@ -1207,16 +1207,3 @@
   record: [`branch-cleanout-2026-08-06.md`](../reviews/branch-cleanout-2026-08-06.md)). **Property
   to hold:** run-closure removes its node worktrees; the reaper flags unregistered orphan dirs it
   cannot probe.
-- **Unlanded 2026-07-30 remediation stack — kept on `remediation/remediate-audit-2026-07-30`
-  (2026-08-06, medium, owner decision).** The 2026-08-06 branch cleanout (verification record:
-  [`branch-cleanout-2026-08-06.md`](../reviews/branch-cleanout-2026-08-06.md)) found this run's
-  8-commit stack never landed on main; mechanisms absent at HEAD: `projectTestAdmission`
-  (discovery-anchored project-test admission gate + capped runner), `ProviderConstructionError` +
-  launch-outcome envelope, `allowlistedExec` internal gating with a `refused` outcome, a
-  `pausedState` terminal-preservation ratchet, `pausePersist` LockedJsonStore atomicity,
-  `ownershipRegistry` single-writer evidence, four test suites, and the run's meta-review record
-  <!-- doc-citation-exempt: branch-only file — exists on remediation/remediate-audit-2026-07-30, deliberately not at HEAD -->
-  (`docs/reviews/meta-review-remediation-run-2026-07-30.md`, branch-only). Decision needed:
-  selectively re-land (rebase onto evolved main — v0.36.2's accept/reverify cluster and v0.37.0
-  touched overlapping paths) or discard the branch. The provider-envelope + paused-state routing
-  content is candidate substrate for the pinned provider mid-run re-detection item above.

@@ -43,3 +43,11 @@ Full per-hunk verdicts with evidence: workflow run `wf_e03627af-6cd` (session ar
 16/16 agents, 0 errors). The branch `remediation/remediate-audit-2026-07-30` remains the
 preservation ref until all eight land, then it is deleted and the open-bugs owner-decision
 entry closes.
+
+**EXECUTED, same day:** all eight landed on main (`b27f27d9`…`24d12f62`, order and
+adaptations as tabled; full suite 7,640/0 after the final commit), the preservation branch
+was deleted, and the open-bugs entry closed. One landing surprise worth its line: the
+CP-NODE-6 drive tests strand-on-`context_cap` under a bare `sessionConfig` on current main
+(no resolved context window) — fixed by using the suite's `TEST_SESSION_CONFIG`, diagnosed
+from `dispatch-explains.jsonl`, after a subagent's quota-cooldown theory was refuted by a
+loud-failing expiry helper (the persisted quota ledger is never written on that path).

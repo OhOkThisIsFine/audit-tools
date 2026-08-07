@@ -5,48 +5,41 @@
 
 ## Live state
 
-- **Analyzer item C SHIPPED (2026-08-06 lap, on top of v0.37.0)** — the mechanical-analyzer
-  program (A/B/C/D) is COMPLETE. Three commits: atomic substrate relocation to
-  `src/shared/analyzers/` (candidate registry moved too — recorded deviation), content-anchored
-  `AnalyzerLeadProvenance` join (packet lead → finding → remediation via the finding id-join),
-  and the close-gate `verifyAnalyzerLeads` leg (per-item `mechanical_verification` in the
-  outcomes contract; a persisting lead re-blocks only ITS item → triage). `/design-check` ran
-  first: no retirement collisions; both deviations recorded in the condensed
-  [`spec/mechanical-analyzer-layer-design.md`](../spec/mechanical-analyzer-layer-design.md);
-  red-green validated at both the unit and integration seams.
-- **Branch/worktree cleanout DONE (owner-authorized)** — 243 local branches → 2, remote →
-  `main` only, 179 orphan worktree dirs discarded; method + per-branch verdicts in
-  [`reviews/branch-cleanout-2026-08-06.md`](reviews/branch-cleanout-2026-08-06.md). The
-  2026-07-30 remediation stack was found NEVER LANDED and is preserved on
-  `remediation/remediate-audit-2026-07-30` — owner decision filed in `open-bugs.md` (re-land
-  selectively vs discard; its provider-envelope content feeds the pinned re-detection item).
-- **Provider mid-run re-detection: mechanism claims VERIFIED against source** — Option B holds
-  on the pause substrate (`waiting_for_provider` exists; `buildConfirmedPools` re-resolves),
-  with 4 named gaps the implementation must add (no provider-death outcome in
-  `classifyFailureChannels`; the pause artifact lacks provider identity; no per-pool
-  spawn-failure counter; the pool-id→provider join is undefined). Annotated draft in
-  [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
-- v0.37.0 sprint record (analyzer A/B/D, friction + gate clusters, weak-model dispatch
-  caveats): [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
+- **The unlanded 2026-07-30 stack is RE-LANDED — 8/8 commits, owner decision executed and
+  closed (2026-08-07).** Review method + per-commit verdicts + landing adaptations:
+  [`reviews/reland-review-2026-08-07.md`](reviews/reland-review-2026-08-07.md). Commits
+  `b27f27d9`…`24d12f62` on main; preservation branch deleted; open-bugs entry removed. Now
+  ON MAIN and relevant to the pinned re-detection item: `ProviderConstructionError` +
+  `ProviderLaunchOutcomeEnvelope` (CP-NODE-4), `classifyProviderConstructionAttempt` + the
+  explicit `clear_persisted_state` directive (CP-NODE-3), pausePersist locked-store
+  atomicity + terminal ratchet + full-success pause clear (CP-NODE-6).
+- **Offload topology finding (2026-08-07):** this Claude-Desktop session's traffic bypasses
+  headroom/llm-relay entirely — CC 2.1.223's launcher-stamped process env wins over the
+  settings.json env block (it worked on 2.1.220; the property flip-flops across releases).
+  Subagents therefore ran on real Anthropic, not DeepSeek. Verify by TRAFFIC (headroom log
+  mtime, relay observed traffic, provider spend), never config. Details + nested-CLI overlay
+  workaround status: project memory `claude-desktop-proxy-redirect-flip-flops` and the new
+  nested-`claude -p` entry in [`backlog/durable-traps.md`](backlog/durable-traps.md).
 
 ## Verification state
 
-- **Shipped as v0.38.1 — release CI fully green** (gate + 4 test shards + publish; npm live;
-  global bins reinstalled with postinstall). The v0.38.0 tag was burned and withdrawn: shard 3
-  caught a hand-edited GENERATED schema (`worker-schema-generation.test.ts`); fixed by carrying
-  `analyzer_provenance` through `scripts/audit/generate-schemas.mjs` from the zod source
-  (`49eb1fee`). Local at ship: audit area 2,818/0, remediate+shared 4,746/0, all gates 0. Known
-  noise: the tracked RPC-timeout "1 error" line still prints (open false-RED/false-GREEN entry
-  in `open-bugs.md`).
+- Full suite after the final landing commit: **7,640 passed / 0 failed** (`npm test`,
+  vitest-gate classified the known reporter-RPC false-RED as PASS — tracked in open-bugs).
+  Every landing commit was individually green (check + check:tests + touched suites);
+  loop-core commits carry review attestations. Tree clean and pushed at `24d12f62`.
 
 ## Immediate next
 
-1. **Provider mid-run re-detection** (open-bugs, HIGH, pinned) — design verified with 4 named
-   implementation gaps (see Live state); implement Option B per the annotated draft in
-   [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md). The unlanded
-   2026-07-30 `ProviderConstructionError` envelope is candidate substrate.
-2. **Unlanded 2026-07-30 stack** (open-bugs, owner decision) — re-land selectively or discard;
-   the branch is the preservation ref.
+1. **Provider mid-run re-detection** (open-bugs, HIGH, pinned) — implement Option B per the
+   annotated draft in
+   [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md). The 4
+   named implementation gaps: (a) no provider-death outcome in `classifyFailureChannels`
+   (`src/shared/dispatch/providerLaunchFinalize.ts`); (b) `DispatchPausedState` lacks
+   provider identity (`src/audit/types/activeDispatch.ts`); (c) no per-pool spawn-failure
+   counter (`QuotaStateEntry`, `src/shared/quota/types.ts`); (d) thread the existing
+   `CapacityPool.providerName` (required field — no new join infrastructure needed) into
+   the pause artifact. The envelope substrate is now LANDED on main (see Live state), so
+   the construction-time pattern can be extended to the mid-run retryable class directly.
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
