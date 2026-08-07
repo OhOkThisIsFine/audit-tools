@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 157 entr(y/ies) indexed.
+> and at commit). 158 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -120,7 +120,8 @@
 - `open-bugs.md:1164` — Dispatch-step prompt conflates merge rejections with failure.
 - `open-bugs.md:1170` — ▶ Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).
 - `open-bugs.md:1181` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:1186` — ~180 orphan node-worktree DIRECTORIES survived the closed 2026-08-06 remediation run (2026-08-06, low, owner decision).
+- `open-bugs.md:1186` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
+- `open-bugs.md:1195` — Unlanded 2026-07-30 remediation stack — kept on `remediation/remediate-audit-2026-07-30` (2026-08-06, medium, owner decision).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

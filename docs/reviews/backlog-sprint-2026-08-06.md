@@ -96,6 +96,19 @@ gate-miss trap.
   Rejected: wave-boundary active re-probe (latency + pool-construction coupling), hybrid (two
   failure paths). Open: threshold value; pause-prompt guidance; exclusion persistence across
   cycles.
+  **Mechanism claims verified against source 2026-08-06** (offload lane + dispatcher spot-checks):
+  HOLDS — `waiting_for_provider` lifecycle state exists (`src/shared/rolling/pausedState.ts`,
+  persisted via `DispatchPausedState` in `src/audit/types/activeDispatch.ts`); `buildConfirmedPools`
+  exists and re-runs provider resolution with an `excludedBackends` filter
+  (`src/remediate/steps/dispatch/waveScheduling.ts`); construction-time-only auto-selection
+  confirmed (`resolveFreshSessionProviderName` snapshots env once, `src/shared/providers/providerFactory.ts`).
+  GAPS the implementation must add (design assumed these exist; they do not):
+  (1) `classifyFailureChannels` (`src/shared/dispatch/providerLaunchFinalize.ts`) has NO
+  provider-death outcome — spawn/PATH failures fall into generic `error`; a distinct classification
+  is new work. (2) the pause artifact carries `settled_exclusions` as pool ids and NO provider
+  identity — "naming the dead provider" is a new field. (3) no per-pool spawn-failure counter
+  exists (only `consecutive_429_count`, `src/shared/quota/types.ts`) — the N-consecutive threshold
+  needs its own field. (4) the pool-id → provider-name join for exclusions is undefined.
 - **Item C design-check prep:** proceed-with-changes — no retirement collisions found;
   `src/shared/analyzers/` relocation consistent with one-core-two-draws; instance-level verify
   semantics ("this provenance identity no longer fires") is mechanical fact, not a verdict. Open
