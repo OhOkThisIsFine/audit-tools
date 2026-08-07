@@ -1,23 +1,36 @@
-# Mechanical analyzer layer — activation, consent surfacing, re-verify loop
+# Mechanical analyzer layer — shipped program + standing refusals
 
-Design of record for the four-item program that turns the external-analyzer layer from
-built-but-dormant into a first-class evidence source, and closes the detect → fix → verify loop.
-Planned 2026-08-06 from an owner discussion; items are unimplemented until this doc's program is
-worked. Remove or condense this doc once the program ships (durable outcomes then live in the code,
-contract tests, and project memory).
+The four-item program (A: safety-derived default set, B: consent surfacing, D: lizard candidate,
+C: mechanical re-verify at remediation close) is **fully shipped** — A/B/D in v0.37.0, C in the
+following release. Durable outcomes live in the code and its contract tests; this doc keeps only
+what is not derivable from them: the decided-against list and the two recorded design deviations.
 
-## Why
+Where the shipped mechanisms live:
 
-The acquisition machinery (candidate registry, `admitSpawn` chokepoint, results artifact, staleness
-cascade, per-task packet lead injection) is fully built — and mostly idle. Only gitleaks carries
-`defaultRun: true`; every other registered analyzer (jscpd, osv-scanner, semgrep, eslint, knip,
-clippy, rubocop, hadolint, actionlint, type-coverage) requires a per-run consent token that the
-tool **never offers to the operator**. Applicable-but-unconsented candidates are silently skipped —
-a silent-fail-closed defect by the project's own standard (a choice that exists but is never
-surfaced is host-discretion, not tool guarantee).
+- Safety profiles + admission (`admitSpawn`: default ∨ recorded `granted` ∨ per-run token) and the
+  acquisition engine: `src/shared/analyzers/acquisitionEngine.ts` (relocated from the audit tree —
+  one core, two draws). Candidate registry + parse adapters: `src/shared/analyzers/candidates.ts`.
+- Consent surfacing: `external_analyzers_consent_current` obligation; decisions persist under
+  `analyzer_consent` in session config; tokens never persist.
+- Lead provenance: `src/shared/analyzers/provenance.ts` — `{analyzer_id, rule?, path,
+  snippet_hash}`, snippet-hash over the normalized flagged span (content identity, not layout);
+  attached at `src/shared/analyzers/normalizeExternal.ts`, carried packet lead → finding
+  (`analyzer_provenance`) → remediation via the finding id-join.
+- Close-verify: `src/remediate/phases/closeVerifyAnalyzerLeads.ts`, a close-gate verify leg in
+  `runClosePhase` — instance-level identity match over a same-pinned-spec re-run; per-item
+  `mechanical_verification` (`verified_mechanically` / `lead_persists` / `skipped`) in the
+  outcomes contract; a persisting lead re-blocks only its item and routes to triage.
 
-Owner-set admission lens: **overhead + safety, not lack-of-evidence**. Fast + safe + may-produce-
-leads → default set. Repo-code-execution or network-egress risk → consent-gated, but *offered*.
+## Recorded design deviations (from the original item-C text)
+
+1. **The candidate registry moved to shared too** — the verify draw re-runs "the same pinned
+   spec", which requires the candidate definitions (`spec`/`buildArgv`/`parse`); keeping them
+   audit-side would force a banned remediate→audit import or a forked copy. Audit keeps
+   orchestration and re-exports through `src/audit/extractors/analyzers/registry.ts`.
+2. **`verify_analyzer_leads` is a close-gate verify leg, not a `CLOSING_ACTIONS` entry** — that
+   enum is the operator's one-per-plan repo-landing choice; verification sits beside the
+   combined-suite / deferred-verify / e2e legs (design-check catch, confirmed by the independent
+   refutation lane).
 
 ## Decided against (do not re-propose without new evidence)
 
@@ -34,111 +47,3 @@ leads → default set. Repo-code-execution or network-egress risk → consent-ga
 - **MinHash/shingle near-dup for docs/config**: no consumer; jscpd covers code-shaped duplication.
 - **osv-scanner as default**: owner call — dependency-identity egress to OSV.dev stays an explicit
   per-run decision. (Offline-DB mode was considered and not taken.)
-
-## Item A — default set derived from recorded safety criteria
-
-Safety facts become per-candidate DATA; `defaultRun` eligibility derives from them mechanically.
-
-- `AnalyzerSafetyProfile` on the candidate contract (`src/shared/analyzers/acquisitionEngine.ts`
-  since the item-C relocation, beside `ExternalAnalyzerCandidate`):
-  `{ config_execution: "none" | "inert-data" | "executable", network_egress: boolean,
-  version_pinning: "pinned" | "toolchain-resolved" | "unpinned" }`.
-<!-- doc-citation-exempt: planned test file — created when item A is implemented -->
-- Contract-test rule (new `tests/audit/candidates-safety.test.ts`): `defaultRun: true` requires
-  `config_execution !== "executable" && !network_egress && version_pinning === "pinned"`; every
-  candidate carries a profile; no version-less npx/pipx spec.
-- Expected promotions: hadolint, actionlint, type-coverage; jscpd **conditional** on verifying its
-  config loading cannot execute repo code (cosmiconfig-style `.jscpd.js` search would disqualify —
-  mitigate by forcing an explicit inert config in `buildArgv` if precedence allows, else stay
-  gated). Stay gated: eslint (executable config), knip (`.ts`/`.js` config), rubocop
-  (`require:` in `.rubocop.yml`), clippy (build scripts), semgrep, osv-scanner (egress).
-- Pin semgrep (`spec: "semgrep==<version>"`) regardless — `runSafetyGate` only checks non-empty
-  spec, so `"semgrep"` passes today while pinning nothing. clippy/rubocop are inherently
-  `toolchain-resolved` (cargo/bundle) — recorded as such, part of why they stay gated.
-- Carry `RunTrackedResult.duration_ms` into `ExternalAnalyzerToolStatus` so per-analyzer overhead
-  is measured, not argued (pipeline-profiling posture).
-
-## Item B — surface the consent offer
-
-The silent skip becomes an operator question; the **decision** persists, the **token** stays
-per-run.
-
-- New obligation `external_analyzers_consent_current` in the PRIORITY array
-  (`src/audit/orchestrator/nextStep.ts`) immediately before `external_analyzers_current`.
-  Executor: `detect()` over consent-gated candidates; applicable + no recorded decision → one
-  batched operator-interactive step (drain halts; remediate `clarification_request` precedent).
-  Nothing undecided → satisfied silently.
-- Offer is tool-rendered (never host improvisation): per candidate — what it detects, its safety
-  profile (why it isn't default), exact accept mechanism.
-- Session config gains `analyzer_consent: Record<candidateId, "granted" | "declined">`. Decisions
-  persist; tokens never do (consistent with the standing forward constraint on token redaction).
-  Declined persists; re-offer only when a new candidate id has no recorded decision.
-- `admitSpawn` admission becomes: default set ∨ recorded `granted` ∨ per-run token. This
-  **deliberately revises the CE-005 analyzer contract** pinned by
-  `tests/shared/analyzer-acquisition-engine.test.ts` ("permanent pre-installed non-default tool
-  still needs the token") — the old rule guarded a consent that was never offered. Test revised in
-  the SAME commit (atomic-replace). Open sub-question, flag at implementation: whether a per-run
-  token overrides a recorded `declined` (default: yes — fresher, explicit signal).
-
-## Item C — mechanical re-verify loop (remediation close)
-
-Findings born from analyzer leads are closed by the same analyzer re-run — verification by tool,
-not host claim. The one place mechanical output is authoritative rather than a lead: "the lead no
-longer fires" is a fact.
-
-1. **Engine relocation (one core, two draws) — SHIPPED, with one recorded deviation:**
-   acquisition substrate (`admitSpawn`, `runSafetyGate`, runner probe/spawn plumbing, candidate +
-   safety-profile contracts) moved to `src/shared/analyzers/`. **Deviation from the original text:
-   the concrete candidate registry (`candidates.ts`) and its parse adapters (`clippy`, `rubocop`)
-   moved to shared too** — the verify draw must re-run "the same pinned spec", which requires the
-   candidate definitions (`spec`/`buildArgv`/`parse`); keeping them audit-side would force either a
-   banned remediate→audit import or a forked spec copy. Audit keeps orchestration
-   (`acquisitionExecutor`, packet policy, the in-tree `LanguageAnalyzer` registry) and re-exports
-   the shared surface through `src/audit/extractors/analyzers/registry.ts`. No remediate→audit
-   import. One atomic move commit.
-2. **Provenance join:** `AnalyzerLeadProvenance` `{analyzer_id, rule, path, snippet_hash}` —
-   content-anchored (hash of the normalized flagged snippet), never line numbers (edits shift
-   lines). Attached at normalization (`src/shared/analyzers/normalizeExternal.ts`), carried task
-   signal → `AuditResult` → finding → `extracted-plan.json` item via the existing id-join
-   architecture. Optional everywhere.
-3. **Close integration — recorded deviation from the original text:** `verify_analyzer_leads` is
-   NOT a `CLOSING_ACTIONS` entry (that enum is the operator's one-per-plan repo-landing choice —
-   commit/push/tag/…); it is a close-gate **verify leg** in `src/remediate/phases/close.ts`,
-   sequenced with the combined-suite / deferred-verify / e2e legs (design-check catch, confirmed
-   by the independent refutation lane): group provenance-carrying resolved items by analyzer;
-   re-run same pinned spec through the shared engine (admission still via `admitSpawn` reading the
-   same session config; an unadmitted analyzer records a per-item skip, never a silent pass),
-   identity-matched over the re-run results. **Instance-level semantics:** pass = that provenance
-   identity no longer appears; a clone pair is fixed when that pair is gone — residual findings
-   elsewhere in the file do not fail it. Unlike the suite legs (which re-block ALL resolved items
-   on red), a persisting lead re-blocks only ITS item — attribution is exact.
-4. **Outcome routing:** per-item `verified_mechanically` / `lead_persists` in the outcomes
-   contract; a persisting lead does not hard-block close — it routes the item to triage as
-   objective evidence.
-5. Value scales with A+B (few default analyzers → few provenance-carrying findings) — sequenced
-   last partly for that reason. Run `/design-check` before implementing (shared-contract +
-   loop-core-adjacent; re-checks the CE-005 revision and the relocation against retired decisions).
-
-## Item D — Lizard candidate
-
-Multi-language complexity leads (NLOC / CCN / param count). Fills the gap that in-tree complexity
-metrics (`computeComplexityMetric`) are JS/TS-only — non-JS/TS repos currently get zero complexity
-evidence.
-
-- `runner: "pipx"` (semgrep precedent), pinned `lizard==<version>`, parse CSV/XML →
-  `ExternalAnalyzerResultItem` (`category: "maintainability"`, rules `lizard-ccn` /
-  `lizard-length` / `lizard-params`, severity by threshold bands — leads only).
-- **Precedence policy:** runs only over languages the in-tree metric does NOT cover — `detect()`
-  fires when non-JS/TS supported sources exist; `buildArgv` restricts via Lizard `-l` filters. One
-  signal source per file class; no double-reporting, no new dedup machinery.
-- Profile: `config_execution: "none"`, no egress, pinned → default-eligible under the item-A rule;
-  ship `defaultRun: true`.
-
-## Sequencing & verification
-
-**A → B → D → C**, green at every commit. New contract tests red-green validated where they pin
-behavior changes (CE-005 revision; close-verify). End-to-end smoke: mixed-language fixture repo
-through `audit-code next-step` — consent offer surfaces gated candidates once; default analyzers
-(gitleaks + promotions + lizard) run tokenless with `duration_ms` recorded; analyzer signals appear
-in a dispatch packet. Then a seeded remediation carrying jscpd provenance through close →
-`verify_analyzer_leads` passes/fails correctly.

@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 158 entr(y/ies) indexed.
+> and at commit). 157 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -129,21 +129,20 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:34` — ▶ Mechanical analyzer layer — item C (re-verify loop) is the remaining piece.
-- `forward-tracks.md:45` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:72` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
-- `forward-tracks.md:85` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.
-- `forward-tracks.md:100` — Generate the executor↔artifact mapping from the registries (anti-drift).
-- `forward-tracks.md:107` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:115` — Free/cheap "quota-arbitrage" dispatch tier — extra SOURCE POOLS on existing machinery, not a new provider engine.
-- `forward-tracks.md:165` — models.dev static window can over-state a specific deployment (carried from W1).
-- `forward-tracks.md:185` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
-- `forward-tracks.md:197` — Tool-enforced dispatch broker with capability-tiered driver.
-- `forward-tracks.md:210` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:225` — Cross-provider quota — live-endpoint confirmation.
-- `forward-tracks.md:236` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
-- `forward-tracks.md:247` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
-- `forward-tracks.md:291` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
+- `forward-tracks.md:34` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:61` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
+- `forward-tracks.md:74` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.
+- `forward-tracks.md:89` — Generate the executor↔artifact mapping from the registries (anti-drift).
+- `forward-tracks.md:96` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:104` — Free/cheap "quota-arbitrage" dispatch tier — extra SOURCE POOLS on existing machinery, not a new provider engine.
+- `forward-tracks.md:154` — models.dev static window can over-state a specific deployment (carried from W1).
+- `forward-tracks.md:174` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
+- `forward-tracks.md:186` — Tool-enforced dispatch broker with capability-tiered driver.
+- `forward-tracks.md:199` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:214` — Cross-provider quota — live-endpoint confirmation.
+- `forward-tracks.md:225` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
+- `forward-tracks.md:236` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
+- `forward-tracks.md:280` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
 
 ### [`deferred.md`](backlog/deferred.md)
 

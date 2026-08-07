@@ -5,55 +5,45 @@
 
 ## Live state
 
-- **2026-08-06 backlog sprint SHIPPED as v0.37.0** (`348d9fa8` + smoke fix `7f615f64` + bump
-  `bba85f36`; release CI fully green — gate + 4 test shards + publish; npm live; global bins
-  reinstalled with postinstall. Multi-agent waves + orchestrator integration; full record in
-  [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md)):
-  - **Mechanical analyzer layer items A/B/D** — safety-derived default set
-    (hadolint/actionlint/type-coverage promoted; jscpd stays gated `executable`; semgrep pinned;
-    `duration_ms` measured), **consent surfacing live end-to-end** (fold-level batched
-    `analyzer_consent` offer step; decisions persist under `analyzer_consent` in session config;
-    admission = default ∨ granted ∨ token, token overrides declined; e2e-pinned), and the lizard
-    candidate (source-walk detection drives `-l`; leads-only threshold bands). Item C remains —
-    see the pinned forward-track.
-  - **2026-08-05 minor-friction cluster closed** — handshake persisted once + `--auditor @<file>`
-    continue-commands; scope echo on EVERY step prompt (resume-blindness gone); advance liveness
-    heartbeat; staleness-record dedupe per call; evidence-grounded observability rationale;
-    fallback-stub item was already resolved (premise stale).
-  - **Remediate gates** — worker scratch + unchanged tool-seeds now excluded at COMMIT ASSEMBLY
-    (recorded in the accept sidecar); close gate drains a deduplicated, full-suite-subsumed
-    deferred-verify residual (the sidecar field is now actually persisted).
-  - **Dispatch/quota** — tier routing distributes across multi-rank rosters (operator
-    `routing_tiers` always wins); `contractPipeline` threads the persisted handshake roster into
-    `scheduleWave` (the concurrency-collapse-to-1 root cause).
-  - **Worker/runtime** — task-file read failures always yield a failed WorkerResult (file or
-    stdout); output-ratio learning fully deleted (no writer can exist — open-bugs:301); bare
-    `python` Store-stub refusal via a real PATH walk.
-  - Stale entries closed by verification (relay-liveness probe, doc-manifest predicate); the
-    vitest false-RED entry stays OPEN with a reverted attempt recorded (top-level `projects` in
-    vitest.config VOIDS the config → false GREEN — see the entry before retrying).
-- Two dispatch waves ran entirely on a weak model despite explicit overrides (durable-traps
-  entry): every agent patch was line-reviewed before landing; two inverted-semantics fixes and
-  several vacuous tests were caught and redone by hand. A 16-agent adversarial review over the
-  final diff confirmed 10 findings; all 10 are fixed in-tree.
-- 179 orphan `remediate-CP-BLOCK-*` worktree DIRS from the closed 2026-08-06 run were MOVED (not
-  deleted) to the session scratchpad after they broke filtered vitest runs; branches untouched —
-  owner decision tracked in `open-bugs.md`.
+- **Analyzer item C SHIPPED (2026-08-06 lap, on top of v0.37.0)** — the mechanical-analyzer
+  program (A/B/C/D) is COMPLETE. Three commits: atomic substrate relocation to
+  `src/shared/analyzers/` (candidate registry moved too — recorded deviation), content-anchored
+  `AnalyzerLeadProvenance` join (packet lead → finding → remediation via the finding id-join),
+  and the close-gate `verifyAnalyzerLeads` leg (per-item `mechanical_verification` in the
+  outcomes contract; a persisting lead re-blocks only ITS item → triage). `/design-check` ran
+  first: no retirement collisions; both deviations recorded in the condensed
+  [`spec/mechanical-analyzer-layer-design.md`](../spec/mechanical-analyzer-layer-design.md);
+  red-green validated at both the unit and integration seams.
+- **Branch/worktree cleanout DONE (owner-authorized)** — 243 local branches → 2, remote →
+  `main` only, 179 orphan worktree dirs discarded; method + per-branch verdicts in
+  [`reviews/branch-cleanout-2026-08-06.md`](reviews/branch-cleanout-2026-08-06.md). The
+  2026-07-30 remediation stack was found NEVER LANDED and is preserved on
+  `remediation/remediate-audit-2026-07-30` — owner decision filed in `open-bugs.md` (re-land
+  selectively vs discard; its provider-envelope content feeds the pinned re-detection item).
+- **Provider mid-run re-detection: mechanism claims VERIFIED against source** — Option B holds
+  on the pause substrate (`waiting_for_provider` exists; `buildConfirmedPools` re-resolves),
+  with 4 named gaps the implementation must add (no provider-death outcome in
+  `classifyFailureChannels`; the pause artifact lacks provider identity; no per-pool
+  spawn-failure counter; the pool-id→provider join is undefined). Annotated draft in
+  [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
+- v0.37.0 sprint record (analyzer A/B/D, friction + gate clusters, weak-model dispatch
+  caveats): [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
 
 ## Verification state
 
-- Full suite 7,551 passed / 0 failed at the ship tree; `build`/`check`/`check:tests`/
-  `check:guard-reach`/`check:deadcode`/doc gates all 0; both packaged smokes green; **release CI
-  green on v0.37.0** (the authoritative signal). Known noise: the suite still prints the tracked
-  RPC-timeout "1 error" line (open false-RED/false-GREEN entry in `open-bugs.md`).
+- At the item-C tree: `build`/`check`/`check:tests`/`check:deadcode`/`check:guard-reach`/doc
+  gates all 0; remediate+shared test areas 4,746 passed / 0 failed. Known noise: the tracked
+  RPC-timeout "1 error" line still prints (open false-RED/false-GREEN entry in `open-bugs.md`).
+  Release CI on the next tag is the authoritative signal.
 
 ## Immediate next
 
-1. **Analyzer item C** (mechanical re-verify at remediation close) — run `/design-check`, then
-   implement per `spec/mechanical-analyzer-layer-design.md`; the prep record (advisory) is in
-   [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
-2. **Provider mid-run re-detection** (open-bugs, HIGH, pinned) — design draft in the same record;
-   verify its mechanism claims against the pause substrate before implementing.
+1. **Provider mid-run re-detection** (open-bugs, HIGH, pinned) — design verified with 4 named
+   implementation gaps (see Live state); implement Option B per the annotated draft in
+   [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md). The unlanded
+   2026-07-30 `ProviderConstructionError` envelope is candidate substrate.
+2. **Unlanded 2026-07-30 stack** (open-bugs, owner decision) — re-land selectively or discard;
+   the branch is the preservation ref.
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
@@ -70,12 +60,11 @@
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 3 pinned item(s).
+> `verify:checks` and at commit). 2 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
 - ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties. · [`open-bugs.md`](backlog/open-bugs.md)
 - ▶ Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high). · [`open-bugs.md`](backlog/open-bugs.md)
-- ▶ Mechanical analyzer layer — item C (re-verify loop) is the remaining piece. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->
