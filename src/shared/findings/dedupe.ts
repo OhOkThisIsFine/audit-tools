@@ -4,6 +4,50 @@ import { findingIdentityKey } from "../findingIdentitySignature.js";
 import { wordJaccard, filePathOverlap, primaryPath } from "../findingSimilarity.js";
 
 /**
+ * PUBLISHED PRECONDITION CONTRACT — artifact:cross-lens-dedup-core
+ *
+ * This module performs NO runtime validation of its inputs. Every exported
+ * function here (`crossLensDedupe`, `sameLensDedupe`, `upsertFindingByIdentity`,
+ * `absorbFinding`, `mergeAffectedFiles`, `mergeGrounding`, `findingReEmissionKey`)
+ * TRUSTS its caller to already satisfy the three preconditions below before
+ * calling in. Runtime enforcement of these preconditions is deliberately the
+ * CALLER's responsibility (CP-NODE-7's runtime validation lands against exactly
+ * this contract) — this module will not detect a violation, by design.
+ *
+ * Preconditions (caller-owned, NOT checked here):
+ *   1. Every `Finding` is schema-valid (matches `FindingSchema` in
+ *      `../types/finding.js`).
+ *   2. Every `Finding.id` is UNIQUE across one call's input array.
+ *   3. `affected_files` and `evidence` are well-formed arrays (present, even
+ *      when empty) on every `Finding`.
+ *
+ * validation_boundary — the concrete failure mode when a precondition is
+ * violated, recorded here so a caller-side check has something to test
+ * against. This is NOT a promise that this module will start enforcing it:
+ *   - A missing/unrecognized `policy.categoryGate` (neither `"soft"` nor
+ *     `"hard"`) silently falls through in the PERMISSIVE direction: the
+ *     hard-gate check in `crossLensDedupe` only special-cases the literal
+ *     string `"hard"`, so anything else (including `undefined`) never blocks
+ *     a cross-category pair — it falls through to the exact/fuzzy match layers
+ *     as if the gate were absent.
+ *   - A `Finding` missing `affected_files` throws an uncaught TypeError inside
+ *     `mergeAffectedFiles` (`survivor.affected_files.map(...)` called on
+ *     `undefined`) the first time that finding is absorbed or absorbs another.
+ *   - Two input findings sharing the same `id` (precondition 2 violated) yield
+ *     an UNSPECIFIED merge-chain target once `crossLensDedupe`'s post-loop
+ *     chain-collapse runs: the `visited`-guard there stops the walk instead of
+ *     spinning forever on the resulting id cycle, but which of the colliding
+ *     ids the chain resolves to is not a contract this module makes.
+ *
+ * seam_adjustments[1] (CDC-010, advisory, NOT decided here): a reviewer raised
+ * that the existing `audit-cli-commands` validate path — which already owns
+ * AuditResult validation — may be a better landing site for the new runtime
+ * check than opening a second validation seam inside a module whose contract
+ * says it validates almost nothing. Recorded as a scoping question for
+ * whoever implements the caller-side check, not settled by this module.
+ */
+
+/**
  * ONE shared finding-dedup core. There is no auditor-dedup vs remediator-dedup —
  * there is one skeleton (group-by-primary-path → pairwise cross-lens compare →
  * similarity gate → survivor selection → absorb), and each orchestrator DRAWS it

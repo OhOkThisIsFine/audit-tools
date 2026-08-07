@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { crossLensDedupe } from "audit-tools/shared";
+import { crossLensDedupe, mergeGrounding, upsertFindingByIdentity } from "audit-tools/shared";
 import type { CrossLensDedupePolicy, Finding } from "audit-tools/shared";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -276,5 +276,238 @@ describe("crossLensDedupe — one core, per-mode policy", () => {
     expect(out.dispositionById!.get("A")).toEqual({ status: "merged", terminalFindingId: "B", mergePath: ["A", "B"] });
     expect(out.dispositionById!.get("B")).toEqual({ status: "retained", terminalFindingId: "B", mergePath: ["B"] });
     expect(out.dispositionById!.get("C")).toEqual({ status: "retained", terminalFindingId: "C", mergePath: ["C"] });
+  });
+
+  // dedupe.ts:213-215 (hard category gate) runs AHEAD of both the exact-identity
+  // short-circuit (:218-222) and the fuzzy title/overlap layer: an exact-identity
+  // match must never cross categories under 'hard' policy, even though on its own
+  // the exact-identity layer would happily collapse it.
+  it("hard category gate blocks an exact-identity match across categories (gate precedes exact-identity)", () => {
+    const findings = [
+      // Same structural anchor (path + symbol) → discriminating exact-identity
+      // match — but DIFFERENT categories, and the policy is 'hard'.
+      makeFinding({
+        id: "A",
+        title: "Totally different wording one",
+        lens: "security",
+        category: "auth",
+        affected_files: [{ path: "src/session.ts", symbol: "refresh" }],
+      }),
+      makeFinding({
+        id: "B",
+        title: "Totally different wording two",
+        lens: "correctness",
+        category: "resource-leak",
+        affected_files: [{ path: "src/session.ts", symbol: "refresh" }],
+      }),
+    ];
+    const out = crossLensDedupe(findings, { ...REMEDIATE_POLICY, categoryGate: "hard" });
+    expect(out.findings, "the hard gate must block the merge even though exact-identity alone would collapse it").toHaveLength(2);
+    expect(out.mergeMap.size).toBe(0);
+  });
+
+  // dedupe.ts:275-283 — chain collapse walks mergeMap via a `visited` guard so a
+  // malformed input (duplicate caller-supplied ids, precondition 2 of the
+  // published contract violated) TERMINATES instead of spinning on the id cycle
+  // it produces. The resulting chain target in that malformed case is
+  // deliberately unspecified — this test proves termination, not a target value.
+  it("chain collapse terminates on a malformed duplicate-id cycle instead of spinning (visited guard)", () => {
+    const policy: CrossLensDedupePolicy = {
+      categoryGate: "soft",
+      exactIdentityShortCircuit: false,
+      survivorMutation: "clone",
+      mergeGrounding: false,
+      sortAffectedFiles: false,
+      breakOnAbsorbedSurvivor: false,
+      idDiscipline: "local",
+    };
+    // Two DIFFERENT primary-path groups, each producing one absorb event, wired
+    // so the two mergeMap entries reference each other's id (DUP1<->DUP2) —
+    // a 2-cycle that only a malformed (duplicate-id) input can produce, since
+    // ids are supposed to be unique per call.
+    const findings = [
+      makeFinding({ id: "DUP1", title: "Group one issue", category: "g1", lens: "correctness", severity: "low", affected_files: [{ path: "src/one.ts" }] }),
+      makeFinding({ id: "DUP2", title: "Group one issue", category: "g1", lens: "security", severity: "high", affected_files: [{ path: "src/one.ts" }] }),
+      makeFinding({ id: "DUP2", title: "Group two issue", category: "g2", lens: "correctness", severity: "low", affected_files: [{ path: "src/two.ts" }] }),
+      makeFinding({ id: "DUP1", title: "Group two issue", category: "g2", lens: "tests", severity: "high", affected_files: [{ path: "src/two.ts" }] }),
+    ];
+
+    let result: ReturnType<typeof crossLensDedupe> | undefined;
+    expect(() => {
+      result = crossLensDedupe(findings, policy);
+    }, "the call must return synchronously — a spin on the id cycle would hang the test").not.toThrow();
+
+    expect(result).toBeDefined();
+    // Both groups still each absorb one finding: 4 inputs - 2 absorbed = 2 survivors.
+    expect(result!.findings).toHaveLength(2);
+    // Every recorded target is a resolved string id — collapse always halts on
+    // SOME value rather than leaving an entry unresolved.
+    for (const target of result!.mergeMap.values()) {
+      expect(typeof target).toBe("string");
+      expect(target.length).toBeGreaterThan(0);
+    }
+  });
+
+  // breakOnAbsorbedSurvivor (dedupe.ts CrossLensDedupePolicy) is documented as a
+  // PURE performance/iteration-count optimization: toggling it must never change
+  // WHAT is merged, only how many redundant comparisons the inner loop makes.
+  it("breakOnAbsorbedSurvivor is a pure performance flag: true vs false produce identical findings and mergeMap", () => {
+    // Shape where the i-slot IS absorbed mid-scan (A absorbed by higher-severity
+    // B, then C compares against the live survivor B) — the only shape where
+    // breakOnAbsorbedSurvivor actually has an extra comparison to skip.
+    const mkAbsorbedISlot = () => [
+      makeFinding({ id: "A", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "low", evidence: ["ev-A"] }),
+      makeFinding({ id: "B", title: "Timeout not enforced", lens: "security", category: "net", severity: "high", evidence: ["ev-B"] }),
+      makeFinding({ id: "C", title: "Timeout not enforced", lens: "tests", category: "net", severity: "medium", evidence: ["ev-C"] }),
+    ];
+
+    const withBreak = crossLensDedupe(mkAbsorbedISlot(), { ...REMEDIATE_POLICY, breakOnAbsorbedSurvivor: true });
+    const withoutBreak = crossLensDedupe(mkAbsorbedISlot(), { ...REMEDIATE_POLICY, breakOnAbsorbedSurvivor: false });
+
+    expect(withBreak.findings.map((f) => f.id)).toEqual(withoutBreak.findings.map((f) => f.id));
+    expect(withBreak.findings.map((f) => f.evidence)).toEqual(withoutBreak.findings.map((f) => f.evidence));
+    expect([...withBreak.mergeMap.entries()]).toEqual([...withoutBreak.mergeMap.entries()]);
+  });
+
+  // Conservation (explicit count form): every input finding is emitted exactly
+  // once in findings[] XOR recorded as a mergeMap key — never both, never
+  // neither. |findings| + |mergeMap keys| == |input findings| whenever ids are
+  // unique per call (the published contract's precondition 2).
+  describe("conservation: |output.findings| + |mergeMap keys| == |input findings|", () => {
+    const cases: Array<[string, () => Finding[], CrossLensDedupePolicy]> = [
+      [
+        "no merges",
+        () => [
+          makeFinding({ id: "A", title: "Alpha issue", lens: "security" }),
+          makeFinding({ id: "B", title: "Totally unrelated beta", lens: "correctness", affected_files: [{ path: "src/other.ts" }] }),
+        ],
+        AUDIT_POLICY,
+      ],
+      [
+        "one merge",
+        () => [
+          makeFinding({ id: "A", title: "Duplicated auth check", lens: "security", category: "auth" }),
+          makeFinding({ id: "B", title: "Duplicated auth check", lens: "correctness", category: "auth" }),
+        ],
+        REMEDIATE_POLICY,
+      ],
+      [
+        "chained absorb-then-absorbed (3 findings, 1 survivor)",
+        () => [
+          makeFinding({ id: "A", title: "Timeout not enforced", lens: "reliability", category: "net", severity: "medium" }),
+          makeFinding({ id: "B", title: "Timeout not enforced", lens: "correctness", category: "net", severity: "low" }),
+          makeFinding({ id: "C", title: "Timeout not enforced", lens: "security", category: "net", severity: "critical" }),
+        ],
+        REMEDIATE_POLICY,
+      ],
+    ];
+
+    for (const [label, build, policy] of cases) {
+      it(label, () => {
+        const input = build();
+        const out = crossLensDedupe(input, policy);
+        expect(out.findings.length + out.mergeMap.size).toBe(input.length);
+      });
+    }
+  });
+});
+
+// ── mergeGrounding: precedence grounded > refuted > ungrounded > absent ──────────
+
+describe("mergeGrounding — precedence grounded > refuted > ungrounded > absent", () => {
+  it("grounded beats refuted, refuted beats ungrounded, ungrounded beats absent", () => {
+    const grounded: Finding["grounding"] = { status: "grounded" };
+    const refuted: Finding["grounding"] = { status: "refuted", reason: "anchor disproved it" };
+    const ungrounded: Finding["grounding"] = { status: "ungrounded", reason: "quote not found" };
+    const absent: Finding["grounding"] = undefined;
+
+    expect(mergeGrounding(refuted, grounded)).toEqual({ status: "grounded" });
+    expect(mergeGrounding(grounded, refuted)).toEqual({ status: "grounded" });
+    expect(mergeGrounding(ungrounded, refuted)).toEqual(refuted);
+    expect(mergeGrounding(refuted, ungrounded)).toEqual(refuted);
+    expect(mergeGrounding(absent, ungrounded)).toEqual(ungrounded);
+    expect(mergeGrounding(ungrounded, absent)).toEqual(ungrounded);
+    expect(mergeGrounding(absent, absent)).toBeUndefined();
+  });
+
+  it("a grounded winner is normalized to the bare verdict — any reason on either side is dropped", () => {
+    // mergeGrounding's own doc: "grounded carries no reason" — even if the
+    // LOSING side (or a malformed grounded side) carried a reason, the merged
+    // result must be exactly {status:'grounded'}, nothing else.
+    const groundedWithStray = { status: "grounded" as const, reason: "should never appear" };
+    const refuted: Finding["grounding"] = { status: "refuted", reason: "anchor disproved it" };
+    expect(mergeGrounding(refuted, groundedWithStray)).toEqual({ status: "grounded" });
+    expect(Object.keys(mergeGrounding(refuted, groundedWithStray) ?? {})).toEqual(["status"]);
+  });
+
+  it("an ungrounded/absent verdict never downgrades an already-grounded finding", () => {
+    const grounded: Finding["grounding"] = { status: "grounded" };
+    expect(mergeGrounding(grounded, { status: "ungrounded", reason: "x" })).toEqual({ status: "grounded" });
+    expect(mergeGrounding(grounded, undefined)).toEqual({ status: "grounded" });
+  });
+});
+
+// ── upsertFindingByIdentity: escalate-only, OR, backfill-when-unset (:389-398) ─
+
+describe("upsertFindingByIdentity — escalate severity/confidence, OR systemic, backfill impact/likelihood only when unset", () => {
+  function identityFinding(overrides: Partial<Finding> = {}): Finding {
+    return {
+      id: "F-1",
+      title: "Same identity title",
+      category: "same-category",
+      severity: "low",
+      confidence: "low",
+      lens: "correctness",
+      summary: "short",
+      affected_files: [{ path: "src/x.ts" }],
+      evidence: ["ev-1"],
+      ...overrides,
+    };
+  }
+
+  it("severity and confidence only ESCALATE — a lower-rank incoming finding never downgrades the existing entry", () => {
+    const merged = new Map<string, Finding>();
+    upsertFindingByIdentity(merged, identityFinding({ id: "A", severity: "critical", confidence: "high" }));
+    // Incoming re-emission carries a LOWER severity/confidence than what's
+    // already recorded — the escalate-only rule must leave the higher ranks in
+    // place, never downgrade to match the incoming.
+    upsertFindingByIdentity(merged, identityFinding({ id: "B", severity: "low", confidence: "low" }));
+
+    const [entry] = [...merged.values()];
+    expect(entry.severity, "severity must not downgrade from critical to low").toBe("critical");
+    expect(entry.confidence, "confidence must not downgrade from high to low").toBe("high");
+  });
+
+  it("severity and confidence DO escalate when the incoming finding outranks the existing entry", () => {
+    const merged = new Map<string, Finding>();
+    upsertFindingByIdentity(merged, identityFinding({ id: "A", severity: "low", confidence: "low" }));
+    upsertFindingByIdentity(merged, identityFinding({ id: "B", severity: "critical", confidence: "high" }));
+
+    const [entry] = [...merged.values()];
+    expect(entry.severity).toBe("critical");
+    expect(entry.confidence).toBe("high");
+  });
+
+  it("systemic ORs across re-emissions (true once true, never reverts to false)", () => {
+    const merged = new Map<string, Finding>();
+    upsertFindingByIdentity(merged, identityFinding({ id: "A", systemic: true }));
+    upsertFindingByIdentity(merged, identityFinding({ id: "B", systemic: false }));
+    const [entry] = [...merged.values()];
+    expect(entry.systemic).toBe(true);
+  });
+
+  it("impact/likelihood backfill ONLY when unset on the existing entry — an already-set value is never overwritten", () => {
+    const merged = new Map<string, Finding>();
+    upsertFindingByIdentity(merged, identityFinding({ id: "A", impact: "original impact", likelihood: undefined }));
+    upsertFindingByIdentity(
+      merged,
+      identityFinding({ id: "B", impact: "incoming impact — must NOT win", likelihood: "backfilled likelihood" }),
+    );
+    const [entry] = [...merged.values()];
+    // impact was already set on the first insert — the second upsert must not
+    // overwrite it.
+    expect(entry.impact, "an already-set impact must never be overwritten by a later re-emission").toBe("original impact");
+    // likelihood was unset — the second upsert backfills it.
+    expect(entry.likelihood, "an unset likelihood must be backfilled from a later re-emission").toBe("backfilled likelihood");
   });
 });

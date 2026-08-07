@@ -213,6 +213,69 @@ test("mergeFindings keeps same-title same-category findings with different lense
   expect(merged.length, "identical title+category across lenses on disjoint files must stay 2").toBe(2);
 });
 
+// ── identity-keyed dedup, never (task_id, unit_id, pass_id, lens)-keyed ──────
+//
+// audit-orchestrator-core deliberately persists MULTIPLE AuditResult records
+// for one (task_id, unit_id, pass_id, lens) coordinate — base, selective-
+// deepening, steward and redispatch records all survive the ledger's
+// idempotent append (src/audit/orchestrator/ledger.ts, appended at
+// ingestionExecutors.ts), and rekeyDriftedResults mints a fresh redispatch key
+// precisely so a drifted re-run is not collapsed into its stale base record.
+// mergeFindings must key its dedup on each FINDING's own identity/content —
+// never on the AuditResult coordinate the findings arrived wrapped in — or it
+// would silently discard one of two genuinely different findings just because
+// they share a task/unit/pass/lens coordinate.
+
+test("mergeFindings keeps a base AND a redispatch record's findings for the SAME (task_id, unit_id, pass_id, lens) coordinate — dedup keys on finding identity, not the coordinate", () => {
+  const coordinate = {
+    task_id: "t-1",
+    unit_id: "u-1",
+    pass_id: "pass:correctness:1",
+    lens: "correctness",
+  };
+
+  // The base result's finding, found before the file drifted.
+  const baseResult = wrapResult(
+    [
+      makeFinding({
+        id: "BASE-F1",
+        title: "Unbounded retry loop on connect",
+        category: "ErrorHandling",
+        lens: "correctness",
+        affected_files: [{ path: "src/connect.ts", line_start: 10, line_end: 20 }],
+        evidence: ["ev-base"],
+      }),
+    ],
+    coordinate,
+  );
+
+  // A redispatch result for the EXACT SAME coordinate (same task_id/unit_id/
+  // pass_id/lens — mirroring what rekeyDriftedResults produces at the ledger
+  // layer): a genuinely different finding, discovered after the file drifted.
+  // Distinct title/category/file so it shares no identity with the base finding.
+  const redispatchResult = wrapResult(
+    [
+      makeFinding({
+        id: "REDISPATCH-F1",
+        title: "Missing null check after refactor",
+        category: "NullHandling",
+        lens: "correctness",
+        affected_files: [{ path: "src/connect.ts", line_start: 55, line_end: 60 }],
+        evidence: ["ev-redispatch"],
+      }),
+    ],
+    coordinate,
+  );
+
+  const merged = mergeFindings([baseResult, redispatchResult]);
+
+  // Both must survive: collapsing them down to 1 (e.g. a regression that keys
+  // dedup on the shared coordinate instead of finding identity/content) must
+  // turn this assertion red.
+  expect(merged.length, "base and redispatch findings for one coordinate must BOTH survive dedup").toBe(2);
+  expect(new Set(merged.map((f) => f.id))).toEqual(new Set(["BASE-F1", "REDISPATCH-F1"]));
+});
+
 // ── blast-radius ordering (conceptual design-review spine, Phase A) ──────────
 
 test("mergeFindings orders equal severity+confidence findings by blast_radius descending", () => {
