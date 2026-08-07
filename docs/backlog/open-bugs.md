@@ -1219,9 +1219,10 @@
   healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
   itself would use for dispatch.
 
-- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Eleven
-  mechanically-observed defects from the first live 205-node rolling drive, all host-recovered
-  mid-run; each needs a tool-side fix + regression test (loop-core, attestation).
+- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Twelve
+  mechanically-observed defects from the first live 205-node rolling drive, eleven host-recovered
+  mid-run and one caught at the merge review; each needs a tool-side fix + regression test
+  (loop-core, attestation).
   Recovery recipes + forensics: memory `remediation-run-2026-08-06-paused-midflight` + run-branch
   git log. (1) `reverify-node` runs a premature whole-plan merge —
   never-dispatched blocks "rejected", swept to triage; (2) quarantine replay
@@ -1240,12 +1241,17 @@
   a stale `committed_oid` (purged scratch) trips the INV-WTS-7 clobber check on every no-change
   re-accept — unrecoverable by retry; (11) the accept's COMMIT step runs before the
   INV-WTS-2 cwd check, so a deleted worktree commits the MAIN tree's dirt onto the run branch as
-  the node's commit. Also observed: worker scratch logs tool-committed and MERGED (the accept
-  write-scope gate refused nothing); untracked-target seeding swept `session-config.json` into a
-  node commit. **Property to hold:** an accept failure leaves branch, worktree, ledger, and outcome
-  record mutually consistent and re-drivable; a no-change claim is judged against CURRENT ground
-  truth only; no git write runs against a cwd that is not its own top-level; nothing outside the
-  declared write scope enters a node commit; reverify touches only its node.
+  the node's commit; (12) the accept's guard leg runs vitest + `check` but never `check:tests`, so
+  an accept can land test files that are type-RED under the CI-gating `verify:checks` — observed
+  live: CP-NODE-26 landed 4 such files (fixtures typed against invented contract shapes), caught
+  only at the 2026-08-06 merge review (`ecec16bc`). Also observed: worker scratch logs
+  tool-committed and MERGED (the accept write-scope gate refused nothing); untracked-target seeding
+  swept `session-config.json` into a node commit. **Property to hold:** an accept failure leaves
+  branch, worktree, ledger, and outcome record mutually consistent and re-drivable; a no-change
+  claim is judged against CURRENT ground truth only; no git write runs against a cwd that is not
+  its own top-level; nothing outside the declared write scope enters a node commit; reverify
+  touches only its node; an accept's verification runs every gate the destination branch's CI will
+  run on the files it lands.
 
 - **Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction,
   medium).** Deferred dist-dependent verify commands are queued as literal command lists and

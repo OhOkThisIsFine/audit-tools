@@ -58,6 +58,14 @@
   landing refs). Run story + verification record in
   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md). The 2026-08-05 run
   story remains in [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
+- **Remediation run `dogfood-20260806-v0361` LANDED on main (2026-08-06, merge `3a17ca8c`):**
+  211 items terminal (202 `verified_no_change` + 9 `resolved`), deliverables promoted. Pre-merge
+  6-lane adversarial review + dedicated regression-hunt: 6 confirmed findings fixed (`ecec16bc`),
+  including a `check:tests`-only type-RED across 4 test files — a FOURTH CP-NODE-26 accept
+  regression, the type-level sibling of the three `860185ba` repaired (invisible to vitest and the
+  commit gate; fatal in CI's `verify:checks`); 0 further accept-class regressions found. The run's
+  5 new tool defects are the accept/reverify cluster in `open-bugs.md` (Immediate next §1);
+  friction record: `.audit-tools/remediation/friction/run.json`.
 - **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
   three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
   single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
@@ -101,38 +109,30 @@
 
 ## Verification state
 
-- Full `npm test` green at the closeout run (7,410 passed, 10 skipped, 0 failed — see the final
-  sprint verify). Two tests were deliberately inverted this sprint, both to retire pinned defect
-  behaviour: the N5b context-only packing assertion and the multi-block remap fixup test.
+- Full `npm test` green at the merge (7,492 passed / 0 failed on `ecec16bc`, the merged tree —
+  byte-identical to `main` after `3a17ca8c`); `check` + `check:tests` both 0.
 - The pause/terminal persisted-state XOR inconsistency is recorded in `docs/backlog/open-bugs.md`.
 
 ## Immediate next
 
-1. **Remediation run `dogfood-20260806-v0361-remediation` is COMPLETE (2026-08-06).** All 211
-   items terminal: 202 `verified_no_change` + 9 `resolved`; close phase ran the full suite on the
-   combined state; deliverables `.audit-tools/remediation-report.md` +
-   `remediation-outcomes.json` committed on the run branch. **Next: review the run branch's diff
-   vs `main` (~50 commits — node fixes + guard repairs + docs) and MERGE
-   `remediation/dogfood-20260806-v0361-remediation` into `main`.** After merging, the checkout may
-   return to `main`. The run surfaced 5 NEW tool defects (cluster now 11 —
-   `open-bugs.md` §Implement-dispatch accept/reverify defect cluster) fixed-around by hand
-   mid-run; friction record: `.audit-tools/remediation/friction/run.json`.
-   ⚠ Standing hazards until §2 ships: `session-config.json` at repo root (untracked,
+1. **Ship the loop-core source fixes** for the accept/reverify cluster (TWELVE defects incl.
+   the commit-before-cwd-check MAIN-dirt commit, the sticky merged:true outcome, the accept_failed
+   re-report ledger, the accept guard leg skipping `check:tests`) + the zero-frontier null-guard
+   (`src/remediate/steps/nextStep.ts:2372`) with
+   regression tests and attestation — entry in `open-bugs.md` §Implement-dispatch accept/reverify
+   defect cluster; run forensics in memory `remediation-run-2026-08-06-paused-midflight`.
+   ⚠ Standing hazards until this ships: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
    is load-bearing — recreate if absent; the installed global dist carries a ONE-LINE HOTFIX
    (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the source fix
    ships.
-2. **Ship the loop-core source fixes** for the accept/reverify cluster (now ELEVEN defects incl.
-   the commit-before-cwd-check MAIN-dirt commit, the sticky merged:true outcome, the accept_failed
-   re-report ledger) + the zero-frontier null-guard (`src/remediate/steps/nextStep.ts:2372`) with
-   regression tests and attestation — entry in `open-bugs.md` §Implement-dispatch accept/reverify
-   defect cluster; run forensics in memory `remediation-run-2026-08-06-paused-midflight`.
-3. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
+2. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
    2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
    `open-bugs.md`.
-4. **CI on main (`8afb66d7`) is still queued behind a GitHub Actions outage** — the TS7006 fix is
-   verified green locally (`verify:checks` exit 0) and every CI shard that ran passed; confirm the
-   queued `ci` run goes green when Actions recovers.
+3. **Confirm CI green on the merge commit `3a17ca8c`** — both workflows went in_progress
+   2026-08-07T01:42Z when the GitHub Actions outage cleared. The previously queued run on
+   `8afb66d7` is superseded (its only completed-run "failure" was two outage-cancelled shards;
+   every shard that ran passed).
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
