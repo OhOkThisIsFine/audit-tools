@@ -5,6 +5,9 @@ dist/
 # Standing pipeline-profiling ledgers (scripts/shared/profile.mjs) — local timing
 # telemetry, never a tracked deliverable.
 .audit-tools-profile/
+# Root-level per-run operator intent (block_quota etc.) read by
+# readValidatedRepoSessionIntent — run input, never a tracked deliverable.
+/session-config.json
 .audit-artifacts/
 .audit-code/
 .remediate-code/
