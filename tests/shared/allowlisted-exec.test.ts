@@ -23,6 +23,8 @@ test("isAllowedAnchorCommand allows legitimate read-only inspection commands", (
     ["grep", "--include", "*.ts", "x", "src"],
     ["rg", "-i", "--json", "pattern", "src"],
     ["rg", "-t", "js", "x"],
+    // Canonical allowed form cited by CP-NODE-4's allowlist-shape obligation.
+    ["rg", "-n", "-e", "foo"],
     ["ripgrep", "x"],
     ["findstr", "/s", "/i", "x", "."],
     ["madge", "--circular", "src"],
@@ -81,7 +83,10 @@ test("CRIT: git is refused for non-read-only subcommands and for write/reconfigu
     ["git", "apply", "patch"],
     // read-only subcommand BUT a write/reconfigure option anywhere → refused
     ["git", "log", "--output=/tmp/evil"],
+    ["git", "log", "-o", "file"],
     ["git", "log", "-o", "/tmp/evil"],
+    // Canonical fixture cited by CP-NODE-4's allowlist-shape obligation.
+    ["git", "-c", "x=y", "log"],
     ["git", "-c", "core.pager=evil", "log"],
     ["git", "--exec-path=/tmp", "status"],
     ["git", "--config-env", "X=Y", "diff"],
@@ -136,12 +141,56 @@ test("runAllowlistedReadOnlyCommand runs an allowlisted command argv-only and re
   expect(r.output.trim()).toMatch(/true/);
 });
 
-test("runAllowlistedReadOnlyCommand reports a spawn error for a missing executable without throwing", async () => {
+test("runAllowlistedReadOnlyCommand reports a spawn error for an ALLOWLISTED executable whose path does not resolve, without throwing", async () => {
+  // The internal gate (invariants[2]) now refuses a non-allowlisted executable
+  // NAME before ever reaching spawn (see allowlisted-exec-runner-internals.test.ts
+  // for that refusal path) — so a genuine "spawn failed" outcome now requires an
+  // executable whose BASENAME is allowlisted ("grep") but whose resolved path
+  // does not exist, still reaching a real ENOENT from the OS.
   const r = await runAllowlistedReadOnlyCommand(
-    ["definitely-not-a-real-binary-xyz", "--help"],
+    ["definitely-not-a-real-directory-xyz/grep", "-n", "x"],
     process.cwd(),
     ALLOWLISTED_EXEC_TIMEOUT_MS,
   );
+  expect(r.refused, "an allowlisted basename must not be refused by the internal gate").not.toBe(true);
   expect(r.exit_code).toBe(null);
   expect(typeof r.spawn_error === "string" && r.spawn_error.length > 0).toBeTruthy();
+});
+
+// ── internal gate idempotence (invariants[2]) ───────────────────────────────
+// runAllowlistedReadOnlyCommand now enforces isAllowedAnchorCommand on itself,
+// unconditionally, before spawning. A caller-side pre-check (the
+// anchorGrounding.ts pattern) becomes a redundant, OPTIONAL fast path —
+// double-gating must be OBSERVATIONALLY IDENTICAL to single-gating for an
+// already-allowed command: the internal gate must never additionally refuse,
+// alter timing semantics, or change the outcome shape for a command the
+// caller already confirmed.
+test("internal gate idempotence: a pre-gated allowed command behaves identically with and without the caller-side check", async () => {
+  const allowedCommand = ["git", "rev-parse", "--is-inside-work-tree"];
+
+  // Caller-side pre-check, THEN run (today's anchorGrounding.ts pattern).
+  expect(isAllowedAnchorCommand(allowedCommand)).toBe(true);
+  const withCallerCheck = await runAllowlistedReadOnlyCommand(
+    allowedCommand,
+    process.cwd(),
+    ALLOWLISTED_EXEC_TIMEOUT_MS,
+  );
+
+  // Direct call, no caller-side pre-check at all — the internal gate alone.
+  const withoutCallerCheck = await runAllowlistedReadOnlyCommand(
+    allowedCommand,
+    process.cwd(),
+    ALLOWLISTED_EXEC_TIMEOUT_MS,
+  );
+
+  // Neither call was refused, both actually ran the command, and both agree
+  // on the outcome shape (exit_code / timed_out / refused / output presence).
+  expect(withCallerCheck.refused).not.toBe(true);
+  expect(withoutCallerCheck.refused).not.toBe(true);
+  expect(withCallerCheck.timed_out).toBe(false);
+  expect(withoutCallerCheck.timed_out).toBe(false);
+  expect(withCallerCheck.spawn_error).toBe(undefined);
+  expect(withoutCallerCheck.spawn_error).toBe(undefined);
+  expect(withCallerCheck.exit_code).toBe(withoutCallerCheck.exit_code);
+  expect(withCallerCheck.output.trim()).toBe(withoutCallerCheck.output.trim());
 });

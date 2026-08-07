@@ -86,7 +86,13 @@ export interface AutoProviderContext {
   agyAvailable: boolean;
 }
 
-function getAutoProviderContext(
+/**
+ * Exported for direct testability of the self-spawn guard's effect on the
+ * `*Available` flags (a "live" test against the real `isSelfSpawnBlocked`
+ * guard rather than inferring the flags indirectly from
+ * `resolveFreshSessionProviderName`'s final resolved name).
+ */
+export function getAutoProviderContext(
   sessionConfig: SessionConfig,
   env: NodeJS.ProcessEnv,
   lookupCommand: (command: string) => boolean,
@@ -98,7 +104,10 @@ function getAutoProviderContext(
   // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
   // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
   // These signals are the behavioral contract; regression-tested in
-  // packages/shared/tests/codex-antigravity-providers.test.mjs.
+  // tests/shared/codex-antigravity-providers.test.ts (RE-GROUNDED: the prior
+  // citation named a pre-single-package-layout test path that no longer
+  // exists in this tree — this repo ships one package, not a workspace of
+  // several, so there is no separate "shared" sub-package tests directory).
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   const codexCommand = sessionConfig.codex?.command ?? "codex";
   const insideCodex = isSelfSpawnBlocked("codex", env);
@@ -115,7 +124,8 @@ function getAutoProviderContext(
     // pattern. Both paths require an operator-configured command_template to
     // activate (template-absent falls through to the next priority rung).
     // This signal is the behavioral contract; it is regression-tested in
-    // packages/shared/tests/codex-antigravity-providers.test.mjs.
+    // tests/shared/codex-antigravity-providers.test.ts (RE-GROUNDED: same
+    // stale pre-single-package-layout citation as above — see that note).
     inAntigravity:
       Boolean(env.ANTIGRAVITY) ||
       (env.TERM_PROGRAM ?? "").toLowerCase() === "antigravity",
@@ -247,7 +257,15 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   },
 ];
 
-function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
+/**
+ * Exported for direct property testing over the full `AutoProviderContext`
+ * space (invariants[7]-adjacent: `claude-worker` is excluded AT THE TYPE via
+ * `ProviderPriorityRule.name`'s `Exclude<>`, and the fallback is the literal
+ * `"worker-command"` — this function can never return `claude-worker` by
+ * construction; the exported form lets a test assert that runtime property
+ * directly rather than only inferring it through `resolveFreshSessionProviderName`).
+ */
+export function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
   for (const rule of PROVIDER_PRIORITY_RULES) {
     if (rule.predicate(context)) return rule.name;
   }
@@ -441,6 +459,55 @@ export function createFreshSessionProvider(
   return provider;
 }
 
+/**
+ * Structured, non-retryable outcome for a provider CONSTRUCTION failure
+ * (invariants[7]): a missing required config block, or an unrecognized
+ * provider name. These are construction-time failures — they happen before
+ * any launch is attempted and today bypass the rolling engine's launch-result
+ * accounting entirely (a raw synchronous throw). This envelope gives a future
+ * catcher (CP-NODE-3's paused-state engine) a structured, machine-classifiable
+ * shape to route them into a terminal configuration failure rather than a
+ * bare, unclassified `Error`.
+ */
+export type ProviderConstructionFailureKind =
+  | "missing_required_config"
+  | "unknown_provider";
+
+export interface ProviderLaunchOutcomeEnvelope {
+  contract_version: "provider-launch-outcome-envelope/v1alpha1";
+  outcome: "construction_failed";
+  /** Always false: a construction failure is never fixed by retrying the same call — the config must change first. */
+  retryable: false;
+  kind: ProviderConstructionFailureKind;
+  provider: string;
+  reason: string;
+}
+
+/**
+ * Thrown by {@link constructProvider} for a construction-time (not
+ * launch-time) failure. Still a synchronous `Error` throw — construction
+ * stays synchronous, so this is additive, not a breaking return-type change —
+ * but `.message` is documentation-stable (unchanged from the prior raw
+ * `Error` text) while `.launchOutcome` carries the structured,
+ * non-retryable classification for a consumer that wants it.
+ */
+export class ProviderConstructionError extends Error {
+  readonly launchOutcome: ProviderLaunchOutcomeEnvelope;
+
+  constructor(
+    envelope: Pick<ProviderLaunchOutcomeEnvelope, "kind" | "provider" | "reason">,
+  ) {
+    super(envelope.reason);
+    this.name = "ProviderConstructionError";
+    this.launchOutcome = {
+      contract_version: "provider-launch-outcome-envelope/v1alpha1",
+      outcome: "construction_failed",
+      retryable: false,
+      ...envelope,
+    };
+  }
+}
+
 /** Instantiate the concrete provider class for a resolved provider name. */
 function constructProvider(
   providerName: ResolvedProviderName,
@@ -458,9 +525,12 @@ function constructProvider(
       return deps.createClaudeWorkerProvider(sessionConfig.claude_worker);
     case "subprocess-template":
       if (!sessionConfig.subprocess_template?.command_template?.length) {
-        throw new Error(
-          "subprocess-template provider requires session-config.json with subprocess_template.command_template.",
-        );
+        throw new ProviderConstructionError({
+          kind: "missing_required_config",
+          provider: providerName,
+          reason:
+            "subprocess-template provider requires session-config.json with subprocess_template.command_template.",
+        });
       }
       return new SubprocessTemplateProvider(
         sessionConfig.subprocess_template,
@@ -480,9 +550,12 @@ function constructProvider(
       return deps.createAgyProvider(sessionConfig.agy);
     case "vscode-task":
       if (!sessionConfig.vscode_task?.command_template?.length) {
-        throw new Error(
-          "vscode-task provider requires session-config.json with vscode_task.command_template.",
-        );
+        throw new ProviderConstructionError({
+          kind: "missing_required_config",
+          provider: providerName,
+          reason:
+            "vscode-task provider requires session-config.json with vscode_task.command_template.",
+        });
       }
       return new SubprocessTemplateProvider(
         sessionConfig.vscode_task,
@@ -490,15 +563,22 @@ function constructProvider(
       );
     case "antigravity":
       if (!sessionConfig.antigravity?.command_template?.length) {
-        throw new Error(
-          "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
-        );
+        throw new ProviderConstructionError({
+          kind: "missing_required_config",
+          provider: providerName,
+          reason:
+            "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
+        });
       }
       return new SubprocessTemplateProvider(
         sessionConfig.antigravity,
         "antigravity",
       );
     default:
-      throw new Error(`Unknown provider: ${providerName}`);
+      throw new ProviderConstructionError({
+        kind: "unknown_provider",
+        provider: String(providerName),
+        reason: `Unknown provider: ${providerName}`,
+      });
   }
 }

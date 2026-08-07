@@ -511,6 +511,19 @@ export {
 export type { ProjectCommands } from "./tooling/testCommand.js";
 export { discoverProjectCommands } from "./tooling/testCommand.js";
 
+// Tooling: project-test admission gate (CP-NODE-4 obligation 3) — a SECOND,
+// separately-owned admission mechanism anchored to discoverProjectCommands,
+// distinct from the model-authored anchor allowlist above. Produced here;
+// CP-NODE-7 is the consumer that routes runtimeCommand.ts's spawn through it.
+export type { ProjectTestAdmissionOutcome } from "./tooling/projectTestAdmission.js";
+export {
+  PROJECT_TEST_TIMEOUT_MS,
+  PROJECT_TEST_SIGKILL_GRACE_MS,
+  PROJECT_TEST_MAX_CAPTURED_OUTPUT,
+  isAdmittedProjectTestCommand,
+  runAdmittedProjectTestCommand,
+} from "./tooling/projectTestAdmission.js";
+
 // Tooling: optional analyzer dependency resolution
 export type {
   AnalyzerDepVia,
@@ -955,12 +968,17 @@ export type { AgyProviderOptions } from "./providers/agyProvider.js";
 export type {
   AutoProviderContext,
   FreshSessionProviderDeps,
+  ProviderConstructionFailureKind,
+  ProviderLaunchOutcomeEnvelope,
 } from "./providers/providerFactory.js";
 export {
   resolveFreshSessionProviderName,
   createFreshSessionProvider,
   hasConfiguredOpenAiCompatible,
   discoverOutputConstraintCapability,
+  getAutoProviderContext,
+  chooseAutoProvider,
+  ProviderConstructionError,
 } from "./providers/providerFactory.js";
 
 export {

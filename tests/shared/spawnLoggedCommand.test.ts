@@ -9,6 +9,31 @@ import type {
   LaunchFreshSessionResult,
 } from "../../src/shared/providers/types.js";
 
+// Every test in this file injects the MAIN child via `options.spawn`, so the
+// only call that ever reaches the raw `node:child_process.spawn` import inside
+// spawnLoggedCommand.ts is `killTree`'s best-effort win32 taskkill-reaper call.
+// Mocking it here makes that reaper call deterministic and hermetic (no real
+// `taskkill.exe` spawned against a fake PID on every timeout test) and lets
+// the "a taskkill ENOENT is swallowed" obligation be asserted directly.
+const rawSpawnCalls: Array<{ command: string; args: unknown }> = [];
+vi.mock("node:child_process", () => ({
+  spawn: (command: string, args?: unknown) => {
+    rawSpawnCalls.push({ command, args });
+    if (command === "taskkill") {
+      const proc: any = new EventEmitter();
+      setImmediate(() => {
+        const err: any = new Error("spawn taskkill ENOENT");
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      });
+      return proc;
+    }
+    throw new Error(
+      `unexpected raw node:child_process.spawn call for "${command}" — spawnLoggedCommand tests must inject the main child via options.spawn`,
+    );
+  },
+}));
+
 const { spawnLoggedCommand } = await import("../../src/shared/providers/spawnLoggedCommand.js");
 
 /**
@@ -698,3 +723,136 @@ test("spawnLoggedCommand lifecycle: stdout/stderr logged and result carries corr
   if (result.command === undefined) throw new Error("expected result.command to be set");
   expect(result.command.includes(ORIGINAL_COMMAND), "command must be in result").toBeTruthy();
 });
+
+// ── CP-NODE-4 (b) Spawn behavior obligations ────────────────────────────────
+
+test("spawnLoggedCommand scrubs CLAUDECODE / CLAUDE_CODE_* from the caller-supplied env before spawning the child", async () => {
+  const calls: Array<{ command: string; args: string[]; options: any }> = [];
+  const spawnDouble: SpawnDouble = (command, args, options) => {
+    calls.push({ command, args: args as string[], options });
+    return makeChild();
+  };
+  const result = await spawnLoggedCommand(
+    ORIGINAL_COMMAND,
+    ORIGINAL_ARGS,
+    baseInput(),
+    { CLAUDECODE: "1", CLAUDE_CODE_SOMETHING: "x", CUSTOM_VAR: "keep-me" },
+    { createWriteStream: fakeCreateWriteStream, spawn: spawnDouble },
+  );
+  expect(result.accepted).toBe(true);
+  expect(calls.length).toBe(1);
+  const env = calls[0].options.env;
+  expect(env.CLAUDECODE, "CLAUDECODE must be scrubbed from the spawned child's env").toBe(undefined);
+  expect(env.CLAUDE_CODE_SOMETHING, "any CLAUDE_CODE_* var must be scrubbed").toBe(undefined);
+  expect(env.CUSTOM_VAR, "a non-CLAUDECODE caller-supplied var must survive the scrub").toBe("keep-me");
+});
+
+test("spawnLoggedCommand does not settle until a delayed log-stream write callback fires (flush-before-settle)", async () => {
+  const pendingCallbacks: Array<() => void> = [];
+  function deferredWriteStream(): WriteStream {
+    const stream: any = new EventEmitter();
+    stream.write = (_chunk: any, cb?: (error?: Error | null) => void) => {
+      if (typeof cb === "function") pendingCallbacks.push(cb);
+      return true;
+    };
+    stream.end = (cb?: () => void) => {
+      if (typeof cb === "function") cb();
+    };
+    return stream as WriteStream;
+  }
+
+  const child: any = new EventEmitter();
+  child.pid = 5150;
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    return true;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+
+  let settled = false;
+  const promise = spawnLoggedCommand(ORIGINAL_COMMAND, ORIGINAL_ARGS, baseInput(), undefined, {
+    createWriteStream: deferredWriteStream,
+    spawn: (() => child) as SpawnDouble,
+  });
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+
+  // Emit stdout data (triggers writeLog → stdoutLog.write, whose callback is
+  // captured rather than invoked) and let the PassThrough deliver it.
+  child.stdout.write("hello\n");
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(pendingCallbacks.length, "expected the stdoutLog.write callback to be captured, not fired").toBeGreaterThan(0);
+
+  // Close the child — settle must NOT proceed while a log write is pending.
+  child.emit("exit", 0, null);
+  child.emit("close", 0, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(settled, "must not settle while a log write callback is still pending (flush-before-settle)").toBe(false);
+
+  // Fire the deferred callback(s) now — settle can proceed.
+  const toFire = pendingCallbacks.splice(0);
+  toFire.forEach((cb) => cb());
+
+  const result = await promise;
+  expect(result.accepted).toBe(true);
+  expect(settled).toBe(true);
+});
+
+test.skipIf(process.platform !== "win32")(
+  "a taskkill ENOENT on win32 is swallowed rather than surfacing as a rejection",
+  async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
+    let openChild: any;
+    const rawCallsBefore = rawSpawnCalls.length;
+    try {
+      const input = { ...baseInput(), timeoutMs: 5_000 };
+      const promise = spawnLoggedCommand(ORIGINAL_COMMAND, ORIGINAL_ARGS, input, undefined, {
+        killGraceMs: 200,
+        createWriteStream: fakeCreateWriteStream,
+        spawn: (() => {
+          openChild = makeOpenChild();
+          return openChild;
+        }) as SpawnDouble,
+      });
+
+      // Advance past timeoutMs — killTree(SIGTERM) fires, which on win32 also
+      // attempts the best-effort taskkill reaper (mocked to emit ENOENT above).
+      vi.advanceTimersByTime(5_001);
+
+      // Let the mocked reaper's async 'error' (ENOENT) event flush. setImmediate
+      // is real (not in the faked-timer set), so this is a genuine tick.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // The reaper call happened (proves this test actually exercised the
+      // taskkill path) and — the point of this test — its ENOENT did NOT
+      // surface as anything: no thrown/unhandled error, no altered rejection.
+      const reaperCalls = rawSpawnCalls.slice(rawCallsBefore).filter((c) => c.command === "taskkill");
+      expect(reaperCalls.length, "expected the taskkill reaper to have been invoked").toBeGreaterThan(0);
+
+      // Settle the main child as if SIGTERM took effect — the overall promise
+      // still rejects with the SAME timeout error as the un-mocked case
+      // (spawnLoggedCommand.test.ts's other SIGTERM/SIGKILL tests), proving the
+      // swallowed taskkill ENOENT did not change or block the outcome.
+      openChild.emit("exit", null, "SIGTERM");
+      openChild.emit("close", null, "SIGTERM");
+
+      await assert.rejects(promise, (err: any) => {
+        expect(err.message.includes("timed out"), `expected 'timed out' in error message, got: ${err.message}`).toBeTruthy();
+        return true;
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);

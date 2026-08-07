@@ -22,8 +22,11 @@
  * SAFETY of the runner: commands run only via `runAllowlistedReadOnlyCommand`,
  * which spawns argv-only (never a shell), under a timeout, with the
  * host-signalling env stripped (`stripClaudeCodeEnv`), platform-resolved via the
- * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The caller still
- * gates each command through `isAllowedAnchorCommand` before running it.
+ * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The runner ENFORCES
+ * `isAllowedAnchorCommand` on itself, unconditionally, before ever spawning
+ * (invariants[2]) — a caller-side pre-check (e.g. `anchorGrounding.ts`) is now
+ * an OPTIONAL fast path, never the sole guarantee: correctness must not rest on
+ * every call site remembering to gate first.
  */
 import { spawn } from "node:child_process";
 import { resolveExecArgv, stripClaudeCodeEnv } from "./exec.js";
@@ -310,6 +313,15 @@ export interface AllowlistedExecOutcome {
   spawn_error?: string;
   /** Full combined stdout+stderr (bounded), used to evaluate output matches. */
   output: string;
+  /**
+   * True when the internal allowlist gate refused `command` BEFORE any spawn
+   * was attempted (`isAllowedAnchorCommand` returned false) — a structured
+   * refusal, never a spawn, never a throw. Distinct from `spawn_error` (which
+   * means a spawn WAS attempted and the OS failed to launch it): a refusal
+   * never touches the child_process API at all. Absent (not `false`) on every
+   * outcome that reached a real spawn attempt.
+   */
+  refused?: boolean;
 }
 
 export type AllowlistedExecRunner = (
@@ -326,16 +338,35 @@ export type AllowlistedExecRunner = (
  * (SIGTERM→SIGKILL). The single runner both orchestrators use for the grounding
  * anchor pass.
  *
- * NOTE: this does NOT re-check the allowlist — callers MUST gate the command
- * through {@link isAllowedAnchorCommand} first. It is named/scoped so a future
- * caller cannot reasonably read it as a general-purpose runner.
+ * INTERNAL GATE (invariants[2]): enforces {@link isAllowedAnchorCommand} on
+ * itself, unconditionally, before ever spawning — `isAllowedAnchorCommand` is
+ * pure, total, and non-throwing, so this check is cheap and correctness no
+ * longer depends on every call site remembering to gate first. A refused
+ * command resolves a structured refusal (`refused: true`); it is NEVER spawned
+ * and this function NEVER throws for a refusal. A caller-side pre-check (e.g.
+ * `anchorGrounding.ts`'s `isAllowedAnchorCommand` call before invoking this
+ * function) is now a redundant, OPTIONAL fast path: double-gating is
+ * observationally identical to single-gating, since the check is idempotent.
+ *
+ * Its reach is the model-authored anchor/targeted command class ONLY — it does
+ * NOT reach `runtimeCommand.ts`'s project-test spawn (a discovered, non-model-
+ * authored vector the default-deny anchor premise excludes by construction;
+ * see `projectTestAdmission.ts` for that surface's own admission gate).
  */
 export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
   command,
   cwd,
   timeoutMs,
-) =>
-  new Promise((resolvePromise) => {
+) => {
+  if (!isAllowedAnchorCommand(command)) {
+    return Promise.resolve({
+      exit_code: null,
+      timed_out: false,
+      output: "",
+      refused: true,
+    });
+  }
+  return new Promise((resolvePromise) => {
     const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
     const child = spawn(resolvedCommand, resolvedArgs, {
       cwd,
@@ -371,3 +402,4 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
       resolvePromise({ exit_code: code, timed_out: timedOut, output });
     });
   });
+};
