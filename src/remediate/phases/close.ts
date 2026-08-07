@@ -1410,9 +1410,14 @@ export async function cleanupTempBranchesAndArtifacts(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn("Failed to clean up temporary git branches.", error);
+    // kind:"error" (not "outcome" — that kind is reserved for the one-line-
+    // per-finding remediation outcome emitted below; a cleanup failure is a
+    // run-level diagnostic, not a finding disposition. Mislabeling this
+    // duplicated the outcome-line count whenever this branch fired — see the
+    // matching fix a few lines down for the state-persist failure.)
     runLogger?.event({
       phase: "close",
-      kind: "outcome",
+      kind: "error",
       obligation: "closing",
       note: `Failed to clean up temporary git branches: ${reason}`,
     });
@@ -1429,13 +1434,17 @@ export async function cleanupTempBranchesAndArtifacts(
     // a failed final-state persist means a restart resumes from the PRE-close
     // state and re-runs closing actions (re-commit/re-push) with no operator
     // clue why. Surface it on the console and in the structured run log.
+    // kind:"error" — see the matching note on the branch-cleanup catch above:
+    // this is a run-level diagnostic (the final-state persist itself failed),
+    // never a per-finding outcome, so it must not share the "outcome" kind
+    // the per-finding loop below emits.
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(
       `Failed to persist the final remediation state — a resumed run may re-execute closing actions: ${reason}`,
     );
     runLogger?.event({
       phase: "close",
-      kind: "outcome",
+      kind: "error",
       obligation: "closing",
       note: `Final state persist FAILED (run still reported complete): ${reason}`,
     });
