@@ -12,9 +12,14 @@
   breaks inside path tokens; `--guidance-file` + `--input` now produce an input-bound `mixed`
   manifest (attested loop-core review, verdict CLEAN). The vitest "false-RED" backlog entry was
   recharacterized to HEAD truth: the exit-code half was ALREADY closed by `run-vitest-gate`
-  (2026-07-24); the unlocated ≥60s blocking worker stays open in `open-bugs.md` with today's
-  mechanism-level diagnosis, and an offloaded candidate sweep (relay CLI lane) was in flight at
-  hand-back — its report lands in the session scratchpad, advisory only.
+  (2026-07-24); the candidate sweep LANDED (verified) as
+  [`reviews/rpc-starvation-candidates-2026-08-07.md`](reviews/rpc-starvation-candidates-2026-08-07.md),
+  and the one confirmed defect-class instance was fixed in `a12ce9a0` (sync full-CLI spawns →
+  async). The entry stays open only for the next leads if the error recurs.
+- **Concurrent-session WIP in this checkout (deliberate, 2026-08-07):** the CI wall-clock track
+  (vitest sequencer + workflow/release-script edits) is live and uncommitted in the shared
+  checkout — its mid-edit `vitest.config.ts` breaks direct `vitest` config load until it lands.
+  Not this lap's work; do not commit, revert, or stash it.
 - **Offload topology (2026-08-07, this session):** the Desktop→relay CLI dispatch lane
   (`llm-relay dispatch` rung `claude-deepseek-credits`) starts correctly, but the first run
   failed `ConnectionRefused` — **llm-relay was DOWN mid-session** (CLI child startup notices are
