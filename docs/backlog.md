@@ -138,7 +138,7 @@
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:34` — Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.
+- `forward-tracks.md:34` — ▶ Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.
 - `forward-tracks.md:41` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
 - `forward-tracks.md:68` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
 - `forward-tracks.md:81` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.

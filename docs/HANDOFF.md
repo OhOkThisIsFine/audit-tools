@@ -148,10 +148,11 @@
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 1 pinned item(s).
+> `verify:checks` and at commit). 2 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
 - ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties. · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

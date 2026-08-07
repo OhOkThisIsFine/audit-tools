@@ -31,7 +31,7 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 ## Forward tracks
 
-- **Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.**
+- **▶ Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.**
   Four-item program specced in [`spec/mechanical-analyzer-layer-design.md`](../../spec/mechanical-analyzer-layer-design.md)
   (deliberately a pointer — the spec carries the per-item file plan, the declined alternatives, and
   the CE-005 contract revision). Trigger: only gitleaks is `defaultRun`, and the consent gate's
