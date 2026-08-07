@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-07T09:16:29.542Z",
+  "generated_at": "2026-08-07T09:38:42.273Z",
   "run": {
     "date": "2026-08-07",
-    "head": "885d0ba9"
+    "head": "242df218"
   },
   "items": [
     {
@@ -49,5 +49,8 @@
     }
   ],
   "applied": [],
-  "skipped": []
+  "skipped": [
+    "leg 2 (backlog) — PARTIAL COVERAGE, not a skipped leg. The mechanical sweep (scripts/shared/triage-backlog.mjs) resolved pool/medium live, passed preflight, and attempted all 112 entries, but classified only 72: 40 were lost to schema non-adherence (the alias emitting prose before the JSON, or no JSON object at all), a rate that climbed as the sweep ran. Coverage stamp: .audit-tools/nightly/triage-2026-08-07-coverage.json — attempted 112, classified 72, errored 40, aborted null. Those 40 entries were NOT examined this run. Errored rows are dropped on load and re-queued, so a plain re-run retries exactly the failures. Recorded as dated recurrence evidence on the open-bugs entry that already owns the per-alias schema-adherence property (commit 242df218).",
+    "leg 1 (docs) — the generated/renderer-owned doc rows were reviewed at their SOURCE, not as generated copies, per the manifest: .agent/** and .github/** host assets are governed by renderer drift tests, and docs/nightly-routine-prompt.md + docs/nightly-inbox.md are generator-owned. Byte parity for the scheduler prompt was confirmed green (npm run check:nightly-routine-prompt) rather than reviewed as prose."
+  ]
 }

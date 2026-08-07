@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-07 at `885d0ba9`.*
+*Last run: 2026-08-07 at `242df218`.*
 
 
 ---
@@ -71,3 +71,15 @@ spec/mechanical-analyzer-layer-design.md line 4-5 reads: "The four-item program 
 </details>
 
 ---
+
+
+<details>
+<summary>What the last run could NOT cover</summary>
+
+
+- leg 2 (backlog) — PARTIAL COVERAGE, not a skipped leg. The mechanical sweep (scripts/shared/triage-backlog.mjs) resolved pool/medium live, passed preflight, and attempted all 112 entries, but classified only 72: 40 were lost to schema non-adherence (the alias emitting prose before the JSON, or no JSON object at all), a rate that climbed as the sweep ran. Coverage stamp: .audit-tools/nightly/triage-2026-08-07-coverage.json — attempted 112, classified 72, errored 40, aborted null. Those 40 entries were NOT examined this run. Errored rows are dropped on load and re-queued, so a plain re-run retries exactly the failures. Recorded as dated recurrence evidence on the open-bugs entry that already owns the per-alias schema-adherence property (commit 242df218).
+
+- leg 1 (docs) — the generated/renderer-owned doc rows were reviewed at their SOURCE, not as generated copies, per the manifest: .agent/** and .github/** host assets are governed by renderer drift tests, and docs/nightly-routine-prompt.md + docs/nightly-inbox.md are generator-owned. Byte parity for the scheduler prompt was confirmed green (npm run check:nightly-routine-prompt) rather than reviewed as prose.
+
+
+</details>
