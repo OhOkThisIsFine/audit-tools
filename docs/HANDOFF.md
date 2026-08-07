@@ -31,10 +31,13 @@
 
 ## Verification state
 
-- At the item-C tree: `build`/`check`/`check:tests`/`check:deadcode`/`check:guard-reach`/doc
-  gates all 0; remediate+shared test areas 4,746 passed / 0 failed. Known noise: the tracked
-  RPC-timeout "1 error" line still prints (open false-RED/false-GREEN entry in `open-bugs.md`).
-  Release CI on the next tag is the authoritative signal.
+- **Shipped as v0.38.1 — release CI fully green** (gate + 4 test shards + publish; npm live;
+  global bins reinstalled with postinstall). The v0.38.0 tag was burned and withdrawn: shard 3
+  caught a hand-edited GENERATED schema (`worker-schema-generation.test.ts`); fixed by carrying
+  `analyzer_provenance` through `scripts/audit/generate-schemas.mjs` from the zod source
+  (`49eb1fee`). Local at ship: audit area 2,818/0, remediate+shared 4,746/0, all gates 0. Known
+  noise: the tracked RPC-timeout "1 error" line still prints (open false-RED/false-GREEN entry
+  in `open-bugs.md`).
 
 ## Immediate next
 
