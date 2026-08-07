@@ -1182,17 +1182,6 @@
   pipeline. **Property to hold:** prompt language and exit semantics agree; rejections-present is
   distinguishable from failure.
 
-- **▶ Provider auto-selection is construction-time-only — a mid-run provider death has no
-  re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).** Auto-detect
-  snapshots PATH/env once (`providerFactory.ts`); pools bind the name at construction; a dead
-  provider's packets retry into the same defunct backend unless the operator pre-configured other
-  pools. **Property to hold:** persistent availability failure on a pool re-detects and folds in
-  an alternative, or pauses resumably naming the dead provider. Design draft (2026-08-06, advisory
-  — verify mechanisms before implementing): resumable `waiting_for_provider` pause naming the dead
-  provider + resume-time re-detect via `buildConfirmedPools`, reusing the 2026-08-04 pause
-  substrate; record in
-  [`reviews/backlog-sprint-2026-08-06.md`](../reviews/backlog-sprint-2026-08-06.md).
-
 - **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:

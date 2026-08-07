@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 158 entr(y/ies) indexed.
+> and at commit). 157 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -119,9 +119,8 @@
 - `open-bugs.md:1168` — `ensure` writes opencode.json with unstable key order.
 - `open-bugs.md:1173` — Two run-id notions; friction record keyed both ways.
 - `open-bugs.md:1179` — Dispatch-step prompt conflates merge rejections with failure.
-- `open-bugs.md:1185` — ▶ Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).
-- `open-bugs.md:1196` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:1201` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
+- `open-bugs.md:1185` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:1190` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
