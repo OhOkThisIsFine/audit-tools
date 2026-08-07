@@ -481,6 +481,13 @@ export default class TimingReporter {
       runMs: Math.round(runSum),
       wallSummedMs: Math.round(wallTotal),
       slowest: slowest.map((f) => ({ file: f.rel, ms: Math.round(f.total), collectMs: Math.round(f.collect), runMs: Math.round(f.run) })),
+      // COMPLETE per-file durations (not just the top 10): the input
+      // `generate-vitest-shard-baseline.mjs` distills into the committed shard
+      // duration baseline the custom sequencer partitions by. Keys are
+      // repo-relative test paths, values total ms.
+      files: Object.fromEntries(
+        [...perFile].sort((a, b) => (a.rel < b.rel ? -1 : 1)).map((f) => [f.rel, Math.round(f.total)]),
+      ),
       outcome,
       // Per-failure classification against the tracked baseline. Advisory to the
       // gate today — it rides in the ledger so a lap can answer "is this mine?"

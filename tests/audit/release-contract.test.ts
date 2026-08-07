@@ -207,11 +207,14 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
 
   expect(ci).toMatch(/CI_NODE_VERSION: "22\.14\.0"/);
 
-  expect(testSuite).toMatch(/name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}(, shard [^)]+)?\)/);
+  // T5 (owner-settled 2026-08-07): ONE Node line across the whole pipeline —
+  // 22.14.0 pinned, no matrix axis, engines >=22. "No workflow references Node
+  // 20" is T5's acceptance clause, pinned here as the negative assertion.
+  expect(testSuite).toMatch(/name: Orchestration tests \(shard \$\{\{ matrix\.shard \}\}\/4\)/);
   expect(testSuite).toMatch(/fail-fast: false/);
-  expect(testSuite.includes('- "20.19.2"')).toBeTruthy();
-  expect(testSuite.includes('- "22.14.0"')).toBeTruthy();
-  expect(testSuite).toMatch(/audit-code-test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
+  expect(testSuite).toMatch(/node-version: "22\.14\.0"/);
+  expect(testSuite.includes("20.19.2"), "T5: no workflow may reference Node 20").toBeFalsy();
+  expect(testSuite).toMatch(/audit-code-test-suite-npm-logs-shard-\$\{\{ matrix\.shard \}\}/);
 });
 
 test("test-suite workflow pins external GitHub Actions to commit SHAs", async () => {

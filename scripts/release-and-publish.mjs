@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
 
 import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
 import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
@@ -429,11 +430,149 @@ async function waitForRunCompletion(repoSlug, runId, { packageName, packageVersi
   throw new Error(`Timed out waiting for publish workflow run ${runId} to complete.`);
 }
 
-// Pull the completed publish run's per-job / per-step wall-clock from the GitHub
-// Actions API and persist it as a `publish-ci` profile. This is the authoritative
-// where-did-CI-time-go view of the release pipeline (gate vs. sharded test vs.
-// publish), emitted on every release so a CI-latency regression is visible.
-function summarizeCiTiming(repoSlug, runId, meta = {}) {
+const RELEASE_WORKFLOW_DEFAULT_PATH = resolve(repoRoot, ".github/workflows/publish-package.yml");
+
+function normalizeNeedName(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeNeeds(needs) {
+  if (Array.isArray(needs)) return needs.map(normalizeNeedName).filter(Boolean);
+  if (typeof needs === "string") return [normalizeNeedName(needs)];
+  return [];
+}
+
+function normalizeBaseJobName(name) {
+  return String(name ?? "")
+    .trim()
+    .replace(/\s*\([^)]*\)\s*$/, "");
+}
+
+function resolveWorkflowPath(path) {
+  if (typeof path !== "string" || path.trim().length === 0) return RELEASE_WORKFLOW_DEFAULT_PATH;
+  const trimmed = path.trim();
+  if (trimmed.startsWith("/")) return resolve(repoRoot, trimmed.replace(/^\/+/, ""));
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return trimmed;
+  return resolve(repoRoot, trimmed);
+}
+
+function loadWorkflowNeeds(runEntry = {}) {
+  const workflowPath = resolveWorkflowPath(runEntry.path);
+  let workflowText;
+  try {
+    workflowText = readFileSync(workflowPath, "utf8");
+  } catch (error) {
+    console.log(
+      `[release] failed to read workflow definition for dependency graph (${workflowPath}): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+
+  let workflow;
+  try {
+    workflow = parseYaml(workflowText);
+  } catch (error) {
+    console.log(
+      `[release] failed to parse workflow definition for dependency graph (${workflowPath}): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+  if (!workflow || typeof workflow !== "object" || !workflow.jobs || typeof workflow.jobs !== "object") {
+    return null;
+  }
+
+  return { path: workflowPath, jobs: workflow.jobs };
+}
+
+function buildNeedsByRunJob(workflowJobs, runJobs = []) {
+  const runJobsByTemplate = new Map();
+  for (const job of runJobs) {
+    const name = normalizeNeedName(job?.name);
+    if (!name) continue;
+    const base = normalizeBaseJobName(name);
+    for (const key of [name, base]) {
+      const existing = runJobsByTemplate.get(key);
+      if (!existing) {
+        runJobsByTemplate.set(key, []);
+      }
+      if (!runJobsByTemplate.get(key).includes(name)) {
+        runJobsByTemplate.get(key).push(name);
+      }
+    }
+  }
+
+  const needsByRunJob = new Map();
+  for (const [templateName, config] of Object.entries(workflowJobs)) {
+    const needs = normalizeNeeds(config?.needs);
+    if (needs.length === 0) continue;
+    const targetNames = runJobsByTemplate.get(normalizeNeedName(templateName)) ?? [];
+    if (targetNames.length === 0) continue;
+    const sourceNames = [];
+    for (const need of needs) {
+      const aliases = runJobsByTemplate.get(need) ?? [];
+      for (const sourceName of aliases) {
+        if (!sourceNames.includes(sourceName)) sourceNames.push(sourceName);
+      }
+    }
+    if (sourceNames.length === 0) continue;
+    for (const targetName of targetNames) {
+      needsByRunJob.set(targetName, [...sourceNames]);
+    }
+  }
+  return needsByRunJob;
+}
+
+function durationMs(start, end) {
+  const a = Date.parse(start ?? "");
+  const b = Date.parse(end ?? "");
+  return Number.isNaN(a) || Number.isNaN(b) ? 0 : Math.max(0, b - a);
+}
+
+function computeCriticalPathMs(perJobMap, needsByRunJob) {
+  if (perJobMap.size === 0) return 0;
+  if (needsByRunJob == null || needsByRunJob.size === 0) {
+    return [...perJobMap.values()].reduce((max, job) => Math.max(max, job.ms), 0);
+  }
+
+  const memo = new Map();
+  const visiting = new Set();
+
+  const walk = (jobName) => {
+    if (memo.has(jobName)) return memo.get(jobName);
+    if (visiting.has(jobName)) {
+      return perJobMap.get(jobName)?.ms ?? 0;
+    }
+    const needs = needsByRunJob.get(jobName) ?? [];
+    visiting.add(jobName);
+    let predecessorMs = 0;
+    for (const dependency of needs) {
+      const depMs = walk(dependency);
+      if (depMs > predecessorMs) predecessorMs = depMs;
+    }
+    visiting.delete(jobName);
+    const selfMs = perJobMap.get(jobName)?.ms ?? 0;
+    const total = selfMs + predecessorMs;
+    memo.set(jobName, total);
+    return total;
+  };
+
+  let best = 0;
+  for (const name of perJobMap.keys()) {
+    const candidate = walk(name);
+    if (candidate > best) best = candidate;
+  }
+  return best;
+}
+
+function summarizeCiTiming(repoSlug, runEntry, meta = {}) {
+  const runId = typeof runEntry === "number" ? runEntry : runEntry?.id;
+  if (!runId) {
+    console.log("[release] CI timing profile skipped: missing run id.");
+    return;
+  }
+
   let payload;
   try {
     payload = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}/jobs?per_page=100`]);
@@ -442,11 +581,6 @@ function summarizeCiTiming(repoSlug, runId, meta = {}) {
     return;
   }
   const jobs = Array.isArray(payload?.jobs) ? payload.jobs : [];
-  const durationMs = (start, end) => {
-    const a = Date.parse(start ?? "");
-    const b = Date.parse(end ?? "");
-    return Number.isNaN(a) || Number.isNaN(b) ? 0 : Math.max(0, b - a);
-  };
   const steps = [];
   const perJob = [];
   for (const job of jobs) {
@@ -458,15 +592,28 @@ function summarizeCiTiming(repoSlug, runId, meta = {}) {
     }
   }
   if (steps.length === 0) return;
-  // Wall-clock of the whole run is the span of the longest job (jobs run in
-  // parallel), not the sum — report both so the parallel speedup is legible.
-  const criticalPathMs = perJob.reduce((max, j) => Math.max(max, j.ms), 0);
-  const summedJobMs = perJob.reduce((sum, j) => sum + j.ms, 0);
+
+  const perJobMap = new Map(perJob.map((job) => [job.name, { ms: job.ms, conclusion: job.conclusion }]));
+  let criticalPathMs = perJobMap.size === 0 ? 0 : Math.max(...perJobMap.values().map((job) => job.ms));
+  const workflow = loadWorkflowNeeds(runEntry);
+  if (workflow) {
+    const needsByRunJob = buildNeedsByRunJob(workflow.jobs, perJob);
+    const computedCriticalPathMs = computeCriticalPathMs(perJobMap, needsByRunJob);
+    if (computedCriticalPathMs > 0) {
+      criticalPathMs = computedCriticalPathMs;
+    }
+  } else {
+    console.log("[release] dependency graph unavailable; critical path defaults to max single-job duration.");
+  }
+
+  const summedJobMs = [...perJobMap.values()].reduce((sum, job) => sum + job.ms, 0);
   console.log("[release] CI timing (per job):");
   for (const j of [...perJob].sort((a, b) => b.ms - a.ms)) {
     console.log(`[release]   ${toSeconds(j.ms)}s  ${j.name} (${j.conclusion})`);
   }
-  console.log(`[release]   critical-path ${toSeconds(criticalPathMs)}s · summed ${toSeconds(summedJobMs)}s across ${perJob.length} jobs`);
+  console.log(
+    `[release]   critical-path ${toSeconds(criticalPathMs)}s · summed ${toSeconds(summedJobMs)}s across ${perJob.length} jobs`,
+  );
   writeProfileLedger("publish-ci", steps, {
     ...meta,
     runId,
@@ -618,7 +765,7 @@ async function main() {
   console.log(`[release] publish run completed: ${completedRun.html_url}`);
 
   // Profile the CI half from the completed run's job/step timings.
-  summarizeCiTiming(repoSlug, runEntry.id, releaseMeta);
+  summarizeCiTiming(repoSlug, runEntry, releaseMeta);
 
   console.log(`[release] waiting for ${packageAfter.name}@${packageAfter.version} on npm`);
   await runPhase("await-npm-propagation", () =>

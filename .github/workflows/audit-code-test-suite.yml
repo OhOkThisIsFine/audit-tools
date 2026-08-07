@@ -72,7 +72,7 @@ env:
 
 jobs:
   orchestration-tests:
-    name: Orchestration tests (Node ${{ matrix.node-version }}, shard ${{ matrix.shard }}/4)
+    name: Orchestration tests (shard ${{ matrix.shard }}/4)
     # Skip the suite on the `release: vX.Y.Z` bump push: that commit only bumps the
     # version (the code was already exercised by this suite on the pre-bump commit),
     # and publish-package.yml runs the authoritative sharded suite for the actual
@@ -99,16 +99,12 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      # Sole suite runner: the vitest suite runs once per Node line, sharded 4
-      # ways (not the full suite whole). ci.yml carries only verify:checks now,
-      # so this workflow owns both Node lines. The Node-20 line is the distinct
-      # type-stripping coverage ci.yml (Node 22 only) lacks.
+      # Sole suite runner: the vitest suite runs once on Node 22.14.0, sharded
+      # 4 ways (not the full suite whole). ci.yml carries only verify:checks now,
+      # so this workflow owns type-stripping coverage ci.yml (Node 22 only) lacks.
       # Keep the denominator in the `vitest run --shard` command below in sync
       # with the length of this shard list.
       matrix:
-        node-version:
-          - "20.19.2"
-          - "22.14.0"
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
@@ -116,7 +112,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "22.14.0"
           cache: npm
       - name: Validate package-lock.json
         timeout-minutes: 2
@@ -133,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded audit-code-test-suite npm logs artifact and rerun npm ci locally."' ERR
-          npm ci
+          npm ci --prefer-offline --no-audit --no-fund
       - name: Build (type-checks + emits dist)
         timeout-minutes: 10
         shell: bash
@@ -151,7 +147,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed on Node ${{ matrix.node-version }}. Review the uploaded audit-code-test-suite npm logs artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally on the same Node line."' ERR
+          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally."' ERR
           # run-vitest-gate.mjs, not a bare `npx vitest run` — closes the false-green
           # defect (docs/backlog.md, search false-green): it fails nonzero if the
           # ledger's structured outcome reports failures even when vitest's own
@@ -161,14 +157,23 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: audit-code-test-suite-npm-logs-node-${{ matrix.node-version }}-shard-${{ matrix.shard }}
+          name: audit-code-test-suite-npm-logs-shard-${{ matrix.shard }}
           path: |
             ~/.npm/_logs
             npm-debug.log*
+          if-no-files-found: ignore
+
+      - name: Upload vitest shard ledger
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: audit-code-test-suite-vitest-ledger-shard-${{ matrix.shard }}
+          path: |
+            .audit-tools-profile/vitest-shard${{ matrix.shard }}of4-latest.json
           if-no-files-found: ignore
       - name: Emit troubleshooting guidance
         if: ${{ failure() }}
         shell: bash
         working-directory: .
         run: |
-          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }} (shard ${{ matrix.shard }}/4). Review the uploaded npm logs artifact and rerun npm ci && npx vitest run --shard=${{ matrix.shard }}/4 locally on the same Node line."
+          echo "::error::audit-code test-suite workflow failed on shard ${{ matrix.shard }}/4. Review the uploaded artifacts and rerun npm ci && npx vitest run --shard=${{ matrix.shard }}/4 locally."

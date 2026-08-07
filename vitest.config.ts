@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 import { vitestIncludeGlobs } from "./tests/helpers/testFileContract.js";
+// Unlike `reporters` below, `sequence.sequencer` does NOT resolve a string module
+// path — vitest constructs the value it is given (`new Sequencer(ctx)`), so this
+// must be the imported class itself.
+import VitestDurationSequencer from "./scripts/shared/vitest-sequencer.mjs";
 
 // Single-package layout: one vitest runner for all three areas.
 // remediate = `.test.ts`; audit + shared admit `.test.mjs` AND `.test.ts` while
@@ -48,5 +52,8 @@ export default defineConfig({
       ".opencode/**",
       ".vscode/**",
     ],
+    sequence: {
+      sequencer: VitestDurationSequencer,
+    },
   },
 });

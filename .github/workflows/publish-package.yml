@@ -115,6 +115,14 @@ jobs:
           # process exit code is 0.
           node scripts/shared/run-vitest-gate.mjs --shard=${{ matrix.shard }}/4
 
+      - name: Upload vitest shard ledger
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publish-package-vitest-ledger-shard-${{ matrix.shard }}
+          path: .audit-tools-profile/vitest-shard${{ matrix.shard }}of4-latest.json
+          if-no-files-found: ignore
+
   publish:
     needs: [gate, test]
     # Single package `audit-tools`: release tags are plain `vX.Y.Z`.

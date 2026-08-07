@@ -9,8 +9,12 @@ so there is no second copy to drift. §1 is the brief (what to do); §2 is the a
 proposed and why it is wrong — read it, or the refuted plan will be re-derived); §3–§4 are the evidence
 behind both.
 
-**Status:** implementation assigned outside this repo's agent loop by the owner, 2026-08-07. T5 is
-settled by owner decision; T1–T4 are unstarted.
+**Status:** T1–T3 + T5 landed 2026-08-07 (implemented outside this repo's agent loop; landed with
+two repairs — `sequence.sequencer` must be the imported class, not a string path, and the committed
+duration baseline must be COMPLETE, now generated via `npm run generate:shard-baseline` with a
+census guard). **T4 is open and unstarted** — it is the only task that lowers the achievable floor
+(the longest single test file bounds every shard), and its one-file-at-a-time red-green protocol
+below is unchanged.
 
 ---
 

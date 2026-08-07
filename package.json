@@ -86,10 +86,11 @@
     "check:backlog-status": "node scripts/check-backlog-status-tokens.mjs",
     "check:backlog-index": "node scripts/shared/generate-backlog-index.mjs --check",
     "test:rebaseline-flakes": "node scripts/shared/rebaseline-flakes.mjs",
-    "check:gate-enumeration": "node scripts/check-gate-enumeration.mjs"
+    "check:gate-enumeration": "node scripts/check-gate-enumeration.mjs",
+    "generate:shard-baseline": "node scripts/shared/generate-vitest-shard-baseline.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "commander": "^13.0.0",
@@ -100,10 +101,19 @@
     "zod-to-json-schema": "^3.24.6"
   },
   "devDependencies": {
+    "@kongyo2/similarity-ts": "^0.6.0",
     "@types/node": "^24.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.66.0",
+    "@typescript-eslint/parser": "^8.66.0",
+    "dependency-cruiser": "^18.1.1",
+    "eslint": "^10.8.0",
+    "eslint-plugin-sonarjs": "^4.2.0",
+    "jscpd": "^5.0.14",
     "knip": "^6.23.0",
     "linguist-languages": "^9.3.2",
+    "madge": "^8.0.0",
     "tree-sitter-wasms": "^0.1.13",
+    "ts-prune": "^0.10.3",
     "tsx": "^4.19.0",
     "typescript": "^5.9.2",
     "vitest": "^3.0.0",
