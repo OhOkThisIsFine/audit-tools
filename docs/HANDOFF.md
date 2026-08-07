@@ -5,35 +5,36 @@
 
 ## Live state
 
-- **Provider mid-run re-detection (ARC-e01faa3e) SHIPPED — item CLOSED (2026-08-07).** Three
-  commits: `80523ccf` (provider_unavailable classified/counted/pool-settling, all six
-  adjacent consumers handled, counter at the recordWaveOutcome chokepoint), `28e2b370`
-  (dead-provider identity captured at strand time; pause names it), `1b7299f9` (resume
-  excludes dead providers via the shared transport-keyed exclusion; remediate re-resolves
-  per invocation, needing no persisted carry). Design-check gated; the draft's open
-  questions got recorded dispositions in `1b7299f9`'s message (N-threshold DISSOLVED into
-  pool exhaustion; exclusion lifetime = the pause record; prompt names provider + PATH).
-- **The 2026-07-30 stack re-land is COMPLETE (same day, earlier):** 8/8 commits
-  (`b27f27d9`…`24d12f62`), branch deleted, backlog entry closed — record:
-  [`reviews/reland-review-2026-08-07.md`](reviews/reland-review-2026-08-07.md).
-- **Offload topology (2026-08-07):** this Desktop session bypassed headroom/llm-relay all
-  day (CC 2.1.223 launcher env wins; worked on 2.1.220 — the property flip-flops). The
-  owner applied a relay-side fix mid-session; it CANNOT take effect for an already-running
-  session — **verify by TRAFFIC at next session start** (headroom log mtime, relay observed
-  traffic, provider spend; never config): memory `claude-desktop-proxy-redirect-flip-flops`.
+- **v0.39.1 SHIPPED 2026-08-07 (niggle-fix lap).** Five commits (`5b721f34`…`12d5e7ca`): Stop
+  gates skip stops that are waits on live background work (the payload's `background_tasks` /
+  `session_crons` — memory `stop-payload-background-tasks-signal`); guard-reach registry
+  registered two live-but-unclaimed hook contract tests; free-form clause splitter no longer
+  breaks inside path tokens; `--guidance-file` + `--input` now produce an input-bound `mixed`
+  manifest (attested loop-core review, verdict CLEAN). The vitest "false-RED" backlog entry was
+  recharacterized to HEAD truth: the exit-code half was ALREADY closed by `run-vitest-gate`
+  (2026-07-24); the unlocated ≥60s blocking worker stays open in `open-bugs.md` with today's
+  mechanism-level diagnosis, and an offloaded candidate sweep (relay CLI lane) was in flight at
+  hand-back — its report lands in the session scratchpad, advisory only.
+- **Offload topology (2026-08-07, this session):** the Desktop→relay **CLI dispatch lane is
+  VERIFIED by traffic** (`llm-relay dispatch` rung `claude-deepseek-credits` started and
+  traversed the relay). The Desktop session's own `/v1/messages` remain pinned to
+  api.anthropic.com (CC 2.1.222 launcher env) — harness subagents spend primary quota; use
+  dispatch rungs for offload.
 
 ## Verification state
 
-- Item-close gates: 45/45 (exclusion + dc4 + audit dispatch), 139/139 (part-1 suites),
-  115/115 (part-2 suites); check + check:tests green at every commit; loop-core commits
-  attested. Full `npm test` last ran green at the re-land close (7,640/0); rerun at ship.
+- Full suite 7,674/0 (574 files) on the pre-commit tree 2026-08-07; release CI green for
+  v0.39.1 (run 31205859432); npm live at 0.39.1; global bins reinstalled + postinstall run,
+  both report 0.39.1. Loop-core commit `645973f4` attested (staged-tree-bound, agent class).
 
 ## Immediate next
 
 1. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — the one remaining pinned
-   item: live-run-watch properties. (v0.39.0 SHIPPED 2026-08-07 — re-landed stack +
-   re-detection; release CI green, npm live, bins reinstalled.)
-2. Host-memory chore (not repo work): `/consolidate-memory` — the memory index needs a real
+   item: live-run-watch properties.
+2. Nightly queue: **docs-1 awaits the owner** (version-pinned status sentence in
+   `spec/mechanical-analyzer-layer-design.md` — de-status vs. retire; answer via
+   `node scripts/nightly/answer.mjs docs-1 "<answer>"`).
+3. Host-memory chore (not repo work): `/consolidate-memory` — the memory index needs a real
    consolidation pass (pointer note at the top of `MEMORY.md`).
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
