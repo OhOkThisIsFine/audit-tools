@@ -110,7 +110,10 @@
 ## Verification state
 
 - Full `npm test` green at the merge (7,492 passed / 0 failed on `ecec16bc`, the merged tree —
-  byte-identical to `main` after `3a17ca8c`); `check` + `check:tests` both 0.
+  byte-identical to `main` after `3a17ca8c`); `check` + `check:tests` both 0. **CI fully green on
+  main at `1511f6b2`** (`ci` + `audit-code-test-suite`, 2026-08-07): the merge commit's `ci` run
+  passed directly; the interim budget-ratchet red on `44ad9fdb` (docs-only) was condensed away in
+  `1511f6b2`.
 - The pause/terminal persisted-state XOR inconsistency is recorded in `docs/backlog/open-bugs.md`.
 
 ## Immediate next
@@ -129,10 +132,6 @@
 2. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
    2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
    `open-bugs.md`.
-3. **Confirm CI green on the merge commit `3a17ca8c`** — both workflows went in_progress
-   2026-08-07T01:42Z when the GitHub Actions outage cleared. The previously queued run on
-   `8afb66d7` is superseded (its only completed-run "failure" was two outage-cancelled shards;
-   every shard that ran passed).
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
