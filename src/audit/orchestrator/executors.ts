@@ -34,6 +34,10 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["intent_equivalence_current"],
   },
   {
+    // Item B consent surfacing is a FOLD-LEVEL pause on this executor (see
+    // pendingAnalyzerConsent in hostInputPause.ts + the analyzer-consent branch
+    // in nextStepHelpers) — the same shape as the analyzer-install consent fold,
+    // not a separate registry obligation.
     id: "external_analyzer_acquisition_executor",
     kind: "deterministic",
     obligation_ids: ["external_analyzers_current"],

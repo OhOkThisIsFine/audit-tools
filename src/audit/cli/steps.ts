@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   writeStepContract,
   StepStatusSchema,
@@ -22,6 +24,7 @@ export const StepKindSchema = z.enum([
   "confirm_intent",
   "intent_equivalence",
   "analyzer_install",
+  "analyzer_consent",
   "edge_reasoning_dispatch",
   "critical_flow_fallback",
   "synthesis_narrative",
@@ -99,6 +102,34 @@ export type StepArtifact = z.infer<typeof StepArtifactSchema>;
  * Audit's optional fields (progress, allowed_mcp_tools, access) ride through
  * `extraFields` with the same conditional-omission semantics as before.
  */
+/**
+ * One-line scope echo rendered into EVERY step prompt from the persisted
+ * `scope_summary.json` the intake executor writes. Previously the echo lived
+ * only in the host loader instructions, keyed to "after the FIRST next-step
+ * (the intake step)" — so a RESUMED run (which never re-runs intake) silently
+ * skipped it (2026-08-05 friction, ambiguous_direction). Tool-rendered here,
+ * fresh and resumed steps carry the same line and no host has to remember.
+ * Lenient: no/malformed summary file → no line.
+ */
+export function scopeEchoLine(artifactsDir: string): string | null {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(artifactsDir, "scope_summary.json"), "utf8"),
+    ) as { repo_root?: unknown; auditable_file_count?: unknown; git_available?: unknown };
+    if (
+      typeof parsed.repo_root !== "string" ||
+      typeof parsed.auditable_file_count !== "number"
+    ) {
+      return null;
+    }
+    const git =
+      parsed.git_available === true ? "yes" : parsed.git_available === false ? "no" : "unknown";
+    return `> Scope: auditing \`${parsed.repo_root}\` — ${parsed.auditable_file_count} files, git: ${git}.`;
+  } catch {
+    return null;
+  }
+}
+
 export async function writeCurrentStep(params: {
   artifactsDir: string;
   stepKind: StepKind;
@@ -113,6 +144,7 @@ export async function writeCurrentStep(params: {
   prompt: string;
   access?: AccessDeclaration;
 }): Promise<StepArtifact> {
+  const echo = scopeEchoLine(params.artifactsDir);
   return writeStepContract<StepArtifact, StepKind, string | null>({
     contractVersion: STEP_CONTRACT_VERSION,
     stepKind: params.stepKind,
@@ -122,7 +154,7 @@ export async function writeCurrentStep(params: {
     stopCondition: params.stopCondition,
     repoRoot: params.repoRoot,
     artifactsDir: params.artifactsDir,
-    prompt: params.prompt,
+    prompt: echo ? `${echo}\n\n${params.prompt}` : params.prompt,
     artifactPaths: params.artifactPaths,
     extraFields: {
       // Optional audit fields keep their conditional-omission semantics; they

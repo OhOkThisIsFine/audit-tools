@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { readdirSync } from "node:fs";
+import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
 import type { ExternalAnalyzerCandidate } from "./acquisitionEngine.js";
 import {
   detectNodeEcosystem,
@@ -123,7 +125,13 @@ const gitleaksCandidate: ExternalAnalyzerCandidate = {
   id: "gitleaks",
   runner: "binary",
   spec: GITLEAKS_VERSION,
+  purpose: "hardcoded secrets and credentials committed to the repo",
   binary: GITLEAKS_BINARY,
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
   defaultRun: true,
   // Secrets can hide in any repo regardless of ecosystem — always applicable.
   detect: () => true,
@@ -177,8 +185,14 @@ function parseSemgrep(stdout: string): ReturnType<ExternalAnalyzerCandidate["par
 const semgrepCandidate: ExternalAnalyzerCandidate = {
   id: "semgrep",
   runner: "pipx",
-  spec: "semgrep",
-  // CONSENT-GATED: pulls rule sets and is heavier; only runs with a consent token.
+  spec: "semgrep==1.63.0",
+  purpose: "security and correctness anti-patterns via community rule sets (pulls rules from the network)",
+  safetyProfile: {
+    config_execution: "inert-data",
+    network_egress: true,
+    version_pinning: "pinned",
+  },
+  // CONSENT-GATED: pulls rule sets from network and is heavier; only runs with a consent token.
   defaultRun: false,
   detect: (root) => detectPythonEcosystem(root) || detectNodeEcosystem(root),
   buildArgv: (prefix, root) => [...prefix, "--json", "--quiet", "--config", "auto", root],
@@ -224,7 +238,13 @@ const eslintCandidate: ExternalAnalyzerCandidate = {
   id: "eslint",
   runner: "npx",
   spec: "eslint@9",
-  // CONSENT-GATED: needs a repo eslint config to be meaningful.
+  purpose: "JS/TS lint findings using the repo's own eslint config",
+  safetyProfile: {
+    config_execution: "executable",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // CONSENT-GATED: needs a repo eslint config to be meaningful; config can execute code.
   defaultRun: false,
   detect: (root) => detectNodeEcosystem(root),
   buildArgv: (prefix, root) => [...prefix, "--format", "json", root],
@@ -326,9 +346,15 @@ const knipCandidate: ExternalAnalyzerCandidate = {
   id: "knip",
   runner: "npx",
   spec: "knip@6",
-  // CONSENT-GATED: needs repo config to avoid noise, and every flag here is an
-  // unverified lead (no graph cross-check yet — see docs/backlog.md), not a
-  // confirmed finding; same tier as eslint/semgrep.
+  purpose: "unused files, dependencies, and exports (leads, not verdicts)",
+  safetyProfile: {
+    config_execution: "executable",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // CONSENT-GATED: needs repo config to avoid noise, config can execute code,
+  // and every flag here is an unverified lead (no graph cross-check yet — see
+  // docs/backlog.md), not a confirmed finding; same tier as eslint/semgrep.
   defaultRun: false,
   detect: (root) => detectNodeEcosystem(root),
   // No positional/cwd flag needed: the acquisition engine already spawns with
@@ -344,6 +370,85 @@ const knipCandidate: ExternalAnalyzerCandidate = {
   ],
   parse: parseKnip,
 };
+
+/**
+ * Detect if a repo contains source files that Lizard can analyze.
+ * Lizard supports: python, rust, ruby, java, go, cpp, c, kotlin.
+ * Returns true if any such sources exist.
+ */
+/**
+ * Non-JS/TS languages lizard covers (the in-tree `computeComplexityMetric` owns
+ * JS/TS — one signal source per file class, no double-reporting). SOURCE-based
+ * detection: ecosystem markers miss exactly the languages that need lizard most
+ * (Java/Go/C/C++/Kotlin have no manifest the ecosystem detectors read), so a
+ * bounded repo walk over extensions is the honest applicability signal, and the
+ * same walk derives the `-l` filter so the argv can never name a language the
+ * repo does not contain.
+ */
+const LIZARD_LANGUAGE_EXTENSIONS: ReadonlyArray<{ lang: string; exts: readonly string[] }> = [
+  { lang: "c", exts: [".c", ".h"] },
+  { lang: "cpp", exts: [".cpp", ".cc", ".cxx", ".hpp"] },
+  { lang: "go", exts: [".go"] },
+  { lang: "java", exts: [".java"] },
+  { lang: "kotlin", exts: [".kt", ".kts"] },
+  { lang: "python", exts: [".py"] },
+  { lang: "ruby", exts: [".rb"] },
+  { lang: "rust", exts: [".rs"] },
+];
+
+const LIZARD_WALK_SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "vendor",
+  AUDIT_TOOLS_DIRNAME,
+]);
+const LIZARD_WALK_MAX_ENTRIES = 5_000;
+
+/**
+ * The lizard-supported languages whose sources exist under `root` — a bounded
+ * breadth-first walk (entry-capped, common build/dep dirs skipped), sorted for
+ * stable argv output. Degrades to [] on any fs error.
+ */
+function detectedLizardLanguages(root: string): string[] {
+  const extToLang = new Map<string, string>();
+  for (const { lang, exts } of LIZARD_LANGUAGE_EXTENSIONS) {
+    for (const ext of exts) extToLang.set(ext, lang);
+  }
+  const found = new Set<string>();
+  const queue: string[] = [root];
+  let seen = 0;
+  while (queue.length > 0 && seen < LIZARD_WALK_MAX_ENTRIES) {
+    const dir = queue.shift()!;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (++seen >= LIZARD_WALK_MAX_ENTRIES) break;
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith(".") || LIZARD_WALK_SKIP_DIRS.has(entry.name)) continue;
+        queue.push(join(dir, entry.name));
+        continue;
+      }
+      const dot = entry.name.lastIndexOf(".");
+      if (dot < 0) continue;
+      const lang = extToLang.get(entry.name.slice(dot).toLowerCase());
+      if (lang) found.add(lang);
+    }
+    if (found.size === LIZARD_LANGUAGE_EXTENSIONS.length) break;
+  }
+  return [...found].sort();
+}
+
+function detectLizardSources(root: string): boolean {
+  return detectedLizardLanguages(root).length > 0;
+}
 
 /** Deterministic per-process output directory for jscpd's JSON reporter. */
 function jscpdReportDir(): string {
@@ -407,8 +512,17 @@ const jscpdCandidate: ExternalAnalyzerCandidate = {
   id: "jscpd",
   runner: "npx",
   spec: "jscpd@4",
-  // CONSENT-GATED: heavier full-repo duplication scan; unverified lead, same
-  // tier as eslint/semgrep/knip.
+  purpose: "copy-pasted/duplicated code blocks across the repo",
+  safetyProfile: {
+    config_execution: "executable",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // Duplication scanner: jscpd uses cosmiconfig which loads .jscpd.js files
+  // (executable config). While jscpd supports --config flag, it is unverified
+  // whether explicit --config suppresses cosmiconfig discovery of .jscpd.js.
+  // Stay gated until verified. Candidate for future promotion if cosmiconfig
+  // can be reliably disabled.
   defaultRun: false,
   detect: (root) => detectNodeEcosystem(root),
   buildArgv: (prefix, root) => [
@@ -534,7 +648,13 @@ const osvScannerCandidate: ExternalAnalyzerCandidate = {
   id: "osv-scanner",
   runner: "binary",
   spec: OSV_SCANNER_VERSION,
+  purpose: "known-vulnerable dependency versions (queries the OSV.dev database over the network)",
   binary: OSV_SCANNER_BINARY,
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: true,
+    version_pinning: "pinned",
+  },
   // CONSENT-GATED: network-dependent (queries the OSV vulnerability database)
   // and heavier than gitleaks — same tier as semgrep/eslint/knip/jscpd.
   defaultRun: false,
@@ -554,6 +674,12 @@ const clippyCandidate: ExternalAnalyzerCandidate = {
   runner: "cargo",
   // The `cargo` runner prefix is `["cargo", spec]`; spec is the cargo subcommand.
   spec: "clippy",
+  purpose: "Rust lint findings (compiles the crate via the cargo toolchain)",
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "toolchain-resolved",
+  },
   // CONSENT-GATED: compiles the crate (heavier), needs the Rust toolchain.
   defaultRun: false,
   detect: (root) => detectRustEcosystem(root),
@@ -572,7 +698,14 @@ const rubocopCandidate: ExternalAnalyzerCandidate = {
   runner: "bundle",
   // The `bundle` runner prefix is `["bundle", "exec", spec]`.
   spec: "rubocop",
-  // CONSENT-GATED: needs the project's bundle/ruby toolchain + rubocop config.
+  purpose: "Ruby style and correctness findings using the repo bundle",
+  safetyProfile: {
+    config_execution: "executable",
+    network_egress: false,
+    version_pinning: "toolchain-resolved",
+  },
+  // CONSENT-GATED: needs the project's bundle/ruby toolchain + rubocop config;
+  // .rubocop.yml can have require: directives that execute code.
   defaultRun: false,
   detect: (root) => detectRubyEcosystem(root),
   // Read-only: NO `--autocorrect`/`-a`/`-A`. `--format json` → single JSON doc.
@@ -653,9 +786,15 @@ const hadolintCandidate: ExternalAnalyzerCandidate = {
   id: "hadolint",
   runner: "binary",
   spec: HADOLINT_VERSION,
+  purpose: "Dockerfile best-practice violations",
   binary: HADOLINT_BINARY,
-  // CONSENT-GATED: same tier as the other acquired binaries.
-  defaultRun: false,
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // Fast, safe, pinned Dockerfile linter — member of the default set.
+  defaultRun: true,
   detect: (root) => detectDockerEcosystem(root),
   // Read-only by nature (a linter). `--format json`; lint the repo's Dockerfile.
   buildArgv: (prefix, root) => [...prefix, "--format", "json", join(root, "Dockerfile")],
@@ -739,9 +878,15 @@ const actionlintCandidate: ExternalAnalyzerCandidate = {
   id: "actionlint",
   runner: "binary",
   spec: ACTIONLINT_VERSION,
+  purpose: "GitHub Actions workflow errors",
   binary: ACTIONLINT_BINARY,
-  // CONSENT-GATED: same tier as the other acquired binaries.
-  defaultRun: false,
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // Fast, safe, pinned GitHub Actions workflow linter — member of the default set.
+  defaultRun: true,
   detect: (root) => detectGithubActionsEcosystem(root),
   // Read-only by nature. `-format '{{json .}}'` → JSON array on stdout; run with
   // cwd=root so actionlint discovers `.github/workflows/` itself.
@@ -792,13 +937,134 @@ const typeCoverageCandidate: ExternalAnalyzerCandidate = {
   id: "type-coverage",
   runner: "npx",
   spec: "type-coverage@2",
-  // CONSENT-GATED: needs a TS project; same tier as eslint/knip.
-  defaultRun: false,
+  purpose: "per-file TypeScript any-coverage gaps",
+  safetyProfile: {
+    config_execution: "inert-data",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // Fast type coverage reporter for TS projects — member of the default set.
+  // Reads tsconfig (inert-data) but does not execute code.
+  defaultRun: true,
   detect: (root) => detectNodeEcosystem(root),
   // Read-only. `--json --detail` prints per-`any` sites as JSON on stdout; run
   // with cwd=root so it resolves the project tsconfig itself.
   buildArgv: (prefix) => [...prefix, "--json", "--detail"],
   parse: parseTypeCoverage,
+};
+
+// ---------------------------------------------------------------------------
+// lizard — Multi-language complexity metrics via pipx (read-only).
+// ---------------------------------------------------------------------------
+/**
+ * Parse a line of CSV, handling quoted fields that may contain commas.
+ * CSV format: "NLOC,CCN,Token,PARAM,Length,Location,File,Function"
+ * Quoted fields are surrounded by double quotes and internal quotes are doubled.
+ */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote: add one quote and skip the next
+        current += '"';
+        i++;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      // Field separator (only when not inside quotes)
+      fields.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  // Add the last field
+  fields.push(current.trim());
+  return fields;
+}
+
+/**
+ * Parse lizard's CSV output (default: `lizard -l <languages> --csv <path>`).
+ * CSV format: "NLOC,CCN,Token,PARAM,Length,Location,File,Function"
+ * Degrades to `[]` on parse failure; reports lead findings for complexity overages.
+ */
+function parseLizard(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  if (!stdout || stdout.trim().length === 0) {
+    return [];
+  }
+  const lines = stdout.trim().split("\n");
+  if (lines.length < 2) return []; // CSV header only, no data rows
+  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  // Skip the CSV header (line 0) and process data rows
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    // Parse CSV line, handling quoted fields with embedded commas
+    const parts = parseCsvLine(line);
+    if (parts.length < 8) continue;
+    const nloc = parseInt(parts[0], 10);
+    const ccn = parseInt(parts[1], 10);
+    const param = parseInt(parts[3], 10);
+    const file = parts[6] || "";
+    const func = parts[7] || "unknown";
+    if (!file || isNaN(nloc) || isNaN(ccn) || isNaN(param)) continue;
+    // Emit leads for complexity overages: CCN > 10, NLOC > 200, PARAM > 5
+    const issues: Array<{ rule: string; threshold: number; actual: number }> = [];
+    if (ccn > 10) issues.push({ rule: "lizard-ccn", threshold: 10, actual: ccn });
+    if (nloc > 200) issues.push({ rule: "lizard-length", threshold: 200, actual: nloc });
+    if (param > 5) issues.push({ rule: "lizard-params", threshold: 5, actual: param });
+    for (const issue of issues) {
+      items.push({
+        id: `${issue.rule}:${file}:${func}`,
+        category: "maintainability",
+        // Threshold bands (leads only, never verdicts): ≥2× the threshold is a
+        // stronger lead than a marginal overage.
+        severity: issue.actual >= issue.threshold * 2 ? "medium" : "low",
+        path: file,
+        summary: `lizard: ${func} — ${issue.rule} ${issue.actual} exceeds threshold ${issue.threshold}`,
+        rule: issue.rule,
+      });
+    }
+  }
+  return items;
+}
+
+const lizardCandidate: ExternalAnalyzerCandidate = {
+  id: "lizard",
+  runner: "pipx",
+  spec: "lizard==1.17.10",
+  purpose: "oversized/over-complex functions in non-JS/TS languages",
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
+  // Multi-language complexity metrics for non-JS/TS languages — member of the default set.
+  // Runs only when non-JS/TS supported languages are detected.
+  // Note: Lizard cannot analyze Dockerfiles, so Docker-only repos are excluded.
+  defaultRun: true,
+  detect: detectLizardSources,
+  // Read-only. `--csv` format; the `-l` filter is DERIVED from the same bounded
+  // source walk detect() ran, so the argv names exactly the languages the repo
+  // contains (JS/TS stay excluded — the in-tree metric owns them).
+  buildArgv: (prefix, root) => [
+    ...prefix,
+    "-l",
+    detectedLizardLanguages(root).join(","),
+    "--csv",
+    root,
+  ],
+  parse: parseLizard,
 };
 
 /** The curated external analyzer candidate set. gitleaks is the default member. */
@@ -814,6 +1080,7 @@ export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   hadolintCandidate,
   actionlintCandidate,
   typeCoverageCandidate,
+  lizardCandidate,
 ];
 
 export {
@@ -839,4 +1106,6 @@ export {
   ACTIONLINT_VERSION,
   typeCoverageCandidate,
   parseTypeCoverage,
+  lizardCandidate,
+  parseLizard,
 };

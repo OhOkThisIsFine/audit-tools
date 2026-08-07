@@ -50,6 +50,8 @@ import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
   nextStepCommand,
+  persistAuditorHandshake,
+  renderAnalyzerConsentPrompt,
   renderAnalyzerInstallPrompt,
   renderEdgeReasoningDispatchPrompt,
   renderPresentReportPrompt,
@@ -313,6 +315,11 @@ async function cmdNextStepBody(
     ...(hostSources !== undefined ? { sources: hostSources } : {}),
   };
 
+  // au-1 (2026-08-05 friction): persist the resolved handshake once (write-if-
+  // changed) so every continue-command below references it as `--auditor @<file>`
+  // instead of re-echoing the full JSON into every step prompt.
+  persistAuditorHandshake(artifactsDir, hostDescriptor);
+
   // G2: the EFFECTIVE dispatch config every dispatch/provider consumer reads — the
   // per-auditor descriptor (`self.provider` + launch blocks + `sources[]`) resolved over
   // the repo INTENT (`resolveSessionConfig`, spec/unified-dispatch-worker-model.md). The
@@ -343,6 +350,9 @@ async function cmdNextStepBody(
       enabled: intent.external_acquisition?.enabled !== false,
       consentToken: intent.external_acquisition?.consent_token,
       analyzers: intent.analyzers,
+      // Item B: recorded consent decisions ride into admission (granted admits
+      // without a token) and into the consent fold's pending computation.
+      analyzerConsent: intent.analyzer_consent,
     },
     since: getFlag(argv, "--since"),
     // G2: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
@@ -1054,6 +1064,36 @@ async function cmdNextStepBody(
         unresolvedConstraintClauses: unresolvedConstraintClauses(
           result.bundle.intent_checkpoint,
         ),
+      }),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "analyzer_consent") {
+    const decisionsPath = join(
+      artifactsDir,
+      "incoming",
+      "analyzer-consent-decisions.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "analyzer_consent",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Present the consent offer to the operator, write their decisions to the decisions path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        analyzer_consent_decisions: decisionsPath,
+      },
+      prompt: renderAnalyzerConsentPrompt({
+        pending: result.pending,
+        decisionsPath,
+        continueCommand,
       }),
     });
     console.log(JSON.stringify(step, null, 2));

@@ -36,6 +36,12 @@ export interface ExternalAcquisitionAdvanceOptions {
   consentToken?: string;
   /** Per-analyzer resolution policy (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
+  /**
+   * Item B: recorded consent decisions from session config. A recorded
+   * "granted" admits a non-default candidate without a per-run token; a
+   * per-run token still overrides a recorded "declined".
+   */
+  analyzerConsent?: Record<string, "granted" | "declined">;
   /** Override the binary cache dir / platform / arch (tests). */
   cacheDir?: string;
   platform?: NodeJS.Platform;
@@ -100,6 +106,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
       run: options.run,
       consentToken: options.consentToken,
       analyzers: options.analyzers,
+      analyzerConsent: options.analyzerConsent,
       cacheDir: options.cacheDir,
       platform: options.platform,
       arch: options.arch,
@@ -111,6 +118,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     resolvedBinaries,
     consentToken: options.consentToken,
     analyzers: options.analyzers,
+    analyzerConsent: options.analyzerConsent,
   });
 
   let mergedResults = bundle.external_analyzer_results;

@@ -10,6 +10,7 @@ import {
   resolveAnalyzerPlan,
   needsInstallDecision,
 } from "../extractors/analyzers/registry.js";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "../extractors/analyzers/candidates.js";
 
 /**
  * Inputs the fold-level host-input pauses depend on. These mirror the fields the
@@ -25,6 +26,12 @@ export interface HostInputPauseInputs {
   analyzers?: Record<string, AnalyzerSetting>;
   /** Phase 4B gate: low-confidence edge-reasoning host turn only fires when true. */
   graphLlmEdgeReasoning?: boolean;
+  /** Item B: acquisition gate — the consent fold only fires when acquisition is live. */
+  externalAcquisitionEnabled?: boolean;
+  /** Item B: recorded per-candidate consent decisions (session config). */
+  analyzerConsent?: Record<string, "granted" | "declined">;
+  /** Item B: a per-run token admits everything this run — nothing is owed an offer. */
+  acquisitionConsentToken?: string;
 }
 
 /**
@@ -51,6 +58,37 @@ export function graphEnrichmentUnresolvedAnalyzers(
   return resolveAnalyzerPlan(inputs.root, inputs.analyzers, includedFiles).filter(
     needsInstallDecision,
   );
+}
+
+/**
+ * Item B (consent surfacing): the consent-gated analyzer candidates that are
+ * APPLICABLE to this repo and have NO recorded decision — the set the operator
+ * is still owed a batched offer on. The SINGLE source of the analyzer-consent
+ * fold, consumed by BOTH the `next-step` fold (which relays the list as the
+ * offer step) and the drain stop predicate (which halts before the acquisition
+ * executor would silently skip them — the silent-fail-closed defect the
+ * mechanical-analyzer-layer program exists to fix). Nothing is owed when
+ * acquisition is off, a per-run token admits everything, or a candidate has a
+ * recorded decision (declined is never re-offered) / `skip` setting.
+ */
+export function pendingAnalyzerConsent(
+  inputs: HostInputPauseInputs,
+): typeof EXTERNAL_ANALYZER_CANDIDATES {
+  if (inputs.externalAcquisitionEnabled !== true || !inputs.root) return [];
+  if (inputs.acquisitionConsentToken && inputs.acquisitionConsentToken.trim().length > 0) {
+    return [];
+  }
+  const root = inputs.root;
+  return EXTERNAL_ANALYZER_CANDIDATES.filter((candidate) => {
+    if (candidate.defaultRun) return false;
+    if (inputs.analyzers?.[candidate.id] === "skip") return false;
+    if (inputs.analyzerConsent?.[candidate.id] !== undefined) return false;
+    try {
+      return candidate.detect(root);
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -102,6 +140,12 @@ export function nextStepPausesForHostInput(
   if (executor === "graph_enrichment_executor") {
     if (graphEnrichmentUnresolvedAnalyzers(bundle, inputs).length > 0) return true;
     if (graphEnrichmentLowConfidenceEdges(bundle, inputs).length > 0) return true;
+  }
+  // Item B fold-level pause: the acquisition executor is registered deterministic,
+  // but running it while applicable consent-gated candidates are undecided would
+  // silently skip them — the fold owes the operator the batched offer first.
+  if (executor === "external_analyzer_acquisition_executor") {
+    if (pendingAnalyzerConsent(inputs).length > 0) return true;
   }
   return false;
 }

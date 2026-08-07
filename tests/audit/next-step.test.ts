@@ -146,6 +146,14 @@ async function advancePastDesignReview(
       );
       continue;
     }
+    if (step.step_kind === "analyzer_consent") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "analyzer-consent-decisions.json"),
+        JSON.stringify({ semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" }, null, 2) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "analyzer_install") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
@@ -256,6 +264,29 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
 
+    // Item B: on an applicable repo the FIRST pause is now the batched
+    // analyzer-consent offer (external analyzers precede graph enrichment).
+    // Answer it (decline everything) and the pipeline proceeds to the
+    // analyzer-install pause under test.
+    const consent = JSON.parse(
+      (await runWrapper(["next-step"], { cwd: root, env })).stdout,
+    );
+    expect(consent.step_kind).toBe("analyzer_consent");
+    expect(consent.artifact_paths.analyzer_consent_decisions).toMatch(
+      /analyzer-consent-decisions\.json$/,
+    );
+    const consentPrompt = await readFile(consent.prompt_path, "utf8");
+    expect(consentPrompt).toMatch(/eslint/);
+    expect(consentPrompt).toMatch(/"granted"/);
+    await writeFile(
+      consent.artifact_paths.analyzer_consent_decisions,
+      JSON.stringify(
+        { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
+        null,
+        2,
+      ) + "\n",
+    );
+
     const proposed = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
@@ -277,11 +308,13 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
     );
     expect(next.step_kind).not.toBe("analyzer_install");
 
-    // The decision is persisted durably to session config.
+    // Both decisions persist durably to session config: the install skip AND
+    // the consent declines (Item B — decisions durable, tokens never).
     const config = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "session-config.json"), "utf8"),
     );
     expect(config.analyzers.typescript).toBe("skip");
+    expect(config.analyzer_consent.eslint).toBe("declined");
   });
 });
 

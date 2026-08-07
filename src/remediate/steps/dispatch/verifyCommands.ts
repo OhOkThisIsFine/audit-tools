@@ -209,6 +209,48 @@ export function partitionDeferredVerifyCommands(
 }
 
 /**
+ * cg-1: collapse the per-node DEFERRED verify commands into the close gate's
+ * single residual run. Exact-duplicate commands collapse to one (first-seen
+ * order); when the close phase's own full-suite leg ran green
+ * (`fullSuiteCovers`), any command that leg already covers is SUBSUMED and
+ * dropped — a whole-suite runner invocation, or a vitest run whose path tokens
+ * are all test files (the full vitest sweep runs every test file). Everything
+ * else (e.g. `npm run check`, dist-spawning scripts) survives as the residual
+ * the close gate must run exactly once. The 2026-08-06 run drained the raw
+ * per-node lists verbatim — duplicate full `tests/audit` passes, a 2h close.
+ */
+export function dedupeDeferredVerifyCommands(
+  deferred: Iterable<string>,
+  opts: { fullSuiteCovers: boolean },
+): { residual: string[]; subsumed: string[] } {
+  const residual: string[] = [];
+  const subsumed: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of deferred) {
+    const cmd = raw.trim();
+    if (cmd.length === 0 || seen.has(cmd)) continue;
+    seen.add(cmd);
+    if (opts.fullSuiteCovers && isSubsumedByFullSuite(cmd)) {
+      subsumed.push(cmd);
+      continue;
+    }
+    residual.push(cmd);
+  }
+  return { residual, subsumed };
+}
+
+/** A green full-suite leg covers whole-suite runs and test-file-only vitest runs. */
+function isSubsumedByFullSuite(cmd: string): boolean {
+  if (isWholeSuiteTestCommand(cmd)) return true;
+  if (!/\bvitest\b/.test(cmd)) return false;
+  const tokens = pathTokensInCommand(cmd);
+  return (
+    tokens.length > 0 &&
+    tokens.every((t) => /\.test\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(t))
+  );
+}
+
+/**
  * Repo-relative path-like tokens in a shell command — tokens containing a `/` and a
  * file extension (e.g. `scripts/remediate/verify-hosts.mjs`, `tests/x.test.ts`).
  * Used to decide whether a targeted verify command is self-contained.

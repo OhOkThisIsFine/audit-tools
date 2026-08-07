@@ -285,6 +285,17 @@ function buildLensPropositions(
     return base.endsWith(".yaml") || base.endsWith(".yml");
   });
 
+  // Logging/metrics-surface signal (kind contains logging/metrics/telemetry, or path heuristics).
+  const hasLoggingMetricsSurface = units.some((u) => {
+    const kind = (u.kind ?? "").toLowerCase();
+    return kind.includes("logging") || kind.includes("metrics") || kind.includes("telemetry") ||
+      kind.includes("observability") || kind.includes("tracing");
+  }) || inScopePaths.some((p) => {
+    const norm = normalizeExtractorPath(p);
+    return norm.includes("/logging/") || norm.includes("/metrics/") || norm.includes("/tracing/") ||
+      norm.includes("/observability/") || norm.includes("logger.") || norm.includes("metric");
+  });
+
   // Structural-complexity signal: code spread across more than one top-level dir.
   const topDirs = new Set(
     inScopePaths.map((p) => normalizeExtractorPath(p).split("/")[0] || "."),
@@ -344,7 +355,9 @@ function buildLensPropositions(
         break;
       case "observability":
         propositions.push(
-          exclude(lens, "no logging/metrics surface detected in scope"),
+          hasLoggingMetricsSurface
+            ? include(lens, "logging, metrics, or tracing surfaces detected in scope")
+            : exclude(lens, "heuristic default: the scan patterns matched zero logging/metrics/tracing surfaces"),
         );
         break;
       case "maintainability":

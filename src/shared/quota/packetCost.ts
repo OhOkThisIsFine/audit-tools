@@ -6,21 +6,16 @@
 // binding rate-limit constraint. Reserving on input alone systematically
 // under-reserves. So a reservation is `input_estimate + output_reservation`, where
 // the output reservation is:
-//   - the LEARNED output/input ratio for the (resourceKey, lens) once completions
-//     have measured it (`input_estimate * ratio`), else
 //   - the packet's DECLARED output cap as a cold-start envelope, else
 //   - zero (no output signal at all — input-only; the reactive floor still catches
 //     any under-reservation).
 //
-// Pure functions: the caller supplies the learned ratio (from quota-state
-// `output_per_input[lens]`) and the declared cap; this module never reads state.
+// Pure functions: the caller supplies the declared cap; this module never reads state.
 
 export interface OutputReservationInput {
   /** Deterministic input token estimate for the packet. */
   inputEstimate: number;
-  /** Learned output/input ratio for the (resourceKey, lens); null/absent at cold start. */
-  learnedRatio?: number | null;
-  /** Packet's declared output cap — the cold-start envelope when no ratio is learned. */
+  /** Packet's declared output cap — the cold-start envelope. */
   declaredOutputCap?: number | null;
 }
 
@@ -36,16 +31,14 @@ function positiveFinite(value: number | null | undefined): number | null {
 }
 
 /**
- * Resolve the output-token envelope to reserve for a packet. Prefers the learned
- * ratio (measured reality), falls back to the declared cap (cold start), then to 0
- * (no signal). Never throws; a non-positive/non-finite input estimate yields a 0
- * envelope regardless (nothing meaningful to scale).
+ * Resolve the output-token envelope to reserve for a packet. Falls back to the
+ * declared cap (cold start), then to 0 (no signal). Never throws; a non-positive/
+ * non-finite input estimate yields a 0 envelope regardless (nothing meaningful to
+ * scale).
  */
 export function resolveOutputReservation(input: OutputReservationInput): number {
   const inputEstimate = positiveFinite(input.inputEstimate);
   if (inputEstimate === null) return 0;
-  const ratio = positiveFinite(input.learnedRatio);
-  if (ratio !== null) return inputEstimate * ratio;
   const declared = positiveFinite(input.declaredOutputCap);
   if (declared !== null) return declared;
   return 0;

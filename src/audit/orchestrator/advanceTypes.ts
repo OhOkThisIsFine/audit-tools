@@ -72,6 +72,13 @@ export interface AdvanceAuditOptions {
   sessionConfig?: SessionConfig;
   /** Current invocation's resolved partition capacity; transient and never persisted. */
   workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
+  /**
+   * INTERNAL — the liveness heartbeat `advanceAudit` creates for its own call;
+   * `runSingleAdvanceStep` labels each beat with the selected obligation.
+   * Closure-scoped per call (never module state), so concurrent calls cannot
+   * cross-talk. Callers never set this.
+   */
+  heartbeat?: { setLabel: (label: string) => void; stop: () => void };
 }
 
 export interface AdvanceAuditResult {

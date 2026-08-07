@@ -5,133 +5,52 @@
 
 ## Live state
 
-- **Prompt/process critique: design SETTLED 2026-08-05, ready to implement.** Four green-lit
-  atomic changes — uniform id-join contract (hard-fail everywhere), always-materialized fan-out
-  (no capability branch), scope-confirmation context (both halves), charter scope-by-feeding with
-  stated/structural/revealed estimators + downstream triangulated telos. Settled spec:
-  §"Design resolutions" in
-  [`reviews/prompt-process-critique-2026-08-05.md`](reviews/prompt-process-critique-2026-08-05.md);
-  hook in `backlog/forward-tracks.md`. **Change 1 (uniform id-join contract) SHIPPED 2026-08-05**
-  after `/design-check` + owner carve-out ruling (merge keeps OBL-INV-RSD-01; hard-fail lives at
-  the resolution/ingest gates): review/ambiguity/clarification/triage/intake gates refuse unknown
-  ids whole (archive + re-halt with the valid set), fuzzy alias remap deleted with a bounded
-  re-dispatch cap (`implement-redispatch-attempts.json` sidecar), synthesis narrative refuses
-  unknown `finding_ids`. Independent loop-core review: approve (agy Sonnet 4.6).
-  **Change 2 (always-materialized fan-out): `/design-check` DONE 2026-08-05** — implementable,
-  retirement-clean, red test pinned (`it.fails` in `tests/audit/semantic-review-step.test.ts`);
-  record in the review doc. **Change 2 IMPLEMENTED 2026-08-05** (single atomic replace, this
-  commit): shared lane materializer (`fanoutLanes.ts` + `renderFanoutExecutionLines` +
-  lane-class-conditional `renderIndependentReviewMandate` in `src/shared/prompts.ts`), all
-  emitters converted (charter per-kind blind lanes with multi-lane kind-purity ingest;
-  charter-delta/systemic/critical-flow/synthesis/edge lanes; `single_task_fallback` + inline
-  `edge_reasoning` step kinds deleted), handshake-less hosts degrade to one-task-per-packet with
-  a loud `unknown_host_window` warning (never refused). Verified: full suite green, 17-agent
-  adversarial review (9 confirmed findings fixed or comment-hardened, 2 refuted by mechanism).
-  **Change 3 (scope-confirmation context) SHIPPED 2026-08-05** (`91f5f375` design-check gate,
-  `52d9b25c` implementation): lens-tagged design-assessment evidence overlays the heuristic lens
-  dispositions (widens exclude→include only; empty/auto-completed is no-signal), and the new
-  deterministic `docs_digest` artifact renders the repo's stated purpose into the confirm-intent
-  prompt (`docs_digest_current` before the checkpoint; `intent_checkpoint.json` stays a DAG leaf).
-  Gate + implementation records in the review doc; 4-lens/8-agent post-implementation review, 2
-  findings fixed+pinned, full suite 7,412/0. **Change 4 (charter layer) IMPLEMENTED 2026-08-06**
-  (owner go in chat, with the telos-as-reactable-opinion gloss): channel-pure estimator kinds
-  stated/structural/revealed (schema migration `charter-register/v2`, DISCARD read policy),
-  scope-by-feeding evidence packets (`charterPackets.ts`; comment grammar single-sourced in
-  `commentDecomposition.ts`), teleology-first lane submissions joined by file-set overlap
-  (decomposition = hint), delta miner = triangulation engine (triangulated telos + tool-counted
-  disagreement density, rendered beside the clarification questions; True nominations at deepest
-  only), vestigial checkpoint charter embeds deleted, new `graph_bundle.json` register edge +
-  member-scoped slice. Design-check + implementation records in the review doc; 4-lens pre-commit
-  adversarial review (5 findings, all 5 refuted by mechanism); full suite 7,438/0. Shipped as
-  **v0.36.0** (`3fb84823` + `c58cb065`; release CI green, npm live, global bins reinstalled).
-  **All four critique-cluster changes are now SHIPPED** — nothing remains from the cluster.
-- **Dogfood self-audit COMPLETED 2026-08-06** (run `20260806T054657426Z_audit_tasks_completed_001`
-  on `2b6ba83e`, v0.36.0, offload ON): **1,925 findings / 133 work blocks** promoted to
-  `.audit-tools/audit-report.md` + `audit-findings.json` (9 critical / 125 high). First live
-  exercise of charter-layer v2 (worked end-to-end; one stated-lane quarantine repaired) and the
-  designated live-run-watch re-test — 5 of the 2026-08-05 minor-friction items **confirmed still
-  live**. Post-run same-day (shipped **v0.36.1**): all 9 criticals adversarially verified — 0
-  survived as critical (3 refuted, 6 downgraded → `open-bugs.md`) — and the run's 3 tool-side
-  defect leads were FIXED (malformed-lane quarantine at the shared consume chokepoint, submit/merge
-  boundary parity, friction-record archival + stop-gate marker agreement). All 8 nightly-inbox
-  items were answered by the owner and EXECUTED (P8/P9/P11/P12 + 4 doc decisions; ledger has the
-  landing refs). Run story + verification record in
-  [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md). The 2026-08-05 run
-  story remains in [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
-- **Accept/reverify 12-defect cluster FIXED in source and SHIPPED as v0.36.2 (2026-08-06,
-  `50634c08`; release CI green, npm live, global bins reinstalled):** INV-WTS-9 own-top-level
-  guard (4/7/11), rollback honesty (3), accept_failed↔outcome reconcile (9), evidence-based
-  merged:true downgrade (10), scoped reverify finalize (1) + full-range quarantine replay (2),
-  zero-frontier null-guard (5, supersedes the dist hotfix), clarified-result archival (6),
-  worktree-hostile verify deferral (8) + `check:tests` in the accept gate (12). Every fix
-  red-green validated; design-check pre-implementation; independent post-implementation review
-  NO CONFIRMED FINDINGS; loop-core attestation on the commit. The write-scope residual pair is
-  its own `open-bugs.md` entry.
-- **Remediation run `dogfood-20260806-v0361` LANDED on main (2026-08-06, merge `3a17ca8c`):**
-  211 items terminal (202 `verified_no_change` + 9 `resolved`), deliverables promoted. Pre-merge
-  6-lane adversarial review + dedicated regression-hunt: 6 confirmed findings fixed (`ecec16bc`),
-  including a `check:tests`-only type-RED across 4 test files — a FOURTH CP-NODE-26 accept
-  regression, the type-level sibling of the three `860185ba` repaired (invisible to vitest and the
-  commit gate; fatal in CI's `verify:checks`); 0 further accept-class regressions found. The run's
-  5 new tool defects are the accept/reverify cluster in `open-bugs.md` (Immediate next §1);
-  friction record: `.audit-tools/remediation/friction/run.json`.
-- **CP-NODE-4 is RECOVERED (2026-08-04):** the retained worktree's 776-line diff landed on main as
-  three attested cuts — checked graph arithmetic (`9ba747f2`), dedupe id-discipline/provenance +
-  single-block ownership (`2ce641f7`), findings-report membership authority (`e3098789`) — with the
-  duplicate-id refusal resolved as a declared `idDiscipline` policy axis (audit's packet-local draw
-  vs remediate's global draw) and the routing predicate split from strict validity
-  (`claimsAuditFindingsContract`). The worktree is removed. **The remediation backend state was
-  DELETED 2026-08-06 on owner instruction** (fresh slate for the next dogfood) — the CP-NODE
-  continuation is closed as a run; the unlanded node diffs still exist on the
-  `remediate-CP-BLOCK-*` branches (1–8 commits each, deliberately NOT deleted), and the
-  continuation order remains recorded in
-  [`graph-derived-findings-remediation-process-review-2026-08-03.md`](reviews/graph-derived-findings-remediation-process-review-2026-08-03.md)
-  if that work is ever resumed.
-- **2026-07-30 defect clusters worked (2026-08-04, `b284bc7a`/`d57480b0`):** JIT/deepening
-  partitioning under the planner's soft target (mega-packet head-of-line block gone, shrink trigger
-  exists), graceful resumable pause on `maxTransitions`, stderr causes in error packet_results,
-  refusals name `sources-declared.json`, host-path dead-worker result salvage, promotion identity
-  check. The rest of the cluster is live-run watch — see the merged ▶ entry in `open-bugs.md`.
-- Dispatch inversion is implemented and its cross-suite fallout is repaired (2026-08-04): provider
-  confirmation/Gate-0, confirmed ordering, dispatch bias, and proxy catalog/populate discovery are
-  retired; `llm-relay` owns concrete provider/model routing at `http://127.0.0.1:8791/v1` (its
-  pool roster is llm-relay's to publish — never named here).
-- The Codex handshake identifies `self.provider: codex`; an unidentified host falls back to
-  `worker-command`, never Claude. Two defects from that neutral identity were found and fixed:
-  pool CLASS (host vs engine-drivable source) is now construction-time data out of
-  `buildConfirmedPools` (never re-derived from the provider name, which the worker-command host
-  identity collides with), and a bare worker-command primary no longer folds into a source pool
-  (no launch contract ⇒ dead capacity the engine drove into silent per-node failures).
-- Local enforcement remains: packet/context fit (unknown context cap now refuses rather than
-  fits), capability floors, quota/headroom, concurrency, result validation, and mechanical
-  self-spawn exclusion.
-- Nightly answers and their landing refs live in `.claude/nightly-decisions.json`; the open queue
-  is `docs/nightly-inbox.md`. Item ids like `sol-1` are per-run and are reused across nights — the
-  ledger's subject keys, not the ids, are what identify a decision.
-- Whole-codebase simplification sweep landed (2026-08-04, three commits `0796a359`/`0dbd3e61`/
-  `46f8081e`, shipped as v0.35.1): per-item outcomes and the verified-decline list live in
-  [`codebase-simplification-review-2026-08-04.md`](reviews/codebase-simplification-review-2026-08-04.md).
-  Includes the executed 2026-07-18 gemini sunset and the new `OrchestratorDescriptor` (one declared
-  per-orchestrator delta object; provider shims + hostLimits twins collapsed). New defect logged:
-  a dedup survivor can belong to multiple blocks (`blockIdsByFinding` now pins first-wins;
-  root question in `open-bugs.md`).
+- **2026-08-06 backlog sprint SHIPPED** (multi-agent waves + orchestrator integration; full record
+  in [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md)):
+  - **Mechanical analyzer layer items A/B/D** — safety-derived default set
+    (hadolint/actionlint/type-coverage promoted; jscpd stays gated `executable`; semgrep pinned;
+    `duration_ms` measured), **consent surfacing live end-to-end** (fold-level batched
+    `analyzer_consent` offer step; decisions persist under `analyzer_consent` in session config;
+    admission = default ∨ granted ∨ token, token overrides declined; e2e-pinned), and the lizard
+    candidate (source-walk detection drives `-l`; leads-only threshold bands). Item C remains —
+    see the pinned forward-track.
+  - **2026-08-05 minor-friction cluster closed** — handshake persisted once + `--auditor @<file>`
+    continue-commands; scope echo on EVERY step prompt (resume-blindness gone); advance liveness
+    heartbeat; staleness-record dedupe per call; evidence-grounded observability rationale;
+    fallback-stub item was already resolved (premise stale).
+  - **Remediate gates** — worker scratch + unchanged tool-seeds now excluded at COMMIT ASSEMBLY
+    (recorded in the accept sidecar); close gate drains a deduplicated, full-suite-subsumed
+    deferred-verify residual (the sidecar field is now actually persisted).
+  - **Dispatch/quota** — tier routing distributes across multi-rank rosters (operator
+    `routing_tiers` always wins); `contractPipeline` threads the persisted handshake roster into
+    `scheduleWave` (the concurrency-collapse-to-1 root cause).
+  - **Worker/runtime** — task-file read failures always yield a failed WorkerResult (file or
+    stdout); output-ratio learning fully deleted (no writer can exist — open-bugs:301); bare
+    `python` Store-stub refusal via a real PATH walk.
+  - Stale entries closed by verification (relay-liveness probe, doc-manifest predicate); the
+    vitest false-RED entry stays OPEN with a reverted attempt recorded (top-level `projects` in
+    vitest.config VOIDS the config → false GREEN — see the entry before retrying).
+- Two dispatch waves ran entirely on a weak model despite explicit overrides (durable-traps
+  entry): every agent patch was line-reviewed before landing; two inverted-semantics fixes and
+  several vacuous tests were caught and redone by hand. A 16-agent adversarial review over the
+  final diff confirmed 10 findings; all 10 are fixed in-tree.
+- 179 orphan `remediate-CP-BLOCK-*` worktree DIRS from the closed 2026-08-06 run were MOVED (not
+  deleted) to the session scratchpad after they broke filtered vitest runs; branches untouched —
+  owner decision tracked in `open-bugs.md`.
 
 ## Verification state
 
-- Full `npm test` green at the merge (7,492 passed / 0 failed on `ecec16bc`, the merged tree —
-  byte-identical to `main` after `3a17ca8c`); `check` + `check:tests` both 0. **CI fully green on
-  main at `1511f6b2`** (`ci` + `audit-code-test-suite`, 2026-08-07): the merge commit's `ci` run
-  passed directly; the interim budget-ratchet red on `44ad9fdb` (docs-only) was condensed away in
-  `1511f6b2`.
-- The pause/terminal persisted-state XOR inconsistency is recorded in `docs/backlog/open-bugs.md`.
+- `npm run build` / `check` / `check:tests` / `check:guard-reach` all 0 at the sprint tree.
+  Touched suites green (analyzer/consent/e2e/next-step/wrapper/narrative/gates). Final full suite
+  + release CI are the ship gate.
 
 ## Immediate next
 
-1. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
-   2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
-   `open-bugs.md`. Adjacent smaller entries from this lap also live there: the write-scope
-   scratch-log/seed admission residual, the full-suite vitest false-RED (worker RPC timeout on a
-   green run), and the session-start relay-liveness 403 false alarm.
+1. **Analyzer item C** (mechanical re-verify at remediation close) — run `/design-check`, then
+   implement per `spec/mechanical-analyzer-layer-design.md`; the prep record (advisory) is in
+   [`reviews/backlog-sprint-2026-08-06.md`](reviews/backlog-sprint-2026-08-06.md).
+2. **Provider mid-run re-detection** (open-bugs, HIGH, pinned) — design draft in the same record;
+   verify its mechanism claims against the pause substrate before implementing.
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
@@ -148,11 +67,12 @@
 > Every line is a POINTER: the backlog entry's own title, verbatim, and a link to the file that
 > holds its spec. Nothing here restates a spec, so this list and the backlog cannot drift.
 > Regenerate: `node scripts/shared/generate-handoff-roadmap.mjs` (`--check` gates it in
-> `verify:checks` and at commit). 2 pinned item(s).
+> `verify:checks` and at commit). 3 pinned item(s).
 
 ### ▶ Next up — pinned in the backlog
 
 - ▶ Dogfood/meta-review 2026-07-30 cluster — remaining live-run-watch properties. · [`open-bugs.md`](backlog/open-bugs.md)
-- ▶ Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop. · [`forward-tracks.md`](backlog/forward-tracks.md)
+- ▶ Provider auto-selection is construction-time-only — a mid-run provider death has no re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high). · [`open-bugs.md`](backlog/open-bugs.md)
+- ▶ Mechanical analyzer layer — item C (re-verify loop) is the remaining piece. · [`forward-tracks.md`](backlog/forward-tracks.md)
 
 <!-- END GENERATED ROADMAP -->

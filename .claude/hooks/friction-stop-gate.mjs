@@ -111,11 +111,28 @@ const AREAS = [
 
 const now = Date.now();
 const needsWalk = [];
+
+// In-flight window: if a session is actively churning on a run, a concurrent
+// bystander session must not block it (the driving session will handle its own
+// friction walk after churn stops).
+const IN_FLIGHT_MS = 2 * 60 * 1000; // 2 minutes
+
 for (const area of AREAS) {
   // A run happened here recently only if a genuine run marker exists and was touched
   // in-window (the session proxy) — a stub or a long-abandoned run never blocks.
   const markerMs = newestRunMarkerMs(area.dir, area.markers);
   if (markerMs === 0 || now - markerMs > RECENT_MS) continue;
+
+  // Skip this area if its run is visibly in flight (current-step.json was touched
+  // recently). A concurrent session's active work must not be blocked by the
+  // bystander; the driving session owes the friction walk at its own close.
+  const currentStepPath = join(area.dir, "steps", "current-step.json");
+  try {
+    const stepMs = statSync(currentStepPath).mtimeMs;
+    if (now - stepMs < IN_FLIGHT_MS) continue; // in flight, skip
+  } catch {
+    /* file does not exist or is unreadable — not in flight */
+  }
 
   const frictionDir = join(area.dir, "friction");
   let records = [];

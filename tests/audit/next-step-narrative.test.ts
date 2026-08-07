@@ -123,6 +123,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
       JSON.stringify(
         {
           analyzers: { typescript: "skip" },
+          analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
           block_quota: {
             context_tokens: 200_000,
             reserved_output_tokens: 8_000,
@@ -236,6 +237,7 @@ test.concurrent("next-step omits the narrative when synthesis.narrative is disab
         {
           synthesis: { narrative: false },
           analyzers: { typescript: "skip" },
+          analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
           block_quota: {
             context_tokens: 200_000,
             reserved_output_tokens: 8_000,

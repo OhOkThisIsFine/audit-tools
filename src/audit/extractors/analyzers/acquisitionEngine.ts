@@ -67,6 +67,19 @@ export const OWNED_TOOL_IDS = new Set<string>([
 export type EcosystemRunner = "npx" | "pipx" | "cargo" | "bundle" | "binary";
 
 /**
+ * Safety properties of an external analyzer. `defaultRun` eligibility derives
+ * from these: `config_execution !== "executable" && !network_egress && version_pinning === "pinned"`.
+ */
+export interface AnalyzerSafetyProfile {
+  /** Whether the tool might execute repo code during config loading. */
+  config_execution: "none" | "inert-data" | "executable";
+  /** Whether the tool might make network requests outside the local repo. */
+  network_egress: boolean;
+  /** How strictly the tool version is pinned. */
+  version_pinning: "pinned" | "toolchain-resolved" | "unpinned";
+}
+
+/**
  * One acquirable external analyzer. `defaultRun: true` marks a member of the
  * small value-curated set that may run without a consent token; everything else
  * is gated on the per-run consent token at the spawn chokepoint.
@@ -78,6 +91,15 @@ export interface ExternalAnalyzerCandidate {
   runner: EcosystemRunner;
   /** Pinned tool spec, e.g. "eslint@9" / "ruff==0.5.0" (pinned for reproducibility). */
   spec: string;
+  /** Safety profile indicating whether this tool is safe to run by default. */
+  safetyProfile: AnalyzerSafetyProfile;
+  /**
+   * One human line: what this analyzer detects. Rendered into the Item B
+   * consent offer so the operator decides from the tool's own words, never a
+   * host improvisation. Optional only for test fixtures — every registered
+   * candidate carries one (pinned by the candidates safety contract test).
+   */
+  purpose?: string;
   /**
    * Build the read-only argv for the tool given the resolved runner argv prefix
    * and repo root. MUST NOT request fixes/writes — F5 is observe-only.
@@ -195,6 +217,8 @@ export interface AcquisitionEngineOptions {
   consentToken?: string;
   /** Per-analyzer settings (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
+  /** Recorded analyzer consent decisions ("granted" or "declined"). */
+  analyzerConsent?: Record<string, "granted" | "declined">;
   /** Injectable command runner; defaults to the shared runTracked. */
   run?: AcquisitionRunner;
   /** Injectable logger; defaults to a no-op (degrade quietly to status records). */
@@ -211,17 +235,21 @@ export interface AcquisitionEngineOptions {
  * Single subprocess-SPAWN admission chokepoint. Returns the reason a spawn is
  * NOT admitted, or `undefined` when admitted. The DEFAULT set is admitted
  * without a token; EVERY other candidate — including `permanent`/`ephemeral`
- * pre-installed tools — requires the per-run consent token (CE-005).
+ * pre-installed tools — requires EITHER a recorded "granted" decision OR a
+ * per-run consent token (CE-005, revised with Item B).
  */
 export function admitSpawn(
   candidate: ExternalAnalyzerCandidate,
   setting: AnalyzerSetting,
   consentToken: string | undefined,
+  recordedDecision?: "granted" | "declined",
 ): string | undefined {
   if (setting === "skip") return "setting=skip";
   if (candidate.defaultRun) return undefined;
+  // Admission: default set ∨ recorded "granted" ∨ per-run token
+  if (recordedDecision === "granted") return undefined;
   if (consentToken && consentToken.trim().length > 0) return undefined;
-  return "non-default tool requires per-run consent token";
+  return "non-default tool requires consent (declined or not yet decided)";
 }
 
 /**
@@ -302,7 +330,8 @@ export function runExternalAnalyzer(
   }
 
   // Single spawn-admission chokepoint — consent gating before anything spawns.
-  const denied = admitSpawn(candidate, setting, options.consentToken);
+  const recordedDecision = options.analyzerConsent?.[candidate.id];
+  const denied = admitSpawn(candidate, setting, options.consentToken, recordedDecision);
   if (denied) {
     log("[f5] %s spawn not admitted: %s", candidate.id, denied);
     return {
@@ -357,6 +386,7 @@ export function runExternalAnalyzer(
         resolved: true,
         status: "spawn_error",
         error: error instanceof Error ? error.message : String(error),
+        duration_ms: 0,
       },
     };
   }
@@ -371,6 +401,7 @@ export function runExternalAnalyzer(
         status: "spawn_error",
         exit_code: result.status,
         error: result.error.message,
+        duration_ms: result.duration_ms,
       },
     };
   }
@@ -406,6 +437,7 @@ export function runExternalAnalyzer(
         exit_code: result.status,
         error: error instanceof Error ? error.message : String(error),
         output_snippet: result.stdout.slice(0, 200),
+        duration_ms: result.duration_ms,
       },
     };
   }
@@ -422,6 +454,7 @@ export function runExternalAnalyzer(
       resolved: true,
       status: normalized.results.length > 0 ? "findings" : "success",
       exit_code: result.status,
+      duration_ms: result.duration_ms,
     },
   };
 }
@@ -476,7 +509,8 @@ export async function resolveBinaryCandidates(
       continue;
     }
     const setting = settingFor(options.analyzers, candidate.id);
-    const denied = admitSpawn(candidate, setting, options.consentToken);
+    const recordedDecision = options.analyzerConsent?.[candidate.id];
+    const denied = admitSpawn(candidate, setting, options.consentToken, recordedDecision);
     if (denied) {
       unresolvedStatuses.push({
         tool: candidate.id,

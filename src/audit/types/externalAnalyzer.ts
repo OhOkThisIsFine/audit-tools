@@ -69,6 +69,7 @@ export const ExternalAnalyzerToolStatusSchema = z
     exit_code: z.number().nullable().optional(),
     error: z.string().optional(),
     output_snippet: z.string().optional(),
+    duration_ms: z.number().optional(),
   })
   .strict();
 export type ExternalAnalyzerToolStatus = z.infer<

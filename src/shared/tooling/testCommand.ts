@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Single project-command discovery shared by both orchestrators. Before
@@ -87,6 +87,53 @@ function pickScript(
 }
 
 /**
+ * Probe a bare command to see if it can be spawned. On Windows, walks PATH entries
+ * to find the first executable, checking for the zero-byte App Execution Alias stub
+ * (e.g. python.exe from the Microsoft Store stub when Python isn't actually installed)
+ * that would open the Microsoft Store on spawn instead of executing or failing cleanly.
+ *
+ * Returns true if the command appears to be a valid executable, false if it is
+ * a zero-byte stub or does not exist.
+ *
+ * @param command - The command name (e.g., "python")
+ * @param platform - The platform to check for; defaults to process.platform
+ * @param pathEnv - Optional PATH string; defaults to process.env.PATH
+ */
+export function isValidExecutableCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  pathEnv: string = process.env.PATH ?? "",
+): boolean {
+  if (platform !== "win32") {
+    // On non-Windows, assume the bare command is resolvable by the shell
+    return true;
+  }
+
+  // On Windows, walk PATH to find the first executable matching the command name.
+  // The Windows Store stub is zero-byte, so we reject the first hit if it's zero-byte.
+  const exeName = `${command}.exe`;
+  const pathSeparator = platform === "win32" ? ";" : ":";
+  const pathEntries = pathEnv.split(pathSeparator).filter((p) => p.length > 0);
+
+  for (const pathDir of pathEntries) {
+    const fullPath = join(pathDir, exeName);
+    try {
+      const stat = statSync(fullPath);
+      // Found the first match in PATH. Check if it's a zero-byte stub.
+      if (stat.size === 0) {
+        return false; // Zero-byte file: App Execution Alias stub
+      }
+      return true; // Valid executable found
+    } catch {
+      // File doesn't exist in this PATH directory, continue to next
+    }
+  }
+
+  // Command not found in any PATH directory
+  return false;
+}
+
+/**
  * Discover the test/e2e/build/lint commands for a repository as argv arrays.
  *
  * Node detection (package.json) takes precedence for e2e/build/lint. The test
@@ -120,7 +167,12 @@ export function discoverProjectCommands(root: string): ProjectCommands {
       existsSync(join(root, "pyproject.toml")) ||
       existsSync(join(root, "pytest.ini"))
     ) {
-      result.test = ["python", "-m", "pytest"];
+      // Check if Python is available before using it. On Windows, the
+      // zero-byte App Execution Alias stub (python.exe from MS Store when
+      // Python isn't installed) would open the Store instead of failing.
+      if (isValidExecutableCommand("python")) {
+        result.test = ["python", "-m", "pytest"];
+      }
     }
   }
 

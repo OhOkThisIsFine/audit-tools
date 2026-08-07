@@ -1,5 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
 import { spawnSyncHidden, resolveWithinRoot } from "audit-tools/shared";
 import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
@@ -78,11 +89,41 @@ export function createWorktree(root: string, worktreePath: string, branchName: s
  * repo-relative (the declared scope contract); absolute/escaping paths are skipped.
  * Best-effort: a copy failure must not abort the dispatch (logged, not thrown).
  */
+export interface SeededUntrackedPath {
+  /** Repo-relative forward-slash path of one seeded FILE (a directory seed is expanded). */
+  rel: string;
+  /**
+   * sha256 of the bytes the tool seeded. The commit step's "unchanged"
+   * discriminator: a seeded file whose content still hashes to this value was
+   * never the worker's edit and must not enter the node commit.
+   */
+  content_sha256: string;
+}
+
+function fileSha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/** Every file under `path` (itself, when a file) as repo-relative entries against `base`. */
+function seededFileEntries(path: string, baseRel: string): SeededUntrackedPath[] {
+  const stat = statSync(path);
+  if (stat.isFile()) {
+    return [{ rel: baseRel.replace(/\\/g, "/"), content_sha256: fileSha256(path) }];
+  }
+  if (!stat.isDirectory()) return [];
+  const out: SeededUntrackedPath[] = [];
+  for (const entry of readdirSync(path)) {
+    out.push(...seededFileEntries(join(path, entry), `${baseRel}/${entry}`));
+  }
+  return out;
+}
+
 export function seedUntrackedDeclaredPaths(
   root: string,
   worktreeRoot: string,
   declaredPaths: Iterable<string>,
-): void {
+): SeededUntrackedPath[] {
+  const seeded: SeededUntrackedPath[] = [];
   for (const rel of new Set(declaredPaths)) {
     if (!rel || isAbsolute(rel)) continue;
     // Reject paths that escape EITHER root (defence-in-depth; declared scope is
@@ -97,6 +138,7 @@ export function seedUntrackedDeclaredPaths(
     try {
       mkdirSync(dirname(dst), { recursive: true });
       cpSync(src, dst, { recursive: true });
+      seeded.push(...seededFileEntries(dst, rel));
     } catch (err) {
       process.stderr.write(
         `[remediate-code] worktree seed: could not copy untracked declared path ${rel}: ${
@@ -105,6 +147,7 @@ export function seedUntrackedDeclaredPaths(
       );
     }
   }
+  return seeded;
 }
 
 /**
@@ -879,7 +922,8 @@ export function commitWorktree(
   worktreeRoot: string,
   message: string,
   declaredWritePaths?: string[],
-): { committed: boolean; error?: string } {
+  seededPaths?: SeededUntrackedPath[],
+): { committed: boolean; error?: string; excludedFromCommit?: string[] } {
   // INV-WTS-9 (cluster defects 4/11): the commit step is the FIRST git write of
   // the accept flow, and it ran before any cwd check — an orphan dir (worktree
   // de-registered mid-recovery) made `git add -A`/`git commit` resolve up to the
@@ -893,6 +937,35 @@ export function commitWorktree(
         `dir or deleted worktree — git calls would escape to the enclosing checkout ` +
         `and commit ITS state). Rebuild the node worktree and re-drive.`,
     };
+  }
+  // Enumerate non-ignored untracked NEW files BEFORE staging: a new file that is
+  // neither under the declared write scope nor a source extension is worker
+  // SCRATCH (debug logs, notes) — the 2026-08-06 run merged such files straight
+  // through the unowned-grant path in `adjudicateWriteScope`, which exists for
+  // genuine source work in unowned files, not for scratch. Scratch is excluded
+  // from the commit here (never sanctioned into it) and reported to the caller.
+  const scratchExcluded: string[] = [];
+  if (declaredWritePaths !== undefined) {
+    const others = spawnSyncHidden(
+      "git",
+      ["ls-files", "--others", "--exclude-standard"],
+      { cwd: worktreeRoot, encoding: "utf8", shell: false },
+    );
+    if (others.error || others.status !== 0) {
+      return {
+        committed: false,
+        error: `git ls-files (untracked enumeration) failed: ${
+          (others.stderr ?? others.error?.message ?? "").toString().trim()
+        }`,
+      };
+    }
+    for (const raw of (others.stdout ?? "").split(/\r?\n/)) {
+      const rel = raw.trim().replace(/\\/g, "/");
+      if (rel.length === 0) continue;
+      if (isUnderWritePaths(rel, declaredWritePaths, worktreeRoot)) continue;
+      if (isSourceNewFile(rel)) continue;
+      scratchExcluded.push(rel);
+    }
   }
   // Force-add worker-created new SOURCE files that `.gitignore` shadows (and fail
   // loudly on a generated-artifact / out-of-scope new file) BEFORE `git add -A`,
@@ -909,13 +982,44 @@ export function commitWorktree(
   if (add.status !== 0) {
     return { committed: false, error: `git add failed: ${(add.stderr ?? "").trim()}` };
   }
+  // A tool-seeded file whose content still hashes to its seed value is workspace
+  // furniture the tool copied in (so the worker could see its declared target),
+  // not an edit — unstage it so the seed never rides into the node commit. A
+  // seeded file the worker DID change stays staged: in write scope it is the
+  // work product; outside write scope the write-scope gate adjudicates it.
+  const seedExcluded: string[] = [];
+  for (const seed of seededPaths ?? []) {
+    const abs = join(worktreeRoot, seed.rel);
+    try {
+      if (existsSync(abs) && fileSha256(abs) === seed.content_sha256) {
+        seedExcluded.push(seed.rel);
+      }
+    } catch {
+      // Unreadable seed → leave staged; the write-scope gate still sees it.
+    }
+  }
+  const toUnstage = [...scratchExcluded, ...seedExcluded];
+  if (toUnstage.length > 0) {
+    const reset = spawnSyncHidden("git", ["reset", "-q", "--", ...toUnstage], {
+      cwd: worktreeRoot,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (reset.status !== 0) {
+      return {
+        committed: false,
+        error: `git reset (scratch/seed exclusion) failed: ${(reset.stderr ?? "").trim()}`,
+      };
+    }
+  }
+  const excludedFromCommit = toUnstage.length > 0 ? toUnstage : undefined;
   // `git diff --cached --quiet` exits 0 when nothing is staged → no worker edits.
   const staged = spawnSyncHidden("git", ["diff", "--cached", "--quiet"], {
     cwd: worktreeRoot,
     shell: false,
   });
   if (staged.status === 0) {
-    return { committed: false };
+    return { committed: false, excludedFromCommit };
   }
   const commit = spawnSyncHidden("git", ["commit", "-m", message], {
     cwd: worktreeRoot,
@@ -925,7 +1029,7 @@ export function commitWorktree(
   if (commit.status !== 0) {
     return { committed: false, error: `git commit failed: ${(commit.stderr ?? "").trim()}` };
   }
-  return { committed: true };
+  return { committed: true, excludedFromCommit };
 }
 
 /**

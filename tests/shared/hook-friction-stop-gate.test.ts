@@ -7,7 +7,7 @@
 // the session.
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -163,6 +163,76 @@ describe('friction-stop-gate: recent runs complete the friction close-out walk',
     const file = join(root, 'not-a-directory');
     writeFileSync(file, 'not a project root\n');
     expect(runHook(FRICTION_GATE, stop(), { root: file }).code).toBe(0);
+  });
+});
+
+describe('friction-stop-gate: skip in-flight runs', () => {
+  it('allows a stop when an area run is visibly in flight (fresh current-step.json)', () => {
+    // A concurrent session is actively working on the run (current-step.json
+    // was touched within 2 minutes). The bystander must not block it.
+    const root = tempRoot('in-flight-remediation');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(
+      join(dir, 'friction', 'run.json'),
+      JSON.stringify({
+        open_observations: [],
+        category_attestations: [],
+      }),
+    );
+    // Create a fresh current-step.json (just now).
+    mkdirSync(join(dir, 'steps'), { recursive: true });
+    writeFileSync(join(dir, 'steps', 'current-step.json'), '{}');
+
+    // The run is recent + has unwalked friction, but current-step.json is
+    // fresh → in-flight → allows stop (no block).
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
+  });
+
+  it('blocks when an area run is stale + unwalked (stale current-step.json)', () => {
+    // A concurrent session is NOT actively working (current-step.json is stale).
+    // This run needs its friction walk — block.
+    const root = tempRoot('stale-step');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(
+      join(dir, 'friction', 'run.json'),
+      JSON.stringify({
+        open_observations: [],
+        category_attestations: [],
+      }),
+    );
+    // Create a stale current-step.json (over 2 minutes ago).
+    mkdirSync(join(dir, 'steps'), { recursive: true });
+    const staleTime = Date.now() - 3 * 60 * 1000; // 3 minutes ago
+    writeFileSync(join(dir, 'steps', 'current-step.json'), '{}');
+    // Back-date the file using utimesSync.
+    const staleSeconds = staleTime / 1000;
+    utimesSync(join(dir, 'steps', 'current-step.json'), staleSeconds, staleSeconds);
+
+    const { code, stderr } = runHook(FRICTION_GATE, stop(), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('recent remediate-code run');
+  });
+
+  it('allows a stop when an area has no current-step.json (not in flight)', () => {
+    // current-step.json doesn't exist, so we can't determine if it's in flight.
+    // But if the friction walk is complete, the stop is allowed anyway.
+    const root = tempRoot('no-step');
+    const dir = markRemediationRun(root);
+    mkdirSync(join(dir, 'friction'), { recursive: true });
+    writeFileSync(
+      join(dir, 'friction', 'run.json'),
+      JSON.stringify({
+        open_observations: [{ category: 'ambiguous_direction' }],
+        category_attestations: [
+          { category: 'tool_should_decide', disposition: 'none' },
+          { category: 'inefficient_feeding', disposition: 'none' },
+        ],
+      }),
+    );
+    // No steps/ dir at all. Friction is complete → allows stop.
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
   });
 });
 

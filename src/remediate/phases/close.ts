@@ -7,7 +7,11 @@ import {
 } from "../steps/dispatch.js";
 import { spawnSync } from "node:child_process";
 import { dirname, extname, isAbsolute, join, relative } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import {
+  dedupeDeferredVerifyCommands,
+  isWholeSuiteTestCommand,
+} from "../steps/dispatch/verifyCommands.js";
 import {
   AGENT_FEEDBACK_FILENAME,
   normalizeRepoPath,
@@ -901,6 +905,102 @@ function runCombinedTestSuite(
 }
 
 /**
+ * cg-1: every DEFERRED per-node verify command recorded across the run's
+ * accept-outcome sidecars (`runs/<runId>/implement/accept-outcome-*.json`),
+ * enumerated by directory scan so no run-id notion has to be reconstructed
+ * (the artifact dir has carried two). Lenient: unreadable/malformed sidecars
+ * are skipped — a missing record must not wedge close.
+ */
+export function collectDeferredVerifyCommands(artifactsDir: string): string[] {
+  const out: string[] = [];
+  const runsDir = join(artifactsDir, "runs");
+  let runIds: string[] = [];
+  try {
+    runIds = readdirSync(runsDir);
+  } catch {
+    return out;
+  }
+  for (const runId of runIds.sort()) {
+    const implementDir = join(runsDir, runId, "implement");
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(implementDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries.sort()) {
+      if (!/^accept-outcome-.*\.json$/.test(entry)) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(join(implementDir, entry), "utf8")) as {
+          deferred_verify_commands?: unknown;
+        };
+        const cmds = parsed.deferred_verify_commands;
+        if (Array.isArray(cmds)) {
+          out.push(...cmds.filter((c): c is string => typeof c === "string"));
+        }
+      } catch {
+        // Malformed sidecar → skip; close must not wedge on one bad record.
+      }
+    }
+  }
+  return out;
+}
+
+interface DeferredVerifyResult {
+  passed: boolean;
+  /** The deduplicated commands actually run (empty when everything was subsumed). */
+  residual: string[];
+  subsumed: string[];
+  output: string;
+}
+
+/**
+ * cg-1: the close gate's tool-owned drain of the per-node DEFERRED verify
+ * commands. Exact duplicates run once; commands the just-run green full-suite
+ * leg covers are subsumed and skipped. Previously NOTHING consumed the
+ * sidecars' `deferredVerifyCommands` — the host replayed the raw per-node
+ * lists verbatim (duplicate full `tests/audit` passes; a 2h close drain).
+ */
+function runDeferredVerifyResidual(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  combinedSuitePassed: boolean,
+): DeferredVerifyResult {
+  const suiteCmd = Array.isArray(state.plan?.test_command)
+    ? state.plan.test_command.join(" ")
+    : state.plan?.test_command ?? "";
+  const fullSuiteCovers =
+    combinedSuitePassed && suiteCmd.length > 0 && isWholeSuiteTestCommand(suiteCmd);
+  const { residual, subsumed } = dedupeDeferredVerifyCommands(
+    collectDeferredVerifyCommands(options.artifactsDir),
+    { fullSuiteCovers },
+  );
+  if (subsumed.length > 0) {
+    console.log(
+      `Deferred verify: ${subsumed.length} command(s) subsumed by the green full-suite leg.`,
+    );
+  }
+  for (const cmd of residual) {
+    console.log(`Running deferred verify (deduplicated): ${cmd}`);
+    const result = spawnSync(cmd, {
+      cwd: options.root,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: true,
+      windowsHide: true,
+    });
+    if (result.status !== 0) {
+      const output = (
+        (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
+      )
+        .trim()
+        .slice(-FAILURE_OUTPUT_TAIL_CHARS);
+      return { passed: false, residual, subsumed, output: `$ ${cmd}\n${output}` };
+    }
+  }
+  return { passed: true, residual, subsumed, output: "" };
+}
+
+/**
  * Parse test output to extract implicated file paths. Looks for common test
  * runner patterns (e.g. "FAIL src/foo.ts", "at src/foo.ts:12", "● foo.ts").
  */
@@ -1612,6 +1712,21 @@ export async function runClosePhase(
     }
     console.warn(
       "Combined test suite failed but no resolved items to re-block — completing with test failure recorded in report.",
+    );
+  }
+
+  // 2b. cg-1 — tool-owned drain of the per-node DEFERRED verify commands:
+  // deduplicated union, full-suite-subsumed, each residual command run exactly
+  // once on the merged tree. A red residual re-blocks and routes to triage the
+  // same way a combined-suite red does.
+  const deferredVerify = runDeferredVerifyResidual(state, options, combinedTest.passed);
+  if (!deferredVerify.passed) {
+    console.log("Deferred verify residual failed. Transitioning back to triage.");
+    if (blockResolvedItemsOnCombinedFailure(state, deferredVerify.output)) {
+      return { ...state, status: "triage" };
+    }
+    console.warn(
+      "Deferred verify residual failed but no resolved items to re-block — completing with the failure recorded in the report.",
     );
   }
 

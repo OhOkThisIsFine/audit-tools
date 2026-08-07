@@ -31,12 +31,16 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 ## Forward tracks
 
-- **▶ Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.**
-  Four-item program specced in [`spec/mechanical-analyzer-layer-design.md`](../../spec/mechanical-analyzer-layer-design.md)
-  (deliberately a pointer — the spec carries the per-item file plan, the declined alternatives, and
-  the CE-005 contract revision). Trigger: only gitleaks is `defaultRun`, and the consent gate's
-  offer never reaches the operator — applicable analyzers are silently skipped. Sequence A→B→D→C;
-  item C requires `/design-check` first.
+- **▶ Mechanical analyzer layer — item C (re-verify loop) is the remaining piece.**
+  Items A (safety-derived default set: hadolint/actionlint/type-coverage promoted, jscpd stays
+  gated as `config_execution:"executable"`, semgrep pinned, `duration_ms` measured), B (consent
+  surfacing: fold-level batched offer + `analyzer_consent` decisions persisted, admission =
+  default ∨ granted ∨ token, token overrides declined) and D (lizard, source-walk detection,
+  leads-only threshold bands) SHIPPED 2026-08-06. Spec of record stays
+  [`spec/mechanical-analyzer-layer-design.md`](../../spec/mechanical-analyzer-layer-design.md);
+  item C (mechanical re-verify at remediation close) still requires `/design-check` — the prep
+  record (retirement-collision sweep, refutation pass, red-first test plan, all advisory) is in
+  [`reviews/backlog-sprint-2026-08-06.md`](../reviews/backlog-sprint-2026-08-06.md).
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"

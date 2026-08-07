@@ -41,8 +41,11 @@ import {
   type WorkBlock,
   type WorkBlockSeam,
   captureStepBoundaryFriction,
+  HostModelRosterEntrySchema,
 } from "audit-tools/shared";
+import { z } from "zod";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
+import { StateStore } from "../state/store.js";
 import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   CP_ARTIFACT_NAMES,
@@ -1723,15 +1726,37 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
     // same wave-sizing implement dispatch consumes. itemCount = module count.
     // scheduleWave sizes concurrency from dispatch fields, so load the effective config
     // through the single remediate loader (always the ambient descriptor — see there).
+    // d4 fix: also load persisted host capabilities (the multi-rank handshake) so
+    // the scheduler can size concurrency from the actual roster instead of degrading
+    // to a conservative single-pool when no explicit hostModels are passed.
     const sessionConfig = await loadRemediateSessionConfig({
       root,
       override: options.sessionConfig,
       artifactsFirst: false,
     });
+    const stateStore = new StateStore(artifactsDir);
+    const state = await stateStore.loadState();
+    const persistedCaps = state?.host_capabilities;
+    // The persisted `models` field is `unknown` by design — validate before the
+    // scheduler reads it (a malformed persisted roster degrades to null, never
+    // a crash or an unchecked cast).
+    const persistedRoster = z
+      .array(HostModelRosterEntrySchema)
+      .safeParse(persistedCaps?.models);
+
     const schedule: WaveScheduleResult = await scheduleWave({
       sessionConfig: sessionConfig ?? null,
       itemCount: modules.length,
       env: process.env,
+      // d4 fix: pass the multi-rank roster from persisted host_capabilities
+      // so the scheduler can derive concurrency from the actual available ranks
+      hostMaxConcurrent: persistedCaps?.max_concurrent ?? undefined,
+      hostContextTokens: persistedCaps?.context_tokens ?? null,
+      hostOutputTokens: persistedCaps?.output_tokens ?? null,
+      hostModels: persistedRoster.success && persistedRoster.data.length > 0
+        ? persistedRoster.data
+        : null,
+      hostModelId: persistedCaps?.model_id ?? null,
       // Genuinely sizing-only: the sole field read is `max_concurrent`, interpolated
       // into the prompt as a fan-out cap. `capacity_pools` never reaches
       // `buildDispatchQuota` from here, so no capability floor bands against this

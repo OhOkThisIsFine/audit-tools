@@ -47,6 +47,11 @@ function candidate(overrides: Partial<ExternalAnalyzerCandidate> = {}): External
     id: "eslint",
     runner: "npx" as EcosystemRunner,
     spec: "eslint@9",
+    safetyProfile: {
+      config_execution: "executable",
+      network_egress: false,
+      version_pinning: "pinned",
+    },
     defaultRun: false,
     detect: () => true,
     buildArgv: (prefix: string[], root: string) => [...prefix, "--format", "json", root],
@@ -71,10 +76,16 @@ test("admitSpawn: non-DEFAULT tool is denied without a consent token (any settin
   }
 });
 
-test("admitSpawn: CE-005 — even a permanent pre-installed non-default tool needs the token", () => {
+test("admitSpawn: CE-005 revised — non-default tool needs token OR recorded 'granted' decision", () => {
   const c = candidate({ defaultRun: false });
+  // No token, no decision: denied
   expect(typeof admitSpawn(c, "permanent", undefined) === "string").toBeTruthy();
+  // With token: admitted
   expect(admitSpawn(c, "permanent", "consent-xyz")).toBe(undefined);
+  // With recorded "granted": admitted (even without token)
+  expect(admitSpawn(c, "permanent", undefined, "granted")).toBe(undefined);
+  // With recorded "declined" but no token: denied
+  expect(typeof admitSpawn(c, "permanent", undefined, "declined") === "string").toBeTruthy();
 });
 
 test("admitSpawn: skip is decisive regardless of token", () => {
@@ -145,6 +156,17 @@ test("runExternalAnalyzer: default tool runs without a token", () => {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   expect(out.status.status).toBe("findings");
+});
+
+test("runExternalAnalyzer: duration_ms is carried from RunTrackedResult to status", () => {
+  const customRun = (argv: string[], cwd?: string) => {
+    if (argv.includes("--version")) {
+      return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 42 };
+    }
+    return { status: 0, stdout: findingPayload, stderr: "", argv, duration_ms: 100 };
+  };
+  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run: customRun });
+  expect(out.status.duration_ms).toBe(100);
 });
 
 test("runExternalAnalyzer: capability-probe failure degrades to empty + not_resolved status", () => {
@@ -420,11 +442,13 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
 // CP-NODE-1: each newly-registered analyzer is consent-gated end-to-end — with
 // detect() forced true and no consent token, the engine must report `skipped`
 // and spawn ZERO subprocesses (the consent chokepoint short-circuits the probe).
+// Note: hadolint, actionlint, type-coverage, and jscpd are now defaultRun:true
+// (they meet the safety profile requirements) and are no longer consent-gated.
 const { EXTERNAL_ANALYZER_CANDIDATES } = await import(
   "../../src/audit/extractors/analyzers/candidates.js"
 );
 
-for (const id of ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"]) {
+for (const id of ["clippy", "rubocop"]) {
   test(`CP-NODE-1: ${id} is consent-gated — no token => skipped, zero subprocess spawn`, () => {
     const real = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === id)!;
     expect(real, `${id} must be registered`).toBeTruthy();
@@ -439,7 +463,7 @@ for (const id of ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"
     const forced = { ...real, detect: () => true };
     const out = runExternalAnalyzer(forced, "/root", { run: spy, analyzers: {} });
     expect(out.status.status, `${id} without consent => skipped`).toBe("skipped");
-    expect(out.status.error).toMatch(/consent token/i);
+    expect(out.status.error).toMatch(/consent/i);
     expect(spawned.length, `${id} must spawn ZERO subprocesses without consent`).toBe(0);
   });
 }
@@ -496,7 +520,7 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
     },
   );
   expect(deniedOutcome.status.status, "consent_denied => skipped").toBe("skipped");
-  expect(deniedOutcome.status.error).toMatch(/consent token/i);
+  expect(deniedOutcome.status.error).toMatch(/consent/i);
   expect(deniedOutcome.results.results.length, "no findings on a denied spawn").toBe(0);
   expect(spawned.length, "consent absent => permanent non-default tool spawns ZERO subprocesses (not even the probe)").toBe(0);
 
@@ -596,7 +620,7 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
   // consent_denied contract: skipped status, no findings (resolved=false), and the
   // operator-facing reason names the missing consent token.
   expect(outcome.status.status, "consent_denied => status skipped").toBe("skipped");
-  expect(outcome.status.error, "denied reason names the consent token").toMatch(/consent token/i);
+  expect(outcome.status.error, "denied reason names the consent requirement").toMatch(/consent/i);
   expect(outcome.results.results.length, "consent_denied => no findings (resolved=false)").toBe(0);
 
   // The load-bearing half of C-009: enforcement is at the SPAWN-admission chokepoint,

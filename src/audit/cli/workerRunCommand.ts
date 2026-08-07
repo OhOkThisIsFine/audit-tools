@@ -36,10 +36,13 @@ export async function cmdWorkerRun(
   if (!taskPath) {
     throw new Error("worker-run requires --task <path>");
   }
-  const task = await readJsonFile<WorkerTask>(taskPath);
+  // Result path can be provided explicitly, or will be read from task
+  const resultPathOverride = getFlag(argv, "--result");
 
+  let task: WorkerTask | undefined;
   let workerResult: WorkerResult;
   try {
+    task = await readJsonFile<WorkerTask>(taskPath);
     if (looksLikeCliFlag(task.audit_results_path)) {
       throw new Error(
         `task.audit_results_path resolved to '${task.audit_results_path}', which looks like a CLI flag instead of a file path.`,
@@ -132,40 +135,54 @@ export async function cmdWorkerRun(
   } catch (error) {
     workerResult = {
       contract_version: WORKER_RESULT_CONTRACT_VERSION,
-      run_id: task.run_id,
-      obligation_id: task.obligation_id,
+      run_id: task?.run_id ?? "",
+      obligation_id: task?.obligation_id ?? null,
       status: "failed",
       progress_made: false,
-      selected_executor: task.preferred_executor,
+      selected_executor: task?.preferred_executor ?? null,
       artifacts_written: [],
-      summary: `Worker failed for executor ${task.preferred_executor}: ${error instanceof Error ? error.message : String(error)}`,
-      next_likely_step: task.obligation_id,
+      summary: `Worker failed: ${error instanceof Error ? error.message : String(error)}`,
+      next_likely_step: task?.obligation_id ?? null,
       errors: [error instanceof Error ? error.message : String(error)],
     };
   }
 
+  // Determine result path: use override if provided, otherwise use task.result_path.
+  // With NEITHER available (task unreadable, no --result), the failed WorkerResult
+  // is still emitted on stdout — a constructed failure record must never be
+  // silently discarded; the supervisor can at least see it in the captured output.
+  const resultPath = resultPathOverride ?? task?.result_path;
+  if (!resultPath) {
+    process.stderr.write(
+      `[workerRunCommand] Cannot determine result path: --result not provided and task file could not be read\n`,
+    );
+    console.log(JSON.stringify(workerResult, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
   try {
-    await writeJsonFile(task.result_path, workerResult);
+    await writeJsonFile(resultPath, workerResult);
   } catch (writeError) {
     const writeFailedResult: WorkerResult = {
       contract_version: WORKER_RESULT_CONTRACT_VERSION,
-      run_id: task.run_id,
-      obligation_id: task.obligation_id,
+      run_id: task?.run_id ?? "",
+      obligation_id: task?.obligation_id ?? null,
       status: "failed",
       progress_made: false,
-      selected_executor: task.preferred_executor,
+      selected_executor: task?.preferred_executor ?? null,
       artifacts_written: [],
-      summary: `Worker result could not be persisted to ${task.result_path}: ${writeError instanceof Error ? writeError.message : String(writeError)}`,
-      next_likely_step: task.obligation_id,
+      summary: `Worker result could not be persisted to ${resultPath}: ${writeError instanceof Error ? writeError.message : String(writeError)}`,
+      next_likely_step: task?.obligation_id ?? null,
       errors: [writeError instanceof Error ? writeError.message : String(writeError)],
     };
     process.stderr.write(
-      `[workerRunCommand] Failed to write result to ${task.result_path}: ${writeError instanceof Error ? writeError.message : String(writeError)}\n`,
+      `[workerRunCommand] Failed to write result to ${resultPath}: ${writeError instanceof Error ? writeError.message : String(writeError)}\n`,
     );
     // Best-effort second attempt with the degraded result. If this also fails,
     // rethrow so the caller sees a hard failure (COR-5332acdf).
     try {
-      await writeJsonFile(task.result_path, writeFailedResult);
+      await writeJsonFile(resultPath, writeFailedResult);
     } catch (fallbackError) {
       process.stderr.write(
         `[workerRunCommand] Fallback write also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`,

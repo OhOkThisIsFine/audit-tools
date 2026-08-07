@@ -8,6 +8,8 @@ import {
   type FrictionTriageDecision,
   type AuditorDescriptor,
 } from "audit-tools/shared";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
@@ -48,20 +50,130 @@ function cliInvocationTokens(): string[] {
  * handshake emits a bare continue-command exactly as before. Otherwise the whole
  * descriptor is JSON-serialized (`JSON.stringify` drops `undefined` self fields).
  */
-export function renderAuditorDescriptor(
+/** Whether a descriptor carries anything worth transporting on a continue-command. */
+export function auditorDescriptorHasContent(
   descriptor: AuditorDescriptor | undefined,
-): string[] {
-  if (!descriptor) return [];
+): descriptor is AuditorDescriptor {
+  if (!descriptor) return false;
   const selfHasField =
     !!descriptor.self &&
     Object.values(descriptor.self).some((value) => value !== undefined);
-  const hasContent =
+  return (
     selfHasField ||
     (descriptor.sources != null && descriptor.sources.length > 0) ||
     descriptor.auditor_id != null ||
-    descriptor.resolved_at != null;
-  if (!hasContent) return [];
+    descriptor.resolved_at != null
+  );
+}
+
+/** The once-per-run persisted handshake file the continue-commands reference. */
+export function auditorHandshakePath(artifactsDir: string): string {
+  return join(artifactsDir, "auditor-handshake.json");
+}
+
+/**
+ * Persist the resolved handshake write-if-changed, so every continue-command can
+ * carry `--auditor @<file>` instead of re-echoing the full JSON in every step
+ * prompt (2026-08-05 friction: the handshake was re-embedded verbatim in each
+ * step). `args.ts` already parses the `@<path>` transport; write-if-changed
+ * keeps a resumed run's file byte-stable.
+ */
+export function persistAuditorHandshake(
+  artifactsDir: string,
+  descriptor: AuditorDescriptor | undefined,
+): void {
+  if (!auditorDescriptorHasContent(descriptor)) return;
+  const path = auditorHandshakePath(artifactsDir);
+  const next = JSON.stringify(descriptor, null, 2) + "\n";
+  try {
+    if (existsSync(path) && readFileSync(path, "utf8") === next) return;
+  } catch {
+    // unreadable existing file → rewrite below
+  }
+  writeFileSync(path, next);
+}
+
+export function renderAuditorDescriptor(
+  descriptor: AuditorDescriptor | undefined,
+  handshakeFilePath?: string,
+): string[] {
+  if (!auditorDescriptorHasContent(descriptor)) return [];
+  if (handshakeFilePath && existsSync(handshakeFilePath)) {
+    return ["--auditor", `@${handshakeFilePath}`];
+  }
   return ["--auditor", JSON.stringify(descriptor)];
+}
+
+/**
+ * Item B — the ONE batched analyzer-consent offer (tool-rendered, never host
+ * improvisation): per candidate — what it detects, its safety profile (exactly
+ * why it is not in the default set), and the exact accept mechanism. The
+ * operator's decisions persist in session config; a per-run token never does.
+ */
+export function renderAnalyzerConsentPrompt(params: {
+  pending: Array<{
+    id: string;
+    runner: string;
+    spec: string;
+    purpose?: string;
+    safetyProfile: {
+      config_execution: string;
+      network_egress: boolean;
+      version_pinning: string;
+    };
+  }>;
+  decisionsPath: string;
+  continueCommand: string;
+}): string {
+  const rows = params.pending
+    .map((c) => {
+      const why: string[] = [];
+      if (c.safetyProfile.config_execution === "executable") {
+        why.push("its config can execute repo code");
+      }
+      if (c.safetyProfile.network_egress) why.push("it makes network requests");
+      if (c.safetyProfile.version_pinning !== "pinned") {
+        why.push(`its version is ${c.safetyProfile.version_pinning}`);
+      }
+      const whyLine = why.length > 0 ? why.join("; ") : "it is heavier than the default set";
+      return [
+        `### \`${c.id}\` (${c.runner}: \`${c.spec}\`)`,
+        ``,
+        `- Detects: ${c.purpose ?? "(no purpose recorded)"}`,
+        `- Consent-gated because ${whyLine}.`,
+      ].join("\n");
+    })
+    .join("\n\n");
+  const example = JSON.stringify(
+    Object.fromEntries(params.pending.map((c, i) => [c.id, i === 0 ? "granted" : "declined"])),
+    null,
+    2,
+  );
+  return `# External Analyzer Consent
+
+This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
+decision. Present EACH candidate below to the operator and record their choices — a decision
+persists across runs (\`granted\` runs it from now on; \`declined\` stops this offer from
+repeating). Do not decide on the operator's behalf.
+
+${rows}
+
+## Record the decisions
+
+Write ONE JSON object covering every candidate above to:
+
+\`${params.decisionsPath}\`
+
+For example:
+
+\`\`\`json
+${example}
+\`\`\`
+
+Then continue:
+
+\`${params.continueCommand}\`
+`;
 }
 
 export function nextStepCommand(
@@ -76,7 +188,7 @@ export function nextStepCommand(
     root,
     "--artifacts-dir",
     artifactsDir,
-    ...renderAuditorDescriptor(auditorDescriptor),
+    ...renderAuditorDescriptor(auditorDescriptor, auditorHandshakePath(artifactsDir)),
   ]);
 }
 

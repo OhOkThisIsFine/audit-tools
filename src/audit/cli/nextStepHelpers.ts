@@ -81,10 +81,13 @@ import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
 import {
   graphEnrichmentUnresolvedAnalyzers,
   graphEnrichmentLowConfidenceEdges,
+  pendingAnalyzerConsent,
 } from "../orchestrator/hostInputPause.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
+import type { ExternalAnalyzerCandidate } from "../extractors/analyzers/acquisitionEngine.js";
 import {
   persistAnalyzerSettings,
+  persistAnalyzerConsent,
 } from "../supervisor/sessionConfig.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
@@ -342,6 +345,7 @@ export type NextStepResult =
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "intent_equivalence"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
+  | { kind: "analyzer_consent"; state: AuditState; bundle: ArtifactBundle; pending: ExternalAnalyzerCandidate[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
@@ -456,6 +460,73 @@ export async function buildTerminalStep(
     finalReportPath,
     triage,
   };
+}
+
+type AnalyzerConsentBranchResult =
+  | { action: "continue" }
+  | { action: "return"; result: { kind: "analyzer_consent"; state: AuditState; bundle: ArtifactBundle; pending: ExternalAnalyzerCandidate[] } }
+  | { action: "fallthrough" };
+
+/**
+ * Item B (consent surfacing) — the acquisition obligation's fold branch,
+ * mirroring the analyzer-install consent fold exactly:
+ *   - nothing pending (acquisition off / token present / all decided) → run the
+ *     deterministic acquisition executor (`fallthrough`);
+ *   - a decisions file arrived (`incoming/analyzer-consent-decisions.json`,
+ *     `{ "<id>": "granted" | "declined" }`) → persist the decisions into
+ *     session config (decisions durable, tokens never), fold them into the
+ *     in-flight acquisition options, and re-scan (`continue`);
+ *   - otherwise → emit the ONE batched operator-interactive offer step
+ *     (`return`), so applicable consent-gated candidates are never silently
+ *     skipped (the silent-fail-closed defect this program exists to fix).
+ */
+export async function handleAnalyzerConsentBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "externalAcquisition">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+  analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
+): Promise<AnalyzerConsentBranchResult> {
+  const pending = pendingAnalyzerConsent({
+    root: params.root,
+    analyzers: analyzersRef.value,
+    externalAcquisitionEnabled: params.externalAcquisition?.enabled,
+    analyzerConsent: params.externalAcquisition?.analyzerConsent,
+    acquisitionConsentToken: params.externalAcquisition?.consentToken,
+  });
+  if (pending.length === 0) return { action: "fallthrough" };
+  const incoming = await consumeObjectIncoming(
+    params.artifactsDir,
+    "analyzer-consent-decisions.json",
+  );
+  if (incoming.status === "quarantined") {
+    return { action: "continue" };
+  }
+  if (incoming.status === "ok") {
+    const decisions: Record<string, "granted" | "declined"> = {};
+    for (const [id, value] of Object.entries(incoming.value)) {
+      if (value === "granted" || value === "declined") {
+        decisions[id] = value;
+      }
+    }
+    if (Object.keys(decisions).length > 0) {
+      await persistAnalyzerConsent(params.artifactsDir, decisions);
+      if (params.externalAcquisition) {
+        params.externalAcquisition.analyzerConsent = {
+          ...(params.externalAcquisition.analyzerConsent ?? {}),
+          ...decisions,
+        };
+      }
+    } else {
+      const invalidEntries = Object.keys(incoming.value).join(", ") || "(none)";
+      process.stderr.write(
+        `[audit-code] analyzer-consent-decisions.json ignored: no recognized values (got: ${invalidEntries}). ` +
+          `Valid values are: granted, declined.\n`,
+      );
+    }
+    await unlink(incoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  return { action: "return", result: { kind: "analyzer_consent", state, bundle, pending } };
 }
 
 type GraphEnrichmentBranchResult =
@@ -2054,7 +2125,30 @@ export function buildAuditObligations(
     deterministic("file_disposition"),
     deterministic("auto_fixes_applied"),
     deterministic("syntax_resolved"),
-    deterministic("external_analyzers_current"),
+    {
+      // External analyzers: the Item B consent fold runs FIRST — applicable
+      // consent-gated candidates with no recorded decision surface ONE batched
+      // operator offer (or consume the arrived decisions file), and only then
+      // does the deterministic acquisition executor run.
+      id: "external_analyzers_current",
+      derive: deriveObligationState("external_analyzers_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleAnalyzerConsentBranch(
+          ctx.params,
+          bundle,
+          state,
+          ctx.analyzersRef,
+        );
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "continue") {
+          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+        }
+        return runDeterministicExecutor(bundle, ctx);
+      },
+    },
     deterministic("structure_artifacts"),
     {
       // Critical-flow fallback: when deterministic flow inference fell below the

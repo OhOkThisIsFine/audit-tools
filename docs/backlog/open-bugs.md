@@ -7,28 +7,28 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 - **Full-suite vitest exits 1 on a worker RPC timeout while every test passes (2026-08-06,
-  friction, medium).** Two consecutive full runs: 7,510 passed / 0 failed, but `Errors 1 error` —
-  `[vitest-worker]: Timeout calling "onTaskUpdate"` — flips the exit code to 1. The worker channel
-  starves while a spawnSync-heavy audit e2e (`audit-code-completion.test.ts`, ~311s single-file
-  wall) blocks its worker's event loop. A green suite reading RED is the false-RED class.
-  **Property:** the full suite's exit code reflects test outcomes; long spawnSync e2es must not
-  starve the worker RPC channel (isolate/serialize the offender, or lift the RPC timeout for it).
-
-- **Session-start offload-liveness probe reads a live llm-relay as DOWN (2026-08-06, friction, low).**
-  `session-start-guards.mjs` probes `http://127.0.0.1:8791/health` and treats any non-2xx as
-  lane-down; the running relay answers that path 403, so every session start reports "OFFLOAD LANE
-  DOWN" while `llm-relay offload status` shows the lane fully live. **Property:** the liveness probe
-  distinguishes no-listener from an answering-but-403 relay (any HTTP response = process alive), or
-  probes an endpoint the relay actually serves 2xx.
+  friction, medium; ATTEMPTED AND REVERTED 2026-08-06).** Two consecutive full runs: 7,510 passed /
+  0 failed, but `Errors 1 error` — `[vitest-worker]: Timeout calling "onTaskUpdate"` — flips the
+  exit code to 1. The worker channel starves while a spawnSync-heavy audit e2e
+  (`audit-code-completion.test.ts`, ~311s single-file wall) blocks its worker's event loop. A green
+  suite reading RED is the false-RED class. ⚠ Reverted attempt: a `projects: [...]` split placed at
+  the TOP LEVEL of `vitest.config.ts` (outside `test`) is SILENTLY IGNORED and voids the entire
+  test config — default `**/*` include (sweeps `.codex`/`.audit-tools` copies), no hermeticity
+  setupFiles, no reporters — and the same RPC-timeout error then flipped a 107-failure run to
+  EXIT 0 (a false GREEN, strictly worse). Any retry must nest the split under `test.projects` and
+  prove both exit polarities. **Property:** the full suite's exit code reflects test outcomes;
+  long spawnSync e2es must not starve the worker RPC channel.
 
 - **closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops
-  (2026-08-05, low).** A turn that ends while waiting on harness-tracked background work (a running
-  test suite, an in-flight review workflow) is a Stop with uncommitted work, so the gate fires —
-  twice in one session during the change-3 lap, exhausting the cap before any REAL closeout
-  happened; a genuinely forgotten closeout later that session would have gone unchallenged.
-  **Property:** the gate should not consume its cap when the stop is a wait on live
-  harness-tracked background tasks (or the cap should count only stops with no such tasks
-  in flight).
+  (2026-08-05, low; investigated 2026-08-06 — blocked on a mechanical signal).** A turn that ends
+  while waiting on harness-tracked background work (a running test suite, an in-flight review
+  workflow) is a Stop with uncommitted work, so the gate fires — reproduced again this sprint
+  (fired on a stop that was waiting on a background workflow). Investigation: the Stop payload
+  carries `hook_event_name`/`session_id`/`transcript_path`/`stop_hook_active` only; harness
+  background-task launch/completion shapes in the transcript/tasks dir are undocumented, and
+  `.audit-tools/` churn is the WRONG signal (background tasks produce none — a rejected fix
+  watched it). **Property:** the gate should not consume its cap when the stop is a wait on live
+  harness-tracked background tasks; ship only on a structural harness signal, never keyword grep.
 
 - **Remediation pause/recovery is not durable (2026-08-03, medium).** A plan-only stop left
   `.audit-tools/remediation/state.json` at `status: implementing`; the wrapper, backend, and detached
@@ -1150,10 +1150,6 @@
   **Property to hold:** the tool namespaces challenge ids per round; the round prompt itself
   carries a covered-themes digest and an explicit variation bar.
 
-- **Staleness events re-log identically within one next-step.** 28 duplicate lines in ~1.7s
-  (critical_flows/risk_register) and ~15 (task_affinity_graph) — per-iteration re-log, not one
-  event per state change. **Property to hold:** one staleness event per artifact per transition.
-
 - **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
   map) on every ensure — a generated config violating the stable content-derived ordering invariant,
   dirtying every tree it touches. **Property to hold:** generated host configs are byte-stable
@@ -1171,89 +1167,29 @@
   pipeline. **Property to hold:** prompt language and exit semantics agree; rejections-present is
   distinguishable from failure.
 
-- **Dogfood 2026-08-05 minor friction cluster** (spec + detail in
-  [`reviews/dogfood-run-2026-08-05.md`](../reviews/dogfood-run-2026-08-05.md)): fallback prompt
-  inlines ~340 lines of low-confidence flow stubs; the full auditor handshake JSON is re-echoed
-  every step; one silent >120s next-step derivation; tier routing collapsed 354/358→deep (multi-rank
-  roster dead weight); observability lens rationale factually wrong ("no logging surface" beside a
-  JSONL ledger); resumed runs skip the loader scope echo; charter stated↔revealed blindness leaks in
-  comment-dense repos. **Property to hold:** each is a small tool-side fix; work them from the
-  review record. Re-tested on the 2026-08-06 v0.36.0 dogfood
-  ([`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md)): handshake
-  re-echo, tier collapse (301/309→deep), silent >300s derivation, staleness-line spam, and the
-  observability rationale all **confirmed still live**; blindness leak not reproduced.
-
-- **Pre-commit doc-manifest leg misses staged docs outside `docs/` (2026-08-06, low).** Committing
-  the newly tracked `.audit-tools/audit-report.md` passed the commit gate but failed BOTH CI
-  workflows on the doc-manifest check and its contract-test twin — the gate's
-  "staged set touches doc contracts" predicate did not treat a new tracked `.md` under
-  `.audit-tools/` as touching the doc contract, which is exactly the fail-only-in-CI class the
-  leg exists to pre-catch. **Property to hold:** any staged change that adds/removes a tracked
-  `.md` anywhere in the tree triggers the commit-time doc-manifest leg.
-
-- **friction-stop-gate blocks BYSTANDER sessions on a concurrent session's mid-flight run
-  (2026-08-06, low).** The checkout is shared; the gate keys "a run happened in this session" on
-  disk-marker recency alone (documented: no per-session signal reaches a Stop hook). Observed: a
-  fresh dogfood run driven by another session (charter lanes mid-submission, `friction/` not yet
-  created) blocked THIS session's stop, demanding a close-out walk the driving session owes at its
-  own close. **Property to hold:** a run that is visibly IN FLIGHT (fresh `steps/current-step.json`
-  churn) or driven by another session never blocks a bystander's stop; the once-per-stop-cycle
-  escape keeps this low-severity.
-
-- **Provider auto-selection is construction-time-only — a mid-run provider death has no
+- **▶ Provider auto-selection is construction-time-only — a mid-run provider death has no
   re-detection or fallback (2026-08-06 self-audit ARC-e01faa3e, verified, high).** Auto-detect
   snapshots PATH/env once (`providerFactory.ts`); pools bind the name at construction; a dead
   provider's packets retry into the same defunct backend unless the operator pre-configured other
   pools. **Property to hold:** persistent availability failure on a pool re-detects and folds in
-  an alternative, or pauses resumably naming the dead provider.
-
-- **`recordOutputRatioObservation` is dead code — output-token reservations never learn
-  (2026-08-06 self-audit ARC-426f9398, verified, medium).** No production caller;
-  `RollingDispatchResult.actualTokens` never read; ledger output reservations stay at declared
-  caps (input-side slope learning is live and unaffected). **Property to hold:** wire actual-output
-  observation into `handleResult`, or delete the mechanism (tested-but-unwired class).
-
-- **A worker task-file read/parse failure exits without writing the failed WorkerResult
-  (2026-08-06 self-audit REL-80b59c13, verified, medium).** `workerRunCommand.ts` awaits the task
-  `readJsonFile` outside the try/catch that writes failed WorkerResults, so the supervisor sees a
-  silent no-result ("stall" half refuted — process exits 1). **Property to hold:** every worker
-  failure after arg parsing writes the same failed-WorkerResult artifact.
+  an alternative, or pauses resumably naming the dead provider. Design draft (2026-08-06, advisory
+  — verify mechanisms before implementing): resumable `waiting_for_provider` pause naming the dead
+  provider + resume-time re-detect via `buildConfirmedPools`, reusing the 2026-08-04 pause
+  substrate; record in
+  [`reviews/backlog-sprint-2026-08-06.md`](../reviews/backlog-sprint-2026-08-06.md).
 
 - **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
 
-- **Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a
-  self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).** The
-  `module_contract_drafting` prompt says "parallel sub-agents in waves of at most **1** concurrent
-  agents" for 153 modules — the backend's quota/host concurrency derivation produced 1 from a
-  3-rank `--host-models` handshake with no `--host-max-concurrent`, on a clean-slate run with no
-  learned limits. A phase designed to parallelize degrades to a multi-hour serial stall; likely the
-  same class as the live tier-routing-collapse item. **Property to hold:** a fresh handshake with a
-  healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
-  itself would use for dispatch.
-
-- **Accept write-scope gate admits worker scratch logs and untracked-target seeds (2026-08-06
-  remediation run, medium).** The two unfixed residuals of the accept/reverify cluster (the twelve
-  numbered defects shipped with regression tests 2026-08-06; recovery recipes stay in memory
-  `remediation-run-2026-08-06-paused-midflight`): worker scratch logs MERGED through the gate
-  (it refused nothing), and untracked-target seeding swept the operator's root
-  `session-config.json` into a node commit. **Property to hold:** nothing outside the declared
-  write scope enters a node commit — including untracked seeds copied into the worktree by the
-  tool itself.
-
-- **Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction,
-  medium).** Deferred dist-dependent verify commands are queued as literal command lists and
-  drained sequentially with no dedup across nodes or against the full-suite legs
-  (observed: duplicate full `tests/audit` passes; a 2h close drain).
-  **Property to hold:** the close gate drains a deduplicated union of deferred verify targets (a
-  file set, not a command list), subsumed by any full-suite leg that already covers it.
-
-- **Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction,
-  low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`) falls back to
-  `python -m pytest` for pyproject/pytest.ini repos; on a Windows host without Python the App
-  Execution Alias stub OPENS THE STORE per spawn — test-fixture repos under parallel verify waves
-  popped it repeatedly. **Property to hold:** before spawning bare `python`, resolve the binary and
-  refuse the zero-byte WindowsApps stub (capture-only probe through the spawn substrate); owner
-  mitigation is disabling the python/python3 app execution aliases.
+- **~180 orphan node-worktree DIRECTORIES survived the closed 2026-08-06 remediation run
+  (2026-08-06, low, owner decision).** `.audit-tools/worktrees/remediate-CP-BLOCK-*` dirs remained
+  after the run's state deletion — all UNREGISTERED (`git worktree list` shows only main; git
+  calls inside them resolve UP to the main checkout, the INV-WTS-9 orphan class), so the
+  session-start reaper (which probes registered worktrees for ancestry/cleanliness) can never
+  reap them, and their stale test-file copies were swept into filtered vitest runs. All 179 were
+  MOVED (not deleted) to the session scratchpad `orphan-worktrees/` dir 2026-08-06; the preserved
+  `remediate-CP-BLOCK-*` BRANCHES are untouched. **Open halves:** (a) confirm the moved dirs can
+  be discarded (branch refs hold the diffs); (b) run-closure should remove its node worktrees, and
+  the reaper should flag unregistered orphan dirs it cannot probe.

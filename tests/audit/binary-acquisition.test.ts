@@ -223,6 +223,11 @@ const binaryCandidate = (overrides: Partial<ExternalAnalyzerCandidate> = {}): Ex
   id: "gitleaks",
   runner: "binary",
   spec: "9.9.9",
+  safetyProfile: {
+    config_execution: "none",
+    network_egress: false,
+    version_pinning: "pinned",
+  },
   defaultRun: true,
   detect: () => true,
   buildArgv: (prefix: string[], root: string) => [...prefix, "detect", "--source", root],

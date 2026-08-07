@@ -213,7 +213,6 @@ function normalizeEntry(entry: QuotaStateEntry): QuotaStateEntry {
     normalized.consecutive_429_count = entry.consecutive_429_count;
   }
   if (entry.tokens_per_pct !== undefined) normalized.tokens_per_pct = entry.tokens_per_pct;
-  if (entry.output_per_input !== undefined) normalized.output_per_input = entry.output_per_input;
   return normalized;
 }
 
@@ -286,70 +285,7 @@ export function foldTokensPerPctObservation(
   return blendEwmaObservation(prior, slopeKey, sampleSlope, TOKENS_PER_PCT_EWMA_ALPHA);
 }
 
-// EWMA weight for a new output/input ratio observation. Shares the responsive-but-
-// not-jumpy 0.3 of the tokens_per_pct slope — a lens's output ratio is at least as
-// stable as its consumption slope, so the same blend converges within a few packets.
-export const OUTPUT_RATIO_EWMA_ALPHA = 0.3;
 
-/**
- * Fold one output/input token-ratio observation into a lens's learned EWMA ratio,
- * returning the updated map (pure — never mutates the input). `ratio =
- * actualOutputTokens / actualInputTokens`, blended into the lens's EWMA so the
- * next reservation's output envelope tracks measured reality.
- *
- * Degrade-safe: returns the prior map unchanged when either token count is
- * non-finite or non-positive (a packet that produced no measurable output/input
- * carries no ratio signal). Never throws.
- */
-export function foldOutputRatioObservation(
-  prior: Record<string, number> | undefined,
-  lens: string,
-  actualInputTokens: number,
-  actualOutputTokens: number,
-): Record<string, number> {
-  const base = prior ?? {};
-  if (
-    !Number.isFinite(actualInputTokens) ||
-    !Number.isFinite(actualOutputTokens) ||
-    actualInputTokens <= 0 ||
-    actualOutputTokens <= 0
-  ) {
-    return base;
-  }
-  const sampleRatio = actualOutputTokens / actualInputTokens;
-  return blendEwmaObservation(prior, lens, sampleRatio, OUTPUT_RATIO_EWMA_ALPHA);
-}
-
-/**
- * Persist a folded output/input ratio observation for a pool's quota-state entry,
- * under the shared quota-state file lock. Reads the current entry (or a blank one),
- * folds the observation via {@link foldOutputRatioObservation}, and writes back.
- * A missing state file is cold start; a CORRUPT one is quarantined and rebuilt
- * ({@link readQuotaStateForUpdate}); a transient-unreadable one rejects. An
- * observation carrying no ratio signal leaves the file untouched-in-value.
- */
-export async function recordOutputRatioObservation(
-  providerModelKey: string,
-  lens: string,
-  actualInputTokens: number,
-  actualOutputTokens: number,
-): Promise<void> {
-  const lockPath = getQuotaStatePath() + ".lock";
-  await withFileLock(lockPath, async () => {
-    const state = await readQuotaStateForUpdate("recordOutputRatioObservation");
-    const entry = state.entries[providerModelKey] ?? blankEntry();
-    const updated = foldOutputRatioObservation(
-      entry.output_per_input,
-      lens,
-      actualInputTokens,
-      actualOutputTokens,
-    );
-    entry.output_per_input = updated;
-    entry.updated_at = new Date().toISOString();
-    state.entries[providerModelKey] = entry;
-    await writeQuotaState(state);
-  });
-}
 
 /**
  * Persist a folded tokens_per_pct observation for a pool's quota-state entry,

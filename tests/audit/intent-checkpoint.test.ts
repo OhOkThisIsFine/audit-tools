@@ -468,3 +468,47 @@ await test("buildPacketPrompt never threads free_form_intent into the worker pro
   });
   expect(prompt).not.toMatch(/## Audit intent/);
 });
+
+// ── AU-5: observability lens rationale (evidence-grounded) ─────────────────────
+
+await test("buildLensPropositions detects logging/metrics surfaces and makes observability recommendation evidence-based", () => {
+  const bundle: ArtifactBundle = {
+    ...readyForIntentBundle(),
+    unit_manifest: {
+      units: [
+        {
+          unit_id: "u-log",
+          name: "logging surface",
+          kind: "logging_surface",
+          files: ["src/logging/ledger.ts"],
+          required_lenses: ["observability"],
+        },
+        {
+          unit_id: "u-met",
+          name: "metrics exporter",
+          kind: "metrics_exporter",
+          files: ["src/metrics/exporter.ts"],
+          required_lenses: ["observability"],
+        },
+      ],
+    },
+  };
+  const pre = computeScopePreDigest(bundle, "/repo");
+  const obs = pre.lens_propositions.find((p) => p.lens === "observability");
+  expect(obs?.disposition).toBe("recommend_include");
+  expect(obs?.reason).toContain("detected in scope");
+});
+
+await test("buildLensPropositions marks observability as heuristic exclude when no evidence (au-5)", () => {
+  // When no logging/metrics surfaces are detected, the rationale must state
+  // it is a heuristic default (no assertion of factual absence).
+  const bundle: ArtifactBundle = {
+    ...readyForIntentBundle(),
+    unit_manifest: { units: [] },
+  };
+  const pre = computeScopePreDigest(bundle, "/repo");
+  const obs = pre.lens_propositions.find((p) => p.lens === "observability");
+  expect(obs?.disposition).toBe("recommend_exclude");
+  // The rationale should NOT claim absence as fact, only as heuristic default
+  expect(obs?.reason).not.toMatch(/no logging.*detected/);
+});

@@ -154,6 +154,8 @@ export async function materializeReviewRun(
       "worker-run",
       "--task",
       paths.taskPath,
+      "--result",
+      paths.resultPath,
     ],
     audit_results_path: auditResultsPath,
     pending_audit_tasks_path: pendingTasksPath,

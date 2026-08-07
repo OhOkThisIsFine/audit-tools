@@ -45,12 +45,31 @@ export interface StalenessOptions {
  * has no side effect and callers (notably the `advanceAudit` drain) can emit
  * exactly once per host round-trip. `reason` distinguishes the metadata-schema
  * migration degrade from an ordinary dependency-hash staleness.
+ *
+ * Content-deduped within the process (2026-08-05 friction: 28×/~15× identical
+ * lines in single next-steps — every state re-derivation outside the advance
+ * drain emits by default). A repeat of the exact last-emitted stale set (+
+ * reason) is dropped at this single writer; a CHANGED set still emits.
  */
+let lastEmittedStalenessKey: string | null = null;
+
+/**
+ * Scope the dedupe to ONE `advanceAudit` call: the boundary resets before each
+ * call so a later call legitimately re-reporting the same stale set still
+ * emits, while the intra-call repeats (the observed 28×/~15× spam) collapse.
+ */
+export function resetStalenessDedup(): void {
+  lastEmittedStalenessKey = null;
+}
+
 export function emitStalenessRecord(
   stale: Set<string>,
   reason?: string,
 ): void {
   if (stale.size === 0) return;
+  const key = JSON.stringify([[...stale].sort(), reason ?? null]);
+  if (key === lastEmittedStalenessKey) return;
+  lastEmittedStalenessKey = key;
   process.stderr.write(
     JSON.stringify({
       kind: "staleness",

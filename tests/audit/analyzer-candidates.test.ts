@@ -22,6 +22,8 @@ import {
   ACTIONLINT_VERSION,
   typeCoverageCandidate,
   parseTypeCoverage,
+  lizardCandidate,
+  parseLizard,
 } from "../../src/audit/extractors/analyzers/candidates.js";
 import { OWNED_TOOL_IDS, registerExternalAnalyzers } from "../../src/audit/extractors/analyzers/acquisitionEngine.js";
 
@@ -346,13 +348,21 @@ test("parseOsvScanner degrades to empty on malformed/empty input", () => {
 
 // --- CP-NODE-1: clippy / rubocop / hadolint / actionlint / type-coverage ---
 
-const NEW_ANALYZER_IDS = ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"];
+const CONSENT_GATED_ANALYZER_IDS = ["clippy", "rubocop"];
+const DEFAULT_ANALYZER_IDS = ["hadolint", "actionlint", "type-coverage"];
 
-test("all five new analyzers are registered, consent-gated (defaultRun:false)", () => {
-  for (const id of NEW_ANALYZER_IDS) {
+test("all seven external analyzers are registered with correct default status", () => {
+  // Consent-gated (defaultRun:false): clippy, rubocop
+  for (const id of CONSENT_GATED_ANALYZER_IDS) {
     const c = EXTERNAL_ANALYZER_CANDIDATES.find((x) => x.id === id)!;
     expect(c, `${id} must be registered`).toBeTruthy();
     expect(c.defaultRun, `${id} must be consent-gated`).toBe(false);
+  }
+  // Default set (defaultRun:true): hadolint, actionlint, type-coverage (+ gitleaks, lizard)
+  for (const id of DEFAULT_ANALYZER_IDS) {
+    const c = EXTERNAL_ANALYZER_CANDIDATES.find((x) => x.id === id)!;
+    expect(c, `${id} must be registered`).toBeTruthy();
+    expect(c.defaultRun, `${id} must be in default set`).toBe(true);
   }
 });
 
@@ -619,3 +629,44 @@ test("parseTypeCoverage maps anys[] sites; degrades to empty", () => {
 function parseTypeCoverageSample() {
   return parseTypeCoverage(JSON.stringify({ anys: [{ file: "src/x.ts", line: 1, text: "z" }] }));
 }
+
+// lizard — complexity metrics via pipx runner.
+test("lizard: pipx runner, CSV format, detects Python/Rust/Ruby ecosystems", () => {
+  expect(lizardCandidate.runner).toBe("pipx");
+  expect(lizardCandidate.defaultRun).toBe(true);
+  const argv = lizardCandidate.buildArgv(["pipx", "run", "--spec", "lizard==1.17.10"], "/repo");
+  expect(argv.includes("-l")).toBeTruthy();
+  expect(argv.includes("--csv")).toBeTruthy();
+});
+
+test("parseLizard: CSV format with quoted fields (function signatures with commas)", () => {
+  // Lizard CSV format: NLOC,CCN,Token,PARAM,Length,Location,File,Function
+  // Test with a function signature that contains commas (quoted in CSV)
+  const report = `NLOC,CCN,Token,PARAM,Length,Location,File,Function
+150,12,500,6,180,"src/module.py:10-160","src/module.py","def process(a, b, c, d, e, f)"
+250,25,1200,8,300,"src/utils.py:20-280","src/utils.py","def complex_func(x, y, z)"
+50,5,200,2,60,"src/helper.py:1-50","src/helper.py","helper"`;
+
+  const items = parseLizard(report);
+  // First function: CCN=12 (> 10) + PARAM=6 (> 5) = 2 issues
+  // Second function: CCN=25 (> 10) + PARAM=8 (> 5) = 2 issues
+  // Third function: all below thresholds = 0 issues
+  // Total: 4 issues + 1 extra for NLOC=250 > 200 = 5 issues
+  expect(items.length).toBeGreaterThan(0);
+  // Verify lizard-ccn reports for high-complexity functions
+  expect(items.filter((i) => i.rule === "lizard-ccn").length).toBeGreaterThan(0);
+  expect(items.filter((i) => i.rule === "lizard-params").length).toBeGreaterThan(0);
+  // Verify that quoted function signature with commas parsed correctly
+  const ccnItems = items.filter((i) => i.rule === "lizard-ccn");
+  expect(ccnItems.some((i) => i.summary?.includes("process"))).toBeTruthy();
+  // Last item: all metrics below thresholds
+  const helperItems = items.filter((i) => i.path === "src/helper.py");
+  expect(helperItems.length).toBe(0); // No issues reported for this function
+});
+
+test("parseLizard: empty input and malformed CSV degrade to empty", () => {
+  expect(parseLizard("")).toEqual([]);
+  expect(parseLizard("header only\n")).toEqual([]);
+  expect(parseLizard("not a csv")).toEqual([]);
+  expect(parseLizard("NLOC,CCN,Token,PARAM,Length,Location,File,Function")).toEqual([]); // header only
+});

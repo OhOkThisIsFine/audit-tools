@@ -113,10 +113,10 @@ export function accountKeyFromProviderShapedKey(poolKey: string): string {
  * source of the same account gates EVERY sibling, because every sibling's
  * effective entry is re-derived through this fold.
  *
- * `tokens_per_pct` / `output_per_input` / `consecutive_429_count` (per-pool
- * BUDGET and backoff-growth bookkeeping) are always taken from `ownEntry`
- * only — the account fold gates the cooldown-gating axis alone, never the
- * per-model budget subdivision (`dispatchableSourceId` stays untouched).
+ * `tokens_per_pct` / `consecutive_429_count` (per-pool BUDGET and
+ * backoff-growth bookkeeping) are always taken from `ownEntry` only — the
+ * account fold gates the cooldown-gating axis alone, never the per-model budget
+ * subdivision (`dispatchableSourceId` stays untouched).
  *
  * Pure; never mutates its inputs. Returns null only when `ownEntry` is null
  * and no sibling contributes a cooldown/last-429 signal either.
@@ -159,8 +159,5 @@ export function foldAccountCooldown(
       ? { consecutive_429_count: ownEntry.consecutive_429_count }
       : {}),
     ...(ownEntry?.tokens_per_pct !== undefined ? { tokens_per_pct: ownEntry.tokens_per_pct } : {}),
-    ...(ownEntry?.output_per_input !== undefined
-      ? { output_per_input: ownEntry.output_per_input }
-      : {}),
   };
 }

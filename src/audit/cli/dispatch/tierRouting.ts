@@ -141,6 +141,68 @@ export function resolveTierBudgets(
   return out;
 }
 
+/**
+ * Compute dynamic routing thresholds (dq-1 fix) to distribute packets across
+ * available tiers. When a roster provides multiple ranks (small/standard/deep),
+ * the fixed DEFAULT_* thresholds may not distribute packets evenly — compute
+ * percentile-based thresholds instead so packet risks are partitioned across
+ * the available tiers.
+ *
+ * For N tiers, partition at percentiles 1/N, 2/N, ... to aim for roughly
+ * equal packet distribution across tiers.
+ *
+ * Returns null if no meaningful distribution is possible (too few packets,
+ * all identical risks, etc.), leaving the caller to use defaults.
+ */
+export function computeDynamicRoutingTiers(
+  packetRisks: number[],
+  tierCount: number,
+): { deep_at?: number; standard_at?: number } | null {
+  if (packetRisks.length === 0 || tierCount < 2) {
+    return null;
+  }
+
+  const sorted = [...packetRisks].sort((a, b) => a - b);
+
+  // For 2-tier rosters: partition at median (50th percentile)
+  if (tierCount === 2) {
+    const medianIdx = Math.floor((sorted.length - 1) / 2);
+    const median = sorted[medianIdx];
+
+    if (median === undefined) {
+      return null;
+    }
+
+    // For 2 tiers, only set deep_at at the median
+    return {
+      deep_at: Math.round(median * 1000) / 1000,
+    };
+  }
+
+  // For 3+ tiers: partition at roughly 1/3 and 2/3 percentiles
+  const p1Idx = Math.floor((sorted.length * 1) / 3);
+  const p2Idx = Math.floor((sorted.length * 2) / 3);
+
+  const p1 = sorted[p1Idx];
+  const p2 = sorted[p2Idx];
+
+  // If all risks are identical or the distribution is degenerate, return null
+  // to fall back to defaults
+  if (p1 === undefined || p2 === undefined || p1 === p2) {
+    return null;
+  }
+
+  const result: { deep_at?: number; standard_at?: number } = {};
+
+  // For 3+ tiers: assign thresholds
+  // standard_at: the lower third boundary (small vs standard)
+  // deep_at: the upper third boundary (standard vs deep)
+  result.standard_at = Math.round(p1 * 1000) / 1000;
+  result.deep_at = Math.round(p2 * 1000) / 1000;
+
+  return result;
+}
+
 export function computeDispatchFanout(params: {
   agentCount: number;
   /** Packets GRANTED this pass by the admission loop (the emergent width). */

@@ -65,6 +65,7 @@ import {
   resolveDispatchTier,
   resolveTierBudgets,
   computeDispatchFanout,
+  computeDynamicRoutingTiers,
   TIER_RANK,
 } from "./dispatch/tierRouting.js";
 import {
@@ -531,6 +532,33 @@ export async function prepareDispatchArtifacts(params: {
   let largestLines = 0;
   let largestEstimatedTokens = 0;
   const warnings: Array<{ code: string; message: string }> = [];
+
+  // dq-1: compute dynamic routing thresholds when a roster is provided to distribute
+  // packets across available tiers based on their risk distribution
+  const dynamicRoutingTiers =
+    dispatchPool.tierBudgets && emitPackets.length > 0
+      ? computeDynamicRoutingTiers(
+          emitPackets
+            .map((p) => p.routing_risk)
+            .filter((r): r is number => r !== undefined),
+          Object.keys(dispatchPool.tierBudgets).length,
+        )
+      : null;
+
+  // If dynamic thresholds were computed and no explicit routing_tiers are already
+  // configured, inject them into the session config so resolveDispatchTier uses them
+  // instead of defaults. Never clobber an operator-set routing_tiers config.
+  const effectiveSessionConfig =
+    dynamicRoutingTiers && !sessionConfig.dispatch?.routing_tiers
+      ? {
+          ...sessionConfig,
+          dispatch: {
+            ...(sessionConfig.dispatch ?? {}),
+            routing_tiers: dynamicRoutingTiers,
+          },
+        }
+      : sessionConfig;
+
   // Unknown host window (no handshake limits, no learned limits, no models.dev
   // resolution): the partition above degraded to one task per packet — honest
   // progress with no fit claim, never a refusal (change-2 constraint 2). Loud
@@ -633,7 +661,7 @@ export async function prepareDispatchArtifacts(params: {
       model_hint: resolveDispatchTier({
         routingRisk: packet.routing_risk,
         complexity,
-        routingTiers: sessionConfig.dispatch?.routing_tiers,
+        routingTiers: effectiveSessionConfig.dispatch?.routing_tiers,
       }),
       // Repo-relative source read set for content-inlining (single-shot providers),
       // kept distinct from the absolute host-scope `access.read_paths` below.

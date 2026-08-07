@@ -13,6 +13,7 @@ import {
   computeStaleArtifacts,
   emitStalenessRecord,
   isMetadataMigrationStaleness,
+  resetStalenessDedup,
 } from "./staleness.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
@@ -81,6 +82,48 @@ function createCorrelationId(): string {
  * state derivations run with `emitStaleness: false` — the caller (`advanceAudit`)
  * emits a single consolidated staleness record for the whole drain at the boundary.
  */
+/**
+ * au-4 (2026-08-05 friction): a long next-step derivation (>120s observed,
+ * >300s on the 2026-08-06 re-test) emitted no progress signal, silently blowing
+ * caller timeouts — same class as the silent stale-artifact re-extraction
+ * entry. One bounded-interval stderr JSONL heartbeat per `advanceAudit` call
+ * names the obligation currently executing, so any caller sees liveness.
+ * Unref'd — never holds the process open.
+ */
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
+export interface AdvanceHeartbeat {
+  /** Update the phase label the next beat reports (the selected obligation). */
+  setLabel: (label: string) => void;
+  stop: () => void;
+}
+
+export function startAdvanceHeartbeat(
+  intervalMs: number = HEARTBEAT_INTERVAL_MS,
+): AdvanceHeartbeat {
+  const startedAt = Date.now();
+  // Closure-scoped label — one per heartbeat, so concurrent advanceAudit calls
+  // (parallel tests, embedded callers) can never cross-talk through module state.
+  let label = "derive";
+  const timer = setInterval(() => {
+    process.stderr.write(
+      JSON.stringify({
+        kind: "progress_heartbeat",
+        phase: label,
+        elapsed_ms: Date.now() - startedAt,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+  }, intervalMs);
+  timer.unref?.();
+  return {
+    setLabel: (l) => {
+      label = l;
+    },
+    stop: () => clearInterval(timer),
+  };
+}
+
 async function runSingleAdvanceStep(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
@@ -95,6 +138,7 @@ async function runSingleAdvanceStep(
   const selectedObligation = forcedExecutor
     ? `forced:${forcedExecutor}`
     : decision.selected_obligation;
+  options.heartbeat?.setLabel(selectedObligation ?? "derive");
 
   log.event({
     phase: "advance",
@@ -461,6 +505,23 @@ export async function advanceAudit(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
 ): Promise<AdvanceAuditResult> {
+  // Liveness heartbeat for the WHOLE call (drain, executors, staleness recompute)
+  // — see startAdvanceHeartbeat. Per-emit staleness dedupe also resets here so
+  // dedupe scopes to ONE call (the observed spam was within single next-steps);
+  // a later call re-reporting the same stale set still emits.
+  resetStalenessDedup();
+  const heartbeat = startAdvanceHeartbeat();
+  try {
+    return await advanceAuditInner(bundle, { ...options, heartbeat });
+  } finally {
+    heartbeat.stop();
+  }
+}
+
+async function advanceAuditInner(
+  bundle: ArtifactBundle,
+  options: AdvanceAuditOptions,
+): Promise<AdvanceAuditResult> {
   const forced = Boolean(options.preferredExecutor);
   let result: AdvanceAuditResult;
 
@@ -473,6 +534,9 @@ export async function advanceAudit(
         root: options.root,
         analyzers: options.analyzers,
         graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
+        externalAcquisitionEnabled: options.externalAcquisition?.enabled,
+        analyzerConsent: options.externalAcquisition?.analyzerConsent,
+        acquisitionConsentToken: options.externalAcquisition?.consentToken,
       },
       stepsRun: { value: 0 },
       artifactsAcc: { value: [] },

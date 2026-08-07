@@ -831,6 +831,11 @@ export interface SessionConfig {
    * `consent_token` unlocks the non-default candidates (semgrep / eslint).
    */
   external_acquisition?: ExternalAcquisitionConfig;
+  /**
+   * Recorded analyzer consent decisions. Maps analyzer id to "granted" or "declined".
+   * Decisions persist across runs; per-run tokens never persist.
+   */
+  analyzer_consent?: Record<string, "granted" | "declined">;
   /** Optional graph-enrichment tuning (Phase 4B edge reasoning). */
   graph?: GraphConfig;
   /** Dispatch fan-out controls (confirmation threshold, packet budget). */
@@ -905,6 +910,7 @@ export const SESSION_CONFIG_KEYS = Object.keys({
   synthesis: 0,
   analyzers: 0,
   external_acquisition: 0,
+  analyzer_consent: 0,
   graph: 0,
   dispatch: 0,
   design_review: 0,

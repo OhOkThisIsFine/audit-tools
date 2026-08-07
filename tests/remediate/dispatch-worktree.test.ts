@@ -121,6 +121,30 @@ describe("seedUntrackedDeclaredPaths", () => {
       await rm(base, { recursive: true, force: true });
     }
   });
+
+  it("returns the list of successfully seeded paths (ws-2 fix)", async () => {
+    const { base, root, wt } = await makeDirs();
+    try {
+      await writeFile(join(root, "config.json"), '{"a":1}');
+      await writeFile(join(root, "tracked.txt"), "ROOT-DIRTY");
+      await writeFile(join(wt, "tracked.txt"), "WORKTREE-HEAD");
+      // Declare three paths: one that will be seeded, one that already exists (skipped),
+      // and one that doesn't exist in root (skipped).
+      const seeded = seedUntrackedDeclaredPaths(root, wt, [
+        "config.json",
+        "tracked.txt",
+        "missing.json",
+      ]);
+      // Only config.json was successfully seeded; tracked.txt was skipped (already
+      // in wt), and missing.json was skipped (not in root). Each seeded entry
+      // carries the seed-time content hash the commit step discriminates on.
+      expect(seeded).toHaveLength(1);
+      expect(seeded[0].rel).toBe("config.json");
+      expect(seeded[0].content_sha256).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

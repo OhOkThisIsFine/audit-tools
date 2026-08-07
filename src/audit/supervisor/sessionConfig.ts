@@ -128,3 +128,19 @@ export async function persistAnalyzerSettings(
     return { ...base, analyzers: { ...current, ...settings } };
   });
 }
+
+/**
+ * Merge analyzer consent DECISIONS into `session-config.json` (Item B). The
+ * decision persists (`granted`/`declined` under `analyzer_consent.<id>`); a
+ * per-run consent token is never written anywhere — decisions durable, tokens
+ * ephemeral. Used by the conversation-first `analyzer_consent` step.
+ */
+export async function persistAnalyzerConsent(
+  artifactsDir: string,
+  decisions: Record<string, "granted" | "declined">,
+): Promise<RepoSessionIntent> {
+  return mutateSessionConfigLocked(artifactsDir, (base) => {
+    const current = isRecord(base.analyzer_consent) ? base.analyzer_consent : {};
+    return { ...base, analyzer_consent: { ...current, ...decisions } };
+  });
+}

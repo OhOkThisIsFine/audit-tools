@@ -98,6 +98,7 @@ export {
   isDistDependentVerifyCommand,
   isWorktreeHostileVerifyCommand,
   partitionDeferredVerifyCommands,
+  dedupeDeferredVerifyCommands,
   pathTokensInCommand,
   selfContainedVerifyCommands,
   verifyCommandsForEdits,

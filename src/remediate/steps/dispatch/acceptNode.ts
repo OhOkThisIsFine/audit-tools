@@ -30,6 +30,7 @@ import {
   seedUntrackedDeclaredPaths,
   worktreePath,
   verifyNodeInWorktree,
+  type SeededUntrackedPath,
 } from "./worktreeLifecycle.js";
 import {
   deriveVerifyCommandsFromBranch,
@@ -149,6 +150,16 @@ export interface AcceptNodeWorktreeParams {
     nodeId: string;
     ownerToken: string;
   };
+  /**
+   * The files the tool itself seeded into the worktree (untracked declared
+   * targets, with their seed-time content hashes). `commitWorktree` unstages any
+   * of them whose content is UNCHANGED from the seed, so a tool-copied file never
+   * rides into the node commit as if the worker authored it (the 2026-08-06 run
+   * swept the operator's root session-config.json into a node commit this way).
+   * A seeded file the worker DID edit stays in the commit and is adjudicated by
+   * the write-scope gate like any other edit.
+   */
+  seededUntrackedPaths?: SeededUntrackedPath[];
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -207,6 +218,14 @@ export interface AcceptNodeWorktreeResult {
    * full-suite run is what subsumes them. Absent when nothing was deferred.
    */
   deferredVerifyCommands?: string[];
+  /**
+   * Repo-relative paths the tool-owned commit step kept OUT of the node commit
+   * by policy: worker scratch (new non-source files outside declared write
+   * scope) and tool-seeded files whose content was unchanged from the seed.
+   * Recorded in the accept-outcome sidecar so the exclusion is auditable —
+   * never a silent drop. Absent when nothing was excluded.
+   */
+  excludedFromCommit?: string[];
   /**
    * Set when a RED merged-base check / loop-core guard tried to roll the base
    * back to its pre-pick OID and the rollback itself FAILED (cluster defect 3):
@@ -381,7 +400,21 @@ async function acceptNodeWorktreeLocked(
     return { outcome: workerOutcome, verifyPassed, merged };
   }
 
-  const commit = commitWorktree(wt, `remediate ${blockId} (${runId})`, params.writePaths);
+  const commit = commitWorktree(
+    wt,
+    `remediate ${blockId} (${runId})`,
+    params.writePaths,
+    params.seededUntrackedPaths,
+  );
+  if (commit.excludedFromCommit?.length) {
+    // Excluded-by-policy paths (undeclared scratch / unchanged seeds) are logged
+    // AND carried on the result so the accept-outcome sidecar records what the
+    // tool kept out of the commit — never a silent drop.
+    process.stderr.write(
+      `[remediate-code] accept ${blockId}: excluded from node commit ` +
+        `(undeclared scratch / unchanged tool seeds): ${commit.excludedFromCommit.join(", ")}\n`,
+    );
+  }
   if (commit.error) {
     // Could not commit the worker's edits (e.g. a generated-artifact-under-scope
     // fail-loud) → cannot safely LAND it, but the worker's real source edits are
@@ -429,7 +462,12 @@ async function acceptNodeWorktreeLocked(
         strayWorktreeSuspected: true,
       };
     }
-    return { outcome: "success", verifyPassed, merged };
+    return {
+      outcome: "success",
+      verifyPassed,
+      merged,
+      excludedFromCommit: commit.excludedFromCommit,
+    };
   }
 
   // Capture the node's own committed branch tip (INV-WTS-7). The node DID commit, so
@@ -790,6 +828,7 @@ async function acceptNodeWorktreeLocked(
       merged,
       committedOid,
       landedHeadOid,
+      excludedFromCommit: commit.excludedFromCommit,
       // nodeEditedFiles was captured pre-pick (above) — still valid here, the
       // pick landed the SAME diff it describes.
       ...(nodeEditedFiles.available ? { editedFiles: [...nodeEditedFiles.files].sort() } : {}),
@@ -877,6 +916,15 @@ export async function recordNodeAcceptOutcome(
         : {}),
       // Ground truth for the close-phase staging manifest (see AcceptNodeWorktreeResult.editedFiles).
       ...(result.editedFiles !== undefined ? { edited_files: result.editedFiles } : {}),
+      // cg-1: the close gate's deferred-verify drain reads THESE — the field was
+      // documented as sidecar-recorded but never actually written, which is why
+      // nothing tool-side could drain it.
+      ...(result.deferredVerifyCommands !== undefined
+        ? { deferred_verify_commands: result.deferredVerifyCommands }
+        : {}),
+      ...(result.excludedFromCommit !== undefined
+        ? { excluded_from_commit: result.excludedFromCommit }
+        : {}),
     });
   });
 }
@@ -897,6 +945,8 @@ export async function loadNodeAcceptOutcome(
     stray_worktree_suspected?: boolean;
     base_rollback_failed?: boolean;
     edited_files?: string[];
+    deferred_verify_commands?: string[];
+    excluded_from_commit?: string[];
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
   return {
@@ -913,6 +963,12 @@ export async function loadNodeAcceptOutcome(
       ? { baseRollbackFailed: raw.base_rollback_failed }
       : {}),
     ...(raw.edited_files !== undefined ? { editedFiles: raw.edited_files } : {}),
+    ...(raw.deferred_verify_commands !== undefined
+      ? { deferredVerifyCommands: raw.deferred_verify_commands }
+      : {}),
+    ...(raw.excluded_from_commit !== undefined
+      ? { excludedFromCommit: raw.excluded_from_commit }
+      : {}),
   };
 }
 
@@ -994,10 +1050,11 @@ export async function executeNodeInWorktree(args: {
     // a SEPARATE critical section from the accept's (released before the worker runs
     // and re-acquired inside acceptNodeWorktree), so the non-reentrant lock never
     // self-deadlocks.
+    let seededPaths_: SeededUntrackedPath[] = [];
     await withFileLock(worktreeNodeLockPath(root, runId, block.block_id), async () => {
       resetNodeWorktreeAndBranch(root, wt, branch);
       createWorktree(root, wt, branch);
-      seedUntrackedDeclaredPaths(root, wt, seedPaths);
+      seededPaths_ = seedUntrackedDeclaredPaths(root, wt, seedPaths);
     });
     const result = await dispatchNode({ block, slot, worktreeRoot: wt, resultPath });
     // Shared post-worker lifecycle. Verify commands are DERIVED from the node's
@@ -1016,6 +1073,7 @@ export async function executeNodeInWorktree(args: {
       // The block's OWN declared write paths (INV-1 new-file inclusion).
       writePaths: allBlockScopes.find((b) => b.block_id === block.block_id)?.write_paths ?? [],
       ownership,
+      seededUntrackedPaths: seededPaths_,
     });
     await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept, { root });
     return { result, accept };

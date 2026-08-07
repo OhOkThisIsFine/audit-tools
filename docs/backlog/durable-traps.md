@@ -13,6 +13,24 @@ contract test when it is a property of the tree instead — a test is equally bi
 self-describing, so it earns the same deletion. What may NOT be deleted is a trap enforced only
 *partly*: state the uncovered half explicitly rather than letting the covered half read as a close.
 
+- **A vitest CLI file filter resurrects same-suffixed test COPIES under stale worktree dirs
+  (2026-08-06).** `npx vitest run tests/remediate/x.test.ts` substring-matched — and RAN — the
+  copies at `.claude/worktrees/wf_*/tests/remediate/x.test.ts` and
+  `.audit-tools/worktrees/*/tests/...` even though config excludes cover both dirs; 17 copies of
+  one lock-based test then raced each other (hermeticity collisions reading as regressions), and
+  stale copies failed at LOAD, flipping exit 1 on a green run. A plain `npm test` (no filter) is
+  NOT affected. Fix at the source: no leftover worktree dirs (agent worktrees removed after use;
+  orphan dirs moved out). Also: the Bash tool's cwd PERSISTS across calls — a `cd` left in a
+  worktree/subdir makes the next bare `npx vitest` run against the WRONG root with default
+  includes.
+
+- **The Workflow tool's per-agent `model` override may not take (observed 2026-08-06).** Both
+  omitting `model` and passing `model:'fable'` ran every workflow subagent as
+  `claude-haiku-4-5` in this environment — plan quality accordingly: treat workflow subagent
+  output as weak-model advisory, seed correction waves with explicit review findings, and verify
+  every patch against source before landing (two waves of this sprint each shipped
+  inverted-semantics fixes that read plausibly).
+
 - **A local test RED can be an ambient-PATH artifact, not a regression.** `INV-shared-core-14`
   stubbed only two provider constructors while auto-resolution walks the real `PATH`, so it passed in CI
   (no CLIs on the runner) and failed on any box with `agy`/`codex` installed — reading as a product
