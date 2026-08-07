@@ -53,6 +53,16 @@
   disposition before merge.
 
 
+- **Phase-boundary gate false abandonment (2026-07-30, HIGH).** The whole-repo gate runs on the LIVE
+  tree; during the 2026-07-30 remediation run, driver-side uncommitted dirt failed it twice and the
+  no-human backstop ABANDONED all 13 items, closing the run "complete" with no gate output persisted
+  (`final-gate.json` holds only a count). Three properties failed: (1) the gate attributed dirt it did
+  not cause to the run; (2) no failing output persisted, so abandonment was undiagnosable from the
+  record; (3) an unattributable all-items abandonment got a terminal close rather than a resumable
+  pause. Primary record:
+  [`meta-review-remediation-run-2026-07-30.md`](../reviews/meta-review-remediation-run-2026-07-30.md).
+  **Property:** attribute a red to the run only for paths it touched; persist the failing output; an
+  unattributable all-items abandonment pauses resumably, never closes terminal.
 
 - **LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at
   `.` inside filenames.** `src/shared/intent/freeFormIntentInterpreter.ts:81` splits on
