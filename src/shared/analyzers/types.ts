@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AnalyzerLeadProvenanceSchema } from "./provenance.js";
 
 /** One normalized result imported from an external analyzer such as eslint or tsc. */
 export const ExternalAnalyzerResultItemSchema = z
@@ -13,6 +14,8 @@ export const ExternalAnalyzerResultItemSchema = z
     rule: z.string().optional(),
     /** Preserves the analyzer-native payload when consumers need original detail. */
     raw: z.unknown().optional(),
+    /** Content-anchored lead identity for the close-verify draw (item C). */
+    provenance: AnalyzerLeadProvenanceSchema.optional(),
   })
   .strict();
 export type ExternalAnalyzerResultItem = z.infer<

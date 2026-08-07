@@ -200,7 +200,8 @@ function renderTaskAnalyzerSignals(
   const shown = signals.slice(0, MAX_ANALYZER_SIGNAL_LINES);
   const omitted = signals.length - shown.length;
   return [
-    "External analyzer signals for this task (leads — confirm or refute against real evidence, do not treat as a finding on their own):",
+    "External analyzer signals for this task (leads — confirm or refute against real evidence, do not treat as a finding on their own).",
+    "When a finding you raise is born from one of these leads, copy the lead's `provenance` object VERBATIM into the finding's `analyzer_provenance` field (omit the field for findings not born from a lead):",
     ...shown.map(({ path, signal }) => {
       // Advisory-only knip↔graph cross-check tag: LIKELY-DEAD / HAS-IMPORTERS /
       // UNVERIFIED / ENTRYPOINT. Rendered inline; degrades to no tag when the
@@ -209,7 +210,12 @@ function renderTaskAnalyzerSignals(
         knipGraphIndex && isKnipLead(signal.name)
           ? ` {graph-crosscheck: ${classifyKnipLead(path, knipGraphIndex)}}`
           : "";
-      return `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}]${tag} ${signal.detail ?? ""}`.trimEnd();
+      // Content-anchored lead identity (item C) — rendered as copyable JSON so
+      // the provenance join needs no worker improvisation.
+      const provenance = signal.provenance
+        ? ` {provenance: ${JSON.stringify(signal.provenance)}}`
+        : "";
+      return `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}]${tag}${provenance} ${signal.detail ?? ""}`.trimEnd();
     }),
     ...(omitted > 0
       ? [`- …and ${omitted} more analyzer signal(s); see the full set in packet.json.`]

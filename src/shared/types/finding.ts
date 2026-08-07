@@ -11,6 +11,7 @@
 // hand-written JSON schema to drift from these types.
 
 import { z } from "zod";
+import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
 
 /** Canonical finding severity vocabulary (most-severe-first). */
 export const FindingSeveritySchema = z.enum([
@@ -155,6 +156,13 @@ export const FindingSchema = z.object({
   verification_obligation_ids: z.array(z.string()).optional(),
   /** Commands recommended by the implementation DAG for focused verification. */
   targeted_commands: z.array(z.string()).optional(),
+  /**
+   * Content-anchored identity of the analyzer lead this finding was born from
+   * (item C). Copied verbatim from the injected lead by the auditing worker;
+   * remediation's close-verify draw re-runs the analyzer and checks this exact
+   * identity no longer fires. Absent on findings not born from analyzer leads.
+   */
+  analyzer_provenance: AnalyzerLeadProvenanceSchema.optional(),
 });
 export type Finding = z.infer<typeof FindingSchema>;
 

@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import type { ExternalAnalyzerResults, AnalyzerLeadProvenance } from "audit-tools/shared";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 
 export type FileAnchorKind =
@@ -27,6 +27,13 @@ export interface FileAnchor {
    */
   end_line?: number;
   detail?: string;
+  /**
+   * Content-anchored lead identity (item C), present only on `analyzer_signal`
+   * anchors whose source signal carried one. Rendered into the packet prompt so
+   * the worker can copy it verbatim into `analyzer_provenance` on a finding
+   * born from this lead.
+   */
+  provenance?: AnalyzerLeadProvenance;
 }
 
 export interface FileAnchorSummary {
@@ -192,6 +199,7 @@ export function buildAnalyzerSignalAnchorIndex(
         name: truncate(signal.rule ?? signal.category, 80),
         line: signal.line_start,
         detail: truncate(signal.summary, 180),
+        ...(signal.provenance !== undefined ? { provenance: signal.provenance } : {}),
       })),
     );
   }

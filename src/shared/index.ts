@@ -1556,6 +1556,14 @@ export {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,
 } from "./analyzers/normalizeExternal.js";
+export type { NormalizeExternalOptions } from "./analyzers/normalizeExternal.js";
+export {
+  AnalyzerLeadProvenanceSchema,
+  normalizeAnalyzerSnippet,
+  hashAnalyzerSnippet,
+  analyzerProvenanceKey,
+} from "./analyzers/provenance.js";
+export type { AnalyzerLeadProvenance } from "./analyzers/provenance.js";
 export {
   EXTERNAL_ANALYZER_CANDIDATES,
   gitleaksCandidate,

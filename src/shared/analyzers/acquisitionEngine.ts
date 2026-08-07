@@ -439,7 +439,17 @@ export function runExternalAnalyzer(
     };
   }
 
-  const normalized = normalizeGenericExternalResults(candidate.id, items);
+  // readSource: content-anchored lead provenance (item C). Repo-rooted, degrade
+  // to no-provenance on any read failure — never blocks normalization.
+  const normalized = normalizeGenericExternalResults(candidate.id, items, {
+    readSource: (path) => {
+      try {
+        return readFileSync(join(root, path), "utf8");
+      } catch {
+        return undefined;
+      }
+    },
+  });
   const edges = normalizeGenericExternalEdges(items);
   if (edges.length > 0) normalized.graph_edges = edges;
 

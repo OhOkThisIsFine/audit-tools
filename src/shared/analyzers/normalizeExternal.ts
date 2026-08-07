@@ -2,6 +2,10 @@ import type {
   ExternalAnalyzerGraphEdge,
   ExternalAnalyzerResults,
 } from "./types.js";
+import {
+  hashAnalyzerSnippet,
+  type AnalyzerLeadProvenance,
+} from "./provenance.js";
 
 type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
 
@@ -21,6 +25,17 @@ function normalizeExternalSeverity(value: string | undefined): SeverityEnum {
   }
 }
 
+export interface NormalizeExternalOptions {
+  /**
+   * Source reader for content-anchored lead provenance (item C): given a
+   * repo-relative path, return the file's contents, or undefined when
+   * unreadable. When supplied, every item with a `path` + `line_start` whose
+   * span hashes non-empty gains an {@link AnalyzerLeadProvenance}; absent or
+   * failing, items simply carry no provenance (optional everywhere).
+   */
+  readSource?: (path: string) => string | undefined;
+}
+
 export function normalizeGenericExternalResults(
   tool: string,
   items: Array<{
@@ -34,6 +49,7 @@ export function normalizeGenericExternalResults(
     rule?: string;
     raw?: unknown;
   }>,
+  options: NormalizeExternalOptions = {},
 ): ExternalAnalyzerResults {
   const valid = items.filter((item) => item.path && item.summary);
   const dropped = items.length - valid.length;
@@ -48,20 +64,48 @@ export function normalizeGenericExternalResults(
       }) + "\n",
     );
   }
+  const sourceCache = new Map<string, string | undefined>();
+  const readCached = (path: string): string | undefined => {
+    if (!options.readSource) return undefined;
+    if (!sourceCache.has(path)) sourceCache.set(path, options.readSource(path));
+    return sourceCache.get(path);
+  };
+  const provenanceFor = (item: {
+    path?: string;
+    line_start?: number;
+    line_end?: number;
+    rule?: string;
+  }): AnalyzerLeadProvenance | undefined => {
+    if (!item.path || item.line_start === undefined) return undefined;
+    const source = readCached(item.path);
+    if (source === undefined) return undefined;
+    const snippet_hash = hashAnalyzerSnippet(source, item.line_start, item.line_end);
+    if (snippet_hash === undefined) return undefined;
+    return {
+      analyzer_id: tool,
+      ...(item.rule !== undefined ? { rule: item.rule } : {}),
+      path: item.path,
+      snippet_hash,
+    };
+  };
   return {
     tool,
     generated_at: new Date().toISOString(),
-    results: valid.map((item, index) => ({
-      id: item.id ?? `${tool}-${index + 1}`,
-      category: item.category ?? "unknown",
-      severity: normalizeExternalSeverity(item.severity),
-      path: item.path as string,
-      line_start: item.line_start,
-      line_end: item.line_end,
-      summary: item.summary as string,
-      rule: item.rule,
-      raw: item.raw,
-    })),
+    results: valid.map((item, index) => {
+      const provenance = provenanceFor(item);
+      return {
+        id: item.id ?? `${tool}-${index + 1}`,
+        category: item.category ?? "unknown",
+        severity: normalizeExternalSeverity(item.severity),
+        path: item.path as string,
+        line_start: item.line_start,
+        line_end: item.line_end,
+        summary: item.summary as string,
+        rule: item.rule,
+        raw: item.raw,
+        ...(provenance !== undefined ? { provenance } : {}),
+      };
+    }),
   };
 }
 
