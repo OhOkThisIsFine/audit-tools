@@ -6,29 +6,24 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Full-suite vitest exits 1 on a worker RPC timeout while every test passes (2026-08-06,
-  friction, medium; ATTEMPTED AND REVERTED 2026-08-06).** Two consecutive full runs: 7,510 passed /
-  0 failed, but `Errors 1 error` — `[vitest-worker]: Timeout calling "onTaskUpdate"` — flips the
-  exit code to 1. The worker channel starves while a spawnSync-heavy audit e2e
-  (`audit-code-completion.test.ts`, ~311s single-file wall) blocks its worker's event loop. A green
-  suite reading RED is the false-RED class. ⚠ Reverted attempt: a `projects: [...]` split placed at
-  the TOP LEVEL of `vitest.config.ts` (outside `test`) is SILENTLY IGNORED and voids the entire
-  test config — default `**/*` include (sweeps `.codex`/`.audit-tools` copies), no hermeticity
-  setupFiles, no reporters — and the same RPC-timeout error then flipped a 107-failure run to
-  EXIT 0 (a false GREEN, strictly worse). Any retry must nest the split under `test.projects` and
-  prove both exit polarities. **Property:** the full suite's exit code reflects test outcomes;
-  long spawnSync e2es must not starve the worker RPC channel.
-
-- **closeout-challenge gate spends its 2-per-session cap on deliberate mid-task stops
-  (2026-08-05, low; investigated 2026-08-06 — blocked on a mechanical signal).** A turn that ends
-  while waiting on harness-tracked background work (a running test suite, an in-flight review
-  workflow) is a Stop with uncommitted work, so the gate fires — reproduced again this sprint
-  (fired on a stop that was waiting on a background workflow). Investigation: the Stop payload
-  carries `hook_event_name`/`session_id`/`transcript_path`/`stop_hook_active` only; harness
-  background-task launch/completion shapes in the transcript/tasks dir are undocumented, and
-  `.audit-tools/` churn is the WRONG signal (background tasks produce none — a rejected fix
-  watched it). **Property:** the gate should not consume its cap when the stop is a wait on live
-  harness-tracked background tasks; ship only on a structural harness signal, never keyword grep.
+- **Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking
+  worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test
+  passes", 2026-08-06).** The exit-code half is a non-issue through the sanctioned path:
+  `npm test`/CI route through `scripts/shared/run-vitest-gate.mjs` (since `605fe61e`,
+  2026-07-24), which converts exit-1 + 0-failed + the `[vitest-worker]: Timeout calling
+  "onTaskUpdate"` stderr marker into a loud PASS — the 2026-08-06 red exits were raw
+  `npx vitest run` invocations that bypass it. What stays open is the starvation itself,
+  now diagnosed to mechanism (2026-08-07): the worker-side birpc reply timeout is a hard 60s
+  (`rpc.-pEldfrD.js` onTimeoutError), so the error means ONE continuous ≥60s sync stretch in
+  some worker. Attribution to `audit-code-completion.test.ts` is UNCONFIRMED: a solo run (244s)
+  does not reproduce, and an event-loop stall probe (>5s threshold) in that file's worker
+  recorded ZERO stalls during a full run in which the error fired — the blocker is another
+  file, or emerges only under contention. Offloaded candidate sweep pending
+  (relay lane, 2026-08-07). ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
+  at the TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config
+  (false GREEN); any config split must nest under `test.projects` and prove both exit
+  polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then
+  the vitest-gate tolerance is the guard, and raw `npx vitest run` full runs still read red.
 
 - **Remediation pause/recovery is not durable (2026-08-03, medium).** A plan-only stop left
   `.audit-tools/remediation/state.json` at `status: implementing`; the wrapper, backend, and detached
@@ -63,22 +58,6 @@
   [`meta-review-remediation-run-2026-07-30.md`](../reviews/meta-review-remediation-run-2026-07-30.md).
   **Property:** attribute a red to the run only for paths it touched; persist the failing output; an
   unattributable all-items abandonment pauses resumably, never closes terminal.
-
-- **LIVE (remediation run 2026-07-30, low): the free-form-intent clause splitter breaks clauses at
-  `.` inside filenames.** `src/shared/intent/freeFormIntentInterpreter.ts:81` splits on
-  `(?<![0-9])\.(?![0-9])` — only decimal points are guarded, so "(docs/backlog/open-bugs.md) rather
-  than duplicating them" yielded the clause fragment "md) rather than duplicating them", surfaced
-  for constraint promotion. Property: the splitter must not break inside a path/extension token —
-  e.g. require whitespace after the dot (`\.\s`) or extend the guard beyond digits.
-
-- **LIVE (remediation run 2026-07-30, low): `--guidance-file` combined with `--input` silently drops
-  the guidance from the intake source manifest.** The manifest builder registers only the inputs
-  (`created_from: "input"`); `intake/conversation-start.md` is written but unlisted, and the
-  `synthesize_intake` prompt says "read only the listed source files" — so the operator's guidance
-  is invisible to the intake worker unless the host compensates (this run's host did).
-  `src/remediate/steps/intakeResolver.ts` gives `--input` precedence deliberately, but precedence
-  should order sources, not evict one. Property: an explicitly supplied guidance file is always a
-  manifest source alongside the inputs.
 
 - **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
   (2026-07-25, low, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep globbed
@@ -706,6 +685,17 @@
   (3) **ambiguous-direction:** none — the backlog entry stated its open property even-handedly
   ("or the fallback must be shown deliberate"), which is exactly what let recon settle it without an
   owner round-trip.
+
+- **Friction walk (niggle-fix lap, 2026-08-07):**
+  (1) **tool-should-decide (low):** a Workflow implement agent finished without calling
+  StructuredOutput even after the harness nudge — its edits were sound but unreported, so the
+  item's verify stage never ran and the driver re-verified by hand. A schema-forced agent whose
+  work lands but whose report doesn't should surface as a partial, not drop the item to null.
+  (2) **tool-should-decide (low):** both implement agents left ~16 stray `*.log` files in the repo
+  ROOT despite prompts directing output elsewhere — the recorded offloaded-diff-scope class
+  ([[parallel-dispatch-bounded-current-verified]]); driver swept them before commit.
+  (3) **ambiguous-direction: none** — the two backlog entries stated their properties precisely
+  enough that both fixes landed against them verbatim.
 
 - **Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):**
   (1) **tool-should-decide (medium):** the closeout-challenge Stop gate fired twice MID-LAP while 15
