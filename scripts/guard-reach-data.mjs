@@ -99,6 +99,18 @@ export const GUARDS = [
   { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
+  {
+    id: 'pre-commit-staged-snapshot-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-staged-snapshot.test.ts',
+    note: 'spawns the pre-commit gate AND the attest-loop-core-review hook end-to-end',
+  },
+  {
+    id: 'loop-core-gate-parity-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/loop-core-gate-parity.test.ts',
+    note: 'pins pattern parity between pre-commit-gate and attest-loop-core-review',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -139,13 +151,16 @@ export const REACH = [
       'hook-session-start-guards-test',
       'session-start-hook-test',
       'doc-manifest-gate-test',
+      'pre-commit-staged-snapshot-test',
+      'loop-core-gate-parity-test',
       'check:loop-core-patterns',
       'check:guard-reach',
     ],
     uncovered:
-      'attest-loop-core-review, question-philosophy-gate, closeout-challenge-gate and shell-split have ' +
-      'no dedicated contract test — only their registration/parity is reconciled. (nightly-surface IS ' +
-      'covered, by nightly-routine-test.)',
+      'shell-split (the trap-guard split helper) has no dedicated contract test — it is exercised only ' +
+      'through hook-trap-guards-test. (question-philosophy-gate and closeout-challenge-gate are covered ' +
+      'by hook-session-gates-test; attest-loop-core-review by the staged-snapshot and parity tests; ' +
+      'nightly-surface by nightly-routine-test.)',
   },
   {
     area: 'gate scripts (the guards themselves)',
