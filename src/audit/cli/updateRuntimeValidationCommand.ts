@@ -1,5 +1,6 @@
 import { runAuditStep } from "./auditStep.js";
 import { getArtifactsDir, getFlag, getRootDir } from "./args.js";
+import { outputJson } from "./cliHelpers.js";
 
 export async function cmdUpdateRuntimeValidation(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -9,15 +10,9 @@ export async function cmdUpdateRuntimeValidation(argv: string[]): Promise<void> 
     preferredExecutor: "runtime_validation_update_executor",
     runtimeUpdatesPath: getFlag(argv, "--updates"),
   });
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        selected_executor: result.selected_executor,
-        progress_summary: result.progress_summary,
-      },
-      null,
-      2,
-    ),
-  );
+  outputJson({
+    artifacts_dir: artifactsDir,
+    selected_executor: result.selected_executor,
+    progress_summary: result.progress_summary,
+  });
 }

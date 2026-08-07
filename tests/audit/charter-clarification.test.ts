@@ -393,7 +393,7 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
     expect(reg.findings.length).toBe(2);
   });
 
-  test("applying answers to banked questions (with lower attention threshold)", () => {
+  test("lower attention threshold allows lower-blast deltas to reach clarification", () => {
     // Test with only architecture_betrayal (lower blast than wrong_goal) to ensure
     // it can pass through the risk gate with lower blast radius.
     const lowerBlastDeltas: CharterDelta[] = [

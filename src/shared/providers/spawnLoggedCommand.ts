@@ -237,7 +237,7 @@ class SpawnRunController {
 
   private emitOutputLine(line: string): void {
     const trimmed = line.trim();
-    if (trimmed.length > 0 && this.input.onProgress) {
+    if (trimmed.length > 0 && this.input.onProgress && !this.settled) {
       this.input.onProgress({
         type: "output",
         runId: this.input.runId,

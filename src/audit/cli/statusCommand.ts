@@ -6,6 +6,7 @@ import type { AuditState } from "../types/auditState.js";
 import { loadRunLedger } from "../supervisor/runLedger.js";
 import { getArtifactsDir } from "./args.js";
 import type { FailingTask } from "./mergeAndIngestCommand.js";
+import { outputJson } from "./cliHelpers.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -22,7 +23,7 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   }
 
   if (!auditState) {
-    console.log(JSON.stringify({ status: 'no_active_audit', error: 'No audit_state.json found; no active audit in this artifacts directory.' }, null, 2));
+    outputJson({ status: 'no_active_audit', error: 'No audit_state.json found; no active audit in this artifacts directory.' });
     process.exitCode = 1;
     return;
   }
@@ -136,23 +137,17 @@ export async function cmdStatus(argv: string[]): Promise<void> {
       ? Date.now() - Date.parse(lastObligationStartedAt)
       : null;
 
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        status: auditState.status,
-        last_obligation: auditState.last_obligation ?? null,
-        last_obligation_started_at: lastObligationStartedAt,
-        last_obligation_elapsed_ms: lastObligationElapsedMs,
-        last_executor: auditState.last_executor ?? null,
-        blockers: auditState.blockers ?? [],
-        obligations_summary: obligationStates,
-        recent_runs: recentRuns,
-        pending_tasks: pendingTasksSummary,
-        failed_tasks: failedTasks,
-      },
-      null,
-      2,
-    ),
-  );
+  outputJson({
+    artifacts_dir: artifactsDir,
+    status: auditState.status,
+    last_obligation: auditState.last_obligation ?? null,
+    last_obligation_started_at: lastObligationStartedAt,
+    last_obligation_elapsed_ms: lastObligationElapsedMs,
+    last_executor: auditState.last_executor ?? null,
+    blockers: auditState.blockers ?? [],
+    obligations_summary: obligationStates,
+    recent_runs: recentRuns,
+    pending_tasks: pendingTasksSummary,
+    failed_tasks: failedTasks,
+  });
 }

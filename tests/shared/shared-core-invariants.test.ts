@@ -50,6 +50,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../");
 const AUDIT_CODE_SCHEMAS = resolve(REPO_ROOT, "schemas");
 
+/**
+ * Load and parse a JSON schema file from the schemas directory.
+ * Asserts that the file exists before returning the parsed schema.
+ */
+type JsonSchemaDoc = {
+  required?: string[];
+  properties?: Record<string, { enum?: string[] } & Record<string, unknown>>;
+} & Record<string, unknown>;
+
+function loadSchema(filename: string): JsonSchemaDoc {
+  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, filename);
+  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
+  return JSON.parse(readFileSync(schemaPath, "utf8")) as JsonSchemaDoc;
+}
+
 // ── INV-shared-core-01: Schema drift detection ───────────────────────────────
 
 test("INV-shared-core-01: finding.schema.json stays consistent with the zod Finding contract (mechanically derived, no hand list)", () => {
@@ -65,9 +80,7 @@ test("INV-shared-core-01: finding.schema.json stays consistent with the zod Find
   //   1. every schema-required key is a real base-contract property;
   //   2. every schema property is a real base-contract property (no orphans);
   //   3. every base-contract REQUIRED key appears in the schema's properties.
-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
-  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  const schema = loadSchema("finding.schema.json");
 
   const zodShape = FindingSchema.shape;
   const baseKeys = new Set(Object.keys(zodShape));
@@ -92,8 +105,7 @@ test("INV-shared-core-01: finding.schema.json stays consistent with the zod Find
 });
 
 test("INV-shared-core-01: finding.schema.json severity enum matches SEVERITIES", () => {
-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  const schema = loadSchema("finding.schema.json");
 
   const schemaEnum: string[] = schema.properties?.severity?.enum ?? [];
   const tsEnum = Array.from(SEVERITIES);
@@ -110,9 +122,7 @@ test("INV-shared-core-01: finding.schema.json severity enum matches SEVERITIES",
 });
 
 test("INV-shared-core-01: audit_result.schema.json required keys are present in the shared contract", () => {
-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "audit_result.schema.json");
-  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  const schema = loadSchema("audit_result.schema.json");
 
   // The audit_result schema required keys are: task_id, unit_id, pass_id, lens,
   // file_coverage, findings. These match the auditor's AuditResult contract.

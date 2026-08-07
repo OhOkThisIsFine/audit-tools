@@ -15,6 +15,7 @@ import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { filterJsonLinesByEvent, findJsonEventLine } from "../helpers/jsonEventFilter.js";
 import type { AuditResult, AuditTask } from "../../src/audit/types.js";
 import type {
   CapacityPool,
@@ -22,6 +23,36 @@ import type {
 } from "audit-tools/shared";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+// Expected shapes of the structured log lines under test. Declared here (not in
+// the helper) because each event's field set is this suite's assertion target.
+type StrategySummaryLine = {
+  event: string;
+  source: string;
+  level: string;
+  created: number;
+  strategy_contributions: Record<string, unknown>;
+  ts: string;
+};
+type PacketResultLine = {
+  event: string;
+  source: string;
+  packet_id: string;
+  outcome: string;
+  completed: number;
+  total: number;
+  ts: string;
+};
+type MergeSummaryLine = {
+  event: string;
+  source: string;
+  total: number;
+  accepted: number;
+  rejected: number;
+  audit_results_path: string;
+  failed_tasks_path?: string;
+  ts: string;
+};
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -116,17 +147,12 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
     else process.env.AUDIT_CODE_VERBOSE = prevVerbose;
   }
 
-  const summaryLines = stderrLines.filter((l) => {
-    try {
-      const obj = JSON.parse(l.trim());
-      return obj.event === "strategy_summary";
-    } catch { return false; }
-  });
+  const summaryLines = filterJsonLinesByEvent<StrategySummaryLine>(stderrLines, "strategy_summary");
   expect(summaryLines.length, "expected exactly one strategy_summary log line").toBe(1);
   if (summaryLines[0] === undefined) {
     throw new Error("strategy_summary log line missing");
   }
-  const parsed = JSON.parse(summaryLines[0].trim());
+  const parsed = summaryLines[0];
   expect(parsed.source).toBe("audit-code:selectiveDeepening");
   expect(parsed.level).toBe("info");
   expect(typeof parsed.created === "number", "created is a number").toBeTruthy();
@@ -213,15 +239,9 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
   }
 
   expect(dispatchCount, "both packets were dispatched").toBe(2);
-  const resultLines = stderrLines.filter((l) => {
-    try {
-      const obj = JSON.parse(l.trim());
-      return obj.event === "packet_result";
-    } catch { return false; }
-  });
+  const resultLines = filterJsonLinesByEvent<PacketResultLine>(stderrLines, "packet_result");
   expect(resultLines.length, "expected one packet_result log line per packet").toBe(2);
-  for (const line of resultLines) {
-    const parsed = JSON.parse(line.trim());
+  for (const parsed of resultLines) {
     expect(parsed.source).toBe("audit-code:rollingDispatch");
     expect(typeof parsed.packet_id === "string", "packet_id present").toBeTruthy();
     expect(parsed.outcome).toBe("success");
@@ -230,7 +250,7 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
     expect(typeof parsed.ts === "string", "ts present").toBeTruthy();
   }
   // completed count should be monotonically increasing
-  const counts = resultLines.map((l) => JSON.parse(l.trim()).completed).sort((a, b) => a - b);
+  const counts = resultLines.map((l) => l.completed).sort((a, b) => a - b);
   expect(counts).toEqual([1, 2]);
 });
 
@@ -484,17 +504,11 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
 
     // stdout must contain a parseable JSON line with event=merge_summary
     const stdoutLines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
-    const summaryLine = stdoutLines.find((l) => {
-      try {
-        const obj = JSON.parse(l.trim());
-        return obj.event === "merge_summary";
-      } catch { return false; }
-    });
-    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
-    if (summaryLine === undefined) {
+    const parsed = findJsonEventLine<MergeSummaryLine>(stdoutLines, "merge_summary");
+    expect(parsed, "expected a JSON merge_summary line on stdout").toBeTruthy();
+    if (parsed === undefined) {
       throw new Error("merge_summary log line missing");
     }
-    const parsed = JSON.parse(summaryLine.trim());
     expect(parsed.source).toBe("audit-code:merge-results");
     expect(parsed.total).toBe(1);
     expect(parsed.accepted).toBe(1);
@@ -504,7 +518,12 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
 
     // The JSON summary line must appear before the plain text line
     const summaryIdx = stdoutLines.findIndex((l) => {
-      try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
+      try {
+        const obj = JSON.parse(l.trim());
+        return obj.event === "merge_summary";
+      } catch {
+        return false;
+      }
     });
     const textIdx = stdoutLines.findIndex((l) => l.includes("tasks valid"));
     expect(summaryIdx !== -1, "JSON summary line present").toBeTruthy();
@@ -536,14 +555,13 @@ test("FND-OBS-bf5c7331: merge-results.mjs JSON summary includes failed_tasks_pat
     ]);
     expect(result.status, "expected non-zero exit on validation failure").toBe(1);
 
-    const summaryLine = result.stdout.split("\n").find((l) => {
-      try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
-    });
-    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
-    if (summaryLine === undefined) {
+    const stdoutLines2 = result.stdout.split("\n").filter((l) => l.trim().length > 0);
+    const parsed2 = findJsonEventLine<MergeSummaryLine>(stdoutLines2, "merge_summary");
+    expect(parsed2, "expected a JSON merge_summary line on stdout").toBeTruthy();
+    if (parsed2 === undefined) {
       throw new Error("merge_summary log line missing");
     }
-    const parsed = JSON.parse(summaryLine.trim());
+    const parsed = parsed2;
     expect(parsed.rejected).toBe(1);
     expect(typeof parsed.failed_tasks_path === "string", "failed_tasks_path present when rejections > 0").toBeTruthy();
   } finally {

@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 159 entr(y/ies) indexed.
+> and at commit). 162 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -126,6 +126,9 @@
 - `open-bugs.md:1201` — A worker task-file read/parse failure exits without writing the failed WorkerResult (2026-08-06 self-audit REL-80b59c13, verified, medium).
 - `open-bugs.md:1207` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 - `open-bugs.md:1212` — Host concurrency cap collapses to 1 on a fresh remediation handshake, rendering a self-contradictory 153-agent serial fan-out (2026-08-06 run, friction, medium).
+- `open-bugs.md:1222` — Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).
+- `open-bugs.md:1250` — Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction, medium).
+- `open-bugs.md:1257` — Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

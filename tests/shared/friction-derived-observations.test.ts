@@ -61,7 +61,7 @@ test("measureFrictionCost: repeated touches on one subject count as verbatim re-
     evt("c", "inefficient_feeding", "x"), // no tokens → contributes 0, never fabricated
   ]);
   expect(cost.round_trips).toBe(3);
-  expect(cost.verbatim_re_authors).toBe(3);
+  expect(cost.verbatim_re_authors, "3 events = original + 2 re-works").toBe(2);
   expect(cost.tokens, "only real measures sum; missing counts as 0").toBe(150);
 });
 

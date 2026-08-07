@@ -4,6 +4,8 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   fileExists,
+  INSTALL_MARKER_END,
+  INSTALL_MARKER_START,
   readJson,
   readTextIfExists,
   writeGeneratedJson,
@@ -24,17 +26,15 @@ import {
   renderCodexAutomationRecipe,
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
+  INSTALLED_PROMPT_FILENAME,
 } from './remediate-code-wrapper-install-renderers.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const promptAssetPath = join(repoRoot, 'skills', 'remediate-code', 'remediate-code.prompt.md');
 const skillAssetPath = join(repoRoot, 'skills', 'remediate-code', 'SKILL.md');
-const INSTALL_MARKER_START = '<!-- remediate-code:begin -->';
-const INSTALL_MARKER_END = '<!-- remediate-code:end -->';
 const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
-const INSTALLED_PROMPT_FILENAME = 'remediate-code.import.md';
 const INSTALL_DIR = '.remediate-code';
 
 function hasFlag(argv, name) {
@@ -600,7 +600,7 @@ export async function installBootstrap(argv, options = {}) {
   const root = resolve(getFlag(argv, '--root') ?? '.');
   await assertDirectoryExists(root, 'Target repository root');
   const profile = getInstallProfile(host);
-  const promptSource = await readFile(promptAssetPath, 'utf8');
+  const promptSource = (await readFile(promptAssetPath, 'utf8')).replace(/\r\n/g, '\n');
   const skillSource = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
   const { body: promptBody } = splitFrontmatter(promptSource);
   const assetPaths = buildInstallAssetPaths(root, profile);
@@ -1000,7 +1000,7 @@ export async function detectBootstrapRefreshReason(root, host) {
 
   let installManifest;
   try {
-    installManifest = JSON.parse(await readFile(installManifestPath, 'utf8'));
+    installManifest = await readJson(installManifestPath, 'install manifest');
   } catch {
     return 'invalid_install_manifest';
   }

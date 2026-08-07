@@ -253,30 +253,16 @@ export function crossLensDedupe(
         // lives on the survivor's single clone, never on the caller's object.
         const a = canonical(originalA);
         const b = canonical(originalB);
+        // crossLensDedupe only pairs findings of DIFFERENT lenses
         if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
 
-        const catMatch = normalizeText(a.category) === normalizeText(b.category);
-        // Hard category gate applies ahead of BOTH the exact-match and fuzzy layers.
-        if (policy.categoryGate === "hard" && !catMatch) continue;
+        const comparison = compareFindingPair(a, b, {
+          categoryGate: policy.categoryGate,
+          exactIdentityShortCircuit: policy.exactIdentityShortCircuit,
+        });
+        if (!comparison.matched) continue;
 
-        let matched = false;
-        if (policy.exactIdentityShortCircuit) {
-          const keyA = discriminatingIdentityKey(a);
-          const keyB = discriminatingIdentityKey(b);
-          matched = keyA !== null && keyA === keyB;
-        }
-        if (!matched) {
-          const titleSim = wordJaccard(a.title, b.title);
-          const threshold = policy.categoryGate === "soft" ? (catMatch ? 0.4 : 0.5) : 0.4;
-          if (titleSim < threshold) continue;
-          if (filePathOverlap(a, b) < 0.5) continue;
-        }
-
-        const aSev = severityRank(a.severity);
-        const bSev = severityRank(b.severity);
-        const aConf = confidenceRank(a.confidence);
-        const bConf = confidenceRank(b.confidence);
-        const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
+        const keepA = comparison.keepA;
         const survivorOriginal = keepA ? originalA : originalB;
         const absorbedOriginal = keepA ? originalB : originalA;
         // Absorb the absorbed side's ACCUMULATED view so data it absorbed earlier
@@ -402,6 +388,67 @@ export function crossLensDedupe(
 }
 
 /**
+ * Shared pairwise comparison result: should these two findings be merged?
+ * Extracted to eliminate duplication between crossLensDedupe and sameLensDedupe.
+ */
+interface PairwiseComparisonResult {
+  /** If true, a is kept as survivor; if false, b is kept. */
+  keepA: boolean;
+  /** Did the pair match under the comparison criteria? */
+  matched: boolean;
+}
+
+/**
+ * Perform pairwise comparison of two findings using similarity metrics.
+ * Returns whether they match and which should be the survivor.
+ * This logic is shared by both crossLensDedupe and sameLensDedupe.
+ */
+function compareFindingPair(
+  a: Finding,
+  b: Finding,
+  options: {
+    skipLensCheck?: boolean; // Skip the lens equality check (crossLensDedupe sets different-lens requirement in its own logic)
+    categoryGate?: "soft" | "hard";
+    exactIdentityShortCircuit?: boolean;
+  },
+): PairwiseComparisonResult {
+  const catMatch = normalizeText(a.category) === normalizeText(b.category);
+
+  // Hard category gate applies ahead of both exact-match and fuzzy layers
+  if (options.categoryGate === "hard" && !catMatch) {
+    return { matched: false, keepA: false };
+  }
+
+  let matched = false;
+  if (options.exactIdentityShortCircuit) {
+    const keyA = discriminatingIdentityKey(a);
+    const keyB = discriminatingIdentityKey(b);
+    matched = keyA !== null && keyA === keyB;
+  }
+
+  if (!matched) {
+    const titleSim = wordJaccard(a.title, b.title);
+    const threshold = options.categoryGate === "soft" ? (catMatch ? 0.4 : 0.5) : 0.4;
+    if (titleSim < threshold) {
+      return { matched: false, keepA: false };
+    }
+    if (filePathOverlap(a, b) < 0.5) {
+      return { matched: false, keepA: false };
+    }
+    matched = true;
+  }
+
+  // Rank by severity then confidence
+  const aSev = severityRank(a.severity);
+  const bSev = severityRank(b.severity);
+  const aConf = confidenceRank(a.confidence);
+  const bConf = confidenceRank(b.confidence);
+  const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
+
+  return { matched, keepA };
+}
+
+/**
  * File-independent finding identity for exact re-emission collapse: the same logical
  * finding (normalized lens + category + title) re-emitted across files / units /
  * passes shares one key. Distinct from `findingIdentityKey` (the 3-tier structural-
@@ -459,8 +506,9 @@ export function sameLensDedupe(findings: Finding[]): Finding[] {
         const a = group[i];
         const b = group[j];
 
-        const titleSim = wordJaccard(a.title, b.title);
+        // sameLensDedupe has different similarity thresholds than crossLensDedupe
         const catMatch = normalizeText(a.category) === normalizeText(b.category);
+        const titleSim = wordJaccard(a.title, b.title);
         const threshold = catMatch ? 0.35 : 0.45;
         if (titleSim < threshold) continue;
         if (!lineRangeOverlaps(a, b) && filePathOverlap(a, b) < 0.5) continue;

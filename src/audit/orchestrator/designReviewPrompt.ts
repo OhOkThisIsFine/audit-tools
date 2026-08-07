@@ -52,21 +52,38 @@ function summarizeGraph(bundle: ArtifactBundle): string {
   return `Dependency graph: ${counts.join(", ")}.`;
 }
 
+/**
+ * Extracted helper for MNT-795c5f85: Duplicated top-N summary pattern.
+ * Formats a top-N list with header, lines, and "more" indicator.
+ */
+function formatTopNList<T>(
+  items: T[],
+  max: number,
+  headerFn: (total: number, shown: number) => string,
+  lineFn: (item: T) => string,
+): string {
+  if (items.length === 0) return "";
+
+  const shown = items.slice(0, max);
+  const lines = shown.map(lineFn);
+
+  return [
+    headerFn(items.length, shown.length),
+    ...lines,
+    ...(items.length > max ? [`  ... and ${items.length - max} more`] : []),
+  ].join("\n");
+}
+
 function summarizeFlows(bundle: ArtifactBundle, max = 15): string {
   const flows = bundle.critical_flows?.flows ?? [];
   if (flows.length === 0) return "No critical flows identified.";
 
-  const shown = flows.slice(0, max);
-  const lines = shown.map(
-    (flow) =>
-      `- ${flow.name}: ${flow.paths.length} files, concerns: ${flow.concerns.join(", ") || "none"}`,
+  return formatTopNList(
+    flows,
+    max,
+    (total) => `${total} critical flows:`,
+    (flow) => `- ${flow.name}: ${flow.paths.length} files, concerns: ${flow.concerns.join(", ") || "none"}`,
   );
-
-  return [
-    `${flows.length} critical flows:`,
-    ...lines,
-    ...(flows.length > max ? [`  ... and ${flows.length - max} more`] : []),
-  ].join("\n");
 }
 
 function summarizeRisk(bundle: ArtifactBundle): string {
@@ -133,17 +150,12 @@ function summarizeSurfaces(bundle: ArtifactBundle, max = 20): string {
   const surfaces = bundle.surface_manifest?.surfaces ?? [];
   if (surfaces.length === 0) return "No externally reachable surfaces identified.";
 
-  const shown = surfaces.slice(0, max);
-  const lines = shown.map(
-    (surface) =>
-      `- ${surface.id} (${surface.kind}): ${surface.entrypoint}${surface.methods?.length ? ` [${surface.methods.join(", ")}]` : ""}`,
+  return formatTopNList(
+    surfaces,
+    max,
+    (total) => `${total} surfaces:`,
+    (surface) => `- ${surface.id} (${surface.kind}): ${surface.entrypoint}${surface.methods?.length ? ` [${surface.methods.join(", ")}]` : ""}`,
   );
-
-  return [
-    `${surfaces.length} surfaces:`,
-    ...lines,
-    ...(surfaces.length > max ? [`  ... and ${surfaces.length - max} more`] : []),
-  ].join("\n");
 }
 
 function summarizeFiles(bundle: ArtifactBundle): string {
@@ -168,17 +180,12 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
   if (findings.length === 0)
     return "No structural issues detected by deterministic analysis.";
 
-  const shown = findings.slice(0, max);
-  const lines = shown.map(
-    (finding) =>
-      `- [${finding.severity}] ${finding.title}: ${finding.summary}`,
+  return formatTopNList(
+    findings,
+    max,
+    (total) => `${total} structural findings from deterministic analysis:`,
+    (finding) => `- [${finding.severity}] ${finding.title}: ${finding.summary}`,
   );
-
-  return [
-    `${findings.length} structural findings from deterministic analysis:`,
-    ...lines,
-    ...(findings.length > max ? [`  ... and ${findings.length - max} more`] : []),
-  ].join("\n");
 }
 
 export interface DesignReviewOptions {

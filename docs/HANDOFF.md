@@ -108,18 +108,31 @@
 
 ## Immediate next
 
-1. **Run remediate-code over the 2026-08-06 dogfood findings** on the freshly shipped version
-   (backend state is a clean slate). Triage is DONE: all 9 criticals were adversarially verified —
-   0 survived as critical (3 refuted, 6 downgraded and now tracked in `open-bugs.md`); the 3
-   tool-side defect leads are FIXED and shipped (see
-   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md) §Defect leads +
-   §Critical-findings verification). Start the remediation from the promoted
-   `.audit-tools/audit-findings.json` (1,925 findings / 133 blocks; high tier first — expect
-   severity inflation, the planning review gate is the filter).
-2. Work the 2026-08-05 minor-friction cluster (still live on v0.36.0, re-confirmed:
-   handshake re-echo, tier-routing collapse, silent long derivation, staleness-line spam,
-   observability rationale) — entry + spec refs in `open-bugs.md` §Dogfood 2026-08-05 minor
-   friction cluster.
+1. **Remediation run `dogfood-20260806-v0361-remediation` is COMPLETE (2026-08-06).** All 211
+   items terminal: 202 `verified_no_change` + 9 `resolved`; close phase ran the full suite on the
+   combined state; deliverables `.audit-tools/remediation-report.md` +
+   `remediation-outcomes.json` committed on the run branch. **Next: review the run branch's diff
+   vs `main` (~50 commits — node fixes + guard repairs + docs) and MERGE
+   `remediation/dogfood-20260806-v0361-remediation` into `main`.** After merging, the checkout may
+   return to `main`. The run surfaced 5 NEW tool defects (cluster now 11 —
+   `open-bugs.md` §Implement-dispatch accept/reverify defect cluster) fixed-around by hand
+   mid-run; friction record: `.audit-tools/remediation/friction/run.json`.
+   ⚠ Standing hazards until §2 ships: `session-config.json` at repo root (untracked,
+   `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
+   is load-bearing — recreate if absent; the installed global dist carries a ONE-LINE HOTFIX
+   (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the source fix
+   ships.
+2. **Ship the loop-core source fixes** for the accept/reverify cluster (now ELEVEN defects incl.
+   the commit-before-cwd-check MAIN-dirt commit, the sticky merged:true outcome, the accept_failed
+   re-report ledger) + the zero-frontier null-guard (`src/remediate/steps/nextStep.ts:2372`) with
+   regression tests and attestation — entry in `open-bugs.md` §Implement-dispatch accept/reverify
+   defect cluster; run forensics in memory `remediation-run-2026-08-06-paused-midflight`.
+3. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
+   2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
+   `open-bugs.md`.
+4. **CI on main (`8afb66d7`) is still queued behind a GitHub Actions outage** — the TS7006 fix is
+   verified green locally (`verify:checks` exit 0) and every CI shard that ran passed; confirm the
+   queued `ci` run goes green when Actions recovers.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 

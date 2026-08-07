@@ -89,64 +89,56 @@ export function detectNonColocalization(
     agreementThreshold,
   );
 
-  // --- Behavioral cluster with no coherent purpose ---
-  const behaviorClusters = allBehaviorClusters
-    .filter((c) => c.length >= minClusterSize)
-    .sort(bySizeThenFirst);
-  for (const cluster of behaviorClusters.slice(0, maxPerKind)) {
-    const best = bestContainment(cluster, input.intentBoundaries);
-    if (best + 1e-12 >= overlapThreshold) continue; // aligns to a declared boundary
-    findings.push({
-      id: nextId(),
-      title: `Behavioral cluster spans declared boundaries: ${cluster.length} files`,
-      category: "non_colocalization_behavioral",
-      severity: "low",
-      confidence: "low",
-      lens: LENS,
-      summary:
-        `These ${cluster.length} files are tightly coupled by behavior (call/import, ` +
-        `co-change, and/or shared state) yet no single declared boundary ` +
-        `(directory, doc, or comment grouping) contains most of them ` +
-        `(best overlap ${(best * 100).toFixed(0)}%). A coupling cluster no ` +
-        `declared purpose owns is accidental complexity or a dead subsystem — a ` +
-        `lead for the conceptual charter pass to confirm.`,
-      affected_files: cluster.map((path) => ({ path })),
-      evidence: [
-        `Behavioral coupling consensus across ${input.behaviorPartitions.length} resolution levels.`,
-        `Best containment in any declared boundary: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
-      ],
-      systemic: true,
-    });
+  // Single-sourced detection loop for both behavioral and purpose non-colocalization findings.
+  function detectNonColocalGroup(
+    groups: string[][],
+    boundary: string[][],
+    label: "behavioral" | "purpose",
+  ): void {
+    const filtered = (label === "behavioral"
+      ? groups.filter((g) => g.length >= minClusterSize)
+      : groups.filter((g) => g.length >= 2)
+    ).sort(bySizeThenFirst);
+
+    for (const group of filtered.slice(0, maxPerKind)) {
+      const best = bestContainment(group, boundary);
+      if (best + 1e-12 >= overlapThreshold) continue;
+
+      const titleSuffix = label === "behavioral"
+        ? `Behavioral cluster spans declared boundaries: ${group.length} files`
+        : `Declared purpose is behaviorally smeared: ${group.length} files`;
+
+      const summaryText = label === "behavioral"
+        ? `These ${group.length} files are tightly coupled by behavior (call/import, co-change, and/or shared state) yet no single declared boundary (directory, doc, or comment grouping) contains most of them (best overlap ${(best * 100).toFixed(0)}%). A coupling cluster no declared purpose owns is accidental complexity or a dead subsystem — a lead for the conceptual charter pass to confirm.`
+        : `A doc/comment grouping declares these ${group.length} files a unit, but they do not form a behavioral cluster — no single coupling cluster contains most of them (best overlap ${(best * 100).toFixed(0)}%). A purpose smeared across the codebase and never modularized is often the highest-value refactor — a lead for the conceptual charter pass.`;
+
+      const evidenceText = label === "behavioral"
+        ? `Behavioral coupling consensus across ${input.behaviorPartitions.length} resolution levels.`
+        : `Declared as one unit by an intent-declared source (doc/comment).`;
+
+      findings.push({
+        id: nextId(),
+        title: titleSuffix,
+        category: label === "behavioral" ? "non_colocalization_behavioral" : "non_colocalization_purpose",
+        severity: "low",
+        confidence: "low",
+        lens: LENS,
+        summary: summaryText,
+        affected_files: group.map((path) => ({ path })),
+        evidence: [
+          evidenceText,
+          `Best containment in any ${label === "behavioral" ? "declared boundary" : "behavioral cluster"}: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
+        ],
+        systemic: true,
+      });
+    }
   }
 
+  // --- Behavioral cluster with no coherent purpose ---
+  detectNonColocalGroup(allBehaviorClusters, input.intentBoundaries, "behavioral");
+
   // --- A purpose with no behavioral cluster (smeared) ---
-  const purposeGroups = [...input.purposeGroups]
-    .filter((g) => g.length >= 2)
-    .sort(bySizeThenFirst);
-  for (const group of purposeGroups.slice(0, maxPerKind)) {
-    const best = bestContainment(group, allBehaviorClusters);
-    if (best + 1e-12 >= overlapThreshold) continue; // the purpose IS a behavior cluster
-    findings.push({
-      id: nextId(),
-      title: `Declared purpose is behaviorally smeared: ${group.length} files`,
-      category: "non_colocalization_purpose",
-      severity: "low",
-      confidence: "low",
-      lens: LENS,
-      summary:
-        `A doc/comment grouping declares these ${group.length} files a unit, but ` +
-        `they do not form a behavioral cluster — no single coupling cluster ` +
-        `contains most of them (best overlap ${(best * 100).toFixed(0)}%). A ` +
-        `purpose smeared across the codebase and never modularized is often the ` +
-        `highest-value refactor — a lead for the conceptual charter pass.`,
-      affected_files: group.map((path) => ({ path })),
-      evidence: [
-        `Declared as one unit by an intent-declared source (doc/comment).`,
-        `Best containment in any behavioral cluster: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
-      ],
-      systemic: true,
-    });
-  }
+  detectNonColocalGroup(input.purposeGroups, allBehaviorClusters, "purpose");
 
   return findings;
 }

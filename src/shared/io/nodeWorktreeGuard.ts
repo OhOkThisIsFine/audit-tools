@@ -43,7 +43,7 @@ import { AUDIT_TOOLS_DIRNAME, WORKTREES_DIRNAME } from "./auditToolsPaths.js";
  */
 export function nodeWorktreeAncestor(p: string): string | null {
   const segments = resolve(p).split(sep);
-  for (let i = 1; i + 2 < segments.length + 1; i++) {
+  for (let i = 1; i + 2 < segments.length; i++) {
     // Case-insensitive segment compare (review hardening): win32 paths are
     // case-preserving but case-insensitive, so a re-cased cwd must still be
     // detected. Refusing more is safe — a posix dir literally spelled

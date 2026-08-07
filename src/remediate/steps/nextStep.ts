@@ -100,6 +100,7 @@ import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
+  type AcceptNodeWorktreeResult,
   mergeImplementResults,
   prepareImplementDispatch,
   readExtractedPlanIfPresent,
@@ -1424,36 +1425,67 @@ export async function driveRollingImplementDispatch(
     // or double-merge it; the run-level `mergeImplementResults` reconciles from the
     // peer's accept outcome.
     if (!claimTokens.has(block.block_id)) {
-      const claim = await registry.claim(block.block_id, "in-process");
-      if (!claim.acquired) {
-        nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false, pool_id: slot.poolId });
+      try {
+        const claim = await registry.claim(block.block_id, "in-process");
+        if (!claim.acquired) {
+          nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false, pool_id: slot.poolId });
+          return {
+            packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
+            outcome: "success",
+          };
+        }
+        claimTokens.set(block.block_id, claim.ownerToken);
+      } catch (err) {
+        // Claim acquisition failed — return error outcome without rejecting, per
+        // contract. Release is skipped since we never acquired the claim.
+        nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false, pool_id: slot.poolId });
         return {
           packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-          outcome: "success",
+          outcome: "error",
+          error: err,
         };
       }
-      claimTokens.set(block.block_id, claim.ownerToken);
     }
     // The shared per-node worktree lifecycle (reset → create → link node_modules →
     // seed → dispatch → commit/verify/write-scope/merge → record), identical to the
     // A-8 hybrid executor and behaviourally to the host-subagent driver's
     // `accept-node` callback. `touched_files` is the block's authoritative declared
     // write set (the source the dispatch plan's write scope is derived from).
-    const { result, accept } = await executeNodeInWorktree({
-      block,
-      slot,
-      root,
-      artifactsDir,
-      runId,
-      resultPath,
-      seedPaths: block.touched_files,
-      allBlockScopes,
-      additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
-      dispatchNode,
-      // Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME lease
-      // this driver just claimed (or re-claimed on a rate_limited re-queue) above.
-      ownership: { registry, nodeId: block.block_id, ownerToken: claimTokens.get(block.block_id)! },
-    });
+    let result: RollingDispatchResult<{ block_id: string }>;
+    let accept: AcceptNodeWorktreeResult;
+    try {
+      ({ result, accept } = await executeNodeInWorktree({
+        block,
+        slot,
+        root,
+        artifactsDir,
+        runId,
+        resultPath,
+        seedPaths: block.touched_files,
+        allBlockScopes,
+        additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
+        dispatchNode,
+        // Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME lease
+        // this driver just claimed (or re-claimed on a rate_limited re-queue) above.
+        ownership: { registry, nodeId: block.block_id, ownerToken: claimTokens.get(block.block_id)! },
+      }));
+    } catch (err) {
+      // Worker execution failed — return error outcome without rejecting, per
+      // contract. Release the claim since we must free it on exception to prevent
+      // blocking peer drivers.
+      try {
+        await releaseNodeClaim(registry, claimTokens, block.block_id);
+      } catch (releaseErr) {
+        // Log release failure but don't escalate — node outcome already records the
+        // execution error as the primary failure mode.
+      }
+      nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false, pool_id: slot.poolId });
+      return {
+        packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
+        outcome: "error",
+        error: err,
+      };
+    }
     nodeOutcomes.push({
       block_id: block.block_id,
       outcome: accept.outcome,

@@ -281,8 +281,6 @@ test("normalizeSemgrepJson maps mixed-case semgrep severity to lowercase schema 
 });
 
 test("normalizeSemgrepJson produces undefined/fallback severity for missing or unknown severity (COR-cffe3d7b)", () => {
-  const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
-
   // Missing severity — normalizeGenericExternalResults should supply a fallback
   const withMissing = normalizeSemgrepJson({
     results: [

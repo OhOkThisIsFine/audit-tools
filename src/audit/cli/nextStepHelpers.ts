@@ -99,6 +99,24 @@ import {
 } from "./reviewRun.js";
 import { mergeAndIngest } from "./mergeAndIngestCommand.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
+import {
+  driveRollingAuditDispatch,
+  resolveAuditRollingEngineEnabled,
+} from "./rollingAuditDispatch.js";
+import {
+  buildAuditSourcePools,
+  isInProcessAuditPool,
+  auditNodeClaimRegistry,
+  auditHybridSettledPath,
+} from "./hybridDispatch.js";
+import {
+  planHybridDispatch,
+  readSettledPools,
+  addSettledPool,
+  buildSelfSpawnExclusion,
+  captureZeroCapacityFriction,
+} from "audit-tools/shared";
+import { resolveHostDispatchCapability } from "./args.js";
 
 /**
  * Skip the design-review enrichment when the host quota wall has persisted past the
@@ -182,24 +200,6 @@ export async function stampSystemicChallengeSkipped(
       };
   await writeJsonFile(path, register);
 }
-import {
-  driveRollingAuditDispatch,
-  resolveAuditRollingEngineEnabled,
-} from "./rollingAuditDispatch.js";
-import {
-  buildAuditSourcePools,
-  isInProcessAuditPool,
-  auditNodeClaimRegistry,
-  auditHybridSettledPath,
-} from "./hybridDispatch.js";
-import {
-  planHybridDispatch,
-  readSettledPools,
-  addSettledPool,
-  buildSelfSpawnExclusion,
-  captureZeroCapacityFriction,
-} from "audit-tools/shared";
-import { resolveHostDispatchCapability } from "./args.js";
 
 // ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
 

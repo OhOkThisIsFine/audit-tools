@@ -15,6 +15,7 @@ import {
 import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditResult } from "../types.js";
 import { getArtifactsDir } from "./args.js";
+import { outputJson } from "./cliHelpers.js";
 
 const SAMPLE_REPO_FILES = [
   { path: "src/api/auth.ts", size_bytes: 1240, hash: "abc123" },
@@ -117,11 +118,5 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
     audit_report: auditReport,
     audit_state: auditState,
   });
-  console.log(
-    JSON.stringify(
-      { audit_state: auditState, artifacts_dir: artifactsDir },
-      null,
-      2,
-    ),
-  );
+  outputJson({ audit_state: auditState, artifacts_dir: artifactsDir });
 }

@@ -206,7 +206,7 @@ export function measureFrictionCost(
   items: readonly CapturedFrictionItem[],
 ): FrictionCostSignals {
   const round_trips = items.length;
-  const verbatim_re_authors = round_trips > 1 ? round_trips : 0;
+  const verbatim_re_authors = round_trips > 1 ? round_trips - 1 : 0;
   const tokens = items.reduce(
     (sum, item) =>
       sum +

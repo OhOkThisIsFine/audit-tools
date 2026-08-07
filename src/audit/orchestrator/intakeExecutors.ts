@@ -15,44 +15,60 @@ interface PackageJsonShape {
   workspaces?: unknown;
 }
 
+/**
+ * Extracted helper for MNT-6bf34726: Nested directory-climb loop pattern.
+ * Walks ancestors from startDir upward, calling fn for each, stopping at stopFn.
+ */
+function walkAncestorDirs(
+  startDir: string,
+  fn: (dir: string) => boolean,
+  maxLevels?: number,
+): void {
+  let current = dirname(startDir);
+  let previous = startDir;
+  let levelsChecked = 0;
+
+  while (current && current !== previous && (!maxLevels || levelsChecked < maxLevels)) {
+    if (fn(current)) break;
+    previous = current;
+    current = dirname(current);
+    levelsChecked++;
+  }
+}
+
 /** Detect signals that the resolved audit root may be the wrong directory. */
 export function detectMisScopeSmells(root: string): string[] {
   const smells: string[] = [];
 
   if (!isGitRepo(root)) {
-    let current = dirname(root);
-    let previous = root;
-    while (current && current !== previous) {
-      if (existsSync(join(current, ".git"))) {
+    walkAncestorDirs(root, (ancestor) => {
+      if (existsSync(join(ancestor, ".git"))) {
         smells.push(
-          `root has no .git but ancestor '${current}' is a git repository — you may have targeted a subdirectory instead of the repo root`,
+          `root has no .git but ancestor '${ancestor}' is a git repository — you may have targeted a subdirectory instead of the repo root`,
         );
-        break;
+        return true;
       }
-      previous = current;
-      current = dirname(current);
-    }
+      return false;
+    });
   }
 
   const rootPkg = readPackageJson(root);
   if (rootPkg && rootPkg.name !== undefined) {
-    let current = dirname(root);
-    let previous = root;
-    let levelsChecked = 0;
-    const maxLevels = 3;
-    while (current && current !== previous && levelsChecked < maxLevels) {
-      const ancestorPkg = readPackageJson(current);
-      if (ancestorPkg && ancestorPkg.workspaces !== undefined) {
-        smells.push(
-          `root appears to be a workspace member of a parent monorepo at '${current}' — consider auditing from the monorepo root instead`,
-        );
-        break;
-      }
-      if (existsSync(join(current, ".git"))) break;
-      previous = current;
-      current = dirname(current);
-      levelsChecked++;
-    }
+    walkAncestorDirs(
+      root,
+      (ancestor) => {
+        const ancestorPkg = readPackageJson(ancestor);
+        if (ancestorPkg && ancestorPkg.workspaces !== undefined) {
+          smells.push(
+            `root appears to be a workspace member of a parent monorepo at '${ancestor}' — consider auditing from the monorepo root instead`,
+          );
+          return true;
+        }
+        if (existsSync(join(ancestor, ".git"))) return true;
+        return false;
+      },
+      3,
+    );
   }
 
   return smells;

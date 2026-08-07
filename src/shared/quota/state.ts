@@ -28,6 +28,12 @@ function isQuotaState(value: unknown): value is QuotaState {
   return (version === 1 || version === 2) && typeof obj["entries"] === "object";
 }
 
+function isValidIsoDateString(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const date = new Date(value);
+  return !isNaN(date.getTime()) && date.toISOString() === value;
+}
+
 /**
  * The cold-start quota state. This is the ONLY value that legitimately means
  * "nothing learned yet" — it must never be manufactured from a read failure.
@@ -221,6 +227,32 @@ export const TOKENS_PER_PCT_EWMA_ALPHA = 0.3;
 export const MIN_SLOPE_DELTA_PERCENT = 0.5;
 
 /**
+ * Fold one observation into a learned EWMA estimate, returning the updated map
+ * (pure — never mutates the input). Core extraction of the EWMA blending logic
+ * used by both tokens-per-percent slopes and output-ratio ratios.
+ *
+ * Degrade-safe: returns the prior map unchanged when the sample is non-finite
+ * or non-positive. Never throws.
+ */
+function blendEwmaObservation(
+  prior: Record<string, number> | undefined,
+  key: string,
+  sample: number,
+  alpha: number,
+): Record<string, number> {
+  const base = prior ?? {};
+  if (!Number.isFinite(sample) || sample <= 0) {
+    return base;
+  }
+  const previous = base[key];
+  const blended =
+    typeof previous === "number" && Number.isFinite(previous) && previous > 0
+      ? previous * (1 - alpha) + sample * alpha
+      : sample;
+  return { ...base, [key]: blended };
+}
+
+/**
  * Fold one tokens→percent slope observation into a window's learned EWMA slope,
  * returning the updated map (pure — never mutates the input). Given a prior and
  * new remaining_pct (0–1 fractions) for the SAME window label plus the tokens
@@ -251,13 +283,7 @@ export function foldTokensPerPctObservation(
   const deltaPercent = (priorRemainingPct - newRemainingPct) * 100;
   if (deltaPercent < MIN_SLOPE_DELTA_PERCENT) return base;
   const sampleSlope = tokensDispatched / deltaPercent;
-  if (!Number.isFinite(sampleSlope) || sampleSlope <= 0) return base;
-  const previous = base[slopeKey];
-  const blended =
-    typeof previous === "number" && Number.isFinite(previous) && previous > 0
-      ? previous * (1 - TOKENS_PER_PCT_EWMA_ALPHA) + sampleSlope * TOKENS_PER_PCT_EWMA_ALPHA
-      : sampleSlope;
-  return { ...base, [slopeKey]: blended };
+  return blendEwmaObservation(prior, slopeKey, sampleSlope, TOKENS_PER_PCT_EWMA_ALPHA);
 }
 
 // EWMA weight for a new output/input ratio observation. Shares the responsive-but-
@@ -291,13 +317,7 @@ export function foldOutputRatioObservation(
     return base;
   }
   const sampleRatio = actualOutputTokens / actualInputTokens;
-  if (!Number.isFinite(sampleRatio) || sampleRatio <= 0) return base;
-  const previous = base[lens];
-  const blended =
-    typeof previous === "number" && Number.isFinite(previous) && previous > 0
-      ? previous * (1 - OUTPUT_RATIO_EWMA_ALPHA) + sampleRatio * OUTPUT_RATIO_EWMA_ALPHA
-      : sampleRatio;
-  return { ...base, [lens]: blended };
+  return blendEwmaObservation(prior, lens, sampleRatio, OUTPUT_RATIO_EWMA_ALPHA);
 }
 
 /**
@@ -599,7 +619,12 @@ async function recordWaveOutcomeUnsafe(
       const backoffMs = computeBackoffCooldownMs(new429Count);
       entry.cooldown_until = new Date(Date.now() + backoffMs).toISOString();
     } else if (outcome.cooldown_until) {
-      entry.cooldown_until = outcome.cooldown_until;
+      // Validate cooldown_until is a valid ISO date string before persisting
+      if (isValidIsoDateString(outcome.cooldown_until)) {
+        entry.cooldown_until = outcome.cooldown_until;
+      } else {
+        throw new Error(`Invalid cooldown_until timestamp in quota outcome: ${outcome.cooldown_until}`);
+      }
     }
   }
 

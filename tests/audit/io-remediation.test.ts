@@ -139,7 +139,7 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
     expect(loaded.tooling_manifest!.package_version).toBe(expectedManifest.package_version);
     expect(loaded.tooling_manifest!.implementation_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(loaded.tooling_manifest!.implementation_hash).not.toBe("0".repeat(64));
-    expect(loaded.tooling_manifest!.inputs).toEqual(Array.from(TOOLING_INPUTS));
+    expect(loaded.tooling_manifest!.inputs).toEqual(expectedManifest.inputs);
     expect(stableToolingManifestValues(loaded.tooling_manifest)).toEqual(stableToolingManifestValues(expectedManifest));
 
     const loadedAgain = await loadArtifactBundle(`${tempDir}${sep}`);

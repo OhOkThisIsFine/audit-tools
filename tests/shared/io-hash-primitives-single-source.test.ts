@@ -19,9 +19,10 @@
  * AccessDeclaration) fails here rather than silently drifting.
  */
 import { test, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectTsFiles } from "./testFileUtils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_PACKAGES = resolve(__dirname, "../..");
@@ -36,17 +37,6 @@ const SHARED_ACCESS_DECLARATION = join(SHARED_SRC, "types", "accessDeclaration.t
 
 function read(path: string): string {
   return readFileSync(path, "utf8");
-}
-
-/** Recursively collect every `*.ts` file under `dir`. */
-function collectTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
-    else if (entry.name.endsWith(".ts")) out.push(full);
-  }
-  return out;
 }
 
 const ALL_SRC_FILES = [

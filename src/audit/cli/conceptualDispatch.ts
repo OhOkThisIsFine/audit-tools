@@ -53,8 +53,10 @@ export interface ConceptualReviewSettings {
  * and every field degrades cleanly on a partial checkpoint: a missing `confirmed_at`
  * renders `unknown`, an absent/empty lens selection renders `all lenses`, and a
  * missing depth falls back to the resolved default `shallow`.
+ *
+ * @internal Exported for testing purposes (TST-4c8bd93a-3).
  */
-function renderReuseNotice(
+export function renderReuseNotice(
   checkpoint: NonNullable<IntentCheckpoint["design_review"]>,
   confirmedAt: string | undefined,
   lensSelection: IntentCheckpoint["lens_selection"],

@@ -132,27 +132,52 @@ function buildIndexes(bundle: ArtifactBundle): BundleIndexes {
   };
 }
 
-function validateCoverageMatrixConsistency(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
-  if (!bundle.repo_manifest || !bundle.coverage_matrix) return;
-  const coveragePaths = new Set(idx.coverageFiles.map((f) => f.path));
+/**
+ * Extracted helper for MNT-176bf609-2: Duplicated consistency-check pattern.
+ * Validates that all repo paths have corresponding entries in a target collection.
+ */
+function validatePathsCoveredBySet(
+  bundle: ArtifactBundle,
+  idx: BundleIndexes,
+  issues: ValidationIssue[],
+  artifactName: string,
+  pathsToCheck: Set<string>,
+  errorMessage: (path: string) => string,
+  prerequisites: () => boolean,
+): void {
+  if (!prerequisites()) return;
   for (const path of idx.repoPaths) {
-    if (!coveragePaths.has(path)) {
-      pushIssue(issues, "coverage_matrix", `Missing coverage entry for ${path}`);
+    if (!pathsToCheck.has(path)) {
+      pushIssue(issues, artifactName, errorMessage(path));
     }
   }
 }
 
+function validateCoverageMatrixConsistency(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
+  validatePathsCoveredBySet(
+    bundle,
+    idx,
+    issues,
+    "coverage_matrix",
+    new Set(idx.coverageFiles.map((f) => f.path)),
+    (path) => `Missing coverage entry for ${path}`,
+    () => !!bundle.repo_manifest && !!bundle.coverage_matrix,
+  );
+}
+
 function validateFileDispositionConsistency(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
-  if (!bundle.repo_manifest || !bundle.file_disposition) return;
-  const dispositionPaths = new Set(idx.fileDispositionEntries.map((f) => f.path));
   // Every manifest file must keep a per-file record — downstream consumers
   // treat a missing entry as included, so there is deliberately no aggregated
   // "covered by prefix" tolerance here.
-  for (const path of idx.repoPaths) {
-    if (!dispositionPaths.has(path)) {
-      pushIssue(issues, "file_disposition", `Missing disposition entry for ${path}`);
-    }
-  }
+  validatePathsCoveredBySet(
+    bundle,
+    idx,
+    issues,
+    "file_disposition",
+    new Set(idx.fileDispositionEntries.map((f) => f.path)),
+    (path) => `Missing disposition entry for ${path}`,
+    () => !!bundle.repo_manifest && !!bundle.file_disposition,
+  );
 }
 
 function validateUnitManifest(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
