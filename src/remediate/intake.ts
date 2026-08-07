@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import type { AuditFindingsReport, Finding, WorkBlock, FindingSeverity } from "audit-tools/shared";
 import {
   hashContent,
@@ -35,22 +36,71 @@ export interface IntakeSourceManifest {
   sources: IntakeSource[];
 }
 
-export interface IntakeOpenQuestion {
-  id: string;
-  question: string;
-  category?: string;
-  blocking?: boolean;
-}
+// Zod is the single source for shape + type here (matching the repo-wide
+// zod-single-source convention, e.g. RemediationBlockSchema/ItemSpecSchema in
+// src/remediate/state/types.ts) rather than a hand-written interface kept in
+// lockstep with a second, independent runtime check. Deliberately NOT
+// `.strict()`: intake-summary.json is HOST-AUTHORED (the LLM-produced artifact
+// synthesizeIntakePrompt's template asks for), the same trust tier as the
+// auditor's `Finding` contract (FindingSchema, also non-strict) — an unknown
+// extra field is not the defect class this validates; a wrong-shaped KNOWN
+// field is (CP-NODE-2 invariants[11]).
+export const IntakeOpenQuestionSchema = z.object({
+  id: z.string(),
+  question: z.string(),
+  category: z.string().optional(),
+  blocking: z.boolean().optional(),
+});
+export type IntakeOpenQuestion = z.infer<typeof IntakeOpenQuestionSchema>;
 
-export interface IntakeSummary {
-  schema_version: typeof INTAKE_SUMMARY_SCHEMA_VERSION;
-  ready: boolean;
-  source_type: "structured_audit" | "documents" | "conversation" | "mixed";
-  goals: string[];
-  non_goals: string[];
-  constraints: string[];
-  affected_files: { path: string; reason?: string }[];
-  open_questions: IntakeOpenQuestion[];
+export const IntakeSummarySchema = z.object({
+  schema_version: z.literal(INTAKE_SUMMARY_SCHEMA_VERSION),
+  ready: z.boolean(),
+  source_type: z.enum(["structured_audit", "documents", "conversation", "mixed"]),
+  goals: z.array(z.string()),
+  non_goals: z.array(z.string()),
+  constraints: z.array(z.string()),
+  affected_files: z.array(
+    z.object({ path: z.string(), reason: z.string().optional() }),
+  ),
+  open_questions: z.array(IntakeOpenQuestionSchema),
+});
+export type IntakeSummary = z.infer<typeof IntakeSummarySchema>;
+
+/**
+ * Validate a raw parsed `intake-summary.json` payload against
+ * {@link IntakeSummarySchema}, throwing a legible Error when the shape does
+ * not conform — the read-time refusal for CP-NODE-2 invariants[11]'s
+ * 'unvalidated intake artifacts' defect class. Before this, `readIntakeArtifacts`
+ * read the file through `readOptionalJsonFile<T>`, a bare `JSON.parse(content)
+ * as T` assertion with zero runtime shape checking (src/shared/io/json.ts), so
+ * a structurally malformed summary — e.g. `ready: "yes"` (a truthy STRING, not
+ * a boolean, so `Boolean(summary.ready)` in `isIntakeReady` silently accepted
+ * it) or a non-array `goals` — was trusted verbatim. The thrown Error's
+ * message becomes the caller's refusal reason: `readIntakeArtifacts` and its
+ * callers run inside `runWithBlockedStepBackstop` (src/shared/io/stepContractWriter.ts),
+ * which turns any throw into a `blocked` step contract naming the cause
+ * verbatim — the mechanism this validation deliberately relies on instead of
+ * degrading silently to `undefined` (contrast the sibling clarification-file
+ * JSON-parse-failure branch a few lines below, which intentionally DOES
+ * degrade to absent because `resolveIntakeStep` re-prompts for it downstream;
+ * `intake-summary.json` has no such re-synthesis path, so silence there would
+ * strand the run on unvalidated data instead).
+ */
+export function validateIntakeSummary(raw: unknown, path: string): IntakeSummary {
+  const parsed = IntakeSummarySchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(
+      `Malformed intake summary at ${path}: ${issues}. Fix the file to match the ` +
+        "IntakeSummary contract (schema_version, ready:boolean, source_type, " +
+        "goals/non_goals/constraints:string[], affected_files:{path,reason?}[], " +
+        "open_questions:{id,question,category?,blocking?}[]) and rerun next-step.",
+    );
+  }
+  return parsed.data;
 }
 
 export function intakePaths(artifactsDir: string): {
@@ -438,12 +488,19 @@ export async function readIntakeArtifacts(
   brief?: string;
 }> {
   const paths = intakePaths(artifactsDir);
+  const rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
   return {
     manifest: await readOptionalJsonFile<IntakeSourceManifest>(
       paths.sourceManifest,
     ),
     conversationStart: await readOptionalTextFile(paths.conversationStart),
-    summary: await readOptionalJsonFile<IntakeSummary>(paths.summary),
+    // File absent → undefined (no summary yet, not a defect). File present →
+    // validated at read time (see validateIntakeSummary); malformed content
+    // throws rather than being trusted as a well-formed IntakeSummary.
+    summary:
+      rawSummary === undefined
+        ? undefined
+        : validateIntakeSummary(rawSummary, paths.summary),
     clarificationResolution: await (async () => {
       try {
         return await readOptionalJsonFile<unknown>(paths.clarificationResolution);

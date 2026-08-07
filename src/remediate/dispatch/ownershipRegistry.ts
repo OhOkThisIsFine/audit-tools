@@ -509,26 +509,60 @@ export class OwnershipRegistry {
     return registry;
   }
 
-  /** Write checkpoint synchronously after each mutation. */
+  /**
+   * PERSIST-LOCKING-DISJUNCTION-RESOLUTION (CP-NODE-2 invariants[7]) — branch (b).
+   *
+   * The disjunction required EITHER (a) routing this checkpoint write through
+   * the shared async locked-JSON persistence path (src/shared/io/lockedJsonStore.ts,
+   * built on the async `withFileLock`), OR (b) a recorded finding that
+   * single-writer discipline genuinely holds for `ownership-registry.json`.
+   *
+   * Branch (a) is not implementable in this module's granted write scope: the
+   * shared locked-JSON store has no synchronous entry point, while `_persist`
+   * is called synchronously from six in-class mutators (`initialize`,
+   * `claimAmendment`, `releaseAmendments`, `claimInFlight`, `releaseInFlight`,
+   * `handoffInFlight`) whose own callers — `src/remediate/dispatch/amendmentClaim.ts`,
+   * `src/remediate/steps/dispatch/marshal.ts`, `src/remediate/steps/dispatch/writeScope.ts`
+   * — consume the synchronous return/throw semantics directly and sit outside
+   * this contract's file scope. Converting `_persist` to async would also turn
+   * `claimInFlight`'s synchronous disjointness-violation throw into a rejected
+   * promise, changing failure semantics those callers depend on. Minting a
+   * second, synchronous locking primitive alongside the shared async one is
+   * forbidden regardless.
+   *
+   * Branch (b), taken here: single-writer discipline holds — trivially, because
+   * checkpoint persistence has no live writer in production today. Evidence
+   * (re-verify with the same greps before ever relying on this holding):
+   *   - `grep -rn "new OwnershipRegistry(" src/` finds exactly two production
+   *     instantiation sites — `src/remediate/steps/dispatch/marshal.ts` ("a
+   *     lightweight ownership registry ... interim path, until rollingDispatch
+   *     replaces this") and `src/remediate/steps/dispatch/writeScope.ts` (an
+   *     "ephemeral OwnershipRegistry") — both zero-argument, so `checkpointPath`
+   *     is `undefined` and the early-return below makes this method a no-op on
+   *     every current production call.
+   *   - `OwnershipRegistry.loadFromCheckpoint` (the only reader of a persisted
+   *     checkpoint) has zero production callers.
+   *   So there is no live writer — concurrent or solo — to the checkpoint file
+   *   today. Should a future caller (e.g. the rolling-dispatch engine the
+   *   marshal.ts comment anticipates) start passing a real `checkpointPath`, it
+   *   would drive from the single in-process synchronous scheduling loop this
+   *   file's own header already documents ("Atomicity: ... a single-threaded
+   *   orchestrator") — so single-writer discipline would continue to hold
+   *   structurally, not merely by absence of wiring. Re-run the greps above
+   *   before wiring a second `checkpointPath`-bearing caller.
+   *
+   * UNCONDITIONALLY on either branch: a persist failure must reach the caller
+   * instead of being swallowed. This method previously caught the write error
+   * and only logged it to stderr, leaving the in-memory registry silently
+   * ahead of disk so a restart lost every claim since the last successful
+   * persist. It no longer catches: an `mkdirSync`/`writeFileSync` failure now
+   * propagates straight out of `_persist` and its six mutator callers.
+   */
   private _persist(): void {
     if (!this.checkpointPath) return;
     const json = JSON.stringify(this.serialize(), null, 2) + "\n";
-    try {
-      mkdirSync(dirname(this.checkpointPath), { recursive: true });
-      writeFileSync(this.checkpointPath, json, "utf8");
-    } catch (err) {
-      // Best-effort: a checkpoint write failure must not crash the orchestrator.
-      process.stderr.write(
-        JSON.stringify({
-          level: "warn",
-          event: "ownership_registry_persist_failed",
-          path: this.checkpointPath,
-          code: (err as NodeJS.ErrnoException).code ?? null,
-          message: String(err),
-          ts: new Date().toISOString(),
-        }) + "\n",
-      );
-    }
+    mkdirSync(dirname(this.checkpointPath), { recursive: true });
+    writeFileSync(this.checkpointPath, json, "utf8");
   }
 
   /** Load from a checkpoint file; returns undefined if the file doesn't exist or can't be parsed. */

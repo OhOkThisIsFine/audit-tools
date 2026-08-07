@@ -3,9 +3,11 @@
  *   - buildFindingsDigest + buildFindingEnumeration: bounded digest + complete
  *     enumeration for enumerable (structured_audit) sources (INV-ID-08)
  *   - computeContentHash: deterministic SHA-256 prefix
+ *   - readIntakeArtifacts / validateIntakeSummary: CP-NODE-2 invariants[11]
+ *     read-time schema validation for the host-authored intake-summary.json
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir } from "node:fs/promises";
+import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +17,11 @@ import {
   buildFindingsDigest,
   buildFindingEnumeration,
   buildDocumentSourceManifest,
+  readIntakeArtifacts,
+  validateIntakeSummary,
+  intakePaths,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+  INTAKE_SUMMARY_SCHEMA_VERSION,
   FINDINGS_DIGEST_SCHEMA_VERSION,
   FINDING_ENUMERATION_SCHEMA_VERSION,
 } from "../../src/remediate/intake.js";
@@ -252,5 +258,78 @@ describe("buildFindingEnumeration", () => {
     const enm = buildFindingEnumeration(report);
     const ids = enm.findings.map((f) => f.id);
     expect(ids).toEqual(["F-001", "F-002", "F-003"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readIntakeArtifacts / validateIntakeSummary — CP-NODE-2 invariants[11]:
+// intake-summary.json is validated at READ TIME, not trusted as a bare cast.
+// ---------------------------------------------------------------------------
+
+describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json schema validation", () => {
+  const WELL_FORMED_SUMMARY = {
+    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+    ready: true,
+    source_type: "documents",
+    goals: ["Fix the bug"],
+    non_goals: [],
+    constraints: [],
+    affected_files: [{ path: "src/a.ts" }],
+    open_questions: [],
+  };
+
+  async function writeSummaryFile(artifactsDir: string, content: unknown) {
+    const paths = intakePaths(artifactsDir);
+    await mkdir(paths.dir, { recursive: true });
+    await writeFile(paths.summary, JSON.stringify(content), "utf8");
+    return paths;
+  }
+
+  it("REFUSES a summary whose `ready` is a truthy STRING instead of a boolean", async () => {
+    await writeSummaryFile(TEST_DIR, { ...WELL_FORMED_SUMMARY, ready: "yes" });
+    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/ready/);
+  });
+
+  it("REFUSES a summary whose `goals` is not an array", async () => {
+    await writeSummaryFile(TEST_DIR, {
+      ...WELL_FORMED_SUMMARY,
+      goals: "Fix the bug",
+    });
+    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/goals/);
+  });
+
+  it("the refusal error names the file path (legible, not opaque)", async () => {
+    const paths = await writeSummaryFile(TEST_DIR, {
+      ...WELL_FORMED_SUMMARY,
+      ready: "yes",
+    });
+    let caught: unknown;
+    try {
+      await readIntakeArtifacts(TEST_DIR);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain(paths.summary);
+  });
+
+  it("a well-formed summary passes through unchanged", async () => {
+    await writeSummaryFile(TEST_DIR, WELL_FORMED_SUMMARY);
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toEqual(WELL_FORMED_SUMMARY);
+  });
+
+  it("a missing summary file is undefined — absence is not a validation refusal", async () => {
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toBeUndefined();
+  });
+
+  it("validateIntakeSummary directly: rejects a non-boolean ready and accepts a well-formed summary", () => {
+    expect(() =>
+      validateIntakeSummary({ ...WELL_FORMED_SUMMARY, ready: "yes" }, "intake-summary.json"),
+    ).toThrow();
+    expect(validateIntakeSummary(WELL_FORMED_SUMMARY, "intake-summary.json")).toEqual(
+      WELL_FORMED_SUMMARY,
+    );
   });
 });
