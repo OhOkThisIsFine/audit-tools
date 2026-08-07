@@ -6,6 +6,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`ensureCleanWorktree` blocks a release on sibling UNTRACKED files (2026-08-07, low, friction).**
+  Bare `git status --porcelain` counts `??` rows, so owner-run Codex tooling's analyzer droppings at
+  repo root refused `release:patch:publish` from the primary checkout; the sanctioned lap-worktree
+  release path worked unchanged. **Property:** the guard should refuse on tracked dirt (the thing a
+  release could actually absorb) and at most WARN on untracked files — npm pack ships by allowlist
+  and the bump commit stages only package.json/package-lock.
+
 - **Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking
   worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test
   passes", 2026-08-06).** The exit-code half is a non-issue through the sanctioned path:
