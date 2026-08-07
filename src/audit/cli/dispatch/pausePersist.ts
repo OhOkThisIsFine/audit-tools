@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import {
-  readJsonFile,
-  writeJsonFile,
   checkLivelockGuard,
+  createLockedJsonStore,
+  SKIP_WRITE,
+  type LockedJsonStore,
   type PartialCompletionTerminal,
 } from "audit-tools/shared";
 import {
@@ -11,22 +12,53 @@ import {
   type DispatchPausedState,
 } from "../../types/activeDispatch.js";
 
+const ACTIVE_DISPATCH_LOCK_FILENAME = "active-dispatch.lock";
+
 /**
  * Resumable-pause persistence on `active-dispatch.json`, single-sourced so the
  * IN-PROCESS rolling driver (`advanceRollingPause`) and the HOST-dispatch path
- * (`advanceHostDispatchPause`) share ONE copy. The paused_state ⊕
- * partial_completion_terminal mutual-exclusion invariant (activeDispatch.ts) is held
- * by these helpers clearing one when setting the other — a fork would let the two
- * producers violate it, so this extraction is load-bearing for correctness, not just DRY.
+ * (`advanceHostDispatchPause`) share ONE copy.
+ *
+ * `paused_state` ⊕ `partial_completion_terminal` is an ASYMMETRIC invariant, not
+ * a symmetric mutual exclusion (CP-NODE-6): stamping a terminal ALWAYS clears any
+ * paused_state (below, `recordPartialCompletionTerminal` does this atomically —
+ * callers no longer order two calls by hand), but a terminal, once stamped, is a
+ * ONE-WAY RATCHET for the run — it must SURVIVE every later write under the same
+ * run_id, including a later `persistPausedState` (a routine follow-up pass over
+ * tasks outside the terminal's `stranded_ids`; see `advanceRollingPause`). Erasing
+ * it would also reset `lifecycle.pause_count` to 0, forcing the livelock bound to
+ * re-earn `LIVELOCK_PAUSE_LIMIT` from scratch and breaking the no-indefinite-stall
+ * guarantee CP-NODE-7's stranded-subtraction completion gate rests on. Every write
+ * below therefore starts from a freshly-read `current` and only ever ADDS/REMOVES
+ * its own field — never rebuilding the record from scratch — so an already-stamped
+ * terminal is preserved by construction, not by caller discipline.
+ *
+ * Every read-modify-write below goes through the shared locked-JSON store
+ * (`createLockedJsonStore`), so two concurrent advancers on the same run_id (e.g.
+ * a host-dispatch pass and an in-process rolling pass racing on the same
+ * artifacts dir) can never interleave read↔write and lose one another's update —
+ * no bespoke lock is added here.
  */
+function activeDispatchStore(
+  artifactsDir: string,
+): LockedJsonStore<ActiveDispatchState | null> {
+  return createLockedJsonStore<ActiveDispatchState | null>({
+    path: join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
+    lockPath: join(artifactsDir, ACTIVE_DISPATCH_LOCK_FILENAME),
+    parse: (raw) => (raw as ActiveDispatchState | undefined) ?? null,
+  });
+}
 
-/** Read the run's active-dispatch artifact, or null when absent / for another run. */
+/**
+ * Read the run's active-dispatch artifact, or null when absent / for another
+ * run. A plain lockless read (matches the store's own `read()` contract) — the
+ * three mutators below are the ones that need TOCTOU safety.
+ */
 export async function readActiveDispatch(
   artifactsDir: string,
   runId: string,
 ): Promise<ActiveDispatchState | null> {
-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
+  const existing = await activeDispatchStore(artifactsDir).read();
   return existing && existing.run_id === runId ? existing : null;
 }
 
@@ -36,12 +68,15 @@ export async function persistPausedState(
   runId: string,
   pausedState: DispatchPausedState,
 ): Promise<void> {
-  const existing = await readActiveDispatch(artifactsDir, runId);
-  if (!existing) return;
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
-    ...existing,
-    paused_state: pausedState,
-  } satisfies ActiveDispatchState);
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    if (!current || current.run_id !== runId) return SKIP_WRITE;
+    // Spread `current` (never rebuild) so an already-stamped
+    // partial_completion_terminal survives this write untouched (the ratchet).
+    return {
+      ...current,
+      paused_state: pausedState,
+    } satisfies ActiveDispatchState;
+  });
 }
 
 /** Clear the paused state (run resumed or went terminal). */
@@ -49,31 +84,34 @@ export async function clearPausedState(
   artifactsDir: string,
   runId: string,
 ): Promise<void> {
-  const existing = await readActiveDispatch(artifactsDir, runId);
-  if (!existing || !existing.paused_state) return;
-  const { paused_state: _dropped, ...rest } = existing;
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
-    ...rest,
-  } satisfies ActiveDispatchState);
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    if (!current || current.run_id !== runId || !current.paused_state) {
+      return SKIP_WRITE;
+    }
+    const { paused_state: _dropped, ...rest } = current;
+    return { ...rest } satisfies ActiveDispatchState;
+  });
 }
 
 /**
  * Stamp the partial-completion terminal onto the run's active-dispatch artifact
- * (leaving every other field intact). The caller clears any paused_state first so the
- * two never coexist.
+ * (leaving every other field intact) and atomically clear any paused_state in
+ * the SAME write — the caller no longer needs to call `clearPausedState` first;
+ * the mutual exclusion on the WAY IN is guaranteed here, not by call-site order.
  */
 export async function recordPartialCompletionTerminal(
   artifactsDir: string,
   runId: string,
   terminal: PartialCompletionTerminal,
 ): Promise<void> {
-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
-  if (!existing || existing.run_id !== runId) return;
-  await writeJsonFile(path, {
-    ...existing,
-    partial_completion_terminal: terminal,
-  } satisfies ActiveDispatchState);
+  await activeDispatchStore(artifactsDir).mutate((current) => {
+    if (!current || current.run_id !== runId) return SKIP_WRITE;
+    const { paused_state: _dropped, ...rest } = current;
+    return {
+      ...rest,
+      partial_completion_terminal: terminal,
+    } satisfies ActiveDispatchState;
+  });
 }
 
 /** Outcome of a host-path pause advance. */

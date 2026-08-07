@@ -850,6 +850,16 @@ export async function prepareDispatchArtifacts(params: {
         }
       : {}),
     ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
+    // CP-NODE-6 ratchet: partial_completion_terminal is a ONE-WAY ratchet for the
+    // run — once the dispatch engine stamps it (livelock/empty-pool), every later
+    // same-run_id re-preparation of THIS artifact must carry it forward, or a
+    // routine follow-up pass (a pending task outside the terminal's stranded_ids)
+    // silently erases the completion gate's basis. pause_count bookkeeping is
+    // already carried above via carriedPausedState (paused_state.lifecycle).
+    ...(priorActiveDispatch?.run_id === runId &&
+    priorActiveDispatch.partial_completion_terminal
+      ? { partial_completion_terminal: priorActiveDispatch.partial_completion_terminal }
+      : {}),
     ...(confirmationShown ? { confirmation_shown: true } : {}),
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);

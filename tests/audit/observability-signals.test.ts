@@ -169,9 +169,14 @@ test("normalizeGenericExternalResults emits no drop log when nothing is dropped"
 
 // ── buildLineIndex / buildLineIndexForPaths: warn on unreadable file (OBS-2cc9cf82) ──
 
-const { buildLineIndex, buildLineIndexForPaths } = await import("../../src/audit/cli/lineIndex.js");
+const { buildLineIndex, buildLineIndexForPaths, isUnmeasuredLineCount } = await import("../../src/audit/cli/lineIndex.js");
 
-test("buildLineIndex warns on unreadable file and returns 0 for that entry", async () => {
+// CP-NODE-6: a read failure surfaces as the UNMEASURED sentinel, not a silent 0
+// (a missing file and a genuine zero-line file were previously indistinguishable).
+// These tests used to pin the old silent-0 behavior; they now assert the
+// sentinel via the module's own exported isUnmeasuredLineCount() predicate,
+// never a bare NaN equality.
+test("buildLineIndex warns on unreadable file and marks that entry unmeasured", async () => {
   await withTempDir(async (dir) => {
     const validFile = "valid.ts";
     await writeFile(join(dir, validFile), "line1\nline2\nline3\n", "utf8");
@@ -192,10 +197,11 @@ test("buildLineIndex warns on unreadable file and returns 0 for that entry", asy
       stderrLines.push(...lines);
     });
 
-    // Non-existent file falls back to 0 line count.
-    expect(result!["does-not-exist.ts"]).toBe(0);
+    // Non-existent file is marked UNMEASURED, not a genuine 0 line count.
+    expect(isUnmeasuredLineCount(result!["does-not-exist.ts"]), "unreadable file must be UNMEASURED, not a silent 0").toBe(true);
     // Valid file still has the correct count.
     expect(result![validFile] > 0, "valid file should have a positive line count").toBeTruthy();
+    expect(isUnmeasuredLineCount(result![validFile]), "a successfully-measured file must not read as unmeasured").toBe(false);
     // A stderr diagnostic was emitted containing the failing path and an error message.
     const warnLine = stderrLines.find((l) => l.includes("does-not-exist.ts"));
     expect(warnLine, "expected a stderr diagnostic for the unreadable file").toBeTruthy();
@@ -203,7 +209,7 @@ test("buildLineIndex warns on unreadable file and returns 0 for that entry", asy
   });
 });
 
-test("buildLineIndexForPaths warns on unreadable file and returns 0 for that entry", async () => {
+test("buildLineIndexForPaths warns on unreadable file and marks that entry unmeasured", async () => {
   await withTempDir(async (dir) => {
     const validFile = "module.ts";
     await writeFile(join(dir, validFile), "a\nb\n", "utf8");
@@ -215,10 +221,11 @@ test("buildLineIndexForPaths warns on unreadable file and returns 0 for that ent
       stderrLines.push(...lines);
     });
 
-    // Non-existent path falls back to 0.
-    expect(result!["ghost.ts"]).toBe(0);
+    // Non-existent path is marked UNMEASURED, not a genuine 0.
+    expect(isUnmeasuredLineCount(result!["ghost.ts"]), "unreadable path must be UNMEASURED, not a silent 0").toBe(true);
     // Valid path has a correct count.
     expect(result![validFile] > 0, "valid file should have a positive line count").toBeTruthy();
+    expect(isUnmeasuredLineCount(result![validFile]), "a successfully-measured path must not read as unmeasured").toBe(false);
     // A stderr diagnostic was emitted containing the failing path.
     const warnLine = stderrLines.find((l) => l.includes("ghost.ts"));
     expect(warnLine, "expected a stderr diagnostic for the unreadable path").toBeTruthy();

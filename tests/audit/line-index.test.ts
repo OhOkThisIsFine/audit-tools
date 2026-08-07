@@ -5,8 +5,22 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
 
-const { buildLineIndex, buildLineIndexForPaths, addFileLineCountHints } =
-  await import("../../src/audit/cli/lineIndex.js");
+const {
+  buildLineIndex,
+  buildLineIndexForPaths,
+  addFileLineCountHints,
+  UNMEASURED_LINE_COUNT,
+  isUnmeasuredLineCount,
+} = await import("../../src/audit/cli/lineIndex.js");
+const { buildFileDisposition } = await import(
+  "../../src/audit/extractors/disposition.js"
+);
+const { buildUnitManifest } = await import(
+  "../../src/audit/orchestrator/unitBuilder.js"
+);
+const { initializeCoverageFromPlan } = await import(
+  "../../src/audit/orchestrator/planning.js"
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,7 +102,10 @@ test("buildLineIndex returns a line-count record keyed by file path", async (t: 
   }
 });
 
-test("buildLineIndex maps a non-existent file path to 0 rather than throwing", async (t: TestContext) => {
+// CP-NODE-6: a read failure must surface as UNMEASURED, not a silent 0 — a
+// missing file and a genuine zero-line file were previously indistinguishable,
+// which stamped missing files as excluded_trivial with no diagnostic.
+test("buildLineIndex maps a non-existent file path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
   const dir = setup();
   try {
     const manifest = makeManifest(["does-not-exist.ts"]);
@@ -96,7 +113,69 @@ test("buildLineIndex maps a non-existent file path to 0 rather than throwing", a
     const result = await buildLineIndex(dir, manifest);
 
     expect(Object.prototype.hasOwnProperty.call(result, "does-not-exist.ts"), "missing file should be present in result").toBeTruthy();
-    expect(result["does-not-exist.ts"], "missing file should map to 0").toBe(0);
+    expect(result["does-not-exist.ts"], "a read failure must be the UNMEASURED sentinel").toBe(UNMEASURED_LINE_COUNT);
+    expect(isUnmeasuredLineCount(result["does-not-exist.ts"]), "isUnmeasuredLineCount must recognize the failure").toBe(true);
+    // A read failure must never satisfy the numeric comparisons trivial-exclusion
+    // logic uses (`=== 0`, `<= 1`) — it fails BOTH by IEEE 754 NaN semantics, so a
+    // downstream consumer can never mistake it for a genuine empty/tiny file.
+    expect(result["does-not-exist.ts"] === 0, "unmeasured must not equal 0").toBe(false);
+    expect(result["does-not-exist.ts"] <= 1, "unmeasured must not satisfy <= 1 either").toBe(false);
+  } finally {
+    teardown();
+  }
+});
+
+// CP-NODE-6: a genuine zero-line file stays a real, distinguishable 0.
+test("buildLineIndex maps a genuine empty file to a real 0, distinguishable from unmeasured", async (t: TestContext) => {
+  const dir = setup();
+  try {
+    // A TRULY empty (0-byte) file — writeLines(..., 0) would still emit a
+    // trailing newline (one blank line), so write it directly.
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "empty.ts"), "");
+    const manifest = makeManifest(["empty.ts"]);
+
+    const result = await buildLineIndex(dir, manifest);
+
+    expect(result["empty.ts"]).toBe(0);
+    expect(isUnmeasuredLineCount(result["empty.ts"]), "a genuine 0 must NOT read as unmeasured").toBe(false);
+  } finally {
+    teardown();
+  }
+});
+
+// CP-NODE-6: a key entirely absent from the index (never queried) is ALSO
+// unmeasured, not a silent 0 — isUnmeasuredLineCount is the single seam every
+// caller should use instead of re-deriving the distinction with `?? 0`.
+test("isUnmeasuredLineCount treats a key absent from the index the same as a failed measurement", () => {
+  const index: Record<string, number> = { "present.ts": 0 };
+  expect(isUnmeasuredLineCount(index["not-a-key.ts"]), "an absent key must be unmeasured").toBe(true);
+  expect(isUnmeasuredLineCount(UNMEASURED_LINE_COUNT), "the sentinel itself must be unmeasured").toBe(true);
+  expect(isUnmeasuredLineCount(index["present.ts"]), "a genuine 0 must not be unmeasured").toBe(false);
+});
+
+// CP-NODE-6: buildLineIndex's keys are the SAME path form coverage.files[].path
+// uses — initializeCoverageFromPlan seeds coverage.files[].path verbatim from
+// repoManifest.files[].path, so a lookup against a coverage path always finds
+// its buildLineIndex entry (no normalization mismatch / lookup miss).
+test("buildLineIndex keys round-trip against coverage.files[].path (same repo_manifest source, mixed case/space path)", async (t: TestContext) => {
+  const dir = setup();
+  try {
+    const weirdPath = "src/Weird Dir/File Name.TS";
+    writeLines(dir, weirdPath, 3);
+    const manifest = makeManifest([weirdPath]);
+    const disposition = buildFileDisposition(manifest);
+    const unitManifest = buildUnitManifest(manifest, disposition);
+    const coverage = initializeCoverageFromPlan(manifest, unitManifest, disposition);
+
+    const result = await buildLineIndex(dir, manifest);
+
+    const coveragePaths = coverage.files.map((f) => f.path).sort();
+    expect(Object.keys(result).sort()).toEqual(coveragePaths);
+    for (const p of coveragePaths) {
+      expect(Object.prototype.hasOwnProperty.call(result, p), `coverage path '${p}' must resolve in the line index`).toBeTruthy();
+      expect(isUnmeasuredLineCount(result[p]), `the actually-written file '${p}' must be measured, not unmeasured`).toBe(false);
+    }
   } finally {
     teardown();
   }
@@ -160,13 +239,14 @@ test("buildLineIndexForPaths contains every unique path regardless of input orde
   }
 });
 
-test("buildLineIndexForPaths maps a non-existent path to 0 rather than throwing", async (t: TestContext) => {
+test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
   const dir = setup();
   try {
     const result = await buildLineIndexForPaths(dir, ["missing.ts"]);
 
     expect(Object.prototype.hasOwnProperty.call(result, "missing.ts"), "missing path should be present").toBeTruthy();
-    expect(result["missing.ts"], "missing path should map to 0").toBe(0);
+    expect(result["missing.ts"], "a read failure must be the UNMEASURED sentinel").toBe(UNMEASURED_LINE_COUNT);
+    expect(isUnmeasuredLineCount(result["missing.ts"])).toBe(true);
   } finally {
     teardown();
   }
@@ -216,6 +296,29 @@ test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async
     }
 
     expect(result[0].file_line_counts["ghost.ts"], "Missing file should map to 0").toBe(0);
+  } finally {
+    teardown();
+  }
+});
+
+// CP-NODE-6: file_line_counts is the schema-constrained contract field
+// (`z.number().int().min(0)`) with no "unmeasured" concept — addFileLineCountHints
+// is the deliberate boundary that degrades UNMEASURED_LINE_COUNT (NaN) to a
+// schema-valid 0 rather than leaking the sentinel into a persisted artifact.
+test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0, never leaking NaN into file_line_counts", async (t: TestContext) => {
+  const dir = setup();
+  try {
+    const tasks: AuditTask[] = [
+      { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "correctness", file_paths: ["ghost.ts"], rationale: "Fixture task" },
+    ];
+
+    const result = await addFileLineCountHints(dir, tasks);
+    const counts = result[0]?.file_line_counts;
+    if (!counts) throw new Error("addFileLineCountHints must annotate every returned task");
+
+    expect(Number.isNaN(counts["ghost.ts"]), "NaN must never leak into file_line_counts").toBe(false);
+    expect(Number.isInteger(counts["ghost.ts"]), "must stay schema-valid (z.number().int().min(0))").toBe(true);
+    expect(counts["ghost.ts"]).toBe(0);
   } finally {
     teardown();
   }
@@ -324,13 +427,13 @@ test("buildLineIndexForPaths deduplicates input paths (fewer result keys than in
   }
 });
 
-test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t: TestContext) => {
+test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", async (t: TestContext) => {
   const dir = setup();
   try {
     const result = await buildLineIndexForPaths(dir, ["this-does-not-exist.ts"]);
 
     expect(Object.prototype.hasOwnProperty.call(result, "this-does-not-exist.ts"), "Error path should still appear as a key").toBeTruthy();
-    expect(result["this-does-not-exist.ts"], "Error path should map to 0").toBe(0);
+    expect(result["this-does-not-exist.ts"], "Error path should be marked UNMEASURED, not 0").toBe(UNMEASURED_LINE_COUNT);
   } finally {
     teardown();
   }
@@ -340,7 +443,7 @@ test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t:
 // COR-c868f53d: missing vs IO error distinguished in stderr diagnostic
 // ---------------------------------------------------------------------------
 
-test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns 0 (COR-c868f53d)", async (t: TestContext) => {
+test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns UNMEASURED (COR-c868f53d, CP-NODE-6)", async (t: TestContext) => {
   const dir = setup();
   const stderrChunks: string[] = [];
   const origWrite = process.stderr.write;
@@ -351,7 +454,8 @@ test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, retur
   };
   try {
     const result = await buildLineIndexForPaths(dir, ["definitely-missing-abc123.ts"]);
-    expect(result["definitely-missing-abc123.ts"], "missing path maps to 0").toBe(0);
+    expect(result["definitely-missing-abc123.ts"], "missing path maps to the UNMEASURED sentinel, not 0").toBe(UNMEASURED_LINE_COUNT);
+    // Keep the file-not-found vs IO-error logging split — still asserted here.
     const combined = stderrChunks.join("");
     expect(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`).toBeTruthy();
   } finally {

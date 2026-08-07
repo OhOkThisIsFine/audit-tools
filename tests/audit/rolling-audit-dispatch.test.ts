@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
+
 import type { AuditTask, AuditResult } from "../../src/audit/types.js";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
 import type { DispatchPlanEntry } from "../../src/audit/cli/dispatch.js";
@@ -450,6 +451,196 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
   // non-complete drive ⇒ settle every source pool" (the 2026-07-17 frontier collapse).
   expect(Array.isArray(result.exhausted_pool_ids), "exhausted_pool_ids must ride the drive result").toBe(true);
   expect(result.exhausted_pool_ids.length > 0, "the rate-limit-exhausted pool is named in exhausted_pool_ids").toBeTruthy();
+});
+
+// ── 3b. CP-NODE-6: clear-paused-state directive, ratchet, settled accumulation ─
+
+test("CP-NODE-6: a run that pauses then regains capacity clears paused_state on the very next full-success pass", async (t) => {
+  // Directive application (invariants[3]/CDC-006): advanceRollingPause is only
+  // invoked when THIS pass strands (run.status === "partial" && stranded_ids
+  // .length > 0). Without an explicit else-branch clear, a pass that dispatches
+  // everything successfully (capacity fully returned) had NO path that ever
+  // cleared a carried paused_state — the run kept reporting dispatch_capacity:
+  // "blocked" forever even though nothing was actually blocked any more.
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const stranding: AuditPacketDispatcher = async (packet) => ({ packet, outcome: "rate_limited" });
+  const paused = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: stranding,
+    ingest: async () => {
+      throw new Error("ingestion must be skipped on a full strand");
+    },
+  });
+  expect(paused.status).toBe("paused");
+  const afterPause = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  );
+  expect(afterPause.paused_state, "paused_state recorded after the strand").toBeTruthy();
+
+  // Capacity returns: the next pass dispatches every packet successfully, with
+  // nothing stranded at all.
+  const resumed = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: makeWritingDispatcher(runDir, taskList),
+    ingest: async ({ runId }) => ({
+      summary: { run_id: runId, accepted_count: taskList.length },
+      has_failures: false,
+    }),
+  });
+  expect(resumed.status).toBe("complete");
+  expect(resumed.stranded_ids.length).toBe(0);
+
+  const afterResume = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  );
+  expect(
+    afterResume.paused_state,
+    "paused_state must be ABSENT once capacity fully returns — a version that leaves it behind must turn this test red",
+  ).toBeUndefined();
+});
+
+test("CP-NODE-6: partial_completion_terminal survives a same-run_id prepareDispatchArtifacts re-preparation", async (t) => {
+  // Ownership extension (seam_adjustments[3]): prepareDispatchArtifacts (dispatch.ts)
+  // rewrites active-dispatch.json wholesale on EVERY pass (paused-or-not). Before the
+  // fix, its ActiveDispatchState object literal carried forward only paused_state and
+  // confirmation_shown — never partial_completion_terminal — so a routine follow-up
+  // pass (a pending task outside the terminal's stranded_ids) silently erased the
+  // completion gate's basis on its very next prepareDispatchArtifacts call.
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const { recordPartialCompletionTerminal } = await import(
+    "../../src/audit/cli/dispatch/pausePersist.js"
+  );
+
+  // Simulate: a prior pass already stamped a terminal for one already-stranded
+  // task. driveRollingAuditDispatch always calls prepareDispatchArtifacts before
+  // anything else, which creates active-dispatch.json for RUN_ID first.
+  const seedWritingDispatcher = makeWritingDispatcher(runDir, taskList);
+  const seedResult = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: seedWritingDispatcher,
+    ingest: async ({ runId }) => ({
+      summary: { run_id: runId, accepted_count: taskList.length },
+      has_failures: false,
+    }),
+  });
+  expect(seedResult.status).toBe("complete");
+
+  await recordPartialCompletionTerminal(artifactsDir, RUN_ID, {
+    reason: "livelock_guard",
+    stranded_ids: ["t-a"],
+  });
+  const seeded = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  );
+  expect(seeded.partial_completion_terminal).toBeTruthy();
+
+
+  // One more same-run_id pass: prepareDispatchArtifacts re-prepares the SAME
+  // active-dispatch.json artifact (nothing pending this time, so it completes
+  // trivially) — the previously-stamped terminal must survive that rewrite.
+  const again = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: async () => {
+      throw new Error("must not dispatch — nothing pending");
+    },
+    ingest: async ({ runId }) => ({ summary: { run_id: runId, accepted_count: 0 }, has_failures: false }),
+  });
+  expect(again.status).toBe("complete");
+
+  const afterReprep = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  );
+  expect(
+    afterReprep.partial_completion_terminal,
+    "the terminal must survive prepareDispatchArtifacts's re-preparation — a version that drops it must turn this test red",
+  ).toEqual({ reason: "livelock_guard", stranded_ids: ["t-a"] });
+});
+
+test("CP-NODE-6 (CE-001): a pool exhausted on pass 1 stays settled through pass 2 (accumulation, never shrinks)", async (t) => {
+  // invariants[8]/CE-001: advanceRollingPause's settled set is `prior settled ∪
+  // this pass's exhausted ids`. If the union dropped the PRIOR settled set (only
+  // this pass's own exhausted ids), a pool settled two passes ago would silently
+  // fall out of the exclusion set and re-offering it on re-discovery would read
+  // as genuinely-new capacity — a false resume.
+  const { artifactsDir, runDir } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const { persistPausedState } = await import(
+    "../../src/audit/cli/dispatch/pausePersist.js"
+  );
+
+  // Seed: a prior pause already settled "pool-already-settled" — an id this
+  // run's OWN pool never touches, so the only way it survives into pass 2's
+  // persisted settled_exclusions is via the prior-settled union, not this
+  // pass's own exhausted-pool computation.
+  const seedResult = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: async (packet) => ({ packet, outcome: "rate_limited" }),
+    ingest: async () => {
+      throw new Error("ingestion must be skipped on a full strand");
+    },
+  });
+  expect(seedResult.status).toBe("paused");
+  const priorPaused = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  ).paused_state;
+
+  await persistPausedState(artifactsDir, RUN_ID, {
+    lifecycle: priorPaused.lifecycle,
+    settled_exclusions: [
+      ...priorPaused.settled_exclusions,
+      "pool-already-settled",
+    ].sort(),
+  });
+
+  // Pass 2: still strands on this run's real pool; re-discovery offers back the
+  // SAME already-settled seeded id (never genuinely new capacity).
+  const pass2 = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: TEST_SESSION_CONFIG,
+    timeoutMs: 1000,
+    dispatchPacket: async (packet) => ({ packet, outcome: "rate_limited" }),
+    discoverProviders: async () => ["pool-already-settled"],
+    ingest: async () => {
+      throw new Error("ingestion must be skipped on a full strand");
+    },
+  });
+  expect(pass2.status, "re-discovering an already-settled pool must NOT resume the run").toBe("paused");
+
+  const afterPass2 = JSON.parse(
+    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
+  );
+  expect(
+    afterPass2.paused_state.settled_exclusions,
+    "pass 1's seeded settled id must still be present in pass 2's persisted settled_exclusions — dropping the prior-settled union must turn this test red",
+  ).toContain("pool-already-settled");
+  expect(afterPass2.paused_state.lifecycle.pause_count, "no genuinely-new capacity → pause_count bumps, not a resume").toBeGreaterThan(priorPaused.lifecycle.pause_count);
 });
 
 // ── 3a. Write scope: spawned workers launch against a disposable snapshot ─────

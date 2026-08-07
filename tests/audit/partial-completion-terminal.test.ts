@@ -1,11 +1,20 @@
 // Tests for N-CE301: partial-completion terminal — audit state + synthesis report
 
-import { test, expect } from "vitest";
+import { test, expect, onTestFinished } from "vitest";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const { buildAuditReportModel, renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
+const {
+  readActiveDispatch,
+  persistPausedState,
+  recordPartialCompletionTerminal,
+} = await import("../../src/audit/cli/dispatch/pausePersist.js");
+const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/types/activeDispatch.js");
 
 // ── Minimal bundle helpers ───────────────────────────────────────────────────
 
@@ -191,4 +200,144 @@ await test("N-CE301: no partial-coverage warning when no terminal set", () => {
   const model = buildAuditReportModel({ results: [] });
   const md = renderAuditReportMarkdown(model);
   expect(md).not.toMatch(/provider pool was exhausted/);
+});
+
+// ── CP-NODE-6: paused_state ⊕ partial_completion_terminal ASYMMETRIC ratchet ──
+// (pausePersist.ts persistence layer, not just its obligation-derivation effect
+// covered above). The invariant is asymmetric, not a plain XOR: stamping a
+// terminal always clears paused_state (direction a), but once stamped a
+// terminal must SURVIVE every later same-run_id write, including a later
+// persistPausedState (direction b) — erasing it would also reset
+// lifecycle.pause_count, forcing the livelock bound to re-earn
+// LIVELOCK_PAUSE_LIMIT from scratch.
+
+const RUN_ID_RATCHET = "run-ratchet";
+
+async function seedActiveDispatch(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "terminal-ratchet-"));
+  await writeFile(
+    join(dir, ACTIVE_DISPATCH_FILENAME),
+    JSON.stringify({
+      run_id: RUN_ID_RATCHET,
+      created_at: "2026-01-01T00:00:00Z",
+      packet_count: 3,
+      task_count: 3,
+      status: "active",
+    }),
+    "utf8",
+  );
+  return dir;
+}
+
+async function readActiveDispatchRaw(dir: string): Promise<{
+  paused_state?: unknown;
+  partial_completion_terminal?: { reason: string; stranded_ids: string[] };
+}> {
+  return JSON.parse(await readFile(join(dir, ACTIVE_DISPATCH_FILENAME), "utf8"));
+}
+
+await test("CP-NODE-6 ratchet (a): recordPartialCompletionTerminal clears paused_state atomically, even with NO prior clearPausedState call", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  await persistPausedState(dir, RUN_ID_RATCHET, {
+    lifecycle: {
+      kind: "waiting_for_provider",
+      paused_at: "2026-01-01T00:00:00Z",
+      pause_count: 2,
+      stranded_node_ids: ["p1"],
+    },
+    settled_exclusions: ["poolA"],
+  });
+  expect((await readActiveDispatchRaw(dir)).paused_state, "paused_state recorded").toBeTruthy();
+
+  // A NEW call site, calling recordPartialCompletionTerminal DIRECTLY with no
+  // preceding clearPausedState call — the mutual exclusion on the way IN must
+  // still be guaranteed by recordPartialCompletionTerminal itself.
+  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
+    reason: "livelock_guard",
+    stranded_ids: ["T1"],
+  });
+
+  const ad = await readActiveDispatchRaw(dir);
+  expect(ad.paused_state, "terminal must clear paused_state even without a prior manual clear").toBeUndefined();
+  expect(ad.partial_completion_terminal?.reason).toBe("livelock_guard");
+});
+
+await test("CP-NODE-6 ratchet (b): a later persistPausedState must NOT clear an already-stamped partial_completion_terminal", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  // Prior pass already went terminal for a stranded subset of tasks.
+  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
+    reason: "livelock_guard",
+    stranded_ids: ["T-stranded"],
+  });
+  let ad = await readActiveDispatchRaw(dir);
+  expect(ad.partial_completion_terminal).toBeTruthy();
+  expect(ad.paused_state).toBeUndefined();
+
+  // One more same-run_id pass: a pending task OUTSIDE the terminal's
+  // stranded_ids drives a fresh first-pause (the "!priorPaused" branch) —
+  // routine, per the module doc. This must NOT erase the terminal.
+  await persistPausedState(dir, RUN_ID_RATCHET, {
+    lifecycle: {
+      kind: "waiting_for_provider",
+      paused_at: "2026-02-01T00:00:00Z",
+      pause_count: 0,
+      stranded_node_ids: ["p-other"],
+    },
+    settled_exclusions: [],
+  });
+
+  ad = await readActiveDispatchRaw(dir);
+  expect(ad.paused_state, "the new pause is recorded").toBeTruthy();
+  expect(
+    ad.partial_completion_terminal,
+    "the terminal MUST survive a later persistPausedState — a version that drops it must turn this test red",
+  ).toBeTruthy();
+  expect(ad.partial_completion_terminal?.stranded_ids).toEqual(["T-stranded"]);
+  expect(ad.partial_completion_terminal?.reason).toBe("livelock_guard");
+});
+
+// ── CP-NODE-6: locked read-modify-write (failure_modes[7]) ───────────────────
+// Two concurrent advancers racing persistPausedState on the SAME run_id must
+// never interleave read↔write and lose one another's update — the shared
+// locked-JSON store (createLockedJsonStore) serializes the critical section.
+await test("CP-NODE-6: concurrent persistPausedState calls on the same run_id never lose an update (locked read-modify-write)", async () => {
+  const dir = await seedActiveDispatch();
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+
+  const N = 6;
+  await Promise.all(
+    Array.from({ length: N }, (_, i) =>
+      persistPausedState(dir, RUN_ID_RATCHET, {
+        lifecycle: {
+          kind: "waiting_for_provider",
+          paused_at: "2026-01-01T00:00:00Z",
+          pause_count: i,
+          stranded_node_ids: [`p-${i}`],
+        },
+        settled_exclusions: [`pool-${i}`],
+      }),
+    ),
+  );
+
+  // Every write is independently valid — the correctness property under test
+  // is that the FINAL file is coherent (a legitimate one-of-N result, not a
+  // corrupted merge/partial write from an unserialized interleave).
+  const ad = await readActiveDispatchRaw(dir);
+  expect(ad.paused_state, "a paused_state must be present after N concurrent writes").toBeTruthy();
+  const state = ad.paused_state as {
+    lifecycle: { pause_count: number; stranded_node_ids: string[] };
+    settled_exclusions: string[];
+  };
+  const i = state.lifecycle.pause_count;
+  expect(i >= 0 && i < N, "pause_count must be one of the N written values, not corrupted").toBeTruthy();
+  expect(state.lifecycle.stranded_node_ids).toEqual([`p-${i}`]);
+  expect(state.settled_exclusions).toEqual([`pool-${i}`]);
+
+  // readActiveDispatch (the public lockless read) sees the same coherent value.
+  const viaHelper = await readActiveDispatch(dir, RUN_ID_RATCHET);
+  expect(viaHelper?.paused_state).toEqual(state);
 });

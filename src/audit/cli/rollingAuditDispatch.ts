@@ -642,6 +642,17 @@ export async function driveRollingAuditDispatch(params: {
       discoverProviders: params.discoverProviders,
       livelockLimit: params.livelockLimit,
     });
+  } else if (run.status === "complete") {
+    // CP-NODE-3(a) clear-paused-state directive, APPLIED HERE: audit-orchestrator-core
+    // cannot do this (deriveAuditState is contractually synchronous and I/O-free, and
+    // its dispatch_capacity obligation is deliberately non-actionable — see
+    // src/audit/orchestrator/state.ts). This pass drove every packet with nothing
+    // stranded, i.e. capacity fully returned; clear any paused_state carried forward
+    // from a prior pause BEFORE the orchestrator next derives obligations, or a
+    // resumed run keeps reporting dispatch_capacity:"blocked" forever (advanceRollingPause
+    // is only invoked on a full strand, so without this the "no strand at all" resume
+    // case had no path that ever cleared the carried pause).
+    await clearPausedState(artifactsDir, runId);
   }
 
   // Ingest only when at least one packet produced a result. A full strand (every
@@ -812,21 +823,23 @@ async function advanceRollingPause(params: {
   }
 
   if (next.kind === "terminal") {
-    // Livelock: clear the pause and record the partial-completion terminal so the
-    // pipeline proceeds to synthesis on partial coverage (the no-indefinite-stall
-    // guard, CE-003/CE-205). The terminal's `stranded_ids` are matched against
-    // `task_id` by `deriveAuditState` (to satisfy `audit_tasks_completed`), so they
-    // MUST be TASK ids, not the PACKET ids the in-process engine strands internally —
-    // a packet id never matches, the tasks stay pending, and synthesis never unlocks
-    // (an infinite pause loop, the exact stall this bound exists to end). Expand THIS
-    // pass's stranded packet ids (`strandedIds`), never the pause's frozen first-pause
-    // `next.stranded_node_ids`: an intervening partial completion re-packetizes the
-    // remaining tasks (packet ids embed a running ordinal), so the frozen ids can be
-    // absent from this pass's rewritten dispatch-result-map — a full lookup miss that
-    // degrades to packet ids. The current stranded set IS the still-uncovered tasks and
-    // is guaranteed present in this pass's result map (parity with the host path's
-    // `advanceHostDispatchPause` `strandedTaskIds`, Increment B residual b).
-    await clearPausedState(artifactsDir, runId);
+    // Livelock: record the partial-completion terminal so the pipeline proceeds
+    // to synthesis on partial coverage (the no-indefinite-stall guard, CE-003/CE-205).
+    // The terminal's `stranded_ids` are matched against `task_id` by `deriveAuditState`
+    // (to satisfy `audit_tasks_completed`), so they MUST be TASK ids, not the PACKET ids
+    // the in-process engine strands internally — a packet id never matches, the tasks
+    // stay pending, and synthesis never unlocks (an infinite pause loop, the exact stall
+    // this bound exists to end). Expand THIS pass's stranded packet ids (`strandedIds`),
+    // never the pause's frozen first-pause `next.stranded_node_ids`: an intervening
+    // partial completion re-packetizes the remaining tasks (packet ids embed a running
+    // ordinal), so the frozen ids can be absent from this pass's rewritten
+    // dispatch-result-map — a full lookup miss that degrades to packet ids. The current
+    // stranded set IS the still-uncovered tasks and is guaranteed present in this
+    // pass's result map (parity with the host path's `advanceHostDispatchPause`
+    // `strandedTaskIds`, Increment B residual b).
+    // recordPartialCompletionTerminal atomically clears any paused_state as
+    // part of the SAME write (CP-NODE-6 ratchet hardening) — no separate
+    // clearPausedState call needed here.
     const strandedTaskIds = await packetIdsToTaskIds(artifactsDir, runId, strandedIds);
     await recordPartialCompletionTerminal(artifactsDir, runId, {
       reason: "livelock_guard",
