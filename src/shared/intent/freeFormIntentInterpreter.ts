@@ -69,16 +69,17 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
  *
  * The two functions intentionally have different splitting rules. Any change to
  * one should be evaluated against the contract of the other. See
- * `tests/maintainability-split-rules.test.mjs` for a regression assertion that
+ * `tests/maintainability-split-rules.test.ts` for a regression assertion that
  * guards the difference.
  */
 function decomposeClauses(input: string): string[] {
-  // Split on `;`, `,`, newlines, and sentence-ending `.` — but NOT a period
-  // flanked by digits, so version/decimal tokens stay intact ("Windows
-  // PowerShell 5.1" must not fragment into "...5" + "1", which then surfaces a
-  // spurious unencodable clause). A run of separators collapses to one split.
+  // Split on `;`, `,`, newlines, and sentence-ending `.` — but ONLY when the
+  // period is followed by whitespace or end-of-input. This preserves periods
+  // in file paths and version numbers: "docs/backlog/open-bugs.md" stays
+  // intact (period followed by "m"), and "Windows PowerShell 5.1" stays
+  // intact (period followed by "1"). A run of separators collapses to one split.
   return input
-    .split(/(?:[;,\n]|(?<![0-9])\.(?![0-9]))+/)
+    .split(/(?:[;,\n]|\.(?=\s|$))+/)
     .map((c) => c.trim())
     .filter((c) => c.length > 0);
 }

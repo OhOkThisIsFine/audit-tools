@@ -41,6 +41,25 @@ test("interpretFreeFormIntent — sentence-ending periods still split clauses", 
   expect((r.lensWeights.reliability ?? 0) > 0, "reliability clause must encode").toBeTruthy();
 });
 
+test("interpretFreeFormIntent — periods inside file paths do not split clauses (open-bugs.md case)", () => {
+  // A "." splits only before whitespace/end-of-input, so a path/extension token
+  // must survive whole — the exact clause the 2026-07-30 run fragmented into a
+  // spurious "md) …" constraint candidate.
+  const r = interpretFreeFormIntent("(docs/backlog/open-bugs.md) rather than duplicating them");
+
+  const hasFragmentStartingWithMd = r.unencodableClauses.some((c) => /^md\)?/.test(c));
+  expect(!hasFragmentStartingWithMd, `period in filename must not fragment the clause; unencodable: ${JSON.stringify(r.unencodableClauses)}`).toBeTruthy();
+});
+
+test("interpretFreeFormIntent — sentence-ending period followed by space still splits", () => {
+  const r = interpretFreeFormIntent("look at open-bugs.md there. also check the config");
+
+  // If the sentence boundary stopped splitting, both sentences would survive as
+  // ONE unencodable clause containing both halves.
+  const singleBigClause = r.unencodableClauses.some((c) => c.includes("md there") && c.includes("also"));
+  expect(!singleBigClause, `a ". " boundary must still split; unencodable: ${JSON.stringify(r.unencodableClauses)}`).toBeTruthy();
+});
+
 // ---------------------------------------------------------------------------
 // Single lens keyword → weight boost
 // ---------------------------------------------------------------------------
