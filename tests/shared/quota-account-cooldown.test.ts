@@ -100,23 +100,23 @@ test("foldAccountCooldown: preserves per-pool budget metadata from ownEntry", ()
     cooldown_until: futureTime,
     last_429_at: null,
     consecutive_429_count: 3,
-    tokens_per_pct: 1000,
-    output_per_input: 0.5,
+    tokens_per_pct: { "account:session": 1000 },
+    output_per_input: { security: 0.5 },
   };
   const sibling: QuotaStateEntry = {
     updated_at: baseTime,
     cooldown_until: laterFutureTime,
     last_429_at: null,
     consecutive_429_count: 5,
-    tokens_per_pct: 2000,
-    output_per_input: 0.8,
+    tokens_per_pct: { "account:session": 2000 },
+    output_per_input: { security: 0.8 },
   };
 
   const result = foldAccountCooldown(own, [sibling]);
   // Budget fields should come from ownEntry, NOT from sibling
   expect(result?.consecutive_429_count).toBe(3);
-  expect(result?.tokens_per_pct).toBe(1000);
-  expect(result?.output_per_input).toBe(0.5);
+  expect(result?.tokens_per_pct).toEqual({ "account:session": 1000 });
+  expect(result?.output_per_input).toEqual({ security: 0.5 });
   // But cooldown should pick furthest from group
   expect(result?.cooldown_until).toBe(laterFutureTime);
 });

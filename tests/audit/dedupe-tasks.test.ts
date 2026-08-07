@@ -5,22 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 
-/**
- * Generic deduplication by task_id.
- * Extracted from src/audit/orchestrator/requeueCommand.ts for testability.
- */
-function dedupeTasks<T extends { task_id: string }>(tasks: T[]): T[] {
-  const seen = new Set<string>();
-  const deduped: T[] = [];
-  for (const task of tasks) {
-    if (seen.has(task.task_id)) {
-      continue;
-    }
-    seen.add(task.task_id);
-    deduped.push(task);
-  }
-  return deduped;
-}
+import { dedupeTasks } from "../../src/audit/orchestrator/requeueCommand.js";
 
 describe("dedupeTasks", () => {
   it("returns empty array for empty input", () => {

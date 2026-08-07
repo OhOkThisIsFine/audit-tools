@@ -12,7 +12,7 @@ import type { QuotaSource } from "../../src/shared/quota/quotaSource.js";
 
 test("resolveAccountIdSafe: returns null when source has no resolveAccountId method", async () => {
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
   };
 
@@ -22,7 +22,7 @@ test("resolveAccountIdSafe: returns null when source has no resolveAccountId met
 
 test("resolveAccountIdSafe: returns account id when resolveAccountId succeeds", async () => {
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
     resolveAccountId: async () => "account-123",
   };
@@ -33,7 +33,7 @@ test("resolveAccountIdSafe: returns account id when resolveAccountId succeeds", 
 
 test("resolveAccountIdSafe: returns null when resolveAccountId throws synchronously", async () => {
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
     resolveAccountId: () => {
       throw new Error("sync error");
@@ -46,7 +46,7 @@ test("resolveAccountIdSafe: returns null when resolveAccountId throws synchronou
 
 test("resolveAccountIdSafe: returns null when resolveAccountId rejects asynchronously", async () => {
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
     resolveAccountId: async () => {
       throw new Error("async error");
@@ -60,7 +60,7 @@ test("resolveAccountIdSafe: returns null when resolveAccountId rejects asynchron
 test("resolveAccountIdSafe: passes through the providerModelKey to resolveAccountId", async () => {
   const keys: string[] = [];
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
     resolveAccountId: async (key: string) => {
       keys.push(key);
@@ -74,7 +74,7 @@ test("resolveAccountIdSafe: passes through the providerModelKey to resolveAccoun
 
 test("resolveAccountIdSafe: returns null for other error types (not just Error)", async () => {
   const source: QuotaSource = {
-    id: "test",
+    name: "test",
     queryCurrentUsage: async () => null,
     resolveAccountId: async () => {
       // Simulate a rejection with a non-Error value

@@ -24,6 +24,36 @@ import type {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+// Expected shapes of the structured log lines under test. Declared here (not in
+// the helper) because each event's field set is this suite's assertion target.
+type StrategySummaryLine = {
+  event: string;
+  source: string;
+  level: string;
+  created: number;
+  strategy_contributions: Record<string, unknown>;
+  ts: string;
+};
+type PacketResultLine = {
+  event: string;
+  source: string;
+  packet_id: string;
+  outcome: string;
+  completed: number;
+  total: number;
+  ts: string;
+};
+type MergeSummaryLine = {
+  event: string;
+  source: string;
+  total: number;
+  accepted: number;
+  rejected: number;
+  audit_results_path: string;
+  failed_tasks_path?: string;
+  ts: string;
+};
+
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -117,7 +147,7 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
     else process.env.AUDIT_CODE_VERBOSE = prevVerbose;
   }
 
-  const summaryLines = filterJsonLinesByEvent(stderrLines, "strategy_summary");
+  const summaryLines = filterJsonLinesByEvent<StrategySummaryLine>(stderrLines, "strategy_summary");
   expect(summaryLines.length, "expected exactly one strategy_summary log line").toBe(1);
   if (summaryLines[0] === undefined) {
     throw new Error("strategy_summary log line missing");
@@ -209,7 +239,7 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
   }
 
   expect(dispatchCount, "both packets were dispatched").toBe(2);
-  const resultLines = filterJsonLinesByEvent(stderrLines, "packet_result");
+  const resultLines = filterJsonLinesByEvent<PacketResultLine>(stderrLines, "packet_result");
   expect(resultLines.length, "expected one packet_result log line per packet").toBe(2);
   for (const parsed of resultLines) {
     expect(parsed.source).toBe("audit-code:rollingDispatch");
@@ -474,7 +504,7 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
 
     // stdout must contain a parseable JSON line with event=merge_summary
     const stdoutLines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
-    const parsed = findJsonEventLine(stdoutLines, "merge_summary");
+    const parsed = findJsonEventLine<MergeSummaryLine>(stdoutLines, "merge_summary");
     expect(parsed, "expected a JSON merge_summary line on stdout").toBeTruthy();
     if (parsed === undefined) {
       throw new Error("merge_summary log line missing");
@@ -526,7 +556,7 @@ test("FND-OBS-bf5c7331: merge-results.mjs JSON summary includes failed_tasks_pat
     expect(result.status, "expected non-zero exit on validation failure").toBe(1);
 
     const stdoutLines2 = result.stdout.split("\n").filter((l) => l.trim().length > 0);
-    const parsed2 = findJsonEventLine(stdoutLines2, "merge_summary");
+    const parsed2 = findJsonEventLine<MergeSummaryLine>(stdoutLines2, "merge_summary");
     expect(parsed2, "expected a JSON merge_summary line on stdout").toBeTruthy();
     if (parsed2 === undefined) {
       throw new Error("merge_summary log line missing");

@@ -132,54 +132,47 @@ export async function stampDesignReviewSkipped(
 ): Promise<void> {
   const path = join(artifactsDir, "design_assessment.json");
   const reviewedAt = new Date().toISOString();
-  try {
-    const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
-    // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
-    // it closes was never reviewed, and the stamp must say so. Per-pass, because
-    // the skip can fire when only ONE pass is outstanding — a pass a real
-    // submission already satisfied must NOT be retro-stamped unreviewed.
-    const contractGenuine =
-      existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
-    const conceptualGenuine =
-      existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
-    const assessment: DesignAssessment = {
-      ...(existing ?? { generated_at: reviewedAt, findings: [] }),
-      findings: existing?.findings ?? [],
-      contract_findings: existing?.contract_findings ?? [],
-      conceptual_findings: existing?.conceptual_findings ?? [],
-      contract_reviewed: true,
-      conceptual_reviewed: true,
-      ...(contractGenuine ? {} : { contract_auto_completed: true }),
-      ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
-    };
-    await writeJsonFile(path, assessment);
-    // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
-    // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
-    // null for an absent design_assessment, but the file we just wrote projects to []
-    // — snapshotting the input bundle would record `null` and re-stale against the
-    // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
-    // assessment makes the skip stick in a single cycle even when it created the file.
-    const snapshotBundle = { ...bundle, design_assessment: assessment };
-    await captureDesignReviewSnapshot(
-      artifactsDir,
-      "contract",
-      assessment.contract_findings ?? [],
-      snapshotBundle,
-      reviewedAt,
-    );
-    await captureDesignReviewSnapshot(
-      artifactsDir,
-      "conceptual",
-      assessment.conceptual_findings ?? [],
-      snapshotBundle,
-      reviewedAt,
-    );
-  } catch (error) {
-    // File operation failures (permissions, disk full) should not crash the stamp operation.
-    // Log for debugging but allow the operation to proceed.
-    console.error(`Failed to stamp design review skipped: ${error instanceof Error ? error.message : String(error)}`);
-    throw error; // Re-throw to preserve the error semantics for callers
-  }
+  const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
+  // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
+  // it closes was never reviewed, and the stamp must say so. Per-pass, because
+  // the skip can fire when only ONE pass is outstanding — a pass a real
+  // submission already satisfied must NOT be retro-stamped unreviewed.
+  const contractGenuine =
+    existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
+  const conceptualGenuine =
+    existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
+  const assessment: DesignAssessment = {
+    ...(existing ?? { generated_at: reviewedAt, findings: [] }),
+    findings: existing?.findings ?? [],
+    contract_findings: existing?.contract_findings ?? [],
+    conceptual_findings: existing?.conceptual_findings ?? [],
+    contract_reviewed: true,
+    conceptual_reviewed: true,
+    ...(contractGenuine ? {} : { contract_auto_completed: true }),
+    ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
+  };
+  await writeJsonFile(path, assessment);
+  // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
+  // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
+  // null for an absent design_assessment, but the file we just wrote projects to []
+  // — snapshotting the input bundle would record `null` and re-stale against the
+  // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
+  // assessment makes the skip stick in a single cycle even when it created the file.
+  const snapshotBundle = { ...bundle, design_assessment: assessment };
+  await captureDesignReviewSnapshot(
+    artifactsDir,
+    "contract",
+    assessment.contract_findings ?? [],
+    snapshotBundle,
+    reviewedAt,
+  );
+  await captureDesignReviewSnapshot(
+    artifactsDir,
+    "conceptual",
+    assessment.conceptual_findings ?? [],
+    snapshotBundle,
+    reviewedAt,
+  );
 }
 
 /**
@@ -193,26 +186,19 @@ export async function stampSystemicChallengeSkipped(
   bundle: ArtifactBundle,
 ): Promise<void> {
   const path = join(artifactsDir, "systemic_challenge.json");
-  try {
-    const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
-    const register: SystemicChallengeRegister = existing
-      ? { ...existing, converged: true }
-      : {
-          generated_at: new Date().toISOString(),
-          target: "systemic_challenge",
-          ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
-          rounds: [],
-          converged: true,
-          findings: [],
-          validation_issues: [],
-        };
-    await writeJsonFile(path, register);
-  } catch (error) {
-    // File operation failures (permissions, disk full) should not crash the stamp operation.
-    // Log for debugging but allow the operation to proceed.
-    console.error(`Failed to stamp systemic challenge skipped: ${error instanceof Error ? error.message : String(error)}`);
-    throw error; // Re-throw to preserve the error semantics for callers
-  }
+  const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
+  const register: SystemicChallengeRegister = existing
+    ? { ...existing, converged: true }
+    : {
+        generated_at: new Date().toISOString(),
+        target: "systemic_challenge",
+        ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
+        rounds: [],
+        converged: true,
+        findings: [],
+        validation_issues: [],
+      };
+  await writeJsonFile(path, register);
 }
 
 // ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────

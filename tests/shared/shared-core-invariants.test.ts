@@ -54,10 +54,15 @@ const AUDIT_CODE_SCHEMAS = resolve(REPO_ROOT, "schemas");
  * Load and parse a JSON schema file from the schemas directory.
  * Asserts that the file exists before returning the parsed schema.
  */
-function loadSchema(filename: string): Record<string, unknown> {
+type JsonSchemaDoc = {
+  required?: string[];
+  properties?: Record<string, { enum?: string[] } & Record<string, unknown>>;
+} & Record<string, unknown>;
+
+function loadSchema(filename: string): JsonSchemaDoc {
   const schemaPath = resolve(AUDIT_CODE_SCHEMAS, filename);
   expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
-  return JSON.parse(readFileSync(schemaPath, "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(schemaPath, "utf8")) as JsonSchemaDoc;
 }
 
 // ── INV-shared-core-01: Schema drift detection ───────────────────────────────

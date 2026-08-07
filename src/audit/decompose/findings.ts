@@ -101,10 +101,7 @@ export function detectNonColocalization(
     ).sort(bySizeThenFirst);
 
     for (const group of filtered.slice(0, maxPerKind)) {
-      const best = bestContainment(
-        group,
-        label === "behavioral" ? input.intentBoundaries : allBehaviorClusters,
-      );
+      const best = bestContainment(group, boundary);
       if (best + 1e-12 >= overlapThreshold) continue;
 
       const titleSuffix = label === "behavioral"
