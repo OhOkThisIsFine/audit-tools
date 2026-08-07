@@ -22,37 +22,52 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-06 at `2b6ba83e`.*
+*Last run: 2026-08-07 at `885d0ba9`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
 
+
+<!-- nightly:item key=e248d7dc8d561ecf -->
+
+## `docs-1` — A durable spec doc opens by naming the releases its work shipped in - drop the version sentence, or retire the doc.
+
+*Documentation · open 1 night · `spec/mechanical-analyzer-layer-design.md`*
+
+### In plain terms
+
+spec/mechanical-analyzer-layer-design.md is meant to be a timeless design document: it explains what the mechanical analyzer layer is and which design choices were deliberately refused, so that someone reading it in six months understands the shape of the thing. Its opening sentence instead reports delivery status - that the four-item program is 'fully shipped', with A/B/D landing in v0.37.0 and C 'in the following release'. Two problems. First, that sentence is already drifting: C landed in v0.38.1, and the phrase 'the following release' only made sense on the day it was typed, when v0.37.0 was current. Second, and more importantly, this is exactly the kind of sentence the repo's documentation philosophy bans from a concept doc - which release carried which piece is git's job, not the spec's. The doc even says so about itself one line later: 'Durable outcomes live in the code and its contract tests; this doc keeps only what is not derivable from them.' The rule here is deliberately narrow: the routine is not allowed to quietly bump the version number, because a doc whose only change between runs is a version bump is a status report wearing a spec's clothes, and bumping it hides that. So the question comes to you: delete the delivery status and keep the doc as the record of design refusals it says it is, or decide the doc's whole reason to exist lapsed when the program completed and retire it.
+
+### The question
+
+spec/mechanical-analyzer-layer-design.md line 4-5 reads: "The four-item program (...) is **fully shipped** - A/B/D in v0.37.0, C in the following release." A pinned release string in a durable spec doc is status-noise, so the routine may not bump it. What should happen to it?
+
+### Your answer
+
+- [ ] **1. Drop the status sentence** — Remove the shipped/version sentence from the preamble. The doc keeps its stated purpose - the decided-against list and the two recorded design deviations - and says nothing about which release carried which item. git log owns that.
+- [ ] **2. De-status, keep "implemented"** — Rewrite the sentence to state, without version numbers, that the program is implemented and its durable outcomes live in the code and contract tests. Keeps the orienting fact that the doc is not describing future work, drops the release pins that drift.
+- [ ] **3. Retire the doc** — The program is complete and its outcomes live in code and contract tests, so the doc has no reason to exist. Move the decided-against list and the two design deviations to their durable home (the backlog or memory) and delete the spec.
+- [ ] **4. Leave it** — Keep the sentence as written. The release pins are worth the drift because they tell a reader at a glance that this describes shipped work, and the doc is short enough that the noise is tolerable.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
 
 <details>
-<summary>What the last run changed on its own</summary>
+<summary>Evidence (5) — what was verified against code, and how</summary>
 
-
-- docs/HANDOFF.md — deleted a FALSE claim and its status-log tail. The bullet asserted "The nightly inbox is EMPTY" and then narrated two 2026-08-04 completions (sol-1 `391c743d`, sol-3 `3750a943`). The inbox is not empty: .audit-tools/nightly/open-items.json held 6 items and docs/nightly-inbox.md rendered all 6. Both commits and both completion refs are recorded in .claude/nightly-decisions.json (subjects 41b0006a30468211 and 5938b991779c1cd2), so no record was lost. The still-open remainder (the relay-side pool/coding failover defect) was kept verbatim and NOT restated. The independent adversary agreed the narration should go but flagged that item ids are reused across runs, so a reader could confuse the 2026-08-04 sol-1/sol-3 with tonight's different sol-1/sol-3; its proposed pointer was adopted rather than contested, and the replacement text names the ledger as the identifying record.
-
-- CLOSED WITHOUT AN EDIT — docs-1 (d58dbfc3bbc8ef8b) and docs-2 (e0c4fbe93a7814ef), last night's two registry-count items. They are resolved because the CODE moved to match the docs: 3fb84823 added the `docs_digest` artifact and `docs_digest_executor`, taking the registries from 37→38 and 27→28, so spec/audit/artifact-contract.md and spec/audit/executor-catalog.md are now correct as written. Verified three independent ways. They are dropped BY HAND: their probes pin the doc side, which still matches, so partitionBySettled would have re-surfaced both offering "Correct it to 37"/"Correct it to 27" — edits that would have introduced the error. That failure mode is filed as the new sol-5.
-
-- LEG 2 SWEPT IN FULL, and established NO deletions — the first complete backlog sweep in four runs (the previous three were partial). 114 entries examined: 96 in open-bugs.md across three bounded line ranges (29 + 32 + 35), 15 in forward-tracks.md, 3 in deferred.md. Zero entries were deleted, and that is a VERIFIED result rather than an unexamined one. Four lane verdicts of SHIPPED were checked individually and ALL FOUR failed verification: three entries whose titles are explicitly about their own accepted residuals ("four accepted residuals", "one low residual"), and one whose open property is refuted at HEAD — the merge is supposed to name WHICH failure per task, and src/audit/cli/dispatch.ts:739 still lumps them ("All 430 assigned task result(s) were missing or invalid"). A naive apply of the lane verdicts would have deleted three live entries. The fourth SHIPPED (the test-tree conversion) is genuinely complete but holds durable rules with no other home, so it is escalated as backlog-1 rather than deleted.
-
+- spec/mechanical-analyzer-layer-design.md:4-5 currently reads "is **fully shipped** - A/B/D in v0.37.0, C in the following release." (read at HEAD 885d0ba9).
+- The claim has already drifted: `git tag --contains 4b79f973` (the item-C close-gate commit) returns v0.38.1, and package.json is at 0.38.1 - so "the following release" now names a release two versions back.
+- The same doc, one line later, states its own scope: "Durable outcomes live in the code and its contract tests; this doc keeps only what is not derivable from them."
+- docs/doc-review-guidelines.md requires exactly this handling: a pinned version/date/status string in a prose doc is reclassified from stale-factual-fix to design-decision - escalate "de-status this (derive the value or drop it), or retire the doc", never auto-bump the number.
+- Independently confirmed by an adversary pass that also swept the whole corpus for false negatives: every `npm run` cited across tracked docs resolves in package.json, no doc still cites the pre-relocation `src/audit/analyzers` path, and this is the only pinned version string in a non-sanctioned prose doc.
 
 </details>
 
-
-<details>
-<summary>What the last run could NOT cover</summary>
-
-
-- Leg 2 lane ROUTING — the codex lane produced NOTHING and the work was re-routed, so this is a lane failure to record even though coverage was preserved. `codex exec` was handed all 113 backlog entries in ONE call; it stayed alive for over 100 minutes and emitted zero bytes, and was still running when the run finished. That is a CALLER error, not a lane defect — the oversized-batch shape this repo has recorded before ([[offload-lane-failures-are-usually-the-caller]]) — and it is the same class sol-4 tracks. Coverage was preserved by re-routing to four bounded subagent lanes (three over open-bugs.md by line range, one over forward-tracks + deferred), which is why leg 2 is NOT partial this run. Standing lesson for the next run: bound the batch per lane up front rather than after the timeout.
-
-- The weekly /insights pass — DUE and FAILED TO RUN for the second consecutive week, so it is a skipped leg rather than a quiet one. The stamp .audit-tools/nightly/insights-last-run.json is still absent, which makes the pass due by the routine's own rule. Re-probed directly this run rather than assumed from the prior record: `claude -p` in the repo root exits 1 with "Failed to authenticate: OAuth session expired and could not be refreshed" (plus a non-fatal "this workspace has not been trusted" warning). No stamp was written, deliberately — leaving it absent keeps the pass due tomorrow instead of parking the failure for a week. Unblocking it needs an interactive `claude` login on this machine so the nested spawn inherits a live token. Leg 3 therefore ran on the written surfaces only (project + global memory, backlog durable-traps and open-bugs, friction records) and again lacks the cross-session friction counts /insights measures from the outside.
-
-
-</details>
+---
