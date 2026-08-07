@@ -140,7 +140,7 @@
 - `forward-tracks.md:225` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
 - `forward-tracks.md:236` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
 - `forward-tracks.md:280` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
-- `forward-tracks.md:282` — CI wall-clock: shard balance is a path-hash lottery, and one test file floors the whole suite.
+- `forward-tracks.md:282` — CI wall-clock: shard balance and the single-file floor.
 
 ### [`deferred.md`](backlog/deferred.md)
 

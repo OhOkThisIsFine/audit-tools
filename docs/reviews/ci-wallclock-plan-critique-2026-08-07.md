@@ -2,9 +2,15 @@
 
 Date: 2026-08-07 · Measured against `088bb6df`'s parent tree · Baseline: `.audit-tools-profile/publish-ci-latest.json` (run 31205859432, v0.39.1)
 
-**This document is self-contained.** It is written for an implementer with no access to the
-conversation that produced it. §1 is the brief (what to do); §2 is the anti-brief (what was proposed
-and why it is wrong — read it, or the refuted plan will be re-derived); §3–§4 are the evidence.
+**This document is the single home for this work — deliberately.** It is written for an implementer
+with no access to the conversation that produced it, and it is complete: nothing about this plan lives
+in the backlog, in chat, or in another doc. The backlog carries a bare pointer here and no substance,
+so there is no second copy to drift. §1 is the brief (what to do); §2 is the anti-brief (what was
+proposed and why it is wrong — read it, or the refuted plan will be re-derived); §3–§4 are the evidence
+behind both.
+
+**Status:** implementation assigned outside this repo's agent loop by the owner, 2026-08-07. T5 is
+settled by owner decision; T1–T4 are unstarted.
 
 ---
 
@@ -130,28 +136,36 @@ before any assertion runs. Worth a separate look at transform caching; independe
 
 ---
 
-**T5 — one Node version across the whole pipeline.** *(Owner decision, 2026-08-07.)*
+**T5 — one Node version across the whole pipeline: 22.14.0, with `engines` raised to `>=22`.**
 
-*Current asymmetry:* `audit-code-test-suite.yml` runs a `node-version: ["20.19.2", "22.14.0"]` matrix
-(2 × 4 shards = 8 jobs). `ci.yml` and `publish-package.yml` are both pinned to `22.14.0` via
-`CI_NODE_VERSION` / `RELEASE_NODE_VERSION`. So the PR path covers Node 20 and 22; the path that guards
-an actual publish covers only 22.
+**Settled by owner decision, 2026-08-07. Do not re-open either half.**
 
-*Decision:* standardize on a single Node version. Remove the `node-version` matrix axis from
-`audit-code-test-suite.yml`, halving that workflow from 8 jobs to 4.
+*Current asymmetry (the defect):* `audit-code-test-suite.yml` runs a
+`node-version: ["20.19.2", "22.14.0"]` matrix (2 × 4 shards = 8 jobs). `ci.yml` and
+`publish-package.yml` are both pinned to `22.14.0` via `CI_NODE_VERSION` / `RELEASE_NODE_VERSION`. So
+the PR path covers Node 20 and 22, while the path that guards an actual publish covers only 22 — the
+gate protecting the least reversible action is the weaker of the two.
 
-*Coupled choice the implementer must not decide silently.* `package.json` declares
-`"engines": {"node": ">=20"}`. Dropping the 20.19.2 axis while keeping that range means shipping a
-declared Node 20 floor with zero Node 20 coverage. Two coherent endpoints:
+*Target:*
 
-- **(a) Standardize on 22.14.0 and raise `engines` to `>=22`.** Least churn — 22.14.0 is already the
-  pinned constant in all three workflows — and it makes the declared support surface honest. This is
-  the recommended endpoint; the repo has no external consumers, so narrowing `engines` costs nothing.
-- **(b) Standardize on 20.19.2 and keep `engines: >=20`.** Tests the floor actually advertised, which
-  catches accidental use of newer APIs. Costs a change to both pinned constants.
+| File | Change |
+|---|---|
+| `.github/workflows/audit-code-test-suite.yml` | Remove the `node-version` matrix axis and every reference to `matrix.node-version` (job name, `setup-node` input, the two `::error::` messages, the artifact name). Matrix becomes `shard: [1,2,3,4]` only — 8 jobs → 4. |
+| `.github/workflows/ci.yml` | None. `CI_NODE_VERSION` stays `"22.14.0"`. |
+| `.github/workflows/publish-package.yml` | None. `RELEASE_NODE_VERSION` stays `"22.14.0"`. |
+| `package.json` | `"engines": {"node": ">=20"}` → `">=22"`. |
 
-Pick one and make `engines` agree with it. Leaving `engines` at `>=20` while testing only 22 is the one
-outcome to avoid, because it is the current defect restated.
+*The `engines` half is not optional.* Dropping the 20.19.2 axis while leaving `engines` at `>=20` would
+ship a declared Node 20 floor with zero Node 20 coverage — that is the same defect this task exists to
+remove, restated one level down. The two edits land together.
+
+*Rejected alternative, recorded so it is not re-litigated:* standardizing on 20.19.2 and keeping
+`engines: >=20` (tests the advertised floor, catches accidental use of post-20 APIs) was considered and
+declined — 22.14.0 is already the pinned constant in all three workflows, and the repo has no external
+consumers, so narrowing `engines` costs nothing.
+
+*Acceptance:* `audit-code-test-suite.yml` runs 4 jobs; no workflow references Node 20; `engines` and the
+pinned constants agree.
 
 ---
 
