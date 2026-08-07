@@ -499,7 +499,7 @@ test("INV-08: renderSynthesisNarrativePrompt writes truncation notice to process
   const origStderrWrite = process.stderr.write.bind(process.stderr);
   const origConsoleWarn = console.warn;
 
-  process.stderr.write = (chunk, ...args) => {
+  process.stderr.write = (chunk, ..._args) => {
     capturedStderr.push(typeof chunk === "string" ? chunk : chunk.toString());
     return true;
   };
@@ -524,7 +524,7 @@ test("INV-08: renderSynthesisNarrativePrompt does NOT write to stderr when findi
 
   const capturedStderr: string[] = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk, ...args) => {
+  process.stderr.write = (chunk, ..._args) => {
     capturedStderr.push(typeof chunk === "string" ? chunk : chunk.toString());
     return true;
   };

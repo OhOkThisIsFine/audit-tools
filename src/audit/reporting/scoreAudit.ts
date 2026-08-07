@@ -248,7 +248,6 @@ export function scoreAudit(
         labels,
       });
       knownTpMissed += labels.filter((l) => l === "true_positive").length;
-      continue;
     }
   }
 

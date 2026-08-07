@@ -5,7 +5,7 @@ import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden, ass
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
 // dispatched by one driver can never be re-dispatched by the other.
 import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
-import { StateStore, type RemediationState } from "../state/store.js";
+import { StateStore } from "../state/store.js";
 import {
   prepareImplementDispatch,
   createWorktree,

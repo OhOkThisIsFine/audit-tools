@@ -31,10 +31,6 @@ async function readPackageVersion() {
   return JSON.parse(await readFile(packageJsonPath, 'utf8')).version;
 }
 
-function hasFlag(argv, name) {
-  return argv.includes(name);
-}
-
 // Informational flags (--help/--version) short-circuit the wrapper only when
 // they appear BEFORE the first non-flag token (the command). A whole-argv scan
 // hijacks post-command tokens that belong to the dist CLI — e.g.
@@ -54,17 +50,11 @@ function getFlag(argv, name) {
   return argv[index + 1];
 }
 
-function setDefaultFlag(argv, name, value) {
-  if (!hasFlag(argv, name)) {
-    argv.push(name, value);
-  }
-}
-
-// Overwrite an existing flag's value (or append when absent). setDefaultFlag
-// only fills a MISSING flag, so a user-supplied RELATIVE --root/--artifacts-dir
-// was forwarded raw and then re-resolved against the child's cwd (repoRoot),
-// not the caller's cwd — e.g. `--root .` pointed at the package dir (CE-001).
-// Normalizing to an absolute path here makes the forwarded value cwd-stable.
+// Overwrite an existing flag's value (or append when absent). A fill-only-if-
+// missing default would forward a user-supplied RELATIVE --root/--artifacts-dir
+// raw, re-resolved against the child's cwd (repoRoot), not the caller's cwd —
+// e.g. `--root .` pointed at the package dir (CE-001). Normalizing to an
+// absolute path here makes the forwarded value cwd-stable.
 function setFlag(argv, name, value) {
   const index = argv.indexOf(name);
   if (index < 0) {

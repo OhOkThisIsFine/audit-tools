@@ -15,7 +15,6 @@ import {
 } from "./reviewPacketSizing.js";
 import {
   graphEdgeConfidence,
-  isConcreteGraphEdge,
   isPacketExpansionEdge,
   buildFileToGroupKeys,
   buildGraphDegreeIndex,

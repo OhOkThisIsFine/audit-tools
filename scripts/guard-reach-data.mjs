@@ -63,6 +63,29 @@ export const GUARDS = [
   { id: 'check:memory-citations', kind: 'gate', impl: 'check:memory-citations' },
   { id: 'check:version-gates', kind: 'gate', impl: 'check:version-gates' },
   { id: 'check:guard-reach', kind: 'gate', impl: 'check:guard-reach', note: 'this registry, reconciled' },
+  {
+    id: 'check:lint',
+    kind: 'gate',
+    impl: 'check:lint',
+    note:
+      'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
+      'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
+      'typechecker-invisible .mjs surface (scripts/wrapper/dispatch/root bins)',
+  },
+  {
+    id: 'check:dup',
+    kind: 'gate',
+    impl: 'check:dup',
+    note: 'jscpd duplication ratchet (.jscpd.json threshold) over src+scripts+tests',
+  },
+  {
+    id: 'check:depgraph',
+    kind: 'gate',
+    impl: 'check:depgraph',
+    note:
+      'dependency-cruiser (.dependency-cruiser.cjs): no runtime import cycles in src; ' +
+      'src/shared never imports src/audit|src/remediate',
+  },
   { id: 'verify:hosts', kind: 'gate', impl: 'verify:hosts' },
   { id: 'verify:remediate-hosts', kind: 'gate', impl: 'verify:remediate-hosts' },
   { id: 'pack:smoke', kind: 'gate', impl: 'pack:smoke' },
@@ -103,7 +126,31 @@ export const GUARDS = [
     id: 'pre-commit-staged-snapshot-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-staged-snapshot.test.ts',
+    note: 'staged-snapshot leg of the pre-commit-gate-*.test.ts family (shared fixture: pre-commit-gate-harness.ts)',
+  },
+  {
+    id: 'pre-commit-commit-detection-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-commit-detection.test.ts',
+    note: 'commit-detection + crash-recovery + live-lock leg of the pre-commit-gate family',
+  },
+  {
+    id: 'pre-commit-commit-creating-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-commit-creating.test.ts',
+    note: 'P9 commit-creating-subcommand leg of the pre-commit-gate family',
+  },
+  {
+    id: 'pre-commit-attestation-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-attestation.test.ts',
     note: 'spawns the pre-commit gate AND the attest-loop-core-review hook end-to-end',
+  },
+  {
+    id: 'pre-commit-branch-strand-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-branch-strand.test.ts',
+    note: 'branch-strand refusal + fail-open announcement leg of the pre-commit-gate family',
   },
   {
     id: 'loop-core-gate-parity-test',
@@ -118,7 +165,16 @@ export const REACH = [
   {
     area: 'source',
     files: ['src/**'],
-    guardedBy: ['build', 'check:tests', 'vitest-gate', 'check:deadcode', 'pre-commit-gate'],
+    guardedBy: [
+      'build',
+      'check:tests',
+      'vitest-gate',
+      'check:deadcode',
+      'check:lint',
+      'check:dup',
+      'check:depgraph',
+      'pre-commit-gate',
+    ],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only the LOOP_CORE_PATTERNS prefixes ' +
       '(src/shared/loopCorePaths.ts), not every dispatch-adjacent CLI file; no gate refuses a direct ' +
@@ -127,9 +183,10 @@ export const REACH = [
   {
     area: 'tests',
     files: ['tests/**'],
-    guardedBy: ['check:tests', 'vitest-gate'],
+    guardedBy: ['check:tests', 'vitest-gate', 'check:lint', 'check:dup'],
     uncovered:
-      'checkJs:false excludes the deliberate .mjs holdout(s) from the typecheck (the 563/564 floor); ' +
+      'checkJs:false excludes the deliberate .mjs holdout(s) from the typecheck (the 563/564 floor), ' +
+      'and check:lint likewise lints only tests/**/*.ts; ' +
       'the vi.spyOn barrel guard (INV-remediate-tests-12) scans only tests/remediate',
   },
   {
@@ -152,6 +209,10 @@ export const REACH = [
       'session-start-hook-test',
       'doc-manifest-gate-test',
       'pre-commit-staged-snapshot-test',
+      'pre-commit-commit-detection-test',
+      'pre-commit-commit-creating-test',
+      'pre-commit-attestation-test',
+      'pre-commit-branch-strand-test',
       'loop-core-gate-parity-test',
       'check:loop-core-patterns',
       'check:guard-reach',
@@ -159,7 +220,7 @@ export const REACH = [
     uncovered:
       'shell-split (the trap-guard split helper) has no dedicated contract test — it is exercised only ' +
       'through hook-trap-guards-test. (question-philosophy-gate and closeout-challenge-gate are covered ' +
-      'by hook-session-gates-test; attest-loop-core-review by the staged-snapshot and parity tests; ' +
+      'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests; ' +
       'nightly-surface by nightly-routine-test.)',
   },
   {
@@ -172,9 +233,10 @@ export const REACH = [
       'scripts/shared/generate-*.mjs',
       'scripts/attest-constitutional-doc-change.mjs',
     ],
-    guardedBy: ['check:guard-reach', 'doc-manifest-gate-test', 'guard-reach-gate-test'],
+    guardedBy: ['check:guard-reach', 'doc-manifest-gate-test', 'guard-reach-gate-test', 'check:lint', 'check:dup'],
     uncovered:
-      'scripts/ is reached by no tsconfig — deliberate (validate at the construction site); ' +
+      'scripts/ is reached by no tsconfig — deliberate (validate at the construction site; check:lint ' +
+      'gives an untyped no-undef/no-unused-vars floor, not a typecheck); ' +
       'attest-constitutional-doc-change is invoked per constitutional override, wired into no verify gate',
   },
   {
@@ -194,16 +256,18 @@ export const REACH = [
       'verify:hosts',
       'verify:remediate-hosts',
       'vitest-gate',
+      'check:lint',
+      'check:dup',
     ],
     uncovered:
       'release-and-publish, update-models, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them; no ' +
-      'typecheck over scripts/ (deliberate)',
+      'typecheck over scripts/ (deliberate; check:lint is an untyped floor)',
   },
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test'],
+    guardedBy: ['nightly-routine-test', 'check:lint', 'check:dup'],
     note:
       'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
@@ -247,12 +311,32 @@ export const REACH = [
       'smoke:linked-audit-code',
       'smoke:linked-remediate-code',
       'vitest-gate',
+      'check:lint',
     ],
   },
   {
     area: 'toolchain config',
-    files: ['package.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.test.json', 'vitest.config.ts', 'knip.json'],
-    guardedBy: ['build', 'check:tests', 'vitest-gate', 'check:deadcode', 'check:guard-reach'],
+    files: [
+      'package.json',
+      'tsconfig.json',
+      'tsconfig.base.json',
+      'tsconfig.test.json',
+      'vitest.config.ts',
+      'knip.json',
+      'eslint.config.js',
+      '.jscpd.json',
+      '.dependency-cruiser.cjs',
+    ],
+    guardedBy: [
+      'build',
+      'check:tests',
+      'vitest-gate',
+      'check:deadcode',
+      'check:guard-reach',
+      'check:lint',
+      'check:dup',
+      'check:depgraph',
+    ],
     note:
       'each config is loaded by the gate it configures — malformed fails that gate loudly; the scripts ' +
       'wiring in package.json is what check:guard-reach reconciles',

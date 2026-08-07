@@ -35,7 +35,6 @@ import {
   contractPipelineDir,
   DEPENDENCY_MAP,
   readContractArtifact,
-  type ContractPipelineArtifactEnvelope,
   type ContractPipelineArtifactName,
 } from "./artifactStore.js";
 import { semanticProjection } from "./semanticProjection.js";

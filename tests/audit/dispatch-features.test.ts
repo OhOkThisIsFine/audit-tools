@@ -12,7 +12,6 @@ import type {
 import type { DispatchQuotaContract } from "audit-tools/shared";
 
 const { prepareDispatchArtifacts, ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/cli/dispatch.js");
-const { taskResultPath, packetPromptPath } = await import("../../src/audit/cli/args.js");
 const { packageRoot } = await import("../../src/audit/cli/paths.js");
 
 const RUN_ID = "test-run";
@@ -101,22 +100,9 @@ async function readActiveDispatch(artifactsDir: string): Promise<ActiveDispatchS
   return readJson<ActiveDispatchState>(join(artifactsDir, ACTIVE_DISPATCH_FILENAME));
 }
 
-// Simulate an accepted submit-packet by writing the per-task result files for a
-// packet (submit-packet only writes these after validation passes).
-async function acceptPacketTasks(runDir: string, taskIds: string[]): Promise<void> {
-  const taskResultsDir = join(runDir, "task-results");
-  for (const taskId of taskIds) {
-    await writeFile(
-      taskResultPath(taskResultsDir, taskId),
-      JSON.stringify({ task_id: taskId, findings: [] }),
-      "utf8",
-    );
-  }
-}
-
 // ── FINDING-009: schema pointer + reachable schema files ────────────────────
 
-await test("FINDING-009: prepareDispatchArtifacts writes the three schema files into task-results/", async (t) => {
+await test("FINDING-009: prepareDispatchArtifacts writes the three schema files into task-results/", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(multiPacketTasks());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -134,7 +120,7 @@ await test("FINDING-009: prepareDispatchArtifacts writes the three schema files 
   }
 });
 
-await test("FINDING-009: the task-results schema files are byte-for-byte equal to the canonical sources", async (t) => {
+await test("FINDING-009: the task-results schema files are byte-for-byte equal to the canonical sources", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(multiPacketTasks());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -151,7 +137,7 @@ await test("FINDING-009: the task-results schema files are byte-for-byte equal t
   }
 });
 
-await test("FINDING-009: the packet prompt references the schema file and retains existing constraints", async (t) => {
+await test("FINDING-009: the packet prompt references the schema file and retains existing constraints", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -172,7 +158,7 @@ await test("FINDING-009: the packet prompt references the schema file and retain
 
 // ── All packets dispatched in one round (canary removed) ──────────────────────
 
-await test("all packets dispatched in one round on first contact", async (t) => {
+await test("all packets dispatched in one round on first contact", async () => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -180,7 +166,7 @@ await test("all packets dispatched in one round on first contact", async (t) => 
   expect(result.packet_count).toBe(tasks.length);
 });
 
-await test("single packet on first contact dispatches normally", async (t) => {
+await test("single packet on first contact dispatches normally", async () => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
@@ -210,7 +196,7 @@ function sharedFileTasks(tokenEstimate: number): AuditTask[] {
   }));
 }
 
-await test("JIT partition merges affinity-linked tasks under the context budget", async (t) => {
+await test("JIT partition merges affinity-linked tasks under the context budget", async () => {
   // 2 × 4000 + prompt overhead sits well under the ~28k default input budget.
   const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(4000));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -218,7 +204,7 @@ await test("JIT partition merges affinity-linked tasks under the context budget"
   expect(result.packet_count, "small same-file tasks pack into one coherent packet").toBe(1);
 });
 
-await test("JIT partition splits a cluster that exceeds the context budget", async (t) => {
+await test("JIT partition splits a cluster that exceeds the context budget", async () => {
   // 2 × 20000 = 40000 exceeds the ~28k default input budget → cannot merge even
   // across a strong edge; the partition keeps them as separate packets.
   const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(20000));
@@ -232,7 +218,7 @@ await test("JIT partition splits a cluster that exceeds the context budget", asy
   expect(result.packet_count, "an oversized cluster splits along its weakest edge under the budget").toBe(2);
 });
 
-await test("capability handshake: host-reported context window is discovered, but the soft target still governs merging (N5b + meta-review 2026-07-30b(a))", async (t) => {
+await test("capability handshake: host-reported context window is discovered, but the soft target still governs merging (N5b + meta-review 2026-07-30b(a))", async () => {
   // The handshake half of N5b still holds: the discovered 200k window is
   // recorded as this session's budget. The PACKING half is deliberately
   // inverted from the original N5b: merging is bounded by
@@ -263,7 +249,7 @@ await test("capability handshake: host-reported context window is discovered, bu
   expect(quota.source).toBe("discovered_capability");
 });
 
-await test("JIT partition splits a coherent cluster at the risk-mass ceiling", async (t) => {
+await test("JIT partition splits a coherent cluster at the risk-mass ceiling", async () => {
   // Small tokens (would merge on token budget alone) but each task is near-max
   // risk; risk_mass_budget caps aggregate risk so they cannot share a packet.
   const tasks = sharedFileTasks(2000).map((task) => ({
@@ -278,7 +264,7 @@ await test("JIT partition splits a coherent cluster at the risk-mass ceiling", a
 
 // ── FINDING-012: confirmation threshold + dispatch summary ───────────────────
 
-await test("FINDING-012: confirmation_recommended and dispatch_summary on the result", async (t) => {
+await test("FINDING-012: confirmation_recommended and dispatch_summary on the result", async () => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -293,7 +279,7 @@ await test("FINDING-012: confirmation_recommended and dispatch_summary on the re
   expect(typeof result.granted_count).toBe("number");
 });
 
-await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async (t) => {
+await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async () => {
   const tasks = multiPacketTasks(); // 3 packets
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -314,7 +300,7 @@ await test("FINDING-012: confirmation_recommended flips when agent_count exceeds
 
 // ── Bug 8 / Slice A4: confirm-once-per-run ───────────────────────────────────
 
-await test("Bug 8: confirmation_recommended fires on the first grant, is suppressed on a repeat grant of the SAME run, and fires again on a fresh run", async (t) => {
+await test("Bug 8: confirmation_recommended fires on the first grant, is suppressed on a repeat grant of the SAME run, and fires again on a fresh run", async () => {
   const tasks = multiPacketTasks(); // 3 packets, agent_count stays 3 across passes below
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -369,7 +355,7 @@ await test("Bug 8: confirmation_recommended fires on the first grant, is suppres
 
 // ── FINDING-013: top-K coverage budget ──────────────────────────────────────
 
-await test("FINDING-013: max_packets caps emitted packets and records deferred ids", async (t) => {
+await test("FINDING-013: max_packets caps emitted packets and records deferred ids", async () => {
   const tasks = multiPacketTasks(); // 3 packets
   const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -394,7 +380,7 @@ await test("FINDING-013: max_packets caps emitted packets and records deferred i
   expect(!planIds.has(active.deferred_packet_ids![0])).toBeTruthy();
 });
 
-await test("FINDING-013: max_packets >= packet count is no cap (budget off)", async (t) => {
+await test("FINDING-013: max_packets >= packet count is no cap (budget off)", async () => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -409,7 +395,7 @@ await test("FINDING-013: max_packets >= packet count is no cap (budget off)", as
   expect(active.budget_packet_count).toBe(undefined);
 });
 
-await test("FINDING-013: budget defaults OFF — all packets emitted when max_packets is unset", async (t) => {
+await test("FINDING-013: budget defaults OFF — all packets emitted when max_packets is unset", async () => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -420,7 +406,7 @@ await test("FINDING-013: budget defaults OFF — all packets emitted when max_pa
 
 // ── FINDING-018: per-packet access metadata ──────────────────────────────────
 
-await test("FINDING-018: dispatch plan entries include access.read_paths with prompt path and source files", async (t) => {
+await test("FINDING-018: dispatch plan entries include access.read_paths with prompt path and source files", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -435,7 +421,7 @@ await test("FINDING-018: dispatch plan entries include access.read_paths with pr
   expect(entry.access.read_paths.some((p) => p.includes("only.ts")), "access.read_paths should include the packet's source file path").toBeTruthy();
 });
 
-await test("dispatch plan entry file_paths is the REPO-RELATIVE source set (for single-shot content inlining), excluding the prompt artifact", async (t) => {
+await test("dispatch plan entry file_paths is the REPO-RELATIVE source set (for single-shot content inlining), excluding the prompt artifact", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -458,7 +444,7 @@ await test("dispatch plan entry file_paths is the REPO-RELATIVE source set (for 
   expect(entry.file_paths.includes(entry.prompt_path), "file_paths must not contain the prompt artifact").toBe(false);
 });
 
-await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async (t) => {
+await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
@@ -480,7 +466,7 @@ await test("FINDING-018: dispatch plan entries access.write_paths contains only 
   expect(!entry.access.write_paths.includes(artifactsDir), "write_paths should not contain the repo root or artifacts dir").toBeTruthy();
 });
 
-await test("FINDING-018: dispatch plan entries include forbidden_patterns for common stray filenames", async (t) => {
+await test("FINDING-018: dispatch plan entries include forbidden_patterns for common stray filenames", async () => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);

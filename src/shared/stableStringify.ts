@@ -6,7 +6,7 @@
  * present-but-undefined field can never change the hash.
  *
  * There must be exactly ONE such serializer — never write a second. Both the
- * artifact-freshness metadata hash (`src/audit/orchestrator/artifactFreshness.ts`,
+ * artifact-freshness metadata hash (`src/shared/artifactFreshness.ts`,
  * which re-exports this) and the content-key seam (`src/shared/contentKey.ts`)
  * route through this function.
  */

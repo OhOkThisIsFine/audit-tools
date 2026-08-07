@@ -718,7 +718,6 @@ describe("deterministic design gates: circular interface detection via validateD
 describe("rolling dispatch: per-node verification before merge via mergeImplementResults", () => {
   const MERGE_TEST_DIR = scratchDir(".test-integration-merge");
   const MERGE_ARTIFACTS_DIR = join(MERGE_TEST_DIR, ".audit-tools", "remediation");
-  const MERGE_RUN_ID = "PLAN-MERGE";
 
   beforeEach(async () => {
     await rm(MERGE_TEST_DIR, { recursive: true, force: true });

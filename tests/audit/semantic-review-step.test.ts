@@ -6,8 +6,6 @@ import type { AuditorDescriptor } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
 
 const { renderSemanticReviewStep } = await import("../../src/audit/cli/semanticReviewStep.js");
-// Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
-const { toPromptPathToken } = await import("audit-tools/shared");
 
 // A minimal ambient descriptor (no host handshake): under the unconditional
 // materialized form this sizes DEGENERATELY (one task per packet, no fit

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   evidenceCitesRealPath,
   groundAffectedFiles,
@@ -12,7 +11,6 @@ import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 import { scratchDir } from "../helpers/scratch.js";
 
-const testDir = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-grounding");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 

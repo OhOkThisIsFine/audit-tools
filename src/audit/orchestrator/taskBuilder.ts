@@ -215,12 +215,6 @@ function withSignalTag(baseTags: string[], hasExternalSignal: boolean): string[]
   return hasExternalSignal ? [...baseTags, "external_analyzer_signal"] : baseTags;
 }
 
-function buildCoverageIndex(
-  coverageMatrix: CoverageMatrix,
-): Map<string, CoverageMatrix["files"][number]> {
-  return new Map(coverageMatrix.files.map((file) => [file.path, file]));
-}
-
 function getExternalSignalPaths(
   externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): Set<string> {

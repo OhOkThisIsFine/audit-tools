@@ -64,7 +64,6 @@ import {
 } from "../quota/capacity.js";
 import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.js";
 import { scheduleWave } from "../quota/scheduler.js";
-import { quotaPoolKey } from "../providers/identity.js";
 import {
   recordWaveOutcome,
   readQuotaState,
@@ -1729,15 +1728,6 @@ export function createRollingDispatcher<TPacket>(
         }
       }
     }
-  }
-
-  /**
-   * True when no configured pool is eligible to dispatch (every pool has been
-   * dropped into `exhaustedPoolIds`). Waiting cannot help — the remaining
-   * pending work must be stranded (INV-QD-07 empty-pool terminal).
-   */
-  function allPoolsExhausted(): boolean {
-    return confirmedPools.every((p) => state.exhaustedPoolIds.has(p.id));
   }
 
   /**

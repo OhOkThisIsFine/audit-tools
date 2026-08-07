@@ -32,7 +32,7 @@ describe("detectMisScopeSmells: no-.git root whose ancestor is a git repo", () =
   });
 });
 
-test("detectMisScopeSmells: root with its own .git → no smell", async (t) => {
+test("detectMisScopeSmells: root with its own .git → no smell", async () => {
   const root = await makeTempDir();
   onTestFinished(async () => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, ".git"), { recursive: true });
@@ -41,7 +41,7 @@ test("detectMisScopeSmells: root with its own .git → no smell", async (t) => {
   expect(smells.length, `smells: ${JSON.stringify(smells)}`).toBe(0);
 });
 
-test("detectMisScopeSmells: workspace-member root → exactly one smell naming the parent", async (t) => {
+test("detectMisScopeSmells: workspace-member root → exactly one smell naming the parent", async () => {
   const parent = await makeTempDir();
   onTestFinished(async () => rm(parent, { recursive: true, force: true }));
   // Give the parent its own .git so the ancestor smell does not also fire,
@@ -67,7 +67,7 @@ test("detectMisScopeSmells: workspace-member root → exactly one smell naming t
   expect(wsSmells[0].includes(parent), wsSmells[0]).toBeTruthy();
 });
 
-test("detectMisScopeSmells: parent has package.json but no workspaces → no workspace smell", async (t) => {
+test("detectMisScopeSmells: parent has package.json but no workspaces → no workspace smell", async () => {
   const parent = await makeTempDir();
   onTestFinished(async () => rm(parent, { recursive: true, force: true }));
   await mkdir(join(parent, ".git"), { recursive: true });
@@ -83,7 +83,7 @@ test("detectMisScopeSmells: parent has package.json but no workspaces → no wor
   expect(smells.filter((s) => s.includes("workspace member")).length, `smells: ${JSON.stringify(smells)}`).toBe(0);
 });
 
-test("detectMisScopeSmells: root with no package.json → no workspace smell", async (t) => {
+test("detectMisScopeSmells: root with no package.json → no workspace smell", async () => {
   const parent = await makeTempDir();
   onTestFinished(async () => rm(parent, { recursive: true, force: true }));
   await mkdir(join(parent, ".git"), { recursive: true });
@@ -98,7 +98,7 @@ test("detectMisScopeSmells: root with no package.json → no workspace smell", a
 // TST-c4496274: nested workspace member detection (packages/ subdirectory)
 // ---------------------------------------------------------------------------
 
-test("detectMisScopeSmells: nested workspace member (packages/ subdirectory) → exactly one smell naming the monorepo root", async (t) => {
+test("detectMisScopeSmells: nested workspace member (packages/ subdirectory) → exactly one smell naming the monorepo root", async () => {
   // Layout: monorepoRoot/ (.git + package.json with workspaces: ["packages/*"])
   //           packages/          (plain dir, no package.json)
   //             member/          (package.json with a name) ← audit root
@@ -132,7 +132,7 @@ test("detectMisScopeSmells: nested workspace member (packages/ subdirectory) →
   expect(wsSmells[0].includes(monorepoRoot), `expected monorepo root '${monorepoRoot}' in smell: ${wsSmells[0]}`).toBeTruthy();
 });
 
-test("detectMisScopeSmells: nested workspace member under apps/ subdirectory → exactly one smell naming the monorepo root", async (t) => {
+test("detectMisScopeSmells: nested workspace member under apps/ subdirectory → exactly one smell naming the monorepo root", async () => {
   // Layout: monorepoRoot/ (.git + package.json with workspaces: ["apps/*"])
   //           apps/              (plain dir, no package.json)
   //             my-app/          (package.json with a name) ← audit root
@@ -162,7 +162,7 @@ test("detectMisScopeSmells: nested workspace member under apps/ subdirectory →
   expect(wsSmells[0].includes(monorepoRoot), `expected monorepo root '${monorepoRoot}' in smell: ${wsSmells[0]}`).toBeTruthy();
 });
 
-test("runIntakeExecutor progress_summary contains no SCOPE_SUMMARY sentinel", async (t) => {
+test("runIntakeExecutor progress_summary contains no SCOPE_SUMMARY sentinel", async () => {
   const base = await makeTempDir();
   onTestFinished(async () => rm(base, { recursive: true, force: true }));
   await mkdir(join(base, ".git"), { recursive: true });
@@ -183,7 +183,7 @@ test("runIntakeExecutor progress_summary contains no SCOPE_SUMMARY sentinel", as
   expect(result.scope_summary!.repo_root).toBe(root);
 });
 
-test("advanceAudit intake_executor writes scope_summary.json to the artifacts dir", async (t) => {
+test("advanceAudit intake_executor writes scope_summary.json to the artifacts dir", async () => {
   // Regression: the conversation-first loader instructs the host to read
   // scope_summary.json after intake, but the intake_executor runner never
   // threaded artifactsDir into runIntakeExecutor, so the file was never produced.
@@ -210,7 +210,7 @@ test("advanceAudit intake_executor writes scope_summary.json to the artifacts di
   expect(typeof parsed.auditable_file_count).toBe("number");
 });
 
-test("runIntakeExecutor includes a scope_summary in its result", async (t) => {
+test("runIntakeExecutor includes a scope_summary in its result", async () => {
   const base = await makeTempDir();
   onTestFinished(async () => rm(base, { recursive: true, force: true }));
   // A self-contained repo with one auditable source file.

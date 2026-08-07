@@ -27,7 +27,7 @@ async function withTempDir<T>(
 
 const { runSample } = await import("../../src/audit/cli/sampleRunCommand.js");
 
-test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async (t) => {
+test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async () => {
   await withTempDir(async (dir) => {
     const artifactsDir = join(dir, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -81,7 +81,7 @@ test("COR-df0bf37c: Array.isArray guard distinguishes null/absent results from e
 // forward any session-config wrap flag into runDeterministicForNextStep.
 // Structural check: NextStepParams carries the trimmed params shape.
 
-test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape", async (t) => {
+test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape", async () => {
   const { handleGraphEnrichmentBranch } = await import("../../src/audit/cli/nextStepCommand.js");
   const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
   const result = await handleGraphEnrichmentBranch(
@@ -97,7 +97,7 @@ test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape
 // When all values in analyzer-decisions.json fail recognized-value check,
 // a stderr warning must be emitted before the file is unlinked.
 
-test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid analyzer decisions", async (t) => {
+test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid analyzer decisions", async () => {
   await withTempDir(async (dir) => {
     const { handleGraphEnrichmentBranch } = await import("../../src/audit/cli/nextStepCommand.js");
     await mkdir(join(dir, "incoming"), { recursive: true });

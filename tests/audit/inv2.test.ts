@@ -43,7 +43,7 @@ const { ClaudeOAuthQuotaSource, mapUsageToSnapshot } = await import(
 const { CodexQuotaSource, mapCodexUsage } = await import(
   "audit-tools/shared/quota/codexQuotaSource"
 );
-const { CopilotQuotaSource, mapCopilotUsage } = await import(
+const { mapCopilotUsage } = await import(
   "audit-tools/shared/quota/copilotQuotaSource"
 );
 const { mapAntigravityUsage } = await import(

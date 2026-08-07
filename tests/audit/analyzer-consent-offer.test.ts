@@ -9,7 +9,7 @@
  *  - the offer prompt is tool-rendered with purpose + safety + mechanism.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pendingAnalyzerConsent } from "../../src/audit/orchestrator/hostInputPause.js";

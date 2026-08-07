@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   applyPlanPipeline,
   mergeBlocksSharingFiles,
@@ -13,9 +12,6 @@ import {
 } from "../../src/remediate/phases/plan.js";
 import { checkAffectedFileIntegrity } from "../../src/remediate/utils/fileIntegrity.js";
 import { scratchDir } from "../helpers/scratch.js";
-
-// Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
-const testDir = dirname(fileURLToPath(import.meta.url));
 
 interface FindingOpts {
   severity?: string;

@@ -79,7 +79,7 @@ test("cmdWorkerRun writes a failed WorkerResult when the result write throws a n
     // Capture stderr and exitCode.
     const stderrChunks: string[] = [];
     const originalStderrWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (chunk, ...rest) => {
+    process.stderr.write = (chunk, ..._rest) => {
       stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
       return true;
     };

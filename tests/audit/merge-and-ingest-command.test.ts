@@ -82,7 +82,7 @@ async function scaffoldRun(
 test("cmdMergeAndIngest replays a completed run's summary without re-ingesting (idempotency)", async () => {
   await withTempDir("merge-ingest-cmd-", async (artifactsDir) => {
     const repoRoot = artifactsDir; // no source read on this path
-    const { runDir, mergeCompletePath } = await scaffoldRun(artifactsDir, repoRoot, {
+    const { mergeCompletePath } = await scaffoldRun(artifactsDir, repoRoot, {
       // One task, but it is NOT present in the pending list, so a stale marker
       // cannot be invalidated by a "pending task answered on disk".
       entries: [

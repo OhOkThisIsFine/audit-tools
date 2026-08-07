@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   FIXTURE_LINE_INDEX,

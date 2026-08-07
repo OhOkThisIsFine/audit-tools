@@ -30,22 +30,6 @@ const EXTENSION_SURFACE_EDGE_KINDS = new Set([
   CHROME_EXTENSION_UI_PAGE_EDGE,
 ]);
 
-const HIGH_RISK_PERMISSION_TOKENS = [
-  "<all_urls>",
-  "activeTab",
-  "debugger",
-  "declarativeNetRequest",
-  "downloads",
-  "downloads.open",
-  "nativeMessaging",
-  "proxy",
-  "scripting",
-  "tabs",
-  "unlimitedStorage",
-  "webNavigation",
-  "webRequest",
-] as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

@@ -5,12 +5,10 @@
  *   - ObligationEntry priority + source fields
  */
 
-import { test, expect, describe, it } from "vitest";
+import { expect, describe, it } from "vitest";
 
 import {
   CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION,
-  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   type ImplementationDAGNode,
   type SeamNegotiationRecord,
   type ObligationEntry,

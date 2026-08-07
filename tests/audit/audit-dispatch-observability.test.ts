@@ -86,7 +86,6 @@ async function withCapturedStderr<T>(
 // ── FND-OBS-c8d43100: selectiveDeepening strategy_summary event ──────────────
 
 const { buildSelectiveDeepeningTasks } = await import("../../src/audit/orchestrator/selectiveDeepening/index.js");
-const { DEEPENING_TAG } = await import("../../src/audit/orchestrator/selectiveDeepening/shared.js");
 
 function makeResult(
   taskId: string,

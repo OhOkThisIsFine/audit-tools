@@ -3,9 +3,10 @@
   "entry": [
     "src/audit/index.ts!",
     "src/remediate/index.ts!",
-    "scripts/**/*.mjs!"
+    "scripts/**/*.mjs!",
+    "tests/helpers/global-setup.ts!"
   ],
-  "project": ["src/**/*.ts!"],
+  "project": ["src/**/*.ts!", "tests/**/*.ts"],
   "ignore": ["dist/**"],
   "ignoreBinaries": ["gitleaks"],
   "ignoreExportsUsedInFile": true,

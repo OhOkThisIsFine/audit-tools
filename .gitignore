@@ -108,3 +108,7 @@ skills-lock.json
 
 # Dev-wrapper auto-rebuild lock (wrapper/audit-code-wrapper-build.mjs)
 .audit-code-build.lock
+
+# External-analyzer sweep droppings (owner-run or dev-side runs): raw run
+# output only — conclusions land in docs/reviews/; the raw dir is disposable.
+analysis-results-*/

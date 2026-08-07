@@ -157,15 +157,6 @@ export type {
 export type { QuotaUsageSnapshot } from "audit-tools/shared";
 
 import type {
-  HostConcurrencyLimit,
-  LimitSource,
-  LimitConfidence,
-  ResolvedLimits,
-  BackoffState,
-  QuotaUsageSnapshot,
-  WaveBindingCap,
-  DispatchCapacityPoolSummary,
-  DispatchAdmission,
   DispatchQuotaContract,
 } from "audit-tools/shared";
 

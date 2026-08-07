@@ -1,4 +1,4 @@
-import { test, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 
 const { PROVIDER_NAMES, SESSION_UI_MODES, ANALYZER_SETTINGS } = await import("../../src/shared/types/sessionConfig.js");
 const { SURFACE_KINDS } = await import("../../src/shared/types/surfaces.js");

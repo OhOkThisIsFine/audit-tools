@@ -38,7 +38,6 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
-  existsSync,
   realpathSync,
 } from "node:fs";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";

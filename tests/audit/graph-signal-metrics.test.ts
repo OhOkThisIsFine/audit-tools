@@ -1,7 +1,5 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import type { RepoManifest } from "../../src/audit/types.js";
 import type { GraphSignals } from "../../src/audit/extractors/graphSignals.js";
 import { manifest, edgeBundle } from "./test-helpers.js";
 

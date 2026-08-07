@@ -206,7 +206,6 @@ test("packetPromptPrefixHash: a prefix-touching diff is caught as a diverging pa
   const promptA = renderPromptFor("abc");
   const promptB = renderPromptFor("xyz");
   const hashA = packetPromptPrefixHash(promptA);
-  const hashB = packetPromptPrefixHash(promptB);
 
   // Simulate a regression that mutates the FIXED prefix for one packet only
   // (e.g. a schema-block edit that landed for one code path but not another).

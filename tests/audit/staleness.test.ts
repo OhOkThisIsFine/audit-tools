@@ -12,10 +12,8 @@ const { computeStaleArtifacts } =
   await import("../../src/audit/orchestrator/staleness.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.js");
-const {
-  hashArtifactValue,
-  stableStringify,
-} = await import("../../src/audit/orchestrator/artifactFreshness.js");
+const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
+const { stableStringify } = await import("../../src/shared/stableStringify.js");
 
 function makeBaseBundle(overrides: Partial<ArtifactBundle> = {}): ArtifactBundle {
   return {
@@ -497,7 +495,6 @@ const {
 } = await import("../../src/shared/contentKey.js");
 const {
   deriveLiveResultKeys,
-  recordResultBaseline,
   isMetadataManifestCurrent,
 } = await import("../../src/audit/orchestrator/resultBaseline.js");
 const { METADATA_SCHEMA_VERSION } = await import(
@@ -873,7 +870,7 @@ test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (pr
   // run, with no wall-clock / run-id leakage — guaranteed because
   // normalizeForMetadataHash strips provenance before hashing.
   const { normalizeForMetadataHash } = await import(
-    "../../src/audit/orchestrator/artifactFreshness.js"
+    "../../src/shared/artifactFreshness.js"
   );
 
   // Run 1: build manifest at an early wall-clock, then PERSIST + RELOAD it.
@@ -933,7 +930,7 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
   // perpetually re-stale its downstreams. The guarantee comes from
   // normalizeForMetadataHash stripping provenance before stableStringify.
   const { normalizeForMetadataHash } = await import(
-    "../../src/audit/orchestrator/artifactFreshness.js"
+    "../../src/shared/artifactFreshness.js"
   );
 
   // Two artifact element values, byte-identical in CONTENT but differing only in

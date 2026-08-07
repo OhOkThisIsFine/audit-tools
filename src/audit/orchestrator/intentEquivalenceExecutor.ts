@@ -36,7 +36,7 @@ import {
   normalizeCheckpointForms,
   normalFormHash,
 } from "./intentCheckpointGate.js";
-import { hashArtifactValue } from "./artifactFreshness.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 
 export const IntentEquivalenceVerdictSchema = z
   .object({

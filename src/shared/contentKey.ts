@@ -58,7 +58,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { stableStringify } from "./stableStringify.js";
-import { normalizeForMetadataHash } from "../audit/orchestrator/artifactFreshness.js";
+import { normalizeForMetadataHash } from "./artifactFreshness.js";
 
 /** Coordinate that groups results: {unit_id, lens, pass_id}. */
 export interface IdentityKeyInput {

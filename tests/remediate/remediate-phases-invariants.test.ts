@@ -581,7 +581,7 @@ describe("groundExtractedFindings — INV-remediate-phases-08: repair hook calle
 
     await groundExtractedFindings(findings as any, {
       root: TEST_DIR,
-      repairZeroPathFindings: async (requests) => {
+      repairZeroPathFindings: async (_requests) => {
         repairCallCount++;
         // Return repairs for F1 only; F2 remains unrepaired.
         return new Map([["F1", ["src/real.ts"]]]);

@@ -110,7 +110,7 @@ test("status: stale gate version / structured delta / prose delta discriminate c
 
 test("stamp arm: baseline stamped from current, revision mirrors the entry (min 1)", async () => {
   const { hashArtifactValue } = await import(
-    "../../src/audit/orchestrator/artifactFreshness.js"
+    "../../src/shared/artifactFreshness.js"
   );
   const cp = checkpoint();
   const bundle = bundleWith(cp, undefined, 7);
@@ -273,7 +273,7 @@ test("first contact with a PENDING checkpoint change resolves CHANGED, never abs
 
 test("hash-consistent first contact stamps quietly at the entry revision", async () => {
   const { hashArtifactValue } = await import(
-    "../../src/audit/orchestrator/artifactFreshness.js"
+    "../../src/shared/artifactFreshness.js"
   );
   const cp = checkpoint();
   const bundle = {

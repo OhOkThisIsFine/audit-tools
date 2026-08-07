@@ -11,7 +11,6 @@ import type {
   AuditTopLevelStatus,
   ObligationState,
 } from "../types/auditState.js";
-import type { ProviderName } from "audit-tools/shared";
 import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 
 export interface AuditCodeHandoffInput {
@@ -85,29 +84,10 @@ const NON_PENDING_OBLIGATION_STATES = new Set<ObligationState>([
   "present",
   "satisfied",
 ]);
-const INTERACTIVE_PROVIDER_OPTIONS: readonly ProviderName[] = [
-  "auto",
-  "claude-code",
-  "codex",
-  "opencode",
-  "subprocess-template",
-  "vscode-task",
-  "antigravity",
-  "agy",
-];
-
 function buildPendingObligations(state: AuditState): string[] {
   return state.obligations
     .filter((item) => !NON_PENDING_OBLIGATION_STATES.has(item.state))
     .map((item) => item.id);
-}
-
-function formatQuotedList(values: readonly string[]): string {
-  if (values.length === 1) {
-    return `"${values[0]}"`;
-  }
-  const head = values.slice(0, -1).map((value) => `"${value}"`).join(", ");
-  return `${head}, or "${values[values.length - 1]}"`;
 }
 
 function buildSummary(

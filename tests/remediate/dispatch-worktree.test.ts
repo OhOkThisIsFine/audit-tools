@@ -34,7 +34,6 @@ import {
 // ---------------------------------------------------------------------------
 
 const { realSpawnSync } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const actual = require("node:child_process") as typeof import("node:child_process");
   // Force windowsHide so the real git calls this test drives don't flash a
   // console window on win32 (INV-WH). vi.hoisted runs before imports, so we

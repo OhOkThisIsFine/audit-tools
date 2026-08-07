@@ -181,7 +181,7 @@ async function writeDispatchQuota(runDir: string, capacityPools: DispatchCapacit
 }
 
 test("recordHostTokenUsageObservation: a wave with no token_usage leaves the pool calibrating (no false graduation)", async () => {
-  await withTempStateDir(async (stateDir) => {
+  await withTempStateDir(async (_stateDir) => {
     const runDir = await mkdtemp(join(tmpdir(), "audit-tools-rundir-"));
     try {
       await writeDispatchQuota(runDir, [
@@ -219,7 +219,7 @@ test("recordHostTokenUsageObservation: a wave with no token_usage leaves the poo
 });
 
 test("recordHostTokenUsageObservation: token_usage + pre/post snapshot delta graduates the pool's tokens_per_pct slope", async () => {
-  await withTempStateDir(async (stateDir) => {
+  await withTempStateDir(async (_stateDir) => {
     const runDir = await mkdtemp(join(tmpdir(), "audit-tools-rundir-"));
     try {
       await writeDispatchQuota(runDir, [

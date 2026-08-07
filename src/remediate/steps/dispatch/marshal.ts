@@ -92,11 +92,6 @@ function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths)];
 }
 
-function markStarted(item: { started_at?: string; completed_at?: string }): void {
-  item.started_at ??= new Date().toISOString();
-  delete item.completed_at;
-}
-
 function markTerminal(item: { started_at?: string; completed_at?: string }): void {
   const now = new Date().toISOString();
   item.started_at ??= now;
@@ -380,7 +375,6 @@ export async function prepareImplementDispatch(
   const testIndex = buildTestFileIndex(options.root);
 
   const items: DispatchPlanItem[] = [];
-  const itemReadFileLists: string[][] = [];
   let reconciledCount = 0;
   for (const block of candidateBlocks) {
     const item = buildImplementDispatchItem(block, state, dir);
@@ -463,7 +457,6 @@ export async function prepareImplementDispatch(
         promptPath: item.prompt_path,
       }),
     });
-    itemReadFileLists.push(nodeReadFiles);
   }
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);

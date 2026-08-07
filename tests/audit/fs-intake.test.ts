@@ -14,7 +14,7 @@ async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise<T> {
   }
 }
 
-test("walk logs a warning and skips hashing for oversized files", async (t) => {
+test("walk logs a warning and skips hashing for oversized files", async () => {
   await withTempRepo(async (root) => {
     await writeFile(join(root, "small.js"), "console.log('small');\n");
     await writeFile(join(root, "large.js"), "x".repeat(200));
@@ -52,7 +52,7 @@ test("walk logs a warning and skips hashing for oversized files", async (t) => {
   });
 });
 
-test("walk logs a warning and continues when readdir throws", async (t) => {
+test("walk logs a warning and continues when readdir throws", async () => {
   await withTempRepo(async (root) => {
     // Create a normal file at root level and a subdirectory
     await writeFile(join(root, "ok.js"), "export const x = 1;\n");
@@ -87,7 +87,7 @@ test("walk logs a warning and continues when readdir throws", async (t) => {
   });
 });
 
-test("walk logs a warning and continues when stat throws", async (t) => {
+test("walk logs a warning and continues when stat throws", async () => {
   await withTempRepo(async (root) => {
     await writeFile(join(root, "file-a.js"), "export const a = 1;\n");
     await writeFile(join(root, "file-b.js"), "export const b = 2;\n");

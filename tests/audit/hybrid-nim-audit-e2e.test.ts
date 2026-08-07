@@ -109,7 +109,7 @@ test(
       const nimReviewed = reviewed();
       const taskIds = ingestedTaskIds();
 
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[hybrid-nim-audit-e2e] LIVE SPLIT — NIM reviewed in-process: ${taskIds.length} task(s) ` +
           `[${taskIds.slice(0, 5).join(", ")}] | last next step: ${result?.kind}`,

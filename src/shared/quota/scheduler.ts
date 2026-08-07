@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { QuotaConfig, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
@@ -781,7 +781,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   // logic; otherwise apply RPM/TPM. The token-budget gate and host-concurrency
   // ceiling are applied below.
   let waveSize = requestedConcurrency;
-  let bindingCap: WaveBindingCap = "none";
+  let bindingCap: WaveBindingCap;
   if (cooldownUntil) {
     waveSize = 1;
     bindingCap = "cooldown";

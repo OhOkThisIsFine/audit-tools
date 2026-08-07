@@ -75,7 +75,7 @@ test("external_analyzer_import_executor throws when externalAnalyzerResults is m
 
 // ── default executor branch emits balanced log events ────────────────────────
 
-test("default executor branch emits executor_end log event and returns progress_made:false", async (t) => {
+test("default executor branch emits executor_end log event and returns progress_made:false", async () => {
   const logDir = await mkdtemp(join(tmpdir(), "advance-default-exec-"));
   const logPath = join(logDir, "run.log.jsonl");
   try {

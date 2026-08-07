@@ -8,7 +8,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AuditFindingsReport } from "audit-tools/shared";

@@ -572,7 +572,7 @@ export function deriveAuditState(
 
   // Intake begins with the repository manifest. Provider/model routing is owned by
   // the dispatch broker and is not an audit lifecycle artifact.
-  let status: AuditTopLevelStatus = "not_started";
+  let status: AuditTopLevelStatus;
   if (!has(bundle.repo_manifest)) {
     status = "not_started";
   } else if (obligations.some((o) => o.state === "blocked")) {

@@ -6,8 +6,8 @@
  * concern.
  */
 
-import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   advance,
   DEFAULT_MAX_TRANSITIONS,

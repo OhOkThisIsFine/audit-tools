@@ -166,7 +166,7 @@ function recordingWriteStream(sink: string[]): WriteStream {
   });
 }
 
-test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.stderr, in headless mode (OBS-101)", async (t) => {
+test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.stderr, in headless mode (OBS-101)", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites: string[] = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
@@ -229,7 +229,7 @@ test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.s
   }
 });
 
-test("spawnLoggedCommand echoes structured heartbeat to process.stderr when uiMode is visible (OBS-101)", async (t) => {
+test("spawnLoggedCommand echoes structured heartbeat to process.stderr when uiMode is visible (OBS-101)", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites: string[] = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
@@ -278,7 +278,7 @@ test("spawnLoggedCommand echoes structured heartbeat to process.stderr when uiMo
   }
 });
 
-test("spawnLoggedCommand rejects with timeout error and sends SIGTERM when timeoutMs elapses", async (t) => {
+test("spawnLoggedCommand rejects with timeout error and sends SIGTERM when timeoutMs elapses", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls: string[] = [];
   let openChild: any;
@@ -317,7 +317,7 @@ test("spawnLoggedCommand rejects with timeout error and sends SIGTERM when timeo
   }
 });
 
-test("spawnLoggedCommand escalates to SIGKILL after grace period when child does not exit after SIGTERM", async (t) => {
+test("spawnLoggedCommand escalates to SIGKILL after grace period when child does not exit after SIGTERM", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls: string[] = [];
   let openChild: any;
@@ -357,7 +357,7 @@ test("spawnLoggedCommand escalates to SIGKILL after grace period when child does
   }
 });
 
-test("spawnLoggedCommand does NOT send SIGKILL when child exits cleanly within the grace period after SIGTERM", async (t) => {
+test("spawnLoggedCommand does NOT send SIGKILL when child exits cleanly within the grace period after SIGTERM", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls: string[] = [];
   let openChild: any;
@@ -592,7 +592,7 @@ test("spawnLoggedCommand returns accepted=false and error message when child is 
   expect(result.exitCode === null || result.exitCode === undefined, `expected exitCode to be null or undefined, got: ${result.exitCode}`).toBeTruthy();
 });
 
-test("spawnLoggedCommand fires both the structured heartbeat to log and onProgress when wired (OBS-101)", async (t) => {
+test("spawnLoggedCommand fires both the structured heartbeat to log and onProgress when wired (OBS-101)", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites: string[] = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);

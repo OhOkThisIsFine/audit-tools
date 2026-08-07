@@ -12,9 +12,24 @@ behind both.
 **Status:** T1–T3 + T5 landed 2026-08-07 (implemented outside this repo's agent loop; landed with
 two repairs — `sequence.sequencer` must be the imported class, not a string path, and the committed
 duration baseline must be COMPLETE, now generated via `npm run generate:shard-baseline` with a
-census guard). **T4 is open and unstarted** — it is the only task that lowers the achievable floor
-(the longest single test file bounds every shard), and its one-file-at-a-time red-green protocol
-below is unchanged.
+census guard). **T4's top three targets landed later the same day**, each split with exact
+test-count parity and a shared harness (splitting, not concurrency flags, per the protocol below):
+`audit-code-wrapper.test.ts` (300.7s in the committed baseline) → five
+`audit-code-wrapper-*.test.ts` files over `tests/audit/helpers/wrapper-harness.ts`;
+`next-step.test.ts` (257.8s) → three `next-step-core-*.test.ts` files over
+`tests/audit/helpers/next-step-harness.ts`; `pre-commit-gate-staged-snapshot.test.ts` (78.3s,
+fully serial) → five `pre-commit-gate-*.test.ts` files over
+`tests/shared/pre-commit-gate-harness.ts` (guard-reach rows updated per file). The committed
+duration baseline was regenerated from a green full run on the split tree. **Post-split correction
+to this brief's own scoping:** §3's top-3 were measured from the SHARD-1 ledger, but the committed
+full-run baseline shows `tests/audit/audit-code-completion.test.ts` at ~335s — it sat in another
+shard and is, and was, the true single-file floor. The three splits fixed the distribution above
+the floor (former 300s/258s/78s monsters now spread across 13 files, largest fragment ~217s);
+**the floor itself moves only when completion.test.ts is split**, same one-file-at-a-time protocol.
+Remaining T4 queue, in floor order: `audit-code-completion.test.ts` (335s), the
+`audit-code-wrapper-packets.test.ts` fragment (217s, split further if completion's split leaves it
+dominant), the dispatch-worktree pair's shared fixture, and the separate `collectMs`
+transform-caching look.
 
 ---
 

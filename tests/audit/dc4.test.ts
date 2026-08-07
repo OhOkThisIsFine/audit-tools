@@ -30,7 +30,7 @@ import { writeFixtureRepo, advanceFixtureToPlanning, buildSyntheticResults } fro
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditTask, AuditResult } from "../../src/audit/types.js";
 import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
-import type { AuditPacketDispatcher, AuditResultIngestor } from "../../src/audit/cli/rollingAuditDispatch.js";
+import type { AuditPacketDispatcher } from "../../src/audit/cli/rollingAuditDispatch.js";
 import type { SessionConfig, IntentCheckpoint } from "audit-tools/shared";
 
 const {
@@ -43,7 +43,6 @@ const {
   deriveUnitScopeDisposition,
 } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
 const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
-const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { writeCoreArtifacts, loadArtifactBundle } = await import("../../src/audit/io/artifacts.js");
 const { runAuditStep } = await import("../../src/audit/cli/auditStep.js");
 
@@ -123,7 +122,7 @@ async function readActiveDispatch(artifactsDir: string) {
 // 1. PAUSE — resumable waiting_for_provider on a full strand (spill-first gate)
 // ───────────────────────────────────────────────────────────────────────────
 
-test.concurrent("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state (not an immediate terminal)", async (t) => {
+test.concurrent("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state (not an immediate terminal)", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -151,7 +150,7 @@ test.concurrent("DC-4 pause: a full strand pauses to a resumable waiting_for_pro
   expect(!active.partial_completion_terminal, "a resumable pause is NOT a partial-completion terminal").toBeTruthy();
 });
 
-test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still has capacity (no strand → no pause)", async (t) => {
+test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still has capacity (no strand → no pause)", async () => {
   const { artifactsDir, runDir, taskList } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -190,7 +189,7 @@ test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still
   expect(!active.paused_state, "no paused state persisted on a clean completion").toBeTruthy();
 });
 
-test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (back to running)", async (t) => {
+test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (back to running)", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -222,7 +221,7 @@ test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (b
   expect(!afterResume.paused_state, "the paused state is cleared on resume").toBeTruthy();
 });
 
-test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net-new (INV-S03)", async (t) => {
+test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net-new (INV-S03)", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -248,7 +247,7 @@ test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-off
   expect(result.paused_state!.lifecycle.pause_count, "pause_count advanced (no resume)").toBe(1);
 });
 
-test.concurrent("DC-4 terminal: the pause promotes to a partial-completion terminal after the livelock limit", async (t) => {
+test.concurrent("DC-4 terminal: the pause promotes to a partial-completion terminal after the livelock limit", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -453,8 +452,8 @@ test.concurrent("DC-4 fold-ingest (CE-009): folded ingestion leaves the SAME sta
 // ARC-e01faa3e — Dead provider exclusion during mid-run re-detection
 // ───────────────────────────────────────────────────────────────────────────
 
-test.concurrent("ARC-e01faa3e: dead providers in paused state are excluded during pool selection", async (t) => {
-  const { artifactsDir, runDir } = await makeRun();
+test.concurrent("ARC-e01faa3e: dead providers in paused state are excluded during pool selection", async () => {
+  const { artifactsDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Create a paused state with dead_providers naming the session provider.
@@ -508,7 +507,7 @@ test.concurrent("ARC-e01faa3e: dead providers in paused state are excluded durin
   );
 });
 
-test.concurrent("ARC-e01faa3e: empty dead_providers list excludes nothing beyond self-spawn", async (t) => {
+test.concurrent("ARC-e01faa3e: empty dead_providers list excludes nothing beyond self-spawn", async () => {
   // A paused state with no dead_providers.
   const pausedState = {
     lifecycle: {
@@ -531,7 +530,7 @@ test.concurrent("ARC-e01faa3e: empty dead_providers list excludes nothing beyond
   expect(exclusion.excludes({ transport: "agy" }), "no exclusion when no dead providers").toBe(false);
 });
 
-test.concurrent("ARC-e01faa3e: undefined dead_providers excludes nothing beyond self-spawn", async (t) => {
+test.concurrent("ARC-e01faa3e: undefined dead_providers excludes nothing beyond self-spawn", async () => {
   // A paused state with undefined dead_providers (backward compat with old records).
   const pausedState = {
     lifecycle: {

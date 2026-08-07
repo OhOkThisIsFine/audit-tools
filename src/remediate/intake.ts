@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { AuditFindingsReport, Finding, WorkBlock, FindingSeverity } from "audit-tools/shared";
@@ -7,7 +6,6 @@ import {
   hashContent,
   readOptionalJsonFile,
   readOptionalTextFile,
-  writeJsonFile,
   isRecord,
   severityCompare,
   countBy,

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WorkerTask } from "../../src/audit/types/workerSession.js";
 import type { WorkerResult } from "../../src/audit/types/workerResult.js";
 import { cmdWorkerRun } from "../../src/audit/cli/workerRunCommand.js";
 import type { WorkerRunDeps } from "../../src/audit/cli/workerRunCommand.js";

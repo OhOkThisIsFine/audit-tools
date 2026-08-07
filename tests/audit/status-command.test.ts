@@ -57,7 +57,7 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
     let parsed;
     try {
       parsed = JSON.parse(result.stdout);
-    } catch (e) {
+    } catch {
       assert.fail(`stdout is not valid JSON: ${result.stdout}\nstderr: ${result.stderr}`);
     }
 

@@ -676,7 +676,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     const params = { artifactsDir };
 
     // Must not throw: the malformed lane quarantines like any other bad shape.
-    const branch = await handleDesignReviewBranch(params, bundle, state);
+    await handleDesignReviewBranch(params, bundle, state);
 
     // The valid contract lane merged and PERSISTED.
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));

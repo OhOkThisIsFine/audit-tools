@@ -67,7 +67,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   const allTasks = await readJsonFile<AuditTask[]>(tasksPath);
   const taskById = new Map(allTasks.map((task) => [task.task_id, task]));
   const packetTasks = packetEntries.map((entry) => taskById.get(entry.task_id));
-  const missingTask = packetEntries.find((entry, index) => !packetTasks[index]);
+  const missingTask = packetEntries.find((_entry, index) => !packetTasks[index]);
   if (missingTask) {
     throw new Error(
       `Dispatch result map references unknown task '${missingTask.task_id}'.`,

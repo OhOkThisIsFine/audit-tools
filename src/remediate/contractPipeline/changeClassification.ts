@@ -499,7 +499,3 @@ export function verifyPairingForFinding(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function dedupe(values: string[]): string[] {
-  return [...new Set(values.filter((v) => typeof v === "string" && v.length > 0))];
-}

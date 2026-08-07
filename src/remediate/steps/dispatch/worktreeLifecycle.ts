@@ -11,7 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative, dirname, isAbsolute } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { spawnSyncHidden, resolveWithinRoot } from "audit-tools/shared";
 import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
 import {
@@ -403,7 +403,6 @@ export function dirtyMainTreeCollisions(root: string, branch: string): string[] 
 export function rebaseBranchOntoHead(
   root: string,
   worktreePath: string,
-  branch: string,
 ): { ok: true } | { ok: false; error: string } {
   const head = spawnSyncHidden("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (head.error || head.status !== 0) {

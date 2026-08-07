@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { isInfraModifyingBlock } from "../../src/remediate/steps/dispatch.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
-import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { Finding } from "audit-tools/shared";
 
 // ---------------------------------------------------------------------------

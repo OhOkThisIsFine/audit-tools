@@ -101,7 +101,7 @@ function assertPackagedContract(packMetadata) {
 
 async function main() {
   const smokeStart = Date.now();
-  let stepStart = Date.now();
+  let stepStart;
   log.step("start");
   const installDir = await mkdtemp(join(tmpdir(), "audit-code-packed-install-"));
 

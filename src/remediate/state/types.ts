@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { ClosingAction } from "./closingActions.js";
 import { CLOSING_ACTIONS } from "./closingActions.js";
 import type { RemediationItemStatus } from "./itemStatus.js";
 
@@ -9,7 +8,6 @@ import type { RemediationItemStatus } from "./itemStatus.js";
 // (so it is in scope for the types below) and re-exported for existing callers.
 import type {
   Finding,
-  FindingTheme,
   RemediationOutcome,
   MechanicalVerification,
 } from "audit-tools/shared";

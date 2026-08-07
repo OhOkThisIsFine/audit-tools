@@ -137,7 +137,6 @@ function buildIndexes(bundle: ArtifactBundle): BundleIndexes {
  * Validates that all repo paths have corresponding entries in a target collection.
  */
 function validatePathsCoveredBySet(
-  bundle: ArtifactBundle,
   idx: BundleIndexes,
   issues: ValidationIssue[],
   artifactName: string,
@@ -155,7 +154,6 @@ function validatePathsCoveredBySet(
 
 function validateCoverageMatrixConsistency(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
   validatePathsCoveredBySet(
-    bundle,
     idx,
     issues,
     "coverage_matrix",
@@ -170,7 +168,6 @@ function validateFileDispositionConsistency(bundle: ArtifactBundle, idx: BundleI
   // treat a missing entry as included, so there is deliberately no aggregated
   // "covered by prefix" tolerance here.
   validatePathsCoveredBySet(
-    bundle,
     idx,
     issues,
     "file_disposition",
@@ -323,7 +320,8 @@ function validateExternalAnalyzerResults(bundle: ArtifactBundle, idx: BundleInde
   }
 }
 
-function validateTaskLineRanges(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
+// `_bundle` keeps the uniform (bundle, idx, issues) validator-sequence signature.
+function validateTaskLineRanges(_bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
   const taskGroups = [
     { artifactPath: "audit_tasks", tasks: idx.auditTasks },
     { artifactPath: "requeue_tasks", tasks: idx.requeueTasks },

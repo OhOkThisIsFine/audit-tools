@@ -1,7 +1,6 @@
 import { open, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileExists, newestMtimeMs } from './audit-code-wrapper-io.mjs';
 

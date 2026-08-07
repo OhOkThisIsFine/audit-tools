@@ -1,4 +1,4 @@
-import { test, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { buildCacheablePrompt } from "../../src/shared/prompts.js";
 
 describe("buildCacheablePrompt assembles shared prefix before per-agent payload", () => {

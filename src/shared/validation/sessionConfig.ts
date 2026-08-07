@@ -40,7 +40,6 @@ import {
   type AnalyzerSetting,
   type ProviderName,
   type RepoSessionIntent,
-  type SessionConfig,
   type SessionUiMode,
 } from "../types/sessionConfig.js";
 import {

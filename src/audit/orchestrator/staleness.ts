@@ -7,7 +7,7 @@ import {
 } from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
 import { isMetadataManifestCurrent } from "./resultBaseline.js";
-import { hashArtifactValue } from "./artifactFreshness.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 import {
   computeDependencySliceHash,
   hasDependencySliceProjection,

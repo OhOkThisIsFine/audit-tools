@@ -1,0 +1,6 @@
+{
+  "$comment": "Duplication ratchet for the DEV tree (`npm run check:dup`, in verify:checks). Fails when duplicated LINES exceed threshold% of scanned lines — a drift-stopper, not a zero-duplication mandate (barrel exports, fixture boilerplate and lookup tables are accepted duplication; see docs/reviews/analysis-tools-plan-2026-08-07.md). Baseline at adoption 2026-08-07: 4.9%. Threshold 5.5 = ~+2,000 duplicated lines of headroom before red. Investigate a breach with: npx jscpd --reporters consoleFull src scripts tests",
+  "threshold": 5.5,
+  "reporters": ["silent"],
+  "gitignore": true
+}

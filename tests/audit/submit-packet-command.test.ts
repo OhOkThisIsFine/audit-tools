@@ -194,7 +194,7 @@ function makeArgv(artifactsDir: string, packetId: string, payload: unknown): str
 
 // ── 1. Packet-id normalization ─────────────────────────────────────────────────
 
-await test("packet-id normalization resolves case/whitespace variants", async (t) => {
+await test("packet-id normalization resolves case/whitespace variants", async () => {
   const task = makeTask("task-norm-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -216,7 +216,7 @@ await test("packet-id normalization resolves case/whitespace variants", async (t
 
 // ── 2. Unknown packet-id ───────────────────────────────────────────────────────
 
-await test("unknown packet-id throws with valid id list", async (t) => {
+await test("unknown packet-id throws with valid id list", async () => {
   const task = makeTask("task-unk-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -230,7 +230,7 @@ await test("unknown packet-id throws with valid id list", async (t) => {
 
 // ── 3. Duplicate task_id in payload ───────────────────────────────────────────
 
-await test("duplicate task_id in payload is rejected", async (t) => {
+await test("duplicate task_id in payload is rejected", async () => {
   const task = makeTask("task-dup-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -247,7 +247,7 @@ await test("duplicate task_id in payload is rejected", async (t) => {
 
 // ── 4. Unassigned task_id in payload ──────────────────────────────────────────
 
-await test("unassigned task_id in payload is rejected", async (t) => {
+await test("unassigned task_id in payload is rejected", async () => {
   const task = makeTask("task-assigned-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -265,7 +265,7 @@ await test("unassigned task_id in payload is rejected", async (t) => {
 
 // ── 5. Missing assigned task in payload ───────────────────────────────────────
 
-await test("missing assigned task in payload is rejected", async (t) => {
+await test("missing assigned task in payload is rejected", async () => {
   const task1 = makeTask("task-miss-1");
   const task2 = makeTask("task-miss-2");
   const { artifactsDir } = await makeArtifactsDir({
@@ -284,7 +284,7 @@ await test("missing assigned task in payload is rejected", async (t) => {
 
 // ── 6. Cross-packet duplicate-finding: submit-packet does NOT warn (handled at merge-and-ingest) ─
 
-await test("cross-packet duplicate finding does NOT emit a warning at submit time (dedup is at merge-and-ingest)", async (t) => {
+await test("cross-packet duplicate finding does NOT emit a warning at submit time (dedup is at merge-and-ingest)", async () => {
   const task1 = makeTaskCovering("task-dup-find-1", "src/shared.ts");
 
   // Pre-existing result in another packet with the same finding key
@@ -339,7 +339,7 @@ await test("cross-packet duplicate finding does NOT emit a warning at submit tim
 
 // ── 7. Happy path — persistence gate ──────────────────────────────────────────
 
-await test("happy path writes per-task result files and outputs accepted count", async (t) => {
+await test("happy path writes per-task result files and outputs accepted count", async () => {
   const task1 = makeTask("task-happy-1");
   const task2 = makeTask("task-happy-2", "unit-2");
   const { artifactsDir, runDir } = await makeArtifactsDir({
@@ -371,7 +371,7 @@ await test("happy path writes per-task result files and outputs accepted count",
 
 // -- 8. Happy path stamps run metadata ----------------------------------------
 
-await test("happy path stamps run_id and one submitted_at value on each result", async (t) => {
+await test("happy path stamps run_id and one submitted_at value on each result", async () => {
   const task1 = makeTask("task-stamp-1");
   const task2 = makeTask("task-stamp-2", "unit-2");
   const { artifactsDir, runDir } = await makeArtifactsDir({
@@ -417,7 +417,7 @@ await test("happy path stamps run_id and one submitted_at value on each result",
 // in memory for an accurate full-run dedup pass. These tests verify submit-packet
 // accepts without any cross-packet duplicate warning regardless of other packets.
 
-await test("findingKey dedup: same finding in two packets is accepted without warning at submit time", async (t) => {
+await test("findingKey dedup: same finding in two packets is accepted without warning at submit time", async () => {
   const task1 = makeTaskCovering("task-fkdup-1", "src/auth.ts");
   const sharedFinding: Finding = {
     id: "FK-001",
@@ -455,7 +455,7 @@ await test("findingKey dedup: same finding in two packets is accepted without wa
   expect(parsed.duplicate_warning_count, `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`).toBe(undefined);
 });
 
-await test("findingKey dedup: finding differing in any key field is NOT a duplicate (submit-packet never warns either way)", async (t) => {
+await test("findingKey dedup: finding differing in any key field is NOT a duplicate (submit-packet never warns either way)", async () => {
   const task1 = makeTaskCovering("task-fkdiff-1", "src/other.ts");
   const baseFinding: Finding = {
     id: "FK-DIFF-001",
@@ -500,7 +500,7 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
 // operates on the in-memory passing[] list — no file scanning needed. This test
 // verifies submit-packet still accepts without cross-packet dedup interference.
 
-await test("submit-packet accepts without warning even when prior result is array-format (dedup is at merge-and-ingest)", async (t) => {
+await test("submit-packet accepts without warning even when prior result is array-format (dedup is at merge-and-ingest)", async () => {
   const task1 = makeTaskCovering("task-arrdup-1", "src/shared.ts");
   const dupFinding: Finding = {
     id: "ARR-DUP-001",
@@ -541,7 +541,7 @@ await test("submit-packet accepts without warning even when prior result is arra
 
 // ── 11. Missing --run-id flag ─────────────────────────────────────────────────
 
-await test("throws when --run-id is missing", async (t) => {
+await test("throws when --run-id is missing", async () => {
   const task = makeTask("task-no-runid");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -567,7 +567,7 @@ await test("throws when --run-id is missing", async (t) => {
 
 // ── 12. Missing --packet-id flag ─────────────────────────────────────────────
 
-await test("throws when --packet-id is missing", async (t) => {
+await test("throws when --packet-id is missing", async () => {
   const task = makeTask("task-no-packetid");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -600,7 +600,7 @@ await test("throws when --packet-id is missing", async (t) => {
 // submit-packet path, not hand-injected. An out-of-boundary file must still be
 // hard-rejected.
 
-await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is accepted", async (t) => {
+await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is accepted", async () => {
   const taskA = makeTaskCovering("task-bound-a", "src/task-bound-a.ts", "correctness");
   const taskB = makeTaskCovering("task-bound-b", "src/task-bound-b.ts", "correctness", "unit-2");
   const { artifactsDir, runDir } = await makeArtifactsDir({
@@ -633,7 +633,7 @@ await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is acce
   expect(written.task_id).toBe(taskA.task_id);
 });
 
-await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected", async (t) => {
+await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected", async () => {
   const taskA = makeTaskCovering("task-oob-a", "src/task-oob-a.ts", "correctness");
   const taskB = makeTaskCovering("task-oob-b", "src/task-oob-b.ts", "correctness", "unit-2");
   const { artifactsDir } = await makeArtifactsDir({
@@ -668,7 +668,7 @@ function makeLensVerificationTask(taskId: string, path: string, unitId: string =
   };
 }
 
-await test("F-6: followup_tasks targeting an in-boundary file is accepted", async (t) => {
+await test("F-6: followup_tasks targeting an in-boundary file is accepted", async () => {
   // Verification task A is tagged lens_verification; its followup may target a
   // file assigned to sibling task B (in-boundary) without a hard reject.
   const taskA = makeLensVerificationTask("task-fu-a", "src/fu-a.ts");
@@ -707,7 +707,7 @@ await test("F-6: followup_tasks targeting an in-boundary file is accepted", asyn
   expect(parsed.accepted_count).toBe(2);
 });
 
-await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-rejected", async (t) => {
+await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-rejected", async () => {
   const taskA = makeLensVerificationTask("task-fuoob-a", "src/fuoob-a.ts");
   const taskB = makeTaskCovering("task-fuoob-b", "src/fuoob-b.ts", "correctness", "unit-2");
   const { artifactsDir } = await makeArtifactsDir({

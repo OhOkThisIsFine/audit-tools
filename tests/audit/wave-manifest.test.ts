@@ -76,7 +76,7 @@ await test("buildWaveSlotEntry with an empty group yields an empty task_ids arra
 
 // ── readWaveManifest ──────────────────────────────────────────────────────────
 
-await test("readWaveManifest returns null when the manifest file does not exist", async (t) => {
+await test("readWaveManifest returns null when the manifest file does not exist", async () => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-read-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
@@ -84,7 +84,7 @@ await test("readWaveManifest returns null when the manifest file does not exist"
   expect(result).toBe(null);
 });
 
-await test("readWaveManifest rethrows errors that are not a missing-file error", async (t) => {
+await test("readWaveManifest rethrows errors that are not a missing-file error", async () => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-bad-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
@@ -113,7 +113,7 @@ await test("readWaveManifest rethrows errors that are not a missing-file error",
 
 // ── writeWaveManifest + round-trip ────────────────────────────────────────────
 
-await test("writeWaveManifest stamps contract_version and persists all manifest fields", async (t) => {
+await test("writeWaveManifest stamps contract_version and persists all manifest fields", async () => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-write-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
@@ -162,7 +162,7 @@ await test("writeWaveManifest stamps contract_version and persists all manifest 
 
 // ── removeWaveManifest ────────────────────────────────────────────────────────
 
-await test("removeWaveManifest does not throw when the manifest file is absent", async (t) => {
+await test("removeWaveManifest does not throw when the manifest file is absent", async () => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-remove-absent-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
@@ -170,7 +170,7 @@ await test("removeWaveManifest does not throw when the manifest file is absent",
   await assert.doesNotReject(() => removeWaveManifest(dir));
 });
 
-await test("removeWaveManifest removes an existing manifest file", async (t) => {
+await test("removeWaveManifest removes an existing manifest file", async () => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-remove-exists-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
 

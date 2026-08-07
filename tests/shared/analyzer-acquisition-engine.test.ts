@@ -31,7 +31,7 @@ const { mergeAnalyzerRiskSignals } = await import(
 // A fake runner: capability probe (`--version`) succeeds; the real tool spawn
 // returns a canned JSON payload one finding + one edge.
 function fakeRunner({ probeOk = true, toolStdout = "[]", throwOnTool = false } = {}) {
-  return (argv: string[], cwd?: string) => {
+  return (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) {
       return probeOk
         ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
@@ -159,7 +159,7 @@ test("runExternalAnalyzer: default tool runs without a token", () => {
 });
 
 test("runExternalAnalyzer: duration_ms is carried from RunTrackedResult to status", () => {
-  const customRun = (argv: string[], cwd?: string) => {
+  const customRun = (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) {
       return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 42 };
     }
@@ -194,7 +194,7 @@ test("runExternalAnalyzer: a thrown spawn degrades to spawn_error, never throws"
 });
 
 test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) degrades to spawn_error, never throws", () => {
-  const run = (argv: string[], cwd?: string) => {
+  const run = (argv: string[], _cwd?: string) => {
     if (argv.includes("--version")) return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
     // Tool spawned, exits non-zero with an error attached (process-level failure).
     return { status: 2, stdout: "", stderr: "boom", argv, duration_ms: 1, error: new Error("exited 2") };

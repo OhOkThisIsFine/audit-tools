@@ -118,7 +118,9 @@ function detectProviderUnavailable(
  * Returns the corresponding RollingDispatchResult fragment or null if no match.
  */
 function classifyFailureChannels<TPacket>(
-  packet: RollingDispatchPacket<TPacket>,
+  // Unused at runtime — kept solely to bind TPacket for the return type at call
+  // sites without explicit type arguments.
+  _packet: RollingDispatchPacket<TPacket>,
   stderrText: string,
   stdoutText: string,
 ): Omit<RollingDispatchResult<TPacket>, "packet"> | null {

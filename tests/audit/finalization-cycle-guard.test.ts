@@ -32,7 +32,6 @@ const {
   loadArtifactBundle,
   writeCoreArtifacts,
 } = await import("../../src/audit/io/artifacts.js");
-const { writeJsonFile } = await import("audit-tools/shared");
 const { computeArtifactStateSignature } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -86,7 +85,7 @@ async function writeMinimalArtifacts(artDir: string, extraBundle: ArtifactBundle
 
 // Build a fake AdvanceAuditResult that checkFinalizationCycle accepts.
 // The bundle's artifact_metadata controls the state signature.
-async function makeFakeResult(artDir: string, bundle: ArtifactBundle): Promise<AdvanceAuditResult> {
+async function makeFakeResult(_artDir: string, bundle: ArtifactBundle): Promise<AdvanceAuditResult> {
   const audit_state = deriveAuditState(bundle);
   return {
     updated_bundle: bundle,

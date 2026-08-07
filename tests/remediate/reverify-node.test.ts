@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   acceptNodeWorktree,

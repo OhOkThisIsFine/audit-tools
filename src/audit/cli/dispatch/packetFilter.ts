@@ -15,7 +15,7 @@ import {
   filterTaskAffinityGraph,
 } from "../../orchestrator/taskAffinityGraph.js";
 import { LARGE_FILE_PACKET_TARGET_LINES } from "./types.js";
-import { resolveDispatchTier, TIER_ORDER } from "./tierRouting.js";
+import { resolveDispatchTier } from "./tierRouting.js";
 import { derivePendingTaskPartition } from "../../orchestrator/pendingTasks.js";
 import { buildLineIndexFromTasks } from "../cliHelpers.js";
 

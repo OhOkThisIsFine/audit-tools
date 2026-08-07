@@ -2,8 +2,6 @@ import { mineGitHistory } from "audit-tools/shared";
 import type {
   GitHistory,
   GraphEdge,
-  RiskRegister,
-  RiskItem,
 } from "audit-tools/shared";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { FileDisposition } from "audit-tools/shared";

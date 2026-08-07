@@ -3,7 +3,6 @@ import type {
   CoverageFileRecord,
   CoverageMatrix,
   FileCoverageRecord,
-  Lens,
 } from "./types.js";
 
 function buildFileIndex(matrix: CoverageMatrix): Map<string, CoverageFileRecord> {

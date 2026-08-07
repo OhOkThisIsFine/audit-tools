@@ -250,7 +250,7 @@ function flagName(token: string): string {
  * flag must be on the policy's allow set (default-deny); positionals are allowed
  * unless the policy forbids them. Returns true only when EVERY token is allowed.
  */
-function isAllowedNonGitCommand(base: string, args: string[], policy: ArgPolicy): boolean {
+function isAllowedNonGitCommand(args: string[], policy: ArgPolicy): boolean {
   const windowsSlash = policy.windowsSlashFlags === true;
   for (const arg of args) {
     if (typeof arg !== "string") return false;
@@ -303,7 +303,7 @@ export function isAllowedAnchorCommand(command: string[]): boolean {
   if (base === "git") return isAllowedGitCommand(args);
   const policy = ARG_POLICIES.get(base);
   if (!policy) return false;
-  return isAllowedNonGitCommand(base, args, policy);
+  return isAllowedNonGitCommand(args, policy);
 }
 
 /** Outcome of actually running an allowlisted command (injectable for tests). */

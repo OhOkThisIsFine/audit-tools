@@ -1,7 +1,7 @@
 import { test, expect, describe } from "vitest";
 import type { DispatchModelTier } from "audit-tools/shared";
 
-const { resolveDispatchTier, DEFAULT_DEEP_ROUTING_RISK, DEFAULT_STANDARD_ROUTING_RISK } =
+const { resolveDispatchTier } =
   await import("../../src/audit/cli/dispatch.js");
 
 const { computeDynamicRoutingTiers } =

@@ -25,15 +25,12 @@ import { join } from "node:path";
 import {
   writeJsonFile,
   readOptionalJsonFile,
-  readValidatedRepoSessionIntent,
-  resolveSessionConfig,
   formatValidationIssues,
   hashContent,
   isRecord,
   withFsRetry,
   type ValidationIssue,
   type JudgeReport,
-  type JudgeRepairDirective,
   type ImplementationDAG,
   type ObligationLedger,
   type SessionConfig,
@@ -62,7 +59,6 @@ import {
   readContractArtifact,
   stampToolCreatedAt,
   writeContractArtifact,
-  type ContractPipelineArtifactEnvelope,
 } from "../contractPipeline/artifactStore.js";
 import {
   readIntakeRiskSignal,
@@ -1585,7 +1581,6 @@ export async function buildNextContractPipelineStep(
   options: ContractPipelineStepOptions,
 ): Promise<RemediationStep | null> {
   const { root, artifactsDir, runId, sourcePaths } = options;
-  const cpDir = contractPipelineDir(artifactsDir);
   const paths = intakePaths(artifactsDir);
 
   // Adversarial-depth dial (T1 slices 3/4): derive the depth for the critique /

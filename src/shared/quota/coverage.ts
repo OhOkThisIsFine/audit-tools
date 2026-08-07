@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { QuotaProbeStatus, QuotaSource } from "./quotaSource.js";
+import type { QuotaSource } from "./quotaSource.js";
 
 /**
  * Whether audit-tools has PROACTIVE quota tracking wired for a host provider —

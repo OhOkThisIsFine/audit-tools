@@ -30,11 +30,8 @@ import type {
   CapacityPool,
   SessionConfig,
   RollingDispatchPacket,
-  RollingDispatchResult,
-  ProviderSlot,
   FreshSessionProvider,
   LaunchFreshSessionInput,
-  DispatchModelHint,
 } from "audit-tools/shared";
 
 const {
@@ -142,7 +139,7 @@ async function makeRun(taskListOverride?: AuditTask[]) {
   return { artifactsDir, runDir, taskList };
 }
 
-function activeReviewRun(artifactsDir: string, runDir: string): ActiveReviewRun {
+function activeReviewRun(_artifactsDir: string, runDir: string): ActiveReviewRun {
   return {
     run_id: RUN_ID,
     task_path: join(runDir, "task.json"),
@@ -216,7 +213,7 @@ function packetPayload(fields: {
 
 // ── 1. makeAuditProviderPacketDispatcher ──────────────────────────────────────
 
-test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo root and returns success when the worker wrote a result", async (t) => {
+test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo root and returns success when the worker wrote a result", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -261,7 +258,7 @@ test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo
   expect(captured[0].uiMode).toBe("headless");
 });
 
-test("A8a: makeAuditProviderPacketDispatcher relays the provider's observedCostUsd onto the dispatch result", async (t) => {
+test("A8a: makeAuditProviderPacketDispatcher relays the provider's observedCostUsd onto the dispatch result", async () => {
   // Reactive cost verification seam: the provider surfaces the endpoint-reported
   // cost on LaunchFreshSessionResult; the dispatcher closure must carry it onto the
   // RollingDispatchResult so handleResult can demote a declared-free pool that
@@ -300,7 +297,7 @@ test("A8a: makeAuditProviderPacketDispatcher relays the provider's observedCostU
   expect(outcome.observedCostUsd, "the endpoint-reported cost is relayed to the engine").toBe(0.02);
 });
 
-test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rejects the launch", async (t) => {
+test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rejects the launch", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await mkdir(join(runDir, "task-results"), { recursive: true });
@@ -334,7 +331,7 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rej
   expect(String(outcome.error)).toMatch(/no api key/);
 });
 
-test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote no result file", async (t) => {
+test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote no result file", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await mkdir(join(runDir, "task-results"), { recursive: true });
@@ -370,7 +367,7 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote
 
 // ── 2. driveRollingAuditDispatch happy path ───────────────────────────────────
 
-test("A8a: driveRollingAuditDispatch drives every packet, writes results, and folds them in via the terminal ingestor", async (t) => {
+test("A8a: driveRollingAuditDispatch drives every packet, writes results, and folds them in via the terminal ingestor", async () => {
   const { artifactsDir, runDir, taskList } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -411,7 +408,7 @@ test("A8a: driveRollingAuditDispatch drives every packet, writes results, and fo
 
 // ── 3. driveRollingAuditDispatch strand path ──────────────────────────────────
 
-test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) when packets strand (DC-4)", async (t) => {
+test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) when packets strand (DC-4)", async () => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -455,7 +452,7 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
 
 // ── 3b. CP-NODE-6: clear-paused-state directive, ratchet, settled accumulation ─
 
-test("CP-NODE-6: a run that pauses then regains capacity clears paused_state on the very next full-success pass", async (t) => {
+test("CP-NODE-6: a run that pauses then regains capacity clears paused_state on the very next full-success pass", async () => {
   // Directive application (invariants[3]/CDC-006): advanceRollingPause is only
   // invoked when THIS pass strands (run.status === "partial" && stranded_ids
   // .length > 0). Without an explicit else-branch clear, a pass that dispatches
@@ -509,7 +506,7 @@ test("CP-NODE-6: a run that pauses then regains capacity clears paused_state on 
   ).toBeUndefined();
 });
 
-test("CP-NODE-6: partial_completion_terminal survives a same-run_id prepareDispatchArtifacts re-preparation", async (t) => {
+test("CP-NODE-6: partial_completion_terminal survives a same-run_id prepareDispatchArtifacts re-preparation", async () => {
   // Ownership extension (seam_adjustments[3]): prepareDispatchArtifacts (dispatch.ts)
   // rewrites active-dispatch.json wholesale on EVERY pass (paused-or-not). Before the
   // fix, its ActiveDispatchState object literal carried forward only paused_state and
@@ -576,7 +573,7 @@ test("CP-NODE-6: partial_completion_terminal survives a same-run_id prepareDispa
   ).toEqual({ reason: "livelock_guard", stranded_ids: ["t-a"] });
 });
 
-test("CP-NODE-6 (CE-001): a pool exhausted on pass 1 stays settled through pass 2 (accumulation, never shrinks)", async (t) => {
+test("CP-NODE-6 (CE-001): a pool exhausted on pass 1 stays settled through pass 2 (accumulation, never shrinks)", async () => {
   // invariants[8]/CE-001: advanceRollingPause's settled set is `prior settled ∪
   // this pass's exhausted ids`. If the union dropped the PRIOR settled set (only
   // this pass's own exhausted ids), a pool settled two passes ago would silently
@@ -857,7 +854,7 @@ test("claims: a full strand releases this run's task claims so the next invocati
 
 // ── 4. Regressions found by the live NIM e2e ──────────────────────────────────
 
-test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-safe sidecar names)", async (t) => {
+test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-safe sidecar names)", async () => {
   // Real audit packet ids embed ':' (e.g. "flow:flow:surface:src-api-auth-ts:security").
   // The dispatcher used to build sidecar paths (`${packet.id}.task.json`) verbatim,
   // which is an invalid filename on Windows (NTFS reads ':' as an ADS separator) —
@@ -907,7 +904,7 @@ test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-saf
 
 // ── 5. Quota-escalation parity with remediate ─────────────────────────────────
 
-test("A8a: a same-packet account wall escalates through the retained host-session source and captures a quota_escalation friction (parity with remediate)", async (t) => {
+test("A8a: a same-packet account wall escalates through the retained host-session source and captures a quota_escalation friction (parity with remediate)", async () => {
   // Parity coverage for the audit-side quota escalation feed. The shared engine +
   // HostSessionQuotaSource escalation is unit-tested in tests/shared; this pins the
   // AUDIT glue: the retained host-session source built for the dispatch is fed by
@@ -972,7 +969,7 @@ test("A8a: a same-packet account wall escalates through the retained host-sessio
   expect(escalation.severity).toBe("high");
 });
 
-test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) when every accepted result is ingestion-invalid", async (t) => {
+test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) when every accepted result is ingestion-invalid", async () => {
   // A packet `outcome:"success"` only means the provider wrote a result file. When
   // every provider-accepted result is contract-invalid, mergeAndIngest raises a hard
   // "all assigned results invalid" block. In the rolling driver that throw must be
@@ -1007,7 +1004,7 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
 
 // ── 6. F4: capability floor enforced by the ENGINE on the audit draw ──────────
 
-test("F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to an incapable pool", async (t) => {
+test("F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to an incapable pool", async () => {
   // A single security-lens, LOW-priority task: the sensitive-lens escalator lifts
   // its model_hint to "standard" (a real floor) while the low priority maps the
   // engine packet to complexity 0 — so pre-F4 the engine's preference order

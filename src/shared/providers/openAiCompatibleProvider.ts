@@ -1,5 +1,5 @@
 import { readFile, mkdir, writeFile, appendFile, stat, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import type {
   FreshSessionProvider,
   LaunchFreshSessionInput,

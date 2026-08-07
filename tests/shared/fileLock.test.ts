@@ -389,7 +389,7 @@ test("releaseLock with wrong token does not unlink the lock", async () => {
 test("stale-lock steal does not cascade when original holder releases", async () => {
   await withTempDir(async (dir: string) => {
     const lockPath = tmpLockPath(dir);
-    const { utimes: utimesFs, writeFile: writeFileFn, readFile: readFileFn } =
+    const { utimes: utimesFs, readFile: readFileFn } =
       await import("node:fs/promises");
 
     // Holder A acquires the lock and captures token A.

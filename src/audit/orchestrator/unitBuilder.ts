@@ -8,7 +8,7 @@ import {
 import { bucketFile, type FileBucket } from "../extractors/bucketing.js";
 import { buildDispositionMap, isAuditExcludedStatus } from "../extractors/disposition.js";
 import { pathTokens, normalizeExtractorPath } from "../extractors/pathPatterns.js";
-import { LENS_ORDER, sortLenses } from "./auditTaskUtils.js";
+import { sortLenses } from "./auditTaskUtils.js";
 
 const LENS_MAP: Record<FileBucket, Lens[]> = {
   runtime: ["correctness", "maintainability", "tests", "observability"],

@@ -26,7 +26,7 @@ import {
   ArtifactSchemaVersionError,
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
-import { TOOLING_INPUTS, buildToolingManifest } from "../../src/audit/io/toolingManifest.js";
+import { buildToolingManifest } from "../../src/audit/io/toolingManifest.js";
 import {
   buildRunId,
   clearDispatchFiles,
@@ -240,6 +240,8 @@ test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e
     expect(warnings.length, "warn must be called exactly once").toBe(1);
     expect(warnings[0], "warn message must mention audit-findings.json").toMatch(/audit-findings\.json/);
     expect(warnings[0], "warn message must include the error text").toMatch(/ENOENT/);
+    // Both copies were attempted (report first, then the failing findings copy).
+    expect(copyCallCount, "both copies must be attempted").toBe(2);
   });
 });
 

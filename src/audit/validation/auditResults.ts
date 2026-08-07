@@ -1,4 +1,4 @@
-import type { AuditResult, AuditTask, Finding } from "../types.js";
+import type { AuditTask, Finding } from "../types.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import {
   captureStepBoundaryFriction,

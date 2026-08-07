@@ -88,7 +88,6 @@ import {
   type EngineDecisionSink,
   type ResolvedProviderName,
   type ProviderName,
-  type DispatchableSource,
   type QuotaBindingWindow,
   type DispatchModelTier,
 } from "audit-tools/shared";
@@ -136,7 +135,6 @@ import {
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
-  isSkipStatus,
 } from "../state/itemStatus.js";
 import {
   deduplicateCrossLensFindings,
@@ -1500,9 +1498,9 @@ export async function driveRollingImplementDispatch(
       // blocking peer drivers.
       try {
         await releaseNodeClaim(registry, claimTokens, block.block_id);
-      } catch (releaseErr) {
-        // Log release failure but don't escalate — node outcome already records the
-        // execution error as the primary failure mode.
+      } catch {
+        // Swallow release failure — node outcome already records the execution
+        // error as the primary failure mode.
       }
       nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false, pool_id: slot.poolId });
       return {

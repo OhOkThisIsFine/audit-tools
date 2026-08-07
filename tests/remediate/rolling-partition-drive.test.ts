@@ -158,7 +158,7 @@ describe("driveRollingDispatch — exhausted-pool pass-through (H2 commit 2)", (
       estimateTokens: () => 2000,
       confirmedPools: [backendPool("nim/exhausts")],
       sessionConfig: { quota: { safety_margin: 1.0 } } as SessionConfig,
-      dispatchNode: async (b, slot: ProviderSlot) => ({
+      dispatchNode: async (b, _slot: ProviderSlot) => ({
         packet: {
           id: b.block_id,
           payload: { block_id: b.block_id },

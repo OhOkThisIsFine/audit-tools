@@ -366,11 +366,7 @@ export function louvain(graph: WeightedGraph, resolution: number): Partition {
   const base = buildAdjacency(graph);
   if (base.nodes.length === 0) return new Map();
 
-  // Track the mapping from ORIGINAL nodes down through each aggregation level.
   let current = base;
-  // originalToCurrent: original node id → its node id in the current level.
-  let originalToCurrent = new Map<string, string>();
-  for (const node of base.nodes) originalToCurrent.set(node, node);
 
   const levels: Level[] = [];
   let guard = 0;

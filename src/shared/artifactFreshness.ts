@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
 
-// Single-sourced in src/shared/stableStringify.ts (INV-CK-2). Re-exported here so
-// existing callers (and the single-serializer property) are preserved — there is
-// exactly one serializer.
-import { stableStringify } from "../../shared/stableStringify.js";
-export { stableStringify };
+// Single-sourced in src/shared/stableStringify.ts (INV-CK-2) — there is exactly
+// one serializer.
+import { stableStringify } from "./stableStringify.js";
 
 // Non-semantic top-level fields stripped before hashing, per artifact. These
 // are provenance (wall-clock stamps, run ids), NOT content: two rebuilds with

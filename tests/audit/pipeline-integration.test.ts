@@ -34,7 +34,6 @@ import {
   runSynthesisNarrativeExecutor,
 } from "../../src/audit/orchestrator/synthesisExecutors.js";
 import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
-import { runDesignReviewAutoComplete } from "../../src/audit/orchestrator/structureExecutors.js";
 import {
   renderContractReviewPrompt,
   renderConceptualReviewPrompt,

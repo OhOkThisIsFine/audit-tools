@@ -40,8 +40,7 @@ afterEach(async () => {
 
 describe("N-R13: RemediationState.status union", () => {
   it("does not include 'documenting' as a valid status", async () => {
-    const { StateStore } = await import("../../src/remediate/state/store.js");
-    const store = new StateStore(ARTIFACTS_DIR);
+    const { StateStore: _StateStore } = await import("../../src/remediate/state/store.js");
 
     // Saving a state with status "documenting" should fail TypeScript compilation
     // (this is a runtime guard: the union no longer includes "documenting").

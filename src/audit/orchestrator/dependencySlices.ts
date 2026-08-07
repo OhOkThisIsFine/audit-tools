@@ -28,7 +28,7 @@
  */
 import { createHash } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { stableStringify } from "./artifactFreshness.js";
+import { stableStringify } from "../../shared/stableStringify.js";
 import {
   charterPacketReadSet,
   memberDependencyEdgeLines,

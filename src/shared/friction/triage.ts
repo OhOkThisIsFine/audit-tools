@@ -18,7 +18,6 @@ import {
   type TriagedFrictionArtifact,
   FRICTION_CATEGORIES,
   appendFrictionUnderLock,
-  frictionLockPath,
   isFrictionCategory,
 } from './frictionRecord.js';
 

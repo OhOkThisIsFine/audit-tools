@@ -6,6 +6,27 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Analyzer-sweep dedup cluster (2026-08-07, medium).** The 2026-08-07 external-analyzer sweep
+  verified ten real duplication/cycle findings that need their own bounded extractions — evidence
+  and per-item detail in
+  [`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4:
+  scoreAudit/scoreTokens drifted mirror; claimRegistry/reservationLedger store scaffolding;
+  `compareGraphEdges` private copies; rollingAuditDispatch/providerNodeDispatch shared prep head
+  (one-core-two-draws); reviewPacket helper twins + acceptNode intra-file outcome twins (loop-core,
+  attested commit); nextStepCommand conceptual-dispatch near-twins; cargo/packageJson workspace
+  patterns; scripts bullet-list parser twins; test step-driver unification; the three type-only
+  import cycles. **Property:** each duplicated load-bearing mechanism ends single-sourced (extract,
+  don't drift-test); the jscpd ratchet (`check:dup`, 5.5%) only stops NEW drift, it does not close
+  these.
+
+- **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
+  the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in
+  `graphPythonImports`, `graphRoutes`, `changeClassification`, `autonomousGate`,
+  `worktreeLifecycle`, `stepBoundaryCapture` need per-pattern backtracking analysis (atomic
+  groups / restructuring where real); the rest of the family was verified false-positive
+  ([`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4/§5).
+  **Property:** no regex over audited-repo content is super-linear on adversarial input.
+
 - **`ensureCleanWorktree` blocks a release on sibling UNTRACKED files (2026-08-07, low, friction).**
   Bare `git status --porcelain` counts `??` rows, so owner-run Codex tooling's analyzer droppings at
   repo root refused `release:patch:publish` from the primary checkout; the sanctioned lap-worktree
@@ -962,9 +983,10 @@
   writes the packet/results artifact paths plus the `access` read/write paths at `:841-846`.
   Property: no design-review pass is judged by the agent that drove the work under review, and no
   dispatched packet carries the orchestrator advance — on any of the three branches.
-  What is open is only the PIN: `tests/audit/next-step.test.ts` asserts the advance-free worker
-  packet and the host-side advance for `design_review_parallel` ONLY; the `design_review_contract` case
-  (`:183-189`) writes the findings file and asserts nothing, so a future rewrite of that branch off the
+  What is open is only the PIN: `tests/audit/helpers/next-step-harness.ts` (the shared walker the
+  `next-step-core-*.test.ts` split files drive) asserts the advance-free worker
+  packet and the host-side advance for `design_review_parallel` ONLY; its `design_review_contract` case
+  writes the findings file and asserts nothing, so a future rewrite of that branch off the
   shared helper would not be caught. Extend the parallel-branch assertion to the solo step.
 
 - **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code

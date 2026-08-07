@@ -3,7 +3,6 @@ import type { GraphEdge } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath, resolveCandidate, isPackageManifestPath } from "../graphPathUtils.js";
 import {
   WorkspacePattern,
-  addWorkspacePattern,
   collectWorkspacePatternValues,
   normalizeWorkspacePattern,
   workspacePatternMatchesPackage,

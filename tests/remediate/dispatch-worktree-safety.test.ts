@@ -27,7 +27,6 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createWorktree,
-  removeWorktree,
   resetNodeWorktreeAndBranch,
   worktreePath,
   worktreeBranchForBlock,
@@ -213,7 +212,7 @@ describe("INV-WTS-9 — orphan worktree dirs never operate on MAIN", () => {
   it("(4) rebaseBranchOntoHead REFUSES an orphan dir instead of rebasing MAIN's branch", () => {
     const repo = initRepo("wts-orphan-rebase-");
     const wt = makeOrphan(repo, "OR");
-    const res = rebaseBranchOntoHead(repo, wt, worktreeBranchForBlock("OR", "R"));
+    const res = rebaseBranchOntoHead(repo, wt);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/top-level|orphan|escape/i);
   });

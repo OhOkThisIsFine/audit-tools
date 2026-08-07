@@ -133,7 +133,7 @@ test("resolveConceptualReviewSettings: session config is the fallback when check
 
 // ── prepareConceptualDispatch ─────────────────────────────────────────────────
 
-test("prepareConceptualDispatch (shallow): writes one conceptual prompt, no fan-out", async (t) => {
+test("prepareConceptualDispatch (shallow): writes one conceptual prompt, no fan-out", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
@@ -148,7 +148,7 @@ test("prepareConceptualDispatch (shallow): writes one conceptual prompt, no fan-
   await access(dispatch.readPaths[0]); // prompt file exists
 });
 
-test("prepareConceptualDispatch (deep): writes N perspective prompts + an independent judge", async (t) => {
+test("prepareConceptualDispatch (deep): writes N perspective prompts + an independent judge", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
@@ -181,7 +181,7 @@ test("prepareConceptualDispatch (deep): writes N perspective prompts + an indepe
   }
 });
 
-test("prepareConceptualDispatch (deep): perspective count is clamped to the built-in maximum", async (t) => {
+test("prepareConceptualDispatch (deep): perspective count is clamped to the built-in maximum", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
@@ -195,7 +195,7 @@ test("prepareConceptualDispatch (deep): perspective count is clamped to the buil
 
 // ── F4: conceptual fan-out carries model tiers ────────────────────────────────
 
-test("deep fan-out carries standard tier on perspectives and deep on the judge", async (t) => {
+test("deep fan-out carries standard tier on perspectives and deep on the judge", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
@@ -214,7 +214,7 @@ test("deep fan-out carries standard tier on perspectives and deep on the judge",
   expect(instr).toMatch(/map each `model_hint\.tier`/);
 });
 
-test("tier tags render unconditionally with the capability-neutral otherwise-ignore line", async (t) => {
+test("tier tags render unconditionally with the capability-neutral otherwise-ignore line", async () => {
   // Design resolution 2: identical artifacts on every host — the instruction
   // itself tells a host without model selection to ignore the inert tags.
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
@@ -230,7 +230,7 @@ test("tier tags render unconditionally with the capability-neutral otherwise-ign
   expect(instr).toMatch(/otherwise the tier tags are inert/);
 });
 
-test("perspective tier is overridable via settings; shallow path carries no hints", async (t) => {
+test("perspective tier is overridable via settings; shallow path carries no hints", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const deep = await prepareConceptualDispatch({

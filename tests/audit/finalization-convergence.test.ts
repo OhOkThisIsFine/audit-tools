@@ -10,7 +10,7 @@ const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js")
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
 const { loadArtifactBundle, writeCoreArtifacts, ARTIFACT_FILE_TO_BUNDLE_KEY } =
   await import("../../src/audit/io/artifacts.js");
-const { hashArtifactValue } = await import("../../src/audit/orchestrator/artifactFreshness.js");
+const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],

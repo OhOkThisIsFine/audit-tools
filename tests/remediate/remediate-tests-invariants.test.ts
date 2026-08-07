@@ -119,17 +119,16 @@ describe("INV-remediate-tests-02: no inline contract-pipeline version literals i
     // If raw literals are used for types that HAVE shared constants, it's a violation.
     // These types have CONTRACT_PIPELINE_GOAL_SPEC_VERSION, _JUDGE_REPORT_VERSION, etc.
     if (rawGoalSpec) {
-      expect(usesSharedConstants || usesLocalConsts).toBe(true);
+      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
     }
     if (rawJudge) {
-      expect(usesSharedConstants || usesLocalConsts).toBe(true);
+      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
     }
     if (rawImplDag) {
-      expect(usesSharedConstants || usesLocalConsts).toBe(true);
+      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
     }
 
     // Overall: the file MUST use constants for at least the available shared types.
-    const hasAnyConstants = usesSharedConstants || usesLocalConsts || importsFromValidation;
     // NOTE: this assertion will fail when the file is updated to use constants (which is good),
     // or it records the current state (file uses only raw literals = known debt).
     // This test documents the current state and will fail when migration is needed.

@@ -58,7 +58,7 @@ import {
 } from "../../src/shared/quota/httpQuotaSource.js";
 import { computeDispatchCapacity, type CapacityPool } from "../../src/shared/quota/capacity.js";
 import { CompositeQuotaSource } from "../../src/shared/quota/compositeQuotaSource.js";
-import type { QuotaSource, QuotaUsageSnapshot } from "../../src/shared/quota/quotaSource.js";
+import type { QuotaSource } from "../../src/shared/quota/quotaSource.js";
 import type { QuotaStateEntry } from "../../src/shared/quota/types.js";
 
 const NOW = Date.parse("2026-06-20T12:00:00.000Z");
@@ -184,7 +184,7 @@ const PROVIDERS: ProviderRow[] = [
 ];
 
 // ── inv-2 + the four real-endpoint mappings: validate each against its live shape ─
-test("inv-2: every provider maps its LIVE payload to a 0–1 remaining_pct", async (t) => {
+test("inv-2: every provider maps its LIVE payload to a 0–1 remaining_pct", async () => {
   onTestFinished(cleanup);
   for (const p of PROVIDERS) {
     const fetchImpl = recordingFetch(ok(p.live));
@@ -207,7 +207,7 @@ test("inv-2: remainingFromUsedPercent is exact for integer percents", () => {
 });
 
 // ── inv-4: own-provider-only — a non-matching key does NO I/O ─────────────────
-test("inv-4: each source ignores a non-matching provider key with no network call", async (t) => {
+test("inv-4: each source ignores a non-matching provider key with no network call", async () => {
   onTestFinished(cleanup);
   for (const p of PROVIDERS) {
     const fetchImpl = recordingFetch(ok(p.live));
@@ -222,7 +222,7 @@ test("inv-4: each source ignores a non-matching provider key with no network cal
 });
 
 // ── inv-1 + inv-9: tri-state probe via the cascade ────────────────────────────
-test("inv-1: probeUsage reports ok / degraded / not_applicable", async (t) => {
+test("inv-1: probeUsage reports ok / degraded / not_applicable", async () => {
   onTestFinished(cleanup);
   // ok — a live snapshot.
   const okProbe = await codexSource(recordingFetch(ok(CODEX_LIVE))).probeUsage("codex/*");
@@ -240,7 +240,7 @@ test("inv-1: probeUsage reports ok / degraded / not_applicable", async (t) => {
   expect(naProbe.snapshot).toBe(null);
 });
 
-test("inv-9: a degraded proactive source composes to a `degraded` cascade (degrade-to-null)", async (t) => {
+test("inv-9: a degraded proactive source composes to a `degraded` cascade (degrade-to-null)", async () => {
   onTestFinished(cleanup);
   // Codex source degrades (401); composite reports degraded since no later source matched.
   const composite = new CompositeQuotaSource([codexSource(recordingFetch(status(401)))]);
@@ -250,7 +250,7 @@ test("inv-9: a degraded proactive source composes to a `degraded` cascade (degra
 });
 
 // ── inv-3 + fail-1..4: read-only tokens — expiry / missing / 401 / throw → null ─
-test("inv-3 / fail-1..4: tokens are read-only — expiry, missing creds, 401, network throw all degrade to null", async (t) => {
+test("inv-3 / fail-1..4: tokens are read-only — expiry, missing creds, 401, network throw all degrade to null", async () => {
   onTestFinished(cleanup);
   const fetchImpl = recordingFetch(ok(CLAUDE_LIVE));
 
@@ -394,7 +394,7 @@ test("inv-8: computeDispatchCapacity always returns >= 1 slot, even when the han
 });
 
 // fail-6: a source with no resolvable token does no I/O and degrades to null.
-test("fail-6: a provider with no resolvable token degrades to null (no fetch)", async (t) => {
+test("fail-6: a provider with no resolvable token degrades to null (no fetch)", async () => {
   onTestFinished(cleanup);
   const fetchImpl = recordingFetch(ok(COPILOT_LIVE));
   const noToken = new CopilotQuotaSource({ copilotConfigPath: NOPATH, ghHostsPath: NOPATH, env: {}, fetchImpl, now: () => NOW });

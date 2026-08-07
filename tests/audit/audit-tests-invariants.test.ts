@@ -7,7 +7,6 @@
  * test suite's own integrity rather than the production sources directly.
  */
 import { test, expect } from "vitest";
-import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

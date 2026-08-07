@@ -20,14 +20,12 @@ import { fileURLToPath } from "node:url";
 import {
   buildNextContractPipelineStep,
   ingestContractArtifacts,
-  promoteImplementationDagToExtractedPlan,
   validateImplementationDagTraceability,
 } from "../../src/remediate/steps/contractPipeline.js";
 import { CONTRACT_PIPELINE_PHASE_ORDER } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import {
   contractInputFilePath,
   contractPipelineDir,
-  writeContractArtifact,
   type ContractPipelineArtifactName,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { detectCyclicSeamObligations } from "../../src/remediate/contractPipeline/cyclicSeamResolution.js";
@@ -39,7 +37,6 @@ import {
   prepareImplementDispatch,
 } from "../../src/remediate/steps/dispatch.js";
 import {
-  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
 import {

@@ -1,4 +1,4 @@
-import { test, expect, describe, it } from "vitest";
+import { expect, describe, it } from "vitest";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
 const { isTrivialAuditPath, autoCompleteTrivialCoverage } =

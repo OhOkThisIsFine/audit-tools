@@ -154,7 +154,7 @@ test("mergeAndIngest ownership gate: a task with no persisted token ingests norm
 
     const [onlyTask] = planning.updated_bundle.audit_tasks ?? [];
     const [onlyResult] = buildSyntheticResults([onlyTask], lineIndex);
-    const { runDir } = await scaffoldRun(artifactsDir, root, [[onlyTask, onlyResult]]);
+    await scaffoldRun(artifactsDir, root, [[onlyTask, onlyResult]]);
 
     // No owner-tokens.json written at all — a recovery/pre-slice-manifest path.
     const { summary } = await mergeAndIngest({ runId: RUN_ID, artifactsDir });

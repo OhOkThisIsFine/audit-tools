@@ -437,7 +437,6 @@ export class OwnershipRegistry {
     if (isReleasingDisposition(disposition)) {
       this.releaseInFlight(nodeId);
       this.releaseAmendments(nodeId);
-      return;
     }
     // blocked_pending_triage / redispatch: claim-retaining — leave it held.
   }

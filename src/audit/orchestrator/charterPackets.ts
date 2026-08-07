@@ -90,7 +90,7 @@ export function topLevelDeclarationLines(strippedSource: string): string[] {
   const lines: string[] = [];
   for (const line of strippedSource.split("\n")) {
     if (line.length === 0) continue;
-    if (/^[\s]/.test(line)) continue;
+    if (/^\s/.test(line)) continue;
     if (/^[}\])`>,;]+\s*$/.test(line)) continue;
     lines.push(line.length > 200 ? `${line.slice(0, 200)}…` : line);
   }

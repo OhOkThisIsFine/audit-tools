@@ -20,7 +20,6 @@ import { makeFinding } from "./test-helpers.js";
 
 const RUN_ID = "run-invalid-result";
 const BLOCK_ID = "TEST-BLOCK-INVALID";
-const FINDING_ID = "F-INV-1";
 
 async function makeMinimalState(artifactsDir: string): Promise<void> {
   const finding = makeFinding();

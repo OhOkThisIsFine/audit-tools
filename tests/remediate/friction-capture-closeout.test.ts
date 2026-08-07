@@ -16,7 +16,6 @@ import {
   stepBoundaryEventId,
   sanitizeRunId,
   AGENT_FEEDBACK_FILENAME,
-  type FrictionCaptureArtifact,
   type TriagedFrictionArtifact,
   type StepBoundaryEventType,
 } from "audit-tools/shared";

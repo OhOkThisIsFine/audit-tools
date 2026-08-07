@@ -143,7 +143,7 @@ const SPLIT_ROSTER: HostModelRosterEntry[] = [
   { rank: "deep", context_tokens: 200000, output_tokens: 32000 },
 ];
 
-await test("a low-risk packet routed to a small window re-splits to fit (design a)", async (t) => {
+await test("a low-risk packet routed to a small window re-splits to fit (design a)", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
@@ -163,7 +163,7 @@ await test("a low-risk packet routed to a small window re-splits to fit (design 
   expect(result.warning_count, "re-split packets fit their budgets").toBe(0);
 });
 
-await test("the same packet at high risk routes to the deep window and stays whole", async (t) => {
+await test("the same packet at high risk routes to the deep window and stays whole", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.9));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
@@ -180,7 +180,7 @@ await test("the same packet at high risk routes to the deep window and stays who
   expect(plan[0].model_hint.tier).toBe("deep");
 });
 
-await test("dispatch-quota carries the roster echo, tier budgets, and per-rank pools", async (t) => {
+await test("dispatch-quota carries the roster echo, tier budgets, and per-rank pools", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await prepareDispatchArtifacts({
@@ -210,7 +210,7 @@ await test("dispatch-quota carries the roster echo, tier budgets, and per-rank p
 
 // ── opaque model identity → quota key (F3) ───────────────────────────────────
 
-await test("--host-model-id keys the quota pool as provider/<id>; absent → provider/*", async (t) => {
+await test("--host-model-id keys the quota pool as provider/<id>; absent → provider/*", async () => {
   for (const [hostModelId, suffix] of [
     ["opaque-x", "/opaque-x"],
     [null, "/*"],
@@ -233,7 +233,7 @@ await test("--host-model-id keys the quota pool as provider/<id>; absent → pro
   }
 });
 
-await test("per-rank model_id keys each roster pool's quota independently", async (t) => {
+await test("per-rank model_id keys each roster pool's quota independently", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.9));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await prepareDispatchArtifacts({
@@ -255,7 +255,7 @@ await test("per-rank model_id keys each roster pool's quota independently", asyn
   expect(quota.host_model_roster.map((entry: any) => entry.model_id)).toEqual(["rank-s", "rank-d"]);
 });
 
-await test("scalar handshake without a roster keeps the single-pool path (no tier budgets)", async (t) => {
+await test("scalar handshake without a roster keeps the single-pool path (no tier budgets)", async () => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({

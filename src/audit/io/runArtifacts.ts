@@ -4,14 +4,14 @@ import { fileURLToPath } from "node:url";
 import { writeJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
-import type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
+import type { RunPaths } from "./runArtifactTypes.js";
 import {
   CURRENT_TASK_FILENAME,
   CURRENT_PROMPT_FILENAME,
   CURRENT_TASKS_FILENAME,
 } from "../supervisor/operatorHandoff.js";
 
-export type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
+export type { RunPaths } from "./runArtifactTypes.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 // src/audit/io/ (source) or dist/audit/io/ (built) → three levels up is the

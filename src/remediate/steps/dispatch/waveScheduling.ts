@@ -7,7 +7,6 @@ import type {
   ResolvedProviderName,
   DispatchCapacityPoolSummary,
   HostModelRosterEntry,
-  CapacityPool,
   DispatchExclusion,
   HostPoolPreamble,
 } from "audit-tools/shared";

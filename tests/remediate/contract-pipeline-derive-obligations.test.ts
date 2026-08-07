@@ -17,7 +17,6 @@ import {
   writeContractArtifact,
   contractArtifactFilePath,
   readContractArtifact,
-  stampToolCreatedAt,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
   deriveObligationLedger,

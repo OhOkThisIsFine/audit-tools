@@ -21,7 +21,6 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { Finding, RemediationBlock } from "../../src/remediate/state/types.js";
 import {
-  prepareImplementDispatch,
   mergeImplementResults,
   collapseItemResults,
   recordNodeAcceptOutcome,

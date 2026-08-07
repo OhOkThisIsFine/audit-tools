@@ -268,7 +268,7 @@ function makeRepoManifestWithFiles(paths: string[]) {
   };
 }
 
-test("runPlanningExecutor applies disposition_overrides before coverage initialization", async (t) => {
+test("runPlanningExecutor applies disposition_overrides before coverage initialization", async () => {
   // A file that is `included` but has a disposition_override marking it `generated`
   // should NOT appear in any audit task.
   const bundle = makeBaseBundle({

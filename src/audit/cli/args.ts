@@ -2,7 +2,7 @@ import { existsSync, createReadStream, readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   renderPromptCommand,
   toPromptPathToken,
@@ -15,7 +15,6 @@ import {
   validateSessionConfig,
   formatValidationIssues,
   type HostProviderName,
-  type ProviderName,
   type SessionConfig,
   type DispatchableSource,
   type AuditorDescriptor,

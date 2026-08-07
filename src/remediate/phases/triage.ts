@@ -335,7 +335,6 @@ export async function runTriagePhase(
       // was approved at the review gate, so transient/contract failures retry
       // autonomously; only budget-exhausted items fall through to a human prompt.
       let autoRetried = false;
-      let reconciledSatisfied = false;
       for (const item of blockedItems) {
         // Re-verify against the CURRENT tree BEFORE retrying (takes precedence
         // over the retry budget): if the node's own verification now passes, the
@@ -352,7 +351,6 @@ export async function runTriagePhase(
           console.log(
             `[triage] ${item.finding_id}: already satisfied in the working tree — reconciled to resolved_no_change (no retry).`,
           );
-          reconciledSatisfied = true;
           continue;
         }
         // Stop auto-retrying an item that has already been retried the cap

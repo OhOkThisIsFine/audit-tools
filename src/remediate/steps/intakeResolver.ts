@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";

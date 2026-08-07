@@ -32,9 +32,7 @@ import {
   createRollingDispatcher,
   type CapacityPool,
   type SessionConfig,
-  type ProviderSlot,
   type RollingDispatchPacket,
-  type RollingDispatchResult,
 } from "audit-tools/shared";
 import {
   buildConfirmedPools,
@@ -48,52 +46,9 @@ import {
   resolveRollingEngineEnabled,
   interpretConfirmedCheckpointIntent,
 } from "../../src/remediate/steps/nextStep.js";
-import type { RemediationState } from "../../src/remediate/state/store.js";
-import type { RemediationBlock } from "../../src/remediate/state/types.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 
-// ---------------------------------------------------------------------------
-// Tiny builders
-// ---------------------------------------------------------------------------
 
-function block(id: string, items: string[], deps: string[] = []): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, touched_files: [], dependencies: deps };
-}
-
-function findingState(
-  blocks: RemediationBlock[],
-  overlays: Record<string, Partial<{ contract_obligation_ids: string[] }>> = {},
-): RemediationState {
-  return {
-    status: "implementing",
-    plan: {
-      plan_id: "PLAN-ROLL",
-      findings: blocks.flatMap((b) =>
-        b.items.map((id) => ({
-          id,
-          title: id,
-          category: "correctness",
-          severity: "medium" as const,
-          confidence: "high" as const,
-          lens: "correctness",
-          summary: id,
-          affected_files: [{ path: `src/${id}.ts` }],
-          evidence: [`src/${id}.ts:1`],
-          ...(overlays[id] ?? {}),
-        })),
-      ),
-      blocks,
-      project_type: "unknown",
-      candidate_closing_actions: ["none"],
-    },
-    items: Object.fromEntries(
-      blocks.flatMap((b) =>
-        b.items.map((id) => [id, { finding_id: id, status: "pending" as const, block_id: b.block_id }]),
-      ),
-    ),
-    closing_plan: { action: "none" },
-  };
-}
 
 // ===========================================================================
 // Single shared dispatch tier-rank authority (P1)

@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdir, rm, readFile } from "node:fs/promises";
 import {
   dependencyVerifiedComplete,
   isVerifiedCompleteStatus,

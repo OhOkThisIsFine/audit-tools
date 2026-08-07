@@ -657,7 +657,10 @@ async function waitForRegistryVersion(packageName, version) {
     }
     await sleep(pollIntervalMs);
   }
-  throw new Error(`Timed out waiting for ${packageName}@${version} to resolve from the npm registry.`);
+  throw new Error(
+    `Timed out waiting for ${packageName}@${version} to resolve from the npm registry. ` +
+      `Last poll result: ${lastResult.slice(0, 200)}`,
+  );
 }
 
 async function main() {

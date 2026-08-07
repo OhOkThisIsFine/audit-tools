@@ -27,7 +27,6 @@ import {
   buildQuotaSource,
   dedupHostAndSourcePools,
   readQuotaStateOrDegrade,
-  type CapacityPool,
   type DispatchExclusion,
   type QuotaStateEntry,
   type ResolvedProviderName,

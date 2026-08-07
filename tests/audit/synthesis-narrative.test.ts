@@ -1,7 +1,4 @@
 import { test, expect } from "vitest";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { AuditFindingsReportSchema } from "audit-tools/shared";
 import type { AuditFindingsReport, SynthesisNarrative } from "audit-tools/shared";
 import type { AuditResult } from "../../src/audit/types.js";
@@ -13,9 +10,6 @@ function assertMatchesJsonSchema(_schema: unknown, value: unknown, label: string
       result.success ? "" : JSON.stringify(result.error.issues)
     }`).toBeTruthy();
 }
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
 
 const {
   buildAuditReportModel: buildAuditReportModelRaw,

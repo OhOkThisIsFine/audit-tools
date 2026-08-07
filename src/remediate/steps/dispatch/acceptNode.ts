@@ -4,7 +4,7 @@ import { withFileLock } from "audit-tools/shared";
 import { isLoopCorePath } from "audit-tools/shared";
 import { runTracked } from "audit-tools/shared";
 import { mergedBaseCheckArgvs, mergedGuardSuiteArgv } from "../gateCommands.js";
-import { readJsonFile, writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
+import { writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
 import type { RemediationBlock } from "../../state/types.js";
 import type { ProviderSlot, RollingDispatchResult } from "audit-tools/shared";
 import type { ClaimRegistry } from "audit-tools/shared";
@@ -497,7 +497,7 @@ async function acceptNodeWorktreeLocked(
     // content (green-at-merge; the later cherry-pick can no longer conflict). A true
     // hunk conflict here is a genuine seam — preserve the work and route to triage
     // rather than land a broken merge.
-    const rebase = rebaseBranchOntoHead(root, wt, branch);
+    const rebase = rebaseBranchOntoHead(root, wt);
     if (!rebase.ok) {
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);

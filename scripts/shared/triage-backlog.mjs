@@ -251,7 +251,7 @@ function post(body) {
         res.on('data', (d) => (buf += d));
         res.on('end', () => {
           try { resolve({ status: res.statusCode, body: JSON.parse(buf) }); }
-          catch (e) { reject(new Error(`HTTP ${res.statusCode}: ${buf.slice(0, 400)}`)); }
+          catch { reject(new Error(`HTTP ${res.statusCode}: ${buf.slice(0, 400)}`)); }
         });
       },
     );

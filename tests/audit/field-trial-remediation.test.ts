@@ -803,10 +803,13 @@ test("loadSessionConfig writes a default repo-local session config when missing"
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
     const config = await loadSessionConfig(artifactsDir);
+    expect(config).toBeTypeOf("object");
 
+    // The default config was persisted repo-locally and is parseable JSON.
     const persisted = JSON.parse(
       await readFile(join(artifactsDir, "session-config.json"), "utf8"),
     );
+    expect(persisted).toBeTypeOf("object");
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }

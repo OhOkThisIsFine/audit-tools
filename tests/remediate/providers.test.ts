@@ -83,7 +83,7 @@ function makeSpawnMock(
     child.killed = false;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    child.kill = (sig: string) => {
+    child.kill = (_sig: string) => {
       child.killed = true;
       process.nextTick(() => {
         child.emit("exit", exitCode, exitSignal);

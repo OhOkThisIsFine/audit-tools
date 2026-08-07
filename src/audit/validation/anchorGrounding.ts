@@ -30,7 +30,6 @@ import {
   runAllowlistedReadOnlyCommand,
 } from "audit-tools/shared";
 import type {
-  AllowlistedExecOutcome,
   AllowlistedExecRunner,
   AnchorExpectation,
   ExecutableAnchor,

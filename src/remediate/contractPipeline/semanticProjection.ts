@@ -18,7 +18,7 @@
  * differently and correctly re-stales.
  *
  * This mirrors audit-code's `normalizeForMetadataHash`
- * (`orchestrator/artifactFreshness.ts`): strip non-semantic provenance fields
+ * (`src/shared/artifactFreshness.ts`): strip non-semantic provenance fields
  * universally, then apply a per-artifact structural projection. The two
  * orchestrators stay in conceptual parity (semantic-projection staleness) while
  * each owns the projection table for its own artifact set.

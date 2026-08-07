@@ -1,4 +1,4 @@
-import { test, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { prefixValidationIssues } from "../../src/shared/validation/basic.js";
 import type { ValidationIssue } from "../../src/shared/validation/basic.js";
 

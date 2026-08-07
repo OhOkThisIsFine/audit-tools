@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditFindingsReport, FindingTheme, SynthesisNarrative } from "audit-tools/shared";
 
-const { hashArtifactValue } = await import("../../src/audit/orchestrator/artifactFreshness.js");
+const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { computeArtifactStateSignature } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { applyNarrative } = await import("../../src/audit/reporting/synthesis.js");
 const { checkNoProgressBeforeDispatch } = await import("../../src/audit/cli/nextStepCommand.js");

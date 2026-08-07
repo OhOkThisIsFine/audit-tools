@@ -379,7 +379,6 @@ type DrainOutcome = ObligationOutcome<ArtifactBundle, AdvanceAuditResult>;
 function deriveObligationState(
   id: string,
   cache: WeakMap<ArtifactBundle, AuditState>,
-  options: AdvanceAuditOptions,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
   return (bundle) => {
     if (bundle.audit_state?.status === "complete") return "satisfied";
@@ -467,11 +466,10 @@ async function runDrainStep(
  */
 function buildDrainObligations(
   cache: WeakMap<ArtifactBundle, AuditState>,
-  options: AdvanceAuditOptions,
 ): DrainObligation[] {
   return PRIORITY.map((id) => ({
     id,
-    derive: deriveObligationState(id, cache, options),
+    derive: deriveObligationState(id, cache),
     execute: runDrainStep,
   }));
 }
@@ -546,7 +544,7 @@ async function advanceAuditInner(
     // so no state can leak across advanceAudit calls.
     const deriveCache = new WeakMap<ArtifactBundle, AuditState>();
     const outcome = await advanceObligations(
-      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache, options) },
+      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache) },
       bundle,
       ctx,
       // INVARIANT: the local graceful cap (MAX_DRAIN_STEPS, enforced inside

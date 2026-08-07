@@ -1,5 +1,4 @@
-import type { AuditTask, Lens, UnitManifest } from "./types.js";
-import { isLens } from "./types.js";
+import type { AuditTask, UnitManifest } from "./types.js";
 import { coerceJsonObjectArg } from "audit-tools/shared";
 
 // (Removed dead DEFAULT_LENS_ORDER literal — MNT-94a2184f. It was unreferenced
@@ -24,12 +23,6 @@ function assertStringArray(
   }
 }
 
-function assertLensArray(value: unknown, label: string): asserts value is string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new TypeError(`${label} must be an array of strings.`);
-  }
-}
-
 function assertUnitManifest(
   value: unknown,
 ): asserts value is UnitManifest {
@@ -49,7 +42,7 @@ function assertUnitManifest(
       throw new TypeError(`${label}.name must be a non-empty string.`);
     }
     assertStringArray(unit.files, `${label}.files`);
-    assertLensArray(unit.required_lenses, `${label}.required_lenses`);
+    assertStringArray(unit.required_lenses, `${label}.required_lenses`);
   });
 }
 
@@ -66,7 +59,7 @@ function normalizedOptions(rawOptions: unknown): {
     throw new TypeError("buildAuditTasks options.pass_prefix must be a string.");
   }
   if (options.limit_lenses !== undefined) {
-    assertLensArray(options.limit_lenses, "buildAuditTasks options.limit_lenses");
+    assertStringArray(options.limit_lenses, "buildAuditTasks options.limit_lenses");
   }
 
   return {

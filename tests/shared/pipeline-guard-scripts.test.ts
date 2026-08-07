@@ -10,7 +10,7 @@ import { test, expect, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import type { SpawnSyncReturns } from "node:child_process";
 import { readFileSync, statSync, rmSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { runProfiledCommands, toSeconds, npmCommand } from "../../scripts/shared/profile.mjs";

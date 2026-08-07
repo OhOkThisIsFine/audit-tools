@@ -268,7 +268,7 @@ describe("ClaudeWorkerProvider.launch — env overlay + isolated config dir", ()
     const provider = new ClaudeWorkerProvider(
       WORKER_CONFIG,
       {},
-      (c: string, a: string[], i: LaunchFreshSessionInput, env: Record<string, string> = {}) => {
+      (_c: string, _a: string[], _i: LaunchFreshSessionInput, env: Record<string, string> = {}) => {
         seenEnv = env;
         return Promise.reject(new Error("spawn exploded"));
       },

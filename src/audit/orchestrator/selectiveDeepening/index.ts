@@ -1,9 +1,6 @@
 import type { AuditTask } from "../../types.js";
 import {
   type BuildSelectiveDeepeningTaskOptions,
-  DEEPENING_TAG,
-  LENS_VERIFICATION_FOLLOWUP_TAG,
-  LENS_VERIFICATION_TAG,
   SEVERITY_RANK,
   intersects,
   isDeepeningTask,

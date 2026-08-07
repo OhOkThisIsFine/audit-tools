@@ -340,11 +340,7 @@ describe("basic validation helpers", () => {
 
 import {
   validateGoalSpec,
-  validateContextBundle,
   validateDesignSpecGates,
-  validateConceptualDesignCritique,
-  validateObligationLedger,
-  validateContractAssessmentReport,
   validateCounterexample,
   validateJudgeReport,
   validateImplementationDAG,
@@ -362,11 +358,8 @@ import {
 } from "../../src/remediate/validation/contractPipeline.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
   CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
-  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
   CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,

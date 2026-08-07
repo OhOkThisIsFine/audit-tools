@@ -19,7 +19,6 @@
  * precise changed-since-last-review delta and instructs re-affirm-or-revise-only-
  * affected — never a blind full re-run. Enforced by the tool, not host memory.
  */
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {

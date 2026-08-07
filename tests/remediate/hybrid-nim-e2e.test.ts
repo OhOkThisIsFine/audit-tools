@@ -142,7 +142,7 @@ describe.runIf(RUN)("A8 HYBRID host+NIM split over live NIM (crit. 3)", () => {
       const handedToHost = NODES.filter((n) => git("show", `HEAD:${n.file}`).status !== 0);
 
       // Observation log (this is the live split).
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[hybrid-nim-e2e] LIVE SPLIT — landed in-process via NIM (on HEAD): ` +
           `${inProcessLanded.map((n) => `${n.block}/${n.file}`).join(", ") || "(none)"} ` +

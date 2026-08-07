@@ -24,10 +24,8 @@ import {
   CP_ARTIFACT_NAMES,
   detectStaleArtifacts,
   writeContractArtifact,
-  readContractArtifact,
   contractArtifactExists,
   contractInputFilePath,
-  contractPipelineDir,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {

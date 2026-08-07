@@ -9,7 +9,6 @@ const {
   ESTIMATED_PACKET_PROMPT_TOKENS,
   DEFAULT_TARGET_PACKET_TOKENS,
   taskContentTokens,
-  sizeIndexFromManifest,
 } = await import("../../src/audit/orchestrator/reviewPacketSizing.js");
 
 // Shared constants for cross-check — import from source, not compiled dist/

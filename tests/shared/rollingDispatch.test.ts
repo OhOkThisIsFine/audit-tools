@@ -481,7 +481,7 @@ test("createRollingDispatcher — a non-positive concurrencyCap is treated as NO
 // ---------------------------------------------------------------------------
 
 test("createRollingDispatcher — records wave outcomes after each result", async () => {
-  const dir = await setupTmpQuotaDir();
+  await setupTmpQuotaDir();
 
   const packet = makePacket("p1", { estimatedTokens: 500 });
 
@@ -793,7 +793,7 @@ test("createRollingDispatcher — when every pool credit-exhausts, the packet is
 });
 
 test("createRollingDispatcher — fires onCreditExhausted with poolId + rawMatch, and records the wave outcome as 'error' (never a rate_limited backoff cooldown)", async () => {
-  const dir = await setupTmpQuotaDir();
+  await setupTmpQuotaDir();
 
   const exhaustions: CreditExhaustedInfo[] = [];
   const dispatcher = createRollingDispatcher<TestPayload>({

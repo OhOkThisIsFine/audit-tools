@@ -1,5 +1,4 @@
 import { test, expect } from "vitest";
-import type { TestContext } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -67,7 +66,7 @@ function makeManifest(paths: string[]): RepoManifest {
 // ---------------------------------------------------------------------------
 
 // TST-e733eba0: empty manifest is valid at pipeline startup
-test("buildLineIndex returns an empty object for a manifest with zero files", async (t: TestContext) => {
+test("buildLineIndex returns an empty object for a manifest with zero files", async () => {
   const dir = setup();
   try {
     const manifest = makeManifest([]);
@@ -80,7 +79,7 @@ test("buildLineIndex returns an empty object for a manifest with zero files", as
   }
 });
 
-test("buildLineIndex returns a line-count record keyed by file path", async (t: TestContext) => {
+test("buildLineIndex returns a line-count record keyed by file path", async () => {
   const dir = setup();
   try {
     writeLines(dir, "a.ts", 10);
@@ -105,7 +104,7 @@ test("buildLineIndex returns a line-count record keyed by file path", async (t: 
 // CP-NODE-6: a read failure must surface as UNMEASURED, not a silent 0 — a
 // missing file and a genuine zero-line file were previously indistinguishable,
 // which stamped missing files as excluded_trivial with no diagnostic.
-test("buildLineIndex maps a non-existent file path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
+test("buildLineIndex maps a non-existent file path to UNMEASURED rather than throwing or reading as a genuine 0", async () => {
   const dir = setup();
   try {
     const manifest = makeManifest(["does-not-exist.ts"]);
@@ -126,7 +125,7 @@ test("buildLineIndex maps a non-existent file path to UNMEASURED rather than thr
 });
 
 // CP-NODE-6: a genuine zero-line file stays a real, distinguishable 0.
-test("buildLineIndex maps a genuine empty file to a real 0, distinguishable from unmeasured", async (t: TestContext) => {
+test("buildLineIndex maps a genuine empty file to a real 0, distinguishable from unmeasured", async () => {
   const dir = setup();
   try {
     // A TRULY empty (0-byte) file — writeLines(..., 0) would still emit a
@@ -158,7 +157,7 @@ test("isUnmeasuredLineCount treats a key absent from the index the same as a fai
 // uses — initializeCoverageFromPlan seeds coverage.files[].path verbatim from
 // repoManifest.files[].path, so a lookup against a coverage path always finds
 // its buildLineIndex entry (no normalization mismatch / lookup miss).
-test("buildLineIndex keys round-trip against coverage.files[].path (same repo_manifest source, mixed case/space path)", async (t: TestContext) => {
+test("buildLineIndex keys round-trip against coverage.files[].path (same repo_manifest source, mixed case/space path)", async () => {
   const dir = setup();
   try {
     const weirdPath = "src/Weird Dir/File Name.TS";
@@ -181,7 +180,7 @@ test("buildLineIndex keys round-trip against coverage.files[].path (same repo_ma
   }
 });
 
-test("buildLineIndex processes files in batches without losing entries (>25 files)", async (t: TestContext) => {
+test("buildLineIndex processes files in batches without losing entries (>25 files)", async () => {
   const dir = setup();
   try {
     const count = 30;
@@ -207,7 +206,7 @@ test("buildLineIndex processes files in batches without losing entries (>25 file
 // buildLineIndexForPaths
 // ---------------------------------------------------------------------------
 
-test("buildLineIndexForPaths deduplicates duplicate paths", async (t: TestContext) => {
+test("buildLineIndexForPaths deduplicates duplicate paths", async () => {
   const dir = setup();
   try {
     writeLines(dir, "shared.ts", 3);
@@ -221,7 +220,7 @@ test("buildLineIndexForPaths deduplicates duplicate paths", async (t: TestContex
   }
 });
 
-test("buildLineIndexForPaths contains every unique path regardless of input order", async (t: TestContext) => {
+test("buildLineIndexForPaths contains every unique path regardless of input order", async () => {
   const dir = setup();
   try {
     writeLines(dir, "z.ts", 2);
@@ -239,7 +238,7 @@ test("buildLineIndexForPaths contains every unique path regardless of input orde
   }
 });
 
-test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
+test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than throwing or reading as a genuine 0", async () => {
   const dir = setup();
   try {
     const result = await buildLineIndexForPaths(dir, ["missing.ts"]);
@@ -256,7 +255,7 @@ test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than 
 // addFileLineCountHints
 // ---------------------------------------------------------------------------
 
-test("addFileLineCountHints annotates each task with per-file line counts", async (t: TestContext) => {
+test("addFileLineCountHints annotates each task with per-file line counts", async () => {
   const dir = setup();
   try {
     writeLines(dir, "src/a.ts", 7);
@@ -283,7 +282,7 @@ test("addFileLineCountHints annotates each task with per-file line counts", asyn
   }
 });
 
-test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async (t: TestContext) => {
+test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async () => {
   const dir = setup();
   try {
     const tasks: AuditTask[] = [
@@ -305,7 +304,7 @@ test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async
 // (`z.number().int().min(0)`) with no "unmeasured" concept — addFileLineCountHints
 // is the deliberate boundary that degrades UNMEASURED_LINE_COUNT (NaN) to a
 // schema-valid 0 rather than leaking the sentinel into a persisted artifact.
-test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0, never leaking NaN into file_line_counts", async (t: TestContext) => {
+test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0, never leaking NaN into file_line_counts", async () => {
   const dir = setup();
   try {
     const tasks: AuditTask[] = [
@@ -324,7 +323,7 @@ test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0
   }
 });
 
-test("addFileLineCountHints preserves original task fields (no mutation of input)", async (t: TestContext) => {
+test("addFileLineCountHints preserves original task fields (no mutation of input)", async () => {
   const dir = setup();
   try {
     writeLines(dir, "x.ts", 3);
@@ -367,7 +366,7 @@ test("addFileLineCountHints preserves original task fields (no mutation of input
 // MNT-6f2529c0: buildLineIndexForPaths batches fd usage like buildLineIndex
 // ---------------------------------------------------------------------------
 
-test("buildLineIndexForPaths resolves all entries correctly for > LINE_COUNT_BATCH_SIZE paths", async (t: TestContext) => {
+test("buildLineIndexForPaths resolves all entries correctly for > LINE_COUNT_BATCH_SIZE paths", async () => {
   const dir = setup();
   try {
     const count = 60;
@@ -389,7 +388,7 @@ test("buildLineIndexForPaths resolves all entries correctly for > LINE_COUNT_BAT
   }
 });
 
-test("buildLineIndexForPaths concurrent countLines calls never exceed LINE_COUNT_BATCH_SIZE", async (t: TestContext) => {
+test("buildLineIndexForPaths concurrent countLines calls never exceed LINE_COUNT_BATCH_SIZE", async () => {
   const dir = setup();
   try {
     const count = 60;
@@ -411,7 +410,7 @@ test("buildLineIndexForPaths concurrent countLines calls never exceed LINE_COUNT
   }
 });
 
-test("buildLineIndexForPaths deduplicates input paths (fewer result keys than input length)", async (t: TestContext) => {
+test("buildLineIndexForPaths deduplicates input paths (fewer result keys than input length)", async () => {
   const dir = setup();
   try {
     writeLines(dir, "dup.ts", 5);
@@ -427,7 +426,7 @@ test("buildLineIndexForPaths deduplicates input paths (fewer result keys than in
   }
 });
 
-test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", async (t: TestContext) => {
+test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", async () => {
   const dir = setup();
   try {
     const result = await buildLineIndexForPaths(dir, ["this-does-not-exist.ts"]);
@@ -443,7 +442,7 @@ test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", 
 // COR-c868f53d: missing vs IO error distinguished in stderr diagnostic
 // ---------------------------------------------------------------------------
 
-test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns UNMEASURED (COR-c868f53d, CP-NODE-6)", async (t: TestContext) => {
+test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns UNMEASURED (COR-c868f53d, CP-NODE-6)", async () => {
   const dir = setup();
   const stderrChunks: string[] = [];
   const origWrite = process.stderr.write;
@@ -466,7 +465,7 @@ test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, retur
 
 // ---------------------------------------------------------------------------
 
-test("addFileLineCountHints keys in file_line_counts match task file_paths array", async (t: TestContext) => {
+test("addFileLineCountHints keys in file_line_counts match task file_paths array", async () => {
   const dir = setup();
   try {
     writeLines(dir, "p1.ts", 1);

@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import { expectExactKeys } from "../helpers/exactKeys.mjs";
 import type { AuditTask } from "../../src/audit/types.js";

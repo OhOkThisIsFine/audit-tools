@@ -233,7 +233,6 @@ test("INV-repo-assets-04: all three loader assets carry the same capability hand
 test("verify function receives correct context shape", async () => {
   // Test that the verify callback is called with the expected argument shape
   const fakeDef = INSTALL_HOST_DEFINITIONS["codex"];
-  let receivedContext = null;
 
   // Create a wrapper to capture the context
   const originalVerify = fakeDef.verify;

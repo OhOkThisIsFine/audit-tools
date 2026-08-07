@@ -7,10 +7,8 @@ import { METADATA_SCHEMA_VERSION } from "../types/artifactMetadata.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import { ALL_DAG_ARTIFACTS, ARTIFACT_DEPENDS_ON_MAP } from "./dependencyMap.js";
-import {
-  hashArtifactValue,
-  stableStringify,
-} from "./artifactFreshness.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { stableStringify } from "../../shared/stableStringify.js";
 import { buildDependencySlices } from "./dependencySlices.js";
 import { computeGateVersion } from "./intentCheckpointGate.js";
 
