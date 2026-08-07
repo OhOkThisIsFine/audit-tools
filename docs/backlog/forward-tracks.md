@@ -279,3 +279,21 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 - **Packet `task_ids`/`lens` attribution is missing from the token-usage ledger** (`DispatchPlanEntry` carries neither). Non-blocking follow-up to the context-efficiency access-memory track, whose items 1-3 shipped.
 
+- **CI wall-clock: shard balance is a path-hash lottery, and one test file floors the whole suite.**
+  Two invariants are currently violated. (a) `criticalPathMs` in `scripts/release-and-publish.mjs` is
+  max-of-jobs, so it cannot see the `publish` tail that runs after `needs: [gate, test]` — the recorded
+  259s understates real wall-clock (~329s) by ~21%. (b) vitest shards by a contiguous slice of a
+  sha1-of-path ordering, which is duration-blind, and shards at FILE granularity with serial intra-file
+  execution — so the slowest shard can never beat the longest single file (measured: 157s, with the top
+  3 files at 46% of shard 1/4). Raising the shard count trims the tail and then dead-ends at that floor;
+  it does not separate the heavy cluster, which stays co-located at N=4, 6 and 8 alike. The per-shard
+  timing ledgers needed to fix balance properly are already produced by
+  `scripts/shared/vitest-timing-reporter.mjs` and discarded by CI (`upload-artifact` is failure-only).
+  ⚠ **OWNER DECISION 2026-08-07 — ONE Node version across the pipeline.** The `node-version` matrix axis
+  in `audit-code-test-suite.yml` goes (8 jobs → 4). `package.json` `engines` MUST be made to agree with
+  whichever version is kept — testing only 22.14.0 while declaring `>=20` is the current defect restated.
+  Full brief, measurements, and the five rejected optimizations (do not re-derive them):
+  `docs/reviews/ci-wallclock-plan-critique-2026-08-07.md`.
+  Implementation assigned OUT of this repo's agent loop by the owner.
+  [[vitest-shard-is-hash-based-and-file-atomic]]
+
