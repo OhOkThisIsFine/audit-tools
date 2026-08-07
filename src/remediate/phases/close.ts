@@ -38,6 +38,7 @@ import type {
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
 import { runTracked } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
+import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
 import type { ClosingAction } from "../state/closingActions.js";
 import type {
   CoverageLedgerEntry,
@@ -188,6 +189,9 @@ export function buildRemediationOutcomesReport(
       ...(item.started_at ? { started_at: item.started_at } : {}),
       ...(item.completed_at ? { completed_at: item.completed_at } : {}),
       ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+      ...(item.mechanical_verification
+        ? { mechanical_verification: item.mechanical_verification }
+        : {}),
     };
     if (!finding) {
       // Degenerate (corrupt state): without the plan finding there is no payload
@@ -1337,6 +1341,15 @@ function buildRemediationReportMarkdown(
     }
   }
 
+  // Item C — mechanical re-verify summary (render of the per-outcome
+  // `mechanical_verification` field; present only when the leg ran).
+  const mechanical = outcomesReport.outcomes.filter((o) => o.mechanical_verification);
+  if (mechanical.length > 0) {
+    const count = (status: string) =>
+      mechanical.filter((o) => o.mechanical_verification!.status === status).length;
+    reportContent += `\nMechanical re-verify (analyzer-born findings): ${count("verified_mechanically")} verified by analyzer re-run, ${count("lead_persists")} lead(s) persisting, ${count("skipped")} skipped (analyzer unavailable/unadmitted).\n`;
+  }
+
   if (!combinedTest.passed) {
     reportContent += `\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n\n`;
     if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
@@ -1728,6 +1741,42 @@ export async function runClosePhase(
     console.warn(
       "Deferred verify residual failed but no resolved items to re-block — completing with the failure recorded in the report.",
     );
+  }
+
+  // 2c. Item C — mechanical re-verify of analyzer-born leads: re-run the same
+  // pinned analyzer per provenance-carrying resolved item and check the exact
+  // content-anchored identity no longer fires. Attribution is exact, so a
+  // persisting lead re-blocks only ITS item (objective evidence to triage) —
+  // never the whole resolved set the way a suite-level red must.
+  const analyzerVerify = await verifyAnalyzerLeads({
+    state,
+    root: options.root,
+    ...(options.analyzerLeadVerifyOverrides
+      ? { overrides: options.analyzerLeadVerifyOverrides }
+      : {}),
+  });
+  if (analyzerVerify.ran) {
+    const now = new Date().toISOString();
+    for (const [findingId, verdict] of Object.entries(analyzerVerify.verdicts)) {
+      const item = state.items[findingId];
+      if (!item) continue;
+      item.mechanical_verification = verdict;
+      if (verdict.status === "lead_persists") {
+        item.status = "blocked";
+        item.completed_at = now;
+        item.failure_reason =
+          `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports this ` +
+          `finding's content-anchored lead identity after the fix (item C). The lead is ` +
+          `objective evidence — rework the fix or dispose the item in triage.`;
+      }
+    }
+    if (analyzerVerify.persisting.length > 0) {
+      console.log(
+        `Analyzer lead re-verify: ${analyzerVerify.persisting.length} lead(s) persist ` +
+        `(${analyzerVerify.persisting.join(", ")}). Transitioning back to triage.`,
+      );
+      return { ...state, status: "triage" };
+    }
   }
 
   // 3. Run end-to-end tests on the fully merged post-remediation state.

@@ -216,11 +216,13 @@ export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
   RemediationOutcomesReport,
+  MechanicalVerification,
 } from "./types/remediationOutcome.js";
 export {
   RemediationOutcomeStatusSchema,
   RemediationOutcomeSchema,
   RemediationOutcomesReportSchema,
+  MechanicalVerificationSchema,
 } from "./types/remediationOutcome.js";
 // Canonical lens vocabulary + the runtime validation Sets derived from it.
 export type { Lens } from "./types/lens.js";

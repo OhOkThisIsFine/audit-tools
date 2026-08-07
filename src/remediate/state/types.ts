@@ -7,7 +7,12 @@ import type { RemediationItemStatus } from "./itemStatus.js";
 // The remediator consumes the auditor's `audit-findings.json` directly, so it
 // uses the shared shape verbatim rather than a divergent local copy. Imported
 // (so it is in scope for the types below) and re-exported for existing callers.
-import type { Finding, FindingTheme, RemediationOutcome } from "audit-tools/shared";
+import type {
+  Finding,
+  FindingTheme,
+  RemediationOutcome,
+  MechanicalVerification,
+} from "audit-tools/shared";
 import { FindingSchema, FindingThemeSchema } from "audit-tools/shared";
 export type { Finding };
 
@@ -344,6 +349,11 @@ export interface RemediationItemState {
   item_spec?: ItemSpec;
   last_successful_step?: string;
   failure_reason?: string;
+  /**
+   * Item C — close-gate mechanical re-verify verdict for an analyzer-born
+   * finding (set by `verifyAnalyzerLeads`; copied into the outcomes contract).
+   */
+  mechanical_verification?: MechanicalVerification;
   /** Times this item was sent back for rework via triage (Phase 7B outcomes). */
   rework_count?: number;
   /** ISO-8601 timestamp when this item first left pending. */

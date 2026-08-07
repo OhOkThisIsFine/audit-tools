@@ -17,6 +17,23 @@ export type RemediationOutcomeStatus = z.infer<
   typeof RemediationOutcomeStatusSchema
 >;
 
+/**
+ * Item C — result of the close-gate mechanical re-verify of an analyzer-born
+ * finding. `verified_mechanically`: the finding's content-anchored lead
+ * identity no longer fires on a re-run of the same pinned analyzer.
+ * `lead_persists`: it still fires (objective evidence routed to triage).
+ * `skipped`: the analyzer could not re-run (admission/resolve/spawn/parse) —
+ * recorded with the reason, never silently treated as verified.
+ */
+export const MechanicalVerificationSchema = z
+  .object({
+    status: z.enum(["verified_mechanically", "lead_persists", "skipped"]),
+    analyzer_id: z.string(),
+    reason: z.string().optional(),
+  })
+  .strict();
+export type MechanicalVerification = z.infer<typeof MechanicalVerificationSchema>;
+
 export const RemediationOutcomeSchema = z
   .object({
     finding_id: z.string(),
@@ -43,6 +60,8 @@ export const RemediationOutcomeSchema = z
     completed_at: z.string().optional(),
     /** Milliseconds between completed_at and started_at when both are present. */
     duration_ms: z.number().optional(),
+    /** Item C — mechanical re-verify verdict for analyzer-born findings. */
+    mechanical_verification: MechanicalVerificationSchema.optional(),
   })
   .strict();
 export type RemediationOutcome = z.infer<typeof RemediationOutcomeSchema>;
