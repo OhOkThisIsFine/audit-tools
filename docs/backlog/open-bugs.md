@@ -1219,29 +1219,40 @@
   healthy roster must never derive a concurrency cap below the cold-start floor the scheduler
   itself would use for dispatch.
 
-- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Six
-  mechanically-observed defects from the first live drive of the 205-node rolling dispatch, all
-  host-recovered mid-run; each needs a tool-side fix + regression test (loop-core, attestation):
-  (1) `reverify-node` runs a premature whole-plan `mergeImplementResults` — 205 never-dispatched
-  blocks were "rejected", swept the run to triage, and burned auto-retry attempt 1/2 on every
-  untouched item; (2) quarantine replay cherry-picks only the preserved TIP commit, so a
-  multi-commit node branch conflicts on missing context (worked around via `commit-tree` squash +
-  `update-ref`); (3) a failed accept left the node's commit ON the remediation branch while
-  reporting `merged:false` — branch tip red until a manual reset; (4) node worktrees were
-  de-registered mid-recovery leaving a dir that resolves up to MAIN (the false-green verify guard
-  caught it — that guard is load-bearing); (5) v0.36.1 hard-crash: `nextStep.ts:2372` reads
-  `rolling.quotaPath!` unguarded on a zero-node frontier (guard sits three lines later) — currently
-  HOTFIXED ONLY in this machine's installed dist, source fix pending; (6) a `clarified` resolution
-  is consumed but reconciliation reuses the stale `needs_clarification` worker results and re-asks
-  the same questions — a clarified item must supersede its stale result (worked around by deleting
-  the 22 result files); (7) `worktreeHoldsUnlandedWork` (`rollingSession.ts`) runs `git status`/
-  `rev-list` with cwd inside the worktree dir WITHOUT the INV-WTS-2 own-top-level check — on an
-  orphaned plain dir (defect 4's leftover) git resolves up to MAIN, whose dirt/ahead-of-main state
-  reads as "un-landed work", so the broken dir is REUSED every re-dispatch and the node strands in
-  an empty tree asking the same clarification (CP-NODE-57; worked around by deleting the 6 orphaned
-  dirs before resume). **Property to hold:** reverify touches only its node; (also observed: 20 worker scratch logs — check_output.txt, test_result.log, build_results.log, … — were tool-committed in worktrees and MERGED to the branch, so the accept write-scope gate did not refuse files outside the node's declared write set;) an accept failure
-  leaves the branch exactly as before the attempt; a clarified item always re-dispatches fresh; a
-  dir that is not its own git top-level is never treated as holding un-landed work.
+- **Implement-dispatch accept/reverify defect cluster (2026-08-06 remediation run, high).** Eleven
+  mechanically-observed defects from the first live 205-node rolling drive, all host-recovered
+  mid-run; each needs a tool-side fix + regression test (loop-core, attestation).
+  Recovery recipes + forensics: memory `remediation-run-2026-08-06-paused-midflight` + run-branch
+  git log. (1) `reverify-node` runs a premature whole-plan merge —
+  never-dispatched blocks "rejected", swept to triage; (2) quarantine replay
+  cherry-picks only the preserved TIP commit; (3) a failed accept
+  can leave the node's commit ON the run branch while reporting `merged:false`; (4) worktrees
+  de-registered mid-recovery leave an orphan dir whose git calls resolve up to MAIN; (5) v0.36.1
+  zero-frontier null-crash (`nextStep.ts:2372`, dist-hotfixed only); (6) a
+  consumed `clarified` resolution still reuses stale `needs_clarification` results and re-asks;
+  (7) `worktreeHoldsUnlandedWork` lacks the own-top-level check — an orphan dir reads MAIN's dirt
+  as un-landed work and is reused every re-dispatch; (8) the
+  accept's node-verify runs branch-touched tests INSIDE the worktree, where driver-lifecycle tests
+  are refused by the cwd guard — such a node cannot accept; (9) terminal-
+  accept idempotency keys on the session `accept_failed` ledger, so a fixed cause still re-reports
+  forever, and the ledger contradicts outcome ground truth in both directions; (10)
+  `recordNodeAcceptOutcome` never lets an honest lesser outcome replace a `merged:true` record, so
+  a stale `committed_oid` (purged scratch) trips the INV-WTS-7 clobber check on every no-change
+  re-accept — unrecoverable by retry; (11) the accept's COMMIT step runs before the
+  INV-WTS-2 cwd check, so a deleted worktree commits the MAIN tree's dirt onto the run branch as
+  the node's commit. Also observed: worker scratch logs tool-committed and MERGED (the accept
+  write-scope gate refused nothing); untracked-target seeding swept `session-config.json` into a
+  node commit. **Property to hold:** an accept failure leaves branch, worktree, ledger, and outcome
+  record mutually consistent and re-drivable; a no-change claim is judged against CURRENT ground
+  truth only; no git write runs against a cwd that is not its own top-level; nothing outside the
+  declared write scope enters a node commit; reverify touches only its node.
+
+- **Close gate replays deferred verify commands verbatim with no dedup (2026-08-06, friction,
+  medium).** Deferred dist-dependent verify commands are queued as literal command lists and
+  drained sequentially with no dedup across nodes or against the full-suite legs
+  (observed: duplicate full `tests/audit` passes; a 2h close drain).
+  **Property to hold:** the close gate drains a deduplicated union of deferred verify targets (a
+  file set, not a command list), subsumed by any full-suite leg that already covers it.
 
 - **Bare `python` spawn opens the Microsoft Store on Windows without Python (2026-08-06, friction,
   low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`) falls back to

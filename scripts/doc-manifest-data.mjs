@@ -156,6 +156,10 @@ export const DOC_MANIFEST = [
         "runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
       ],
       [
+        ".audit-tools/remediation-report.md",
+        "runtime run-artifact — a remediate-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
+      ],
+      [
         "tests/audit/fixtures/simple-app/README.md",
         "test-fixture content — a sample-app README, its own concern, not a project doc",
       ],

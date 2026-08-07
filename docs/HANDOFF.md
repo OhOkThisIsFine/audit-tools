@@ -108,30 +108,25 @@
 
 ## Immediate next
 
-1. **RESUME the remediation run `dogfood-20260806-v0361-remediation` — PAUSED mid-run 2026-08-06
-   on owner instruction.** The checkout sits ON branch `remediation/dogfood-20260806-v0361-remediation`
-   (6 real commits ahead of `main`; do NOT switch back to main — the run's worktrees/state key off
-   this branch). State: `waiting_for_clarification` with **6 open clarifications**; everything is
-   persisted and resumable. Progress so far: full contract pipeline done (review gate: 46 strategic
-   findings declined after adversarial triage, record in
-   `.audit-tools/remediation/strategic-triage/triage-record.md`; contracts + test plan + assessment
-   + critic/judge all green); all 205 implement nodes dispatched and terminal-accepted once
-   (≈128 accepted, most verified no-change; 6 commits landed); a 22-node clarified re-wave landed.
-   **To resume:** `remediate-code next-step` with the usual capability flags → answer the 6
-   clarifications (the answer pattern that works is in
-   `.audit-tools/remediation/steps/` history: constituent finding ids + artifact paths + the
-   verify-or-no-change scope policy) → keep driving accept/merge rounds to the close phase.
-   ⚠ Three standing hazards: (0) `session-config.json` at repo root (untracked,
+1. **Remediation run `dogfood-20260806-v0361-remediation` is COMPLETE (2026-08-06).** All 211
+   items terminal: 202 `verified_no_change` + 9 `resolved`; close phase ran the full suite on the
+   combined state; deliverables `.audit-tools/remediation-report.md` +
+   `remediation-outcomes.json` committed on the run branch. **Next: review the run branch's diff
+   vs `main` (~50 commits — node fixes + guard repairs + docs) and MERGE
+   `remediation/dogfood-20260806-v0361-remediation` into `main`.** After merging, the checkout may
+   return to `main`. The run surfaced 5 NEW tool defects (cluster now 11 —
+   `open-bugs.md` §Implement-dispatch accept/reverify defect cluster) fixed-around by hand
+   mid-run; friction record: `.audit-tools/remediation/friction/run.json`.
+   ⚠ Standing hazards until §2 ships: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
-   is REQUIRED for plan extraction/replan sizing and something in the run deleted it once — recreate
-   it if absent; (a) the installed global dist carries a ONE-LINE HOTFIX
-   (`nextStep.js` zero-frontier null-guard) — reinstalling the global package reverts it and
-   next-step will crash again until the source fix ships; (b) the accept/reverify defect cluster in
-   `open-bugs.md` (premature whole-plan merge, tip-only quarantine replay, branch-tip left dirty on
-   failed accept, stale-result clarification loop) — recovery recipes are in that entry.
-2. **Ship the v0.36.1 loop-core source fixes** for the accept/reverify cluster + the zero-frontier
-   null-guard (`src/remediate/steps/nextStep.ts:2372`) with regression tests and attestation —
-   entry in `open-bugs.md` §Implement-dispatch accept/reverify defect cluster.
+   is load-bearing — recreate if absent; the installed global dist carries a ONE-LINE HOTFIX
+   (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the source fix
+   ships.
+2. **Ship the loop-core source fixes** for the accept/reverify cluster (now ELEVEN defects incl.
+   the commit-before-cwd-check MAIN-dirt commit, the sticky merged:true outcome, the accept_failed
+   re-report ledger) + the zero-frontier null-guard (`src/remediate/steps/nextStep.ts:2372`) with
+   regression tests and attestation — entry in `open-bugs.md` §Implement-dispatch accept/reverify
+   defect cluster; run forensics in memory `remediation-run-2026-08-06-paused-midflight`.
 3. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
    2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
    `open-bugs.md`.
