@@ -58,6 +58,15 @@
   landing refs). Run story + verification record in
   [`reviews/dogfood-run-2026-08-06.md`](reviews/dogfood-run-2026-08-06.md). The 2026-08-05 run
   story remains in [`reviews/dogfood-run-2026-08-05.md`](reviews/dogfood-run-2026-08-05.md).
+- **Accept/reverify 12-defect cluster FIXED in source and SHIPPED as v0.36.2 (2026-08-06,
+  `50634c08`; release CI green, npm live, global bins reinstalled):** INV-WTS-9 own-top-level
+  guard (4/7/11), rollback honesty (3), accept_failed↔outcome reconcile (9), evidence-based
+  merged:true downgrade (10), scoped reverify finalize (1) + full-range quarantine replay (2),
+  zero-frontier null-guard (5, supersedes the dist hotfix), clarified-result archival (6),
+  worktree-hostile verify deferral (8) + `check:tests` in the accept gate (12). Every fix
+  red-green validated; design-check pre-implementation; independent post-implementation review
+  NO CONFIRMED FINDINGS; loop-core attestation on the commit. The write-scope residual pair is
+  its own `open-bugs.md` entry.
 - **Remediation run `dogfood-20260806-v0361` LANDED on main (2026-08-06, merge `3a17ca8c`):**
   211 items terminal (202 `verified_no_change` + 9 `resolved`), deliverables promoted. Pre-merge
   6-lane adversarial review + dedicated regression-hunt: 6 confirmed findings fixed (`ecec16bc`),
@@ -118,21 +127,15 @@
 
 ## Immediate next
 
-1. **Publish the accept/reverify cluster fixes** (all TWELVE numbered defects SHIPPED to source
-   2026-08-06 with red-green regression tests + loop-core attestation: own-top-level guard
-   INV-WTS-9, evidence-based merged:true downgrade, accept_failed↔outcome reconcile, scoped
-   reverify finalize, full-range quarantine replay, worktree-hostile verify deferral,
-   `check:tests` in the accept gate, zero-frontier null-guard, clarified-result archival,
-   base-rollback honesty) — run `/ship` so the global bins pick up the source fix and the
-   dist-only zero-frontier hotfix note below dissolves. The two unfixed residuals (write-scope
-   scratch-log/seed admission) are their own entry in `open-bugs.md`.
-   ⚠ Standing hazards until the publish lands: `session-config.json` at repo root (untracked,
-   `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
-   is load-bearing — recreate if absent; the installed global dist carries a ONE-LINE HOTFIX
-   (`nextStep.js` zero-frontier null-guard) — a global reinstall reverts it until the publish.
-2. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
+1. Work the 2026-08-05 minor-friction cluster (still live, re-confirmed; now joined by the
    2026-08-06 handshake concurrency-cap collapse and block-sizing blindness entries) — specs in
-   `open-bugs.md`.
+   `open-bugs.md`. Adjacent smaller entries from this lap also live there: the write-scope
+   scratch-log/seed admission residual, the full-suite vitest false-RED (worker RPC timeout on a
+   green run), and the session-start relay-liveness 403 false alarm.
+
+   ⚠ Standing hazard: `session-config.json` at repo root (untracked,
+   `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
+   is load-bearing — recreate if absent.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
