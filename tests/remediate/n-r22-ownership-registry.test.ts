@@ -11,11 +11,16 @@
  * - mergeImplementResults: unowned amended_files are accepted and added to effective scope
  * - mergeImplementResults: owned amended_files block the item
  * - OwnershipRegistry: stale in-flight claims are purged on load
+ * - OwnershipRegistry._persist: CP-NODE-2 invariants[7] persist-locking disjunction
+ *   is settled (branch b) and a persist failure surfaces to the caller
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AUDIT_TOOLS_CALLER_CWD_ENV } from "audit-tools/shared";
 import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../../src/remediate/dispatch/amendmentClaim.js";
 import { mergeImplementResults } from "../../src/remediate/steps/dispatch.js";
@@ -323,6 +328,95 @@ describe("OwnershipRegistry: stale in-flight claims are purged on load", () => {
 });
 
 // ---------------------------------------------------------------------------
+// OwnershipRegistry._persist — CP-NODE-2 invariants[7]: checkpoint-locking
+// disjunction is settled (branch b), and a persist failure surfaces.
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies which branch of the persist-locking disjunction a given source
+ * text resolves to. Branch (a): `_persist` actually calls into the shared
+ * locked-JSON store (`createLockedJsonStore(`). Branch (b): the recorded
+ * resolution marker naming single-writer discipline. Deliberately looks for
+ * the real CALL syntax (not just the bare word `lockedJsonStore`, which
+ * branch (b)'s own explanatory prose legitimately mentions when describing
+ * why branch (a) was rejected) so the two branches can never both fire on the
+ * same source text.
+ */
+function classifyPersistLockingDisjunction(
+  sourceText: string,
+): "branch-a" | "branch-b" | "neither" {
+  const branchA = /createLockedJsonStore\s*\(/.test(sourceText);
+  const branchB = /PERSIST-LOCKING-DISJUNCTION-RESOLUTION[\s\S]{0,6000}branch \(b\)/i.test(
+    sourceText,
+  );
+  if (branchA) return "branch-a";
+  if (branchB) return "branch-b";
+  return "neither";
+}
+
+describe("OwnershipRegistry._persist — CP-NODE-2 invariants[7]: checkpoint-locking disjunction is settled, not silent", () => {
+  const SOURCE_PATH = join(
+    __dirname,
+    "../../src/remediate/dispatch/ownershipRegistry.ts",
+  );
+
+  it("the shipped tree resolves to exactly one of branch (a) or branch (b) — currently branch (b)", () => {
+    const sourceText = readFileSync(SOURCE_PATH, "utf8");
+    const classification = classifyPersistLockingDisjunction(sourceText);
+    expect(classification).not.toBe("neither");
+    // Recorded resolution: single-writer discipline holds (see the doc
+    // comment directly above OwnershipRegistry's private `_persist`).
+    expect(classification).toBe("branch-b");
+  });
+
+  it("a THIRD state (neither branch present) fails the check — proves the check is not vacuous", () => {
+    const neitherSource = `
+      export class OwnershipRegistry {
+        private _persist(): void {
+          // no locked-store call, no recorded resolution marker
+        }
+      }
+    `;
+    expect(classifyPersistLockingDisjunction(neitherSource)).toBe("neither");
+  });
+
+  it("a source calling createLockedJsonStore( classifies as branch (a)", () => {
+    const branchASource = `
+      import { createLockedJsonStore } from "audit-tools/shared";
+      class X {
+        private _persist(): void {
+          createLockedJsonStore({ path: this.checkpointPath }).mutate(() => this.serialize());
+        }
+      }
+    `;
+    expect(classifyPersistLockingDisjunction(branchASource)).toBe("branch-a");
+  });
+
+  it("UNCONDITIONALLY: an injected write failure surfaces to the caller instead of being swallowed", () => {
+    // Make a path segment an existing regular FILE so mkdirSync(dirname(...),
+    // {recursive:true}) is forced to fail (it cannot create a directory where
+    // a file already sits) — the write failure this method must now propagate
+    // instead of catching+logging to stderr.
+    mkdirSync(TEST_DIR, { recursive: true });
+    const blockerFile = join(TEST_DIR, "blocker-file");
+    writeFileSync(blockerFile, "not a directory", "utf8");
+    const checkpointPath = join(blockerFile, "sub", "ownership-registry.json");
+
+    const registry = new OwnershipRegistry(checkpointPath);
+    expect(() =>
+      registry.initialize([{ node_id: "NODE-A", write_paths: ["src/a.ts"] }]),
+    ).toThrow();
+  });
+
+  it("a checkpoint-less registry (no checkpointPath) never touches disk and never throws from persist", () => {
+    const registry = new OwnershipRegistry();
+    expect(() =>
+      registry.initialize([{ node_id: "NODE-A", write_paths: ["src/a.ts"] }]),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // mergeImplementResults: amended_files integration
 // ---------------------------------------------------------------------------
 
@@ -446,7 +540,50 @@ async function writeDispatchPlan(
   );
 }
 
+/**
+ * mergeImplementResults (via marshal.ts) drives StateStore.mutate, which
+ * asserts `assertNotNodeWorktreeCwd` (src/shared/io/nodeWorktreeGuard.ts) as
+ * defense-in-depth against a dispatched worker mutating shared run state. The
+ * guard's discriminator is deliberately CWD-only (its own header comment:
+ * "CWD is the honest mechanical discriminator") — so running THIS suite from
+ * inside a node worktree (e.g. a per-node implement verify, exactly how this
+ * file is normally invoked) trips the guard on tests that are not a live
+ * cross-node clobber: a suite-invocation artifact, not a defect in the guard
+ * or in mergeImplementResults. Neutralize it for exactly the two describe
+ * blocks below (state-transition tests), never weakening the guard itself:
+ * `nodeWorktreeAncestor` is purely path-string-based (no filesystem access,
+ * per its own doc comment), so `process.chdir()` to any already-existing
+ * non-worktree directory suffices — `os.tmpdir()` always exists. Also point
+ * `AUDIT_TOOLS_CALLER_CWD_ENV` (the wrapper-propagated-caller-cwd seam) at the
+ * same directory: `cwdCandidates()` checks BOTH sources whenever the env var
+ * is set, so leaving it stale/unset while only chdir'ing is the minimum fix,
+ * but setting both keeps this future-proof against a caller that starts
+ * passing an explicit cwd sourced from the env var. Both are saved/restored
+ * per-test so no other test in this file is affected.
+ */
+let savedCwdForGuardSeam: string | undefined;
+let savedCallerCwdEnvForGuardSeam: string | undefined;
+
+function neutralizeNodeWorktreeGuardCwd(): void {
+  savedCwdForGuardSeam = process.cwd();
+  savedCallerCwdEnvForGuardSeam = process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
+  const outside = tmpdir();
+  process.chdir(outside);
+  process.env[AUDIT_TOOLS_CALLER_CWD_ENV] = outside;
+}
+
+function restoreNodeWorktreeGuardCwd(): void {
+  if (savedCwdForGuardSeam !== undefined) process.chdir(savedCwdForGuardSeam);
+  if (savedCallerCwdEnvForGuardSeam === undefined) {
+    delete process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
+  } else {
+    process.env[AUDIT_TOOLS_CALLER_CWD_ENV] = savedCallerCwdEnvForGuardSeam;
+  }
+}
+
 describe("mergeImplementResults: unowned amended_files are accepted and added to effective scope", () => {
+  beforeEach(neutralizeNodeWorktreeGuardCwd);
+  afterEach(restoreNodeWorktreeGuardCwd);
   it("an ImplementWorkerResult with amended_files listing an unowned path is accepted", async () => {
     const runId = "run-r22-a";
     await writeMinimalState(ARTIFACTS_DIR, [{ block_id: "BLK-001", items: ["F-001"] }], [{ id: "F-001" }]);
@@ -478,6 +615,9 @@ describe("mergeImplementResults: unowned amended_files are accepted and added to
 });
 
 describe("mergeImplementResults: owned amended_files block the item", () => {
+  beforeEach(neutralizeNodeWorktreeGuardCwd);
+  afterEach(restoreNodeWorktreeGuardCwd);
+
   it("an ImplementWorkerResult with amended_files listing a path owned by another block blocks the item", async () => {
     const runId = "run-r22-b";
     await writeMinimalState(
