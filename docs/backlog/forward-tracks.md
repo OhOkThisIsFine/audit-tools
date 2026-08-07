@@ -31,6 +31,13 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 ## Forward tracks
 
+- **Mechanical analyzer layer — activate defaults, surface consent, close the re-verify loop.**
+  Four-item program specced in [`spec/mechanical-analyzer-layer-design.md`](../../spec/mechanical-analyzer-layer-design.md)
+  (deliberately a pointer — the spec carries the per-item file plan, the declined alternatives, and
+  the CE-005 contract revision). Trigger: only gitleaks is `defaultRun`, and the consent gate's
+  offer never reaches the operator — applicable analyzers are silently skipped. Sequence A→B→D→C;
+  item C requires `/design-check` first.
+
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"
   ([`open-bugs.md`](open-bugs.md)): without ground truth, per-lane yield is a noisy signal and
