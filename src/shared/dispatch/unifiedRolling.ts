@@ -209,6 +209,15 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
    * wires it to friction emission. Omit to leave it silent.
    */
   onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
+  /**
+   * Provider-unavailable exclusion: invoked once per pool the first time a
+   * `provider_unavailable` result lands (spawn-level provider death — binary
+   * missing, PATH resolution failure, or process death before any channel output).
+   * The engine has already permanently excluded the pool for the run. Forwarded
+   * to the engine; the consumer wires it to friction emission. Omit to leave the
+   * exclusion silent.
+   */
+  onProviderUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
   /** Engine escalation hooks (host-session rate-limit accrual + strand-not-requeue read). */
   recordRateLimit?: (packet: RollingDispatchPacket<TPayload>, result: RollingDispatchResult<TPayload>) => void;
   isPacketEscalated?: (packetId: string) => boolean;
@@ -260,6 +269,13 @@ export interface UnifiedRollingResult<TPayload> {
    * DC-4 settled-exclusion seed the audit resume path carries. Empty on a clean run.
    */
   exhaustedPoolIds: string[];
+  /**
+   * Dead providers captured when any sub-wave's dispatcher encountered
+   * provider_unavailable outcomes. Array of {pool_id, provider_name} deduped by
+   * pool_id. Empty on a clean run. Used by the resumable pause path to name dead
+   * providers and suggest re-detection on resume.
+   */
+  dead_provider_pools: Array<{ pool_id: string; provider_name: string }>;
 }
 
 /**
@@ -276,8 +292,10 @@ export async function driveRolling<TItem, TPayload>(
     allResults: [],
     rebuilds: 0,
     exhaustedPoolIds: [],
+    dead_provider_pools: [],
   };
   const exhausted = new Set<string>();
+  const deadProviders = new Map<string, string>(); // pool_id → provider_name
   // ONE cost-demotion set for the whole drive: a per-sub-wave dispatcher would reset
   // it at every sub-wave/level boundary, letting a lapsed-free pool regain free-first
   // fill each boundary. Sharing it makes a demotion (and its single onCostDrift emit)
@@ -332,6 +350,7 @@ export async function driveRolling<TItem, TPayload>(
         ...(config.onQuotaUnclassified ? { onQuotaUnclassified: config.onQuotaUnclassified } : {}),
         ...(config.onModelUnavailable ? { onModelUnavailable: config.onModelUnavailable } : {}),
         ...(config.onPacketTooLarge ? { onPacketTooLarge: config.onPacketTooLarge } : {}),
+        ...(config.onProviderUnavailable ? { onProviderUnavailable: config.onProviderUnavailable } : {}),
         ...(config.onAdmissionDecision ? { onAdmissionDecision: config.onAdmissionDecision } : {}),
         costDemotedPoolIds,
         onResult: (result) => {
@@ -343,6 +362,11 @@ export async function driveRolling<TItem, TPayload>(
       levelResults.push(...(await dispatcher.run()));
       terminal = mergePartialTerminals(terminal, dispatcher.getTerminal());
       for (const poolId of dispatcher.getState().exhaustedPoolIds) exhausted.add(poolId);
+      // Collect dead providers captured by this dispatcher's provider_unavailable outcomes.
+      for (const dead of dispatcher.getState().dead_provider_pools) {
+        // Dedupe by pool_id across sub-waves (union operation).
+        deadProviders.set(dead.pool_id, dead.provider_name);
+      }
     }
     out.levels.push({ nodeIds: nodes.map((n) => n.block_id), results: levelResults });
 
@@ -371,5 +395,9 @@ export async function driveRolling<TItem, TPayload>(
 
   out.terminal = terminal;
   out.exhaustedPoolIds = [...exhausted];
+  // Dead providers sorted by pool_id for stable artifact ordering.
+  out.dead_provider_pools = [...deadProviders.entries()]
+    .map(([pool_id, provider_name]) => ({ pool_id, provider_name }))
+    .sort((a, b) => a.pool_id.localeCompare(b.pool_id));
   return out;
 }

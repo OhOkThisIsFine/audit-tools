@@ -49,6 +49,12 @@ export interface RollingRunResult<TPacket> {
    * gave up is never re-offered as fresh. Empty when status === "complete".
    */
   exhausted_pool_ids: string[];
+  /**
+   * Dead providers captured when any packet's provider_unavailable outcome was
+   * observed. Array of {pool_id, provider_name} for naming in pause/resume paths.
+   * Empty when status === "complete" or no provider death occurred.
+   */
+  dead_provider_pools: Array<{ pool_id: string; provider_name: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +104,7 @@ export async function runRollingDispatch<TPacket>(
       // unavailable for this run and is settled-excluded so re-discovery must
       // surface genuinely-new capacity to resume.
       exhausted_pool_ids: confirmedPools.map((p) => p.id),
+      dead_provider_pools: [],
     };
   }
 
@@ -165,6 +172,11 @@ export async function runRollingDispatch<TPacket>(
   // exclusion set (DC-4) so re-discovery never re-offers them as net-new.
   const exhaustedPoolIds = run.exhaustedPoolIds;
 
+  // Dead providers captured when provider_unavailable outcomes were observed.
+  // Threaded through to the resumable pause so the operator can see which
+  // providers died and the resume path can re-detect them.
+  const deadProviderPools = run.dead_provider_pools;
+
   // Check for livelock post-run (packets that never completed).
   const completedIds = new Set(results.map((r) => r.packet.id));
   const pendingIds = packets.map((p) => p.id).filter((id) => !completedIds.has(id));
@@ -188,6 +200,7 @@ export async function runRollingDispatch<TPacket>(
       stranded_ids: terminal.stranded_ids,
       partial_reason: terminal.reason,
       exhausted_pool_ids: exhaustedPoolIds,
+      dead_provider_pools: deadProviderPools,
     };
   }
 
@@ -198,5 +211,6 @@ export async function runRollingDispatch<TPacket>(
     results,
     stranded_ids: [],
     exhausted_pool_ids: exhaustedPoolIds,
+    dead_provider_pools: deadProviderPools,
   };
 }

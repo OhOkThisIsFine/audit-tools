@@ -1804,6 +1804,59 @@ test("createRollingDispatcher — model_unavailable excludes the pool for the ru
   expect(attemptsOn404After.length <= 2, "excluded pool never re-attempted after exclusion").toBeTruthy();
 });
 
+test("createRollingDispatcher — provider_unavailable captures dead provider identity and re-queues to surviving pool", async () => {
+  await setupTmpQuotaDir();
+  const p1 = makePacket("p-1");
+  const p2 = makePacket("p-2");
+  const hookCalls: Array<{ poolId: string; rawMatch: string | null }> = [];
+  const attempts: [packetId: string, poolId: string][] = [];
+
+  // Two pools with different provider names to verify capture.
+  const deadPool = makePool("pool-dead", { providerName: "openai-compatible" });
+  const livePool = makePool("pool-live", { providerName: "claude-code" });
+
+  const dispatcher = createRollingDispatcher<TestPayload>({
+    confirmedPools: [deadPool, livePool],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attempts.push([packet.id, slot.poolId]);
+      if (slot.poolId === "pool-dead") {
+        return {
+          packet,
+          outcome: "provider_unavailable",
+          providerUnavailable: { text: "binary not found", rawMatch: "not found" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onProviderUnavailable: (info) => hookCalls.push(info),
+  });
+
+  dispatcher.enqueue([p1, p2]);
+  const results = await dispatcher.run();
+
+  // Both packets should succeed on the surviving pool
+  const successes = results.filter((r) => r.outcome === "success");
+  expect(successes.length, "both packets eventually succeed on the surviving pool").toBe(2);
+
+  // Hook fires once per dead pool, not per packet
+  expect(hookCalls.length, "onProviderUnavailable fires once for the dead pool").toBe(1);
+  expect(hookCalls[0].poolId).toBe("pool-dead");
+  expect(hookCalls[0].rawMatch).toBe("not found");
+
+  // dead_provider_pools captures the pool id and provider name
+  const state = dispatcher.getState();
+  expect(state.dead_provider_pools.length, "one dead provider captured").toBe(1);
+  expect(state.dead_provider_pools[0]).toEqual({
+    pool_id: "pool-dead",
+    provider_name: "openai-compatible",
+  });
+
+  // Dead pool is never re-attempted after exclusion
+  const attemptsOnDeadAfter = attempts.filter(([, poolId]) => poolId === "pool-dead");
+  expect(attemptsOnDeadAfter.length <= 2, "excluded pool never re-attempted after exclusion").toBeTruthy();
+});
+
 test("createRollingDispatcher — a packet that fits NO pool's declared context cap strands loud instead of spinning (never-dispatchable guard)", async () => {
   await setupTmpQuotaDir();
   // 30k cap; packet 20k + 15k harness overhead = 35k > cap → permanently unselectable.

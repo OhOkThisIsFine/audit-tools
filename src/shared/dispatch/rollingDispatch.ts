@@ -377,6 +377,14 @@ export interface RollingDispatchState<TPacket> {
    * distinct pair is a separate sizing fault signal.
    */
   oversizedPacketPools: Map<string, Set<string>>;
+  /**
+   * Dead providers captured when provider_unavailable outcomes are observed.
+   * Array of {pool_id, provider_name} deduped by pool_id. Populated AT THE MOMENT
+   * each pool is added to exhaustedPoolIds in the provider_unavailable branch,
+   * capturing the pool's providerName at spawn-failure time. Used by the
+   * resumable pause path to name the dead provider and suggest re-detection.
+   */
+  dead_provider_pools: Array<{ pool_id: string; provider_name: string }>;
 }
 
 /** Consumer-provided configuration for the rolling dispatcher. */
@@ -983,6 +991,7 @@ export function createRollingDispatcher<TPacket>(
     quotaUnclassifiedPoolIds: new Set(),
     modelUnavailablePoolIds: new Set(),
     oversizedPacketPools: new Map(),
+    dead_provider_pools: [],
   };
 
   const inFlightTracker = new InFlightTokenTracker();
@@ -1505,6 +1514,16 @@ export function createRollingDispatcher<TPacket>(
       const firstForPool = !state.exhaustedPoolIds.has(providerSlot.poolId);
       state.exhaustedPoolIds.add(providerSlot.poolId);
       if (firstForPool) {
+        // Capture the dead provider's identity at the moment exclusion happens.
+        // Dedupe by pool_id so multiple provider_unavailable results on the same
+        // pool (concurrent in-flight packets) add the provider info only once.
+        const servingPool = confirmedPools.find((p) => p.id === providerSlot.poolId);
+        if (servingPool && !state.dead_provider_pools.some((d) => d.pool_id === providerSlot.poolId)) {
+          state.dead_provider_pools.push({
+            pool_id: providerSlot.poolId,
+            provider_name: servingPool.providerName,
+          });
+        }
         try {
           onProviderUnavailable?.({
             poolId: providerSlot.poolId,

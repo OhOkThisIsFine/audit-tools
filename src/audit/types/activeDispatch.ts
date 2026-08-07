@@ -26,6 +26,13 @@ export interface DispatchPausedState {
   >;
   /** Sorted pool ids that have been exhausted (the shared SettledExclusionSet). */
   settled_exclusions: string[];
+  /**
+   * Dead providers captured when provider_unavailable outcomes were observed.
+   * Optional because old persisted records may omit it. Array of {pool_id,
+   * provider_name} to name the dead providers in the pause handoff and
+   * suggest re-detection on resume.
+   */
+  dead_providers?: Array<{ pool_id: string; provider_name: string }>;
 }
 
 export interface ActiveDispatchState {

@@ -639,6 +639,7 @@ export async function driveRollingAuditDispatch(params: {
       runId,
       strandedIds: run.stranded_ids,
       exhaustedPoolIds: run.exhausted_pool_ids,
+      dead_provider_pools: run.dead_provider_pools,
       discoverProviders: params.discoverProviders,
       livelockLimit: params.livelockLimit,
     });
@@ -769,10 +770,11 @@ async function advanceRollingPause(params: {
   runId: string;
   strandedIds: string[];
   exhaustedPoolIds: string[];
+  dead_provider_pools?: Array<{ pool_id: string; provider_name: string }>;
   discoverProviders?: ProviderRediscovery;
   livelockLimit?: number;
 }): Promise<DispatchPausedState | undefined> {
-  const { artifactsDir, runId, strandedIds, exhaustedPoolIds } = params;
+  const { artifactsDir, runId, strandedIds, exhaustedPoolIds, dead_provider_pools } = params;
   const prior = await readActiveDispatch(artifactsDir, runId);
   const priorPaused = prior?.paused_state;
 
@@ -784,6 +786,27 @@ async function advanceRollingPause(params: {
     ...exhaustedPoolIds,
   ]);
   const settledArray = [...settled].sort();
+
+  // Union dead providers from this pass with any prior pause's recorded dead
+  // providers, deduped by pool_id and sorted for stable artifact ordering.
+  const deadProvidersMap = new Map<string, string>();
+  // Add prior dead providers if any
+  if (priorPaused?.dead_providers) {
+    for (const dead of priorPaused.dead_providers) {
+      deadProvidersMap.set(dead.pool_id, dead.provider_name);
+    }
+  }
+  // Add this pass's dead providers (overwrite if same pool_id)
+  if (dead_provider_pools) {
+    for (const dead of dead_provider_pools) {
+      deadProvidersMap.set(dead.pool_id, dead.provider_name);
+    }
+  }
+  const deadProvidersArray = deadProvidersMap.size > 0
+    ? [...deadProvidersMap.entries()]
+        .map(([pool_id, provider_name]) => ({ pool_id, provider_name }))
+        .sort((a, b) => a.pool_id.localeCompare(b.pool_id))
+    : undefined;
 
   // First strand: enter the paused state. No re-discovery yet — the pool was just
   // exhausted this very pass, so probing now would only re-surface the same ids.
@@ -800,6 +823,7 @@ async function advanceRollingPause(params: {
     const pausedState: DispatchPausedState = {
       lifecycle,
       settled_exclusions: settledArray,
+      ...(deadProvidersArray ? { dead_providers: deadProvidersArray } : {}),
     };
     await persistPausedState(artifactsDir, runId, pausedState);
     return pausedState;
@@ -852,6 +876,7 @@ async function advanceRollingPause(params: {
   const pausedState: DispatchPausedState = {
     lifecycle: next,
     settled_exclusions: settledArray,
+    ...(deadProvidersArray ? { dead_providers: deadProvidersArray } : {}),
   };
   await persistPausedState(artifactsDir, runId, pausedState);
   return pausedState;

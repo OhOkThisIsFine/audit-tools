@@ -2486,18 +2486,29 @@ async function runHostDelegationObligation(
     if (driven.status === "paused") {
       const paused = driven.paused_state;
       const pauseCount = paused?.lifecycle.pause_count ?? 0;
+      // Build the base message about the pause.
+      let reason =
+        `In-process rolling dispatch paused waiting for provider capacity: ` +
+        `${driven.stranded_ids.length} review packet(s) are stranded on an exhausted ` +
+        `provider pool (provider '${sessionConfig?.provider}', pause ${pauseCount + 1}). `;
+      // If dead providers were recorded, name them and suggest re-detection.
+      if (paused?.dead_providers && paused.dead_providers.length > 0) {
+        const providerList = paused.dead_providers
+          .map((d) => `provider ${d.provider_name} (pool ${d.pool_id})`)
+          .join(", ");
+        reason +=
+          `Dead provider(s): ${providerList} died at spawn — check installation/PATH. `;
+      }
+      reason +=
+        "The run is resumable — re-run next-step once provider capacity returns; " +
+        "it will resume automatically and re-detect providers, or yield to synthesis on partial coverage after the pause limit.";
       return {
         kind: "emit",
         step: {
           kind: "blocked",
           state,
           bundle,
-          reason:
-            `In-process rolling dispatch paused waiting for provider capacity: ` +
-            `${driven.stranded_ids.length} review packet(s) are stranded on an exhausted ` +
-            `provider pool (provider '${sessionConfig?.provider}', pause ${pauseCount + 1}). ` +
-            "The run is resumable — re-run next-step once provider capacity returns; " +
-            "it will resume automatically, or yield to synthesis on partial coverage after the pause limit.",
+          reason,
         },
       };
     }
