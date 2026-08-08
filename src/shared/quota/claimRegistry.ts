@@ -57,14 +57,10 @@ async function readClaimMap(registryPath: string): Promise<ClaimMap> {
   );
 }
 
-/**
- * Atomic (temp + rename, via the shared `writeJsonFile`). `readClaimMap` degrades
- * malformed content to `{}` — "no node is claimed" — so a torn registry lets two
- * dispatch loops claim the same node. Same fail-open class as INV-QD-15.
- */
-async function writeClaimMap(registryPath: string, claims: ClaimMap): Promise<void> {
-  await writeRecordMap(registryPath, claims);
-}
+// Writes go straight to `writeRecordMap` (atomic temp + rename). The fail-open
+// direction that matters here: `readClaimMap` degrades malformed content to `{}` —
+// "no node is claimed" — so a torn registry lets two dispatch loops claim the same
+// node. Same class as INV-QD-15.
 
 /**
  * File-backed claim registry. The caller owns the path (and may point two
@@ -111,7 +107,7 @@ export class ClaimRegistry {
       }
       const ownerToken = mintToken();
       claims[nodeId] = { ownerToken, poolId, heartbeatAt: now };
-      await writeClaimMap(this.registryPath, claims);
+      await writeRecordMap(this.registryPath, claims);
       return { acquired: true, ownerToken };
     });
   }
@@ -151,7 +147,7 @@ export class ClaimRegistry {
         granted.push(nodeId);
         ownerTokenByNode[nodeId] = ownerToken;
       }
-      if (granted.length > 0) await writeClaimMap(this.registryPath, claims);
+      if (granted.length > 0) await writeRecordMap(this.registryPath, claims);
       return { granted, ownerTokenByNode };
     });
   }
@@ -173,7 +169,7 @@ export class ClaimRegistry {
           removed += 1;
         }
       }
-      if (removed > 0) await writeClaimMap(this.registryPath, claims);
+      if (removed > 0) await writeRecordMap(this.registryPath, claims);
       return removed;
     });
   }
@@ -199,7 +195,7 @@ export class ClaimRegistry {
           released.push(nodeId);
         }
       }
-      if (released.length > 0) await writeClaimMap(this.registryPath, claims);
+      if (released.length > 0) await writeRecordMap(this.registryPath, claims);
       return released;
     });
   }
@@ -216,7 +212,7 @@ export class ClaimRegistry {
       const existing = claims[nodeId];
       if (!existing || existing.ownerToken !== ownerToken) return false;
       existing.heartbeatAt = this.now();
-      await writeClaimMap(this.registryPath, claims);
+      await writeRecordMap(this.registryPath, claims);
       return true;
     });
   }
@@ -232,7 +228,7 @@ export class ClaimRegistry {
       const existing = claims[nodeId];
       if (!existing || existing.ownerToken !== ownerToken) return false;
       delete claims[nodeId];
-      await writeClaimMap(this.registryPath, claims);
+      await writeRecordMap(this.registryPath, claims);
       return true;
     });
   }
@@ -254,7 +250,7 @@ export class ClaimRegistry {
           reclaimed.push(nodeId);
         }
       }
-      if (reclaimed.length > 0) await writeClaimMap(this.registryPath, claims);
+      if (reclaimed.length > 0) await writeRecordMap(this.registryPath, claims);
       return reclaimed;
     });
   }

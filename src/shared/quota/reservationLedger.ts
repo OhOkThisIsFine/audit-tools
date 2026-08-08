@@ -176,16 +176,11 @@ async function readLedger(ledgerPath: string): Promise<LedgerMap> {
   });
 }
 
-/**
- * Atomic (temp + rename, via the shared `writeJsonFile`). A truncating in-place
- * write leaves a permanently-torn ledger behind a crash mid-write, and `readLedger`
- * degrades malformed content to `{}` — i.e. "zero outstanding leases" — so the
- * failure direction is over-admission. Same fail-open class as the quota-state
- * torn read (INV-QD-15).
- */
-async function writeLedger(ledgerPath: string, ledger: LedgerMap): Promise<void> {
-  await writeRecordMap(ledgerPath, ledger);
-}
+// Writes go straight to `writeRecordMap` (atomic temp + rename) — a truncating
+// in-place write would leave a permanently-torn ledger behind a crash mid-write,
+// and `readLedger` degrades malformed content to `{}`, i.e. "zero outstanding
+// leases", so the failure direction is over-admission. Same fail-open class as the
+// quota-state torn read (INV-QD-15).
 
 /** Sum of non-expired leases for a key. Expired leases (crashed consumers) don't count. */
 function sumOutstanding(leases: ReservationLease[] | undefined, now: number): number {
@@ -329,7 +324,7 @@ export class ReservationLedger {
       if (!admitted) {
         // Persist the prune even on a blocked admission so expired leases don't
         // linger and depress headroom for the next attempt.
-        await writeLedger(this.ledgerPath, ledger);
+        await writeRecordMap(this.ledgerPath, ledger);
         return { admitted: false, leaseId: null, constraints: outcomes, binding, anyOutstanding };
       }
 
@@ -339,7 +334,7 @@ export class ReservationLedger {
         const lease: ReservationLease = { leaseId, cost: outcome.cost, poolId: input.poolId, expiresAt };
         ledger[outcome.resourceKey] = [...(ledger[outcome.resourceKey] ?? []), lease];
       }
-      await writeLedger(this.ledgerPath, ledger);
+      await writeRecordMap(this.ledgerPath, ledger);
       return { admitted: true, leaseId, constraints: outcomes, binding, anyOutstanding };
     });
   }
@@ -365,7 +360,7 @@ export class ReservationLedger {
         if (remaining.length > 0) ledger[resourceKey] = remaining;
         else delete ledger[resourceKey];
       }
-      await writeLedger(this.ledgerPath, ledger);
+      await writeRecordMap(this.ledgerPath, ledger);
       return removed;
     });
   }
@@ -388,7 +383,7 @@ export class ReservationLedger {
     return withFileLock(this.lockPath, async () => {
       const now = this.now();
       const { ledger, dropped } = pruneExpired(await readLedger(this.ledgerPath), now);
-      if (dropped > 0) await writeLedger(this.ledgerPath, ledger);
+      if (dropped > 0) await writeRecordMap(this.ledgerPath, ledger);
       return dropped;
     });
   }
