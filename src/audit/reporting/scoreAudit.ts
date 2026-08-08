@@ -34,6 +34,7 @@
  */
 
 import { findingIdentityKey, type Finding } from "audit-tools/shared";
+import { ratio, pct, valueRegressed } from "./scoreShared.js";
 
 /** The label a human applies to one finding of a labeled corpus run. */
 export type FindingLabel = "true_positive" | "false_positive" | "hallucinated";
@@ -138,9 +139,6 @@ export function findingSignature(finding: Finding): string {
   return findingIdentityKey(finding);
 }
 
-function ratio(numerator: number, denominator: number): number | null {
-  return denominator === 0 ? null : numerator / denominator;
-}
 
 /**
  * Score a fresh audit's findings against a corpus's labels — the pure A-2 oracle.
@@ -298,16 +296,16 @@ export function hallucinationRegressed(
   epsilon = 1e-9,
 ): boolean {
   if (!baseline) return false;
-  const currentRate = current.hallucination_rate;
-  if (currentRate === null) return false;
-  const baselineRate = baseline.hallucination_rate ?? 0;
-  return currentRate > baselineRate + epsilon;
+  return valueRegressed(
+    current.hallucination_rate,
+    baseline.hallucination_rate,
+    "lower-is-better",
+    epsilon,
+  );
 }
 
 /** A compact, deterministic human summary of a {@link Scorecard}. */
 export function renderScorecardMarkdown(scorecard: Scorecard): string {
-  const pct = (value: number | null): string =>
-    value === null ? "n/a" : `${(value * 100).toFixed(1)}%`;
   const c = scorecard.counts;
   const lines = [
     `# Audit scorecard — ${scorecard.run_id}`,

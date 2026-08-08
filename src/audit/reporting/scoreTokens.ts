@@ -20,6 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { ratio, pct, valueRegressed } from "./scoreShared.js";
 
 /** One packet's recorded usage, read from a `token-usage.jsonl` line. */
 export interface TokenUsageEntry {
@@ -72,9 +73,6 @@ export interface TokenScorecard {
   provider_coverage: Record<string, "measured" | "unmeasured">;
 }
 
-function ratio(numerator: number, denominator: number): number | null {
-  return denominator === 0 ? null : numerator / denominator;
-}
 
 /** True iff at least one of the four usage legs was reported (not null/undefined). */
 function isMeasured(entry: TokenUsageEntry): boolean {
@@ -238,16 +236,16 @@ export function cacheHitRatioRegressed(
   epsilon = 1e-9,
 ): boolean {
   if (!baseline) return false;
-  const currentRatio = current.cache_hit_ratio_overall;
-  if (currentRatio === null) return false;
-  const baselineRatio = baseline.cache_hit_ratio_overall ?? 0;
-  return currentRatio < baselineRatio - epsilon;
+  return valueRegressed(
+    current.cache_hit_ratio_overall,
+    baseline.cache_hit_ratio_overall,
+    "higher-is-better",
+    epsilon,
+  );
 }
 
 /** A compact, deterministic human summary of a {@link TokenScorecard}. */
 export function renderTokenScorecardMarkdown(scorecard: TokenScorecard): string {
-  const pct = (value: number | null): string =>
-    value === null ? "n/a" : `${(value * 100).toFixed(1)}%`;
   const t = scorecard.totals;
   const lines = [
     `# Token scorecard — ${scorecard.run_id}`,
