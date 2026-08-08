@@ -49,10 +49,11 @@
    one-file-at-a-time protocol; queue in the brief's status block.
 4. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties. Run
    it once the refactors above are done, per the owner call.
-5. Host-memory chore (not repo work): `/consolidate-memory` — the index is ~20KB against a 17.1KB
-   target across 227 files. A further mechanical trim is NOT the fix; the note at the top of
-   `MEMORY.md` records the constraint that blocks a naive merge (several memory files are cited by
-   repo docs, and `check:memory-citations` fails on a dangling citation).
+   ⚠ The memory-index size chore is **closed, not pending** (owner call, 2026-08-07): the index is
+   one line per cluster already, so its size is the file count rather than padding, and it sits well
+   under the harness's real 24.4KB read limit. The harness's 17.1KB compaction reminder still fires
+   on memory edits — ignore it. Rationale and the re-open condition are in the note at the top of
+   `MEMORY.md`. Do not re-add this as a task.
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
