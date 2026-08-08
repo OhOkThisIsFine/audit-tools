@@ -250,34 +250,11 @@ describe('the live tree', () => {
     expect(r.stdout).toMatch(/pointer\(s\)/);
   });
 
-  it('shares ONE definition of "a backlog entry" with check-backlog-budget', () => {
-    // Two entry grammars would drift into two different item counts, and the
-    // roadmap would silently omit whatever only the budget gate can see.
-    const r = spawnSyncHidden(process.execPath, [join(REPO_ROOT, 'scripts', 'check-backlog-budget.mjs'), '--report'], {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      timeout: 60_000,
-      windowsHide: true,
-    });
-    const rawCounts = new Map<string, number>(
-      [...(r.stdout ?? '').matchAll(/^(\S+\.md): (\d+) entries/gm)].map(
-        (m): [string, number] => [m[1], Number(m[2])],
-      ),
-    );
-    const counts = {
-      size: rawCounts.size,
-      get(key: string): number {
-        const v = rawCounts.get(key);
-        if (v === undefined) throw new Error(`no entry count recorded for ${key}`);
-        return v;
-      },
-    };
-    expect(counts.size).toBeGreaterThan(0);
-    for (const file of ['open-bugs.md', 'deferred.md', 'forward-tracks.md']) {
-      const text = readFileSync(join(REPO_ROOT, 'docs', 'backlog', file), 'utf8');
-      expect(parseBulletEntries(text, file), `${file} entry grammar drifted`).toHaveLength(counts.get(file));
-    }
-  });
+  // The former 'shares ONE definition of "a backlog entry"' test compared this
+  // generator's entry COUNT against check-backlog-budget's. Both now segment
+  // through scripts/shared/backlog-entry-grammar.mjs, so there is one grammar and
+  // nothing left to drift — extraction replaces the drift test rather than
+  // sitting beside it.
 });
 
 // ── the pre-commit gate, end to end in a throwaway repo ──────────────────────

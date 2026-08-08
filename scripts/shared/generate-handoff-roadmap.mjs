@@ -44,6 +44,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
+import { splitBacklogEntries } from "./backlog-entry-grammar.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -108,25 +109,16 @@ function boldTitle(body, { where, opener }) {
 }
 
 /**
- * Split backlog text into its top-level `- **…` entries. Same entry grammar as
- * `scripts/check-backlog-budget.mjs` — one definition of "an entry" for the
- * budget gate and the roadmap alike; `tests/shared/handoff-roadmap.test.mjs`
- * pins the two against each other so they cannot diverge.
+ * Split backlog text into its top-level `- **…` entries. Entry boundaries come
+ * from the shared grammar in `./backlog-entry-grammar.mjs`, so this and the
+ * budget gate cannot disagree on what an entry is; only the title derivation is
+ * local (the roadmap needs the verbatim bold run).
  */
 export function parseBulletEntries(text, file = "<text>") {
-  const lines = text.split(/\r?\n/);
-  const starts = [];
-  lines.forEach((l, i) => {
-    if (/^- \*\*/.test(l)) starts.push(i);
-  });
-  return starts.map((start, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : lines.length;
-    const body = lines.slice(start, end).join("\n");
-    return {
-      title: boldTitle(body, { where: `${file}:${start + 1}`, opener: "- " }),
-      line: start + 1,
-    };
-  });
+  return splitBacklogEntries(text).map(({ line, body }) => ({
+    title: boldTitle(body, { where: `${file}:${line}`, opener: "- " }),
+    line,
+  }));
 }
 
 /**

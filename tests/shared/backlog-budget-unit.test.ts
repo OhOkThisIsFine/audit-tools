@@ -42,6 +42,7 @@ import { join, resolve } from "node:path";
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const BACKLOG_DIR = join(REPO_ROOT, "docs", "backlog");
 const SCRIPT = join(REPO_ROOT, "scripts", "check-backlog-budget.mjs");
+const ENTRY_GRAMMAR = join(REPO_ROOT, "scripts", "shared", "backlog-entry-grammar.mjs");
 
 const {
   sizeOf,
@@ -308,11 +309,14 @@ describe("--update-baseline may lower a ceiling, never raise one", () => {
 
     beforeAll(() => {
       dir = mkdtempSync(join(tmpdir(), "backlog-budget-"));
-      mkdirSync(join(dir, "scripts"), { recursive: true });
+      mkdirSync(join(dir, "scripts", "shared"), { recursive: true });
       mkdirSync(join(dir, "docs", "backlog"), { recursive: true });
       script = join(dir, "scripts", "check-backlog-budget.mjs");
       baselineFile = join(dir, "docs", "backlog", ".size-baseline.json");
       copyFileSync(SCRIPT, script);
+      // The script imports the shared entry grammar; the skeleton has to carry it
+      // too, or the copy dies at import time instead of exercising the CLI.
+      copyFileSync(ENTRY_GRAMMAR, join(dir, "scripts", "shared", "backlog-entry-grammar.mjs"));
 
       const text = file(...bulk(60, 2000));
       measured = sizeOf(text);

@@ -59,6 +59,7 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { splitBacklogEntries } from "./shared/backlog-entry-grammar.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
@@ -75,22 +76,18 @@ export const ENTRY_BUDGET_BYTES = 2600;
 /** Max BYTES for a whole section file — the "one bounded read" property. */
 export const FILE_BUDGET_BYTES = 120_000;
 
-/** Split a backlog file into its top-level entries. */
+/**
+ * Split a backlog file into its top-level entries and meter each one. Entry
+ * boundaries come from the shared grammar; the TITLE stays local because it is a
+ * persisted identity (see entryKey / .size-baseline.json) whose 78-char
+ * truncation the recorded keys already carry.
+ */
 export function parseEntries(text) {
-  const lines = text.split(/\r?\n/);
-  const starts = [];
-  lines.forEach((l, i) => {
-    if (/^- \*\*/.test(l)) starts.push(i);
-  });
-  return starts.map((start, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : lines.length;
-    const body = lines.slice(start, end).join("\n").replace(/\s+$/, "");
-    return {
-      line: start + 1,
-      bytes: sizeOf(body),
-      title: lines[start].replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78),
-    };
-  });
+  return splitBacklogEntries(text).map(({ line, headline, body }) => ({
+    line,
+    bytes: sizeOf(body.replace(/\s+$/, "")),
+    title: headline.replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78),
+  }));
 }
 
 /** Stable identity for an entry — its title, not its line (lines shift constantly). */
