@@ -19,6 +19,7 @@ its proposals would have introduced defects.
 | 5 | `reviewPacketShared.ts`; `acceptNode` `rollbackFailureOutcome` | `c38f4511` |
 | 7 | `scripts/shared/backlog-entry-grammar.mjs`, replacing the count-parity drift test | `e5eda582` |
 | 9 | All three type-only cycles broken; `no-circular` `viaOnly` exemption removed | `4082c237` |
+| 2 | `recordStore.ts` — `mintToken`, `readRecordMap` (pick, not guard), `writeRecordMap` | `426c2ba6` |
 
 Item 5 also dissolved a duplicated `ReviewPacketPlanningData` interface the sweep had not listed —
 same defect class, same two files, and its "re-declared locally to avoid circular dep" comment was
@@ -41,7 +42,9 @@ the tell.
 
 ## Remaining — verified specs
 
-### §4 item 2 — `claimRegistry` / `reservationLedger` store scaffolding
+### ~~§4 item 2 — `claimRegistry` / `reservationLedger` store scaffolding~~ — LANDED `426c2ba6`
+
+Kept below because the correction it forced is the reusable part.
 
 **Pair.** `src/shared/quota/claimRegistry.ts` `mintOwnerToken` / `readClaimMap` / `writeClaimMap`
 against `src/shared/quota/reservationLedger.ts` `mintLeaseId` / `readLedger` / `writeLedger`.
@@ -85,12 +88,32 @@ adapter, or (c) a policy knob belonging on the shared core; only (a) and (b) leg
 per-mode. Note the standing rule: "it would become a config shell with several knobs" is *not* a
 fork justification.
 
-⚠ **A latent bug the comparison exposed, worth fixing regardless of whether the extraction happens.**
-Audit names its sidecars through `artifactNameForId(...)`, which sanitizes the `:` that packet ids
-embed (documented as throwing on Windows NTFS). Remediate builds them raw as
-`` `${block.block_id}.task.json` ``, with **no sanitizer** — and `block_id` is model-authored
-verbatim, so it is not guaranteed `:`-free. That is a latent Windows failure on the remediate side.
-The shared prep should adopt the sanitizer for both.
+⚠ **A latent bug the comparison exposed, worth fixing regardless of whether the extraction happens —
+and it is bigger than it first looks.** Audit names its sidecars through `artifactNameForId(...)`,
+which sanitizes the `:` that packet ids embed (`rollingAuditDispatch.ts` documents that a raw id
+throws on Windows, NTFS reading `:` as an alternate-data-stream separator). Remediate builds them
+raw as `` `${block.block_id}.task.json` ``, with **no sanitizer**. `block_id` is declared
+`z.string()` with no charset constraint and no validating regex anywhere, and it is model-authored,
+so it is not guaranteed `:`-free.
+
+**The trap for whoever fixes it:** the name is constructed in TWO places, with no shared helper.
+`providerNodeDispatch.ts` writes `<blockId>.{task.json,stdout.txt,stderr.txt}`, and
+`steps/dispatch/marshal.ts:614-616` INDEPENDENTLY rebuilds `<blockId>.task.json` /
+`<blockId>.stderr.txt` to decide whether a block was ever dispatched (no task.json ⇒ it reports a
+rolling-engine plan/drive inconsistency). Sanitizing only the writer makes marshal fail to find the
+file and wrongly report "never dispatched" on every node. So the fix is: single-source the three
+sidecar paths into one helper used by both, and sanitize there.
+
+Supporting move: `artifactNameForId` / `safeArtifactStem` / `digestId` currently live in
+`src/audit/cli/args.ts`. Remediate must not import from audit, so they belong in
+`src/shared/io/artifactName.ts` with `args.ts` re-exporting for its existing consumers.
+
+Note this changes on-disk sidecar names (`B1.task.json` → `B1_<digest>.task.json`), so the tests
+asserting the literal names need updating with it —
+`tests/remediate/rolling-provider-dispatch.test.ts:235`,
+`tests/remediate/dispatch-merge-tolerance.test.ts:173`. These are per-run transient artifacts, not a
+persisted cross-version identity, so renaming them is safe as long as writer and reader move
+together. Loop-core (`src/remediate/steps/dispatch/`) — attested commit.
 
 Also unresolved by the lane: `WorkerTask` is a per-orchestrator contract
 (`audit-code-worker/v1alpha1` vs `remediation-worker/v1alpha1`), so the task-builder is genuine

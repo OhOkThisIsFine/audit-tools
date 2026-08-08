@@ -6,19 +6,29 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Analyzer-sweep dedup cluster — remaining four (2026-08-07, medium).** Five of the sweep's ten
+- **Analyzer-sweep dedup cluster — remaining three (2026-08-07, medium).** Six of the sweep's ten
   duplication/cycle findings shipped 2026-08-07 (score primitives, `compareGraphEdges`, reviewPacket
   twins + acceptNode outcome twins, scripts bullet grammar, all three type-only cycles — the
-  `no-circular` rule now gates type-only cycles too). **Remaining, each with a verified diff-ready
-  spec** in [`reviews/dedup-cluster-2026-08-07b.md`](../reviews/dedup-cluster-2026-08-07b.md):
-  claimRegistry/reservationLedger store scaffolding (⚠ generalize on a *pick* function, not a guard —
-  an `every` guard changes the corrupt-input degrade path); rollingAuditDispatch/providerNodeDispatch
-  shared prep head (one-core-two-draws; ⚠ exposes a latent Windows bug — remediate builds sidecar
-  names from a model-authored `block_id` with no `:` sanitizer); nextStepCommand conceptual-dispatch
-  scaffold + cargo/packageJson workspace patterns; step-driver unification across
-  completion-harness / wrapper-harness / run-wrapper. **Property:** each duplicated load-bearing
-  mechanism ends single-sourced (extract, don't drift-test); the jscpd ratchet (`check:dup`, 5.5%)
-  only stops NEW drift, it does not close these.
+  `no-circular` rule now gates type-only cycles too — and the claim/lease store scaffolding).
+  **Remaining, each with a verified diff-ready spec** in
+  [`reviews/dedup-cluster-2026-08-07b.md`](../reviews/dedup-cluster-2026-08-07b.md):
+  rollingAuditDispatch/providerNodeDispatch shared prep head (one-core-two-draws);
+  nextStepCommand conceptual-dispatch scaffold + cargo/packageJson workspace patterns;
+  step-driver unification across completion-harness / wrapper-harness / run-wrapper.
+  **Property:** each duplicated load-bearing mechanism ends single-sourced (extract, don't
+  drift-test); the jscpd ratchet (`check:dup`, 5.5%) only stops NEW drift, it does not close these.
+
+- **Remediate sidecar filenames are unsanitized, and the name is built in two places (2026-08-07,
+  medium).** `providerNodeDispatch.ts` writes `<block_id>.{task.json,stdout.txt,stderr.txt}` raw,
+  while audit sanitizes the equivalent through `artifactNameForId` because ids embed `:`, which NTFS
+  reads as an alternate-data-stream separator. `block_id` is `z.string()` with no charset constraint
+  and is model-authored, so this is a latent Windows failure. `steps/dispatch/marshal.ts:614-616`
+  INDEPENDENTLY rebuilds the same names to decide whether a block was dispatched, so sanitizing only
+  the writer makes marshal report "never dispatched" for every node. **Property:** one helper owns
+  the three sidecar paths for both writer and reader, and it sanitizes; `artifactNameForId` moves
+  down out of `src/audit/cli/args.ts` into shared so remediate need not import from audit. Detail,
+  the new module's home, and the tests that move with it:
+  [`reviews/dedup-cluster-2026-08-07b.md`](../reviews/dedup-cluster-2026-08-07b.md).
 
 - **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
   the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in

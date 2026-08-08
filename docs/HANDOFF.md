@@ -37,17 +37,27 @@
 
 ## Immediate next
 
-1. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties;
-   needs a quiet tree.
-2. **Analyzer-sweep dedup cluster — remaining four** (open-bugs) — specs are written and verified in
-   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md); the two loop-core
-   ones (quota store scaffolding, rolling-dispatch prep head) each want their own attested commit.
-   The rolling-dispatch item also carries a **latent Windows bug** to fix regardless: remediate
-   builds sidecar filenames from a model-authored `block_id` with no `:` sanitizer.
+> **Owner call 2026-08-07, superseding the earlier deferral:** the dogfood deferral is **obsolete** —
+> dogfooding can run whenever, the quiet tree is no longer the gate. But **known refactoring goals
+> come first, before another audit run.** That is why the pinned dogfood cluster is last here while
+> still being the backlog's pinned item.
+
+1. **Remediate sidecar filenames — unsanitized, and built in TWO places** (open-bugs). The sharpest
+   remaining defect: `marshal.ts` independently rebuilds the names `providerNodeDispatch` writes, so
+   sanitizing only the writer makes marshal report "never dispatched" for every node. Fix both
+   through one helper, and move `artifactNameForId` down into shared on the way.
+2. **Analyzer-sweep dedup cluster — remaining three** (open-bugs) — specs written and verified in
+   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md). The
+   rolling-dispatch prep head is the one with real design content (one-core-two-draws) and wants its
+   own attested commit.
 3. **T4 remainder** — next target `audit-code-wrapper-packets.test.ts` (198.5s), same
    one-file-at-a-time protocol; queue in the brief's status block.
-4. Host-memory chore (not repo work): `/consolidate-memory` — the memory index still needs its
-   consolidation pass (pointer note at the top of `MEMORY.md`).
+4. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties. Run
+   it once the refactors above are done, per the owner call.
+5. Host-memory chore (not repo work): `/consolidate-memory` — the index is ~20KB against a 17.1KB
+   target across 227 files. A further mechanical trim is NOT the fix; the note at the top of
+   `MEMORY.md` records the constraint that blocks a naive merge (several memory files are cited by
+   repo docs, and `check:memory-citations` fails on a dangling citation).
 
    ⚠ Standing hazard: `session-config.json` at repo root (untracked,
    `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
