@@ -290,10 +290,10 @@ export function makeAuditProviderPacketDispatcher(params: {
     // built FROM its pool's source config) and sidecar naming are one algorithm
     // across both draws. Only the task contract and the launch's root/labelling
     // below are audit-specific.
-    const { provider, cfg } = resolveDispatchProvider(params, slot, createFreshSessionProvider);
+    const provider = resolveDispatchProvider(params, slot, createFreshSessionProvider);
 
     const resultPath = entry.result_path;
-    const { dir, taskPath, stdoutPath, stderrPath } = dispatchSidecarPathsForResult(
+    const { taskPath, stdoutPath, stderrPath } = dispatchSidecarPathsForResult(
       resultPath,
       packet.id,
     );

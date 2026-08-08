@@ -44,7 +44,7 @@ export interface ProviderDispatchPrepParams {
 }
 
 /**
- * Resolve the provider for one slot, plus the config it was built from.
+ * Resolve the provider for one slot.
  *
  * The provider comes from the slot the scheduler chose, falling back to the
  * configured provider when the slot names none. `withSourceConfig` folds the
@@ -55,11 +55,11 @@ export function resolveDispatchProvider(
   params: ProviderDispatchPrepParams,
   slot: ProviderSlot | null | undefined,
   fallback: FreshSessionProviderFactory,
-): { provider: FreshSessionProvider; cfg: SessionConfig } {
+): FreshSessionProvider {
   const resolveProvider = params.createProvider ?? fallback;
   const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
   const cfg = withSourceConfig(params.sessionConfig ?? {}, source);
-  return { provider: resolveProvider(slot?.providerName || cfg.provider, cfg), cfg };
+  return resolveProvider(slot?.providerName || cfg.provider, cfg);
 }
 
 /**
@@ -98,7 +98,6 @@ function dispatchSidecarPaths(
 export function dispatchSidecarPathsForResult(
   resultPath: string,
   id: string,
-): { dir: string; taskPath: string; stdoutPath: string; stderrPath: string } {
-  const dir = dirname(resultPath);
-  return { dir, ...dispatchSidecarPaths(dir, id) };
+): { taskPath: string; stdoutPath: string; stderrPath: string } {
+  return dispatchSidecarPaths(dirname(resultPath), id);
 }

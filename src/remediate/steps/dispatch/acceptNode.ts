@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { isLoopCorePath } from "audit-tools/shared";

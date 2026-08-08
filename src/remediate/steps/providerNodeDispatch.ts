@@ -99,7 +99,7 @@ export function makeProviderNodeDispatcher(
     // cross-pool spill (INV-QD-14) really routes to a peer pool's backend) and
     // sidecar naming are one algorithm across both draws. Only the task contract
     // and the worktree-rooted launch below are remediation-specific.
-    const { provider } = resolveDispatchProvider(params, slot, createFreshSessionProvider);
+    const provider = resolveDispatchProvider(params, slot, createFreshSessionProvider);
     // Sidecars resolve through `nodeArtifacts`, the one owner of every per-node
     // run-dir name, so the merge's diagnosis — which independently resolves the
     // same paths — can never disagree with what was written here.
