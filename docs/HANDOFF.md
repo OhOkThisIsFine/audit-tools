@@ -5,12 +5,13 @@
 
 ## Live state
 
-- **Unreleased on `main` since v0.39.3** — five commits, all green, dedup-cluster + T4 work:
-  `3a5d352c` score primitives; `c38f4511` (attested) `compareGraphEdges` + `reviewPacketShared` +
-  acceptNode `rollbackFailureOutcome`; `4082c237` (attested) all three type-only cycles broken **and
-  the `no-circular` rule tightened** — `viaOnly` type-only exemption removed, so a type-only cycle is
-  now a red build; `e5eda582` one backlog-entry grammar for the scripts tree; `6734b25d` the T4
-  split of `audit-code-completion.test.ts`. **Not yet published** — no version bump taken.
+- **v0.39.4 SHIPPED 2026-08-07 (dedup cluster + type-only cycle gate + T4 completion split).** Six
+  commits: `3a5d352c` score primitives; `c38f4511` (attested) `compareGraphEdges` +
+  `reviewPacketShared` + acceptNode `rollbackFailureOutcome`; `4082c237` (attested) all three
+  type-only cycles broken **and the `no-circular` rule tightened** — the `viaOnly` type-only
+  exemption is gone, so a type-only cycle is now a red build; `e5eda582` one backlog-entry grammar
+  for the scripts tree; `6734b25d` the T4 split of `audit-code-completion.test.ts`; `9407db81` the
+  record + regenerated baseline.
 - **Five of the sweep's ten dedup findings are done.** The four that remain each carry a verified,
   diff-ready spec in [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md),
   which also records three cases where the analysis lane's proposal was wrong and what the
@@ -29,8 +30,10 @@
   validated (reintroduced cycle → exit 1) and restored by inverting the edit.
 - The shard-duration baseline is regenerated from that green full run (593 files).
 - Loop-core commits `c38f4511` and `4082c237` attested (staged-tree-bound, agent class).
-- Release CI last green for v0.39.3 (run 31220796273): critical path 253s. **CI has not run on the
-  five new commits** beyond the local full suite.
+- Release CI green for v0.39.4 (run 31234888604): gate 130s, test shards **137/131/165/182s**,
+  publish 73s. The T4 split shows up as a tighter spread and a lower ceiling — v0.39.3's shards were
+  205/198/151/132, so the slowest shard fell 205s → 182s. npm live at 0.39.4; global bins reinstalled
+  + postinstall run manually (npm defers it on `-g`), both report 0.39.4.
 
 ## Immediate next
 
