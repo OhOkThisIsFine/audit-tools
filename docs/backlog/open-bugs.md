@@ -6,26 +6,43 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).** Found one
-  live instance closing dedup item 8: `"advancePastDesignReview throws on unknown pause kind"`
-  declared a hand-copied replica of the walker *inside the test body* and asserted on the replica, so
-  the production helper could have been deleted and it would have stayed green. Fixed in `c791df49`
-  by making the driver's transport injectable, which is the general remedy — the replica exists
-  because the real code was undrivable.
-  **Why no gate catches it:** it is green, it typechecks, it has no unused exports, and coverage
-  counts the replica's lines. knip, eslint and the red-green rule all pass a test that pins nothing.
-  **The tell:** a function declared in a test file that mirrors production control flow (a `for` over
-  step kinds, a switch over cases) rather than calling into `src/`.
-  **Property:** every test either calls production code or is deleted; where a replica exists because
-  the subject is hard to drive, fix the *untestability* (inject the dependency) rather than the test.
-  Scope: `tests/**` — start with the harness-heavy audit suites. [[test-must-reach-the-code-it-claims]]
+- **Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).**
+  `module_contract_drafting` says "dispatch ONE sub-agent PER MODULE"; where in-process subagents are
+  unavailable the only route is a shell-out lane the tool neither knows nor sizes for (2 of 9 such
+  dispatches died mid-output; only the step's presence check caught it). **Property:** a fan-out step
+  states what it NEEDS (N independent contexts, no shared authorship), not a mechanism; an
+  absent-after-dispatch shard reports as TRANSPORT failure, not a refusal. Uncovered half: nothing
+  carries the Stop-gate kill-switches into a shell-out child, so it hangs.
 
-- **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
-  the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in
-  `graphPythonImports`, `graphRoutes`, `changeClassification`, `autonomousGate`,
-  `worktreeLifecycle`, `stepBoundaryCapture` need per-pattern backtracking analysis (atomic
-  groups / restructuring where real); the rest of the family was verified false-positive
-  ([`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4/§5).
+- **Diff-based re-review loses the verdict it must diff against (2026-08-08, low).** Repairing
+  `finalized_module_contracts` deletes `conceptual_design_critique.*` as stale, then the re-review step
+  says "diff against your prior verdict" — which survives only as prose in the step prompt, unreadable
+  to the independent reviewer that step demands. **Property:** an artifact a step tells the host to diff
+  against is readable when that step runs.
+
+- **`free_form_intent` clause splitter shreds prose on bare `;` (2026-08-08, low).** Splits inside
+  parentheticals and `(a) …; (b) …` lists, so fragments are unencodable *because* they are fragments.
+  **Property:** split on sentence boundaries; report a count plus pointer, not shredded prose.
+
+- **Resolved intake questions must clear `open_questions`, not just the checkpoint (2026-08-08, low).**
+  `decideNextStep` gates on `intake-summary.json` (`ready` + `open_questions[]`), so resolving at
+  `confirm_intent` still routes to `collect_intake_clarifications` until the host edits the summary.
+  **Property:** resolved at the checkpoint is resolved everywhere, or confirm names the gate's input.
+
+- **Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).** One live
+  instance found and fixed in `c791df49` (see git log). **Why no gate catches it:** such a test is
+  green, typechecks, has no unused exports, and coverage counts the replica's lines — knip, eslint and
+  the red-green rule all pass a test that pins nothing. **The tell:** a function declared in a test file
+  that mirrors production control flow (a `for` over step kinds, a switch over cases) instead of calling
+  into `src/`. **Property:** every test either calls production code or is deleted; where a replica
+  exists because the subject is undrivable, fix the *untestability* (inject the dependency), not the
+  test. Scope: `tests/**`, starting with the harness-heavy audit suites. [[test-must-reach-the-code-it-claims]]
+
+- **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of the
+  sonarjs regex findings — six sites processing unbounded audited-repo content — needs per-pattern
+  backtracking analysis (atomic groups / restructuring where real); the rest of the family was verified
+  false-positive. Sites and triage in
+  [`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4/§5.
   **Property:** no regex over audited-repo content is super-linear on adversarial input.
 
 - **`ensureCleanWorktree` blocks a release on sibling UNTRACKED files (2026-08-07, low, friction).**
@@ -420,18 +437,12 @@
 
 - **"The free model can't handle reasoning work" is a MYTH built from unset request parameters — check
   `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).** Two apparent
-  capability failures in one session, both traced to the caller:
-  (a) asked to enumerate defects in a 94-line review record under `strict: true` with a generic
-  `{summary, findings[], open_questions[]}` shape, the lane returned schema-VALID output whose every
-  finding was the literal string `FAILED_TO_EXTRACT`. Cause: constrained decoding into a container that
-  cannot hold the answer. The same model, same document, given a schema shaped to the task (an array of
-  typed defect records) with `strict` off, produced a correct classification matching an independent hand
-  analysis. The tell was present in the bad run — the summary was accurate and every defect id was named,
-  so comprehension was never in question, only the container;
-  (b) a 12-item batch returned 5 items with the last one degenerating into nonsense tokens, which read as
-  the model falling apart under load. Measured cause: `finish_reason=length`, `completion_tokens=1024` —
-  **no `max_tokens` was ever set**, so a default cap truncated the array mid-flight and the "gibberish"
-  was the model closing valid JSON against the wall.
+  capability failures in one session, both traced to the caller (incidents in git log): (a) constrained
+  decoding under `strict: true` into a generic container that could not hold the answer returned
+  schema-VALID output of literal `FAILED_TO_EXTRACT` strings — a task-shaped schema with `strict` off
+  produced a correct classification from the same model and document; (b) a batch degenerating into
+  "gibberish" was `finish_reason=length` at `completion_tokens=1024` with **no `max_tokens` ever set** —
+  the model closing valid JSON against a default cap.
   **Properties to hold:** (i) an offload caller sets `max_tokens` deliberately and treats
   `finish_reason !== "stop"` as a failure, not a result — neither of these misdiagnoses survives one line
   of response inspection; (ii) the output schema is part of the prompt, not packaging, and `strict: true`
@@ -641,7 +652,7 @@
   ⚠ Not an ignore-list: suppressing these tests destroys the signal, and the hermeticity defects remain
   worth fixing on their own merits. This removes the investigation tax, not the flakes.
 
-- **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` includes `src/audit/orchestrator/` (so 2a-ii's Finding-A fix in `advanceTypes.ts`/`executorRunners.ts`/`intakeExecutors.ts` correctly demanded attestation) but NOT `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts` — where the CORE 2a-ii dispatch-inventory READ switch lives. A dispatch-substrate edit confined to those cli emitters (plausible for 2a-iii's loader wiring) would ship WITHOUT the attestation backstop. Endpoint (owner call): either add the audit cli dispatch-emitters to `src/shared/loopCorePaths.ts` (`.mjs` list is generated), or accept them as cli-glue and rely on the reviewer catching it. Not auto-expanded — widening the set makes every edit to the big `nextStepCommand.ts` require attestation, a real friction tax to weigh. **G1 (`e7b593ac`) is a concrete SECOND instance:** a breaking dispatch-handshake transport change spanning `args.ts`/`prompts.ts`/`nextStepCommand.ts`/`semanticReviewStep.ts`/`prepareDispatchCommand.ts`/`quotaCommand.ts` shipped attestation-free (none are loop-core by path). An independent review WAS done by discipline (and caught a real roster-validation-drop regression) — so the reviewer-catches-it fallback held, but only because the author chose to run it. Reinforces the owner-call endpoint above.
+- **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` covers `src/audit/orchestrator/` but not `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts`, where the core dispatch-inventory READ switch lives — so a dispatch-substrate edit confined to those emitters ships without the attestation backstop. Two instances so far (see git log; G1 `e7b593ac` shipped a breaking dispatch-handshake change attestation-free across six such files). The reviewer-catches-it fallback held only because the author chose to run a review.
   **SPEC — move the CODE, do not widen the pattern list. The owner call dissolves.** The choice was framed
   as "add the CLI dispatch emitters to the attested path set (and tax every edit to a huge, constantly-
   edited CLI file) or accept them as glue and hope a reviewer catches it." Both options are bad because
