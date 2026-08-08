@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { writeJsonFile } from "../io/json.js";
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
+import { mintToken, readRecordMap, writeRecordMap } from "./recordStore.js";
 import { getQuotaStatePath } from "./state.js";
 
 // Shared, lock-guarded token-reservation ledger — the proactive layer of the
@@ -148,10 +147,6 @@ export interface AdmitInput {
 
 type LedgerMap = Record<string, ReservationLease[]>;
 
-function mintLeaseId(): string {
-  return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 function isLease(value: unknown): value is ReservationLease {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const obj = value as Record<string, unknown>;
@@ -169,27 +164,16 @@ function isLease(value: unknown): value is ReservationLease {
 // ledger must never throw into the dispatch loop — at worst a reservation is missed
 // (over-admission), which the reactive floor still catches. Only well-formed leases
 // are retained; junk is dropped silently.
+// The pick FILTERS junk leases out of a key's array and keeps the survivors,
+// dropping the key only when nothing well-formed remains. That is why the shared
+// substrate takes a pick rather than a type guard: a whole-value guard would
+// discard an entire resource key over one malformed lease.
 async function readLedger(ledgerPath: string): Promise<LedgerMap> {
-  let raw: string;
-  try {
-    raw = await readFile(ledgerPath, "utf8");
-  } catch {
-    return {};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return {};
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  const out: LedgerMap = {};
-  for (const [resourceKey, leases] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!Array.isArray(leases)) continue;
+  return readRecordMap(ledgerPath, (leases) => {
+    if (!Array.isArray(leases)) return undefined;
     const kept = leases.filter(isLease);
-    if (kept.length > 0) out[resourceKey] = kept;
-  }
-  return out;
+    return kept.length > 0 ? kept : undefined;
+  });
 }
 
 /**
@@ -200,7 +184,7 @@ async function readLedger(ledgerPath: string): Promise<LedgerMap> {
  * torn read (INV-QD-15).
  */
 async function writeLedger(ledgerPath: string, ledger: LedgerMap): Promise<void> {
-  await writeJsonFile(ledgerPath, ledger);
+  await writeRecordMap(ledgerPath, ledger);
 }
 
 /** Sum of non-expired leases for a key. Expired leases (crashed consumers) don't count. */
@@ -349,7 +333,7 @@ export class ReservationLedger {
         return { admitted: false, leaseId: null, constraints: outcomes, binding, anyOutstanding };
       }
 
-      const leaseId = mintLeaseId();
+      const leaseId = mintToken();
       const expiresAt = now + ttl;
       for (const outcome of outcomes) {
         const lease: ReservationLease = { leaseId, cost: outcome.cost, poolId: input.poolId, expiresAt };

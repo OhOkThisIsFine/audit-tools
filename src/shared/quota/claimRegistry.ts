@@ -1,6 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
-import { writeJsonFile } from "../io/json.js";
+import { mintToken, readRecordMap, writeRecordMap } from "./recordStore.js";
 
 // On-disk node-claim registry (A-10). A claim is a soft lease a dispatch loop
 // takes on a node before it starts work, so two concurrent loops driving the
@@ -36,10 +35,6 @@ export type ClaimResult =
 
 type ClaimMap = Record<string, ClaimRecord>;
 
-function mintOwnerToken(): string {
-  return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 function isClaimRecord(value: unknown): value is ClaimRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const obj = value as Record<string, unknown>;
@@ -51,29 +46,15 @@ function isClaimRecord(value: unknown): value is ClaimRecord {
   );
 }
 
-// Read the registry, degrading ANY malformed/absent state to an empty map. A
-// corrupt registry must never throw into the dispatch loop — at worst a claim is
-// re-granted, which the lock-serialized write then makes consistent again. Only
-// well-formed individual records are retained; junk entries are dropped silently.
+// Read the registry, degrading ANY malformed/absent state to an empty map (the
+// shared store substrate does the degrading). A corrupt registry must never throw
+// into the dispatch loop — at worst a claim is re-granted, which the
+// lock-serialized write then makes consistent again. Only well-formed individual
+// records are retained; junk entries are dropped silently.
 async function readClaimMap(registryPath: string): Promise<ClaimMap> {
-  let raw: string;
-  try {
-    raw = await readFile(registryPath, "utf8");
-  } catch {
-    return {};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return {};
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  const out: ClaimMap = {};
-  for (const [nodeId, record] of Object.entries(parsed as Record<string, unknown>)) {
-    if (isClaimRecord(record)) out[nodeId] = record;
-  }
-  return out;
+  return readRecordMap(registryPath, (record) =>
+    isClaimRecord(record) ? record : undefined,
+  );
 }
 
 /**
@@ -82,7 +63,7 @@ async function readClaimMap(registryPath: string): Promise<ClaimMap> {
  * dispatch loops claim the same node. Same fail-open class as INV-QD-15.
  */
 async function writeClaimMap(registryPath: string, claims: ClaimMap): Promise<void> {
-  await writeJsonFile(registryPath, claims);
+  await writeRecordMap(registryPath, claims);
 }
 
 /**
@@ -128,7 +109,7 @@ export class ClaimRegistry {
       if (existing && !this.isStale(existing, now)) {
         return { acquired: false, heldBy: existing.ownerToken };
       }
-      const ownerToken = mintOwnerToken();
+      const ownerToken = mintToken();
       claims[nodeId] = { ownerToken, poolId, heartbeatAt: now };
       await writeClaimMap(this.registryPath, claims);
       return { acquired: true, ownerToken };
@@ -165,7 +146,7 @@ export class ClaimRegistry {
         if (existing && !this.isStale(existing, now) && existing.poolId !== poolId) {
           continue;
         }
-        const ownerToken = mintOwnerToken();
+        const ownerToken = mintToken();
         claims[nodeId] = { ownerToken, poolId, heartbeatAt: now };
         granted.push(nodeId);
         ownerTokenByNode[nodeId] = ownerToken;
