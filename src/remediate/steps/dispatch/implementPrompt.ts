@@ -20,7 +20,12 @@ import {
 } from "../types.js";
 import { classifyFindingRisk } from "../stepUtils.js";
 import { isTerminalStatus } from "../../state/itemStatus.js";
-import { runDir, uniquePaths } from "./common.js";
+import { uniquePaths } from "./common.js";
+import {
+  implementTaskId,
+  nodeArtifactPathsIn,
+  nodeArtifactPathsFor,
+} from "./nodeArtifacts.js";
 import {
   buildFreeVerifyCommands,
   partitionDeferredVerifyCommands,
@@ -217,14 +222,14 @@ export function buildImplementDispatchItem(
   state: RemediationState,
   dir: string,
 ): DispatchPlanItemDraft {
-  const taskId = `implement-${block.block_id}`;
+  const taskId = implementTaskId(block.block_id);
   const readFiles = blockReadFiles(block, state);
   const writeFiles = blockWriteFiles(block, state);
-  const resultPath = join(dir, `${taskId}.result.json`);
+  const { resultPath, promptPath } = nodeArtifactPathsIn(dir, block.block_id);
   return {
     task_id: taskId,
     block_id: block.block_id,
-    prompt_path: join(dir, `${taskId}.md`),
+    prompt_path: promptPath,
     result_path: resultPath,
     model_hint: buildImplementModelHint(block, state),
     access: {
@@ -235,18 +240,20 @@ export function buildImplementDispatchItem(
 }
 
 /**
- * Absolute path to a block's implement worker result file for a run. Single
- * source (same convention as {@link buildImplementDispatchItem}'s `result_path`)
- * shared with triage's already-satisfied reconciliation guard: a passing tree
- * verify only proves a node's work was DONE if a worker actually ran and left a
- * result — no result file ⇒ "no worker ran", not "verified satisfied".
+ * Absolute path to a block's implement worker result file for a run. Shared with
+ * triage's already-satisfied reconciliation guard: a passing tree verify only
+ * proves a node's work was DONE if a worker actually ran and left a result — no
+ * result file ⇒ "no worker ran", not "verified satisfied".
+ *
+ * Derived from the same owner as {@link buildImplementDispatchItem}'s
+ * `result_path` rather than rebuilt to match it, so the two cannot drift.
  */
 export function implementResultPath(
   artifactsDir: string,
   runId: string,
   blockId: string,
 ): string {
-  return join(runDir(artifactsDir, runId, "implement"), `implement-${blockId}.result.json`);
+  return nodeArtifactPathsFor(artifactsDir, runId, blockId).resultPath;
 }
 
 export function buildImplementModelHint(

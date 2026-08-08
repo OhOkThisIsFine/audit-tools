@@ -1,9 +1,10 @@
 import { existsSync, createReadStream, readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
+  artifactNameForId,
+  isCanonicalResultFilename,
   renderPromptCommand,
   toPromptPathToken,
   quotePromptCommandArg,
@@ -77,21 +78,11 @@ export function fromBase64Url(value: string): string {
   return Buffer.from(value, "base64url").toString("utf8");
 }
 
-export function digestId(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 12);
-}
-
-export function safeArtifactStem(value: string): string {
-  const sanitized = value
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80);
-  return sanitized.length > 0 ? sanitized : "artifact";
-}
-
-export function artifactNameForId(value: string, extension: string): string {
-  return `${safeArtifactStem(value)}_${digestId(value)}.${extension}`;
-}
+// Artifact naming moved to `audit-tools/shared` — remediate names its per-node run
+// artifacts from the same primitive and must not import from audit. Re-exported
+// here so this module's existing consumers are unchanged.
+export { digestId, safeArtifactStem } from "audit-tools/shared";
+export { artifactNameForId, isCanonicalResultFilename };
 
 export const quoteCommandArg = quotePromptCommandArg;
 
@@ -113,18 +104,6 @@ export function renderCommand(argv: string[]): string {
 
 export function taskResultPath(taskResultsDir: string, taskId: string): string {
   return join(taskResultsDir, artifactNameForId(taskId, "json"));
-}
-
-// Canonical result filenames produced by artifactNameForId: a stem, "_", a
-// 12-hex sha256 digest, then ".json" — optionally with one extra suffix segment
-// before ".json" (the host writes packet results as "<stem>_<digest>.inline-result.json").
-const CANONICAL_RESULT_FILENAME = /_[0-9a-f]{12}(\.[a-z0-9-]+)?\.json$/i;
-
-// True when `filename` matches the canonical result naming above. Lets
-// merge-and-ingest tell legitimate packet / prior-round results apart from
-// genuinely stray files (e.g. packet-23-results.json) left in task-results/.
-export function isCanonicalResultFilename(filename: string): boolean {
-  return CANONICAL_RESULT_FILENAME.test(filename);
 }
 
 export function packetPromptPath(taskResultsDir: string, packetId: string): string {

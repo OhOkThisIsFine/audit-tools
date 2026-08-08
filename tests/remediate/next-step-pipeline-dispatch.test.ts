@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { spawnHidden } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -961,7 +962,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       "utf8",
     );
     const implementDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
-    const staleResultPath = join(implementDir, "implement-B-001.result.json");
+    const staleNames = nodeArtifactPathsIn(implementDir, "B-001");
+    const staleResultPath = staleNames.resultPath;
     await mkdir(implementDir, { recursive: true });
     await writeFile(
       staleResultPath,
@@ -987,8 +989,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(existsSync(join(ARTIFACTS_DIR, "triage_resolution.json"))).toBe(false);
     expect(existsSync(staleResultPath)).toBe(false);
     const implementFiles = await readdir(implementDir);
-    expect(implementFiles.some((name) => name.startsWith("implement-B-001.result.json.stale-"))).toBe(true);
-    expect(implementFiles.some((name) => name.startsWith("implement-B-001.md"))).toBe(true);
+    expect(implementFiles.some((name) => name.startsWith(`${basename(staleNames.resultPath)}.stale-`))).toBe(true);
+    expect(implementFiles.some((name) => name === basename(staleNames.promptPath))).toBe(true);
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );

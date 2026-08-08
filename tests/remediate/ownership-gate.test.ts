@@ -41,6 +41,7 @@ import {
 } from "../../src/remediate/steps/rollingSession.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import type { WorktreeNodeWorker } from "../../src/remediate/steps/dispatch.js";
+import { nodeAcceptOutcomePath } from "../../src/remediate/steps/dispatch/acceptNode.js";
 
 function initRepo(prefix: string): { repo: string; ok: boolean } {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -340,7 +341,7 @@ describe("advanceHostRolling — ownership gate integration", () => {
     // terminal-on-any-outcome shape every other pre-merge refusal uses.
     expect(directive.kind).toBe("done");
 
-    const sidecar = join(implDir, "accept-outcome-OG6.json");
+    const sidecar = nodeAcceptOutcomePath(artifactsDir, "R1", "OG6");
     expect(existsSync(sidecar)).toBe(true);
     const rec = JSON.parse(readFileSync(sidecar, "utf8"));
     expect(rec.outcome).toBe("error");

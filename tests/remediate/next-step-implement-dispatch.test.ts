@@ -6,6 +6,7 @@ import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import type { RemediationStepKind } from "../../src/remediate/steps/types.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -301,7 +302,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     const implResultDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
     await mkdir(implResultDir, { recursive: true });
     await writeFile(
-      join(implResultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(implResultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",

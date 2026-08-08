@@ -10,6 +10,7 @@ import {
 } from "../../src/remediate/steps/dispatch.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 
 // Regression: the canonical next-step wave path must inject the
 // "match the surrounding code" house-style block into implement
@@ -156,7 +157,7 @@ describe("dispatch prompts carry house style", () => {
     );
 
     const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
-    const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
+    const prompt = await readFile(nodeArtifactPathsIn(implDir, "B-001").promptPath, "utf8");
     expect(prompt).toContain(CONVENTIONS_MARKER);
     // Repository root is normalized to forward slashes in host-facing prompts (FINDING-004).
     expect(prompt).toContain(`Repository root: ${REPO_DIR.replace(/\\/g, "/")}`);
@@ -179,7 +180,7 @@ describe("dispatch prompts carry house style", () => {
     );
 
     const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
-    const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
+    const prompt = await readFile(nodeArtifactPathsIn(implDir, "B-001").promptPath, "utf8");
     expect(prompt).toMatch(/Run changed or newly created tests by name when possible/i);
     expect(prompt).toMatch(/record the focused\s+command and result/i);
     expect(prompt).toMatch(/broad or full-suite\s+command fails in a dirty worktree/i);
@@ -203,7 +204,7 @@ describe("dispatch prompts invite opt-in agent reflections", () => {
     );
 
     const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
-    const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
+    const prompt = await readFile(nodeArtifactPathsIn(implDir, "B-001").promptPath, "utf8");
     expect(prompt).toContain("## Optional process feedback");
     expect(prompt).toContain(FEEDBACK_PATH);
     expect(prompt).toContain('"task_id": "B-001"');

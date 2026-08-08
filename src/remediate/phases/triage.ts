@@ -187,16 +187,10 @@ async function archiveImplementResultsForRetries(
   }
 
   for (const blockId of blockIds) {
-    await archiveIfPresent(
-      join(
-        options.artifactsDir,
-        "runs",
-        runId,
-        "implement",
-        `implement-${blockId}.result.json`,
-      ),
-      "stale",
-    );
+    // Resolved through the same owner the writer uses — this rebuilt both the
+    // filename AND the run-dir layout, so a drift here silently left a stale
+    // result in place to be read as current.
+    await archiveIfPresent(implementResultPath(options.artifactsDir, runId, blockId), "stale");
   }
 }
 

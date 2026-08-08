@@ -636,6 +636,15 @@ export {
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
 
+// IO: filesystem-safe artifact naming for a model-authored id, plus the
+// recognizer for the exact format it produces (kept together so they can't drift).
+export {
+  digestId,
+  safeArtifactStem,
+  artifactNameForId,
+  isCanonicalResultFilename,
+} from "./io/artifactName.js";
+
 // IO: repo-root anchoring (untrust the process cwd; never nest .audit-tools)
 export { resolveRepoRoot, climbOutOfAuditTools } from "./io/repoRoot.js";
 export { resolveWithinRoot, assertWithinRoot } from "./io/pathContainment.js";

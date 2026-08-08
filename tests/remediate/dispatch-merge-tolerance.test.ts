@@ -30,6 +30,7 @@ import {
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
 import { frictionCapturePath, stepBoundaryEventId } from "audit-tools/shared";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -169,11 +170,14 @@ async function mergeWithMissingResult(opts: {
     }),
   );
   // Deliberately DO NOT write resultPath — this is the missing-result case.
+  // Sidecar names come from the owner the dispatcher writes through, so this
+  // seeds exactly what the diagnosis looks for.
+  const sidecars = nodeArtifactPathsIn(resultDir, "CP-BLOCK-N-x");
   if (opts.taskJson) {
-    await writeFile(join(resultDir, "CP-BLOCK-N-x.task.json"), JSON.stringify({ id: "CP-BLOCK-N-x" }));
+    await writeFile(sidecars.taskPath, JSON.stringify({ id: "CP-BLOCK-N-x" }));
   }
   if (opts.stderr !== undefined) {
-    await writeFile(join(resultDir, "CP-BLOCK-N-x.stderr.txt"), opts.stderr);
+    await writeFile(sidecars.stderrPath, opts.stderr);
   }
   return mergeImplementResults({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR }, runId);
 }

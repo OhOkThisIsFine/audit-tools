@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-triage");
@@ -606,7 +607,7 @@ describe("runTriagePhase", () => {
     const dir = join(TEST_DIR, "runs", planId, "implement");
     await mkdir(dir, { recursive: true });
     await writeFile(
-      join(dir, `implement-${blockId}.result.json`),
+      nodeArtifactPathsIn(dir, blockId).resultPath,
       JSON.stringify({ item_results: [] }),
       "utf8",
     );

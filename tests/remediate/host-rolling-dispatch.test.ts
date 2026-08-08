@@ -15,6 +15,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+import { nodeAcceptOutcomePath } from "../../src/remediate/steps/dispatch/acceptNode.js";
 import {
   acceptNodeWorktree,
   createWorktree,
@@ -572,7 +573,7 @@ describe("advanceHostRolling", () => {
     expect(d.kind).toBe("done");
 
     // The accept-outcome sidecar is the merge-state ground truth (OBL-DS-06).
-    const sidecar = join(artifactsDir, "runs", RID, "implement", "accept-outcome-B1.json");
+    const sidecar = nodeAcceptOutcomePath(artifactsDir, RID, "B1");
     expect(existsSync(sidecar)).toBe(true);
     const rec = JSON.parse(readFileSync(sidecar, "utf8"));
     expect(rec.block_id).toBe("B1");
@@ -602,7 +603,7 @@ describe("advanceHostRolling", () => {
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" }),
     ).rejects.toThrow(/stray worktree|isolation:"worktree"/i);
 
-    const sidecar = join(artifactsDir, "runs", RID, "implement", "accept-outcome-B1.json");
+    const sidecar = nodeAcceptOutcomePath(artifactsDir, RID, "B1");
     expect(existsSync(sidecar)).toBe(true);
     const rec = JSON.parse(readFileSync(sidecar, "utf8"));
     expect(rec.outcome).toBe("error");
@@ -758,7 +759,7 @@ describe("advanceHostRolling", () => {
     expect(session.accept_failed).toEqual(["RED1"]);
     // The sidecar recorded the true outcome for the merge gate.
     const rec = JSON.parse(
-      readFileSync(join(artifactsDir, "runs", RID, "implement", "accept-outcome-RED1.json"), "utf8"),
+      readFileSync(nodeAcceptOutcomePath(artifactsDir, RID, "RED1"), "utf8"),
     );
     expect(rec.outcome).toBe("error");
     expect(rec.merged).toBe(false);

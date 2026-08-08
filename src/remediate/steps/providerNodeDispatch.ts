@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import {
   writeJsonFile,
   withSourceConfig,
@@ -14,6 +14,7 @@ import {
   createRemediationWorkerTask,
   createLaunchInputForTask,
 } from "../phases/workerTasks.js";
+import { nodeArtifactPathsIn } from "./dispatch/nodeArtifacts.js";
 import type { RemediationBlock } from "../state/types.js";
 
 export interface ProviderNodeDispatcherParams {
@@ -106,10 +107,11 @@ export function makeProviderNodeDispatcher(
     const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
     const cfg = withSourceConfig(params.sessionConfig ?? {}, source);
     const provider = resolveProvider(slot?.providerName || cfg.provider, cfg);
+    // Names come from the one owner (`nodeArtifacts`) so the merge's diagnosis,
+    // which independently resolves the same paths, can never disagree with what
+    // was written here — and so a model-authored block id is sanitized once.
     const dir = dirname(resultPath);
-    const taskPath = join(dir, `${block.block_id}.task.json`);
-    const stdoutPath = join(dir, `${block.block_id}.stdout.txt`);
-    const stderrPath = join(dir, `${block.block_id}.stderr.txt`);
+    const { taskPath, stdoutPath, stderrPath } = nodeArtifactPathsIn(dir, block.block_id);
 
     const task = createRemediationWorkerTask({
       runId: `${params.runId}:${block.block_id}`,

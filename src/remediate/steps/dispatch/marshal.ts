@@ -44,6 +44,7 @@ import {
   isSkipStatus,
 } from "../../state/itemStatus.js";
 import { resnapshotAffectedFileHashes } from "../../utils/fileIntegrity.js";
+import { nodeArtifactPathsIn } from "./nodeArtifacts.js";
 import { reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
 import {
   DispatchOptions,
@@ -611,9 +612,12 @@ async function diagnoseMissingResultCause(
       reasonDetail: "",
     };
   }
-  const dispatched = existsSync(join(dir, `${blockId}.task.json`));
+  // Resolved through the one owner, so this can never look for a name the
+  // dispatcher did not write — a disagreement here reports a naming bug as an
+  // engine plan/drive inconsistency.
+  const { taskPath, stderrPath } = nodeArtifactPathsIn(dir, blockId);
+  const dispatched = existsSync(taskPath);
   let stderrTail = "";
-  const stderrPath = join(dir, `${blockId}.stderr.txt`);
   if (existsSync(stderrPath)) {
     try {
       stderrTail = (await readFile(stderrPath, "utf8")).trim().slice(-600);

@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareImplementDispatch } from "../../src/remediate/steps/dispatch.js";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
 import { makeFinding } from "./test-helpers.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // A worker result file that is PRESENT but INVALID (malformed JSON or a result
@@ -64,7 +65,7 @@ function implementRunDir(artifactsDir: string): string {
 }
 
 function resultPath(artifactsDir: string): string {
-  return join(implementRunDir(artifactsDir), `implement-${BLOCK_ID}.result.json`);
+  return nodeArtifactPathsIn(implementRunDir(artifactsDir), BLOCK_ID).resultPath;
 }
 
 describe("present-but-invalid implement result is archived, not treated as absent", () => {
@@ -91,7 +92,7 @@ describe("present-but-invalid implement result is archived, not treated as absen
     // The corrupt file was moved out of the way (archived), not left in place.
     expect(existsSync(rp)).toBe(false);
     const archived = (await readdir(implementRunDir(artifactsDir))).filter((f) =>
-      f.startsWith(`implement-${BLOCK_ID}.result.json.stale-`),
+      f.startsWith(`${basename(resultPath(artifactsDir))}.stale-`),
     );
     expect(archived.length).toBe(1);
 
@@ -110,7 +111,7 @@ describe("present-but-invalid implement result is archived, not treated as absen
 
     expect(existsSync(rp)).toBe(false);
     const archived = (await readdir(implementRunDir(artifactsDir))).filter((f) =>
-      f.startsWith(`implement-${BLOCK_ID}.result.json.stale-`),
+      f.startsWith(`${basename(resultPath(artifactsDir))}.stale-`),
     );
     expect(archived.length).toBe(1);
     expect(plan.items.length).toBe(1);
@@ -124,7 +125,7 @@ describe("present-but-invalid implement result is archived, not treated as absen
     await prepareImplementDispatch({ root: dir, artifactsDir }, RUN_ID);
 
     const archived = (await readdir(implementRunDir(artifactsDir))).find((f) =>
-      f.startsWith(`implement-${BLOCK_ID}.result.json.stale-`),
+      f.startsWith(`${basename(resultPath(artifactsDir))}.stale-`),
     );
     expect(archived).toBeDefined();
     const content = await readFile(join(implementRunDir(artifactsDir), archived!), "utf8");

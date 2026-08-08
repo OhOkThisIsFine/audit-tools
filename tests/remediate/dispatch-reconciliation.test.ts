@@ -16,6 +16,7 @@ import {
 import { promoteImplementationDagToExtractedPlan } from "../../src/remediate/steps/contractPipeline.js";
 import { writeContractArtifact, contractPipelineDir } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-dispatch-reconcile");
@@ -119,7 +120,7 @@ describe("prepareImplementDispatch reconciliation", () => {
       ],
     };
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify(validResult),
     );
 
@@ -146,7 +147,7 @@ describe("prepareImplementDispatch reconciliation", () => {
     await mkdir(resultDir, { recursive: true });
 
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
@@ -176,7 +177,7 @@ describe("prepareImplementDispatch reconciliation", () => {
     await mkdir(resultDir, { recursive: true });
 
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({ contract_version: "wrong", phase: "implement", item_results: [] }),
     );
 
@@ -199,7 +200,7 @@ describe("prepareImplementDispatch reconciliation", () => {
     for (const blockId of ["B-001", "B-002"]) {
       const findingId = blockId === "B-001" ? "F-001" : "F-002";
       await writeFile(
-        join(resultDir, `implement-${blockId}.result.json`),
+        nodeArtifactPathsIn(resultDir, blockId).resultPath,
         JSON.stringify({
           contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
           phase: "implement",
@@ -227,7 +228,7 @@ describe("prepareImplementDispatch reconciliation", () => {
     await mkdir(resultDir, { recursive: true });
 
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
@@ -263,7 +264,7 @@ describe("prepareImplementDispatch reconciliation", () => {
     await mkdir(resultDir, { recursive: true });
 
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
@@ -310,7 +311,7 @@ describe("mergeImplementResults per-item validation", () => {
 
     const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
     await mkdir(resultDir, { recursive: true });
-    const resultPath = join(resultDir, "implement-B-001.result.json");
+    const resultPath = nodeArtifactPathsIn(resultDir, "B-001").resultPath;
 
     await writeFile(
       join(resultDir, "dispatch-plan.json"),
@@ -324,7 +325,7 @@ describe("mergeImplementResults per-item validation", () => {
           {
             task_id: "implement-B-001",
             block_id: "B-001",
-            prompt_path: join(resultDir, "implement-B-001.md"),
+            prompt_path: nodeArtifactPathsIn(resultDir, "B-001").promptPath,
             result_path: resultPath,
           },
         ],
@@ -376,7 +377,7 @@ describe("mergeImplementResults per-item validation", () => {
     await saveState(makeImplementingState());
     const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
     await mkdir(resultDir, { recursive: true });
-    const resultPath = join(resultDir, "implement-B-001.result.json");
+    const resultPath = nodeArtifactPathsIn(resultDir, "B-001").resultPath;
     await writeFile(
       join(resultDir, "dispatch-plan.json"),
       JSON.stringify({
@@ -389,7 +390,7 @@ describe("mergeImplementResults per-item validation", () => {
           {
             task_id: "implement-B-001",
             block_id: "B-001",
-            prompt_path: join(resultDir, "implement-B-001.md"),
+            prompt_path: nodeArtifactPathsIn(resultDir, "B-001").promptPath,
             result_path: resultPath,
           },
         ],
@@ -677,7 +678,7 @@ describe("FINDING-021: no per-item reconciliation console.log messages", () => {
     await mkdir(resultDir, { recursive: true });
 
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
@@ -722,7 +723,7 @@ describe("prepare-implement-dispatch stdout cleanliness (OBS-1903cdd6)", () => {
 
     // Pre-write a valid result so prepareImplementDispatch logs a reuse message.
     await writeFile(
-      join(resultDir, "implement-B-001.result.json"),
+      nodeArtifactPathsIn(resultDir, "B-001").resultPath,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
@@ -764,7 +765,7 @@ describe("mergeImplementResults — worker-reported blocked status", () => {
 
     const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
     await mkdir(resultDir, { recursive: true });
-    const resultPath = join(resultDir, "implement-B-001.result.json");
+    const resultPath = nodeArtifactPathsIn(resultDir, "B-001").resultPath;
 
     await writeFile(
       join(resultDir, "dispatch-plan.json"),
@@ -778,7 +779,7 @@ describe("mergeImplementResults — worker-reported blocked status", () => {
           {
             task_id: "implement-B-001",
             block_id: "B-001",
-            prompt_path: join(resultDir, "implement-B-001.md"),
+            prompt_path: nodeArtifactPathsIn(resultDir, "B-001").promptPath,
             result_path: resultPath,
           },
         ],

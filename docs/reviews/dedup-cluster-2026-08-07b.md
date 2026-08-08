@@ -88,6 +88,25 @@ adapter, or (c) a policy knob belonging on the shared core; only (a) and (b) leg
 per-mode. Note the standing rule: "it would become a config shell with several knobs" is *not* a
 fork justification.
 
+> **LANDED as its own fix — and the spec below UNDERSTATED it by 5×.** The spec said the name was
+> built in TWO places. Verification found **six filenames built in TEN places across five modules**,
+> with **three** independent writer/reader rebuild pairs, not one:
+> `implement-<id>.result.json` was rebuilt three times (`implementPrompt.ts` plan item, its own
+> `implementResultPath`, and `triage.ts` — which also re-hardcoded the `runs/<id>/implement` layout,
+> so a drift there left a stale result to be read as current); `<id>.task.json` and
+> `<id>.stderr.txt` twice each (writer + `marshal.ts`); plus `<id>.stdout.txt`,
+> `implement-<id>.md`, and `accept-outcome-<id>.json`. `acceptNode.ts`'s docstring *asserted* the ids
+> "follow the same filename-safe convention" — an invariant nothing enforced.
+> All ten now derive from one owner, `src/remediate/steps/dispatch/nodeArtifacts.ts`, which sanitizes
+> through `artifactNameForId` (moved to `src/shared/io/artifactName.ts` with
+> `isCanonicalResultFilename`, its format recognizer, kept beside it).
+> **The cross-platform face matters more than the reported one:** `writeJsonFile` runs
+> `ensureParentDirectory`, so a `/` in a model-authored id does NOT throw — it silently mkdir -p's a
+> subtree and hides the sidecar one level down, on every OS. The win32 `:` throw is only the visible
+> third of the defect. Red-green pinned in `tests/remediate/dispatch-artifact-naming.test.ts`.
+> *Lesson for the remaining items: a spec's "built in N places" is a floor, not a count — grep the
+> whole filename family before sizing the edit.*
+
 ⚠ **A latent bug the comparison exposed, worth fixing regardless of whether the extraction happens —
 and it is bigger than it first looks.** Audit names its sidecars through `artifactNameForId(...)`,
 which sanitizes the `:` that packet ids embed (`rollingAuditDispatch.ts` documents that a raw id

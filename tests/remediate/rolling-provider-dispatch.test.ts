@@ -33,6 +33,7 @@ import {
   worktreeBranchForBlock,
 } from "../../src/remediate/steps/dispatch.js";
 import { makeProviderNodeDispatcher } from "../../src/remediate/steps/providerNodeDispatch.js";
+import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import type {
   FreshSessionProvider,
@@ -231,8 +232,9 @@ describe("G1: makeProviderNodeDispatcher", () => {
     expect(captured!.repoRoot).toBe(worktreeRoot);
     expect(captured!.promptPath).toBe(promptPath);
     expect(captured!.resultPath).toBe(resultPath);
-    // A task.json was written for the provider to read.
-    expect(existsSync(join(artifactsDir, "B1.task.json"))).toBe(true);
+    // A task.json was written for the provider to read. The name is derived from
+    // the same owner the dispatcher uses, so this can't drift from the writer.
+    expect(existsSync(nodeArtifactPathsIn(artifactsDir, "B1").taskPath)).toBe(true);
   });
 
   it("records a token-usage ledger line at runs/<run-id>/ relaying the provider's observedUsage + cost", async () => {

@@ -9,11 +9,11 @@ import type { RemediationBlock } from "../../state/types.js";
 import type { ProviderSlot, RollingDispatchResult } from "audit-tools/shared";
 import type { ClaimRegistry } from "audit-tools/shared";
 import {
-  runDir,
   worktreeBranchForBlock,
   gitEditedFilesForBranch,
   gitCommitIsAncestor,
 } from "./common.js";
+import { nodeArtifactPathsFor } from "./nodeArtifacts.js";
 import {
   removeWorktree,
   commitWorktree,
@@ -857,15 +857,17 @@ async function acceptNodeWorktreeLocked(
 /**
  * Sidecar path for a node's tool-owned accept (verify/merge) outcome. Written by
  * BOTH rolling drivers as each node is accepted, read by `mergeImplementResults`.
- * Block ids here follow the same filename-safe convention as the per-node result
- * files in the same dir.
+ *
+ * Filename-safety is not a convention block ids happen to FOLLOW — `block_id` is
+ * an unconstrained `z.string()` minted from a model-authored node id — so the name
+ * is derived through the shared owner, which enforces it.
  */
 export function nodeAcceptOutcomePath(
   artifactsDir: string,
   runId: string,
   blockId: string,
 ): string {
-  return join(runDir(artifactsDir, runId, "implement"), `accept-outcome-${blockId}.json`);
+  return nodeArtifactPathsFor(artifactsDir, runId, blockId).acceptOutcomePath;
 }
 
 /**
