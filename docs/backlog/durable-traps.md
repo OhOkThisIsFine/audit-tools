@@ -77,16 +77,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   **SIZE:** failure is size-correlated (48KB+ single calls: no first byte in 28 min; 105KB:
   `ECONNRESET`; 1–3KB per item: 94/101). Split to the natural per-item unit and size `max_tokens` to the
   per-item output — [[nim-offload-reliable-unit-is-one-entry]].
-  **CONCURRENCY — a per-BACKEND limit, NOT a property of the lane** (owner narrowing, 2026-07-28:
-  *"the local offload proxy shouldn't need to be serialized; only NIM has been giving us issues"*).
-  The fan-outs that degraded at 3, 10 and 12 (429s, or schema-valid empty documents, or never
-  returning) were all routed to **NIM**. Serialize NIM-routed work (≤2 concurrent per model, escalating
-  backoff, **resumable** driver — two writers to one output file clobber each other); do NOT serialize
-  the lane as a whole, and do not assume another provider inherits the limit. The relay fronts many
-  providers and owns failover. ⚠ This has been wrong in BOTH directions — first "pool ~6-wide", then
-  over-corrected to a blanket lane-wide ceiling; neither blanket answer held, which is why the durable
-  fact is stated per-backend. On this axis the endpoint really is the cause, and `finish_reason` is
-  `undefined`, not `length`. [[nim-offload-reliable-unit-is-one-entry]]
+  **CONCURRENCY — a per-BACKEND limit, NOT a property of the lane.** The fan-outs that degraded at 3, 10
+  and 12 (429s, schema-valid empty documents, or never returning) were all NIM-routed. Serialize
+  NIM-routed work (≤2 concurrent per model, escalating backoff, **resumable** driver — two writers to one
+  output file clobber each other); do NOT serialize the lane, and do not assume another provider inherits
+  the limit. ⚠ This has been wrong in BOTH directions (first "pool ~6-wide", then a blanket lane-wide
+  ceiling), which is why the fact is stated per-backend. `finish_reason` is `undefined`, not `length`.
+  [[nim-offload-reliable-unit-is-one-entry]]
   Scope is ad-hoc scripts only: audit-tools' own dispatch is paced by declared
   `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
