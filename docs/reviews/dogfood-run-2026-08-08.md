@@ -189,6 +189,47 @@ silently acquiring an unrelated mandate is a correctness risk, not just noise.
 **Property to hold:** a dispatch child's inherited surface is DECLARED — hooks and skills both — not
 whatever happens to sit in the cwd.
 
+### O13 — the deep design review paid for itself, and the JUDGE is the part that did
+
+Measured against the shipped contract, not impressions.
+
+| Lane | Raw findings | Criticals |
+|---|---|---|
+| P1 Pragmatist | 10 | 1 |
+| P2 Mathematician | 12 | 1 |
+| P3 Short-attention | 7 | 2 |
+| P4 Novelty-seeker | 6 | **0** |
+| P5 Adversary | 6 | 1 |
+| Contract (adversarial) | 10 | 1 |
+| **Judge (merged)** | **18** | **3** |
+
+The judge's 18 are *exactly* the 18 conceptual/contract findings in the final `audit-findings.json` — the
+merge survived to the report unaltered. Three things it did, in order of value:
+
+1. **It ADDED a critical no perspective raised.** `ARC-e5288553` (prompt injection via untrusted
+   target-repo content interpolated into worker prompts) is marked `(judge-added)` and is arguably the
+   most consequential finding in the run — it is about the tool's own trust boundary when auditing a
+   hostile repository. **Shallow has no judge stage at all**, so this finding does not exist in a
+   shallow run.
+2. **It filtered harder than it added.** 6 raw criticals across the lanes became 2 kept + 1 added. Four
+   perspective criticals were merged away or downgraded — consistent with
+   [[adversary-overturns-most-close-verdicts]] and with this repo's standing doubt about auditor
+   severity calibration.
+3. **It compressed 51 → 18** without losing the criticals.
+
+**Density is the headline.** Those 18 findings are **0.8% of the report's 2,241** but produced **3 of
+its 4 criticals**; the 2,181 packet findings produced 1. At critical-or-high the design review runs
+10/18 (56%) against the packet lane's 74/2,181 (3.4%) — ~16× denser.
+
+⚠ Honest limits: P4 (Novelty-seeker) returned 6 findings and 0 criticals, so the five perspectives did
+NOT pay off equally — a narrower fan-out may do nearly as well. And nothing here proves a shallow run
+would have missed the other two criticals; the only *proven* shallow-loss is the judge-added one. All
+severities are auditor-assigned and unverified — the 2026-08-06 entry records 0 of 9 self-audit
+criticals surviving mechanism verification.
+
+Separately, the systemic_challenge loop contributed **42** `systemic_improvement` findings (12 high,
+0 critical) — a different lane from the design review, and the one that had to be force-converged (O7).
+
 ### O10 — the WORKER MODEL is the dominant quality variable, and the configured default was the worst
 
 One packet (`src-remediate:maintainability:packet-85`), same prompt, same effort (`model_reasoning_effort
