@@ -1,6 +1,10 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
-import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
-import type { DiscoveredRateLimitsInput } from "./scheduler.js";
+import type {
+  DiscoveredRateLimitsInput,
+  LimitConfidence,
+  LimitSource,
+  ResolvedLimits,
+} from "./types.js";
 import { resolveModelStatics } from "./modelStatics.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";

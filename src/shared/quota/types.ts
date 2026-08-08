@@ -229,3 +229,26 @@ export interface ObservedWaveOutcome {
   cooldown_until?: string | null;
   reset_at?: string | null;
 }
+
+/**
+ * Minimal structural shape of capabilities discovered at runtime — RPM/TPM (e.g.
+ * via response-header extraction) plus, from the dispatch-time capability
+ * handshake, the dispatching model's real context/output window. Declared in
+ * this base module so the scheduler stays decoupled from any package-specific
+ * discovery implementation — callers may pass a richer object (with a `source`
+ * field, etc.); only these fields are read. `scheduler.ts` re-exports it, so
+ * existing importers are unaffected.
+ *
+ * `context_tokens`/`output_tokens`, when present, are the discovered model's
+ * window and take precedence over the static known-model table — they are how
+ * dispatch sizes from real capabilities (see spec/audit-workflow-design.md).
+ */
+export interface DiscoveredRateLimitsInput {
+  requests_per_minute?: number | null;
+  input_tokens_per_minute?: number | null;
+  output_tokens_per_minute?: number | null;
+  /** Discovered context window for the dispatching model, if reported. */
+  context_tokens?: number | null;
+  /** Discovered output cap for the dispatching model, if reported. */
+  output_tokens?: number | null;
+}

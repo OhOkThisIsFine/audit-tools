@@ -30,26 +30,14 @@ import {
 } from "./semanticProjection.js";
 
 // ── Artifact names ────────────────────────────────────────────────────────────
+// Defined in ./artifactNames.js (below both this module and semanticProjection,
+// which needs the name type — declaring it here closed a type-only cycle).
+// Re-exported so existing importers are unchanged.
 
-export const CP_ARTIFACT_NAMES = [
-  "goal_spec",
-  "context_bundle",
-  "module_decomposition",
-  "module_contracts",
-  "seam_reconciliation_report",
-  "finalized_module_contracts",
-  "conceptual_design_critique",
-  "obligation_ledger",
-  "cyclic_seam_resolution",
-  "test_validator_plan",
-  "contract_assessment_report",
-  "counterexample",
-  "judge_report",
-  "implementation_dag",
-  "verification_report",
-] as const;
-
-export type ContractPipelineArtifactName = (typeof CP_ARTIFACT_NAMES)[number];
+import { CP_ARTIFACT_NAMES } from "./artifactNames.js";
+import type { ContractPipelineArtifactName } from "./artifactNames.js";
+export { CP_ARTIFACT_NAMES };
+export type { ContractPipelineArtifactName };
 
 // ── Dependency DAG ────────────────────────────────────────────────────────────
 // An artifact is stale when any dependency it lists is missing or has a

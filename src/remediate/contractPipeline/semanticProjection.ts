@@ -24,7 +24,7 @@
  * each owns the projection table for its own artifact set.
  */
 import { isRecord, stableStringifyProjection } from "audit-tools/shared";
-import type { ContractPipelineArtifactName } from "./artifactStore.js";
+import type { ContractPipelineArtifactName } from "./artifactNames.js";
 
 export { stableStringifyProjection };
 

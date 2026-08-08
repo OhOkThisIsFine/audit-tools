@@ -33,17 +33,19 @@ module.exports = {
       name: "no-circular",
       severity: "error",
       comment:
-        "Circular RUNTIME imports make module initialization order load-bearing " +
-        "and resist extraction. The src graph has zero runtime cycles today " +
-        "(verified at adoption, 2026-08-07); any new one is a regression. " +
-        "Cycles with a type-only leg are tolerated by viaOnly (three existed at " +
-        "adoption: quota/limits<->scheduler, remediate state/itemStatus<->types, " +
-        "contractPipeline artifactStore<->semanticProjection) — type-erased at " +
-        "runtime, tracked as cleanup, not gated.",
+        "Circular imports make module initialization order load-bearing and " +
+        "resist extraction. The src graph has zero cycles of ANY kind — runtime " +
+        "or type-only; any new one is a regression. The three type-only cycles " +
+        "that existed at adoption (quota/limits<->scheduler, remediate " +
+        "state/itemStatus<->types, contractPipeline " +
+        "artifactStore<->semanticProjection) were each broken by moving the " +
+        "shared declaration DOWN into a module below both sides, so the " +
+        "viaOnly type-only exemption is gone: a type-only cycle is a real " +
+        "design defect (it says two modules each own part of the other's " +
+        "contract), it just happens to be erased at emit.",
       from: {},
       to: {
         circular: true,
-        viaOnly: { dependencyTypesNot: ["type-only"] },
       },
     },
     {

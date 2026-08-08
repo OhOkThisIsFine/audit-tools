@@ -323,22 +323,10 @@ export interface OutcomeCoverageLedger extends Omit<CoverageLedger, "entries"> {
   entries: OutcomeCoverageEntry[];
 }
 
-/**
- * How an item ENDED, as the outcomes contract records it. Derived from the item
- * status by the single status→disposition→outcome authority in `itemStatus.ts`;
- * nothing else may re-enumerate it.
- *
- * Every value is terminal. `abandoned` is the tool giving up — retry bound
- * exhausted, final gate red, or operator halt — and is deliberately distinct
- * from `ignored` (a settled human decision not to act), because collapsing them
- * would erase which of the two happened.
- */
-export type PerFindingDisposition =
-  | "resolved"
-  | "resolved_no_change"
-  | "ignored"
-  | "deemed_inappropriate"
-  | "abandoned";
+// Defined in ./disposition.js (below both this module and itemStatus.ts, which
+// needs it — importing it from here closed a type-only cycle). Re-exported so
+// existing importers are unchanged.
+export type { PerFindingDisposition } from "./disposition.js";
 
 export interface RemediationItemState {
   finding_id: string;

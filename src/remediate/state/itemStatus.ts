@@ -11,7 +11,7 @@
  */
 
 import type { RemediationOutcomeStatus } from "audit-tools/shared";
-import type { PerFindingDisposition } from "./types.js";
+import type { PerFindingDisposition } from "./disposition.js";
 
 // ── Canonical status enum ───────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig
 import type { DispatchModelTier } from "../types/stepContract.js";
 import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
+  DiscoveredRateLimitsInput,
   HostConcurrencyLimit,
   QuotaBindingWindow,
   QuotaStateEntry,
@@ -25,27 +26,11 @@ import {
   type ProviderType,
 } from "./limits.js";
 
-/**
- * Minimal structural shape of capabilities discovered at runtime — RPM/TPM (e.g.
- * via response-header extraction) plus, from the dispatch-time capability
- * handshake, the dispatching model's real context/output window. Declared here
- * so the scheduler stays decoupled from any package-specific discovery
- * implementation — callers may pass a richer object (with a `source` field,
- * etc.); only these fields are read.
- *
- * `context_tokens`/`output_tokens`, when present, are the discovered model's
- * window and take precedence over the static known-model table — they are how
- * dispatch sizes from real capabilities (see spec/audit-workflow-design.md).
- */
-export interface DiscoveredRateLimitsInput {
-  requests_per_minute?: number | null;
-  input_tokens_per_minute?: number | null;
-  output_tokens_per_minute?: number | null;
-  /** Discovered context window for the dispatching model, if reported. */
-  context_tokens?: number | null;
-  /** Discovered output cap for the dispatching model, if reported. */
-  output_tokens?: number | null;
-}
+// Defined in ./types.js — the base module below both this file and limits.ts —
+// because limits.ts needs it too, and importing it from here closed a
+// scheduler⇄limits cycle against this file's own one-directional intent.
+// Re-exported so every existing `from "./scheduler.js"` consumer is unchanged.
+export type { DiscoveredRateLimitsInput };
 
 /**
  * One entry of the host's model roster, reported at the dispatch handshake
