@@ -5,16 +5,16 @@
 
 ## Live state
 
-- **A dogfood self-audit is PARKED MID-DISPATCH — this is deliberate, not a broken run.**
-  `.audit-tools/audit/` holds a live run: intake → charters → deep design review → 11 challenge rounds →
-  planning all complete, and **9 of 382 review packets done (373 remaining)**. No partial results were
-  written, so it resumes cleanly. It is parked on INFRASTRUCTURE, not a tool defect: every member of the
-  relay's `xhigh` pool is exhausted (4×402 credits / 3×429 quota / 3×403 subscription / 1×400 gone).
-  `pool/low` and `pool/medium` were still serving at park time. Run record + 9 tool findings:
-  [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md); the friction close-out walk
-  is on `.audit-tools/audit/friction/run.json`.
-  ⚠ The prior run's promoted deliverables (`.audit-tools/audit-report.md`, `audit-findings.json`) are
-  STALE relative to this run — they are last run's, not this one's, until synthesis completes.
+- **The dogfood self-audit COMPLETED 2026-08-08 — `audit-report.md` / `audit-findings.json` are FRESH.**
+  **2,241 findings** (4 critical, 92 high, 1,329 medium, 804 low, 12 info) over **200 work blocks**;
+  1,264 files audited. Three dispatch waves (382 packets, then 6 deepening / 154 tasks, then 3 / 25),
+  every packet accounted for. Run record, the four criticals, and **12 tool findings** are in
+  [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md). The friction record
+  (9 observations across all three categories) is promoted to `.audit-tools/audit-friction-run.json`,
+  which is gitignored — read it there, it is not in git.
+  ⚠ **The findings are AUDIT OUTPUT, not a work queue.** Nothing has been triaged or verified; the
+  auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
+  Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
 - **v0.39.9 SHIPPED 2026-08-08.** npm live at 0.39.9, both global bins reinstalled and the deferred
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
@@ -91,13 +91,13 @@
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
 
-1. **Resume the parked dogfood dispatch** — 373 of 382 packets remain (see *Live state*). Blocked only
-   on free-lane capacity; re-probe with `llm-relay pools --probe` and resume on a pool with live members.
-   The driver used is session-scratch, not tracked: it dispatches one `claude -p` per packet through the
-   relay, carries the three gate kill-switches from
-   [[dispatch-lane-children-hit-repo-stop-gates]], takes the result from the child's FINAL MESSAGE
-   (never a Write call — see open-bugs), and skips any packet whose result file already parses.
-   A relay-side writeup of the pool exhaustion went to the owner directly (not tracked in-repo).
+1. **Triage the 2,241 audit findings — decide the CUT before reading them.** They are unfiltered output.
+   Maintainability alone is 1,417 (63%), and the auditor's severity calibration has a standing
+   open-bugs entry against it (2026-08-06: 0 of 9 self-audit criticals survived mechanism verification).
+   The 4 criticals + 92 high are the only tractable starting set; the four criticals are summarized in
+   [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md). Feeding this to
+   `/remediate-code` wholesale would be a mistake — verify by MECHANISM first
+   ([[verify-delegated-findings-mechanism-not-just-citation]]).
 2. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
    ⬇ Two of its still-live properties were exercised this run: a pause/cooldown DID occur (pool
    exhaustion), and the remedy a refusal names was NOT reachable — the pool surfaced one member's 402

@@ -23,6 +23,28 @@ lane prompt + inlined packet to llm-relay's OpenAI-compatible endpoint directly
 (`127.0.0.1:8791/v1/chat/completions`), with every returned artifact verified against
 `repo_manifest.json` before it was written.
 
+## Outcome — COMPLETED
+
+The run finished. `audit-findings.json` (8.3MB) + `audit-report.md` (5.4MB) are the promoted
+deliverables; the friction record was promoted to `.audit-tools/audit-friction-run.json` (gitignored).
+
+- **2,241 findings** — 4 critical, 92 high, 1,329 medium, 804 low, 12 info — across **200 work blocks**.
+- 1,264 files audited, 221 excluded. Grounding: 1,054 grounded / 10 ungrounded.
+- Lens spread: maintainability 1,417, tests 312, correctness 145, observability 91, architecture 77,
+  data_integrity 52, reliability 49, operability 40, performance 39, security 15, config_deployment 4.
+- The four criticals: a non-atomic write under concurrent lock acquisition
+  (`io/artifacts.ts`, `io/runArtifacts.ts`); the audit/remediate parallel-orchestrator duplication
+  (the "one core, two draws" violation the project already names as its most persistent mistake);
+  symlink/relative-path traversal in remediation write-scope isolation (`writeScope.ts`); and
+  prompt injection from untrusted target-repo content interpolated into worker prompts
+  (`packetPrompt.ts`) — that last one **judge-added**, raised by no perspective lane.
+- Dispatch took three waves: 382 packets, then 6 deepening packets (154 tasks), then 3 (25 tasks).
+  Selective deepening fired twice off the findings, which is the mechanism working as designed.
+
+⚠ A machine crash occurred mid-run, after the deepening wave completed but before its ingest. Nothing
+was lost: every packet result was already on disk and `merge-and-ingest` picked them all up on restart.
+Resumability held under an uncontrolled failure, which is a stronger test than a clean pause.
+
 ## Observations
 
 ### O1 — the declared relay lanes were dead, and looked alive (fixed in-run)
@@ -166,6 +188,56 @@ silently acquiring an unrelated mandate is a correctness risk, not just noise.
 
 **Property to hold:** a dispatch child's inherited surface is DECLARED — hooks and skills both — not
 whatever happens to sit in the cwd.
+
+### O10 — the WORKER MODEL is the dominant quality variable, and the configured default was the worst
+
+One packet (`src-remediate:maintainability:packet-85`), same prompt, same effort (`model_reasoning_effort
+= "xhigh"` from `~/.codex/config.toml`, not overridden), four backends:
+
+| Backend | Findings |
+|---|---|
+| `gpt-5.6-sol` (codex) | **6** |
+| `deepseek-v4-flash-0731` (relay, OpenRouter) | 5 |
+| `gpt-5.6-terra` (codex) | 3 |
+| `gpt-5.3-codex-spark` (codex) | **1** |
+| `gpt-5.6-luna` (codex) | malformed JSON |
+
+`gpt-5.3-codex-spark` is the `config.toml` default, so a codex lane that does NOT pass `-m` silently
+picks the weakest of the four. Its smoke slice returned **0 findings across 28 tasks** and read as five
+clean packets; sol on comparable work runs ~4-5 findings/packet. A rubber-stamping worker and a genuinely
+clean codebase are indistinguishable from the outside — which is exactly what `reviewed_clean` cannot
+tell you, since the worker asserts it about itself.
+
+**Property to hold:** worker model identity is recorded per result, so a lane's finding-rate is
+auditable after the fact rather than an assumption.
+
+### O11 — codex honors the packet contract that the relay-backed lane did not
+
+The codex lane WROTE its own `result_path` on every success (`source: worker_write`), where the
+relay-backed `claude -p` lane routinely skipped the Write call entirely (O8). Codex also exposes
+`-o/--output-last-message`, which captures the final message to a file — a guaranteed backstop that
+needs no stdout parsing. Running the worker under `--sandbox workspace-write` with `-o` as fallback
+gets both: the real contract is exercised, and a skipped write cannot lose the work.
+
+### O12 — three host-driver bugs, each of which FAKED a lane verdict
+
+Recorded because every one of them would have been reported as "the offload lane is bad":
+
+1. **Unshaped JSON extraction manufactured success.** First-`[`-to-last-`]` matched `[published]` from a
+   quoted YAML snippet and parsed cleanly. An extractor must require the array to look like
+   AuditResults (first element carrying `task_id`).
+2. **A hair-trigger lane-dead abort killed healthy work.** Added to stop 373 packets grinding against a
+   real HTTP 402, it then treated ONE 402 from a pool's free fallback member as the whole lane dying —
+   aborting while 42 packets were succeeding. A refusal signal must require a sustained streak that any
+   success resets.
+3. **Content-scanning for error strings false-positives when auditing code about errors.** The codex
+   driver scanned stdout for `/402/` and `rate limit reached`; codex echoes file content with
+   line-number prefixes, so source line `402:` and this repo's own quota code both matched. 8 packets
+   were misclassified as a dead lane. Scan STDERR only, and harvest the result BEFORE judging any
+   refusal — those workers had already written valid results.
+
+**Property to hold:** a lane verdict is derived from the absence of a valid RESULT, never from string
+matching over content the worker echoed.
 
 ### O6 — fence drift is near-universal but not total
 
