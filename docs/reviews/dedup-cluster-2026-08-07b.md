@@ -47,7 +47,11 @@ the tell.
   public `audit-tools/shared` surface for types only one orchestrator uses. A local sibling below
   both breaks the cycle equally well.
 
-## Remaining — verified specs
+## The specs, and what each turned out to be — ALL LANDED
+
+Nothing below is outstanding. Each section is kept because the *correction* it records is the
+reusable part: what the written spec claimed, versus what verification actually found. Read these
+before sizing any future extraction — the pattern that repeats is a spec undercounting its family.
 
 ### ~~§4 item 2 — `claimRegistry` / `reservationLedger` store scaffolding~~ — LANDED `426c2ba6`
 

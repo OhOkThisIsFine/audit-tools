@@ -6,6 +6,20 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).** Found one
+  live instance closing dedup item 8: `"advancePastDesignReview throws on unknown pause kind"`
+  declared a hand-copied replica of the walker *inside the test body* and asserted on the replica, so
+  the production helper could have been deleted and it would have stayed green. Fixed in `c791df49`
+  by making the driver's transport injectable, which is the general remedy — the replica exists
+  because the real code was undrivable.
+  **Why no gate catches it:** it is green, it typechecks, it has no unused exports, and coverage
+  counts the replica's lines. knip, eslint and the red-green rule all pass a test that pins nothing.
+  **The tell:** a function declared in a test file that mirrors production control flow (a `for` over
+  step kinds, a switch over cases) rather than calling into `src/`.
+  **Property:** every test either calls production code or is deleted; where a replica exists because
+  the subject is hard to drive, fix the *untestability* (inject the dependency) rather than the test.
+  Scope: `tests/**` — start with the harness-heavy audit suites. [[test-must-reach-the-code-it-claims]]
+
 - **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
   the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in
   `graphPythonImports`, `graphRoutes`, `changeClassification`, `autonomousGate`,
