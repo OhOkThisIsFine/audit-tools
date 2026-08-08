@@ -5,10 +5,11 @@
 
 ## Live state
 
-- **v0.39.8 is the published version; `main` is now 6 commits ahead of the tag, and 4 of those
-  touch `src/`.** Unlike the previous docs-only gap, this IS an unpublished code delta —
-  `ec494621`, `9329238f`, `c791df49`, `8e7931e4` (plus doc commits). A release has not been run
-  this lap; see *Immediate next*.
+- **v0.39.9 SHIPPED 2026-08-08.** npm live at 0.39.9, both global bins reinstalled and the deferred
+  postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
+  bins report 0.39.9. Release CI run
+  [31244546675](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31244546675) green across
+  all 6 jobs, critical path 294s (summed 854s). **Tag and `main` are level — no gap.**
 - **v0.39.7 was burned and is deliberately absent** — its gate job failed on five eslint errors and
   the release + tag were deleted (`gh release delete --cleanup-tag`), then forward-bumped. A gap in
   the version sequence is expected, not a missing publish.
@@ -35,24 +36,31 @@
   [`durable-traps.md`](backlog/durable-traps.md).
 - **A type-only import cycle is now a red build.** All three that existed were broken and
   `no-circular` lost its `viaOnly` exemption, so the cleanup is enforced rather than tracked.
-- **The T4 single-file floor is now ~40s.** `audit-code-wrapper-packets.test.ts` (198.5s) was split
-  three ways this lap into `audit-code-wrapper-{submit-packet,packet-merge,result-identity}.test.ts`
-  (40.3 / 38.9 / 37.0s). The next-slowest file has not been re-measured since — regenerate the
-  shard-duration baseline to pick the next target rather than guessing.
+- **T4's floor is no longer a single outlier — it is a CLUSTER, which changes what the next split
+  buys.** `audit-code-wrapper-packets.test.ts` was split three ways this lap and the baseline was
+  regenerated from the 596-file run. The top of the list is now four completion files within 7s of
+  each other: `audit-code-completion-present` 134.9s, `-ingest-dir` 134.5s, `-promote` 131.6s,
+  `-force-synthesis` 128.0s, then `linux-cycle-regression` 125.9s. Splitting any ONE of them moves
+  the floor by ~3s, so the next T4 step is a decision about the completion family as a whole, not
+  another single-file split. ⚠ Baseline numbers are under full-suite contention and run ~3× the
+  isolated timings (the new wrapper files measure 37-40s alone, 107s in-suite) — compare like with
+  like.
 
 ## Verification state
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31242135825](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31242135825)** (v0.39.8 —
-  gate + all 4 shards green). That covers v0.39.8, NOT the four `src/`-touching commits since.
-- This lap's landings were each verified before commit: `build` + `check` + `check:tests` +
-  `check:lint` + `check:deadcode` + `check:depgraph` green, plus the targeted suites — 180 tests
-  across the 9 design-review/conceptual suites and 68 in graph-manifest-edges (item 6), 166/2-skipped
-  across 12 provider suites (providers twin), 65 across the 15 harness-affected suites (item 8), and
-  7 across the three new wrapper files (T4).
-- The shard-duration baseline is now **two files stale** (it predates both the completion split and
-  this lap's wrapper-packets split). Regenerate it at the next release — it is what picks the next
-  T4 target.
+  [31244546675](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31244546675)** (v0.39.9 —
+  gate + all 4 shards green). Read that, not the local run, as the release signal.
+- A LOCAL full suite also covers this source, unlike the last two releases: **592 files passed /
+  4 skipped, 7684 passed / 15 skipped, 264.9s**, on a clean committed tree at `f6f99cb3`. The test
+  count is identical to the pre-lap run, which is the expected signature of a pure split plus a
+  rewritten-in-place test.
+- Each landing was additionally verified before its commit: `build` + `check` + `check:tests` +
+  `check:lint` + `check:deadcode` + `check:depgraph` green, plus targeted suites — 180 tests across
+  the 9 design-review/conceptual suites and 68 in graph-manifest-edges (item 6), 166/2-skipped across
+  12 provider suites (providers twin), 65 across the 15 harness-affected suites (item 8), 7 across
+  the three new wrapper files (T4).
+- **The shard-duration baseline is now CURRENT** — regenerated from this lap's 596-file run.
 - **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
   `7ebb8976`). It previously ran `npm run check` alone — a typecheck — which is how v0.39.7 got
   tagged with eslint errors; `tsc` cannot see an unused destructured binding. Expect ~2min at the
@@ -75,14 +83,13 @@
 > come first, before another audit run.** That is why the pinned dogfood cluster is last here while
 > still being the backlog's pinned item.
 
-1. **SHIP the four unpublished `src/` commits.** `main` carries an unreleased code delta (see *Live
-   state*). Run `/ship` — it owns verify → commit → push → publish → verify live → reinstall bins.
-   Regenerate the shard-duration baseline as part of it; it is two files stale.
-2. **T4 remainder** — the floor moved to ~40s, so the next target is unknown until the baseline is
-   regenerated. Pick from fresh numbers, same one-file-at-a-time protocol.
-3. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties. The
-   known refactoring goals that gated it are now DONE, so per the owner call this is next after the
-   ship.
+1. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
+   **This is now unblocked and is the top item**: the owner gated it behind "known refactoring goals
+   first", and those are done — the dedup cluster is 10 of 10, the providers twin is closed, and
+   nothing is unpublished.
+2. **T4 — needs a DECISION, not another split.** See *Live state*: the floor is a four-file
+   completion cluster within 7s, so one more single-file split buys ~3s. Worth deciding whether T4
+   continues at all at this granularity before spending a lap on it.
    ⚠ The memory-index size chore is **closed, not pending** (owner call, 2026-08-07): the index is
    one line per cluster already, so its size is the file count rather than padding, and it sits well
    under the harness's real 24.4KB read limit. The harness's 17.1KB compaction reminder still fires
