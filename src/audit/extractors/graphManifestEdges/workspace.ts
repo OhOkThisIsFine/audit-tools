@@ -1,5 +1,6 @@
 import { posix } from "node:path";
-import { normalizeGraphPath } from "../graphPathUtils.js";
+import type { GraphEdge } from "audit-tools/shared";
+import { graphEdge, normalizeGraphPath } from "../graphPathUtils.js";
 
 export interface WorkspacePattern {
   pattern: string;
@@ -78,17 +79,6 @@ export function globPatternToRegExp(pattern: string): RegExp {
   return new RegExp(`${source}$`, "i");
 }
 
-export function workspacePatternMatchesPackage(
-  workspacePattern: string,
-  packagePath: string,
-): boolean {
-  return workspacePatternMatchesManifest(
-    workspacePattern,
-    packagePath,
-    "package.json",
-  );
-}
-
 export function workspacePatternMatchesManifest(
   workspacePattern: string,
   manifestPath: string,
@@ -101,4 +91,88 @@ export function workspacePatternMatchesManifest(
     ? normalizedManifestPath
     : manifestDir;
   return globPatternToRegExp(workspacePattern).test(patternTarget);
+}
+
+/**
+ * The workspace member-resolution algorithm shared by every manifest ecosystem:
+ * normalize each raw pattern against the declaring manifest, split positive from
+ * negated, cross-product the positives against the repo path lookup, and drop
+ * any target a negation also matches.
+ *
+ * Ecosystems differ only in the four values passed in — which manifest filename
+ * marks a member, which paths count as a manifest, and the edge's kind /
+ * confidence / reason. Those are genuine INPUT, not policy knobs selected here.
+ *
+ * Iteration order of `pathLookup` does NOT reach the artifact: these edges land
+ * in `acc.references`, which `uniqueSortedEdges` dedupes and sorts by
+ * from/to/kind before it is hashed, so the content-derived order invariant holds
+ * downstream rather than here.
+ */
+export function workspaceMemberEdges(options: {
+  fromPath: string;
+  rawPatterns: WorkspacePattern[];
+  pathLookup: Map<string, string>;
+  manifestName: string;
+  isMemberManifest: (path: string) => boolean;
+  kind: string;
+  confidence: number;
+  reason: (pattern: string, target: string) => string;
+}): GraphEdge[] {
+  const {
+    fromPath,
+    rawPatterns,
+    pathLookup,
+    manifestName,
+    isMemberManifest,
+    kind,
+    confidence,
+    reason,
+  } = options;
+
+  if (rawPatterns.length === 0) {
+    return [];
+  }
+
+  const positivePatterns: string[] = [];
+  const negativePatterns: string[] = [];
+  for (const { pattern, negated } of rawPatterns) {
+    const normalized = normalizeWorkspacePattern(fromPath, pattern);
+    if (!normalized) {
+      continue;
+    }
+    if (negated) {
+      negativePatterns.push(normalized);
+    } else {
+      positivePatterns.push(normalized);
+    }
+  }
+
+  const edges: GraphEdge[] = [];
+  for (const pattern of positivePatterns) {
+    for (const target of pathLookup.values()) {
+      if (target === fromPath || !isMemberManifest(target)) {
+        continue;
+      }
+      if (!workspacePatternMatchesManifest(pattern, target, manifestName)) {
+        continue;
+      }
+      if (
+        negativePatterns.some((negativePattern) =>
+          workspacePatternMatchesManifest(negativePattern, target, manifestName),
+        )
+      ) {
+        continue;
+      }
+      edges.push(
+        graphEdge({
+          from: fromPath,
+          to: target,
+          kind,
+          confidence,
+          reason: reason(pattern, target),
+        }),
+      );
+    }
+  }
+  return edges;
 }

@@ -23,7 +23,12 @@ import {
   prepareConceptualDispatch,
   resolveConceptualReviewSettings,
 } from "./conceptualDispatch.js";
+import type {
+  ConceptualDispatch,
+  ConceptualReviewSettings,
+} from "./conceptualDispatch.js";
 import { buildDesignReReviewSection } from "../orchestrator/designReviewSnapshot.js";
+import type { DesignReviewPass } from "../orchestrator/designReviewSnapshot.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { deriveIntentEquivalenceStatus } from "../orchestrator/intentEquivalenceExecutor.js";
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
@@ -133,6 +138,62 @@ interface ContractDispatch {
 }
 
 /**
+ * The two host-facing notices every design-review pass prepends to its prompt:
+ * the diff-based re-review section (present only on a genuine re-review) and the
+ * prior-submission rejection notice (present only when a submission was
+ * quarantined). Both are per-pass and both are optional, so the join has to drop
+ * absent ones rather than emit blank runs.
+ *
+ * Single-sourced across all THREE pass preparations — contract, and the
+ * conceptual pass in each of its two branches. Previously each site rebuilt the
+ * pair and composed it its own way, which is how the two conceptual branches
+ * came to hold byte-identical scaffolds: a notice added for one pass would have
+ * had to be remembered in three places to reach them all.
+ */
+async function designReviewNotesSection(
+  artifactsDir: string,
+  bundle: ArtifactBundle,
+  pass: DesignReviewPass,
+): Promise<string> {
+  const reReview = await buildDesignReReviewSection(artifactsDir, bundle, pass);
+  const rejectionNotice = renderDesignReviewRejectionNotice(bundle, [
+    "legacy",
+    pass,
+  ]);
+  return [reReview, rejectionNotice]
+    .filter((s): s is string => Boolean(s))
+    .join("\n\n");
+}
+
+/**
+ * Prepare the conceptual pass end to end: derive its notices, then write its
+ * dispatch artifacts.
+ *
+ * Both conceptual branches — the parallel one (contract still outstanding) and
+ * the conceptual-only one — need exactly this, and their settings are resolved
+ * separately because the parallel branch also feeds `max_units` to the contract
+ * packet it prepares first. Settings therefore stay an INPUT here rather than
+ * being resolved inside, which keeps each branch's write ordering unchanged.
+ */
+async function prepareConceptualPass(
+  artifactsDir: string,
+  bundle: ArtifactBundle,
+  settings: ConceptualReviewSettings,
+): Promise<ConceptualDispatch> {
+  const notesSection = await designReviewNotesSection(
+    artifactsDir,
+    bundle,
+    "conceptual",
+  );
+  return prepareConceptualDispatch({
+    artifactsDir,
+    bundle,
+    settings,
+    reReviewSection: notesSection || undefined,
+  });
+}
+
+/**
  * Write the contract-review worker packet and return the dispatch pieces —
  * single-sourced so the parallel branch (both passes outstanding) and the solo
  * branch (only the contract pass left) cannot drift into two shapes.
@@ -154,15 +215,11 @@ async function prepareContractDispatch(opts: {
   await mkdir(incoming, { recursive: true });
   const promptPath = join(incoming, "design-review-contract-prompt.md");
   const resultsPath = join(incoming, "design-review-contract-findings.json");
-  const reReview = await buildDesignReReviewSection(
+  const notesSection = await designReviewNotesSection(
     opts.artifactsDir,
     opts.bundle,
     "contract",
   );
-  const rejectionNotice = renderDesignReviewRejectionNotice(opts.bundle, [
-    "legacy",
-    "contract",
-  ]);
   const promptText = [
     renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
     "## Results path",
@@ -170,8 +227,7 @@ async function prepareContractDispatch(opts: {
     'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
     "",
     `  ${resultsPath}`,
-    ...(reReview ? ["", reReview] : []),
-    ...(rejectionNotice ? ["", rejectionNotice] : []),
+    ...(notesSection ? ["", notesSection] : []),
   ].join("\n");
   await writeFile(promptPath, promptText, "utf8");
 
@@ -489,24 +545,11 @@ async function cmdNextStepBody(
       bundle: result.bundle,
       maxUnits: conceptualSettings.max_units,
     });
-    const conceptualReReview = await buildDesignReReviewSection(
+    const conceptual = await prepareConceptualPass(
       artifactsDir,
       result.bundle,
-      "conceptual",
+      conceptualSettings,
     );
-    const conceptualRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
-      "legacy",
-      "conceptual",
-    ]);
-    const conceptualNotesSection = [conceptualReReview, conceptualRejectionNotice]
-      .filter((s): s is string => Boolean(s))
-      .join("\n\n");
-    const conceptual = await prepareConceptualDispatch({
-      artifactsDir,
-      bundle: result.bundle,
-      settings: conceptualSettings,
-      reReviewSection: conceptualNotesSection || undefined,
-    });
 
     const dispatchPrompt = [
       "# Design review — parallel dispatch",
@@ -630,24 +673,11 @@ async function cmdNextStepBody(
       result.bundle,
       intent,
     );
-    const conceptualReReview = await buildDesignReReviewSection(
+    const conceptual = await prepareConceptualPass(
       artifactsDir,
       result.bundle,
-      "conceptual",
+      conceptualSettings,
     );
-    const conceptualRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, [
-      "legacy",
-      "conceptual",
-    ]);
-    const conceptualNotesSection = [conceptualReReview, conceptualRejectionNotice]
-      .filter((s): s is string => Boolean(s))
-      .join("\n\n");
-    const conceptual = await prepareConceptualDispatch({
-      artifactsDir,
-      bundle: result.bundle,
-      settings: conceptualSettings,
-      reReviewSection: conceptualNotesSection || undefined,
-    });
 
     const prompt = [
       "# Design review — conceptual pass",

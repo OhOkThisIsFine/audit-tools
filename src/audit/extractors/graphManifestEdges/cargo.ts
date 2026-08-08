@@ -1,6 +1,6 @@
 import type { GraphEdge } from "audit-tools/shared";
-import { graphEdge, isCargoManifestPath } from "../graphPathUtils.js";
-import { WorkspacePattern, addWorkspacePattern, normalizeWorkspacePattern, workspacePatternMatchesManifest } from "./workspace.js";
+import { isCargoManifestPath } from "../graphPathUtils.js";
+import { WorkspacePattern, addWorkspacePattern, workspaceMemberEdges } from "./workspace.js";
 import { tomlTable, tomlStringArray } from "./toml.js";
 
 const CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE = 0.87;
@@ -39,51 +39,15 @@ export function extractCargoWorkspaceMemberEdges(
     return [];
   }
 
-  const rawPatterns = cargoWorkspacePatterns(content);
-  if (rawPatterns.length === 0) {
-    return [];
-  }
-
-  const positivePatterns: string[] = [];
-  const negativePatterns: string[] = [];
-  for (const { pattern, negated } of rawPatterns) {
-    const normalized = normalizeWorkspacePattern(fromPath, pattern);
-    if (!normalized) {
-      continue;
-    }
-    if (negated) {
-      negativePatterns.push(normalized);
-    } else {
-      positivePatterns.push(normalized);
-    }
-  }
-
-  const edges: GraphEdge[] = [];
-  for (const pattern of positivePatterns) {
-    for (const target of pathLookup.values()) {
-      if (target === fromPath || !isCargoManifestPath(target)) {
-        continue;
-      }
-      if (!workspacePatternMatchesManifest(pattern, target, "Cargo.toml")) {
-        continue;
-      }
-      if (
-        negativePatterns.some((negativePattern) =>
-          workspacePatternMatchesManifest(negativePattern, target, "Cargo.toml"),
-        )
-      ) {
-        continue;
-      }
-      edges.push(
-        graphEdge({
-          from: fromPath,
-          to: target,
-          kind: "cargo-workspace-member-link",
-          confidence: CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE,
-          reason: `Cargo workspace pattern '${pattern}' includes member manifest '${target}'.`,
-        }),
-      );
-    }
-  }
-  return edges;
+  return workspaceMemberEdges({
+    fromPath,
+    rawPatterns: cargoWorkspacePatterns(content),
+    pathLookup,
+    manifestName: "Cargo.toml",
+    isMemberManifest: isCargoManifestPath,
+    kind: "cargo-workspace-member-link",
+    confidence: CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE,
+    reason: (pattern, target) =>
+      `Cargo workspace pattern '${pattern}' includes member manifest '${target}'.`,
+  });
 }

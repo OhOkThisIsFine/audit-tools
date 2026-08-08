@@ -4,8 +4,7 @@ import { graphEdge, normalizeGraphPath, resolveCandidate, isPackageManifestPath 
 import {
   WorkspacePattern,
   collectWorkspacePatternValues,
-  normalizeWorkspacePattern,
-  workspacePatternMatchesPackage,
+  workspaceMemberEdges,
 } from "./workspace.js";
 import { pnpmWorkspacePatterns } from "./pnpm.js";
 import { isPnpmWorkspaceManifestPath } from "../graphPathUtils.js";
@@ -228,51 +227,15 @@ export function extractWorkspacePackageEdges(
   content: string,
   pathLookup: Map<string, string>,
 ): GraphEdge[] {
-  const rawPatterns = workspacePatternsForFile(fromPath, content);
-  if (rawPatterns.length === 0) {
-    return [];
-  }
-
-  const positivePatterns: string[] = [];
-  const negativePatterns: string[] = [];
-  for (const { pattern, negated } of rawPatterns) {
-    const normalized = normalizeWorkspacePattern(fromPath, pattern);
-    if (!normalized) {
-      continue;
-    }
-    if (negated) {
-      negativePatterns.push(normalized);
-    } else {
-      positivePatterns.push(normalized);
-    }
-  }
-
-  const edges: GraphEdge[] = [];
-  for (const pattern of positivePatterns) {
-    for (const target of pathLookup.values()) {
-      if (target === fromPath || !isPackageManifestPath(target)) {
-        continue;
-      }
-      if (!workspacePatternMatchesPackage(pattern, target)) {
-        continue;
-      }
-      if (
-        negativePatterns.some((negativePattern) =>
-          workspacePatternMatchesPackage(negativePattern, target),
-        )
-      ) {
-        continue;
-      }
-      edges.push(
-        graphEdge({
-          from: fromPath,
-          to: target,
-          kind: "workspace-package-link",
-          confidence: WORKSPACE_PACKAGE_EDGE_CONFIDENCE,
-          reason: `Workspace pattern '${pattern}' includes package manifest '${target}'.`,
-        }),
-      );
-    }
-  }
-  return edges;
+  return workspaceMemberEdges({
+    fromPath,
+    rawPatterns: workspacePatternsForFile(fromPath, content),
+    pathLookup,
+    manifestName: "package.json",
+    isMemberManifest: isPackageManifestPath,
+    kind: "workspace-package-link",
+    confidence: WORKSPACE_PACKAGE_EDGE_CONFIDENCE,
+    reason: (pattern, target) =>
+      `Workspace pattern '${pattern}' includes package manifest '${target}'.`,
+  });
 }
