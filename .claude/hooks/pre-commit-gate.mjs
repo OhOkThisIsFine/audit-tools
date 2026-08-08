@@ -743,6 +743,45 @@ function runGate(committedPaths) {
     }
   }
 
+  // 2b-v. Backlog STATUS-LABEL ban — same trigger as 2b-iii/2b-iv, third sibling
+  // of the same family. `check:backlog-status` refuses a leading status label on
+  // an entry ("Resolved …", "Done …"), because the backlog is a living to-do
+  // list, not a status log — a closed entry is DELETED, a partial one TRIMMED.
+  //
+  // Bit 2026-08-08, and by the same shape the 2b-iv comment above describes: a
+  // docs-only commit ran `check:backlog-budget` (the check its edit obviously
+  // touched) plus build+check, landed on main, and turned `ci` RED on this leg
+  // alone. Its two siblings here DID fire on that commit, which is what makes
+  // the omission a gap rather than a judgement call — the same sentence the
+  // budget leg was added under. Three checks share one trigger condition; a
+  // family where one member is missing is how "run the whole gate" degrades
+  // into "run the check you happened to think of".
+  const pinsBacklogStatus = (p) => /^docs\/backlog\/[^/]+\.md$/.test(p.replace(/\\/g, '/'));
+  if (staged.some(pinsBacklogStatus)) {
+    try {
+      execSync('npm run check:backlog-status', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: backlog status-label check FAILED — commit blocked. A staged entry leads with a ` +
+          `status label, and the backlog is a living to-do list rather than a status log.\n` +
+          `Fix: a fully-closed entry is DELETED (move anything durable to its real home first — spec/ or ` +
+          `project memory for design, docs/backlog/durable-traps.md for an environment gotcha, CLAUDE.md for ` +
+          `a how-to); a partial entry is TRIMMED to its open remainder.\n` +
+          `Only the LABEL form is refused — a status word inside a sentence is fine. Move it out of the ` +
+          `leading position rather than reaching for a synonym.\n${tail}`,
+      };
+    }
+  }
+
   // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
   // re-includes each hook BY NAME, so a new hook committed without its
   // `!.claude/hooks/<name>` line is silently dropped from the commit — and if
