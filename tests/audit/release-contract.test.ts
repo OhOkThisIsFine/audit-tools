@@ -86,7 +86,13 @@ test("one-command release helper wires the trusted publishing path", async () =>
   );
 
   expect(helper).toMatch(/--bump-only/);
-  expect(helper).toMatch(/verify:release/);
+  // The pre-tag gate must run the whole non-test gate, not a bare typecheck: a tag is
+  // the one step the helper takes that is expensive to undo, so a red gate has to fail
+  // BEFORE `vX.Y.Z` exists (v0.39.7 was tagged + released with eslint errors and had to
+  // be deleted and forward-bumped). This asserts the INVOCATION — the previous pin was
+  // satisfied by the word "verify:release" appearing in a comment, while the script
+  // actually ran `check` alone.
+  expect(helper).toMatch(/run\(npm, \["run", "verify:checks"\]\)/);
   expect(helper).toMatch(/run\(npm, \["version", bump, "--no-git-tag-version"\]\)/);
   expect(helper).toMatch(/run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
   expect(helper).toMatch(/run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);

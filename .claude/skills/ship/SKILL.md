@@ -26,10 +26,9 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `docs/**`, unregistered in `docs/doc-review-guidelines.md` otherwise fails only in RELEASE CI;
   burned v0.34.17) +
   `npm run check:lint` (14s — `tsc` does NOT flag an unused DESTRUCTURED binding or a
-  newly-dead import, so `build && check` goes green while the gate job fails; burned v0.39.7).
-- **Carrying a refactor? Run the whole `npm run verify:checks` locally first.** The fast list above
-  is a fail-fast for ordinary edits; an extraction or a moved call reliably leaves exactly the
-  leftovers only the full non-test gate sees, and the gate is minutes, not a burned tag.
+  newly-dead import, so `build && check` goes green while eslint fails; burned v0.39.7).
+  These are for FAST FEEDBACK only — nothing here is load-bearing, because the release script's
+  pre-tag gate now runs the whole `verify:checks` and refuses to tag if any of it is red.
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`
   (= `verify:checks` + full vitest + both linked-install smokes) — but the sharded CI gate re-runs it
   authoritatively either way.
@@ -46,15 +45,15 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
   branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
   the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
-  CRLF/clean-tree guard and the `npm run check` pre-tag gate still run. No `--root`/branch flag is needed —
+  CRLF/clean-tree guard and the `verify:checks` pre-tag gate still run. No `--root`/branch flag is needed —
   if the lap HEAD hasn't been fast-forwarded onto `origin/main` first, the guard refuses (fix the sync, don't
   add a flag).
 
 ## 3. Publish (single package)
 
 - Repo root: `npm run release:patch:publish` (or `:minor:` / `:major:`).
-  `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
-  already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
+  `scripts/release-and-publish.mjs` runs the full non-test gate before tagging (`npm run verify:checks` — a tag is
+  the one unrecoverable-cheaply step, so it fails BEFORE `vX.Y.Z` exists rather than after), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
   parallel jobs — `gate`, whose steps are generated from `package.json`:
 

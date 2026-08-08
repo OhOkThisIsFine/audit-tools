@@ -700,12 +700,19 @@ async function main() {
     return;
   }
 
-  // Local pre-tag gate is a fast typecheck only — the authoritative full-suite
-  // gate (check + test + smokes) runs on Linux in publish-package.yml before the
-  // upload, and the /ship preflight already ran it locally. Re-running the whole
-  // verify:release here a third time only delayed the tag.
-  console.log("[release] running local pre-tag gate (check)");
-  await runPhase("pre-tag-gate(check)", () => run(npm, ["run", "check"]));
+  // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
+  // this script does that cannot be taken back cheaply: once `vX.Y.Z` exists and the
+  // GitHub Release is created, a CI failure costs a delete + cleanup-tag + forward-bump.
+  //
+  // It was `npm run check` (typecheck) alone, justified by "the /ship preflight already
+  // ran it locally" — but the preflight is deliberately a fast SUBSET and never runs
+  // verify:checks, so nothing linted before the tag. v0.39.7 was tagged and released
+  // with five eslint errors and had to be deleted; `tsc` cannot see an unused
+  // destructured binding or a newly-dead import, which is exactly what a refactor
+  // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
+  // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
+  console.log("[release] running local pre-tag gate (verify:checks)");
+  await runPhase("pre-tag-gate(verify:checks)", () => run(npm, ["run", "verify:checks"]));
 
   console.log(`[release] bumping ${bump} version`);
   const { packageAfter, tag } = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
