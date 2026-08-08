@@ -5,8 +5,8 @@
 
 ## Live state
 
-- **v0.39.5 SHIPPED 2026-08-07.** npm live at 0.39.5, global bins reinstalled + postinstall run
-  manually (npm defers it on `-g`), both report 0.39.5.
+- **v0.39.6 SHIPPED 2026-08-07.** npm live at 0.39.6, global bins reinstalled + postinstall run
+  manually (npm defers it on `-g`), both report 0.39.6.
 - **The analyzer sweep's dedup cluster is 6 of 10 done.** The remaining three, plus a defect found
   en route, are the immediate-next list below. Each carries a verified, diff-ready spec in
   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md) — which also
@@ -23,9 +23,8 @@
 - Full suite green 2026-08-07: **589 files / 7681 tests passed** (4 files + 15 tests skipped);
   `verify:checks` green on the clean pushed tree. The shard-duration baseline is regenerated from
   that green full run.
-- Release CI green for v0.39.4 (run 31234888604) and v0.39.5. The T4 split shows as a tighter shard
-  spread: v0.39.3 was 205/198/151/132, v0.39.5 is 180/140/150/191 — slowest shard down from 205s,
-  critical path ~255s.
+- Release CI green for v0.39.4, v0.39.5 and v0.39.6. The T4 split shows as a tighter shard spread:
+  v0.39.3 was 205/198/151/132, v0.39.6 critical path 245s — slowest shard down from 205s.
 - A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
   542 modules; the tightened `no-circular` rule was red-green validated (reintroduced cycle → exit 1)
   and restored by inverting the edit, never by checkout.
