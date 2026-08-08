@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-07 at `242df218`.*
+*Last run: 2026-08-08 at `fe95d213`.*
 
 
 ---
@@ -31,26 +31,30 @@ records them in the tracked ledger, and does the work.
 # Documentation
 
 
-<!-- nightly:item key=e248d7dc8d561ecf -->
+<!-- nightly:item key=fa7990661f200b59 -->
 
-## `docs-1` — A durable spec doc opens by naming the releases its work shipped in - drop the version sentence, or retire the doc.
+## `docs-1` — instruction-file edit: CLAUDE.md states Node 20+ but the package refuses anything below Node 22.
 
-*Documentation · open 1 night · `spec/mechanical-analyzer-layer-design.md`*
+*Documentation · open 1 night · `CLAUDE.md`*
 
 ### In plain terms
 
-spec/mechanical-analyzer-layer-design.md is meant to be a timeless design document: it explains what the mechanical analyzer layer is and which design choices were deliberately refused, so that someone reading it in six months understands the shape of the thing. Its opening sentence instead reports delivery status - that the four-item program is 'fully shipped', with A/B/D landing in v0.37.0 and C 'in the following release'. Two problems. First, that sentence is already drifting: C landed in v0.38.1, and the phrase 'the following release' only made sense on the day it was typed, when v0.37.0 was current. Second, and more importantly, this is exactly the kind of sentence the repo's documentation philosophy bans from a concept doc - which release carried which piece is git's job, not the spec's. The doc even says so about itself one line later: 'Durable outcomes live in the code and its contract tests; this doc keeps only what is not derivable from them.' The rule here is deliberately narrow: the routine is not allowed to quietly bump the version number, because a doc whose only change between runs is a version bump is a status report wearing a spec's clothes, and bumping it hides that. So the question comes to you: delete the delivery status and keep the doc as the record of design refusals it says it is, or decide the doc's whole reason to exist lapsed when the program completed and retire it.
+CLAUDE.md's Commands section opens by stating the toolchain: "All TypeScript (ES2022, NodeNext, strict), Node 20+." The package itself declares a stricter floor — package.json has "engines": {"node": ">=22"} — so npm refuses to install audit-tools on Node 20 with an EBADENGINE error. The doc understates the real requirement by one major version.
+
+The same sentence appeared in README.md, and that copy was corrected to "Node 22+" this run under the routine's normal auto-apply. CLAUDE.md is different: it is an instruction file, and instruction files are never edited autonomously, no matter how narrow or how factual the fix. That rule exists because a wrong edit there deletes a guardrail governing every agent that reads it, so the blast radius is not comparable to a prose doc.
+
+There is one thing worth knowing before answering: CI is not uniform on this. audit-code-test-suite.yml deliberately runs Node 20 AND 22, because the Node-20 line gives type-stripping coverage that the Node-22-only workflow lacks. So the code may well still run on Node 20; what is definitely true is that the published package will not INSTALL there. If you consider "Node 20+" a statement about what the source supports rather than what the package accepts, the sentence is defensible as written and the right answer may be to leave it or to say both.
 
 ### The question
 
-spec/mechanical-analyzer-layer-design.md line 4-5 reads: "The four-item program (...) is **fully shipped** - A/B/D in v0.37.0, C in the following release." A pinned release string in a durable spec doc is status-noise, so the routine may not bump it. What should happen to it?
+CLAUDE.md:38 reads "All TypeScript (ES2022, NodeNext, strict), Node 20+." but package.json declares "engines": {"node": ">=22"}. CLAUDE.md is an instruction file, so the routine will not edit it. What should it say?
 
 ### Your answer
 
-- [ ] **1. Drop the status sentence** — Remove the shipped/version sentence from the preamble. The doc keeps its stated purpose - the decided-against list and the two recorded design deviations - and says nothing about which release carried which item. git log owns that.
-- [ ] **2. De-status, keep "implemented"** — Rewrite the sentence to state, without version numbers, that the program is implemented and its durable outcomes live in the code and contract tests. Keeps the orienting fact that the doc is not describing future work, drops the release pins that drift.
-- [ ] **3. Retire the doc** — The program is complete and its outcomes live in code and contract tests, so the doc has no reason to exist. Move the decided-against list and the two design deviations to their durable home (the backlog or memory) and delete the spec.
-- [ ] **4. Leave it** — Keep the sentence as written. The release pins are worth the drift because they tell a reader at a glance that this describes shipped work, and the doc is short enough that the noise is tolerable.
+- [ ] **1. Change to Node 22+** — Edit CLAUDE.md:38 to read "Node 22+", matching package.json engines and the README copy already corrected this run. One number, no other change.
+- [ ] **2. Derive it, do not pin it** — Replace the pinned version with a pointer to package.json engines ("Node — see package.json engines"), so the instruction file stops carrying a number that can drift from the declared floor at all.
+- [ ] **3. Say both** — State the distinction explicitly: the package installs on Node 22+ (engines >=22), while the test suite still covers Node 20 for type-stripping. Keeps the CI nuance that a bare "22+" loses.
+- [ ] **4. Leave it** — Keep "Node 20+". It describes what the source supports, the Node-20 CI line proves that is still true, and the install floor is package.json's business rather than the instruction file's.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -62,11 +66,115 @@ spec/mechanical-analyzer-layer-design.md line 4-5 reads: "The four-item program 
 <details>
 <summary>Evidence (5) — what was verified against code, and how</summary>
 
-- spec/mechanical-analyzer-layer-design.md:4-5 currently reads "is **fully shipped** - A/B/D in v0.37.0, C in the following release." (read at HEAD 885d0ba9).
-- The claim has already drifted: `git tag --contains 4b79f973` (the item-C close-gate commit) returns v0.38.1, and package.json is at 0.38.1 - so "the following release" now names a release two versions back.
-- The same doc, one line later, states its own scope: "Durable outcomes live in the code and its contract tests; this doc keeps only what is not derivable from them."
-- docs/doc-review-guidelines.md requires exactly this handling: a pinned version/date/status string in a prose doc is reclassified from stale-factual-fix to design-decision - escalate "de-status this (derive the value or drop it), or retire the doc", never auto-bump the number.
-- Independently confirmed by an adversary pass that also swept the whole corpus for false negatives: every `npm run` cited across tracked docs resolves in package.json, no doc still cites the pre-relocation `src/audit/analyzers` path, and this is the only pinned version string in a non-sanctioned prose doc.
+- package.json declares "engines": {"node": ">=22"} (read at HEAD fe95d213).
+- CLAUDE.md:38 reads "All TypeScript (ES2022, NodeNext, strict), Node 20+."
+- README.md:204 carried the identical claim and was corrected to "Node 22+" this run (ops/usage row — factual-stale, auto-apply); CLAUDE.md is the instruction row, escalate-only, so the two copies are deliberately left divergent until you answer.
+- Counter-evidence, recorded rather than suppressed: audit-code-test-suite.yml runs Node 20 + 22 and its own comment says "The Node-20 line is the distinct type-stripping coverage ci.yml (Node 22 only) lacks." So Node 20 is still exercised; it is the published package that refuses to install there.
+- These are the only two remaining "Node 20" mentions in tracked non-review markdown.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=514380f70957a2e5 -->
+
+## `sol-1` — The shipped example config names three broker pools that no longer exist — decide what it should name instead, and whether a gate should stop this recurring.
+
+*Recurring-problem solutions · open 1 night · `examples/catalog/sources-declared.json`*
+
+### In plain terms
+
+audit-tools ships an example machine config at examples/catalog/sources-declared.json, and examples/README.md tells an operator to copy it to ~/.audit-code/sources-declared.json. It declares three dispatch sources whose models are named "pool/fast", "pool/coding" and "pool/reasoning". Those three pool names were removed from llm-relay at v0.15.4. The live relay does not fall back — it refuses outright with "no pool \"coding\" configured (available: low, medium, high, xhigh, ...)". So every dispatch through the shipped example fails, and an operator copying it as instructed gets a broken setup with an error that reads like a proxy problem rather than a stale example.
+
+The same three dead names also sit in examples/README.md, docs/audit-pkg/operator-guide.md, spec/dispatch-quota.md, spec/backend-identity-axes.md, spec/unified-dispatch-worker-model.md and docs/backlog/durable-traps.md.
+
+The reason this is a decision rather than a fix is that you have already answered the same question once, on 2026-08-07, for docs/HANDOFF.md: "Drop the pool names from the HANDOFF routing sentence (llm-relay owns the roster; naming pools here is a standing drift source)." That answer was applied to HANDOFF.md alone. Meanwhile the same class was fixed at two other single instances — the leg-2 triage script hardcoded pool/fast on 2026-08-05 and was changed on 2026-08-06 to resolve its pool live. Three fixes, none of them swept the rest of the tree, and here it is again on the fourth date.
+
+So the question is not "which names are current" — bumping them to low/medium/high/xhigh is the fix that already failed three times, and it is also the hand-maintained copy of another system's table that CLAUDE.md bans. The question is what the shipped example should say, and whether a check should make naming a concrete pool impossible rather than something the next pass has to notice. The full recurrence analysis and the proposed check are written up in .audit-tools/nightly/proposals/P13-concrete-pool-names-in-tracked-docs/PROPOSAL.md.
+
+### The question
+
+examples/catalog/sources-declared.json declares three sources with "model": "pool/fast" / "pool/coding" / "pool/reasoning". The live relay rejects all three ("no pool \"coding\" configured (available: low, medium, high, xhigh, credits-low, credits-medium, credits-high, credits-xhigh)"). What should the shipped example name, and should a check enforce it across the tree?
+
+### Your answer
+
+- [ ] **1. Placeholder + gate** — Replace the concrete names with the placeholder form (pool/<name>) in the example config and in every prose doc that names a pool, and land the P13 check (scripts/check-broker-pool-names.mjs in verify:checks) that fails the build on any concrete pool/<name> outside the record channels. The example stops being copy-paste runnable; the README gains a line saying to substitute a pool the operator's own broker defines. This is the 2026-08-07 HANDOFF answer applied to the whole tree and made mechanical.
+- [ ] **2. Placeholder, no gate** — De-name the pools everywhere (placeholder form) but do not add the check. Accept that a future doc can reintroduce a concrete pool name and that the nightly is what catches it.
+- [ ] **3. Current names, no gate** — Update the example and the docs to the pools the relay serves today (low / medium / high / xhigh). Keeps the example copy-paste runnable against this box, and accepts that it will rot again the next time llm-relay renames a pool.
+- [ ] **4. Drop the example config** — Delete examples/catalog/sources-declared.json and document the sources-declared SHAPE only, in prose, with no runnable model values. Nothing in the tree then names another system's pools, and there is no example to keep current.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P13-concrete-pool-names-in-tracked-docs/PROPOSAL.md`](../.audit-tools/nightly/proposals/P13-concrete-pool-names-in-tracked-docs/PROPOSAL.md)
+
+<details>
+<summary>Evidence (8) — what was verified against code, and how</summary>
+
+- examples/catalog/sources-declared.json declares three sources whose "model" values are "pool/fast", "pool/coding", "pool/reasoning" (read at HEAD fe95d213).
+- Live relay refusal, verified this run: POST http://127.0.0.1:8791/v1/chat/completions with {"model":"pool/coding"} returns {"type":"error","error":{"type":"api_error","message":"llm-relay routing: no pool \"coding\" configured (available: low, medium, high, xhigh, credits-low, credits-medium, credits-high, credits-xhigh)"}}. `llm-relay config get routing.pools` lists the same eight.
+- examples/README.md:38-45 instructs copying that file to ~/.audit-code/sources-declared.json, and describes it as naming "only pool/fast, pool/coding, and pool/reasoning".
+- Same three names also at docs/audit-pkg/operator-guide.md:193-195 (inline copy of the JSON), spec/dispatch-quota.md:532-533 (stated as an enumeration of the source intents), spec/backend-identity-axes.md:25, spec/unified-dispatch-worker-model.md:40, docs/backlog/durable-traps.md:207 (written as live guidance).
+- Recurrence, four dates, same class: 2026-08-05 P11 records the leg-2 sweep dying on a hardcoded pool/fast; 2026-08-06 owner decision sol-4 changed scripts/shared/triage-backlog.mjs to resolve its pool live, its docblock recording "a hardcoded pool name is a hand-held copy of the relay's config and went stale twice (pool/fast + pool/coding died at relay v0.15.4)"; 2026-08-07 nightly decision 2994bbdaf341d0c4 ordered the pool names dropped from docs/HANDOFF.md; 2026-08-08 (this run) the seven files above still carry them.
+- The prior decision 2994bbdaf341d0c4 is recorded as done and HANDOFF.md carries no pool name at HEAD — the fix was applied to that one file only.
+- No existing gate reaches this: check:doc-code-citations verifies repo paths and symbols, and a broker pool name is neither. All eleven doc/backlog gates were green this run.
+- Full recurrence analysis, proposed mechanism and its false-positive surface: .audit-tools/nightly/proposals/P13-concrete-pool-names-in-tracked-docs/PROPOSAL.md
+
+</details>
+
+---
+
+
+<!-- nightly:item key=8762f6da87a68f50 -->
+
+## `sol-2` — A script that takes a positional path accepts `--help` AS that path — one script does damage silently, and the guard exists in only one place.
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+
+### In plain terms
+
+scripts/shared/triage-backlog.mjs takes its output file as a bare positional argument: const OUT = process.argv[2] || <default>. Nothing checks whether that argument is actually a path. So running it with --help does not print help — it treats "--help" as the output filename, runs the lane preflight, and starts classifying all 111 backlog entries into files literally named "--help" and "--help-coverage.json" in the repo root. That happened during this run; the sweep had to be killed and the two junk files removed before the real leg-2 sweep could start.
+
+What makes it worth writing down rather than filing as a typo is that the guard already exists — in exactly one other script. scripts/check-gate-enumeration.mjs was written on 2026-07-30 with an explicit "and does not start with --" test on the same argument, which means someone hit this before and fixed the instance in front of them. That is the shape this project treats as a defect class rather than an incident.
+
+The honest limit: this is thin. Two instances on two dates, and the blast radius is junk files plus a wasted sweep, not lost work. Two other scripts share the unguarded shape but happen to fail loudly (the bad path throws), so they are near-misses rather than live faults. Whether that clears the bar for a contract test, or is better left as a one-line fix to the one script that actually misbehaves, is the call being put to you.
+
+### The question
+
+scripts/shared/triage-backlog.mjs treats an unrecognized flag as its output path and silently starts a full sweep writing to it. The guard for this exists in scripts/check-gate-enumeration.mjs only. Fix the one script, or hold the class with a contract test?
+
+### Your answer
+
+- [ ] **1. Hold the class with a test** — Fix every script that takes a positional path (filter argv for non-flag positionals, handle -h/--help, exit non-zero on an unrecognized flag) and add a contract test under tests/ asserting each declared script exits 0 with usage on --help and writes nothing. Register the script list in scripts/guard-reach-data.mjs so a new positional-arg script is reconciled rather than remembered.
+- [ ] **2. Fix the one script** — Add the argument guard to scripts/shared/triage-backlog.mjs only. It is the single script where a bad argument does silent damage; the other two fail loudly already, and a contract test over five entrypoints is more machinery than two incidents justify.
+- [ ] **3. Fix all, no test** — Add the guard to every script that takes a positional path, but do not add the contract test or the registry entry. Removes the live fault and the near-misses without adding a gate to maintain.
+- [ ] **4. Leave it** — Not worth changing. The failure is visible within seconds, costs nothing but a re-run, and two instances is not a pattern.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P14-positional-path-arg-swallows-a-flag/PROPOSAL.md`](../.audit-tools/nightly/proposals/P14-positional-path-arg-swallows-a-flag/PROPOSAL.md)
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- scripts/shared/triage-backlog.mjs:80 — `const OUT = process.argv[2] || join(ROOT, '.audit-tools', 'backlog-triage.jsonl');` with no flag check (read at HEAD fe95d213).
+- Reproduced this run: `node scripts/shared/triage-backlog.mjs --help` created `--help` (23139 bytes) and `--help-coverage.json` (219 bytes) in the repo root and began sweeping; killed and removed before the real sweep.
+- The guard exists once: scripts/check-gate-enumeration.mjs:22 — `process.argv[2] && !process.argv[2].startsWith("--") ? ... : process.cwd()`, added 2026-07-30 in 6b8f8d7a.
+- Scope checked rather than assumed: scripts/check-doc-links.mjs:35 and scripts/check-doc-code-citations.mjs:46 share the unguarded shape but exit 1 on --help (verified by running both), so they are loud-by-accident, not silent. scripts/release-and-publish.mjs:22 is guarded by an allowedBumps allowlist.
+- Full write-up: .audit-tools/nightly/proposals/P14-positional-path-arg-swallows-a-flag/PROPOSAL.md
 
 </details>
 
@@ -74,12 +182,32 @@ spec/mechanical-analyzer-layer-design.md line 4-5 reads: "The four-item program 
 
 
 <details>
+<summary>What the last run changed on its own</summary>
+
+
+- spec/mechanical-analyzer-layer-design.md — the "Where the shipped mechanisms live" list named an obligation `external_analyzers_consent_current` that exists nowhere in src/. The real mechanism is the `analyzer_consent` STEP KIND (src/audit/cli/steps.ts), emitted while resolving the `external_analyzers_current` obligation (src/audit/orchestrator/nextStep.ts PRIORITY, executors.ts obligation_ids); the `analyzer_consent` session-config persistence the line also claims is correct (src/shared/types/sessionConfig.ts:838). Corrected the obligation name to the step kind + its owning obligation.
+
+- README.md:204 — "TypeScript, Node 20+" → "Node 22+". package.json declares engines.node ">=22", so the stated floor was one major version below what npm will install. The identical claim in CLAUDE.md is escalated instead (instruction file, never auto-edited) as item docs-1.
+
+- docs/audit-pkg/release.md:189-190 — the maintainer-flow paragraph described the pre-tag gate as "a fast local typecheck gate (`npm run check` — not the full `verify:release` suite, which already ran via CI/the `/ship` preflight)". scripts/release-and-publish.mjs:714-715 runs `npm run verify:checks`, and its own comment records why the doc's justification was wrong: "It was `npm run check` (typecheck) alone ... nothing linted before the tag. v0.39.7 was tagged and released". Rewritten to name verify:checks.
+
+
+</details>
+
+
+<details>
 <summary>What the last run could NOT cover</summary>
 
 
-- leg 2 (backlog) — PARTIAL COVERAGE, not a skipped leg. The mechanical sweep (scripts/shared/triage-backlog.mjs) resolved pool/medium live, passed preflight, and attempted all 112 entries, but classified only 72: 40 were lost to schema non-adherence (the alias emitting prose before the JSON, or no JSON object at all), a rate that climbed as the sweep ran. Coverage stamp: .audit-tools/nightly/triage-2026-08-07-coverage.json — attempted 112, classified 72, errored 40, aborted null. Those 40 entries were NOT examined this run. Errored rows are dropped on load and re-queued, so a plain re-run retries exactly the failures. Recorded as dated recurrence evidence on the open-bugs entry that already owns the per-alias schema-adherence property (commit 242df218).
+- docs/backlog/durable-traps.md — a CONFIRMED staleness with NO channel this run, so it is recorded here rather than lost. Four passages (:93, :132, :150-152, :204-210) describe `~/.claude/llm-call.mjs` as a live mechanism ("probes /health and exits 3", "POSTs via node:http with a 30-min ceiling", "takes the model as its FIRST POSITIONAL argument"). That helper was retired 2026-07-28 and its backup deleted 2026-07-29 per the global ~/.claude/CLAUDE.md; `ls ~/.claude/llm-call.mjs` returns No such file. docs/backlog/open-bugs.md:294,816,821 cite it too. It could not be raised as an open item because writeOpenItems refuses a premise probe aimed at docs/backlog (a record path carries no evidence about whether a defect is fixed), and it was not auto-applied because deleting or rewriting four durable-trap entries is judgment, not a reference correction — the traps around the dead helper still carry live lessons. Needs a decision on whether those passages are rewritten to point at the relay directly or deleted with the helper.
 
-- leg 1 (docs) — the generated/renderer-owned doc rows were reviewed at their SOURCE, not as generated copies, per the manifest: .agent/** and .github/** host assets are governed by renderer drift tests, and docs/nightly-routine-prompt.md + docs/nightly-inbox.md are generator-owned. Byte parity for the scheduler prompt was confirmed green (npm run check:nightly-routine-prompt) rather than reviewed as prose.
+- leg 3 — the recurrence pass read project memory (231 files + MEMORY.md), the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md and docs/backlog/open-bugs.md, and this run's own friction. It did NOT read .audit-tools/{audit,remediation}/friction/run.json beyond confirming they exist; both are single-run artifacts from prior dogfood runs, not a cross-date recurrence surface.
+
+- leg 1 — the generated/renderer-owned rows were checked at their SOURCE, not as prose: .agent/** and .github/** host assets are governed by the renderer drift tests, docs/nightly-routine-prompt.md was confirmed byte-identical to both its sources (npm run check:nightly-routine-prompt), and docs/nightly-inbox.md is generator-owned.
+
+- leg 1 — one candidate was considered and DROPPED rather than escalated, so the silence is deliberate: dated "superseded and deleted on <date>" parentheticals in spec/backlog-remediation-design.md:41 and spec/conceptual-design-review-design.md:246,272, surfaced by the Codex spec sweep as status-noise. They read as status-noise by the letter of the rule, but the content is a REFUSAL record ("this was tried and deleted"), which the philosophy explicitly wants kept; only the date is noise. Judged too thin to spend an owner decision on. The other seven status-noise hits in that sweep were false positives (an `anthropic-beta: oauth-2025-04-20` HTTP header literal, and third-party gemini-cli deprecation dates that are durable facts about another vendor's API).
+
+- leg 2 — FULL COVERAGE, no deletions. Coverage stamp .audit-tools/nightly/triage-2026-08-08-coverage.json: model pool/medium resolved live, preflight passed, attempted 111, classified 111, errored 0, aborted null. Verdicts: 61 actionable_now, 22 owner_decision_needed, 20 live_run_blocked, 7 accepted_residual_no_work, 1 already_shipped_or_stale. Nothing was deleted because neither shipped-signal survived verification: open-bugs#b3e71bd5 ("already_shipped_or_stale") carries no premise probe and a hedged action ("not necessary now"), which is the over-flagging the sweep's own docblock warns about; and forward-tracks#ecd20cf4 ("premise: gone") is a FALSE gone — its probe quotes `service = declared ?? transport`, the state the unwritten migration would PRODUCE, and src/shared/providers/identity.ts contains no such fold, so the entry is legitimately open.
 
 
 </details>
