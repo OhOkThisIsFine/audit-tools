@@ -201,7 +201,7 @@ Add `--root <repo>` when running from outside the target repository.
 
 ## Develop
 
-TypeScript, Node 20+. From the repo root:
+TypeScript, Node 22+. From the repo root:
 
 ```bash
 npm install     # always run first in a fresh clone/worktree

@@ -188,8 +188,8 @@ Full maintainer flow:
 npm run release:patch:publish
 ```
 
-That command checks the worktree, runs a fast local typecheck gate (`npm run check` — not the full
-`verify:release` suite, which already ran via CI/the `/ship` preflight), bumps the version, commits,
+That command checks the worktree, runs the full local pre-tag gate (`npm run verify:checks` — every
+non-test check, so a tag can never be cut over a red one), bumps the version, commits,
 tags, pushes `main` and the tag, creates the GitHub Release, waits for `publish-package.yml`, and
 confirms the new npm version resolves.
 

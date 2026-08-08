@@ -10,8 +10,9 @@ Where the shipped mechanisms live:
 - Safety profiles + admission (`admitSpawn`: default ∨ recorded `granted` ∨ per-run token) and the
   acquisition engine: `src/shared/analyzers/acquisitionEngine.ts` (relocated from the audit tree —
   one core, two draws). Candidate registry + parse adapters: `src/shared/analyzers/candidates.ts`.
-- Consent surfacing: `external_analyzers_consent_current` obligation; decisions persist under
-  `analyzer_consent` in session config; tokens never persist.
+- Consent surfacing: the `analyzer_consent` step kind (`src/audit/cli/steps.ts`), emitted while
+  resolving the `external_analyzers_current` obligation; decisions persist under `analyzer_consent`
+  in session config; tokens never persist.
 - Lead provenance: `src/shared/analyzers/provenance.ts` — `{analyzer_id, rule?, path,
   snippet_hash}`, snippet-hash over the normalized flagged span (content identity, not layout);
   attached at `src/shared/analyzers/normalizeExternal.ts`, carried packet lead → finding
