@@ -87,9 +87,14 @@
    **This is now unblocked and is the top item**: the owner gated it behind "known refactoring goals
    first", and those are done — the dedup cluster is 10 of 10, the providers twin is closed, and
    nothing is unpublished.
-2. **T4 — needs a DECISION, not another split.** See *Live state*: the floor is a four-file
-   completion cluster within 7s, so one more single-file split buys ~3s. Worth deciding whether T4
-   continues at all at this granularity before spending a lap on it.
+2. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
+   The floor is now a four-file completion cluster within 7s (see *Live state*), so further
+   single-file splits redistribute time rather than lower it. The cost to attack: each completion
+   test runs ~35s because it spins a real audit run through real subprocesses, so the target is the
+   shared fixture/setup — one home for the cost, which lowers every file at once and keeps working
+   as files are added. Re-measure and only then decide whether anything still needs splitting.
+   ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
+   for a cluster.
    ⚠ The memory-index size chore is **closed, not pending** (owner call, 2026-08-07): the index is
    one line per cluster already, so its size is the file count rather than padding, and it sits well
    under the harness's real 24.4KB read limit. The harness's 17.1KB compaction reminder still fires
