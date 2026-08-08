@@ -76,7 +76,32 @@ with `claim: (v) => (isClaimRecord(v) ? v : undefined)` and
 **Loop-core** (`src/shared/quota/`) — needs an attested commit. No external call site changes; the
 public exports are untouched.
 
-### §4 item 4 — `rollingAuditDispatch` / `providerNodeDispatch` shared prep head
+### ~~§4 item 4 — `rollingAuditDispatch` / `providerNodeDispatch` shared prep head~~ — LANDED
+
+The classification the item asked for, with each divergence typed:
+
+| Spine step | Verdict |
+|---|---|
+| provider resolve — `createProvider ?? default`, `sourceByPoolId.get(slot.poolId)`, `withSourceConfig`, `resolveProvider(slot.providerName \|\| cfg.provider, cfg)` | **(c) shared core** — identical modulo `sessionConfig ?? {}` |
+| `dirname(resultPath)` + the three sidecar names | **(c) shared core** |
+| the worker task object | **(a) genuine INPUT** — `audit-code-worker/v1alpha1` vs `remediation-worker/v1alpha1` carry different fields |
+| launch `repoRoot` (review snapshot vs node worktree), `entityLabel` | **(b) routing adapter** |
+
+Now `src/shared/dispatch/providerDispatchPrep.ts` (`resolveDispatchProvider`,
+`dispatchSidecarNames`/`Paths`/`PathsForResult`). Both dispatchers call it; remediate's
+`nodeArtifacts` draws its three sidecar names from it, so there is no second implementation.
+No knob was added: (a) and (b) are passed in by the caller rather than selected inside.
+
+**Adjacent duplication this exposed, NOT in the sweep and still open:**
+`src/audit/providers/index.ts` and `src/remediate/providers/index.ts` are byte-identical apart from
+the descriptor constant they reference — same imports, same `buildOrchestratorProviderBindings(D)`,
+same `resolveFreshSessionProviderName`, same `createFreshSessionProvider` body. Their own docblocks
+say the descriptor is "the ONE home for everything that legitimately differs", which is exactly the
+tell: the descriptor *is* the per-mode axis, so the factory boilerplate around it should be
+`buildOrchestratorProviderModule(descriptor)` in shared. Only asymmetry is audit's extra
+`ACTIVE_CLAUDE_CODE_SESSION_MESSAGE` export.
+
+### ~~§4 item 4 — original spec, kept for the latent bug it recorded~~
 
 **Pair.** `src/audit/cli/rollingAuditDispatch.ts` (prep spine inside
 `makeAuditProviderPacketDispatcher`) against `src/remediate/steps/providerNodeDispatch.ts` (spine

@@ -1,13 +1,13 @@
 import { dirname } from "node:path";
 import {
   writeJsonFile,
-  withSourceConfig,
   finalizeProviderLaunchResult,
   type SessionConfig,
   type ProviderSlot,
   type RollingDispatchResult,
   type FreshSessionProvider,
   type DispatchableSource,
+  resolveDispatchProvider,
 } from "audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
 import {
@@ -95,21 +95,14 @@ export function makeProviderNodeDispatcher(
       };
     }
 
-    // Resolve the provider the scheduler SELECTED for this slot, not a fixed
-    // configured one: that is what makes cross-pool spill (INV-QD-14) actually
-    // route a node to a peer pool's backend (e.g. an openai-compatible/NIM pool
-    // when the primary pool is quota-degraded). Falls back to the configured
-    // provider when no slot provider is present.
-    const resolveProvider = params.createProvider ?? createFreshSessionProvider;
-    // A-8 generic sources: build the node's provider FROM its pool's source config
-    // (its own endpoint/model/params) when the pool is source-backed, else the global
-    // block — so two sources of the same provider (e.g. two NIM endpoints) launch distinctly.
-    const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
-    const cfg = withSourceConfig(params.sessionConfig ?? {}, source);
-    const provider = resolveProvider(slot?.providerName || cfg.provider, cfg);
-    // Names come from the one owner (`nodeArtifacts`) so the merge's diagnosis,
-    // which independently resolves the same paths, can never disagree with what
-    // was written here — and so a model-authored block id is sanitized once.
+    // Shared prep head — provider resolution (the scheduler's slot choice, so
+    // cross-pool spill (INV-QD-14) really routes to a peer pool's backend) and
+    // sidecar naming are one algorithm across both draws. Only the task contract
+    // and the worktree-rooted launch below are remediation-specific.
+    const { provider } = resolveDispatchProvider(params, slot, createFreshSessionProvider);
+    // Sidecars resolve through `nodeArtifacts`, the one owner of every per-node
+    // run-dir name, so the merge's diagnosis — which independently resolves the
+    // same paths — can never disagree with what was written here.
     const dir = dirname(resultPath);
     const { taskPath, stdoutPath, stderrPath } = nodeArtifactPathsIn(dir, block.block_id);
 

@@ -21,7 +21,7 @@
  * writes only its result file, into the real artifacts dir.
  */
 
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   writeJsonFile,
   advancePausedState,
@@ -36,7 +36,6 @@ import {
   type FreshSessionProvider,
   type HostModelRosterEntry,
   type DispatchableSource,
-  withSourceConfig,
   sourceByPoolId,
   captureStepBoundaryFriction,
   captureCostDriftFriction,
@@ -48,6 +47,8 @@ import {
   createReviewSnapshot,
   removeReviewSnapshot,
   createDispatchDecisionLog,
+  resolveDispatchProvider,
+  dispatchSidecarPathsForResult,
 } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -65,7 +66,6 @@ import { prepareDispatchArtifacts, loadDispatchResultMap, releaseOwnedTaskClaims
 import { recordAttemptedPackets } from "./dispatchAttempted.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
-import { artifactNameForId } from "./args.js";
 import { renderWorkerJsonSchema } from "../contracts/workerSchemas.js";
 
 /**
@@ -286,24 +286,17 @@ export function makeAuditProviderPacketDispatcher(params: {
 
   return async (packet, slot) => {
     const entry = packet.payload;
-    const resolveProvider = params.createProvider ?? createFreshSessionProvider;
-    // A-8 generic sources: build the per-packet worker FROM its pool's source config.
-    const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
-    const cfg = withSourceConfig(params.sessionConfig, source);
-    const provider = resolveProvider(slot?.providerName || cfg.provider, cfg);
+    // Shared prep head — provider resolution (A-8 generic sources: the worker is
+    // built FROM its pool's source config) and sidecar naming are one algorithm
+    // across both draws. Only the task contract and the launch's root/labelling
+    // below are audit-specific.
+    const { provider, cfg } = resolveDispatchProvider(params, slot, createFreshSessionProvider);
 
     const resultPath = entry.result_path;
-    const dir = dirname(resultPath);
-    // Sidecar files share the packet's canonical FS-safe stem. Packet ids embed
-    // ':' (e.g. "root-config:correctness:packet-3"), which is an invalid filename
-    // character on Windows (NTFS reads it as an alternate-data-stream separator),
-    // so a raw `${packet.id}.task.json` throws on the write — before any launch,
-    // erroring every packet. `artifactNameForId` is the same sanitizer the
-    // prompt/result files use (stem + digest), keeping the sidecars co-named and
-    // OS-agnostic (INV everything-agnostic / Windows-aware).
-    const taskPath = join(dir, artifactNameForId(packet.id, "task.json"));
-    const stdoutPath = join(dir, artifactNameForId(packet.id, "stdout.txt"));
-    const stderrPath = join(dir, artifactNameForId(packet.id, "stderr.txt"));
+    const { dir, taskPath, stdoutPath, stderrPath } = dispatchSidecarPathsForResult(
+      resultPath,
+      packet.id,
+    );
 
     const task: WorkerTask = {
       contract_version: "audit-code-worker/v1alpha1",

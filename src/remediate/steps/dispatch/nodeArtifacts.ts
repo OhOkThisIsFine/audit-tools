@@ -24,7 +24,7 @@
  */
 
 import { join } from "node:path";
-import { artifactNameForId } from "audit-tools/shared";
+import { artifactNameForId, dispatchSidecarNames } from "audit-tools/shared";
 import { runDir } from "./common.js";
 
 /** The phase whose run dir holds every per-node artifact. */
@@ -59,15 +59,18 @@ export function nodeArtifactNames(blockId: string): {
   acceptOutcome: string;
 } {
   const taskId = implementTaskId(blockId);
+  // The three launch sidecars are named by the SHARED prep head — audit's draw
+  // names its own identically — so remediate carries no second implementation.
+  const sidecars = dispatchSidecarNames(blockId);
   return {
     // Result and prompt are keyed on the TASK id, the sidecars on the block id —
     // preserved from the pre-extraction layout so the two families stay visually
     // distinct in a run dir. Both are sanitized, which is the property that matters.
     result: artifactNameForId(taskId, "result.json"),
     prompt: artifactNameForId(taskId, "md"),
-    task: artifactNameForId(blockId, "task.json"),
-    stdout: artifactNameForId(blockId, "stdout.txt"),
-    stderr: artifactNameForId(blockId, "stderr.txt"),
+    task: sidecars.task,
+    stdout: sidecars.stdout,
+    stderr: sidecars.stderr,
     acceptOutcome: artifactNameForId(`accept-outcome-${blockId}`, "json"),
   };
 }

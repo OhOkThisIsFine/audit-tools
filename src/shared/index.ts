@@ -636,6 +636,19 @@ export {
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
 
+// Dispatch: the prep head both rolling dispatchers share — provider resolution
+// for a scheduler-chosen slot, and the three launch sidecar names.
+export {
+  resolveDispatchProvider,
+  dispatchSidecarNames,
+  dispatchSidecarPaths,
+  dispatchSidecarPathsForResult,
+} from "./dispatch/providerDispatchPrep.js";
+export type {
+  ProviderDispatchPrepParams,
+  FreshSessionProviderFactory,
+} from "./dispatch/providerDispatchPrep.js";
+
 // IO: filesystem-safe artifact naming for a model-authored id, plus the
 // recognizer for the exact format it produces (kept together so they can't drift).
 export {

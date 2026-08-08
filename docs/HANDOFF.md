@@ -5,13 +5,25 @@
 
 ## Live state
 
-- **v0.39.6 SHIPPED 2026-08-07.** npm live at 0.39.6, global bins reinstalled + postinstall run
-  manually (npm defers it on `-g`), both report 0.39.6.
-- **The analyzer sweep's dedup cluster is 6 of 10 done.** The remaining three, plus a defect found
-  en route, are the immediate-next list below. Each carries a verified, diff-ready spec in
+- **v0.39.6 is the last PUBLISHED version; `main` is now two commits ahead of it and UNRELEASED.**
+  Both are loop-core, attested, pushed, full-suite green. A release is the obvious next pipeline
+  step whenever the sprint is called.
+- **The analyzer sweep's dedup cluster is 8 of 10 done.** Item 4 (rolling-dispatch prep head) and
+  the sidecar-naming defect it exposed both landed 2026-08-07. Items 6 and 8 remain, each with a
+  verified diff-ready spec in
   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md) — which also
-  records four cases where the offload lane's proposal was WRONG and what verification found
-  instead. Read it before re-deriving any of them.
+  records the cases where the offload lane's proposal was WRONG and what verification found
+  instead. Read it before re-deriving either.
+- **A spec's "built in N places" proved to be a floor, not a count.** The sidecar item said the name
+  was built in TWO places; the family was six filenames in TEN places across five modules, with
+  three independent writer/reader rebuild pairs. Grep the whole family before sizing the remaining
+  items. Recorded in memory as `extraction-spec-scope-is-a-floor`.
+- **⚠ Offload was DEGRADED this session and may still be.** This is a Desktop session, so it
+  bypasses the proxy chain entirely (`ANTHROPIC_BASE_URL=https://api.anthropic.com`; headroom shows
+  zero Claude requests against 2325 Codex). Shelling out via `llm-relay dispatch` DOES work and was
+  used — but `pool/high` stalled ~12min with no output and the second DeepSeek dispatch never
+  returned, while the first had worked fine. The owner was mid-update on the llm-relay package.
+  **Probe a lane with a small task before committing bulk work to it.**
 - **A type-only import cycle is now a red build.** All three that existed were broken and
   `no-circular` lost its `viaOnly` exemption, so the cleanup is enforced rather than tracked.
 - **The T4 single-file floor is now `audit-code-wrapper-packets.test.ts` (198.5s)**, after
@@ -20,9 +32,9 @@
 
 ## Verification state
 
-- Full suite green 2026-08-07: **589 files / 7681 tests passed** (4 files + 15 tests skipped);
-  `verify:checks` green on the clean pushed tree. The shard-duration baseline is regenerated from
-  that green full run.
+- Full suite green 2026-08-07 after both landings: **590 files / 7684 tests passed** (4 files + 15
+  tests skipped, 265s). Run twice — once per commit — not once at the end. The shard-duration
+  baseline still dates from the 589-file run and is one file stale; regenerate on the next release.
 - Release CI green for v0.39.4, v0.39.5 and v0.39.6. The T4 split shows as a tighter shard spread:
   v0.39.3 was 205/198/151/132, v0.39.6 critical path 245s — slowest shard down from 205s.
 - A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
@@ -37,14 +49,17 @@
 > come first, before another audit run.** That is why the pinned dogfood cluster is last here while
 > still being the backlog's pinned item.
 
-1. **Remediate sidecar filenames — unsanitized, and built in TWO places** (open-bugs). The sharpest
-   remaining defect: `marshal.ts` independently rebuilds the names `providerNodeDispatch` writes, so
-   sanitizing only the writer makes marshal report "never dispatched" for every node. Fix both
-   through one helper, and move `artifactNameForId` down into shared on the way.
-2. **Analyzer-sweep dedup cluster — remaining three** (open-bugs) — specs written and verified in
-   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md). The
-   rolling-dispatch prep head is the one with real design content (one-core-two-draws) and wants its
-   own attested commit.
+1. **Analyzer-sweep dedup cluster — remaining two** (open-bugs), specs in
+   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md).
+   **Item 6** is the smaller: 6a the byte-identical five-statement conceptual-prep scaffold in
+   `nextStepCommand.ts` (keep the per-branch step *assembly* — that difference is load-bearing), 6b
+   parameterizing the workspace-pattern algorithm shared by `graphManifestEdges/{cargo,packageJson}.ts`.
+   ✅ 6b's stable-order warning is already DISCHARGED — `graph.ts:204` runs `uniqueSortedEdges`
+   downstream, so `pathLookup.values()` iteration order never reaches the artifact; no ordering fix
+   is needed. **Item 8** unifies three step-drivers (`completion-harness.advanceToDispatchReady`,
+   `wrapper-harness.startDispatchRun`, `helpers/run-wrapper.mjs`) into one parameterized driver.
+2. **`providers/index.ts` descriptor twin** (open-bugs, new) — found during item 4; the two files
+   differ only by the descriptor constant they reference.
 3. **T4 remainder** — next target `audit-code-wrapper-packets.test.ts` (198.5s), same
    one-file-at-a-time protocol; queue in the brief's status block.
 4. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties. Run
