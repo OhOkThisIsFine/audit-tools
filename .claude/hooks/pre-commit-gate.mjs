@@ -704,6 +704,45 @@ function runGate(committedPaths) {
     }
   }
 
+  // 2b-iv. Backlog SIZE budget — whenever the STAGED set touches any
+  // `docs/backlog/*.md`. Sibling of 2b-iii and wired for exactly the same
+  // reason, but it catches a different failure: 2b-iii catches a stale derived
+  // index, this catches an entry (or a file) that outgrew its ceiling. An
+  // over-budget file may only SHRINK, so the longer it goes unnoticed the more
+  // expensive the eventual condensation.
+  //
+  // Bit 2026-08-08: a docs-only commit verified with `npm run build && npm run
+  // check` — neither of which can see a budget — landed on main and turned BOTH
+  // CI workflows red (`verify:checks`, plus two cases in
+  // tests/shared/backlog-budget-unit.test.ts, one of which asserts "the live
+  // backlog passes the gate it ships with"). The index leg beside this one DID
+  // fire on the same commit, which is what makes the omission a gap rather than
+  // a judgement call.
+  const pinsBacklogBudget = (p) => /^docs\/backlog\/[^/]+\.md$/.test(p.replace(/\\/g, '/'));
+  if (staged.some(pinsBacklogBudget)) {
+    try {
+      execSync('npm run check:backlog-budget', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: backlog budget check FAILED — commit blocked. A staged backlog entry or file ` +
+          `is over its size ceiling, and an over-budget file may only shrink.\n` +
+          `Fix: condense at write time — keep the MECHANISM and the open PROPERTY in the entry, and LINK ` +
+          `the primary record (git log, a docs/reviews/ file) instead of retelling how it was found.\n` +
+          `There is no per-entry ceiling to raise: an entry that must grow is paid for by shrinking its ` +
+          `file elsewhere.\n${tail}`,
+      };
+    }
+  }
+
   // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
   // re-includes each hook BY NAME, so a new hook committed without its
   // `!.claude/hooks/<name>` line is silently dropped from the commit — and if
