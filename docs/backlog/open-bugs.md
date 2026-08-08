@@ -24,7 +24,7 @@
   parentheticals and `(a) …; (b) …` lists, so fragments are unencodable *because* they are fragments.
   **Property:** split on sentence boundaries; report a count plus pointer, not shredded prose.
 
-- **Resolved intake questions must clear `open_questions`, not just the checkpoint (2026-08-08, low).**
+- **Answering an intake question at the checkpoint does not clear `open_questions` (2026-08-08, low).**
   `decideNextStep` gates on `intake-summary.json` (`ready` + `open_questions[]`), so resolving at
   `confirm_intent` still routes to `collect_intake_clarifications` until the host edits the summary.
   **Property:** resolved at the checkpoint is resolved everywhere, or confirm names the gate's input.

@@ -30,7 +30,7 @@
 - `open-bugs.md:9` — Contract-pipeline fan-out names a mechanism the host may not have (2026-08-08, medium).
 - `open-bugs.md:17` — Diff-based re-review loses the verdict it must diff against (2026-08-08, low).
 - `open-bugs.md:23` — `free_form_intent` clause splitter shreds prose on bare `;` (2026-08-08, low).
-- `open-bugs.md:27` — Resolved intake questions must clear `open_questions`, not just the checkpoint (2026-08-08, low).
+- `open-bugs.md:27` — Answering an intake question at the checkpoint does not clear `open_questions` (2026-08-08, low).
 - `open-bugs.md:32` — Sweep the test tree for tests that re-implement their subject (2026-08-08, medium).
 - `open-bugs.md:41` — Regex-perf triage tail from the analyzer sweep (2026-08-07, low).
 - `open-bugs.md:48` — `ensureCleanWorktree` blocks a release on sibling UNTRACKED files (2026-08-07, low, friction).
