@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 164 entr(y/ies) indexed.
+> and at commit). 165 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -117,14 +117,15 @@
 - `open-bugs.md:1179` — submit-packet can report success on a result merge later refuses.
 - `open-bugs.md:1187` — systemic_challenge findings ids are adversary-invented and round-colliding.
 - `open-bugs.md:1194` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:1202` — A review packet's deliverable rides a tool call the worker can silently skip.
-- `open-bugs.md:1209` — Dispatch children inherit the repo's `.claude` SKILLS, not just its hooks.
-- `open-bugs.md:1215` — An `openai-compatible` source's reach proves its ENDPOINT, never its declared MODEL.
-- `open-bugs.md:1221` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:1226` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:1232` — Dispatch-step prompt conflates merge rejections with failure.
-- `open-bugs.md:1238` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:1243` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
+- `open-bugs.md:1201` — A review packet's deliverable rides a tool call the worker can silently skip.
+- `open-bugs.md:1207` — Dispatch children inherit the repo's `.claude` SKILLS, not just its hooks.
+- `open-bugs.md:1212` — CI trigger paths omit `.claude/
+- `open-bugs.md:1219` — An `openai-compatible` source's reach proves its ENDPOINT, never its declared MODEL.
+- `open-bugs.md:1225` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:1230` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:1236` — Dispatch-step prompt conflates merge rejections with failure.
+- `open-bugs.md:1242` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:1247` — Run-closure leaves orphan node-worktree DIRECTORIES behind (2026-08-06, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

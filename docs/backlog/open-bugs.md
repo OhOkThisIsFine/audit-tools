@@ -1192,31 +1192,35 @@
   ⬇ Reproduced in full 2026-08-08 (O7 in the run record below).
 
 - **The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to
-  fabricate.** `MAX_DRAIN_STEPS` bounds the deterministic drain; this loop has no equivalent, and
-  `src/audit/orchestrator/state.ts` holds the obligation unmet (blocking planning) until a round returns
-  nothing-new. A fresh no-memory adversary structurally cannot judge "nothing new", and observed yield
-  tracked the serving MODEL rather than exhaustion. **Property to hold:** a round ceiling ends the loop
-  without a false dry signal, and a host-forced stop is recordable as such.
-  Evidence: [`reviews/dogfood-run-2026-08-08.md`](../reviews/dogfood-run-2026-08-08.md) O7.
+  fabricate.** `MAX_DRAIN_STEPS` bounds the deterministic drain; this loop has none, and
+  `src/audit/orchestrator/state.ts` blocks planning until a round returns nothing-new. A fresh
+  no-memory adversary structurally cannot judge "nothing new"; observed yield tracked the serving MODEL,
+  not exhaustion. **Property to hold:** a round ceiling ends the loop without a false dry signal, and a
+  host-forced stop is recordable as such. Run record O7.
 
-- **A review packet's deliverable rides a tool call the worker can silently skip.** The packet asks the
-  worker to `Write` its result, then reply with a confirmation. A worker that completes the analysis and
-  never emits the Write exits 0 with no file — indistinguishable from success at the process level.
-  **Property to hold:** the deliverable rides a channel the worker cannot skip, and exit-0-with-no-result
-  is never counted as success. Evidence + the host-side extractor trap that compounds it (an unshaped
-  extractor parses `[published]` out of a YAML span as success): run record O8, O12.
+- **A review packet's deliverable rides a tool call the worker can silently skip.** A worker that
+  finishes the analysis but never emits the `Write` exits 0 with no file — indistinguishable from
+  success. **Property to hold:** the deliverable rides a channel the worker cannot skip, and
+  exit-0-with-no-result is never success. Run record O8, O12 (incl. the unshaped host extractor that
+  parses `[published]` out of a YAML span as a valid result).
 
 - **Dispatch children inherit the repo's `.claude` SKILLS, not just its hooks.** Children run with
-  cwd = the checkout; one packet worker loaded this repo's `security-review` skill mid-packet and
-  reasoned about its mandate conflicting with the packet's. The hooks half is covered by
-  [[dispatch-lane-children-hit-repo-stop-gates]]; skills are uncovered. **Property to hold:** a dispatch
-  child's inherited surface is DECLARED — hooks and skills both. Evidence: run record O9.
+  cwd = the checkout; a packet worker loaded `security-review` mid-packet and weighed its mandate against
+  the packet's. Hooks half: [[dispatch-lane-children-hit-repo-stop-gates]]; skills uncovered.
+  **Property to hold:** a child's inherited surface is DECLARED — hooks and skills both. Run record O9.
+
+- **CI trigger paths omit `.claude/**`, which `check:guard-reach` INSPECTS.** `ci.yml`'s own path-filter
+  comment states the invariant ("a gate's trigger paths must cover every path the gate INSPECTS", after
+  a 2026-07-19 incident of this exact shape), yet `.claude/**` is absent — a hook-only push runs NO CI
+  while `verify:checks` reconciles the guard registry against those files, so a hook missing its registry
+  row or `.gitignore` re-include lands green and detonates on the next unrelated push. Seen 2026-08-08:
+  `ce83638f` triggered zero runs. **Property to hold:** trigger paths cover every inspected path.
 
 - **An `openai-compatible` source's reach proves its ENDPOINT, never its declared MODEL.**
-  `resolveAmbientSources` probes `/v1/models` / `/health`, which a running proxy answers whether or not
-  the declared `model` resolves — so a lane naming a retired model resolves GREEN, is admitted as a
+  `resolveAmbientSources` probes `/v1/models` / `/health`, which a proxy answers whether or not the
+  declared `model` resolves — so a lane naming a retired model resolves GREEN, is admitted as a
   CapacityPool, and fails on every packet. **Property to hold:** the declared model is proven, or the
-  reach report states outright that it was not checked. Evidence: run record O1.
+  reach report says it was not checked. Run record O1.
 
 - **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
   map) on every ensure — a generated config violating the stable content-derived ordering invariant,
