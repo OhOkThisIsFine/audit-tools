@@ -1173,6 +1173,11 @@
   returned invented node_id slugs the host had to remap. The packet lane validates on submit; these
   lanes validate nothing. **Property to hold:** every incoming artifact rides a tool-validated
   write (submit-command pattern); an unknown node_id is refused loudly naming the valid set.
+  ⬇ **Reproduced 2026-08-08 at 9 of 10 lanes** (3/3 charter, critical-flow, delta, and 5/6
+  design-review all fence-wrapped their JSON); the invented-node_id half did NOT reproduce. The
+  load-bearing detail: the repairs are invisible to the tool, so only an instrumented host surfaces
+  them — an uninstrumented run reads as clean
+  ([`reviews/dogfood-run-2026-08-08.md`](../reviews/dogfood-run-2026-08-08.md) O2).
 
 - **submit-packet can report success on a result merge later refuses.** 2026-08-05: two workers
   hand-wrote malformed inline-result JSON not covering the packet's one assigned task, echoed
@@ -1187,6 +1192,43 @@
   convergence also rested on host prompt-craft (8/7/4/8→0 only after hardened dispatch framing).
   **Property to hold:** the tool namespaces challenge ids per round; the round prompt itself
   carries a covered-themes digest and an explicit variation bar.
+  ⬇ **Reproduced in full 2026-08-08** ([`reviews/dogfood-run-2026-08-08.md`](../reviews/dogfood-run-2026-08-08.md) O7):
+  host had to prefix `SC-R<n>-` again, and had to author BOTH the covered-themes digest and the
+  variation bar host-side before template repetition broke.
+
+- **The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to
+  fabricate.** `MAX_DRAIN_STEPS` bounds the deterministic drain; the challenge loop has no equivalent,
+  and `src/audit/orchestrator/state.ts` holds the obligation unmet (blocking planning) until a round
+  returns nothing-new. 2026-08-08: still producing after 11 rounds / 42 accepted improvements with no
+  repeats, so the run was released with an empty submission and the register now records a `dry` round
+  that did not happen. Yield tracked the SERVING MODEL, not exhaustion (3,4,3,2,2,1,2,2,7,6,10 — jumps
+  are minimax-m3/deepseek replacing gemini), and a fresh no-memory adversary structurally cannot judge
+  "nothing new". **Property to hold:** a round ceiling ends the loop without a false dry signal, and a
+  host-forced stop is recordable as such.
+
+- **A review packet's deliverable rides a tool call the worker can silently skip.** The packet asks the
+  worker to `Write` its result then reply with a confirmation line. Observed repeatedly 2026-08-08: the
+  worker completed the whole analysis, said "now let me write the result file", and the session ended
+  with **no Write call — exit 0, no file, work discarded**, indistinguishable from success at the
+  process level. Moving the deliverable to the final message (the one output `-p` mode guarantees)
+  removed the failure class. **Property to hold:** the deliverable rides a channel the worker cannot
+  skip, and exit-0-with-no-result is never counted as success. (Related trap: an unshaped host-side JSON
+  extractor manufactures success — first-`[`-to-last-`]` matched `[published]` from a quoted YAML span.)
+
+- **Dispatch children inherit the repo's `.claude` SKILLS, not just its hooks.** 2026-08-08 a packet
+  worker loaded this repo's `security-review` skill mid-packet and reasoned about how that skill's
+  mandate conflicted with the packet's. Children run with cwd = the checkout, so they inherit whatever
+  sits there; the hooks half is already covered by [[dispatch-lane-children-hit-repo-stop-gates]] and
+  its three kill-switches, but skills are uncovered and a worker silently acquiring an unrelated mandate
+  is a correctness risk. **Property to hold:** a dispatch child's inherited surface is DECLARED — hooks
+  and skills both — never whatever the cwd happens to contain.
+
+- **An `openai-compatible` source's reach proves its ENDPOINT, never its declared MODEL.**
+  `resolveAmbientSources` probes `/v1/models` / `/health`, which a running proxy answers regardless of
+  whether the declared `model` resolves. 2026-08-08: three declared relay lanes named pool aliases
+  retired at llm-relay v0.15.4; all three resolved GREEN, were admitted as CapacityPools, and would have
+  400'd on every packet. **Property to hold:** the declared model is proven, or the reach report states
+  outright that it was not checked.
 
 - **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
   map) on every ensure — a generated config violating the stable content-derived ordering invariant,

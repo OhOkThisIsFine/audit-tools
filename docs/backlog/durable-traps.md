@@ -77,10 +77,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   **SIZE:** failure is size-correlated (48KB+ single calls: no first byte in 28 min; 105KB:
   `ECONNRESET`; 1–3KB per item: 94/101). Split to the natural per-item unit and size `max_tokens` to the
   per-item output — [[nim-offload-reliable-unit-is-one-entry]].
-  **CONCURRENCY:** fan-out at 3, 10 and 12 all degraded (429s, or schema-valid empty documents, or never
-  returning). Ceiling **≤2 concurrent per model**, escalating backoff, **resumable** driver (two writers
-  to one output file clobber each other). ⚠ The size lap's "pool ~6-wide" PREDATES this — do not use it.
-  On this axis the endpoint really is the cause, and `finish_reason` is `undefined`, not `length`.
+  **CONCURRENCY — a per-BACKEND limit, NOT a property of the lane** (owner narrowing, 2026-07-28:
+  *"the local offload proxy shouldn't need to be serialized; only NIM has been giving us issues"*).
+  The fan-outs that degraded at 3, 10 and 12 (429s, or schema-valid empty documents, or never
+  returning) were all routed to **NIM**. Serialize NIM-routed work (≤2 concurrent per model, escalating
+  backoff, **resumable** driver — two writers to one output file clobber each other); do NOT serialize
+  the lane as a whole, and do not assume another provider inherits the limit. The relay fronts many
+  providers and owns failover. ⚠ This has been wrong in BOTH directions — first "pool ~6-wide", then
+  over-corrected to a blanket lane-wide ceiling; neither blanket answer held, which is why the durable
+  fact is stated per-backend. On this axis the endpoint really is the cause, and `finish_reason` is
+  `undefined`, not `length`. [[nim-offload-reliable-unit-is-one-entry]]
   Scope is ad-hoc scripts only: audit-tools' own dispatch is paced by declared
   `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
@@ -204,9 +210,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (a) there is no standalone fallback — `~/.claude/llm-call.mjs` POSTs that one endpoint, preflights
   `/health`, and exits 3 when nothing is listening, so a failing offload means "start the relay", not
   "the backend is broken".
-  (b) Use `pool/fast`, `pool/coding`, or `pool/reasoning`. The relay owns concrete candidates and
-  failover; putting a provider/model id in audit-tools recreates the duplicate configuration this
-  boundary exists to remove. `llm-relay pools --probe` is the concrete-model health check.
+  (b) Address a pool by EFFORT — `pool/low`, `pool/medium`, `pool/high`, `pool/xhigh`. The relay owns
+  concrete candidates and failover; putting a provider/model id in audit-tools recreates the duplicate
+  configuration this boundary exists to remove. `llm-relay pools --probe` is the concrete-model health
+  check. ⚠ The task-named pools (`fast`/`coding`/`reasoning`) were retired at llm-relay v0.15.4 and now
+  400 — ask the relay for the live set rather than trusting any written list, this one included.
+  (b2) **A dead pool NAME passes the reach probe and fails only at work time.** `resolveAmbientSources`
+  proves an `openai-compatible` lane by ENDPOINT liveness (`/v1/models`, `/health`), which a running
+  relay answers regardless of whether the declared `model` resolves. So a `sources-declared.json`
+  naming a retired pool resolves green, is admitted as a CapacityPool, and 400s on every packet.
+  Bit 2026-08-08: all three declared relay lanes named retired pools. Probe the declared MODEL with a
+  real `/v1/chat/completions` round-trip after any relay upgrade — endpoint-alive is not lane-alive.
   (c) invocation shape differs by consumer: `llm-call.mjs` takes the model as its FIRST POSITIONAL
   argument, while `--model <spec>` is the *worker/provider* form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
