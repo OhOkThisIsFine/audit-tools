@@ -7,6 +7,9 @@
 
 - **v0.39.8 SHIPPED 2026-08-07.** npm live at 0.39.8, both global bins reinstalled + postinstall run
   manually (npm defers it on `-g`), both report 0.39.8. Release CI green, critical path 252s.
+  ⚠ **`main` is 2 commits AHEAD of the `v0.39.8` tag** — `b2111cbc` and `2468825a`, touching only
+  `.claude/skills/ship/SKILL.md` and this file. Docs/skill only, no `src/` delta, so the published
+  artifact matches the shipped source; do not read the gap as an unpublished code change.
 - **v0.39.7 was burned and is deliberately absent** — its gate job failed on five eslint errors and
   the release + tag were deleted (`gh release delete --cleanup-tag`), then forward-bumped. A gap in
   the version sequence is expected, not a missing publish.
@@ -34,12 +37,16 @@
 
 ## Verification state
 
-- Full suite green 2026-08-07 after both landings: **590 files / 7684 tests passed** (4 files + 15
-  tests skipped, 265s). Run twice — once per commit — not once at the end. The shard-duration
-  baseline still dates from the 589-file run and is one file stale; regenerate on the next release.
-- `npm run verify:checks` was run locally end-to-end (all 27 steps green) before the v0.39.8 retry,
-  after the fast preflight let the v0.39.7 lint failure through. Do that on any release that carries
-  a refactor — see the `/ship` preflight friction entry in open-bugs.
+- **The authoritative full-suite green for the SHIPPED source is release CI run
+  [31242135825](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31242135825)** (v0.39.8 —
+  gate + all 4 shards green). Read that, not the local runs, as the release signal.
+- Local full suite was green twice at **590 files / 7684 tests** (4 files + 15 tests skipped, 265s),
+  once per landing — but both runs predate `4503c1fc`, which changed two return shapes. So no LOCAL
+  full-suite run covers the released source; CI above does. The shard-duration baseline still dates
+  from the older 589-file run and is one file stale — regenerate on the next release.
+- `npm run verify:checks` was run locally end-to-end (all 27 steps green) on the final tree, after
+  the fast preflight let the v0.39.7 lint failure through. `check:lint` is now IN that preflist
+  (`.claude/skills/ship/SKILL.md`), so the trap is in the mechanism and carries no backlog entry.
 - Release CI green for v0.39.4, v0.39.5 and v0.39.6. The T4 split shows as a tighter shard spread:
   v0.39.3 was 205/198/151/132, v0.39.6 critical path 245s — slowest shard down from 205s.
 - A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
