@@ -5,41 +5,44 @@
 
 ## Live state
 
-- **v0.39.3 SHIPPED 2026-08-07 (analyzer sweep + T4 splits).** One attested commit (`c15d3ac4`) carries:
-  the external-analyzer sweep verified/fixed/adopted (record:
-  [`reviews/analysis-tools-plan-2026-08-07.md`](reviews/analysis-tools-plan-2026-08-07.md) — three
-  new dev gates `check:lint` / `check:dup` / `check:depgraph` in `verify:checks`, ts-prune + madge
-  removed, ~330 verified lint findings fixed incl. a `src/shared`→`src/audit` layering violation
-  dissolved by moving `artifactFreshness` into shared); and the CI wall-clock brief's **T4 top
-  three** — wrapper, next-step and pre-commit-gate suites each split over a shared harness with
-  exact test-count parity, `verify:guards` excludes + guard-reach rows updated, shard-duration
-  baseline regenerated from a green full run (status block in
-  [`reviews/ci-wallclock-plan-critique-2026-08-07.md`](reviews/ci-wallclock-plan-critique-2026-08-07.md)).
-- **Dogfood/meta-review cluster deliberately NOT run this session** (owner call, 2026-08-07) — it
-  stays the pinned item below.
-- `analysis-results-*/` is now gitignored (raw sweep output is disposable; conclusions live in the
-  review doc). The owner's Codex-lane droppings at repo root became tracked, real configs
-  (`.dependency-cruiser.cjs`, `eslint.config.js`, `.jscpd.json`).
+- **Unreleased on `main` since v0.39.3** — five commits, all green, dedup-cluster + T4 work:
+  `3a5d352c` score primitives; `c38f4511` (attested) `compareGraphEdges` + `reviewPacketShared` +
+  acceptNode `rollbackFailureOutcome`; `4082c237` (attested) all three type-only cycles broken **and
+  the `no-circular` rule tightened** — `viaOnly` type-only exemption removed, so a type-only cycle is
+  now a red build; `e5eda582` one backlog-entry grammar for the scripts tree; `6734b25d` the T4
+  split of `audit-code-completion.test.ts`. **Not yet published** — no version bump taken.
+- **Five of the sweep's ten dedup findings are done.** The four that remain each carry a verified,
+  diff-ready spec in [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md),
+  which also records three cases where the analysis lane's proposal was wrong and what the
+  verification pass found instead — read it before re-deriving any of them.
+- **T4 floor moved.** `audit-code-completion.test.ts` (~335s) is split five ways over
+  `tests/audit/helpers/completion-harness.ts` with exact test-count parity. The regenerated baseline
+  puts the new single-file ceiling at `audit-code-wrapper-packets.test.ts` (**198.5s**), which is the
+  brief's named next target.
+- **Dogfood/meta-review cluster still NOT run** (owner call, 2026-08-07) — it stays the pinned item.
 
 ## Verification state
 
-- Full suite 585/0 files green locally on the release tree 2026-08-07 (the one red on the first
-  full run was the gate-enumeration parity test catching the three unglossed new gates — fixed,
-  re-run green). Release CI green for v0.39.3 (run 31220796273): needs-DAG critical-path **253s**
-  (v0.39.2: 282s), test shards 205/198/151/132s — duration-balanced sharding + the T4 splits at
-  work (old spread was 259/138/103/89). npm live at 0.39.3; global bins reinstalled + postinstall
-  run, both report 0.39.3. Loop-core commit `c15d3ac4` attested (staged-tree-bound, agent class).
+- Full suite green on this tree 2026-08-07: **589 files / 7681 tests passed**, 4 files + 15 tests
+  skipped. `verify:checks` green. A strict all-cycles `depcruise` (tsPreCompilationDeps on) reports
+  zero cycles of any kind across 542 modules; the tightened `no-circular` rule was red-green
+  validated (reintroduced cycle → exit 1) and restored by inverting the edit.
+- The shard-duration baseline is regenerated from that green full run (593 files).
+- Loop-core commits `c38f4511` and `4082c237` attested (staged-tree-bound, agent class).
+- Release CI last green for v0.39.3 (run 31220796273): critical path 253s. **CI has not run on the
+  five new commits** beyond the local full suite.
 
 ## Immediate next
 
 1. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties;
    needs a quiet tree.
-2. **Analyzer-sweep dedup cluster** (open-bugs) — ten verified extractions, evidence in the sweep
-   review doc §4; the loop-core pairs (reviewPacket helpers, acceptNode outcome twins) deserve their
-   own attested commit.
-3. **T4 remainder** (the CI wall-clock brief) — the true single-file floor turned out to be
-   `audit-code-completion.test.ts` (~335s; it sat outside the shard-1 ledger the brief measured),
-   so the floor moves only when IT is split; queue + protocol in the brief's status block.
+2. **Analyzer-sweep dedup cluster — remaining four** (open-bugs) — specs are written and verified in
+   [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md); the two loop-core
+   ones (quota store scaffolding, rolling-dispatch prep head) each want their own attested commit.
+   The rolling-dispatch item also carries a **latent Windows bug** to fix regardless: remediate
+   builds sidecar filenames from a model-authored `block_id` with no `:` sanitizer.
+3. **T4 remainder** — next target `audit-code-wrapper-packets.test.ts` (198.5s), same
+   one-file-at-a-time protocol; queue in the brief's status block.
 4. Host-memory chore (not repo work): `/consolidate-memory` — the memory index still needs its
    consolidation pass (pointer note at the top of `MEMORY.md`).
 

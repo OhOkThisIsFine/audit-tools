@@ -257,11 +257,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
   failed on seeing the advisory. Observed 2026-07-08.
 
-- **`tests/audit/audit-code-completion.test.ts` is the slowest file in the whole suite, not just in audit.**
-  Rank 1 in every profiled run that lists it (`.audit-tools-profile/vitest-history.ndjson`), 285-470s file
-  wall. It drives the full multi-phase audit flow in-process — the CLI handlers are imported and called
-  directly, not subprocess-spawned — and `HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000` is a PER-TEST timeout on
-  four tests, so a file wall above 300s is expected, not a hang. **Confirmed, do not re-chase:** production
+- **The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file
+  wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the
+  whole suite — rank 1 in every profiled run that listed it
+  (`.audit-tools-profile/vitest-history.ndjson`), 285-470s file wall — until it was split five ways over
+  `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments now top out
+  around 135s. The CLI handlers are imported and called directly rather than subprocess-spawned, and
+  `HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000` is a PER-TEST timeout, so a long wall is the shape of the
+  workload. **Confirmed, do not re-chase:** production
   does NOT redundantly re-extract on an unchanged repo. `repo_manifest` *specifically* is presence-gated
   (`src/audit/orchestrator/state.ts` — `has(bundle.repo_manifest) ? "satisfied" : "missing"`), so its sole
   FS walk (`intakeExecutors.ts` → `buildRepoManifestFromFs`) never re-fires once the artifact exists, and
@@ -402,7 +405,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
   `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
   coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
-  `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.ts`.)
+  `buildOperatorForcedTerminal` in shared; e2e in
+  `tests/audit/audit-code-completion-force-synthesis.test.ts`.)
 
 - **A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).** `dist/`, `.claude/*` and `.audit-tools/*/*` are gitignored, so `rg` and `git grep` — the project's default search tools — provably cannot see a worktree's or a build tree's output. `grep -r` and PowerShell `Select-String -Recurse` honour no ignore file, so they hit `dist/**` and report deleted code as still referenced. Verified twice by probe. When checking whether a symbol is truly dead, use the ignore-aware tool; a `grep -r` hit inside `dist/` is the compiled copy of the very code you deleted, not a caller.
 

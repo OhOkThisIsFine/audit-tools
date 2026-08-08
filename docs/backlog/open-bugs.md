@@ -6,18 +6,19 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Analyzer-sweep dedup cluster (2026-08-07, medium).** The 2026-08-07 external-analyzer sweep
-  verified ten real duplication/cycle findings that need their own bounded extractions — evidence
-  and per-item detail in
-  [`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4:
-  scoreAudit/scoreTokens drifted mirror; claimRegistry/reservationLedger store scaffolding;
-  `compareGraphEdges` private copies; rollingAuditDispatch/providerNodeDispatch shared prep head
-  (one-core-two-draws); reviewPacket helper twins + acceptNode intra-file outcome twins (loop-core,
-  attested commit); nextStepCommand conceptual-dispatch near-twins; cargo/packageJson workspace
-  patterns; scripts bullet-list parser twins; test step-driver unification; the three type-only
-  import cycles. **Property:** each duplicated load-bearing mechanism ends single-sourced (extract,
-  don't drift-test); the jscpd ratchet (`check:dup`, 5.5%) only stops NEW drift, it does not close
-  these.
+- **Analyzer-sweep dedup cluster — remaining four (2026-08-07, medium).** Five of the sweep's ten
+  duplication/cycle findings shipped 2026-08-07 (score primitives, `compareGraphEdges`, reviewPacket
+  twins + acceptNode outcome twins, scripts bullet grammar, all three type-only cycles — the
+  `no-circular` rule now gates type-only cycles too). **Remaining, each with a verified diff-ready
+  spec** in [`reviews/dedup-cluster-2026-08-07b.md`](../reviews/dedup-cluster-2026-08-07b.md):
+  claimRegistry/reservationLedger store scaffolding (⚠ generalize on a *pick* function, not a guard —
+  an `every` guard changes the corrupt-input degrade path); rollingAuditDispatch/providerNodeDispatch
+  shared prep head (one-core-two-draws; ⚠ exposes a latent Windows bug — remediate builds sidecar
+  names from a model-authored `block_id` with no `:` sanitizer); nextStepCommand conceptual-dispatch
+  scaffold + cargo/packageJson workspace patterns; step-driver unification across
+  completion-harness / wrapper-harness / run-wrapper. **Property:** each duplicated load-bearing
+  mechanism ends single-sourced (extract, don't drift-test); the jscpd ratchet (`check:dup`, 5.5%)
+  only stops NEW drift, it does not close these.
 
 - **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
   the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in

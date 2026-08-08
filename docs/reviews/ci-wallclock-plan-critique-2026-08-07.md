@@ -26,10 +26,17 @@ full-run baseline shows `tests/audit/audit-code-completion.test.ts` at ~335s —
 shard and is, and was, the true single-file floor. The three splits fixed the distribution above
 the floor (former 300s/258s/78s monsters now spread across 13 files, largest fragment ~217s);
 **the floor itself moves only when completion.test.ts is split**, same one-file-at-a-time protocol.
-Remaining T4 queue, in floor order: `audit-code-completion.test.ts` (335s), the
-`audit-code-wrapper-packets.test.ts` fragment (217s, split further if completion's split leaves it
-dominant), the dispatch-worktree pair's shared fixture, and the separate `collectMs`
-transform-caching look.
+
+**T4 fourth split landed 2026-08-07** (`6734b25d`): `audit-code-completion.test.ts` → five
+`audit-code-completion-*.test.ts` files over `tests/audit/helpers/completion-harness.ts`, exact
+test-count parity (5 = 5), bodies extracted by script rather than retyped; the `verify:guards`
+exclude, which named the file exactly, now matches the split family. Baseline regenerated from a
+green 589-file full run. **The floor is now
+`audit-code-wrapper-packets.test.ts` at 198.5s** — the completion fragments land at 135s and below.
+Remaining T4 queue, in floor order: `audit-code-wrapper-packets.test.ts` (198.5s),
+`linux-cycle-regression.test.ts` (146.7s, but a SINGLE test — neither splitting nor a concurrency
+flag applies to it, so look before assuming), the dispatch-worktree pair's shared fixture, and the
+separate `collectMs` transform-caching look.
 
 ---
 
