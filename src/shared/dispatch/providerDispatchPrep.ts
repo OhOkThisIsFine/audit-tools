@@ -82,7 +82,7 @@ export function dispatchSidecarNames(
 }
 
 /** {@link dispatchSidecarNames}, resolved against the directory they live in. */
-export function dispatchSidecarPaths(
+function dispatchSidecarPaths(
   dir: string,
   id: string,
 ): { taskPath: string; stdoutPath: string; stderrPath: string } {

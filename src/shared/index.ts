@@ -641,7 +641,6 @@ export {
 export {
   resolveDispatchProvider,
   dispatchSidecarNames,
-  dispatchSidecarPaths,
   dispatchSidecarPathsForResult,
 } from "./dispatch/providerDispatchPrep.js";
 export type {

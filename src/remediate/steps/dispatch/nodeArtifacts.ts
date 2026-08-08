@@ -31,7 +31,7 @@ import { runDir } from "./common.js";
 const IMPLEMENT_PHASE = "implement";
 
 /** Absolute path to the run dir that holds a run's per-node artifacts. */
-export function nodeArtifactsDir(artifactsDir: string, runId: string): string {
+function nodeArtifactsDir(artifactsDir: string, runId: string): string {
   return runDir(artifactsDir, runId, IMPLEMENT_PHASE);
 }
 
@@ -50,7 +50,7 @@ export function implementTaskId(blockId: string): string {
  * pass it directly; callers that hold `(artifactsDir, runId)` should go through
  * {@link nodeArtifactPathsFor}.
  */
-export function nodeArtifactNames(blockId: string): {
+function nodeArtifactNames(blockId: string): {
   result: string;
   prompt: string;
   task: string;
