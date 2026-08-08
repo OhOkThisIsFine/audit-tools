@@ -5,13 +5,14 @@
 
 ## Live state
 
-- **v0.39.4 SHIPPED 2026-08-07 (dedup cluster + type-only cycle gate + T4 completion split).** Six
-  commits: `3a5d352c` score primitives; `c38f4511` (attested) `compareGraphEdges` +
+- **v0.39.4 + v0.39.5 SHIPPED 2026-08-07 (dedup cluster + type-only cycle gate + T4 completion
+  split).** `3a5d352c` score primitives; `c38f4511` (attested) `compareGraphEdges` +
   `reviewPacketShared` + acceptNode `rollbackFailureOutcome`; `4082c237` (attested) all three
   type-only cycles broken **and the `no-circular` rule tightened** — the `viaOnly` type-only
   exemption is gone, so a type-only cycle is now a red build; `e5eda582` one backlog-entry grammar
   for the scripts tree; `6734b25d` the T4 split of `audit-code-completion.test.ts`; `9407db81` the
-  record + regenerated baseline.
+  record + regenerated baseline; `426c2ba6` (attested) the claim/lease store scaffolding.
+  **6 of the sweep's 10 dedup findings are done.**
 - **Five of the sweep's ten dedup findings are done.** The four that remain each carry a verified,
   diff-ready spec in [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md),
   which also records three cases where the analysis lane's proposal was wrong and what the
@@ -30,10 +31,10 @@
   validated (reintroduced cycle → exit 1) and restored by inverting the edit.
 - The shard-duration baseline is regenerated from that green full run (593 files).
 - Loop-core commits `c38f4511` and `4082c237` attested (staged-tree-bound, agent class).
-- Release CI green for v0.39.4 (run 31234888604): gate 130s, test shards **137/131/165/182s**,
-  publish 73s. The T4 split shows up as a tighter spread and a lower ceiling — v0.39.3's shards were
-  205/198/151/132, so the slowest shard fell 205s → 182s. npm live at 0.39.4; global bins reinstalled
-  + postinstall run manually (npm defers it on `-g`), both report 0.39.4.
+- Release CI green for v0.39.4 (run 31234888604) and v0.39.5. The T4 split shows up as a tighter
+  shard spread and a lower ceiling: v0.39.3 was 205/198/151/132, v0.39.4 137/131/165/182, v0.39.5
+  180/140/150/191 — slowest shard down from 205s, critical path ~255s. npm live at **0.39.5**;
+  global bins reinstalled + postinstall run manually (npm defers it on `-g`), both report 0.39.5.
 
 ## Immediate next
 
