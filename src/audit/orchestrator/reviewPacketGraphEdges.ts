@@ -39,6 +39,21 @@ export function isConcreteGraphEdge(edge: GraphEdge): boolean {
   return edge.kind !== "heuristic-container-edge";
 }
 
+/**
+ * Stable edge ordering: confidence descending, then content-derived tiebreak.
+ * Lives beside `graphEdgeConfidence` because it sorts by it — co-located so the
+ * comparator's delta arithmetic cannot drift away from the score it reads.
+ */
+export function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
+  const confidenceDelta = graphEdgeConfidence(b) - graphEdgeConfidence(a);
+  if (confidenceDelta !== 0) return confidenceDelta;
+  return (
+    a.from.localeCompare(b.from) ||
+    a.to.localeCompare(b.to) ||
+    (a.kind ?? "").localeCompare(b.kind ?? "")
+  );
+}
+
 export interface GraphDegreeIndex {
   fanIn: Map<string, number>;
   fanOut: Map<string, number>;

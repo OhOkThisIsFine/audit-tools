@@ -361,6 +361,40 @@ function withRollbackDiagnostic(
   );
 }
 
+/**
+ * Cluster defect 3, single-sourced: a FAILED rollback leaves the pick applied, so
+ * report the base's ACTUAL state (merged:true + landed oid + the loud flag) rather
+ * than a merged:false that contradicts the branch. Shared by the merged-base check
+ * and the loop-core guard; `command` stays a parameter so the two gates keep
+ * distinguishable diagnostics.
+ */
+function rollbackFailureOutcome(params: {
+  command: string;
+  detail: string;
+  rollback: { ok: boolean; detail?: string };
+  verifyPassed: boolean;
+  committedOid: string | undefined;
+  pickedHeadOid: string | undefined;
+}): AcceptNodeWorktreeResult {
+  const { rollback, pickedHeadOid } = params;
+  return {
+    outcome: "error",
+    verifyPassed: params.verifyPassed,
+    merged: !rollback.ok,
+    committedOid: params.committedOid,
+    ...(rollback.ok
+      ? {}
+      : {
+          ...(pickedHeadOid !== undefined ? { landedHeadOid: pickedHeadOid } : {}),
+          baseRollbackFailed: true,
+        }),
+    diagnostic: withRollbackDiagnostic(
+      `$ ${params.command}\n${params.detail}`,
+      rollback,
+    ),
+  };
+}
+
 /** The accept-node body, run while the per-node worktree lock (INV-WTS-8) is held. */
 async function acceptNodeWorktreeLocked(
   params: AcceptNodeWorktreeParams,
@@ -733,25 +767,14 @@ async function acceptNodeWorktreeLocked(
           nodeEditedFiles.available ? nodeEditedFiles.files : [],
         );
         quarantineFailedNodeCommit(root, branch, runId, blockId);
-        // Cluster defect 3: a FAILED rollback leaves the pick applied — report
-        // the base's ACTUAL state (merged:true + landed oid + the loud flag),
-        // never a merged:false that contradicts the branch.
-        return {
-          outcome: "error",
+        return rollbackFailureOutcome({
+          command: checkArgv.join(" "),
+          detail,
+          rollback,
           verifyPassed,
-          merged: !rollback.ok,
           committedOid,
-          ...(rollback.ok
-            ? {}
-            : {
-                ...(pickedHeadOid !== undefined ? { landedHeadOid: pickedHeadOid } : {}),
-                baseRollbackFailed: true,
-              }),
-          diagnostic: withRollbackDiagnostic(
-            `$ ${checkArgv.join(" ")}\n${detail}`,
-            rollback,
-          ),
-        };
+          pickedHeadOid,
+        });
       }
     }
 
@@ -786,24 +809,14 @@ async function acceptNodeWorktreeLocked(
             guardEdited.available ? guardEdited.files : [],
           );
           quarantineFailedNodeCommit(root, branch, runId, blockId);
-          // Cluster defect 3 (same as the merged-base path above): a FAILED
-          // rollback leaves the pick applied — report the base's actual state.
-          return {
-            outcome: "error",
+          return rollbackFailureOutcome({
+            command: guardArgv.join(" "),
+            detail,
+            rollback,
             verifyPassed,
-            merged: !rollback.ok,
             committedOid,
-            ...(rollback.ok
-              ? {}
-              : {
-                  ...(pickedHeadOid !== undefined ? { landedHeadOid: pickedHeadOid } : {}),
-                  baseRollbackFailed: true,
-                }),
-            diagnostic: withRollbackDiagnostic(
-              `$ ${guardArgv.join(" ")}\n${detail}`,
-              rollback,
-            ),
-          };
+            pickedHeadOid,
+          });
         }
       }
     }

@@ -31,6 +31,8 @@ import {
 } from "./partitionTaskGraph.js";
 import type { TaskAffinityGraph } from "./taskAffinityGraph.js";
 import { computeAuditPlanMetrics } from "./reviewPacketMetrics.js";
+import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
+import { normalizePriority, lineCountForPath } from "./reviewPacketShared.js";
 
 // Re-exported for scope.ts, which imports the canonical path normalizer here.
 export { normalizeGraphPath };
@@ -71,25 +73,6 @@ export interface BuildReviewPacketOptions {
    * packet's estimated tokens never exceed it.
    */
   maxContextTokens?: number;
-}
-
-interface ReviewPacketPlanningData {
-  graphEdges: GraphEdge[];
-  groups: Map<string, AuditTask[]>;
-  planningGraphEdges: GraphEdge[];
-  packets: ReviewPacket[];
-}
-
-function normalizePriority(priority: AuditTask["priority"]): NonNullable<AuditTask["priority"]> {
-  return priority ?? "low";
-}
-
-function lineCountForPath(
-  task: AuditTask,
-  path: string,
-  lineIndex?: Record<string, number>,
-): number {
-  return task.file_line_counts?.[path] ?? lineIndex?.[path] ?? 0;
 }
 
 function taskFileSignature(task: AuditTask): string {

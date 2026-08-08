@@ -14,6 +14,8 @@ import {
   buildFileToGroupKeys,
 } from "./reviewPacketGraphEdges.js";
 import { roundQuality } from "./reviewPacketGraphContext.js";
+import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
+import { normalizePriority, lineCountForPath } from "./reviewPacketShared.js";
 
 // Audit-plan quality metrics: packet cohesion, weakly-explained packet
 // analysis, edge-kind breakdowns. buildAuditPlanMetrics is the single entry
@@ -27,28 +29,7 @@ const WEAK_PACKET_GAP_ORDER: WeaklyExplainedPacketSample["primary_gap"][] = [
   "partial_cohesion",
 ];
 
-// --- types shared with reviewPackets (re-declared locally to avoid circular dep) ---
-
-interface ReviewPacketPlanningData {
-  graphEdges: GraphEdge[];
-  groups: Map<string, AuditTask[]>;
-  planningGraphEdges: GraphEdge[];
-  packets: ReviewPacket[];
-}
-
 // --- private helpers ---
-
-function normalizePriority(priority: AuditTask["priority"]): NonNullable<AuditTask["priority"]> {
-  return priority ?? "low";
-}
-
-function lineCountForPath(
-  task: AuditTask,
-  path: string,
-  lineIndex?: Record<string, number>,
-): number {
-  return task.file_line_counts?.[path] ?? lineIndex?.[path] ?? 0;
-}
 
 function taskLineCount(
   task: AuditTask,

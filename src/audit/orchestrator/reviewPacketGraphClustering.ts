@@ -15,6 +15,7 @@ import {
 } from "./reviewPacketSizing.js";
 import {
   graphEdgeConfidence,
+  compareGraphEdges,
   isPacketExpansionEdge,
   buildFileToGroupKeys,
   buildGraphDegreeIndex,
@@ -55,16 +56,6 @@ const BROAD_ANALYZER_OWNERSHIP_ROOTS = new Set([
   "spec",
   "specs",
 ]);
-
-function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
-  const confidenceDelta = graphEdgeConfidence(b) - graphEdgeConfidence(a);
-  if (confidenceDelta !== 0) return confidenceDelta;
-  return (
-    a.from.localeCompare(b.from) ||
-    a.to.localeCompare(b.to) ||
-    (a.kind ?? "").localeCompare(b.kind ?? "")
-  );
-}
 
 function uniqueTaskFilePaths(tasks: AuditTask[]): string[] {
   return [...new Set(tasks.flatMap((task) => task.file_paths))].sort((a, b) =>

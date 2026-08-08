@@ -5,7 +5,11 @@ import type {
   ReviewPacketQuality,
 } from "../types/reviewPlanning.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
-import { isConcreteGraphEdge, graphEdgeConfidence } from "./reviewPacketGraphEdges.js";
+import {
+  isConcreteGraphEdge,
+  graphEdgeConfidence,
+  compareGraphEdges,
+} from "./reviewPacketGraphEdges.js";
 
 // Packet-level graph context: entrypoint extraction, internal/boundary edge
 // classification, cohesion scoring, key-edge selection. Consumed by buildPacket
@@ -16,16 +20,6 @@ const MAX_PACKET_BOUNDARY_FILES = 12;
 
 export function roundQuality(value: number): number {
   return Math.round(value * 1000) / 1000;
-}
-
-function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
-  const confidenceDelta = graphEdgeConfidence(b) - graphEdgeConfidence(a);
-  if (confidenceDelta !== 0) return confidenceDelta;
-  return (
-    a.from.localeCompare(b.from) ||
-    a.to.localeCompare(b.to) ||
-    (a.kind ?? "").localeCompare(b.kind ?? "")
-  );
 }
 
 function reviewPacketGraphEdge(edge: GraphEdge): ReviewPacketGraphEdge {
