@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
+import { walkStepsUntilTerminal } from "./step-driver.js";
 import { AuditCodeResponseSchema } from "../../../src/audit/contracts/wrapperResponse.js";
 
 // Post-G2 the backend provider identity rides the per-invocation --auditor
@@ -330,95 +331,22 @@ export function validAuditResultForTask(task: any, overrides: Record<string, unk
   };
 }
 
-// Pause step kinds that next-step can emit before review dispatch is ready
-// (analyzer install decision, intent confirmation, design review passes,
-// optional edge reasoning), each at most once; allow extra headroom.
-const MAX_PRE_DISPATCH_PAUSES = 8;
-
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause headlessly (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review).
+// Same walk as completion-harness's `advanceToDispatchReady`, differing only in
+// transport: this one drives the wrapper as a spawned CLI rather than in-process.
 export async function startDispatchRun(root: string): Promise<any> {
-  const incomingDir = join(root, ".audit-tools/audit", "incoming");
-  for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
-    const step = JSON.parse(
-      (await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout,
-    );
-    if (step.step_kind === "analyzer_consent") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        step.artifact_paths.analyzer_consent_decisions,
-        JSON.stringify({ semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" }, null, 2) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "analyzer_install") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        step.artifact_paths.analyzer_decisions,
-        JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "confirm_intent") {
-      await writeFile(
-        step.artifact_paths.intent_checkpoint,
-        JSON.stringify(
-          {
-            schema_version: "intent-checkpoint/v1",
-            confirmed_at: "2026-04-22T00:00:00Z",
-            confirmed_by: "host",
-            scope_summary: "test scope",
-            intent_summary: "full-audit",
-          },
-          null,
-          2,
-        ) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_parallel") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-contract-findings.json"),
-        "[]\n",
-      );
-      await writeFile(
-        join(incomingDir, "design-review-conceptual-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_contract") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-contract-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_conceptual") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-conceptual-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "edge_reasoning_dispatch") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
-      continue;
-    }
-    if (step.step_kind === "dispatch_review") {
-      return step;
-    }
-    throw new Error(
-      `startDispatchRun: unexpected step kind '${step.step_kind}' (iteration ${i})`,
-    );
-  }
-  throw new Error("next-step did not reach a dispatch-ready step");
+  return walkStepsUntilTerminal({
+    root,
+    transport: async () =>
+      JSON.parse(
+        (await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout,
+      ),
+    terminalKinds: new Set(["dispatch_review"]),
+    label: "startDispatchRun",
+  });
 }
 
 async function setupDispatchFixture(root: string) {

@@ -7,6 +7,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { countLines } from "./countLines.mjs";
+import { walkStepsUntilTerminal } from "./step-driver.js";
 import type { AuditTask } from "../../../src/audit/types.js";
 
 const { currentStepPath } = await import("audit-tools/shared");
@@ -190,94 +191,22 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
   }
 }
 
-// Pause step kinds that next-step can emit before review dispatch is ready
-// (analyzer install decision, intent confirmation, design review passes,
-// optional edge reasoning), each at most once; allow extra headroom.
-const MAX_PRE_DISPATCH_PAUSES = 8;
-
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause headlessly (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review).
+//
+// The walk itself is `walkStepsUntilTerminal`; this harness supplies only the
+// IN-PROCESS transport, which is the single thing that made it differ from
+// wrapper-harness's spawned equivalent.
 export async function advanceToDispatchReady(root: string) {
   const artifactsDir = join(root, ".audit-tools/audit");
-  const incomingDir = join(artifactsDir, "incoming");
-  for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
-    const step = await callNextStep(root, artifactsDir);
-    if (step.step_kind === "analyzer_consent") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        step.artifact_paths.analyzer_consent_decisions,
-        JSON.stringify({ semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" }, null, 2) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "analyzer_install") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        step.artifact_paths.analyzer_decisions,
-        JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "confirm_intent") {
-      await writeFile(
-        step.artifact_paths.intent_checkpoint,
-        JSON.stringify(
-          {
-            schema_version: "intent-checkpoint/v1",
-            confirmed_at: "2026-04-22T00:00:00Z",
-            confirmed_by: "host",
-            scope_summary: "test scope",
-            intent_summary: "full-audit",
-          },
-          null,
-          2,
-        ) + "\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_parallel") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-contract-findings.json"),
-        "[]\n",
-      );
-      await writeFile(
-        join(incomingDir, "design-review-conceptual-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_contract") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-contract-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "design_review_conceptual") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(
-        join(incomingDir, "design-review-conceptual-findings.json"),
-        "[]\n",
-      );
-      continue;
-    }
-    if (step.step_kind === "edge_reasoning_dispatch") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
-      continue;
-    }
-    if (step.step_kind === "dispatch_review") {
-      return step;
-    }
-    throw new Error(
-      `advanceToDispatchReady: unexpected step kind '${step.step_kind}' (iteration ${i})`,
-    );
-  }
-  throw new Error("next-step did not reach a dispatch-ready step");
+  return walkStepsUntilTerminal({
+    root,
+    transport: () => callNextStep(root, artifactsDir),
+    terminalKinds: new Set(["dispatch_review"]),
+    label: "advanceToDispatchReady",
+  });
 }
 
 // Disable the synthesis narrative so finalization stays fully deterministic

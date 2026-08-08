@@ -1,11 +1,12 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
+import { walkStepsUntilTerminal } from "./helpers/step-driver.js";
 import {
+  ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS,
   advancePastDesignReview,
   withTempRepo,
 } from "./helpers/next-step-harness.js";
@@ -54,73 +55,41 @@ test.concurrent("next-step with can_dispatch_subagents:false still materializes 
   });
 });
 
-test.concurrent("advancePastDesignReview throws on unknown pause kind", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
-  // Stub runWrapper to return a single step with an unrecognised step_kind.
-  // We call advancePastDesignReview directly by monkey-patching its dependency
-  // indirectly: write a tiny wrapper that returns a fake step JSON and call the
-  // helper with that wrapper path.
-  //
-  // The simplest approach: create a fake wrapper script that emits the unknown
-  // step as JSON, then pass it as a custom wrapperArgs using the wrapperPath
-  // override pattern already used by runWrapper.
+// This previously asserted against a hand-copied REPLICA of the walker declared
+// inside the test body, so it passed regardless of what the real helper did —
+// the production code could have been deleted outright and it would still have
+// been green. The shared driver takes its transport as a parameter, so the
+// unknown-kind case can now be driven against the REAL code with a stub
+// transport, which is what this exercises.
+test.concurrent("the step driver throws on an unknown step kind rather than returning it", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-pause-"));
   try {
-    // Create a fake wrapper that writes an unknown-kind step to stdout.
-    const fakeWrapperPath = join(tempDir, "fake-wrapper.mjs");
-    await writeFile(
-      fakeWrapperPath,
-      [
-        "#!/usr/bin/env node",
-        "process.stdout.write(JSON.stringify({",
-        "  contract_version: 'audit-code-step/v1alpha1',",
-        "  step_kind: 'unknown_future_pause',",
-        "  artifact_paths: {},",
-        "  prompt_path: '/dev/null',",
-        "}) + '\\n');",
-      ].join("\n"),
-    );
-
-    // Build a minimal helper that mirrors advancePastDesignReview but uses the
-    // fake wrapper path so we don't spin up a real audit run.
-    const TERMINAL = new Set([
-      "dispatch_review", "single_task",
-      "synthesis", "present_report",
-    ]);
-    async function runFakeWrapper() {
-      return new Promise<{ stdout: string }>((resolve, reject) => {
-        const child = spawn(process.execPath, [fakeWrapperPath], {
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        child.stdout.on("data", (chunk: Buffer | string) => { stdout += String(chunk); });
-        child.on("error", reject);
-        child.on("exit", () => resolve({ stdout }));
-      });
-    }
-    async function helperUnderTest() {
-      for (let i = 0; i < 6; i++) {
-        const step = JSON.parse((await runFakeWrapper()).stdout);
-        if (step.step_kind === "analyzer_install") { continue; }
-        if (step.step_kind === "design_review") { continue; }
-        if (step.step_kind === "edge_reasoning_dispatch") {
-          continue;
-        }
-        if (TERMINAL.has(step.step_kind)) { return step; }
-        throw new Error(
-          `advancePastDesignReview: unexpected pause kind '${step.step_kind}' (iteration ${i})`,
-        );
-      }
-      throw new Error("next-step did not advance past structure-phase pauses");
-    }
-
+    let calls = 0;
     await assert.rejects(
-      () => helperUnderTest(),
+      () =>
+        walkStepsUntilTerminal({
+          root: tempDir,
+          transport: async () => {
+            calls++;
+            return {
+              contract_version: "audit-code-step/v1alpha1",
+              step_kind: "unknown_future_pause",
+              artifact_paths: {},
+              prompt_path: "/dev/null",
+            };
+          },
+          terminalKinds: ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS,
+          label: "advancePastDesignReview",
+        }),
       (err: Error) => {
-        expect(err.message).toMatch(/unexpected pause kind/);
+        expect(err.message).toMatch(/unexpected step kind/);
         expect(err.message).toMatch(/unknown_future_pause/);
+        expect(err.message).toMatch(/advancePastDesignReview/);
         return true;
       },
     );
+    // It must fail FAST on an unrecognised kind, not burn the whole pause budget.
+    expect(calls).toBe(1);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

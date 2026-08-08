@@ -479,6 +479,21 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
 
+- **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
+  (2026-08-07).** A relay lane dispatched to analyze a duplication and left running while the
+  extraction was written came back describing the new shared helper as pre-existing — its "finding"
+  was the edit in flight. Nothing warns; the report simply describes a tree that did not exist when
+  the task was written. Dispatch recon BEFORE editing the files it covers, or hold the edit until it
+  returns. Same reason its output is advisory: verify against source at the moment you act.
+
+- **Long relay recon jobs die mid-response; short ones do not (2026-08-07).** Three multi-file
+  analysis dispatches on the DeepSeek lane: two failed with `API Error: Server error mid-response`
+  after ~10 min, the third returned only after ~25 min; a one-line probe on the same lane answered
+  instantly, and the same work on the agy lane returned complete in minutes. `claude -p` buffers to
+  completion, so a dying lane and a working one are both zero bytes until the end — elapsed time is
+  not a progress signal. Probe small, keep each dispatch to one bounded item, and prefer a second
+  lane over a retry on the one that just failed.
+
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
   and the packaged smoke tests run that install, so `npm test` alone is enough to erase the edit.
