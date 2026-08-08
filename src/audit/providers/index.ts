@@ -1,15 +1,5 @@
-import {
-  buildOrchestratorProviderBindings,
-  createFreshSessionProvider as createSharedFreshSessionProvider,
-  createOpenCodeProvider,
-  resolveFreshSessionProviderName as resolveSharedFreshSessionProviderName,
-} from "audit-tools/shared";
-import type {
-  FreshSessionProvider,
-  OrchestratorDescriptor,
-  ResolvedProviderName,
-  SessionConfig,
-} from "audit-tools/shared";
+import { buildOrchestratorProviderModule } from "audit-tools/shared";
+import type { OrchestratorDescriptor } from "audit-tools/shared";
 
 /**
  * Auto-resolution, the provider classes, AND the per-orchestrator binding
@@ -27,35 +17,13 @@ export const AUDIT_CODE_DESCRIPTOR: OrchestratorDescriptor = {
   envPrefix: "AUDIT_CODE",
 };
 
-const bindings = buildOrchestratorProviderBindings(AUDIT_CODE_DESCRIPTOR);
+const providerModule = buildOrchestratorProviderModule(AUDIT_CODE_DESCRIPTOR);
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
-  bindings.activeClaudeCodeSessionMessage;
-export const createClaudeCodeProvider = bindings.createClaudeCodeProvider;
-// opencode has no per-orchestrator delta; the shared factory is re-exported to
-// keep one import surface for all provider factories.
-export { createOpenCodeProvider };
-
-export function resolveFreshSessionProviderName(
-  name: string | undefined,
-  sessionConfig: SessionConfig = {},
-  options: {
-    env?: NodeJS.ProcessEnv;
-    commandExists?: (command: string) => boolean;
-  } = {},
-): ResolvedProviderName {
-  return resolveSharedFreshSessionProviderName(name, sessionConfig, options);
-}
-
-export function createFreshSessionProvider(
-  name: string | undefined,
-  sessionConfig: SessionConfig = {},
-): FreshSessionProvider {
-  return createSharedFreshSessionProvider(name, sessionConfig, {
-    orchestratorName: AUDIT_CODE_DESCRIPTOR.orchestratorName,
-    createClaudeCodeProvider: bindings.createClaudeCodeProvider,
-    createClaudeWorkerProvider: bindings.createClaudeWorkerProvider,
-    createOpenCodeProvider: (config) => createOpenCodeProvider(config),
-    createAgyProvider: bindings.createAgyProvider,
-  });
-}
+  providerModule.activeClaudeCodeSessionMessage;
+export const createClaudeCodeProvider = providerModule.createClaudeCodeProvider;
+export const createOpenCodeProvider = providerModule.createOpenCodeProvider;
+export const resolveFreshSessionProviderName =
+  providerModule.resolveFreshSessionProviderName;
+export const createFreshSessionProvider =
+  providerModule.createFreshSessionProvider;

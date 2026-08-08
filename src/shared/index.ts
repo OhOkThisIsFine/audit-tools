@@ -977,7 +977,10 @@ export type {
   OrchestratorDescriptor,
   OrchestratorProviderBindings,
 } from "./providers/orchestratorBindings.js";
-export { buildOrchestratorProviderBindings } from "./providers/orchestratorBindings.js";
+export {
+  buildOrchestratorProviderBindings,
+  buildOrchestratorProviderModule,
+} from "./providers/orchestratorBindings.js";
 export {
   AgyProvider,
   AGY_PROVIDER_NAME,

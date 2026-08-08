@@ -1,8 +1,20 @@
-import type { AgyConfig, ClaudeCodeConfig, ClaudeWorkerConfig } from "../types/sessionConfig.js";
+import type {
+  AgyConfig,
+  ClaudeCodeConfig,
+  ClaudeWorkerConfig,
+  ResolvedProviderName,
+  SessionConfig,
+} from "../types/sessionConfig.js";
 import type { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import type { FreshSessionProvider } from "./types.js";
 import { ClaudeCodeProvider, buildActiveClaudeCodeSessionMessage } from "./claudeCodeProvider.js";
 import { ClaudeWorkerProvider } from "./claudeWorkerProvider.js";
 import { AgyProvider, buildActiveAgySessionMessage } from "./agyProvider.js";
+import { OpenCodeProvider, createOpenCodeProvider } from "./opencodeProvider.js";
+import {
+  createFreshSessionProvider as createSharedFreshSessionProvider,
+  resolveFreshSessionProviderName as resolveSharedFreshSessionProviderName,
+} from "./providerFactory.js";
 
 /**
  * The per-orchestrator delta, declared ONCE per side (drift-plan E4 completed:
@@ -87,5 +99,69 @@ export function buildOrchestratorProviderBindings(
         },
         launchCommand,
       ),
+  };
+}
+
+/**
+ * Everything an orchestrator's `providers/index.ts` exposes, derived from its
+ * descriptor alone.
+ */
+export interface OrchestratorProviderModule {
+  activeClaudeCodeSessionMessage: string;
+  createClaudeCodeProvider: OrchestratorProviderBindings["createClaudeCodeProvider"];
+  createOpenCodeProvider: (
+    config?: Parameters<typeof createOpenCodeProvider>[0],
+    launchCommand?: typeof spawnLoggedCommand,
+  ) => OpenCodeProvider;
+  resolveFreshSessionProviderName: (
+    name: string | undefined,
+    sessionConfig?: SessionConfig,
+    options?: {
+      env?: NodeJS.ProcessEnv;
+      commandExists?: (command: string) => boolean;
+    },
+  ) => ResolvedProviderName;
+  createFreshSessionProvider: (
+    name: string | undefined,
+    sessionConfig?: SessionConfig,
+  ) => FreshSessionProvider;
+}
+
+/**
+ * Build an orchestrator's entire provider module from its descriptor.
+ *
+ * Both orchestrators' `providers/index.ts` were byte-identical apart from the
+ * descriptor they referenced — the same bindings call, the same pass-through
+ * resolver, the same factory body wiring the same four bound factories. Those
+ * files' own docblocks named the descriptor as "the ONE home for everything that
+ * legitimately differs", which is precisely why the boilerplate AROUND it should
+ * not have been written twice: the descriptor is the per-mode axis, so the
+ * module derived from it belongs here, once.
+ *
+ * The auto-resolution surface is deliberately NARROWER than the shared
+ * resolver's: `uiMode` is not forwarded. Both orchestrators already narrowed it
+ * identically, and preserving that keeps this a pure de-duplication rather than a
+ * silent widening of what each orchestrator can ask for.
+ */
+export function buildOrchestratorProviderModule(
+  descriptor: OrchestratorDescriptor,
+): OrchestratorProviderModule {
+  const bindings = buildOrchestratorProviderBindings(descriptor);
+  return {
+    activeClaudeCodeSessionMessage: bindings.activeClaudeCodeSessionMessage,
+    createClaudeCodeProvider: bindings.createClaudeCodeProvider,
+    // opencode has no per-orchestrator delta; the shared factory is re-exposed
+    // so all provider factories keep one import surface.
+    createOpenCodeProvider,
+    resolveFreshSessionProviderName: (name, sessionConfig = {}, options = {}) =>
+      resolveSharedFreshSessionProviderName(name, sessionConfig, options),
+    createFreshSessionProvider: (name, sessionConfig = {}) =>
+      createSharedFreshSessionProvider(name, sessionConfig, {
+        orchestratorName: descriptor.orchestratorName,
+        createClaudeCodeProvider: bindings.createClaudeCodeProvider,
+        createClaudeWorkerProvider: bindings.createClaudeWorkerProvider,
+        createOpenCodeProvider: (config) => createOpenCodeProvider(config),
+        createAgyProvider: bindings.createAgyProvider,
+      }),
   };
 }
