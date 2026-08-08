@@ -24,7 +24,12 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
   `npm run check:doc-manifest` (0.1s — ANY new/renamed tracked `*.md` anywhere in the repo, not just
   `docs/**`, unregistered in `docs/doc-review-guidelines.md` otherwise fails only in RELEASE CI;
-  burned v0.34.17).
+  burned v0.34.17) +
+  `npm run check:lint` (14s — `tsc` does NOT flag an unused DESTRUCTURED binding or a
+  newly-dead import, so `build && check` goes green while the gate job fails; burned v0.39.7).
+- **Carrying a refactor? Run the whole `npm run verify:checks` locally first.** The fast list above
+  is a fail-fast for ordinary edits; an extraction or a moved call reliably leaves exactly the
+  leftovers only the full non-test gate sees, and the gate is minutes, not a burned tag.
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`
   (= `verify:checks` + full vitest + both linked-install smokes) — but the sharded CI gate re-runs it
   authoritatively either way.

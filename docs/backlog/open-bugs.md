@@ -19,16 +19,6 @@
   **Property:** each duplicated load-bearing mechanism ends single-sourced (extract, don't
   drift-test); the jscpd ratchet (`check:dup`, 5.5%) only stops NEW drift, it does not close these.
 
-- **`/ship`'s preflight omits `check:lint`, the cheapest gate that catches extraction leftovers
-  (2026-08-07, low, friction).** v0.39.7 burned a tag on five eslint errors: `cfg`/`dir` destructured
-  and never read, and a `node:path` `join` import left dead by a moved call. `tsc` does not flag an
-  unused DESTRUCTURED binding, so `build && check` was green locally while the gate job failed. The
-  documented preflight is a deliberate fast-fail (CI is authoritative), but `check:lint` is 14s and
-  is precisely the gate an extraction/refactor trips — it belongs in the fast list beside
-  `check:doc-manifest`, which is there for the same "fails only in release CI" reason.
-  **Property:** the preflight's fast list includes every sub-second-to-20s gate whose failure mode is
-  "green locally, red in release CI".
-
 - **The two `providers/index.ts` are a descriptor-parameterized twin (2026-08-07, low).** Found
   while extracting the shared dispatch prep head (§4 item 4). `src/audit/providers/index.ts` and
   `src/remediate/providers/index.ts` are byte-identical apart from the descriptor constant they
