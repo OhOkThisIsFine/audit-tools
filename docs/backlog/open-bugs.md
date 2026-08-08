@@ -6,30 +6,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **Analyzer-sweep dedup cluster — remaining three (2026-08-07, medium).** Six of the sweep's ten
-  duplication/cycle findings shipped 2026-08-07 (score primitives, `compareGraphEdges`, reviewPacket
-  twins + acceptNode outcome twins, scripts bullet grammar, all three type-only cycles — the
-  `no-circular` rule now gates type-only cycles too — and the claim/lease store scaffolding), plus
-  item 4's latent sidecar-naming bug as its own fix (`nodeArtifacts.ts`).
-  **Remaining, each with a verified diff-ready spec** in
-  [`reviews/dedup-cluster-2026-08-07b.md`](../reviews/dedup-cluster-2026-08-07b.md):
-  nextStepCommand conceptual-dispatch scaffold + cargo/packageJson workspace patterns;
-  step-driver unification across completion-harness / wrapper-harness / run-wrapper.
-  (The rolling-dispatch prep head landed 2026-08-07 — `shared/dispatch/providerDispatchPrep.ts`.)
-  **Property:** each duplicated load-bearing mechanism ends single-sourced (extract, don't
-  drift-test); the jscpd ratchet (`check:dup`, 5.5%) only stops NEW drift, it does not close these.
-
-- **The two `providers/index.ts` are a descriptor-parameterized twin (2026-08-07, low).** Found
-  while extracting the shared dispatch prep head (§4 item 4). `src/audit/providers/index.ts` and
-  `src/remediate/providers/index.ts` are byte-identical apart from the descriptor constant they
-  reference — same imports, same `buildOrchestratorProviderBindings(D)`, same
-  `resolveFreshSessionProviderName`, same `createFreshSessionProvider` body. Both docblocks state the
-  descriptor is "the ONE home for everything that legitimately differs", which is the tell: the
-  descriptor already IS the per-mode axis, so the factory boilerplate around it is duplication.
-  **Property:** one `buildOrchestratorProviderModule(descriptor)` in shared; each orchestrator's
-  module declares only its descriptor and draws the factories from it. Sole asymmetry to preserve:
-  audit also exports `ACTIVE_CLAUDE_CODE_SESSION_MESSAGE`.
-
 - **Regex-perf triage tail from the analyzer sweep (2026-08-07, low).** The verified-real subset of
   the sonarjs regex findings: patterns that process audited-repo content (unbounded input) in
   `graphPythonImports`, `graphRoutes`, `changeClassification`, `autonomousGate`,
