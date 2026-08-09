@@ -16,12 +16,15 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.10 SHIPPED 2026-08-08.** npm live at 0.39.10, both global bins reinstalled and the deferred
+- **v0.39.11 SHIPPED 2026-08-09.** npm live at 0.39.11, both global bins reinstalled and the deferred
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
-  bins report 0.39.10. Release CI run
-  [31297966782](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31297966782) green across
-  all 6 jobs, critical path 246s (summed 850s). **Tag and `main` are level at `148c1734` — no gap.**
+  bins report 0.39.11. Release CI run
+  [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005) green across
+  all 6 jobs, critical path 252s (summed 839s). **Tag and `main` are level at `c30bd070` — no gap.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
+  ⚠ This one carries a real BEHAVIOR change, not just docs: a contract-pipeline DAG whose node
+  resolves to an empty write scope is now REFUSED at validation. A pipeline run that previously
+  promoted such a node and died later at dispatch will now be rejected earlier and regenerate.
 - **The nightly queue holds FOUR unanswered propositions** (`7a0bb2da`, 2026-08-09) — `sol-1` a
   Bash-tool guard rule for env vars unset in that shell, `sol-2` both shipped bins running the
   installer on `<verb> --help`, `sol-3` the leg-2 sweep's `gone` verdict being wrong every time it
@@ -63,18 +66,17 @@
 ## Verification state
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31297966782](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31297966782)** (v0.39.10 —
+  [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005)** (v0.39.11 —
   gate + all 4 shards green). Read that, not the local run, as the release signal.
-- The pre-release lap was additionally verified locally on the clean committed tree at `af37bbad`:
+- The pre-release lap was additionally verified locally on the clean committed tree at `37d2cc44`:
   the whole `verify:checks` green (exit 0, including `pack:smoke` and both packaged smokes), plus
-  `ci` and `audit-code-test-suite` green on that commit before the bump. Targeted suites: 55 tests
-  across the three affected suites (`examples-session-config`, `auditor-sources`,
-  `triage-lane-health`).
-- **The arg guard is red-green validated both ways** — no junk files under a flag, and a flag-shaped
-  `argv[2]` no longer exits an *importer*. That second half matters: `triage-lane-health.test.ts`
-  imports the module and its stated invariant is that importing must not start a sweep, so an
-  unconditional `process.exit` in the guard would have killed the test worker. Both guards are bound
-  to a single-sourced `IS_CLI`.
+  `ci` and `audit-code-test-suite` green on that commit before the bump. Suites: whole remediate area
+  145 files / 2465 tests, and 80 across the five files touching the content-key seam.
+- **Both repairs are red-green validated on the property that matters, not just written with tests.**
+  Dropping the sort in `buildAttemptKey` turns the replay-stability test red and only that test;
+  disabling the new empty-write-scope condition turns exactly the new DAG test red. Both restored by
+  INVERTING the edit, never by checkout. A test that has not been seen to fail proves nothing here —
+  the defect being repaired is precisely one that green builds and clean self-reviews missed.
 - **The shard-duration baseline is still CURRENT** — regenerated from the 596-file run one lap ago;
   nothing this lap changed test counts materially.
 - **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
@@ -87,8 +89,10 @@
 - A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
   542 modules; the tightened `no-circular` rule was red-green validated (reintroduced cycle → exit 1)
   and restored by inverting the edit, never by checkout.
-- **No loop-core commit was needed this lap** — nothing landed touched `LOOP_CORE_PATTERNS`, so no
-  attestation applies. (The attested set from earlier laps is in git history, not restated here.)
+- **One loop-core commit this lap**, `40f632b4` (`src/remediate/steps/contractPipeline.ts`), attested
+  with the diagnosis and the red-green evidence. The other landings touch no `LOOP_CORE_PATTERNS`
+  path — `src/shared/contentKey.ts` and `src/shared/types/attributionContract.ts` are outside the
+  list, which covers `src/shared/{dispatch,engine,quota,rolling}/` and the two step machines.
 
 ## Immediate next
 
