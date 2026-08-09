@@ -97,26 +97,32 @@
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
 
-1. **Decide the fate of `remediation/dispatch-effectiveness-observability` (pushed, 2 commits), then
-   repair its two upstream defects.** The observability feature request ran through the contract
-   pipeline (3 adversarial laps → judge approved) into implementation. CP-NODE-1 landed the shared
-   attribution-contract type surface on that branch;
-   <!-- doc-citation-exempt: the module lives on the unmerged remediation branch, not on main -->
-   `src/shared/types/attributionContract.ts`; CP-NODE-2/3/4 are halted. Two repairs gate the rest,
-   neither fixable by retry: (a) `attempt_key` rests on an admission identity the dispatch layer does
-   NOT mint — verified against source, `lease_id` is null on the unmetered lane, `packet_id` repeats
-   by design, `newInstanceId` is random; `contentKey`'s `result_content_discriminator` is the existing
-   precedent, and the amendment needs a critic/judge lap
-   ([[attempt-key-has-no-admission-identity]]). (b) `implementation_dag` carries no per-node file
-   scope, so the dispatch boundary refuses CP-NODE-2/3 structurally. Evidence:
-   `.audit-tools/remediation/scratch/dispatch-effectiveness-observability/C-024-verification.md`.
-   ⚠ Seven frictions from the run are in the run's friction record but **NOT in open-bugs.md** — that
-   file is 129.6KB against a 120KB ceiling and the budget gate allows only shrinkage, so landing them
-   requires an offsetting condensation.
-2. **Triage the 2,241 audit findings — decide the CUT before reading them.** They are unfiltered output.
-   Maintainability alone is 1,417 (63%), and the auditor's severity calibration has a standing
-   open-bugs entry against it (2026-08-06: 0 of 9 self-audit criticals survived mechanism verification).
-   The 4 criticals + 92 high are the only tractable starting set; the four criticals are summarized in
+1. **Re-run the observability DAG — both blocking repairs are DONE, but the run's own DAG is still
+   the defective one.** The owner's call was merge-then-repair-on-main, and that is where things
+   stand: CP-NODE-1's type surface is on main (`14677902`, artifacts commit deliberately left on the
+   branch), `attempt_key` has a real derivation (`c79aaf4d`), and a scope-less node is now refused at
+   DAG validation (`40f632b4`). What is NOT done is regenerating the implementation_dag: CP-NODE-2/3
+   still carry obligation ids (`OBL-attribution-capture-…`, `OBL-verdict-capture-…`) that join to no
+   module in the decomposition, so the *next* run refuses them loudly and regenerates instead of
+   promoting a node nothing can be dispatched for. Either declare `output_files` on those nodes or
+   name their obligations after a decomposed module.
+   ⚠ **The backlog's description of repair (b) was wrong, which cost real time — read the run's
+   outcome records, not the prose.** It said "implementation_dag carries no per-node file scope"; the
+   schema has the fields and a fallback has existed since 2026-07-12, and the evidence file it cited
+   is entirely about repair (a). The actual failure is a JOIN between two independently authored name
+   spaces. Full mechanism in `40f632b4`. [[backlog-prose-decays-verify-against-head]]
+   ⚠ The run's friction record holds **four** entries, not seven, and the sharpest is unfixed:
+   implementation workers never receive the contract they must satisfy, so the CP-NODE-1 worker
+   invented `RowKind` and `AttributionProvenance` values that contradicted the contract three
+   adversarial laps had pinned. Build was green and its self-review clean — nothing mechanical caught
+   it, because the divergence is conformance, not correctness. It is in
+   `.audit-tools/remediation/scratch/dispatch-effectiveness-observability/friction-log.md` and NOT in
+   open-bugs.md, which is over its ceiling and accepts only shrinkage.
+2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
+   2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
+   measured precision rather than the auditor's own severity ranking, which is the signal a standing
+   open-bugs entry says is broken (2026-08-06: 0 of 9 self-audit criticals survived mechanism
+   verification). Maintainability alone is 1,417 of them (63%). The four criticals are summarized in
    [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md). Feeding this to
    `/remediate-code` wholesale would be a mistake — verify by MECHANISM first
    ([[verify-delegated-findings-mechanism-not-just-citation]]).
