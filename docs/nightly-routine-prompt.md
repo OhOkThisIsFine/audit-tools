@@ -199,7 +199,7 @@ shape:
 
 ```text
 { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,
-  options[], evidence[], premise_probes[], proposal?, patch_path? }
+  options[], evidence[], premise_probes[], auto_close?, proposal?, patch_path? }
 ```
 
 - `title` is the front-loaded one-line decision, not a summary of the
@@ -228,7 +228,17 @@ shape:
   `absent` genuinely absent) — `writeOpenItems()` refuses the batch otherwise —
   and **every probe target must be a git-TRACKED source file**: a gitignored
   runtime artifact or a record file (docs/backlog, docs/reviews, HANDOFF, the
-  inbox, .claude) carries no evidence and is refused at write. An item whose
+  inbox, .claude) carries no evidence and is refused at write.
+  **One door exists, for a question ABOUT a record.** A leg-2 escalation asks
+  what a backlog entry should *become* — its premise is prose in `docs/backlog`
+  and there is frequently no code side at all, so the record-path refusal made
+  leg 2's whole non-mechanical output unwritable. Such an item declares
+  `auto_close: false` and may then carry `{ file, contains }` probes on record
+  paths. The fragment is still verified present at write like any other; the
+  item simply never auto-closes, and leaves the queue when the owner answers —
+  which for that question is the only correct exit. The flag is refused unless
+  EVERY probe is a positive record-path probe, so an item that *has* a code side
+  must still auto-close off it and cannot opt out. An item whose
   premise is a RELATION between two locations (doc says X, code lacks X)
   carries one probe per side — `contains` on the side that asserts, `absent`
   on the side that lacks — and auto-closes when EITHER side moves; an item

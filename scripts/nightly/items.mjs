@@ -267,6 +267,12 @@ function isRecordPath(file) {
   return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
 }
 
+// A positive `contains` probe passes at WRITE time in either of two ways: the
+// ordinary tracked-source read ('present'), or the record-file read that is
+// admitted only for a declared non-auto-closing item ('record_present'). Both
+// mean "the premise is true at HEAD"; neither is ever a closing verdict.
+const PASSING_CONTAINS_STATES = new Set(['present', 'record_present']);
+
 // `git ls-files --error-unmatch` exits non-zero for an untracked path, so the
 // okStatuses:[0] default already maps "untracked" to null. A git failure is
 // indistinguishable from untracked here, which errs toward abstaining — the
@@ -275,10 +281,40 @@ function isTrackedPath(root, file) {
   return gitLines(root, ['ls-files', '--error-unmatch', '--', file]) !== null;
 }
 
-function evaluateOneProbe(root, probe) {
+function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}) {
   // Refuse the target before reading it: a probe that cannot produce evidence
   // must not produce the verdict that closes an item.
-  if (isRecordPath(probe.file)) return { state: 'untrackable', reason: 'record_path' };
+  //
+  // The RECORD-path half of that rule is split by DIRECTION. Closing and
+  // creating need opposite properties from the same probe, and one rule was
+  // enforcing both: a record file quotes the code it is about, so its text
+  // vanishing says nothing about whether the defect was fixed (must never
+  // CLOSE) — but that same text being present is exactly the premise a question
+  // ABOUT a record asserts (must be checkable at CREATE). Callers on the close
+  // path leave the flag off and keep the abstention unchanged; `writeOpenItems`
+  // turns it on only for an item that has declared itself non-auto-closing.
+  //
+  // The two states below are the guarantee, and it is STRUCTURAL rather than
+  // caller-dependent: neither is ever 'absent', 'appeared' or 'holds', so no
+  // record-path probe can reach 'resolved' in `evaluateProbes` even if a future
+  // caller passes the flag on the close path by mistake. Only the positive
+  // `contains` form is admitted — a negative `absent` probe asserts the code
+  // side of a divergence, which a record can never speak for.
+  if (isRecordPath(probe.file)) {
+    if (!recordPathsCarryEvidence || typeof probe.contains !== 'string') {
+      return { state: 'untrackable', reason: 'record_path' };
+    }
+    let recordText = null;
+    try {
+      recordText = readFileSync(join(root, probe.file), 'utf8');
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') return { state: 'error' };
+      return { state: 'record_missing' };
+    }
+    return recordText.includes(probe.contains)
+      ? { state: 'record_present' }
+      : { state: 'record_missing' };
+  }
   if (!isTrackedPath(root, probe.file)) return { state: 'untrackable', reason: 'untracked' };
 
   // Negative form (P12): `{ file, absent }` — the string must NOT be in the
@@ -367,8 +403,14 @@ function evaluateOneProbe(root, probe) {
  *                 'bad_path' / 'unknown' / 'error' / 'moved' probe can never
  *                 contribute to an auto-close.
  *   'open'      — anything else (fail-open).
+ *
+ * `options` is forwarded verbatim to each probe evaluation. The only flag today
+ * is `recordPathsCarryEvidence`, which `writeOpenItems` sets for a declared
+ * non-auto-closing item; every close-path caller omits it and so keeps the
+ * record-path abstention. Leaving it off is the DEFAULT, so a new caller
+ * inherits the safe direction without knowing the flag exists.
  */
-export function evaluateProbes(root, item) {
+export function evaluateProbes(root, item, options = {}) {
   const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
   const wellFormedString = (v) => typeof v === 'string' && v.trim() !== '';
   const probes = raw.filter(
@@ -385,7 +427,7 @@ export function evaluateProbes(root, item) {
     file: p.file,
     form: wellFormedString(p.absent) ? 'absent' : 'contains',
     ...(wellFormedString(p.absent) ? { absent: p.absent } : { contains: p.contains }),
-    ...evaluateOneProbe(root, p),
+    ...evaluateOneProbe(root, p, options),
   }));
 
   // A divergence item (any negative-form probe) resolves as soon as EITHER side
@@ -417,7 +459,17 @@ export function evaluateProbes(root, item) {
 export function writeOpenItems(root, { items, applied = [], skipped = [], run = null }) {
   for (const item of items) {
     const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
-    const { status, probes } = evaluateProbes(root, item);
+    // A leg-2 escalation asks what a RECORD should become ("is this backlog
+    // entry still worth keeping, or what should it turn into"), so its premise
+    // is prose in a record file and there is frequently no code side at all.
+    // Such an item declares itself non-auto-closing and is then verified at
+    // write exactly like any other; it leaves the queue when the owner answers,
+    // which for that question is the only correct exit anyway. The direction
+    // split this rides on is documented in `evaluateOneProbe`.
+    const nonClosing = item?.auto_close === false;
+    const { status, probes } = evaluateProbes(root, item, {
+      recordPathsCarryEvidence: nonClosing,
+    });
     if (probes.length === 0) {
       throw new Error(
         `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no premise_probes ` +
@@ -437,8 +489,27 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `that lacks it.`,
       );
     }
+    // The flag is only reachable when EVERY probe is a positive probe on a
+    // record path. An item that has a code side must auto-close off that side,
+    // so `auto_close: false` can never become the lazy opt-out that lets an
+    // ordinary item ride the queue forever immune to closing — which is the
+    // exact failure the subject-key ledger was built to end.
+    if (nonClosing) {
+      const offending = probes.filter((p) => p.form !== 'contains' || !isRecordPath(p.file));
+      if (offending.length > 0) {
+        const detail = offending.map((p) => `${p.file} [${p.form}]`).join('; ');
+        throw new Error(
+          `writeOpenItems: item "${item?.id ?? '(no id)'}" declares auto_close:false but carries ` +
+            `${offending.length} probe(s) that are not a positive {file, contains} probe on a ` +
+            `record path (${detail}). The flag exists only for a question ABOUT a record ` +
+            `(docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .claude). ` +
+            `An item with a code side must auto-close off that side — drop the flag and probe ` +
+            `the tracked source file instead.`,
+        );
+      }
+    }
     const failing = probes.filter((p) =>
-      p.form === 'absent' ? p.state !== 'holds' : p.state !== 'present',
+      p.form === 'absent' ? p.state !== 'holds' : !PASSING_CONTAINS_STATES.has(p.state),
     );
     if (failing.length > 0) {
       const untrackable = failing.filter((p) => p.state === 'untrackable');

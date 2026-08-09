@@ -11,7 +11,11 @@ import { join } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { evaluateProbes, writeOpenItems } from "../../scripts/nightly/items.mjs";
+import {
+  evaluateProbes,
+  partitionBySettled,
+  writeOpenItems,
+} from "../../scripts/nightly/items.mjs";
 
 let root: string;
 
@@ -176,5 +180,106 @@ describe("two-sided divergence probes", () => {
       ],
     });
     expect(status).toBe("open");
+  });
+});
+
+// P18 (nightly sol-4, owner decision 2026-08-09): the record-path refusal is
+// split by DIRECTION. Closing and creating need opposite properties from the
+// same probe — a record file's text vanishing must never CLOSE an item, but that
+// text being present is exactly the premise a question ABOUT a record asserts,
+// and must be checkable at CREATE. One rule enforcing both left leg 2 unable to
+// write the escalations it is defined to produce: zero in three runs, four
+// questions displaced into HANDOFF by hand.
+describe("record-path probes are refused by direction, not outright", () => {
+  const RECORD = "docs/backlog/open-bugs.md";
+  const FRAGMENT = "the entry that has no code side";
+
+  /** A tracked record file carrying the fragment an escalation would quote. */
+  function seedRecord(text = `- ${FRAGMENT}\n`): void {
+    mkdirSync(join(root, "docs", "backlog"), { recursive: true });
+    writeFileSync(join(root, RECORD), text);
+    git("add", "-A");
+    git("commit", "-qm", "record");
+  }
+
+  const escalation = (overrides: Record<string, unknown> = {}) => ({
+    id: "backlog-1",
+    subject_key: "kb1",
+    auto_close: false,
+    premise_probes: [{ file: RECORD, contains: FRAGMENT }],
+    ...overrides,
+  });
+
+  it("still refuses a record-path probe on an ordinary item (the flag is the only door)", () => {
+    seedRecord();
+    expect(() =>
+      writeOpenItems(root, { items: [escalation({ auto_close: undefined })] }),
+    ).toThrow(/carries no evidence|tracked SOURCE file/);
+  });
+
+  it("accepts a record-path contains probe when the item declares auto_close:false", () => {
+    seedRecord();
+    const payload = writeOpenItems(root, { items: [escalation()] });
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]?.auto_close).toBe(false);
+  });
+
+  it("still VERIFIES the premise at write — a fragment absent from the record is refused", () => {
+    seedRecord("- some other entry entirely\n");
+    expect(() => writeOpenItems(root, { items: [escalation()] })).toThrow(
+      /does not pass at HEAD/,
+    );
+  });
+
+  it("refuses auto_close:false when any probe targets a non-record path", () => {
+    seedRecord();
+    expect(() =>
+      writeOpenItems(root, {
+        items: [
+          escalation({
+            premise_probes: [
+              { file: RECORD, contains: FRAGMENT },
+              { file: "src/thing.ts", contains: "export const KEPT" },
+            ],
+          }),
+        ],
+      }),
+    ).toThrow(/declares auto_close:false but carries/);
+  });
+
+  it("refuses auto_close:false on a negative probe — a record cannot speak for the code side", () => {
+    seedRecord();
+    expect(() =>
+      writeOpenItems(root, {
+        items: [
+          escalation({
+            premise_probes: [
+              { file: RECORD, contains: FRAGMENT },
+              { file: RECORD, absent: "not in this record" },
+            ],
+          }),
+        ],
+      }),
+    ).toThrow(/declares auto_close:false but carries/);
+  });
+
+  it("never auto-closes such an item, even once the quoted fragment is deleted", () => {
+    // The guarantee the split must not buy its capability with. This is the
+    // close path exactly as `partitionBySettled` walks it — no flag passed — so
+    // the record probe abstains and `resolved` stays unreachable.
+    seedRecord();
+    const item = escalation();
+    writeOpenItems(root, { items: [item] });
+
+    expect(evaluateProbes(root, item).status).not.toBe("resolved");
+
+    writeFileSync(join(root, RECORD), "- the entry was rewritten entirely\n");
+    git("add", "-A");
+    git("commit", "-qm", "rewrite record");
+
+    expect(evaluateProbes(root, item).status).not.toBe("resolved");
+    const { open, resolved } = partitionBySettled([item], {}, root);
+    expect(resolved).toHaveLength(0);
+    expect(open).toHaveLength(1);
   });
 });
