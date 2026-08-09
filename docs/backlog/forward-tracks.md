@@ -306,3 +306,20 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   `knip --production` audit. The open question is whether the wrapper's `ensureBootstrap` already
   covers the global-asset half it writes, in which case both it and
   `src/remediate/utils/hostAssets.ts`'s comment naming it go too.
+
+- **llm-relay is being deprecated for another tool — repoint the two tracked call sites that shell
+  out to it (owner, 2026-08-09).** Product source is NOT coupled: `src/audit/cli/dispatch.ts:249` and
+  `src/audit/cli/dispatch/hostFanoutGate.ts:4` only NAME it in doc comments describing who owns
+  provider selection, so they need a wording pass at most. The real coupling is automation, and it
+  fails in two different ways. `.claude/hooks/session-start-guards.mjs:229` probes
+  `127.0.0.1:8791/health` and prints "OFFLOAD LANE DOWN … start it: llm-relay" — once the proxy is
+  gone that fires every session as a permanent false RED, which is the failure mode
+  [[false-red-is-as-corrosive-as-false-green]] warns about; it is env-overridable via
+  `AUDIT_TOOLS_OFFLOAD_PROBE_URL`, so repointing may be a one-line change.
+  `scripts/shared/triage-backlog.mjs:50` asks `llm-relay config get routing.pools` to DISCOVER its
+  default model live — deliberately, because a hardcoded pool name went stale twice — so the nightly
+  triage leg breaks outright, and re-hardcoding a name is the thing that entry exists to prevent.
+  Procedural coupling too: `/design-check` step 3 mandates routing the refutation through
+  `llm-relay dispatch`, and `docs/nightly-routine.md` names it. **Open:** what replaces it, and
+  whether the replacement exposes an equivalent "discover the pool roster" query — that capability,
+  not the binary, is what these two sites actually depend on.

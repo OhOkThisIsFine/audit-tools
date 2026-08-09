@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 172 entr(y/ies) indexed.
+> and at commit). 173 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -156,6 +156,7 @@
 - `forward-tracks.md:282` — CI wall-clock: shard balance and the single-file floor.
 - `forward-tracks.md:289` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:301` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
+- `forward-tracks.md:310` — llm-relay is being deprecated for another tool — repoint the two tracked call sites that shell out to it (owner, 2026-08-09).
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -210,7 +211,7 @@
 - `durable-traps.md:475` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
 - `durable-traps.md:486` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
 - `durable-traps.md:493` — Long relay recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:501` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:507` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
 
 <!-- END GENERATED SEEK INDEX -->
 

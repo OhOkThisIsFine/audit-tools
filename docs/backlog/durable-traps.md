@@ -497,6 +497,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   completion, so a dying lane and a working one are both zero bytes until the end — elapsed time is
   not a progress signal. Probe small, keep each dispatch to one bounded item, and prefer a second
   lane over a retry on the one that just failed.
+  ⚠ **The variable is job LENGTH, not the lane (2026-08-09).** agy is no longer the escape hatch this
+  entry's first paragraph implies: one long refutation died there with `status: "ERROR"`,
+  `timeout waiting for response` at 296s, having generated 15,532 output tokens that were discarded —
+  while an 8s probe on that same lane passed, and the free relay pool hung past 10 min on the same
+  prompt and was marked exhausted. Splitting the one job into three bounded questions returned two of
+  three. Shrink the unit before walking the ladder.
 
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
