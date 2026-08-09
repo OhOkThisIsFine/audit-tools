@@ -126,23 +126,13 @@
    ⚠ **Repair by TARGETED EDIT of the payload, never regeneration** — regeneration is the exact path
    that collapsed 7 modules to 4 last time. Assert the module-name list before and after; the two
    repairs this lap did that and INV-CO-13 stayed green each time.
-   **Design state — the contract pipeline is through decomposition, drafting, seam reconciliation and
-   two critique/repair rounds.** The 7-module set has survived every step: `attribution-triple-resolution`,
-   `attempt-row-emission`, `verdict-dedup-shared`, `verdict-audit-ingest`, `verdict-remediate-gates`,
-   `attribution-artifact`, `effectiveness-render`. **INV-CO-13 is doing its job** — drafted 7 →
-   finalized 7, none dropped, none invented, verified after each repair.
-   The phase cut went `has_cycle: true` with 7 one-module phases → **`has_cycle: false`, 5 phases**:
-   foundations{triple-resolution, dedup-shared} → consumers-1{emission, ingest} → consumers-2{gates}
-   → consumers-3{artifact} → integration{render}. Producer now precedes consumer everywhere.
-   **What the two repairs decided:**
-   - Round 1 deleted every `neighbor_needs` edge that stated what the NEIGHBOUR needs rather than what
-     the module needs. Three inverted edges plus one genuine two-way edge were the whole cycle.
-   - Round 2 gave the finding→attempt join an owner. `verdict-audit-ingest` now stamps every ingested
-     finding with its originating `attempt_ref` + triple (tool-applied, worker-unauthorable, like the
-     existing identity keys); `verdict-remediate-gates` reads that stamp off the finding instead of
-     inputting an artifact produced two phases later. Also: `ingest_refused` rows re-keyed
-     `(result_index, refused_kind)`; the single-source guarantee became a runtime one-row-per-packet
-     assertion instead of a grep; the no-recompute rule widened from the renderers to the model builders.
+   **Where the design state lives — read it there, it is not restated here.** Each module's
+   `seam_adjustments` in `finalized_module_contracts.json` records verbatim what every seam and repair
+   decided and why; `phase_cut.json` carries the ordering (`has_cycle: false`, 5 phases). The 7-module
+   set is `attribution-triple-resolution`, `attempt-row-emission`, `verdict-dedup-shared`,
+   `verdict-audit-ingest`, `verdict-remediate-gates`, `attribution-artifact`, `effectiveness-render`.
+   Durable lessons from the rounds are in project memory
+   ([[inverted-neighbor-edges-manufacture-a-cycle]]).
    **State:** the old completed run's DIRECTORY was archived to
    `.audit-tools/remediation.archived-observability-2026-08-08/` and a fresh run bootstrapped in its
    place. Intake, intent confirmation, `goal_spec` and `context_bundle` are all written and validated
