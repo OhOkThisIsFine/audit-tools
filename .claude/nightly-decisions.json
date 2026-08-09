@@ -838,5 +838,33 @@
     "decided_at": "2026-08-09T05:47:21.520Z",
     "completed_at": "2026-08-09T09:05:38.274Z",
     "completed_ref": "af37bbad — triage-backlog.mjs IS_CLI-bound --help/unknown-flag guard"
+  },
+  "23abd7578f6d8b05": {
+    "disposition": "settled",
+    "answer": "Add the rule to shell-trap-guard.mjs as proposed (including the findLiveExpansions helper in shell-split.mjs and the six contract tests), run the red-green validation both ways, and DELETE the $TMPDIR / $CLAUDE_PROJECT_DIR entry from docs/backlog/durable-traps.md in the same commit — moving its \"any env var seen only in hook command lines is suspect\" generalisation into the rule comment.",
+    "subject": "An env var that is unset in the Bash tool expands to nothing and the error names the wrong cause — hit four times, the last WITH the durable-traps entry already written. Add a guard rule, or keep it as prose?",
+    "path": ".claude/hooks/shell-trap-guard.mjs",
+    "decided_at": "2026-08-09T14:54:17.757Z"
+  },
+  "cb327d44d31852ec": {
+    "disposition": "settled",
+    "answer": "Do all four parts: hoist the informational-flag check above verb routing in both wrappers, give each installer verb its own help body from a single source, delete the unreachable `ensure` action in src/remediate/index.ts and register all four verbs as description-only stubs so they appear in --help, and add one contract test that enumerates every verb of both bins and asserts `<verb> --help` exits 0, prints the verb name, and writes nothing.",
+    "subject": "Both shipped bins run the installer instead of printing help when asked `<verb> --help`, and remediate-code lists a shadowed `ensure` that can never execute. Fix the class, or accept it?",
+    "path": "wrapper/audit-code-wrapper-lib.mjs",
+    "decided_at": "2026-08-09T14:54:17.954Z"
+  },
+  "f6edd3affec55a2a": {
+    "disposition": "settled",
+    "answer": "Do the above plus the input-side repairs: resolve a bare basename against the tracked tree and record it as recovered rather than substituted (20 of 72 occurrences), widen the schema so the model can name a symbol when it does not know the path, and teach the system prompt that a probe aimed at docs/backlog or docs/reviews carries no evidence (26 of 72 occurrences).",
+    "subject": "The backlog sweep's strongest verdict is wrong every time it fires — both of tonight's `gone` stamps are false, and 30 of 121 records hide unusable probes under the same word as an honest one.",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-09T14:54:18.102Z"
+  },
+  "493f2c67e57b9e64": {
+    "disposition": "settled",
+    "answer": "Accept a record-path contains probe at CREATION on an item carrying auto_close:false, refuse that flag whenever any probe targets a non-record path, and leave the auto-close path exactly as it is — a record-path probe still never produces absent, gone, or a close.",
+    "subject": "Leg 2 is defined to escalate and, since 2026-08-06, structurally cannot — a probe about a backlog entry is refused at write. Four questions are stuck behind it.",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-08-09T14:54:18.193Z"
   }
 }
