@@ -757,6 +757,68 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
   });
 });
 
+describe("write-scope gate: a node that resolves to no files never promotes", () => {
+  // Reproduces the 2026-08-09 dispatch-effectiveness run. Four DAG nodes declared
+  // no output_files. Two carried obligation slugs that matched a decomposed module
+  // and dispatched; CP-NODE-2 and CP-NODE-3 carried `OBL-attribution-capture-…`
+  // and `OBL-verdict-capture-…`, which matched NOTHING — the decomposition had
+  // named those modules `dispatch-attribution-capture` and `verdict-capture-audit`
+  // / `verdict-capture-remediate`. The obligation-id slug and the decomposition's
+  // module names are two independently authored name spaces joined by a prefix
+  // match, so a rename on either side silently yields an empty scope. Both nodes
+  // promoted anyway and died at the dispatch boundary with "there is nothing a
+  // worker could be scoped to", cascade-blocking CP-NODE-4.
+  it("refuses a node whose obligation slug matches no decomposed module", async () => {
+    await writeRawChainThroughJudge();
+    await writeRawArtifact(
+      "implementation_dag",
+      traceableDag({
+        // Traceable (the ledger has O-1), but no declared write scope and an extra
+        // obligation whose slug names no module in module_decomposition.
+        satisfies_obligations: ["O-1"],
+        verification_obligation_ids: ["OBL-verdict-capture-inv-1"],
+        output_files: undefined,
+        files_likely_touched: undefined,
+      }),
+    );
+
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+    const result = await validateImplementationDagTraceability(ARTIFACTS_DIR);
+
+    expect(result.ok).toBe(false);
+    const violation = result.violations.join("\n");
+    // The diagnostic must name the node, the ids that failed to join, and the
+    // slugs that WERE available — otherwise the reader is left guessing which of
+    // the two name spaces moved.
+    expect(violation).toMatch(/CP-001/);
+    expect(violation).toMatch(/EMPTY write scope/);
+    expect(violation).toMatch(/OBL-verdict-capture-inv-1/);
+    expect(violation).toMatch(/auth-module/);
+  });
+
+  it("accepts a scope-less node whose obligation slug DOES match a module", async () => {
+    await writeRawChainThroughJudge();
+    await writeRawArtifact(
+      "implementation_dag",
+      traceableDag({
+        satisfies_obligations: ["O-1"],
+        // `auth-module` is the fixture's decomposed module, whose file_scope is
+        // ["src/auth.ts"] — so the node inherits a scope and stays dispatchable.
+        verification_obligation_ids: ["OBL-auth-module-inv-1"],
+        output_files: undefined,
+        files_likely_touched: undefined,
+      }),
+    );
+
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+    const result = await validateImplementationDagTraceability(ARTIFACTS_DIR);
+
+    expect(
+      result.violations.filter((v) => v.includes("EMPTY write scope")),
+    ).toEqual([]);
+  });
+});
+
 describe("traceability gate: untraceable implementation_dag nodes never promote", () => {
   it("rejects nodes tracing to no obligation and no accepted counterexample", async () => {
     await writeRawChainThroughJudge();

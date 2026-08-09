@@ -1069,6 +1069,14 @@ export async function validateImplementationDagTraceability(
   if (nodes.length === 0) {
     violations.push("implementation_dag has no nodes; nothing would be implemented.");
   }
+  // A node that resolves to no write scope is undispatchable: no worktree seed, no
+  // write boundary, no paths to inline for a single-shot worker. It used to reach
+  // the dispatch boundary anyway and fail there with "there is nothing a worker
+  // could be scoped to" — cascade-blocking its dependents, three steps from the
+  // cause. Refusing HERE puts it in front of the regeneration loop this validator
+  // already feeds, and names the slug that failed to join.
+  const { resolve: resolveWriteScope, availableSlugs } =
+    await buildNodeWriteScopeResolver(artifactsDir);
   for (const node of nodes) {
     const tracedObligations = [
       ...(node.satisfies_obligations ?? []),
@@ -1080,6 +1088,19 @@ export async function validateImplementationDagTraceability(
     if (tracedObligations.length === 0 && tracedCounterexamples.length === 0) {
       violations.push(
         `Node "${node.id}" traces to no obligation from the obligation ledger and no judge-accepted counterexample.`,
+      );
+    }
+    if (resolveWriteScope(node).length === 0) {
+      const carried = [
+        ...(node.satisfies_obligations ?? []),
+        ...(node.verification_obligation_ids ?? []),
+      ];
+      violations.push(
+        `Node "${node.id}" resolves to an EMPTY write scope, so nothing could be dispatched for it. ` +
+          `It declares no output_files/files_likely_touched, and none of its obligation ids ` +
+          `(${carried.join(", ") || "none"}) begins with "OBL-<module>-" for any module in ` +
+          `module_decomposition (${availableSlugs.join(", ") || "no modules declared"}). ` +
+          `Declare the node's output_files, or name its obligations after a decomposed module.`,
       );
     }
   }
@@ -1379,6 +1400,60 @@ async function readDecomposedModules(
     });
   }
   return result;
+}
+
+/** The subset of an implementation_dag node the write-scope resolution reads. */
+interface DagScopeNode {
+  output_files?: string[];
+  files_likely_touched?: string[];
+  satisfies_obligations?: string[];
+  verification_obligation_ids?: string[];
+}
+
+/**
+ * Single source for "which files may this DAG node write". Declared scope wins
+ * (`output_files`, else `files_likely_touched`); a node that declared neither
+ * inherits the `file_scope` of the module(s) its obligations belong to, resolved
+ * by longest-`OBL-<slug>-` prefix so a short slug never mis-claims a longer
+ * module's files.
+ *
+ * ⚠ Shared by the PROMOTER (which derives the scope) and the VALIDATOR (which
+ * refuses when it resolves to nothing) on purpose. Two copies of this resolution
+ * would drift, and the drift is invisible: the validator would pass a node the
+ * promoter then writes scope-less.
+ *
+ * The join it performs is between two INDEPENDENTLY AUTHORED name spaces — the
+ * obligation id's slug and the decomposition's module names — which is exactly
+ * where it fails. Observed 2026-08-09: nodes carrying `OBL-attribution-capture-…`
+ * and `OBL-verdict-capture-…` matched no module, because the decomposition had
+ * named them `dispatch-attribution-capture` and `verdict-capture-audit` /
+ * `verdict-capture-remediate`. Their siblings matched and dispatched; these two
+ * resolved to nothing and died later at the dispatch boundary with "there is
+ * nothing a worker could be scoped to", three steps from the cause.
+ */
+async function buildNodeWriteScopeResolver(artifactsDir: string): Promise<{
+  resolve: (node: DagScopeNode) => string[];
+  availableSlugs: string[];
+}> {
+  const decomposedModules = await readDecomposedModules(artifactsDir);
+  const moduleScopesBySlug = decomposedModules
+    .map((m) => ({ slug: moduleSlug(m.name), files: m.file_scope }))
+    .sort((a, b) => b.slug.length - a.slug.length);
+  const resolve = (node: DagScopeNode): string[] => {
+    const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];
+    if (declared.length > 0) return declared;
+    const obligationIds = [
+      ...(node.satisfies_obligations ?? []),
+      ...(node.verification_obligation_ids ?? []),
+    ];
+    const inherited = new Set<string>();
+    for (const id of obligationIds) {
+      const owner = moduleScopesBySlug.find((m) => id.startsWith(`OBL-${m.slug}-`));
+      if (owner) for (const f of owner.files) inherited.add(f);
+    }
+    return [...inherited];
+  };
+  return { resolve, availableSlugs: moduleScopesBySlug.map((m) => m.slug) };
 }
 
 /** The goal_id carried by module_decomposition (authoritative for the merge). */
@@ -3063,32 +3138,9 @@ export async function promoteImplementationDagToExtractedPlan(
   // node's obligations are `OBL-<moduleSlug>-…`, and every module declares its
   // `file_scope`, so a node that declared no files inherits the file_scope of the
   // module(s) its obligations belong to. (Declared files still win when present.)
-  const decomposedModules = await readDecomposedModules(artifactsDir);
-  // Sorted longest-slug-first so an obligation id resolves to its OWNING module by
-  // longest-`OBL-<slug>-`-prefix match — the same resolution phaseCut uses, so a
-  // shorter slug that prefixes another module's slug never mis-claims its files.
-  const moduleScopesBySlug = decomposedModules
-    .map((m) => ({ slug: moduleSlug(m.name), files: m.file_scope }))
-    .sort((a, b) => b.slug.length - a.slug.length);
-  const deriveNodeFiles = (node: {
-    output_files?: string[];
-    files_likely_touched?: string[];
-    satisfies_obligations?: string[];
-    verification_obligation_ids?: string[];
-  }): string[] => {
-    const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];
-    if (declared.length > 0) return declared;
-    const obligationIds = [
-      ...(node.satisfies_obligations ?? []),
-      ...(node.verification_obligation_ids ?? []),
-    ];
-    const inherited = new Set<string>();
-    for (const id of obligationIds) {
-      const owner = moduleScopesBySlug.find((m) => id.startsWith(`OBL-${m.slug}-`));
-      if (owner) for (const f of owner.files) inherited.add(f);
-    }
-    return [...inherited];
-  };
+  // Single-sourced with the DAG validator, which refuses a node this resolves to
+  // nothing for — see buildNodeWriteScopeResolver.
+  const { resolve: deriveNodeFiles } = await buildNodeWriteScopeResolver(artifactsDir);
 
   const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
   const findings = nodes.map((node, index) => {
