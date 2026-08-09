@@ -504,6 +504,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   prompt and was marked exhausted. Splitting the one job into three bounded questions returned two of
   three. Shrink the unit before walking the ladder.
 
+- **A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).**
+  Running a refutation lane as `codex exec '<prompt>' < /dev/null 2>&1 | tail -120` in the background
+  makes the whole run invisible: the filter buffers to EOF, so the task output file stays 0 bytes for
+  the entire job and there is no way to tell a working lane from a hung one — the exact ambiguity the
+  entry above says elapsed time cannot resolve. One lane sat at 0 bytes for ~30 min and then returned
+  a complete, useful verdict. Redirect to a file instead (`… *> run.log`) and read the log separately,
+  which is the same shape the shell-trap guard already forces on suite commands for the exit-code
+  reason.
+
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
   and the packaged smoke tests run that install, so `npm test` alone is enough to erase the edit.
