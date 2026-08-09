@@ -92,26 +92,33 @@
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
 
-1. **Start the FRESH `dispatch-effectiveness-observability` run — the gate it was waiting on has
-   LANDED (`80b3be6a`).** `finalized_module_contracts` is now refused when its module-name set does
-   not match its drafted `module_contracts` input (INV-CO-13), so the unchecked LLM repair that
-   collapsed 7 modules to 4 and dropped `effectiveness-render` cannot recur silently. Background and
-   the refuted alternatives:
-   [`reviews/observability-dag-scope-join-2026-08-09.md`](reviews/observability-dag-scope-join-2026-08-09.md).
-   **Do:** a fresh run, NOT an in-place repair (owner's call, 2026-08-09). The old run's artifacts are
-   unrecoverable — no archived predecessor of `finalized_module_contracts` survives — CP-NODE-1's
-   contract is already on main (`14677902`), and the stale
-   `remediation/dispatch-effectiveness-observability` branch and its local
-   `remediate-CP-BLOCK-CP-NODE-1-…` sibling get deleted with the changeover. Both still exist; nothing
-   was deleted this lap.
-   ⚠ The gate is **phase-independent** (`contractPipeline.ts` step 2.55), not in the
-   `nextPhase === "critic"` block this entry used to name. Stale dependents are archived *before*
-   `nextPhase` is computed, so a finalized rewrite makes the next phase `critique` and a critic-boundary
-   gate would have fired five phases too late. Corrected on execution evidence, not argument.
-   [[phase-branch-gate-fires-late-after-staleness]]
-   ⚠ The gate verifies the module SET only. Whether a node's *derived write scope* actually covers the
-   work is still open, and is tracked as its own entry in
-   [`open-bugs.md`](backlog/open-bugs.md) — do not read this landing as closing that.
+1. **Resume the FRESH `dispatch-effectiveness-observability` run — it is IN FLIGHT and paused at the
+   `decomposition` phase.** This is a deliberate stopping point at a clean phase boundary, not a
+   breakage. Just run `remediate-code next-step` from the repo root and author the artifact it asks
+   for.
+   **State:** the old completed run was archived wholesale to
+   `.audit-tools/remediation.archived-observability-2026-08-08/` (including its promoted
+   `remediation-report.md` / `-outcomes.json`), and a fresh run bootstrapped in its place. Intake,
+   intent confirmation, `goal_spec` and `context_bundle` are all written and validated `status: "ok"`;
+   `goal_id` is `dispatch-effectiveness-observability`. The confirmed checkpoint carries
+   `must_not_touch` guards on `audit-findings.json` / `audit-report.md` / the archive — added because
+   the PREVIOUS run's second commit rewrote the promoted outcomes and would have dropped ~54k lines of
+   an earlier run record (see `14677902`'s message).
+   ⚠ **The contract is INPUT, not output.** `src/shared/types/attributionContract.ts` is already on
+   main (`14677902`) — `AttributionTriple`, `DispatchAttemptRow`, `FindingVerdictRow`, `classifyDetail`,
+   `deriveAggregates`, and the four enums that fix scope (`DRAWS`, `VERDICT_STAGES`, `VERDICT_DETAILS`,
+   `STAGE_OWNERSHIP`). Verified by grep: its only consumers are the shared barrel and its own test. The
+   run is the WIRING.
+   ⚠ **Keep BOTH render sites in scope** — `src/audit/reporting/synthesis.ts` and
+   `src/remediate/phases/close.ts` are exactly what the previous attempt lost when its module set
+   collapsed 7 → 4. That collapse is now gated (INV-CO-13, shipped in v0.39.13), which is what unblocked
+   this run.
+   ⚠ **The two stale branches were NOT deleted, deliberately.** The plan said they get cleaned up with
+   the changeover, but they carry commits that are *not* on main —
+   `remediation/dispatch-effectiveness-observability` has 2 (`6fcff985` the old run report, `d5ef739b`
+   the worker commit) and `remediate-CP-BLOCK-CP-NODE-1-…` has 1 (`28ab1175`). The CP-NODE-1 *content*
+   re-landed as `14677902`, but `6fcff985` is unique. Deleting them is a real loss, so it is an
+   explicit call, not cleanup. **Your decision.**
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing

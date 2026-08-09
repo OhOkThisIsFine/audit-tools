@@ -504,6 +504,28 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   prompt and was marked exhausted. Splitting the one job into three bounded questions returned two of
   three. Shrink the unit before walking the ladder.
 
+- **`.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run
+  deletes them (2026-08-09).** `.audit-tools/` reads as scratch, but `.gitignore` negations track the
+  promoted deliverables, so `mv`-ing the completed run's outputs aside is a tracked-file deletion of
+  ~56k lines — the exact loss `14677902` refused to let a branch merge cause. It surfaces obliquely:
+  the next `npm run check:memory-citations` dies with a raw `ENOENT` stack on
+  `.audit-tools/remediation-report.md` rather than a message about a missing deliverable. Archive the
+  RUN DIRECTORY (`.audit-tools/remediation/`) and leave the promoted files where they are — a fresh
+  run overwrites them on completion, which is the intended lifecycle. Check with
+  `git ls-files .audit-tools/` before moving anything under that path.
+  [[gitignore-deliverable-tracking]]
+
+- **Every `remediate-code next-step` announces four DEAD offload sources, and the port they name is
+  the retired proxy's (2026-08-09).** Each invocation prints `declared source "relay-{xhigh,high,
+  medium,low}" not resolved: keyless endpoint "http://127.0.0.1:8791" failed the liveness probe`.
+  Probed at the time: **8791 answers nothing**, while freellmapi (3001) and headroom (8787) both
+  respond — and 8791 appears nowhere in `src/`, the repo `session-config.json`, the environment, or
+  `~/.audit-tools/`; only in historical `docs/reviews/` about the retired repair-proxy. So the
+  declaration outlived the proxy `866d67de` repointed away from. Consequence: a run silently has no
+  offload lane while looking configured. **Unresolved:** where the `relay-*` source set is actually
+  declared — it is constructed or read from somewhere this lap did not find, so start there rather
+  than re-probing the ports.
+
 - **A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).**
   Running a refutation lane as `codex exec '<prompt>' < /dev/null 2>&1 | tail -120` in the background
   makes the whole run invisible: the filter buffers to EOF, so the task output file stays 0 bytes for
