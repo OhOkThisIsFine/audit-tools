@@ -37,6 +37,10 @@
   **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
   switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
   [`durable-traps.md`](backlog/durable-traps.md).
+  ⚠ **The declared offload lane is DEAD right now**, which matters for dispatch in the resumed run:
+  every `remediate-code next-step` reports four unresolved `relay-*` sources at `127.0.0.1:8791` — the
+  retired proxy's port. Probed 2026-08-09: 8791 answers nothing, while freellmapi (3001) and headroom
+  (8787) both respond. Plan dispatch as host-only until that is repointed.
 - **T4's floor is no longer a single outlier — it is a CLUSTER, which changes what the next split
   buys.** `audit-code-wrapper-packets.test.ts` was split three ways this lap and the baseline was
   regenerated from the 596-file run. The top of the list is now four completion files within 7s of
@@ -115,8 +119,8 @@
    are *not* on main: `remediation/dispatch-effectiveness-observability` has 2 (`6fcff985`, the old
    run's report, which exists nowhere else, and `d5ef739b`), and `remediate-CP-BLOCK-CP-NODE-1-…` has 1
    (`28ab1175`). CP-NODE-1's *content* re-landed as `14677902`, but `6fcff985` is unique, so deleting
-   now would be a real loss. **Delete both once this run lands** — that is the trigger, and it is the
-   only remaining action on them.
+   now would be a real loss. **Delete both once the observability run in this item lands** — that is
+   the trigger, and it is the only remaining action on them.
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing
@@ -126,9 +130,10 @@
    `/remediate-code` wholesale would be a mistake — verify by MECHANISM first
    ([[verify-delegated-findings-mechanism-not-just-citation]]).
 3. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
-   ⬇ Two of its still-live properties were exercised this run: a pause/cooldown DID occur (pool
-   exhaustion), and the remedy a refusal names was NOT reachable — the pool surfaced one member's 402
-   rather than an aggregate naming the exhausted set.
+   ⬇ Two of its still-live properties were exercised by the **2026-08-08 dogfood audit** (not the
+   observability run in item 1): a pause/cooldown DID occur (pool exhaustion), and the remedy a refusal
+   names was NOT reachable — the pool surfaced one member's 402 rather than an aggregate naming the
+   exhausted set.
 4. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
    The floor is a four-file completion cluster within 7s (see *Live state*), so further single-file
    splits redistribute time rather than lower it. The cost to attack: each completion test runs ~35s
