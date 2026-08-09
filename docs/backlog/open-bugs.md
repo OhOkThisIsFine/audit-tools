@@ -718,18 +718,6 @@
 
 - **Node-worktree guard — accepted residuals only (each low, on-evidence-only).** The guard itself shipped v0.34.19. Mechanism, refuted alternatives, and review disposition: `docs/reviews/node-worktree-guard-mechanisms-2026-07-23.md`. Deny-by-default CLI refusal (`assertCliCommandAllowedFromCwd`, `src/shared/io/nodeWorktreeGuard.ts`) is wired at both CLI chokepoints (`src/audit/cli.ts`, `src/remediate/index.ts`) over caller cwd + wrapper-stamped `AUDIT_TOOLS_CALLER_CWD` + raw `--root`, with remediate-side writer asserts (`state/store.ts`, `steps/rollingSession.ts`) behind it. What stays open: audit-side session writers have no writer assert and rely on the CLI guard alone (add one only if a non-CLI clobber shape ever fires); a worker that both `cd`s out of its worktree AND passes explicit targets can still reach shared state (containment, not authority — the `implementPrompt` "Standing rules" section is the remaining layer); a failed review-snapshot degrades spawned audit workers to the REAL checkout (`src/audit/cli/rollingAuditDispatch.ts`, `resolveReviewRoot`), where the cwd predicate cannot fire and write-scope is prompt-only for that run — loud (stderr + a high-severity `write_scope_degraded` friction event) but unguarded; dist-dependent verify commands deferred by `partitionDistDependentVerifyCommands` are subsumed by the close gate's full-suite run rather than individually re-run.
 
-- **Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29):**
-  (1) **tool-should-decide (low):** the Grep tool's content output rendered `/**` and `//` comment
-  markers as `\**` / `\ ` in `apiPool.ts`, indistinguishable from real file corruption — cost a
-  verification Read. Display artifact of the harness Grep tool, not the repo; logged in
-  [`durable-traps.md`](durable-traps.md).
-  (2) **inefficient-feeding (low):** the nightly surface presented all 18 items as open while the
-  owner was answering them in a parallel session on the shared checkout — the sol-2 class, since
-  mechanized (premise probes).
-  (3) **ambiguous-direction:** none — the backlog entry stated its open property even-handedly
-  ("or the fallback must be shown deliberate"), which is exactly what let recon settle it without an
-  owner round-trip.
-
 - **Friction walk (niggle-fix lap, 2026-08-07):**
   (1) **tool-should-decide (low):** a Workflow implement agent finished without calling
   StructuredOutput even after the harness nudge — its edits were sound but unreported, so the

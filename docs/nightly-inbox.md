@@ -22,28 +22,241 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-08 at `fe95d213`.*
-
-
-> **3 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+*Last run: 2026-08-09 at `05a4d3fe`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=23abd7578f6d8b05 -->
+
+## `sol-1` — An env var that is unset in the Bash tool expands to nothing and the error names the wrong cause — hit four times, the last WITH the durable-traps entry already written. Add a guard rule, or keep it as prose?
+
+*Recurring-problem solutions · open 1 night · `.claude/hooks/shell-trap-guard.mjs`*
+
+### In plain terms
+
+In the Bash tool on this machine, two environment variables that look like they should exist do not: $TMPDIR is simply never set by Git Bash here, and $CLAUDE_PROJECT_DIR is a variable Claude Code substitutes into hook command lines — it is never exported to a normal shell. In POSIX sh an unset variable expands to nothing at all, so a command like `npm run check > "$TMPDIR/out.log"` quietly becomes `> /out.log`, which fails with "Permission denied". The person reading that message concludes they cannot write to the temp directory. They have no reason to suspect the variable was empty. If the path is read back later instead of written, it is worse — `/out.log` resolves against the Windows working directory as `C:\Program Files\Git\out.log`, and the failure reads as a missing file.
+
+This has now happened four times on four separate dates: 2026-07-25 and 2026-07-28 (recorded together in docs/backlog/durable-traps.md), 2026-07-29 (a friction walk in open-bugs.md), and again tonight, on this run's very first redirect. The fourth hit is the reason this is being raised. The durable-traps entry describing the trap is accurate, complete, and states the fix — and it did not prevent anything, because a written entry only helps a reader who has read it and happens to remember it at the moment they type a redirect. CLAUDE.md's own rule says a trap that can be enforced must be enforced, and that "be careful" is never a fix.
+
+The proposal adds one rule to the existing Bash-tool guard: refuse a command that expands either of those two names, and say in the refusal what to write instead. Commands that set the variable themselves, or that only mention it inside single quotes (searching for the literal text), are unaffected. The detection logic was prototyped and run against eleven commands — the four real historical ones plus six that must NOT be blocked — and all eleven behaved correctly, so this is not a guess about whether it works. If it lands, the durable-traps entry is deleted in the same commit, which is what CLAUDE.md asks for when a trap becomes mechanical.
+
+### The question
+
+Should `.claude/hooks/shell-trap-guard.mjs` gain a rule refusing a Bash-tool command that expands $TMPDIR or $CLAUDE_PROJECT_DIR (with the durable-traps entry deleted in the same commit), or should the trap stay as documented prose?
+
+### Your answer
+
+- [ ] **1. Add the guard rule** — Add the rule to shell-trap-guard.mjs as proposed (including the findLiveExpansions helper in shell-split.mjs and the six contract tests), run the red-green validation both ways, and DELETE the $TMPDIR / $CLAUDE_PROJECT_DIR entry from docs/backlog/durable-traps.md in the same commit — moving its "any env var seen only in hook command lines is suspect" generalisation into the rule comment.
+- [ ] **2. Guard, keep the entry** — Add the rule, but keep the durable-traps entry rather than deleting it — the generalisation it carries about hook-only variables is broader than the two names the rule enumerates.
+- [ ] **3. Widen it first** — Do not enumerate two names. Work out the general rule (any variable not present in the tool shell environment) and build that instead, even though it is a bigger change and has a real false-positive surface.
+- [ ] **4. Leave it as prose** — Do not add a rule. The trap is documented, the failure is loud, and the cost of each hit is one wasted command — not worth another always-on refusal in the Bash path.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P15-unset-env-var-expands-to-nothing/PROPOSAL.md`](../.audit-tools/nightly/proposals/P15-unset-env-var-expands-to-nothing/PROPOSAL.md)
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- Hit this run at 2026-08-09T09:05Z: `npm run check:nightly-routine-prompt > "$TMPDIR/parity.log" 2>&1` returned `/usr/bin/bash: line 1: /parity.log: Permission denied`.
+- docs/backlog/durable-traps.md:161-168 records the same trap for 2026-07-25 ($TMPDIR) and 2026-07-28 ($CLAUDE_PROJECT_DIR, "Same class, confirmed").
+- docs/backlog/open-bugs.md:467 records it again in the 2026-07-29 friction walk, item (2).
+- The guard already carries four Bash-tool syntax rules of the same shape (.claude/hooks/shell-trap-guard.mjs:226-289: Windows backslash path, PowerShell here-string, mktemp, live backtick).
+- stripQuoted cannot be reused: it blanks double-quoted spans, and every observed instance was double-quoted ("$TMPDIR/x"). The patch generalises findLiveBackticks — which already walks the same three-way quote context — into findLiveExpansions.
+- The scanner + self-assignment logic was prototyped in the session scratchpad and run against 11 commands (4 historical + ${BRACED} + 6 must-not-fire). All 11 gave the wanted verdict, including `echo "$HOME/$PATH and $TMPDIR_OTHER"`, where the name regex matches TMPDIR_OTHER and correctly misses the set.
+- NOT verified: nothing was written into .claude/hooks/ or tests/, so the wiring (rule placement, exit-2 path, bypass scrub in the test harness) has not executed.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=cb327d44d31852ec -->
+
+## `sol-2` — Both shipped bins run the installer instead of printing help when asked `<verb> --help`, and remediate-code lists a shadowed `ensure` that can never execute. Fix the class, or accept it?
+
+*Recurring-problem solutions · open 1 night · `wrapper/audit-code-wrapper-lib.mjs`*
+
+### In plain terms
+
+Running `remediate-code install --help` does not print help. It runs the installation and writes four files. The same is true of `audit-code verify-install --help`, and of every other installer verb on both bins — this was confirmed by running them tonight, not inferred.
+
+The cause is slightly different on each side. remediate-code checks for the installer verbs first thing and hands off before any help handling exists at all. audit-code does have a real --help check, but it uses a helper that stops looking as soon as it sees a word that is not a flag — so `audit-code --help` works and `audit-code install --help` does not. Neither is careless; each is a reasonable local decision that adds up to the same surprise.
+
+Why it matters more here than in a repo script: these are the published commands, and the affected verbs are the first ones a new operator touches. Two of the four (install, ensure) write files into the user's repository and home directory. "Ask the tool what this does" is the single most likely first command, and it performs the installation instead of describing it.
+
+There is a second, sharper problem underneath. remediate-code's help page lists a command called `ensure`, described as "Repair/check global /remediate-code host assets". That entry belongs to an implementation inside src/remediate/index.ts which can never run — the wrapper intercepts `ensure` first and calls a completely different function. So a reader is shown one implementation's description and gets another's behaviour, and the dead one is invisible to the dead-code checker, because a registered command looks like a live consumer. The other three installer verbs do not appear in the help at all, even though the skill docs tell people to use them.
+
+This is the third date for the same underlying defect — a command treating --help as data rather than as a request. It was fixed at one script on 2026-07-30 and at another on 2026-08-08, both times only at the site where it was found.
+
+### The question
+
+Should the informational-flag check move above verb routing in both wrappers (with per-verb help text, the shadowed src/remediate `ensure` deleted, the other three verbs registered so they appear in --help, and a contract test asserting every verb answers --help with no filesystem writes)?
+
+### Your answer
+
+- [ ] **1. Fix the class** — Do all four parts: hoist the informational-flag check above verb routing in both wrappers, give each installer verb its own help body from a single source, delete the unreachable `ensure` action in src/remediate/index.ts and register all four verbs as description-only stubs so they appear in --help, and add one contract test that enumerates every verb of both bins and asserts `<verb> --help` exits 0, prints the verb name, and writes nothing.
+- [ ] **2. Help only** — Fix only the --help behaviour and the contract test. Leave the shadowed `ensure` and the missing help entries alone for now — they are a separate cleanup.
+- [ ] **3. Shadow only** — Fix only the shadowed `ensure` and the missing --help entries in remediate-code. The `<verb> --help` behaviour is a smaller surprise than a help page that describes code which cannot run.
+- [ ] **4. Accept it** — Accept both. Record the invariant ("an informational flag never performs work; every verb of a shipped bin answers --help") in docs/backlog/open-bugs.md with an offsetting condensation, and move on.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P16-installer-verb-swallows-help/PROPOSAL.md`](../.audit-tools/nightly/proposals/P16-installer-verb-swallows-help/PROPOSAL.md)
+
+<details>
+<summary>Evidence (8) — what was verified against code, and how</summary>
+
+- Observed this run: `node remediate-code.mjs install --help` exited 0 and emitted the install JSON, writing .remediate-code/install/{remediate-code.import.md,SKILL.md,GETTING-STARTED.md,manifest.json}.
+- Observed this run: `node audit-code.mjs verify-install --help` exited 0 and emitted the verify JSON.
+- remediate-code.mjs:129-138 routes install/ensure/verify-install/install-host to the B2 bootstrap before any help handling; the installer reads flags with hasFlag/getFlag (wrapper/remediate-code-wrapper-install-hosts.mjs:40-51), neither of which knows --help.
+- wrapper/audit-code-wrapper-lib.mjs:281 short-circuits on --help via hasLeadingFlag (:39-45), which returns false at the first token not starting with "-" — so a verb consumes the leading position.
+- src/remediate/index.ts:362-369 registers `ensure` -> ensureGlobalAssets. remediate-code.mjs:130 catches `ensure` first and calls installer.ensureBootstrap (wrapper/remediate-code-wrapper-install-hosts.mjs:1115), so the commander action is unreachable through the bin. It still appears in `node dist/remediate/index.js --help`.
+- install, verify-install and install-host appear in no `remediate-code --help` entry, yet skills/remediate-code/SKILL.md:62,71 document ensure and install as the normal bootstrap path.
+- Same class fixed twice before, single-site each time: scripts/check-gate-enumeration.mjs:22 (6b8f8d7a, 2026-07-30) and scripts/shared/triage-backlog.mjs (af37bbad, 2026-08-08, nightly P14).
+- NOT verified: whether ensureGlobalAssets has any other live caller. Establish that before deleting it.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=f6edd3affec55a2a -->
+
+## `sol-3` — The backlog sweep's strongest verdict is wrong every time it fires — both of tonight's `gone` stamps are false, and 30 of 121 records hide unusable probes under the same word as an honest one.
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+
+### In plain terms
+
+Every night a sweep classifies each backlog entry using a model, and stamps each record with what it thinks happened to the entry's premise. The strongest stamp is "gone" — meaning the code the entry is about has verifiably disappeared — and it is the stamp a deletion would rest on.
+
+Both of tonight's two "gone" stamps are wrong, and last night's digest recorded a third. No correct one has been observed. They fail the same way, and it is not the model being sloppy — it is doing exactly what it was told.
+
+The sweep's instructions say: quote the fragment verbatim from the entry, because you cannot see the repository. That is sensible — it stops the model inventing code. But a fragment quoted from a backlog entry is only a usable probe if the entry itself quoted the file word for word, and backlog prose paraphrases all the time. One entry tonight had three probes all quoting the phrase "the core dispatch-inventory READ switch lives" — that is the entry's own English sentence, not code. It appears in no file, so all three probes came back absent, and the record was stamped "gone" while the problem it describes is entirely live. Another quoted `finish_reason === "stop"` when the code says `finish_reason !== 'stop'` — inverted comparison, different quote style. Present in substance, absent as a literal string.
+
+Separately, while measuring that, a wholly fabricated record turned up: title "Multi-Veterinarian", reason "bad file", recommended action "delete file", against an entry that is really 1,500 characters about a postinstall migration gap. It was schema-valid and counted toward "121 classified, 0 errored". Replaying the whole sweep showed it is not alone — 30 of the 121 records supplied probes of which not one was usable, and all 30 report the same stamp as the 58 records that honestly supplied none. Two of the five records recommending deletion sit in that bucket.
+
+The fix has two independent halves. The narrow one is nearly free: the code already knows the difference between "supplied no probes" and "supplied probes, none usable", and throws it away — one branch keeps it. The broader one is that the sweep should probably stop emitting "gone" at all, since a lane that cannot read the repository has no business asserting a fact about it; let the probe evaluation, which does read the tree, be the only thing that says it.
+
+### The question
+
+Should the sweep stop emitting the `gone` verdict entirely (leaving it to probe evaluation, which can actually read the tree), and should `premiseStamp` distinguish "supplied probes, none usable" from "honestly supplied none"?
+
+### Your answer
+
+- [ ] **1. Both: drop gone + split the stamp** — Do both. Stop the sweep emitting `gone` — downgrade it to premise_unconfirmed and let only probe evaluation in the nightly writer, which reads the tree, ever assert goneness. And add the probes_unusable stamp so a record whose probes all evaluate to nothing is visibly distinct from one that honestly supplied none, counted in the coverage stamp, and never a deletion lead when paired with already_shipped_or_stale.
+- [ ] **2. Split the stamp only** — Add the probes_unusable stamp and the coverage-stamp count, but keep `gone`. Its false rate is measured on three instances across two nights; watch it with the new stamp in place before removing a signal.
+- [ ] **3. Corroborate gone instead** — Keep `gone` but require corroboration: the model emits a symbol name alongside the literal fragment, and `gone` only stamps when BOTH are absent. Plus the probes_unusable split.
+- [ ] **4. Go further — fix the probe inputs too** — Do the above plus the input-side repairs: resolve a bare basename against the tracked tree and record it as recovered rather than substituted (20 of 72 occurrences), widen the schema so the model can name a symbol when it does not know the path, and teach the system prompt that a probe aimed at docs/backlog or docs/reviews carries no evidence (26 of 72 occurrences).
+- [ ] **5. Leave it** — Leave the sweep as is. Its verdicts are already documented as advisory leads that must be verified against HEAD, and that rule caught every bad record this run.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P17-fabricated-triage-record-stamps-as-honest/PROPOSAL.md`](../.audit-tools/nightly/proposals/P17-fabricated-triage-record-stamps-as-honest/PROPOSAL.md)
+
+<details>
+<summary>Evidence (10) — what was verified against code, and how</summary>
+
+- open-bugs#aea07705: all three probes quote "the core dispatch-inventory READ switch lives" — the ENTRY's prose, in no source file — so the record stamped `gone`. Premise verified HOLDING at HEAD: src/audit/cli/{nextStepCommand,semanticReviewStep,prompts}.ts all exist and none appears in LOOP_CORE_PATTERNS (src/shared/loopCorePaths.ts:26-46).
+- open-bugs#8b808454: probe quotes `finish_reason === "stop"`; the code at scripts/shared/triage-backlog.mjs:414 reads `if (c?.finish_reason !== 'stop')`. Mechanism present, literal absent, stamp `gone`.
+- Root cause is the system prompt at scripts/shared/triage-backlog.mjs:266-269 — "Quote the fragment VERBATIM from the entry — you cannot see the repo". Correct for its purpose, and it is what produces both false stamps.
+- The 2026-08-08 digest recorded a third false gone (forward-tracks#ecd20cf4). Three across two nights; no true one observed.
+- Fabricated record open-bugs#03d4bc94: title "Multi-Veterinarian", why "bad file", action "delete file", code_paths ["agdoskka"], three probes naming README/names/text. The real entry, recovered via the sweep's own chunk() hash, is "External shared-logic audit V1-V7 residuals" (1,508 chars).
+- Measured by replaying the JSONL: 30 of 121 records supplied probes with none usable, all reporting `premise: unprobed` — identical to the 58 that honestly supplied []. Of their 72 probe occurrences: 26 record-path, 20 uniquely resolvable by basename, 6 ambiguous, 20 junk.
+- Two of the five already_shipped_or_stale verdicts fall in that bucket (03d4bc94, de319d16).
+- Second title fabrication found while verifying: open-bugs#0487b95c reported as "Outbox truncation limit (RED 089) pending"; the entry is "Untracked-exclusion scope rule — residuals only" with four live residuals.
+- The signal already exists and is discarded at scripts/shared/triage-backlog.mjs:184-191: premiseStamp collapses "every surviving probe is signal-free" into the same `unprobed` it returns when none were supplied.
+- NOT verified: no code was changed, so the proposed branch has not executed inside the sweep. The 30/121 rate is one night on pool/medium; stability across models or nights is unknown.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=493f2c67e57b9e64 -->
+
+## `sol-4` — Leg 2 is defined to escalate and, since 2026-08-06, structurally cannot — a probe about a backlog entry is refused at write. Four questions are stuck behind it.
+
+*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
+
+### In plain terms
+
+The nightly routine's second leg reviews the backlog. It is allowed to do mechanical cleanup on its own, and everything else — deciding what a vague entry should become, whether an entry should be kept or closed — is explicitly the owner's call, so it must be escalated to you.
+
+An escalated item has to carry a premise probe: a literal string, quoted from a tracked source file, that pins the fact the item is about. That requirement exists so an item can auto-close when the thing it is about changes, and so a question already fixed in the code does not keep being asked.
+
+The probe writer refuses to accept a probe pointing at docs/backlog, docs/reviews, HANDOFF or the inbox. That refusal is right, for the reason it was written: a backlog entry quotes the code it is about, so the entry's own text vanishing tells you nothing about whether the underlying defect was fixed. A probe aimed at a record is probing the record, not the premise.
+
+But a leg-2 escalation IS about a backlog entry. Its premise is prose in docs/backlog, and often there is no code side at all — the question is "should this entry still exist", not "does this doc match the code". So the only probe that could pin it is refused, and the item cannot be written down. One rule, correct for closing items, silently removed a whole leg's ability to ask anything.
+
+The history shows it cleanly. The last backlog-leg item the routine ever produced was written at 02:51 on 2026-08-06; the refusal landed at 09:24 the same day, about six and a half hours later. Every run since has produced zero. Four real questions are now stuck behind it, including one that has been telling its reader "name the process, or close the entry" since 2026-07-16, and one whose only escape was being typed into HANDOFF.md by hand — which is exactly the lose-the-escalation failure the tracked inbox was built to end.
+
+The proposed fix splits the rule by direction rather than weakening it: keep the refusal absolutely for closing, and at creation allow a record-path probe on an item that declares it never auto-closes. Such an item still has to be true when written, still shows up normally, and leaves the queue when you answer it — which for "what should this entry become" is the only sensible exit anyway.
+
+### The question
+
+Should writeOpenItems accept a record-path `contains` probe on an item explicitly marked as never-auto-closing (with the auto-close refusal unchanged, and the flag refused whenever any probe targets a non-record path), so leg 2 can write the escalations it is defined to produce?
+
+### Your answer
+
+- [ ] **1. Split by direction** — Accept a record-path contains probe at CREATION on an item carrying auto_close:false, refuse that flag whenever any probe targets a non-record path, and leave the auto-close path exactly as it is — a record-path probe still never produces absent, gone, or a close.
+- [ ] **2. A separate escalation channel** — Do not touch the probe contract. Give leg 2 its own escalation surface for backlog-about-backlog questions, with its own lifecycle, rather than bending an item shape designed around code premises.
+- [ ] **3. Answer the four directly** — Leave the mechanism alone; the four blocked questions are the actual cost. Surface them individually by whatever means works this run and decide whether the channel is worth building after seeing whether a fifth ever appears.
+- [ ] **4. Narrow leg 2 instead** — Accept that leg 2 is mechanical-cleanup-only in practice, and amend nightly-routine.md so its leg table stops promising an escalation path that does not exist.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md)
+
+<details>
+<summary>Evidence (9) — what was verified against code, and how</summary>
+
+- scripts/nightly/items.mjs:257-263 defines RECORD_PATH_PREFIXES (docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .claude); evaluateOneProbe:281 returns untrackable for any of them, and writeOpenItems:444-454 turns that into a refusal at write.
+- nightly-routine.md's leg table gives leg 2 exactly one escalation class: "Any genuine disambiguation — turning a vague item into a spec is the owner's call".
+- backlog-1 (e2fa990a, 2026-08-06 02:51) is the last leg-2 escalation ever written; its probe was {file: "docs/backlog/open-bugs.md", contains: "Test-tree `.mjs`→`.ts` conversion: COMPLETE at its floor"} — refused by the current writer.
+- The refusal landed in 9d307314 at 2026-08-06 09:24, ~6.5h after backlog-1 was written.
+- Runs 44137e5f (08-07), 1d203e89 (08-07) and f02138eb (08-08) carry 0 backlog-leg items out of 1, 1 and 3 respectively.
+- Blocked question 1: the retired ~/.claude/llm-call.mjs described as live in six durable-traps.md passages and three in open-bugs.md. The 2026-08-08 digest names the refusal as the reason it could not be raised; it now lives as HANDOFF.md Immediate next item 5.
+- Blocked question 2: open-bugs#de319d16 has said "Before rebuilding this: name the process that rewrote the bytes, or close the entry" since 2026-07-16 — three weeks unasked.
+- Blocked question 3: open-bugs#0487b95c was flagged shipped; verification found four live residuals including a live-run watch, leaving a keep/trim call with no channel.
+- NOT verified: that no other mechanism suppressed leg-2 items in those three runs — they may have found nothing to escalate. The counts are consistent with the refusal, the four blocked questions are the direct evidence.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- spec/mechanical-analyzer-layer-design.md — the "Where the shipped mechanisms live" list named an obligation `external_analyzers_consent_current` that exists nowhere in src/. The real mechanism is the `analyzer_consent` STEP KIND (src/audit/cli/steps.ts), emitted while resolving the `external_analyzers_current` obligation (src/audit/orchestrator/nextStep.ts PRIORITY, executors.ts obligation_ids); the `analyzer_consent` session-config persistence the line also claims is correct (src/shared/types/sessionConfig.ts:838). Corrected the obligation name to the step kind + its owning obligation.
-
-- README.md:204 — "TypeScript, Node 20+" → "Node 22+". package.json declares engines.node ">=22", so the stated floor was one major version below what npm will install. The identical claim in CLAUDE.md is escalated instead (instruction file, never auto-edited) as item docs-1.
-
-- docs/audit-pkg/release.md:189-190 — the maintainer-flow paragraph described the pre-tag gate as "a fast local typecheck gate (`npm run check` — not the full `verify:release` suite, which already ran via CI/the `/ship` preflight)". scripts/release-and-publish.mjs:714-715 runs `npm run verify:checks`, and its own comment records why the doc's justification was wrong: "It was `npm run check` (typecheck) alone ... nothing linted before the tag. v0.39.7 was tagged and released". Rewritten to name verify:checks.
+- docs/backlog/open-bugs.md — DELETED the entry "Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29)" (was :721-731, 843 bytes). Shipped-entry removal, code-anchored both ways: leg (1)'s Grep-mangling trap already lives in its durable home at docs/backlog/durable-traps.md:432-435 with the same information; leg (2)'s "nightly surface presented answered items as open" is mechanized as premise probes (scripts/nightly/items.mjs partitionBySettled, consumed at scripts/nightly/answer.mjs:48); leg (3) states "none". Reviewer + independent adversary lane both verified the anchors and the adversary returned ORPHANED-IF-DELETED: none, so no judge was needed. check:backlog-budget stays green and open-bugs.md shrinks 129,560 -> 128,717 bytes, which the shrink-only ceiling wants.
 
 
 </details>
@@ -53,15 +266,19 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- docs/backlog/durable-traps.md — a CONFIRMED staleness with NO channel this run, so it is recorded here rather than lost. Four passages (:93, :132, :150-152, :204-210) describe `~/.claude/llm-call.mjs` as a live mechanism ("probes /health and exits 3", "POSTs via node:http with a 30-min ceiling", "takes the model as its FIRST POSITIONAL argument"). That helper was retired 2026-07-28 and its backup deleted 2026-07-29 per the global ~/.claude/CLAUDE.md; `ls ~/.claude/llm-call.mjs` returns No such file. docs/backlog/open-bugs.md:294,816,821 cite it too. It could not be raised as an open item because writeOpenItems refuses a premise probe aimed at docs/backlog (a record path carries no evidence about whether a defect is fixed), and it was not auto-applied because deleting or rewriting four durable-trap entries is judgment, not a reference correction — the traps around the dead helper still carry live lessons. Needs a decision on whether those passages are rewritten to point at the relay directly or deleted with the helper.
+- leg 1 — the Codex reviewer lane DIED mid-run and its scope was re-covered, not dropped. `codex exec --model gpt-5.6-sol` ran ~20 minutes over the doc corpus and then wedged on an internal tool-router fault (`ERROR codex_core::tools::router: error=timeout_ms must be at least 10000`, then "collab: Wait" with no further output); it was stopped. Its scope was re-dispatched to two agy lanes. Lane B (skills/**, .claude/skills/**, docs/nightly-routine.md — CLI invocations and flag literals) returned all-clean. Lane A (docs/audit-pkg/*, README.md, the package READMEs) ALSO died — "timeout waiting for response" after 297s. That scope was then covered mechanically instead, by extracting every npm script, repo path and directory those nine docs cite and reconciling each against package.json and git ls-files: 4 candidates surfaced, all 4 verified as correct relative-path prose (`agents/openai.yaml` relative to the installed skill dir — skills/audit-code/agents/openai.yaml exists; `steps/current-step.json` relative to the stated `.audit-tools/audit/`; `examples/catalog/` deliberately naming the directory sol-1 deleted; `auditor-descriptor/self-with-sources.json` relative to examples/). No factual doc finding this run.
 
-- leg 3 — the recurrence pass read project memory (231 files + MEMORY.md), the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md and docs/backlog/open-bugs.md, and this run's own friction. It did NOT read .audit-tools/{audit,remediation}/friction/run.json beyond confirming they exist; both are single-run artifacts from prior dogfood runs, not a cross-date recurrence surface.
+- leg 1 — the semantic half of the package-docs scope is the part the mechanical fallback does NOT cover. Reference existence was checked exhaustively; whether a doc's PROSE still describes what the code does was covered only by the agy lanes that survived plus the spec-vs-registry pass, not by a reviewer reading docs/audit-pkg/*.md end to end. Two dead lanes is the reason, and it is a genuine gap rather than a clean result.
 
-- leg 1 — the generated/renderer-owned rows were checked at their SOURCE, not as prose: .agent/** and .github/** host assets are governed by the renderer drift tests, docs/nightly-routine-prompt.md was confirmed byte-identical to both its sources (npm run check:nightly-routine-prompt), and docs/nightly-inbox.md is generator-owned.
+- leg 1 — one confirmed staleness has NO channel for the second night running, and is NOT re-raised here because writeOpenItems refuses a premise probe aimed at docs/backlog. Six passages in docs/backlog/durable-traps.md and three in docs/backlog/open-bugs.md describe the retired ~/.claude/llm-call.mjs as a live mechanism. It is carried as docs/HANDOFF.md Immediate next item 5, and the refusal that blocks it is now itself raised as sol-4.
 
-- leg 1 — one candidate was considered and DROPPED rather than escalated, so the silence is deliberate: dated "superseded and deleted on <date>" parentheticals in spec/backlog-remediation-design.md:41 and spec/conceptual-design-review-design.md:246,272, surfaced by the Codex spec sweep as status-noise. They read as status-noise by the letter of the rule, but the content is a REFUSAL record ("this was tried and deleted"), which the philosophy explicitly wants kept; only the date is noise. Judged too thin to spend an owner decision on. The other seven status-noise hits in that sweep were false positives (an `anthropic-beta: oauth-2025-04-20` HTTP header literal, and third-party gemini-cli deprecation dates that are durable facts about another vendor's API).
+- leg 2 — FULL COVERAGE. Stamp .audit-tools/nightly/triage-2026-08-09-coverage.json: model pool/medium resolved live, preflight passed, total 121, attempted 121, classified 121, errored 0, aborted null. Verdicts: 71 actionable_now, 24 live_run_blocked, 14 owner_decision_needed, 7 accepted_residual_no_work, 5 already_shipped_or_stale. ⚠ Read that coverage alongside sol-3: 30 of the 121 records carry probes that all evaluate to nothing while reporting the same stamp as an honest record, and both `gone` stamps this run are FALSE. The sweep covered the backlog; how much of what it returned is trustworthy is the open question.
 
-- leg 2 — FULL COVERAGE, no deletions. Coverage stamp .audit-tools/nightly/triage-2026-08-08-coverage.json: model pool/medium resolved live, preflight passed, attempted 111, classified 111, errored 0, aborted null. Verdicts: 61 actionable_now, 22 owner_decision_needed, 20 live_run_blocked, 7 accepted_residual_no_work, 1 already_shipped_or_stale. Nothing was deleted because neither shipped-signal survived verification: open-bugs#b3e71bd5 ("already_shipped_or_stale") carries no premise probe and a hedged action ("not necessary now"), which is the over-flagging the sweep's own docblock warns about; and forward-tracks#ecd20cf4 ("premise: gone") is a FALSE gone — its probe quotes `service = declared ?? transport`, the state the unwritten migration would PRODUCE, and src/shared/providers/identity.ts contains no such fold, so the entry is legitimately open.
+- leg 2 — of the five already_shipped_or_stale verdicts, ONE was deleted (see applied) and four were REFUTED by verification, so they are neither deleted nor raised. open-bugs#03d4bc94 is a wholly fabricated record (the real entry is live, with four residuals). open-bugs#0487b95c was mis-titled by the sweep and has four live residuals. open-bugs#de319d16 states its own close-or-keep condition and is a genuine owner decision with no channel (sol-4). open-bugs#31d38188 is a friction walk whose item (1) still states an unenforced property, so its proof of shipping is incomplete — escalating rather than guessing, which also has no channel.
+
+- leg 3 — the recurrence pass read the project memory store (235 files + MEMORY.md), the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md, docs/backlog/open-bugs.md, .audit-tools/audit-friction-run.json and .audit-tools/remediation/friction/dispatch-effectiveness-observability.json, plus this run's own friction. One strong candidate was DROPPED rather than raised: the "incoming charter/design-review/challenge artifacts have no submit chokepoint" theme (9 of 10 lanes wrapped JSON in markdown fences on 2026-08-08, 5 of 8 drifted on 2026-08-05) is already a live open-bugs entry at :1181 with its property stated and its 2026-08-08 recurrence appended. Re-proposing it would be the repeat-nightly shape the routine warns about.
+
+- /insights — NOT DUE, which is not a skipped leg. Stamp .audit-tools/nightly/insights-last-run.json shows ran_at 2026-08-07T09:09:53Z, two days old against the seven-day gate.
 
 
 </details>

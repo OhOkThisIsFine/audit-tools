@@ -135,8 +135,11 @@
    behaviour as current. The nightly's own note says four and cites older line numbers — it drifted,
    so re-grep rather than trusting either list. The traps around the dead helper still carry live
    lessons, which is why deleting them wholesale is a judgment call and not a reference fix.
-   ⚠ `open-bugs.md` is 129,560 bytes against the 120,000 ceiling — grandfathered, so the budget gate
-   accepts only SHRINKAGE there. Any edit to that file must come out net-negative.
+   ⬇ The refusal that pushed this item here is now itself a raised decision (nightly `sol-4`,
+   2026-08-09): it blocks three other backlog questions too, and leg 2 has produced zero escalations
+   since it landed. Answering `sol-4` gives this item its proper channel back.
+   ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
+   SHRINKAGE there. Any edit to that file must come out net-negative.
 
 ### Standing notes — not tasks
 

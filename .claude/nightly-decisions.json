@@ -816,7 +816,9 @@
     "answer": "Edit CLAUDE.md:38 to read \"Node 22+\", matching package.json engines and the README copy already corrected this run. One number, no other change.",
     "subject": "All TypeScript (ES2022, NodeNext, strict), Node 20+.",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-09T05:47:21.516Z"
+    "decided_at": "2026-08-09T05:47:21.516Z",
+    "completed_at": "2026-08-09T09:05:38.174Z",
+    "completed_ref": "af37bbad — CLAUDE.md:38 now reads Node 22+"
   },
   "514380f70957a2e5": {
     "disposition": "settled",
@@ -824,13 +826,17 @@
     "subject": "the shipped sources-declared example names the broker pools pool/fast, pool/coding and pool/reasoning",
     "path": "examples/catalog/sources-declared.json",
     "note": "This repo doesn't need to do anything specific. It dispatches normally, and the llm-relay tool will interject. We don't need any of this crap.",
-    "decided_at": "2026-08-09T05:47:21.519Z"
+    "decided_at": "2026-08-09T05:47:21.519Z",
+    "completed_at": "2026-08-09T09:05:38.223Z",
+    "completed_ref": "af37bbad — examples/catalog/sources-declared.json deleted; pool names de-pinned repo-wide"
   },
   "8762f6da87a68f50": {
     "disposition": "settled",
     "answer": "Add the argument guard to scripts/shared/triage-backlog.mjs only. It is the single script where a bad argument does silent damage; the other two fail loudly already, and a contract test over five entrypoints is more machinery than two incidents justify.",
     "subject": "const OUT = process.argv[2] || join(ROOT, .audit-tools, backlog-triage.jsonl)",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-08-09T05:47:21.520Z"
+    "decided_at": "2026-08-09T05:47:21.520Z",
+    "completed_at": "2026-08-09T09:05:38.274Z",
+    "completed_ref": "af37bbad — triage-backlog.mjs IS_CLI-bound --help/unknown-flag guard"
   }
 }
