@@ -109,10 +109,23 @@
 
 ## Immediate next
 
-1. **Resume the `dispatch-effectiveness-observability` run — it is IN FLIGHT and paused mid-`critique`,
-   ROUND 3.** Clean phase boundary, not a breakage: run `remediate-code next-step` from the repo root
-   and author the artifact it asks for. The pending step is the third conceptual-design critique of
-   the twice-repaired `finalized_module_contracts`.
+1. **Resume the `dispatch-effectiveness-observability` run — it is IN FLIGHT and parked at the ROUND-3
+   REPAIR of `finalized_module_contracts`.** Clean phase boundary, not a breakage: run
+   `remediate-code next-step` from the repo root and author the artifact it asks for.
+   **The two blocking items to resolve are already stated and each was verified against source:**
+   - **CDC-T1** — `INV-ORIGIN-STAMP-TOTAL` requires stamping an originating `attempt_ref` + triple onto
+     each finding, but `FindingSchema` (`src/shared/types/finding.ts:102`, re-exported at
+     `src/audit/types.ts:186`) defines no such fields and `WorkerFindingSchema`
+     (`src/audit/contracts/workerSchemas.ts:40`) adds none. **No module scopes
+     `src/shared/types/finding.ts`**, so as written the stamp is unimplementable. Decide: widen a
+     module's `file_scope` to include the Finding type, or re-home the join.
+   - **CDC-T2** — that repair justified itself by analogy to "the way identity/idempotency keys are
+     already stamped", but that precedent is on the RUN LEDGER
+     (`src/audit/orchestrator/ledger.ts:9-21`), not on findings. There is no existing
+     worker-unauthorable stamp on a `Finding` to copy, so the analogy cannot carry the decision.
+   ⚠ **Repair by TARGETED EDIT of the payload, never regeneration** — regeneration is the exact path
+   that collapsed 7 modules to 4 last time. Assert the module-name list before and after; the two
+   repairs this lap did that and INV-CO-13 stayed green each time.
    **Design state — the contract pipeline is through decomposition, drafting, seam reconciliation and
    two critique/repair rounds.** The 7-module set has survived every step: `attribution-triple-resolution`,
    `attempt-row-emission`, `verdict-dedup-shared`, `verdict-audit-ingest`, `verdict-remediate-gates`,
@@ -121,12 +134,7 @@
    The phase cut went `has_cycle: true` with 7 one-module phases → **`has_cycle: false`, 5 phases**:
    foundations{triple-resolution, dedup-shared} → consumers-1{emission, ingest} → consumers-2{gates}
    → consumers-3{artifact} → integration{render}. Producer now precedes consumer everywhere.
-   ⚠ **Round 3's critique was NOT authored — the free pool exhausted mid-dispatch** (`All models
-   exhausted … soonest reset ~42s`, HuggingFace `out_of_credits`). That is the only reason the step is
-   open. Re-dispatch it or author it inline; the step prompt mandates an INDEPENDENT reviewer and
-   names inline as the explicitly-degraded fallback.
-   **What the two repairs decided** (both are targeted edits of the payload, never regenerations —
-   regeneration is the exact path that collapsed 7 → 4 last time):
+   **What the two repairs decided:**
    - Round 1 deleted every `neighbor_needs` edge that stated what the NEIGHBOUR needs rather than what
      the module needs. Three inverted edges plus one genuine two-way edge were the whole cycle.
    - Round 2 gave the finding→attempt join an owner. `verdict-audit-ingest` now stamps every ingested
