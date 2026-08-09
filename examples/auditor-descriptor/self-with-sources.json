@@ -7,10 +7,10 @@
   },
   "sources": [
     {
-      "id": "relay-coding",
+      "id": "relay-primary",
       "transport": "openai-compatible",
       "endpoint": "http://127.0.0.1:8791/v1",
-      "model": "pool/coding",
+      "model": "pool/<name>",
       "no_auth": true,
       "worker_kind": "single_shot",
       "capability_rank": 1,

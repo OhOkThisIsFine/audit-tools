@@ -37,7 +37,7 @@ the caps — that is their permanent ceiling, not a bug to fix.
 ## The proxy overlay — an explicit kind-1 launch transport
 
 The proxy overlay is a **base-URL redirect**: an explicit `claude-worker` source names a reachable
-Anthropic-compatible endpoint and a broker pool intent such as `pool/coding`. The worker is launched
+Anthropic-compatible endpoint and a broker pool intent (`pool/<name>`). The worker is launched
 with `ANTHROPIC_BASE_URL` pointed at that endpoint, so the Claude harness's `/v1/messages` traffic
 lands on the broker-selected backend.
 

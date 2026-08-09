@@ -35,7 +35,7 @@ The `src/shared` area (imported as `audit-tools/shared`) single-sources step con
 
 ## Commands
 
-All TypeScript (ES2022, NodeNext, strict), Node 20+. From repo root:
+All TypeScript (ES2022, NodeNext, strict), Node 22+. From repo root:
 
 ```bash
 npm install                       # install deps

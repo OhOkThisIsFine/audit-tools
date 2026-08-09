@@ -14,9 +14,11 @@
  * - `examples/auditor-descriptor/*.json` — the `--auditor` descriptor; its
  *   `sources[]` must pass the shared `validateSessionConfig` sources check
  *   (the same bar `readSourceDeclaration` holds the machine declaration to).
- * - `examples/catalog/sources-declared.json` — the machine-level declaration;
- *   its `sources[]` must pass the same check (a failing entry is silently
- *   degraded to an empty pool at runtime, so rot here is invisible).
+ *
+ * The machine declaration itself (`~/.audit-code/sources-declared.json`) has no
+ * bundled example to guard: it named another broker's pools, went stale when they
+ * were renamed, and was deleted rather than re-pinned. `readSourceDeclaration`'s
+ * own coverage lives in `tests/shared/auditor-sources.test.ts`.
  */
 import { test, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -71,17 +73,4 @@ test("every examples/auditor-descriptor/*.json carries valid sources", () => {
       ).toEqual([]);
     }
   }
-});
-
-test("examples/catalog/sources-declared.json sources pass the shared validator", () => {
-  const declaration = JSON.parse(
-    readFileSync(join(EXAMPLES, "catalog", "sources-declared.json"), "utf8"),
-  );
-  const errors = errorIssues(validateSessionConfig({ sources: declaration.sources }));
-  expect(errors, "declared sources must pass the same bar readSourceDeclaration enforces").toEqual([]);
-  expect(declaration.sources.map((source: { model?: string }) => source.model)).toEqual([
-    "pool/fast",
-    "pool/coding",
-    "pool/reasoning",
-  ]);
 });

@@ -529,9 +529,9 @@ never learned; provider-reported rate limits and reactive cooldowns remain hard 
 ### 7.4 Broker boundary
 
 Audit-tools does not persist or ask the operator to confirm a provider/model ordering, and there is
-no cost↔speed bias. Each declared broker pool is one source intent (`pool/fast`, `pool/coding`, or
-`pool/reasoning`); the broker expands that intent into concrete candidates, ranks them against live
-health, and performs failover.
+no cost↔speed bias. Each declared broker pool is one source intent (`pool/<name>`); the broker expands
+that intent into concrete candidates, ranks them against live health, and performs failover. The pool
+names themselves belong to the broker, so this spec does not enumerate them.
 
 Across independently declared source intents, admission remains deterministic and provider-neutral:
 apply the hard capability/context floor, then try eligible pools by declared/catalog cost and stable

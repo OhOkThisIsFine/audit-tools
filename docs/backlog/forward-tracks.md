@@ -132,7 +132,7 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
   - **Phase-0 opencode-free — env-bound live validation remaining.** opencode-free ships as a pure-config
-    source entry (`cost_per_mtok: 0`; see `examples/catalog/sources-declared.json`). It is declared
+    source entry (`cost_per_mtok: 0`). It is declared
     machine-level in `~/.audit-code/sources-declared.json`, NOT the repo session-config, which cannot
     represent it — G2 put `sources`/`provider` in `DISPATCH_INVENTORY_FIELDS`, stripped from the persisted
     `RepoSessionIntent` (`src/shared/types/sessionConfig.ts`). Its key must be an `api_key_env`

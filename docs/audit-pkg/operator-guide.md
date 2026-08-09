@@ -190,12 +190,14 @@ ranking, cooldowns, and failover belong to the external broker. A machine-level
 ```json
 {
   "sources": [
-    { "id": "relay-fast", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/fast", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 2 },
-    { "id": "relay-coding", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/coding", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 1 },
-    { "id": "relay-reasoning", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/reasoning", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 0 }
+    { "id": "relay-primary", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/<name>", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 0 }
   ]
 }
 ```
+
+Declare one entry per pool intent you own, ranking them with `capability_rank`.
+`pool/<name>` is a placeholder: the pool names belong to your relay, so ask it for
+its live set rather than copying one from any written list, this guide included.
 
 The relay owns the concrete model lists behind those pool names. Audit-tools still
 enforces packet size/context fit, capability floors, quota/headroom, concurrency,

@@ -77,7 +77,35 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { evaluateProbes } from '../nightly/items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const OUT = process.argv[2] || join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
+// Import-safe: tests import the exported helpers, so nothing below may exit or
+// sweep unless this file IS the entrypoint. Single-sourced here and reused at
+// the bottom — two copies of this test would drift.
+const IS_CLI = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+// The one positional is an output PATH, so a flag in that slot is never one.
+// Unguarded, `--help` BECAME the filename: the sweep started and wrote `--help`
+// and `--help-coverage.json` into the repo root instead of printing usage — a
+// wrong argument doing silent work rather than failing. Same shape of guard as
+// scripts/check-gate-enumeration.mjs, which is where this was fixed once already.
+const OUT_ARG = process.argv[2];
+const USAGE = 'Usage: node scripts/shared/triage-backlog.mjs [outPath]';
+if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {
+  console.log(USAGE);
+  console.log('  outPath                  default .audit-tools/backlog-triage.jsonl');
+  console.log('  TRIAGE_MODEL=<spec>      llm-relay spec; the default is discovered live');
+  console.log('  TRIAGE_CONCURRENCY=<n>   default 3');
+  process.exit(0);
+}
+if (IS_CLI && OUT_ARG?.startsWith('-')) {
+  console.error(`triage-backlog: unrecognized option "${OUT_ARG}" — the only positional is an output path.`);
+  console.error(USAGE);
+  process.exit(1);
+}
+// A flag never reaches here under direct invocation, and an importer's argv is
+// none of this script's business — so the default stands for anything flag-shaped.
+const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
+  ? OUT_ARG
+  : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
 // llm-relay on :8791 — the LiteLLM proxy this script was born against (:4000)
@@ -416,7 +444,6 @@ async function main() {
   );
 }
 
-// Import-safe: tests import the exported helpers without starting a sweep.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (IS_CLI) {
   await main();
 }
