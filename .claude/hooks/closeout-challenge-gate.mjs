@@ -233,7 +233,12 @@ console.error(
     '  - every decision only the OWNER can make ASKED as a direct question, options spelled out ' +
     '(AskUserQuestion where available) — "your decision: see queue X / run command Y" is a pointer, ' +
     'not a question, and the owner never has to go fetch a question the agent already holds.\n\n' +
-    'Fix what is real, then stop again. If it genuinely was all handled, say so explicitly and stop — ' +
+    'Fix what is real. Then RE-RENDER the whole closeout report to the scheme in ' +
+    'docs/end-of-sprint-report-template.md, carrying the corrections this pass just made — every ' +
+    'section kept, "none" / "nothing pending" written out rather than dropped. That report IS the ' +
+    'hand-back; a conversational reply ABOUT the challenge is not, and it leaves the next session ' +
+    'reading a hand-back that predates the fixes. State inside the report what this pass changed, or ' +
+    'that nothing was outstanding, then stop — ' +
     `this asks at most ${CHALLENGE_CAP}x per session. (Bypass: AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1.)`,
 );
 process.exit(2);

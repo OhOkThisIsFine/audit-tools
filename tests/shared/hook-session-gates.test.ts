@@ -227,6 +227,15 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(stderr).toContain('a pointer, not a question');
   });
 
+  it('demands the closeout REPORT be re-rendered, not a conversational "yes, it was handled"', () => {
+    // Left to its own devices the agent answers the challenge in prose and the
+    // structured hand-back — the thing the next session actually reads — is
+    // never re-emitted with the corrections this pass just made.
+    const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('re-render')), { root: repo });
+    expect(stderr).toContain('end-of-sprint-report-template.md');
+    expect(stderr).toMatch(/re-render/i);
+  });
+
   it('does not re-ask about a tree state it already challenged', () => {
     const session = sid('same-state');
     expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
