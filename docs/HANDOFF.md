@@ -20,7 +20,8 @@
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
   bins report 0.39.11. Release CI run
   [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005) green across
-  all 6 jobs, critical path 252s (summed 839s). **Tag and `main` are level at `c30bd070` — no gap.**
+  all 6 jobs, critical path 252s (summed 839s). **`v0.39.11` tags `c30bd070`; `main` carries only
+  docs-after-the-tag since, so nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
   ⚠ This one carries a real BEHAVIOR change, not just docs: a contract-pipeline DAG whose node
   resolves to an empty write scope is now REFUSED at validation. A pipeline run that previously
@@ -115,13 +116,14 @@
    schema has the fields and a fallback has existed since 2026-07-12, and the evidence file it cited
    is entirely about repair (a). The actual failure is a JOIN between two independently authored name
    spaces. Full mechanism in `40f632b4`. [[backlog-prose-decays-verify-against-head]]
-   ⚠ The run's friction record holds **four** entries, not seven, and the sharpest is unfixed:
-   implementation workers never receive the contract they must satisfy, so the CP-NODE-1 worker
-   invented `RowKind` and `AttributionProvenance` values that contradicted the contract three
-   adversarial laps had pinned. Build was green and its self-review clean — nothing mechanical caught
-   it, because the divergence is conformance, not correctness. It is in
-   `.audit-tools/remediation/scratch/dispatch-effectiveness-observability/friction-log.md` and NOT in
-   open-bugs.md, which is over its ceiling and accepts only shrinkage.
+   ⚠ The run's friction record holds **four** entries, not seven. Its two DEFECTS are now in
+   [`open-bugs.md`](backlog/open-bugs.md) — the sharpest being that implementation workers are never
+   given the contract they must satisfy, which is why the CP-NODE-1 worker invented contract
+   vocabulary while the build stayed green. They were living only in an UNTRACKED scratch file, so
+   room was made by condensing the 2026-07-25 friction walk to the file's own one-line template. The
+   two cosmetic entries (the review gate tiering DAG nodes as security findings, the redundant
+   resume prompt) were deliberately not carried over. Ceiling re-ratcheted 129,610 → 129,162 bytes,
+   so that headroom is spent, not banked.
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing

@@ -1,12 +1,9 @@
 {
   "file_ceilings": {
-    "open-bugs.md": 129610
+    "open-bugs.md": 129162
   },
   "entries_over_budget": [
     "forward-tracks.md::Free/cheap \"quota-arbitrage\" dispatch tier — extra SOURCE POOLS on existing",
-    "forward-tracks.md::One repo intent, three filenames — the audit/remediate intent split is a `one ",
-    "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6",
-    "open-bugs.md::\"The free model can't handle reasoning work\" is a MYTH built from unset reques",
-    "open-bugs.md::Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch"
+    "forward-tracks.md::Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-6"
   ]
 }

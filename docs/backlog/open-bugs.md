@@ -485,29 +485,37 @@
   regen:docs` (or one gate naming both) would make it one round-trip. (3) **ambiguous-direction:** none
   this lap.
 
-- **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium,
-  the lap's biggest cost):** the offload triage was first run on `glm-5.2` — rank 1, a heavy reasoning
-  model — for a mechanical classification, at ~4 min/entry (~7h for the file) before the alias was
-  changed to the flash tier, which answered in seconds. Nothing in the lane's interface expresses "this
-  is mechanical, pick down the roster", so alias choice is host discretion on every call. Property: an
-  offload caller declares the WORK CLASS and the lane picks the alias, rather than the caller guessing
-  rank. [[offload-lane-failures-are-usually-the-caller]]
-  (2) **tool-should-decide (medium):** `deepseek-v4-flash` prepends prose before the JSON despite
-  `response_format: json_schema` — 11 of 14 calls unparseable, which reads exactly like model incapacity
-  and is not. `scripts/shared/triage-backlog.mjs` now salvages the object between the first `{` and last
-  `}`, but ONLY after `finish_reason === "stop"`, so a truncated body cannot be laundered into a
-  valid-looking record. The general property is unbuilt: schema non-adherence is a per-alias trait the
-  roster does not record, so every new caller rediscovers it. **Recurrence 2026-08-07:** the nightly
-  leg-2 sweep on `pool/medium` classified 72 of 112 entries and lost 40 to the same fault (prose before
-  the JSON, or none at all), degrading as it ran — the preflight passed and the lane never died, so
-  P11's health contract reported a 64%-coverage sweep instead of a silent partial one, which is the
-  stamp working. Coverage is recovered by re-running (errored rows re-queue); the per-alias trait is
-  what would stop it recurring.
-  (3) **ambiguous-direction (low):** three entries worked this lap had premises already fixed at HEAD
-  (`api_key_env` type narrowing, the leaked tool-call XML, the doc-path typo) — the standing
-  verify-against-HEAD rule caught them, but only after each was opened. The triage lane cannot check
-  HEAD, so its `actionable_now` verdict is a routing signal and never a work order.
-  [[backlog-prose-decays-verify-against-head]]
+- **Friction walk (backlog triage + clearance lap, 2026-07-25):** (1) **inefficient-feeding (medium):**
+  nothing in the lane's interface expresses "this is mechanical, pick down the roster", so alias choice
+  is host discretion on every call. Property: the caller declares the WORK CLASS and the lane picks the
+  alias. [[offload-lane-failures-are-usually-the-caller]]
+  (2) **tool-should-decide (medium):** schema non-adherence — prose before the JSON despite
+  `response_format: json_schema` — is a per-alias trait the roster does not record, so every new caller
+  rediscovers it, and it reads as model incapacity. `triage-backlog.mjs` salvages the object between the
+  first `{` and last `}` but ONLY after `finish_reason === "stop"`, so a truncated body cannot be
+  laundered into a valid-looking record; the general property is unbuilt. Recurred 2026-08-07 at 64%
+  coverage, which P11's stamp reported rather than hid (errored rows re-queue, so a re-run recovers).
+  (3) **ambiguous-direction (low):** the triage lane cannot check HEAD, so its `actionable_now` verdict
+  is a routing signal and never a work order. [[backlog-prose-decays-verify-against-head]]
+
+- **Implementation workers are never given the contract they must satisfy (2026-08-09, high).** The
+  implement-node prompt carries the DAG node's `description` and obligation ids but NOT the text of
+  `finalized_module_contracts` — verified: zero occurrences of `INV-AC-` in it. So a worker is told to
+  declare a type and never told its declared values. Observed, not hypothesised: the CP-NODE-1 worker
+  invented `RowKind` and `AttributionProvenance` members and made `findings_produced` an id array rather
+  than a count, all contradicting what three adversarial laps had pinned. **Nothing mechanical caught
+  it** — build green, its own adversarial self-review clean — because the divergence is CONFORMANCE, not
+  correctness, and the accept-node lifecycle verifies only build/tests. Properties: the node prompt
+  carries (or references by path) the contract for the module it implements, and a conformance check
+  sits between "worker finished" and "merged", since a Phase-0 divergence propagates to every node that
+  imports it. Auditor-agnostic rule exactly — it worked only when the DAG author happened to restate
+  every declared value in the node description. [[enforce-robustness-in-tooling-not-host-discretion]]
+
+- **`obligation_ledger.input.json` is listed as a required input but never written (2026-08-09, low).**
+  Every contract-pipeline step prompt lists it under Required Inputs; only the enveloped
+  `obligation_ledger.json` exists on disk. Its five sibling artifacts each have both forms. A host
+  following the prompt literally gets ENOENT. Either write the `.input.json` form like the siblings or
+  point the prompt at the envelope.
 
 - **Friction walk (backlog clear-out lap, 2026-07-24):** (1) **ambiguous-direction (medium, two
   instances, same class):** two entries had paraphrased their own incident until the MECHANISM
