@@ -97,28 +97,42 @@
 > whenever, but **known refactoring goals came first**. Those are now done — dedup cluster 10 of 10,
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
+>
+> ⚠ **Item 1 was re-diagnosed 2026-08-09 and its premise changed.** It is no longer "re-run the DAG";
+> it is a contract-finalization gate. Read its entry before acting on any older description of it.
 
-1. **Re-run the observability DAG — both blocking repairs are DONE, but the run's own DAG is still
-   the defective one.** The owner's call was merge-then-repair-on-main, and that is where things
-   stand: CP-NODE-1's type surface is on main (`14677902`, artifacts commit deliberately left on the
-   branch), `attempt_key` has a real derivation (`c79aaf4d`), and a scope-less node is now refused at
-   DAG validation (`40f632b4`). What is NOT done is regenerating the implementation_dag: CP-NODE-2/3
-   still carry obligation ids (`OBL-attribution-capture-…`, `OBL-verdict-capture-…`) that join to no
-   module in the decomposition, so the *next* run refuses them loudly and regenerates instead of
-   promoting a node nothing can be dispatched for. Either declare `output_files` on those nodes or
-   name their obligations after a decomposed module.
-   ⚠ **The backlog's description of repair (b) was wrong, which cost real time — read the run's
-   outcome records, not the prose.** It said "implementation_dag carries no per-node file scope"; the
-   schema has the fields and a fallback has existed since 2026-07-12, and the evidence file it cited
-   is entirely about repair (a). The actual failure is a JOIN between two independently authored name
-   spaces. Full mechanism in `40f632b4`. [[backlog-prose-decays-verify-against-head]]
-   ⚠ The run's friction record holds **four** entries, not seven. Its two DEFECTS are now in
-   [`open-bugs.md`](backlog/open-bugs.md) — the sharpest being that implementation workers are never
-   given the contract they must satisfy, which is why the CP-NODE-1 worker invented contract
-   vocabulary while the build stayed green. They were living only in an UNTRACKED scratch file, so
-   room was made by condensing the 2026-07-25 friction walk to the file's own one-line template. The
-   two cosmetic entries (the review gate tiering DAG nodes as security findings, the redundant
-   resume prompt) were deliberately not carried over. Ceiling re-ratcheted 129,610 → 129,162 bytes,
+1. **Gate `finalized_module_contracts` against its own drafted input — an LLM repair silently dropped
+   three modules, and that is what doomed the observability run.** Diagnosed to root cause 2026-08-09
+   (`0b2af308`); full evidence in
+   [`reviews/observability-dag-scope-join-2026-08-09.md`](reviews/observability-dag-scope-join-2026-08-09.md).
+   `module_decomposition` and the DRAFTED `module_contracts` both carry **7** modules;
+   `finalized_module_contracts` carries **4**. `attribution-capture` and `verdict-capture` appear in
+   no other artifact — invented merged names — and `effectiveness-render` was dropped outright.
+   `phase_cut` derives from the finalized set, so the DAG author wrote `OBL-attribution-capture-…` /
+   `OBL-verdict-capture-…` faithfully to *its* input; the write-scope resolver then joins them against
+   the decomposition's 7 granular names and finds nothing. **The DAG was never the defect.**
+   **Next step:** `contract_finalization` is deterministic and carries each drafted contract verbatim,
+   but the same path re-emits it as an LLM step when a downstream gate objects — and `repair-state.json`
+   records four rewrites against this artifact with no post-condition. Add a cross-artifact gate
+   asserting the finalized module-name set equals the drafted `module_contracts` set, wired into the
+   `nextPhase === "critic"` gate block (`contractPipeline.ts` ~2821) which already re-emits
+   `contract_finalization` on error. `validateFinalizedModuleContracts`
+   (`src/remediate/validation/contractPipeline.ts:286`) checks shape only; `validateDesignSpecGates`
+   never sees the drafted contracts. Loop-core → attestation required, failing test first.
+   ⚠ `scanModuleShards` would have caught this but is exempted at `contractPipeline.ts:539` because
+   finalization "is deterministically derived, never sharded" — true of the derivation, false of the
+   repair path that overwrites it. That comment is the reach hole, not a bug in the scan.
+   ⚠ **Re-running is NOT the next action, and the old entry's premise was wrong twice over.** The run
+   is `status: "complete"`, not paused, so `next-step` never re-enters the contract pipeline
+   (`PRE_INTAKE_PRIORITY` orders `complete` first) — nothing re-validates. And `40f632b4` refuses only
+   a TOTALLY empty scope: CP-NODE-4 resolved to a NARROWED scope and CP-NODE-1 to two files the worker
+   never touched while writing three it was not scoped to. Both non-empty, both passed.
+   [[backlog-prose-decays-verify-against-head]]
+   ⚠ `/design-check` found a retirement collision on the obvious fix — requiring the host to declare
+   `output_files` is the stance `c60eb73f` deliberately removed. The owner's call (2026-08-09) was
+   **verify the scope, don't re-author it**, which is what the gate above does.
+   ⚠ The run's friction record holds **four** entries, not seven; its two DEFECTS are in
+   [`open-bugs.md`](backlog/open-bugs.md). Ceiling re-ratcheted 129,610 → 129,162 → **129,156** bytes,
    so that headroom is spent, not banked.
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
