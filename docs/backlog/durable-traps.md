@@ -535,6 +535,37 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   which is the same shape the shell-trap guard already forces on suite commands for the exit-code
   reason.
 
+- **The free router's `/v1` Anthropic surface DELEGATES auth while the passthrough lane is on, so a
+  router-local key 401s there (2026-08-09).** `app/.env` gained
+  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload`, which splits a Claude Code session pointed at
+  the router: subagent turns to the free pool, everything else forwarded to Anthropic **under the
+  caller's own credential**. Its side effect is the trap — while on, the router stops validating its
+  own `freellmapi-…` key on `/v1/messages` and forwards it upstream, so a direct call that worked
+  minutes earlier starts failing with `invalid x-api-key` and an **Anthropic-shaped `request_id`
+  (`req_011C…`)**. That id is the tell: the router's own refusal reads `Invalid API key` with no
+  request id. The router had also RESTARTED mid-session, so the config flip was invisible. Use the
+  OpenAI-compatible surface `POST /v1/chat/completions` with `Authorization: Bearer <key>` for direct
+  dispatch — it still authenticates locally. ⚠ This also makes the global `CLAUDE.md` claim that
+  FreeLLMAPI has "no outbound Anthropic provider at all" **stale**.
+
+- **A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s
+  (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung
+  `claude.ps1` is not evidence the pool is down — probe the router directly before concluding
+  anything about lane health. It compounds with the nested-session trap below: launched from the repo
+  cwd it is a full session in the SHARED checkout. For bounded recon, POST to the router and skip the
+  nested agent entirely.
+
+- **A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak
+  model (2026-08-09).** The router's `auto` alias resolves to a reasoning model that spends its whole
+  budget thinking **in the visible channel** — 7 of 7 contract-drafting jobs came back ~10,200 chars
+  of prose having never reached the JSON they were asked for. Always record `finish_reason` /
+  `stop_reason`; a `max_tokens` stop means raise the cap or pin a non-reasoning model, and reading it
+  as "the free model can't do this" is the myth a standing open-bugs entry already warns about.
+  ⚠ **Assistant PREFILL is not honoured as continuation here** — the reply restarts with its own `{`,
+  producing `{"name":"x",{"name":"x",…`, so salvage must take the largest balanced object rather than
+  assuming the prefill opened it. ⚠ **`/v1/models` listing a model is not a reachability claim**:
+  `glm-4.7` is listed and 401s upstream on every call.
+
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
   and the packaged smoke tests run that install, so `npm test` alone is enough to erase the edit.

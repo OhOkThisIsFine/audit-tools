@@ -37,6 +37,14 @@
   **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
   switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
   [`durable-traps.md`](backlog/durable-traps.md).
+  ⚠ **The free router changed under this lap (2026-08-09).** `app/.env` gained
+  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload` and the router RESTARTED mid-session; while that
+  lane is on, the `/v1` **Anthropic** surface delegates auth upstream, so a router-local key now 401s
+  there with an Anthropic-shaped `request_id`. Dispatch directly against
+  `POST /v1/chat/completions` with `Authorization: Bearer <key>`, which still authenticates locally.
+  Do NOT diagnose this as a dead pool — the router answered a probe in 0.4s throughout. Full trap,
+  plus the `finish_reason: max_tokens` and listed-but-unreachable-model traps, in
+  [`durable-traps.md`](backlog/durable-traps.md).
   ⚠ **The declared offload lane is DEAD right now**, which matters for dispatch in the resumed run:
   every `remediate-code next-step` reports four unresolved `relay-*` sources at `127.0.0.1:8791` — the
   retired proxy's port. Probed 2026-08-09: 8791 answers nothing, while freellmapi (3001) and headroom
@@ -51,6 +59,15 @@
   wrapper files measure 37-40s alone, 107s in-suite) — compare like with like.
 
 ## Verification state
+
+- **This lap changed NO source — only run artifacts under `.audit-tools/` (gitignored) and docs.**
+  `npm run build` and `npm run check` both exit 0 on the final tree. No suite run was warranted and
+  none is claimed. The shipped-source signal below is unchanged.
+- Every file attribution in the decomposition was verified by reading the named symbol off disk before
+  it was scoped, and all 50 `path:line` citations the drafted shards made were mechanically resolved
+  against the tree (0 unresolved). The critique's two highest-stakes claims — the phase inversion and
+  the cross-phase artifact dependency — were each confirmed against `phase_cut.json` and the contract
+  payload rather than accepted from the reviewing lane.
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
   [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177)** (v0.39.13 —
@@ -91,14 +108,42 @@
 
 ## Immediate next
 
-1. **Resume the FRESH `dispatch-effectiveness-observability` run — it is IN FLIGHT and paused at the
-   `decomposition` phase.** This is a deliberate stopping point at a clean phase boundary, not a
-   breakage. Just run `remediate-code next-step` from the repo root and author the artifact it asks
-   for.
+1. **Resume the `dispatch-effectiveness-observability` run — it is IN FLIGHT and paused mid-`critique`,
+   ROUND 3.** Clean phase boundary, not a breakage: run `remediate-code next-step` from the repo root
+   and author the artifact it asks for. The pending step is the third conceptual-design critique of
+   the twice-repaired `finalized_module_contracts`.
+   **Design state — the contract pipeline is through decomposition, drafting, seam reconciliation and
+   two critique/repair rounds.** The 7-module set has survived every step: `attribution-triple-resolution`,
+   `attempt-row-emission`, `verdict-dedup-shared`, `verdict-audit-ingest`, `verdict-remediate-gates`,
+   `attribution-artifact`, `effectiveness-render`. **INV-CO-13 is doing its job** — drafted 7 →
+   finalized 7, none dropped, none invented, verified after each repair.
+   The phase cut went `has_cycle: true` with 7 one-module phases → **`has_cycle: false`, 5 phases**:
+   foundations{triple-resolution, dedup-shared} → consumers-1{emission, ingest} → consumers-2{gates}
+   → consumers-3{artifact} → integration{render}. Producer now precedes consumer everywhere.
+   ⚠ **Round 3's critique was NOT authored — the free pool exhausted mid-dispatch** (`All models
+   exhausted … soonest reset ~42s`, HuggingFace `out_of_credits`). That is the only reason the step is
+   open. Re-dispatch it or author it inline; the step prompt mandates an INDEPENDENT reviewer and
+   names inline as the explicitly-degraded fallback.
+   **What the two repairs decided** (both are targeted edits of the payload, never regenerations —
+   regeneration is the exact path that collapsed 7 → 4 last time):
+   - Round 1 deleted every `neighbor_needs` edge that stated what the NEIGHBOUR needs rather than what
+     the module needs. Three inverted edges plus one genuine two-way edge were the whole cycle.
+   - Round 2 gave the finding→attempt join an owner. `verdict-audit-ingest` now stamps every ingested
+     finding with its originating `attempt_ref` + triple (tool-applied, worker-unauthorable, like the
+     existing identity keys); `verdict-remediate-gates` reads that stamp off the finding instead of
+     inputting an artifact produced two phases later. Also: `ingest_refused` rows re-keyed
+     `(result_index, refused_kind)`; the single-source guarantee became a runtime one-row-per-packet
+     assertion instead of a grep; the no-recompute rule widened from the renderers to the model builders.
    **State:** the old completed run's DIRECTORY was archived to
    `.audit-tools/remediation.archived-observability-2026-08-08/` and a fresh run bootstrapped in its
    place. Intake, intent confirmation, `goal_spec` and `context_bundle` are all written and validated
    `status: "ok"`; `goal_id` is `dispatch-effectiveness-observability`.
+   ⚠ **The `context_bundle` carries three file attributions that are WRONG at HEAD.** All three were
+   corrected in the decomposition, with the correction stated in the module's own responsibilities —
+   do not "restore" them: `src/remediate/state/itemStatus.ts` sets no status (it is the vocabulary;
+   the setter is `acceptReconcile.ts:171`); `src/audit/cli/dispatch/packetFilter.ts` does not
+   determine `coverage_mismatch` (`src/audit/validation/auditResults.ts` does); the dependency DAG is
+   in `src/audit/orchestrator/dependencyMap.ts`, not `src/audit/io/artifacts.ts`.
    ⚠ The promoted `.audit-tools/remediation-report.md` / `-outcomes.json` are back at their canonical
    paths and unchanged — they are **git-tracked**, so moving them aside was a tracked-file deletion of
    ~56k lines and was reverted. Leave them alone; this run overwrites them on completion, which is the
