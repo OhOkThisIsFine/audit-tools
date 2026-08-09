@@ -20,8 +20,11 @@
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
   bins report 0.39.12. Release CI run
   [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039) green across
-  all 6 jobs, critical path 274s (summed 819s). **`v0.39.12` tags `b1375ee6`; `main` carries only
-  docs-after-the-tag since, so nothing is unpublished.**
+  all 6 jobs, critical path 274s (summed 819s). **`v0.39.12` tags `b1375ee6`.**
+  ⚠ **`main` is now AHEAD of the tag by a source change, so there IS something unpublished:**
+  `80b3be6a` (the INV-CO-13 module-set gate). npm still serves 0.39.12, which does not carry it.
+  Ship it whenever the next release runs — it is not urgent, since the only consumer of the gate is a
+  local remediation run, which uses the repo tree.
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
   ⚠ This one carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb
   (`ensure`/`install`/`install-host`/`verify-install`) now prints help on BOTH bins instead of
@@ -57,23 +60,22 @@
   gate + all 4 shards green). Read that, not the local run, as the release signal. `verify:checks`
   was additionally green locally (exit 0, both packaged smokes) on the clean tree at `b4b785b5`
   before the bump.
-- **Every one of this lap's four changes is red-green validated, each restored by INVERTING the edit,
-  never by checkout** — nine inversions across the four, and in each the named tests went red and
-  only those. Two are worth knowing about:
-  - `sol-4`'s auto-close guarantee is STRUCTURAL, not caller-dependent: `record_present` /
-    `record_missing` are never `absent`/`appeared`/`holds`, so `resolved` is unreachable for a
-    record probe even if a future caller passes the creation flag on the close path. Breaking it
-    needs BOTH the default flipped and the state renamed — and doing both also reds the original P8
-    test.
-  - `sol-2`'s inversion reproduces the bug exactly: with the help check disabled, `install --help`
-    wrote six entries into the test sandbox on each bin. Its `-h` case initially stayed green, which
-    made it vacuous, so it now carries the same no-work assertion — the installer's own JSON output
-    also contains the word "install".
-- Gates run green on the staged tree for each commit: `check`, `check:tests`, `check:lint`,
-  `check:deadcode`, `check:guard-reach`, `check:gate-enumeration`, the doc-contract subset and the
-  backlog budget/index. No commit this lap touches a `LOOP_CORE_PATTERNS` path, so no review
-  attestation was required — `.claude/hooks/`, `wrapper/`, `scripts/` and `src/remediate/index.ts`
-  are all outside the list.
+- **This lap's one change (`80b3be6a`, the INV-CO-13 gate) is red-green validated by INVERTING the
+  gate, never by checkout** — twice, and in each the named tests went red and only those. Worth
+  knowing:
+  - The placement is proven by execution, not argument. With the gate absent, the step emitted
+    immediately after a finalized rewrite is literally `# Conceptual Design Critique` — which is why
+    the `nextPhase === "critic"` home the plan named would have been five phases too late.
+  - The membership check and the multiplicity (duplicate-name) check were inverted **separately**, so
+    neither rides on the other's red. 5 tests red for the first, 1 for the second.
+  - The three tolerance tests correctly stay GREEN under inversion (they assert *no* issues), so the
+    red set is the refusal behaviour alone.
+- `verify:checks` exit 0 on the final tree, including both packaged smokes; `npm run build` and
+  `npm run check` clean; `tests/remediate` + `tests/shared` = **4912 passed, 0 failed** (332 files).
+  ⚠ `tests/audit` was NOT run locally this lap — the change is remediate-only, but CI's sharded run
+  is the signal for it.
+- `80b3be6a` touches `src/remediate/steps/contractPipeline.ts`, a `LOOP_CORE_PATTERNS` path, so it
+  carries a review attestation (staged tree `7fed2c11`, verdict clear, attester class `agent`).
 - **The shard-duration baseline is still CURRENT** — regenerated from the 596-file run one lap ago;
   nothing this lap changed test counts materially.
 - **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
@@ -86,10 +88,10 @@
 - A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
   542 modules; the tightened `no-circular` rule was red-green validated (reintroduced cycle → exit 1)
   and restored by inverting the edit, never by checkout.
-- **One loop-core commit this lap**, `40f632b4` (`src/remediate/steps/contractPipeline.ts`), attested
-  with the diagnosis and the red-green evidence. The other landings touch no `LOOP_CORE_PATTERNS`
-  path — `src/shared/contentKey.ts` and `src/shared/types/attributionContract.ts` are outside the
-  list, which covers `src/shared/{dispatch,engine,quota,rolling}/` and the two step machines.
+- `LOOP_CORE_PATTERNS` covers `src/shared/{dispatch,engine,quota,rolling}/` and the two step
+  machines; `.claude/hooks/`, `wrapper/`, `scripts/`, `src/remediate/index.ts` and
+  `src/remediate/validation/` are all OUTSIDE it. That is why this lap's validator changes needed no
+  attestation and its one `steps/` change did.
 
 ## Immediate next
 
@@ -98,30 +100,26 @@
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
 
-1. **Gate `finalized_module_contracts` against its own drafted input.** An unchecked LLM repair
-   collapsed the module set 7 → 4 and dropped `effectiveness-render`; every later symptom, including
-   the scope-less DAG nodes, is downstream of that. Mechanism, evidence and the refuted alternatives:
-   [`reviews/observability-dag-scope-join-2026-08-09.md`](reviews/observability-dag-scope-join-2026-08-09.md)
-   (`0b2af308`).
-   **Do:** add a cross-artifact gate asserting the finalized module-name set equals the drafted
-   `module_contracts` set, wired into the `nextPhase === "critic"` block (`contractPipeline.ts` ~2821),
-   which already re-emits `contract_finalization` on error. `validateFinalizedModuleContracts`
-   (`src/remediate/validation/contractPipeline.ts:286`) checks shape only and `validateDesignSpecGates`
-   never sees the drafted contracts, so neither can be extended in place. Loop-core → failing test
-   first, attestation required.
-   ⚠ **Do not re-run the DAG to fix this** — that was the old entry's instruction and it would have
-   fixed nothing. The run is `status: "complete"`, so `next-step` never re-enters the contract pipeline
-   at all. [[backlog-prose-decays-verify-against-head]]
-   **Owner calls (2026-08-09):** *verify the scope, don't re-author it* — requiring host-declared
-   `output_files` collides with `c60eb73f` and is out. And **fresh run once the gate lands**, not an
-   in-place repair: the artifacts are unrecoverable, CP-NODE-1's contract is already on main
-   (`14677902`), and the stale `remediation/dispatch-effectiveness-observability` branch + worktree get
-   cleaned up with it.
-   **Resume at `/design-check` step 3.** Steps 1–2 are done and the retirement verdict is CLEAN — the
-   gate is a post-condition on a guarantee `63034e58` already states, evidence in `72f87e2e`. Step 3's
-   refutation is partial and step 4's failing test is unwritten.
-   ⚠ A delegated lane claimed a module-name gate already exists among the cross-gates; it does NOT.
-   Believed, it closes this item as already-solved. [[verify-delegated-findings-mechanism-not-just-citation]]
+1. **Start the FRESH `dispatch-effectiveness-observability` run — the gate it was waiting on has
+   LANDED (`80b3be6a`).** `finalized_module_contracts` is now refused when its module-name set does
+   not match its drafted `module_contracts` input (INV-CO-13), so the unchecked LLM repair that
+   collapsed 7 modules to 4 and dropped `effectiveness-render` cannot recur silently. Background and
+   the refuted alternatives:
+   [`reviews/observability-dag-scope-join-2026-08-09.md`](reviews/observability-dag-scope-join-2026-08-09.md).
+   **Do:** a fresh run, NOT an in-place repair (owner's call, 2026-08-09). The old run's artifacts are
+   unrecoverable — no archived predecessor of `finalized_module_contracts` survives — CP-NODE-1's
+   contract is already on main (`14677902`), and the stale
+   `remediation/dispatch-effectiveness-observability` branch and its local
+   `remediate-CP-BLOCK-CP-NODE-1-…` sibling get deleted with the changeover. Both still exist; nothing
+   was deleted this lap.
+   ⚠ The gate is **phase-independent** (`contractPipeline.ts` step 2.55), not in the
+   `nextPhase === "critic"` block this entry used to name. Stale dependents are archived *before*
+   `nextPhase` is computed, so a finalized rewrite makes the next phase `critique` and a critic-boundary
+   gate would have fired five phases too late. Corrected on execution evidence, not argument.
+   [[phase-branch-gate-fires-late-after-staleness]]
+   ⚠ The gate verifies the module SET only. Whether a node's *derived write scope* actually covers the
+   work is still open, and is tracked as its own entry in
+   [`open-bugs.md`](backlog/open-bugs.md) — do not read this landing as closing that.
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing
