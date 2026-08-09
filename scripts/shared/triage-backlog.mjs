@@ -32,11 +32,18 @@
 // `premise_probes` — literal strings the ENTRY quotes, tied to the paths it
 // names. The model only ever sees the entry text, so the probes are the
 // entry's own claims; THIS script holds the repo access and evaluates them
-// mechanically, stamping `premise: holds|partial|gone|unprobed` on every
-// record. Every invocation also RE-evaluates the stored records first —
+// mechanically, stamping
+// `premise: holds|partial|premise_unconfirmed|probes_unusable|unprobed` on
+// every record. Every invocation also RE-evaluates the stored records first —
 // regenerating the triage is the presentation event for this lifecycle, so a
-// record whose quoted code has since vanished reads `premise: "gone"` rather
+// record whose quoted fragment no longer matches reads as unconfirmed rather
 // than surviving as a stale verdict.
+//
+// `gone` is deliberately ABSENT from that list (nightly sol-3, 2026-08-09). The
+// model quotes fragments from the ENTRY, so "all probes absent" means its guess
+// missed, never that the code went away — it was wrong 3 times out of 3. The
+// strongest verdict belongs only to probe evaluation in the nightly writer,
+// whose probes are authored to be checkable against the tree.
 //
 //   TRIAGE_MODEL=<spec>        explicit llm-relay spec (pool/<name> or
 //                              <provider>/<model>). DEFAULT IS DISCOVERED LIVE:
@@ -176,19 +183,101 @@ export function writeCoverageStamp(path, stamp) {
   fs.writeFileSync(path, JSON.stringify(stamp, null, 2) + '\n');
 }
 
-// Map the shared evaluator's item-level view onto a per-record stamp. `partial`
-// is surfaced separately from `holds` because a half-vanished premise is
-// exactly the "verify against HEAD before working it" case. A row whose every
-// probe is signal-free (bad_path / unknown / error — the model emits bare
-// filenames it cannot resolve) stamps `unprobed`, never `gone`: a malformed
-// probe must not manufacture the strongest possible claim (nightly sol-3).
-function premiseStamp(rec) {
-  const { status, probes } = evaluateProbes(ROOT, rec);
-  if (status === 'unprobed') return 'unprobed';
-  if (status === 'resolved') return 'gone';
-  const signalFree = new Set(['bad_path', 'unknown', 'error', 'untrackable']);
-  if (probes.every((p) => signalFree.has(p.state))) return 'unprobed';
-  return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
+/** Tracked files matching a git query, or null when git cannot answer. */
+function trackedMatches(root, args, okStatuses = [0]) {
+  const out = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true });
+  if (out.error || !okStatuses.includes(out.status)) return null;
+  return out.stdout.split('\n').filter((l) => l.trim() !== '');
+}
+
+/**
+ * Repair the two INPUT defects that made a third of the sweep's probes
+ * unusable — without inventing evidence.
+ *
+ * The model authoring these probes cannot see the repo, so it names the path
+ * the ENTRY mentions. That is often a bare basename, and sometimes only a
+ * symbol. Both are recoverable against the tracked tree, and recovering them is
+ * strictly better than stamping the record unusable.
+ *
+ * The bound that matters: a repair applies ONLY when exactly one tracked file
+ * matches. Zero or several leaves the probe untouched, because guessing a path
+ * would manufacture precisely the false verdict this change exists to stop. A
+ * repair is RECORDED (`recovered[]`) rather than silently substituted, so a
+ * reader can see the sweep chose the path rather than the entry naming it.
+ */
+function resolveProbes(raw, root) {
+  const probes = [];
+  const recovered = [];
+  for (const p of raw) {
+    if (!p || typeof p.contains !== 'string') continue;
+    const named = typeof p.file === 'string' ? p.file.replace(/\\/g, '/').replace(/^\.\//, '') : '';
+    // A path the entry gave in full is used as-is — including a record path,
+    // which the evaluator abstains on by design.
+    if (named.includes('/')) {
+      probes.push({ file: named, contains: p.contains });
+      continue;
+    }
+    // Bare basename, or no path at all but a symbol to search for.
+    let hits = null;
+    let how = null;
+    if (named !== '') {
+      hits = trackedMatches(root, ['ls-files', '--', `*/${named}`, named]);
+      how = 'basename';
+    } else if (typeof p.symbol === 'string' && p.symbol.trim() !== '') {
+      hits = trackedMatches(
+        root,
+        ['grep', '-l', '-F', '-e', p.symbol, '--',
+          ':!docs/backlog', ':!docs/reviews', ':!docs/HANDOFF.md', ':!docs/nightly-inbox.md', ':!.claude'],
+        [0, 1],
+      );
+      how = 'symbol';
+    }
+    if (hits && hits.length === 1) {
+      probes.push({ file: hits[0], contains: p.contains });
+      recovered.push({ from: named || p.symbol, via: how, to: hits[0] });
+      continue;
+    }
+    // Ambiguous or unresolvable: keep whatever was given so the evaluator
+    // reports it as signal-free rather than the sweep quietly dropping it.
+    if (named !== '') probes.push({ file: named, contains: p.contains });
+  }
+  return { probes, recovered };
+}
+
+/**
+ * Map the shared evaluator's item-level view onto a per-record stamp.
+ *
+ * `partial` is surfaced separately from `holds` because a half-vanished premise
+ * is exactly the "verify against HEAD before working it" case.
+ *
+ * Two verdicts this sweep must NOT emit, both from nightly sol-3 (2026-08-09):
+ *
+ *  - `gone` is retired outright. The sweep asks the model to quote a fragment
+ *    VERBATIM FROM THE ENTRY, so "all probes absent" means the entry's own prose
+ *    is not in the file the model guessed — never that the code went away. It
+ *    was wrong every single time it fired (3 false, 0 true across two nights),
+ *    and it is the strongest claim the pipeline can make. Only probe evaluation
+ *    in the nightly writer, which reads the tree against probes authored to be
+ *    checkable, may assert goneness. Here it stamps `premise_unconfirmed`.
+ *
+ *  - `unprobed` no longer absorbs a record that TRIED and failed. A row whose
+ *    probes were all unusable now stamps `probes_unusable`, visibly distinct
+ *    from one that honestly quoted nothing checkable, counted in the coverage
+ *    stamp, and never evidence for deleting an entry when paired with
+ *    `already_shipped_or_stale`.
+ */
+export function premiseVerdict(rec, root = ROOT) {
+  const raw = Array.isArray(rec?.premise_probes) ? rec.premise_probes : [];
+  const { probes: resolved, recovered } = resolveProbes(raw, root);
+  const { status, probes } = evaluateProbes(root, { premise_probes: resolved });
+  const stamp = (() => {
+    if (status === 'unprobed') return raw.length > 0 ? 'probes_unusable' : 'unprobed';
+    if (status === 'resolved') return 'premise_unconfirmed';
+    const signalFree = new Set(['bad_path', 'unknown', 'error', 'untrackable']);
+    if (probes.every((p) => signalFree.has(p.state))) return 'probes_unusable';
+    return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
+  })();
+  return { stamp, recovered };
 }
 
 function chunk(file) {
@@ -241,9 +330,22 @@ const SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['file', 'contains'],
+          // `file` is no longer required: the author cannot see the repo, and
+          // forcing a path made it emit bare basenames and guesses. Naming a
+          // `symbol` instead is honest, and the sweep resolves it against the
+          // tracked tree when exactly one file matches.
+          required: ['contains'],
           properties: {
-            file: { type: 'string', description: 'repo-relative path the entry names' },
+            file: {
+              type: 'string',
+              description:
+                'repo-relative path the entry names; a bare filename is accepted and resolved when unambiguous',
+            },
+            symbol: {
+              type: 'string',
+              description:
+                'an identifier to locate the file by, when the entry names no path — use INSTEAD of file, never a guess',
+            },
             contains: { type: 'string', description: 'a literal fragment the entry quotes from that file' },
           },
         },
@@ -266,7 +368,16 @@ Be strict. Prefer actionable_now when a property to hold is stated and the fix s
 premise_probes: for each code fragment the entry QUOTES as currently existing (a symbol, a string, a
 line), emit { file, contains } with the repo-relative path the entry ties it to. Quote the fragment
 VERBATIM from the entry — you cannot see the repo, so never invent content. Prefer fragments whose
-disappearance would mean the entry is done. Emit [] only when the entry quotes nothing checkable.`;
+disappearance would mean the entry is done. Emit [] only when the entry quotes nothing checkable.
+
+Three rules about the TARGET, each of which made a third of the previous run's probes worthless:
+- A probe aimed at docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md or .claude
+  carries NO evidence. Those files are the RECORD of the code, not the code — a backlog entry quotes
+  the very fragment it is about, so finding it there proves nothing and losing it means nothing.
+  Probe the source file the entry is ABOUT, never the entry itself.
+- If the entry names no path, emit { symbol, contains } instead of guessing a path. An identifier is
+  resolvable against the tree; a guessed path is not, and a wrong one is worse than none.
+- A bare filename is fine when that is all the entry gives — do not invent directories for it.`;
 
 function post(body) {
   return new Promise((resolve, reject) => {
@@ -341,7 +452,14 @@ async function main() {
         // exited 0 — a false green.)
         if (rec.error) continue;
         done.add(rec.id);
-        kept.push({ ...rec, premise: premiseStamp(rec) });
+        {
+          const { stamp, recovered } = premiseVerdict(rec);
+          kept.push({
+            ...rec,
+            premise: stamp,
+            ...(recovered.length > 0 ? { premise_probes_recovered: recovered } : {}),
+          });
+        }
       } catch {}
     }
     fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
@@ -358,6 +476,10 @@ async function main() {
     attempted: 0,
     classified: 0,
     errored: 0,
+    // Counted so "the sweep covered 121 entries" cannot hide how many of those
+    // carried probes that could not be evaluated at all. 30 of 121 did on
+    // 2026-08-09, indistinguishable from an honest `unprobed` until now.
+    probes_unusable: 0,
   };
   stampSafe(stamp);
 
@@ -420,13 +542,18 @@ async function main() {
         const end = raw.lastIndexOf('}');
         if (start < 0 || end <= start) throw new Error('no JSON object in response');
         rec = { id: e.id, file: e.file, ...JSON.parse(raw.slice(start, end + 1)) };
-        rec.premise = premiseStamp(rec);
+        {
+          const { stamp, recovered } = premiseVerdict(rec);
+          rec.premise = stamp;
+          if (recovered.length > 0) rec.premise_probes_recovered = recovered;
+        }
       } catch (err) {
         rec = { id: e.id, file: e.file, error: String(err.message || err) };
       }
       stamp.attempted += 1;
       if (rec.error) stamp.errored += 1;
       else stamp.classified += 1;
+      if (rec.premise === 'probes_unusable') stamp.probes_unusable += 1;
       // Rewritten per completion (cheap, atomic-enough for a progress sidecar):
       // a killed run leaves an honest partial stamp, not silence.
       stampSafe(stamp);
@@ -439,7 +566,8 @@ async function main() {
   stamp.finished_at = new Date().toISOString();
   stampSafe(stamp);
   process.stderr.write(
-    `leg-2 coverage: ${stamp.classified} classified / ${stamp.errored} errored of ` +
+    `leg-2 coverage: ${stamp.classified} classified / ${stamp.errored} errored / ` +
+      `${stamp.probes_unusable} probes-unusable of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ${stampPath}\n`,
   );
 }

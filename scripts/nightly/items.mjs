@@ -262,7 +262,7 @@ const RECORD_PATH_PREFIXES = [
   '.claude',
 ];
 
-function isRecordPath(file) {
+export function isRecordPath(file) {
   const norm = file.replace(/\\/g, '/').replace(/^\.\//, '');
   return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
 }
