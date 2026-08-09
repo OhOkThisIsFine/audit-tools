@@ -61,4 +61,29 @@ describe("pre-commit gate: every commit-creating subcommand is gated (P9)", () =
     expect(r.status, `expected bypass refusal (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/bypass/i);
   });
+
+  // Short `-n` means `--no-verify` on `git commit` ALONE. On cherry-pick and
+  // revert it is `--no-commit`, which is the SAFER form — it leaves the result
+  // staged for this very gate to read — and on merge it is `--no-stat`. Refusing
+  // those as a bypass is a false RED that pushes the caller toward the
+  // un-inspectable form, which is the opposite of what the gate wants. The
+  // long-form `--no-verify` / `core.hooksPath` vectors stay whole-command matched
+  // and are unaffected.
+  test("`-n` is a bypass on commit, and NOT where it means --no-commit/--no-stat", () => {
+    const bypass = runGate("git commit -n -m x");
+    expect(bypass.status, `expected bypass refusal (2); stderr:\n${bypass.stderr}`).toBe(2);
+    expect(bypass.stderr).toMatch(/bypass/i);
+
+    for (const cmd of [
+      "git cherry-pick -n abc123",
+      "git revert -n abc123",
+      "git merge -n feature",
+    ]) {
+      const r = runGate(cmd);
+      expect(r.stderr, `"${cmd}" must not be refused as a hook bypass`).not.toMatch(/bypass/i);
+      expect(r.status, `expected pass (0) on a green snapshot for "${cmd}"; stderr:\n${r.stderr}`).toBe(
+        0,
+      );
+    }
+  });
 });

@@ -227,9 +227,14 @@ if (commitSubCmds.length === 0) process.exit(0);
 // `--no-verify` and `core.hooksPath` are matched against the WHOLE command: a
 // SIBLING statement can arm the bypass before the commit runs
 // (`git config core.hooksPath /dev/null && git commit -m …`), so scoping these
-// to commit sub-commands is a hole. Only the short `-n` form stays scoped to
-// `git commit` sub-commands — that scoping exists for flags that are common in
+// to commit sub-commands is a hole. Only the short `-n` form stays scoped, and
+// specifically to `git commit` — that scoping exists for flags that are common in
 // unrelated tools (`grep -n`), which is not true of the other two vectors.
+// `commit` ALONE, not every commit-creating subcommand: `-n` is `--no-verify`
+// only there. On cherry-pick and revert it is `--no-commit` — the SAFER form,
+// which leaves the result staged for this gate to read — and on merge it is
+// `--no-stat`. Refusing those was a false RED that pushed the caller toward the
+// un-inspectable form, i.e. the opposite of what this gate wants.
 // The `-n` check runs on stripQuoted statements: `-n` inside a quoted commit
 // MESSAGE (`git commit -m "use grep -n output"`) is text, not a flag, and must
 // not false-trip the bypass detection. The long-form vectors stay RAW-matched
@@ -239,7 +244,9 @@ if (commitSubCmds.length === 0) process.exit(0);
 // MENTIONS `--no-verify` is rare enough to accept the false block.
 if (
   /--no-verify\b|\bcore\.hooksPath\b/.test(cmd) ||
-  commitSubCmds.some((sub) => /(?:^|\s)-n(?=\s|$)/.test(stripQuoted(sub)))
+  commitSubCmds
+    .filter((sub) => isGitSubcommand('commit')(sub))
+    .some((sub) => /(?:^|\s)-n(?=\s|$)/.test(stripQuoted(sub)))
 ) {
   console.error(
     'pre-commit gate: commit rejected — hook-bypass detected (`--no-verify`/`-n` or a `core.hooksPath` override anywhere in the command). ' +
