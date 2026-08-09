@@ -20,7 +20,8 @@
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
   bins report 0.39.12. Release CI run
   [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039) green across
-  all 6 jobs, critical path 274s (summed 819s). **Nothing is unpublished.**
+  all 6 jobs, critical path 274s (summed 819s). **`v0.39.12` tags `b1375ee6`; `main` carries only
+  docs-after-the-tag since, so nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
   ⚠ This one carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb
   (`ensure`/`install`/`install-host`/`verify-install`) now prints help on BOTH bins instead of
@@ -141,7 +142,9 @@
    for a cluster.
 5. **Use the escalation channel `sol-4` just restored — the four questions it was blocking are still
    unasked.** They are listed in
-   [`P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md):
+   [`P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md)
+   (read [`SHIPPED-2026-08-09.md`](../.audit-tools/nightly/proposals/SHIPPED-2026-08-09.md) first —
+   P15–P18 all landed, so their proposals' present tense is stale):
    the retired `~/.claude/llm-call.mjs` described as live in nine backlog passages, `open-bugs#de319d16`
    and `#0487b95c` (both close-or-keep calls), and the run's wider `already_shipped_or_stale` set. Leg 2
    can now write them as `auto_close: false` items, so the next nightly run should surface them itself
