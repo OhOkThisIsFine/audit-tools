@@ -285,3 +285,15 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   work. Nothing is restated here, so there is no second copy to drift. Implementation assigned outside
   this repo's agent loop by the owner 2026-08-07. [[vitest-shard-is-hash-based-and-file-atomic]]
 
+
+- **Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.**
+  A DAG node that declares no files inherits its write scope from the module its obligations belong
+  to, matched as `OBL-<moduleSlug>-…`. Nothing forces the two sides to agree, so a rename on either
+  breaks the join — and its failure mode is an EMPTY result, indistinguishable from "nothing to
+  inherit". That is how the 2026-08-09 observability run stranded two of four nodes. `40f632b4` made
+  the miss a loud refusal at DAG validation, which is the safety property; it did NOT unify the two
+  name spaces, and it deliberately did not make the join tolerant (containment or fuzzy slugs would
+  attach work to a module nobody chose, which is worse than refusing). **Open question, not a
+  planned change:** whether the obligation id should be DERIVED from the decomposition rather than
+  authored alongside it, so the join cannot be broken by a rename at all.
+  [[prefix-join-between-two-name-spaces-fails-empty]]

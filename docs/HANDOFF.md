@@ -32,35 +32,16 @@
   fires, `sol-4` leg 2 having no writable escalation channel since 2026-08-06. Each carries options
   and a full proposal under `.audit-tools/nightly/proposals/`; answer by ticking a box in
   [`nightly-inbox.md`](nightly-inbox.md), then `npm run nightly:ingest`.
-- **The owner's three earlier answers are APPLIED and recorded DONE** (`af37bbad`). `docs-1`:
-  CLAUDE.md now states Node 22+, matching `engines >=22`. `sol-1`: the shipped
-  <!-- doc-citation-exempt: naming the file this lap deleted is the point of the sentence -->
-  `examples/catalog/sources-declared.json` is DELETED rather than re-pinned — its three model values
-  named llm-relay pools retired at v0.15.4, so the example the README told operators to copy failed
-  every dispatch. `examples/README.md` now documents the shape in prose with no runnable values.
-  `sol-2`: `triage-backlog.mjs` no longer treats `--help` as its output filename.
-  ⚠ **The sol-1 sweep was wider than the item stated** — a fourth dead-name copy sat in
-  `examples/auditor-descriptor/self-with-sources.json`, named nowhere in the item. Record channels
-  (`docs/reviews/`, `.audit-tools/`, the decisions ledger) are deliberately untouched.
-- **Record the constitutional-doc override AFTER staging the complete set, never before.** It binds
-  to an exact staged-tree hash and names only the constitutional docs in *that* tree, so attesting
-  against a partial stage both invalidates on the next `git add` and can under-cover the real commit.
-  [[constitutional-override-binds-to-final-staged-tree]]
-- **⚠ Offload from a Desktop session is shell-out ONLY, and lane quality varies sharply.** Subagents
-  here bypass the relay entirely. `llm-relay dispatch` works, but of three long DeepSeek recon jobs
-  two died with `API Error: Server error mid-response` after ~10min and the third took ~25min, while
-  the agy lane returned complete reports in minutes. `claude -p` buffers to completion, so a dying
-  lane and a healthy one look identical (zero bytes) until the end. Probe small, one bounded item
-  per dispatch, and prefer switching lanes over retrying the one that just failed. Both traps are in
+- **⚠ Offload from a Desktop session is shell-out ONLY** — subagents here bypass the relay entirely —
+  **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
+  switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
   [`durable-traps.md`](backlog/durable-traps.md).
-- **A type-only import cycle is now a red build.** All three that existed were broken and
-  `no-circular` lost its `viaOnly` exemption, so the cleanup is enforced rather than tracked.
 - **T4's floor is no longer a single outlier — it is a CLUSTER, which changes what the next split
   buys.** `audit-code-wrapper-packets.test.ts` was split three ways this lap and the baseline was
   regenerated from the 596-file run. The top of the list is now four completion files within 7s of
   each other: `audit-code-completion-present` 134.9s, `-ingest-dir` 134.5s, `-promote` 131.6s,
   `-force-synthesis` 128.0s, then `linux-cycle-regression` 125.9s. Splitting any ONE of them moves
-  the floor by ~3s, which is why the mechanism changed — see *Immediate next* 2.
+  the floor by ~3s, which is why the mechanism changed — see *Immediate next* 4.
   ⚠ Baseline numbers are under full-suite contention and run ~3× the isolated timings (the new
   wrapper files measure 37-40s alone, 107s in-suite) — compare like with like.
 
