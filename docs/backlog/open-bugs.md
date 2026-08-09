@@ -55,21 +55,17 @@
 - **Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking
   worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test
   passes", 2026-08-06).** The exit-code half is a non-issue through the sanctioned path:
-  `npm test`/CI route through `scripts/shared/run-vitest-gate.mjs` (since `605fe61e`,
-  2026-07-24), which converts exit-1 + 0-failed + the `[vitest-worker]: Timeout calling
-  "onTaskUpdate"` stderr marker into a loud PASS — the 2026-08-06 red exits were raw
-  `npx vitest run` invocations that bypass it. What stays open is the starvation itself,
-  now diagnosed to mechanism (2026-08-07): the worker-side birpc reply timeout is a hard 60s
-  (`rpc.-pEldfrD.js` onTimeoutError), so the error means ONE continuous ≥60s sync stretch in
-  some worker. Attribution to `audit-code-completion.test.ts` is UNCONFIRMED: a solo run (244s)
-  does not reproduce, and an event-loop stall probe (>5s threshold) in that file's worker
-  recorded ZERO stalls during a full run in which the error fired — the blocker is another
-  file, or emerges only under contention. Candidate sweep LANDED (relay lane, verified against
-  source): [`reviews/rpc-starvation-candidates-2026-08-07.md`](../reviews/rpc-starvation-candidates-2026-08-07.md)
-  — the one confirmed defect-class instance (sync full-CLI `next-step` children in
-  `next-step-pipeline-dispatch.test.ts`, unbounded below the 120s test timeout) was converted to
-  async spawn the same day; gate-script spawns in `tests/shared/*-gate.test.ts` are the next
-  leads if the error recurs. ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
+  `npm test`/CI route through `scripts/shared/run-vitest-gate.mjs` (since `605fe61e`), which converts
+  exit-1 + 0-failed + the `[vitest-worker]: Timeout calling "onTaskUpdate"` stderr marker into a loud
+  PASS — the 2026-08-06 red exits were raw `npx vitest run` invocations that bypass it. What stays open
+  is the starvation itself: the worker-side birpc reply timeout is a hard 60s
+  (`rpc.-pEldfrD.js` onTimeoutError), so the error means ONE continuous ≥60s sync stretch in some
+  worker. `audit-code-completion.test.ts` is ruled out as sole cause — a solo run does not reproduce and
+  an event-loop stall probe recorded ZERO stalls during a full run in which the error fired. Candidate
+  sweep: [`reviews/rpc-starvation-candidates-2026-08-07.md`](../reviews/rpc-starvation-candidates-2026-08-07.md)
+  — its one confirmed instance (sync full-CLI `next-step` children in
+  `next-step-pipeline-dispatch.test.ts`) was converted to async spawn; gate-script spawns in
+  `tests/shared/*-gate.test.ts` are the next leads. ⚠ Standing trap from the reverted 2026-08-06 attempt: `projects:`
   at the TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config
   (false GREEN); any config split must nest under `test.projects` and prove both exit
   polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then
@@ -227,15 +223,12 @@
   per-pair.
 
 - **A spec row's category prefix is load-bearing enough to manufacture work — and one was false
-  (2026-07-28, low, RESOLVED; the open half is the class).** `spec/audit/artifact-contract.md` labelled both
-  `critical-flow-fallback.json` and `intent-equivalence-verdict.json` `Durable host input:`, though
-  only the first is registered and a staleness-DAG leaf; the second is staged under `incoming/`,
-  consumed, deleted, and materialized into `artifact_metadata.intent_baseline`. Nightly `docs-3`
-  correctly inferred "register it for consistency" from the shared label, colliding with DD-9's
-  deliberate no-verdict-pair-cache retirement. FIXED by relabelling the row **Transient host
-  submission** and making the durable row state its registry+DAG membership explicitly (owner-approved,
-  attested — `artifact-contract.md` is constitutional); no runtime or registry change. Both endpoint
-  traces: `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
+  (2026-07-28, low, RESOLVED; the open half is the class).** `spec/audit/artifact-contract.md` gave a
+  TRANSIENT host submission (`intent-equivalence-verdict.json`) the same `Durable host input:` prefix as
+  a registered staleness-DAG leaf, so nightly `docs-3` correctly inferred "register it for consistency"
+  and collided with DD-9's deliberate no-verdict-pair-cache retirement. Fixed by relabelling the row and
+  making the durable row state its registry+DAG membership explicitly; endpoint traces in
+  `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
   **Open property (the class, not this instance):** a category prefix in a normative table is read as
   a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
   only if a second instance appears — one occurrence is not yet a pattern.
@@ -295,10 +288,9 @@
 - **Regenerating the price snapshot INVERTS host tier cost order — the refresh is blocked on the
   service→vendor-id mapping, not merely followed by it (2026-07-24, medium, ATTEMPTED AND REVERTED).**
   `src/shared/data/model-statics.generated.json` predates `__by_provider`, so `resolveModelStatics(m, p)`
-  finds the index empty and falls through to the flat table — the known inert-path defect. Running
-  `npm run update-models` does populate it (2794 models, 2945 collisions, 146 providers) but ALSO
-  rewrites the flat table, whose entry for a colliding id is the CHEAPEST across providers by
-  construction. Measured at HEAD, blended $/Mtok:
+  finds the index empty and falls through to the flat table — the known inert-path defect.
+  `npm run update-models` populates it but ALSO rewrites the flat table, whose entry for a colliding id
+  is the CHEAPEST across providers by construction. Measured at HEAD, blended $/Mtok:
 
   | model | flat (no provider) | `anthropic`-scoped |
   |---|---|---|
@@ -307,10 +299,10 @@
   | `claude-opus-4-8` | **0.85** | 10.00 |
 
   So after a refresh the flat table ranks **opus as the cheapest model in the roster**, below haiku —
-  and cost-first routing (λ=0) would send every packet to it. `tests/shared/cost-rank.test.ts` caught
-  this as 11 failures on CI shard 1 (both Node versions); the pre-collision snapshot happens to carry
-  anthropic's own prices, which is why the stale file looked correct. **The refresh is therefore
-  gated on the second-order mismatch, not merely followed by it:** `byProvider` is keyed by models.dev
+  and cost-first routing (λ=0) would send every packet to it; `tests/shared/cost-rank.test.ts` caught it.
+  The pre-collision snapshot happens to carry anthropic's own prices, which is why the stale file looked
+  correct. **The refresh is gated on the second-order mismatch, not merely followed by it:**
+  `byProvider` is keyed by models.dev
   VENDOR ids while both pricing sites pass `sourceService(source)` (`identity.ts`), so any lane whose
   service string is not a models.dev provider id misses the index and lands on the cheapest-reseller
   price. Fix the mapping FIRST, then refresh. ⚠ Do not "fix" this by updating the cost-rank
@@ -436,21 +428,18 @@
 
 - **"The free model can't handle reasoning work" is a MYTH built from unset request parameters — check
   `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).** Two apparent
-  capability failures in one session, both traced to the caller (incidents in git log): (a) constrained
-  decoding under `strict: true` into a generic container that could not hold the answer returned
-  schema-VALID output of literal `FAILED_TO_EXTRACT` strings — a task-shaped schema with `strict` off
-  produced a correct classification from the same model and document; (b) a batch degenerating into
-  "gibberish" was `finish_reason=length` at `completion_tokens=1024` with **no `max_tokens` ever set** —
-  the model closing valid JSON against a default cap.
+  capability failures traced to the caller, not the model (incidents in git log): `strict: true`
+  constrained decoding into a generic container returned schema-VALID `FAILED_TO_EXTRACT` placeholders,
+  and a "gibberish" batch was `finish_reason=length` with **no `max_tokens` ever set**.
   **Properties to hold:** (i) an offload caller sets `max_tokens` deliberately and treats
-  `finish_reason !== "stop"` as a failure, not a result — neither of these misdiagnoses survives one line
-  of response inspection; (ii) the output schema is part of the prompt, not packaging, and `strict: true`
-  is a quality risk to justify rather than a safe default; (iii) a structurally-conformant response with
-  placeholder or missing content is a failure wearing a success shape and must be detectable as such.
+  `finish_reason !== "stop"` as a failure, not a result; (ii) the output schema is part of the prompt,
+  not packaging, and `strict: true` is a quality risk to justify rather than a safe default; (iii) a
+  structurally-conformant response with placeholder or missing content is a failure wearing a success
+  shape and must be detectable as such.
   ⚠ **Re-examine the inherited belief before acting on it.** Earlier records of this lane "timing out past
   120s" and "not matching its own read schema" came from a retired wrapper with a hardcoded timeout and a
-  single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
-  cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
+  single fixed schema — the same two failure classes, so the standing assumption that reasoning-heavy work
+  cannot be offloaded here is not currently supported by evidence.
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
@@ -516,6 +505,19 @@
   `obligation_ledger.json` exists on disk. Its five sibling artifacts each have both forms. A host
   following the prompt literally gets ENOENT. Either write the `.input.json` form like the siblings or
   point the prompt at the envelope.
+
+- **A block's declared write scope is recorded as the EDITED surface, and the accept-time gate did not
+  fire on the path that wrote outside it** (2026-08-09, medium, LEAD). `CP-BLOCK-CP-NODE-1` declared
+  `touched_files: [runLedger.ts, remediationOutcome.ts]`; git shows both with **zero diff** while the
+  worker wrote `attributionContract.ts`, `index.ts` and a test file (`14677902`), and the node recorded
+  `resolved`. `access_memory.json` records `edited_count: 1` for the two never-touched files and knows
+  nothing of the three written — it harvests the DECLARED surface
+  (`src/remediate/state/accessMemory.ts:59`), intent presented as fact
+  [[write-only-data-looks-authoritative]]. `enforceWriteScope`
+  (`src/remediate/steps/dispatch/writeScope.ts`) fails closed on git ground truth and would have
+  blocked this, so it did not run on this path. **Open:** which dispatch path skips the gate, and
+  whether access-memory should record the git-observed surface. Evidence:
+  [`reviews/observability-dag-scope-join-2026-08-09.md`](../reviews/observability-dag-scope-join-2026-08-09.md).
 
 - **Friction walk (backlog clear-out lap, 2026-07-24):** (1) **ambiguous-direction (medium, two
   instances, same class):** two entries had paraphrased their own incident until the MECHANISM
