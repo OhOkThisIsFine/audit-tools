@@ -93,8 +93,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   ⚠ Rank is not latency: rank-1 `glm-5.2` returned nothing in >15min where `deepseek-v4-flash` answered
   in seconds. Rank-1 is no default for a blocking call. Re-confirmed 2026-07-28: an 836-line analytical
   call to `nim/z-ai/glm-5.2` died `HTTP 504 backend timed out` where small probes answered instantly.
-  ⚠ Dead-lane detection is mechanical: `~/.claude/llm-call.mjs` probes `/health` and exits 3 naming
-  the restart command. That helper is OUTSIDE the repo — re-add the preflight if it is ever reset.
+  ⚠ Dead-lane detection is NOT automatic any more. The helper that preflighted `/health` and exited 3
+  naming the restart command was retired 2026-07-28 and nothing replaced it, so probe the relay
+  yourself before a long dispatch — otherwise a dead lane is indistinguishable from a slow one.
   **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
   returns an empty document instead of refusing loudly.
 
@@ -139,7 +140,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   gate.
 
 - **The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable
-  (2026-07-20, medium).** `~/.claude/llm-call.mjs` inlines each file as raw text. An adversarial
+  (2026-07-20, medium).** A lane that inlines each file as raw text strips them. An adversarial
   review prompt that asks the worker to verify cited `file:line` then cannot be honoured: `glm-5.2`
   answered "NOT VERIFIABLE — the file numbering isn't displayed" to eight consecutive citation checks,
   refuted nothing, and still returned a `premise_false` verdict — an incoherent result that reads as
@@ -157,10 +158,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   shipped (`deadlineBoundFetch` in `src/shared/providers/openAiCompatibleProvider.ts`) and hand-rolling a `node:http`
   transport there was deliberately rejected — undici IS Node's fetch implementation, pure JS, and HTTP
   transport is correctness-sensitive enough to acquire rather than own.
-  (b) **the offload helper is already fixed** — `~/.claude/llm-call.mjs` POSTs via `node:http` with a
-  30-min ceiling (`LLM_TIMEOUT_MS`, request-option `timeout`), so a plain
-  `node ~/.claude/llm-call.mjs …` call needs nothing from the caller.
-  (c) **a standalone script you hand-roll** (`~/.claude/*.mjs`, scratchpad) — `import("undici")` still
+  (b) **a standalone script you hand-roll** (`~/.claude/*.mjs`, scratchpad) — `import("undici")` still
   does NOT resolve (re-verified 2026-07-24: `ERR_MODULE_NOT_FOUND` from `~/.claude` and from the
   scratchpad; resolves only with the repo as cwd). Use `node:http` — or `node:https` for a non-local
   endpoint — with an explicit request `timeout`.
@@ -211,9 +209,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 - **The free offload lane is the local `llm-relay` broker — it must be RUNNING, and callers should
   request a named pool.** Requests go to `127.0.0.1:8791`; start it with a bare `llm-relay`.
   Three consequences:
-  (a) there is no standalone fallback — `~/.claude/llm-call.mjs` POSTs that one endpoint, preflights
-  `/health`, and exits 3 when nothing is listening, so a failing offload means "start the relay", not
-  "the backend is broken".
+  (a) there is no standalone fallback — every offload call goes to that one endpoint, so a failing
+  offload means "start the relay", not "the backend is broken".
   (b) Address a pool by EFFORT — `pool/low`, `pool/medium`, `pool/high`, `pool/xhigh`. The relay owns
   concrete candidates and failover; putting a provider/model id in audit-tools recreates the duplicate
   configuration this boundary exists to remove. `llm-relay pools --probe` is the concrete-model health
@@ -225,8 +222,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   naming a retired pool resolves green, is admitted as a CapacityPool, and 400s on every packet.
   Bit 2026-08-08: all three declared relay lanes named retired pools. Probe the declared MODEL with a
   real `/v1/chat/completions` round-trip after any relay upgrade — endpoint-alive is not lane-alive.
-  (c) invocation shape differs by consumer: `llm-call.mjs` takes the model as its FIRST POSITIONAL
-  argument, while `--model <spec>` is the *worker/provider* form (claude-worker, codex, agy).
+  (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
   (d) the ladder's agy lane pins can go stale against the installed agy model roster (2026-08-05:
   `agy-claude-sonnet` pinned `claude-sonnet-5`, agy only offers `Claude Sonnet 4.6 (Thinking)`; also

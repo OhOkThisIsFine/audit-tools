@@ -322,9 +322,8 @@
   the observed `UND_ERR_HEADERS_TIMEOUT` storm (9 observations across glm-5.2, deepseek-v4-pro,
   nemotron-3-ultra-550b, qwen3.5-397b) was the CALLER's transport, not lane health: global `fetch`
   rides undici's ~5-min `headersTimeout`, which fires before a big model's FIRST byte on heavyweight
-  analytical calls (no streaming). Both halves are FIXED — `~/.claude/llm-call.mjs` POSTs via
-  `node:http` (`LLM_TIMEOUT_MS`, 30-min default), and the in-repo lane builds a per-launch undici
-  `Agent` bound to the declared `input.timeoutMs` (v0.34.27).
+  analytical calls (no streaming). The in-repo lane is FIXED — it builds a per-launch undici `Agent`
+  bound to the declared `input.timeoutMs` (v0.34.27).
   **What stays open:** a >5-min time-to-first-byte is not exercisable in a unit test — only
   "does not route through global fetch" is pinned. If a live NIM run STILL shows
   `UND_ERR_HEADERS_TIMEOUT` from the in-repo lane, the remaining suspect is genuine roster bimodality
@@ -826,16 +825,14 @@
   saying "default to clean unless you can quote evidence". An adversarial prompt biases toward finding
   something — budget a verification pass per lead
   ([[verify-delegated-findings-mechanism-not-just-citation]]).
-  (3) **inefficient-feeding (low):** `llm-call.mjs --schema <file>` was accepted but the reply came back
-  in the DEFAULT container shape, so a task-shaped schema silently degrades to prose. Unverified whether
-  the helper or the proxy drops it.
+  (3) **inefficient-feeding (low):** a task-shaped schema was accepted but the reply came back in the
+  DEFAULT container shape, so the schema silently degraded to prose.
 
 - **Friction walk (fourth backlog-clearance lap, 2026-07-24):** (1) **inefficient-feeding (medium):**
-  `llm-call.mjs` takes `--schema`, and the DEFAULT container silently flattened a six-part lettered
-  question into one `summary` with `findings: []` — which reads as model incapacity and is not. The
-  helper can detect this: an instruction containing enumerated sub-questions (`A.`/`B.`/`1.`) under the
-  default schema should warn (or refuse) at call time, since the shape mismatch is decidable from the
-  prompt. (2) **tool-should-decide (medium):** the backlog budget baseline is bound to the LIVE file, so
+  the DEFAULT container silently flattened a six-part lettered question into one `summary` with
+  `findings: []` — which reads as model incapacity and is not. A lane taking a schema can detect this:
+  enumerated sub-questions (`A.`/`B.`/`1.`) under the default schema should warn at call time, since
+  the shape mismatch is decidable from the prompt. (2) **tool-should-decide (medium):** the backlog budget baseline is bound to the LIVE file, so
   ratcheting mid-lap and then deleting more entries turns `backlog-budget-unit.test.ts` RED in a way
   that reads as a code regression — it cost a full-suite investigation here. Either ratchet only at
   commit time (a hook), or have the test compare against the COMMITTED file rather than the worktree.

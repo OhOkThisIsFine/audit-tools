@@ -132,18 +132,10 @@
    are added. Re-measure, and only then decide whether anything still needs splitting.
    ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
    for a cluster.
-5. **Decide what happens to the passages describing the RETIRED `~/.claude/llm-call.mjs` as live.**
-   The 2026-08-08 nightly recorded this under "could not cover" because its writer refuses a premise
-   probe aimed at `docs/backlog/`, so it has no channel and needs an answer rather than a sweep. The
-   helper was retired 2026-07-28 and is confirmed absent from disk; six passages in
-   [`durable-traps.md`](backlog/durable-traps.md) (`:96`, `:135`, `:153`, `:155`, `:207`, `:221`) and
-   three in [`open-bugs.md`](backlog/open-bugs.md) (`:325`, `:841`, `:846`) still describe its
-   behaviour as current. The nightly's own note says four and cites older line numbers — it drifted,
-   so re-grep rather than trusting either list. The traps around the dead helper still carry live
-   lessons, which is why deleting them wholesale is a judgment call and not a reference fix.
-   ⬇ The refusal that pushed this item here is now itself a raised decision (nightly `sol-4`,
-   2026-08-09): it blocks three other backlog questions too, and leg 2 has produced zero escalations
-   since it landed. Answering `sol-4` gives this item its proper channel back.
+5. **Answer nightly `sol-4` — leg 2 has no writable escalation channel.** Its writer refuses a premise
+   probe aimed at `docs/backlog/`, which blocks three other backlog questions and is why leg 2 has
+   produced zero escalations since it landed. This is the item that was blocking the retired-helper
+   sweep (now done), so it will keep costing a hand-carried HANDOFF slot until it is answered.
    ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
    SHRINKAGE there. Any edit to that file must come out net-negative.
 
