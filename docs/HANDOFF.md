@@ -16,16 +16,16 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.11 SHIPPED 2026-08-09.** npm live at 0.39.11, both global bins reinstalled and the deferred
+- **v0.39.12 SHIPPED 2026-08-09.** npm live at 0.39.12, both global bins reinstalled and the deferred
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
-  bins report 0.39.11. Release CI run
-  [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005) green across
-  all 6 jobs, critical path 252s (summed 839s). **`v0.39.11` tags `c30bd070`; `main` carries only
-  docs-after-the-tag since, so nothing is unpublished.**
+  bins report 0.39.12. Release CI run
+  [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039) green across
+  all 6 jobs, critical path 274s (summed 819s). **Nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
-  ⚠ This one carries a real BEHAVIOR change, not just docs: a contract-pipeline DAG whose node
-  resolves to an empty write scope is now REFUSED at validation. A pipeline run that previously
-  promoted such a node and died later at dispatch will now be rejected earlier and regenerate.
+  ⚠ This one carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb
+  (`ensure`/`install`/`install-host`/`verify-install`) now prints help on BOTH bins instead of
+  performing the verb. Two of those previously wrote to the repo and to HOME. Verified against the
+  installed global bin, not only in tests.
 - **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
   owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
   the landing refs, so none will be raised again. `sol-4` split the record-path probe refusal by
@@ -52,8 +52,10 @@
 ## Verification state
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005)** (v0.39.11 —
-  gate + all 4 shards green). Read that, not the local run, as the release signal.
+  [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039)** (v0.39.12 —
+  gate + all 4 shards green). Read that, not the local run, as the release signal. `verify:checks`
+  was additionally green locally (exit 0, both packaged smokes) on the clean tree at `b4b785b5`
+  before the bump.
 - **Every one of this lap's four changes is red-green validated, each restored by INVERTING the edit,
   never by checkout** — nine inversions across the four, and in each the named tests went red and
   only those. Two are worth knowing about:
