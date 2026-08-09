@@ -1,7 +1,7 @@
 /**
  * Host fan-out compatibility types.
  *
- * The attended host and llm-relay own provider selection, quota, failover, and
+ * The attended host owns provider selection, quota, failover, and
  * concurrency. audit-tools only prepares the prompts and hands the complete
  * fan-out to the host; it must not create local leases, cooldown state, or
  * livelock pauses for that hand-off.

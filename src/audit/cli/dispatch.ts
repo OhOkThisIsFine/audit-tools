@@ -246,7 +246,7 @@ export async function prepareDispatchArtifacts(params: {
   grantLeases?: boolean;
   /**
    * The attended conversation host owns this dispatch. In this mode audit-tools
-   * only prepares packet artifacts; the host and llm-relay choose providers,
+   * only prepares packet artifacts; the host chooses providers,
    * fail over, pace, and fan out the complete plan. No local admission subset,
    * quota wall, cold-start clamp, or concurrency cap is applied.
    *

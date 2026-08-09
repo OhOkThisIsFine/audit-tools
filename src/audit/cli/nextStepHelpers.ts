@@ -2413,7 +2413,7 @@ async function runHostDelegationObligation(
   const engineEnabled = resolveAuditRollingEngineEnabled({ sessionConfig });
   const hybridCfg = sessionConfig ?? ({} as SessionConfig);
   // An attended host is the review dispatcher. Provider/model policy, ordering,
-  // failover, and concurrency belong to the host plus llm-relay; audit-tools must
+  // failover, and concurrency belong to the host; audit-tools must
   // not auto-resolve a second provider (for example Codex) and compete with it.
   // Keep source-pool discovery only for a genuinely headless invocation, where no
   // host exists to launch the review packets.

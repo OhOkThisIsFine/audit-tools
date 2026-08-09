@@ -26,7 +26,7 @@ test("buildSourcePool: an undiscoverable source window remains explicitly unknow
     transport: "claude-worker",
     service: "groq",
     model: "some-unlisted-model-xyz",
-    endpoint: "http://127.0.0.1:8791",
+    endpoint: "http://127.0.0.1:3001",
   };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {}, capabilityRanks: null });
   expect(pool.contextCapTokens).toBeNull();

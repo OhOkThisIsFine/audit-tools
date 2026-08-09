@@ -40,7 +40,7 @@ import type {
   LaunchFreshSessionResult,
 } from "../../src/shared/providers/types.js";
 
-const PROXY_URL = "http://127.0.0.1:8791";
+const PROXY_URL = "http://127.0.0.1:3001";
 
 const WORKER_CONFIG: ClaudeWorkerConfig = {
   endpoint: PROXY_URL,

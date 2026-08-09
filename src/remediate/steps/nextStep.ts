@@ -2432,7 +2432,7 @@ async function buildImplementDispatchStep(ctx: {
       const reverifyCmd = loaderCommand(`reverify-node --id <BLOCK_ID> --run-id ${runId}`);
       const hostOwnedRolling = rolling.quotaPath === null;
       const dispatchAuthorityNote = hostOwnedRolling
-        ? `The attended host and llm-relay own provider selection, failover, quota, and
+        ? `The attended host owns provider selection, failover, quota, and
 concurrency. Dispatch the COMPLETE eligible set of ${rolling.session.frontier.length}
 node(s) below; audit-tools imposes no admission subset, cold-start wall, or concurrency
 cap. When they are all accepted, merge and re-invoke next-step.`
@@ -2674,7 +2674,7 @@ ${hostOwnedLegacy ? "" : `\`${implQuotaPath}\``}
 
 Every item in \`items\` is a node whose dependencies are all VERIFIED-COMPLETE
 (INV-RS-01). ${hostOwnedLegacy
-  ? "The attended host and llm-relay own provider selection, failover, quota, and concurrency. Dispatch every item in this complete eligible plan; audit-tools imposes no admission subset, cold-start wall, or concurrency cap."
+  ? "The attended host owns provider selection, failover, quota, and concurrency. Dispatch every item in this complete eligible plan; audit-tools imposes no admission subset, cold-start wall, or concurrency cap."
   : "The tool admitted a budget-bounded subset: dispatch EXACTLY the block ids in the quota file's `admission.granted_packet_ids` and no others — that granted set is the whole grant (there is no separate concurrency cap)."} Each item's
 \`model_hint.tier\` suggests which model to use (small/standard/deep). If your
 provider has rate limits, pace launches accordingly.

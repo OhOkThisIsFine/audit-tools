@@ -75,7 +75,7 @@ export async function renderSemanticReviewStep(params: {
     await loadSessionConfig(artifactsDir),
     params.descriptor,
   );
-  // The host and llm-relay own provider selection, failover, quota, and
+  // The host owns provider selection, failover, quota, and
   // concurrency. Use the non-LLM bookkeeping identity only to let the shared
   // packet sizer apply the host handshake; never auto-resolve or instantiate a
   // second provider here (especially not Codex).
@@ -95,7 +95,7 @@ export async function renderSemanticReviewStep(params: {
     hostModelRoster: params.hostModelRoster,
     hostModelId: params.hostModelId,
     inProcessMadeProgress: params.inProcessMadeProgress,
-    // The conversation host and llm-relay own execution, quota, and concurrency.
+    // The conversation host owns execution, quota, and concurrency.
     // audit-tools still packetizes and records the plan, but must not reserve a
     // host lease or turn its cold-start probe into a host-facing pause/cap.
     grantLeases: false,

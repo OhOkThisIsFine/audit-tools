@@ -190,7 +190,7 @@ ranking, cooldowns, and failover belong to the external broker. A machine-level
 ```json
 {
   "sources": [
-    { "id": "relay-primary", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:8791/v1", "model": "pool/<name>", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 0 }
+    { "id": "router-primary", "transport": "openai-compatible", "endpoint": "http://127.0.0.1:3001/v1", "model": "auto", "no_auth": true, "worker_kind": "single_shot", "capability_rank": 0 }
   ]
 }
 ```

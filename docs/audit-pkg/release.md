@@ -77,7 +77,7 @@ row becomes a backlog item.
 Codex and `agy` are headless CLIs, so they are correctly absent from the GUI-host
 table below. The `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix live e2e (and
 its `runInProcessAuditDispatch` driver) was **retired with the dispatch
-inversion**: the host and llm-relay own concrete provider/model routing now, so
+inversion**: the attended host owns concrete provider/model routing now, so
 audit-tools no longer selects or instantiates those backends for host review and
 the per-backend live round-trip it exercised is no longer this package's seam.
 

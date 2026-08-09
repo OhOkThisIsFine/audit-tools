@@ -419,11 +419,11 @@ describe("probeReachableWithEscalation", () => {
 
 describe("buildLivenessProbeUrls", () => {
   it("checks origin-level health routes for a /v1 relay endpoint", () => {
-    expect(buildLivenessProbeUrls("http://127.0.0.1:8791/v1")).toEqual([
-      "http://127.0.0.1:8791/v1/health/liveliness",
-      "http://127.0.0.1:8791/v1/models",
-      "http://127.0.0.1:8791/health/liveliness",
-      "http://127.0.0.1:8791/health",
+    expect(buildLivenessProbeUrls("http://127.0.0.1:3001/v1")).toEqual([
+      "http://127.0.0.1:3001/v1/health/liveliness",
+      "http://127.0.0.1:3001/v1/models",
+      "http://127.0.0.1:3001/health/liveliness",
+      "http://127.0.0.1:3001/health",
     ]);
   });
 });

@@ -22,8 +22,8 @@ The rule is:
 | **transport** | Which adapter or process launches the work? | `openai-compatible`, `codex`, `claude-worker` |
 | **service** | Which declared capacity/account boundary serves it? | a broker service name or the transport fallback |
 | **account** | Which credential/tenant owns the quota? | an opaque account id |
-| **model** | Which stable broker intent or explicitly selected model is requested? | `pool/<name>` |
-| **locus** | Where is the endpoint or launcher? | `http://127.0.0.1:8791`, `codex` |
+| **model** | Which stable broker intent or explicitly selected model is requested? | `auto`, `<model-id>` |
+| **locus** | Where is the endpoint or launcher? | `http://127.0.0.1:3001`, `codex` |
 
 `source.id` is an operator-provided pool-id override, not an axis. `worker_kind`
 (`agentic` versus `single_shot`) is a capability, not an identity.

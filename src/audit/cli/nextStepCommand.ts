@@ -100,8 +100,7 @@ export {
 
 /**
  * Host-owned fan-out hand-off. The helper remains at the call sites so the
- * obligation shape stays stable, but execution policy belongs to the host and
- * llm-relay; audit-tools never meters, leases, caps, or pauses these panels.
+ * obligation shape stays stable, but execution policy belongs to the host; audit-tools never meters, leases, caps, or pauses these panels.
  */
 async function gateHostFanoutOrPause(params: {
   root: string;

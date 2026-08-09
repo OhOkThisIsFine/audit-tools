@@ -196,7 +196,7 @@ describe("host-review dispatch for a codex-configured run never inherits the cod
   });
 
   it("host-owned dispatch writes no admission quota artifact and inherits no codex identity", async () => {
-    // Post dispatch-inversion the attended host (and llm-relay) own admission:
+    // Post dispatch-inversion the attended host owns admission:
     // finalizeDispatchQuota is headless-only, so this path emits NO dispatch_quota
     // artifact — the inherited-codex-pool leak the original bug charged against is
     // structurally impossible because no capacity pool is persisted at all.

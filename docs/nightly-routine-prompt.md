@@ -36,11 +36,12 @@ Use independent lanes wherever they preserve coverage:
 - **Codex** has repo access and performs its own source inspection:
   `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
   load-bearing; an open stdin makes the process wait indefinitely.
-- **The second independent lane** is reached by activating the `/llm-relay`
-  skill — it owns the current offload/dispatch mechanics (pools, tier mapping,
-  peer-CLI lanes), so this doc never restates routing details that would drift.
-  Treat every reply as an advisory lead and verify it against source; quoted
-  evidence is especially fallible.
+- **The second independent lane** is a separate free-provider session:
+  `powershell -File C:\Users\ethan\freellmapi\claude.ps1 -p "<prompt>"`. The
+  launcher owns the routing mechanics (endpoint, key, model alias), so this doc
+  never restates them and cannot drift from them. Treat every reply as an
+  advisory lead and verify it against source; quoted evidence is especially
+  fallible.
 - If a lane is unavailable, route the work elsewhere. A dead lane may not
   silently shrink coverage; any coverage that still could not run belongs in
   the digest's `skipped` list.
@@ -71,9 +72,9 @@ a 2026-07-19 pass found ~21% of entries stale or already closed, in both
 directions. Deletion requires the same code anchor a doc auto-apply requires.
 
 *Coverage is read from the stamp, never eyeballed.* The mechanical sweep
-(`scripts/shared/triage-backlog.mjs`) resolves its model target live from
-llm-relay, preflights once (a dead lane aborts at entry 0 with the relay's own
-error), and writes `<out>-coverage.json` — model, attempted, classified,
+(`scripts/shared/triage-backlog.mjs`) resolves its model target live from the
+router's roster, preflights once (a dead lane aborts at entry 0 with the
+router's own error), and writes `<out>-coverage.json` — model, attempted, classified,
 errored, aborted — beside the JSONL as it runs. Report leg-2 coverage from that
 stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
 and saying so is the honest sentence three partial runs had to reconstruct by

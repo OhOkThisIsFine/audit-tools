@@ -29,7 +29,7 @@ test("io/artifacts.ts ArtifactPayloadMap carries phase-block comments (ARC-dd468
   // Each phase must appear as a section header comment inside
   // ArtifactPayloadMap so the grouping is visible to human readers.
   // (Phase 0, the provider-confirmation session gate, was retired by the
-  // dispatch inversion — the host and llm-relay own provider selection now.)
+  // dispatch inversion — the attended host owns provider selection now.)
   const requiredComments = [
     "Phase 1",
     "Phase 2",

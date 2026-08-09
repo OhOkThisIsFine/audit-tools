@@ -88,13 +88,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
   ⚠ **Never hand-rotate `model` per batch/retry** — the proxy owns retries and same-tier fallbacks
-  (`~/.llm-relay/config.json` since the 2026-07-28 LiteLLM retirement); caller-side rotation crosses
+  (the router owns them); caller-side rotation crosses
   capability tiers and silently downgrades the call.
   ⚠ Rank is not latency: rank-1 `glm-5.2` returned nothing in >15min where `deepseek-v4-flash` answered
   in seconds. Rank-1 is no default for a blocking call. Re-confirmed 2026-07-28: an 836-line analytical
   call to `nim/z-ai/glm-5.2` died `HTTP 504 backend timed out` where small probes answered instantly.
   ⚠ Dead-lane detection is NOT automatic any more. The helper that preflighted `/health` and exited 3
-  naming the restart command was retired 2026-07-28 and nothing replaced it, so probe the relay
+  naming the restart command was retired 2026-07-28 and nothing replaced it, so probe the router
   yourself before a long dispatch — otherwise a dead lane is indistinguishable from a slow one.
   **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
   returns an empty document instead of refusing loudly.
@@ -196,29 +196,29 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   as `[audit-tools] declared source "<id>" not resolved: <reason>`. After a source-contract change,
   validate the live declaration through `resolveAmbientSources`; do not infer health from a green suite.
 
-- **The free offload lane is the local `llm-relay` broker — it must be RUNNING, and callers should
-  request a named pool.** Requests go to `127.0.0.1:8791`; start it with a bare `llm-relay`.
-  Three consequences:
+- **The free offload lane is a local router — it must be RUNNING, and callers should request the
+  `auto` alias.** Requests go to `127.0.0.1:3001`; start it with
+  `powershell -File C:\Users\ethan\freellmapi\start.ps1`. ⚠ This lane has now outlived THREE
+  transports — two earlier local brokers on other ports were each retired within weeks — so treat
+  any endpoint, port or model name written down here as stale until probed. Three consequences:
   (a) there is no standalone fallback — every offload call goes to that one endpoint, so a failing
-  offload means "start the relay", not "the backend is broken".
-  (b) Address a pool by EFFORT — `pool/low`, `pool/medium`, `pool/high`, `pool/xhigh`. The relay owns
-  concrete candidates and failover; putting a provider/model id in audit-tools recreates the duplicate
-  configuration this boundary exists to remove. `llm-relay pools --probe` is the concrete-model health
-  check. ⚠ The task-named pools (`fast`/`coding`/`reasoning`) were retired at llm-relay v0.15.4 and now
-  400 — ask the relay for the live set rather than trusting any written list, this one included.
-  (b2) **A dead pool NAME passes the reach probe and fails only at work time.** `resolveAmbientSources`
-  proves an `openai-compatible` lane by ENDPOINT liveness (`/v1/models`, `/health`), which a running
-  relay answers regardless of whether the declared `model` resolves. So a `sources-declared.json`
-  naming a retired pool resolves green, is admitted as a CapacityPool, and 400s on every packet.
-  Bit 2026-08-08: all three declared relay lanes named retired pools. Probe the declared MODEL with a
+  offload means "start the router", not "the backend is broken".
+  (b) Address the `auto` alias, not a concrete model. The router owns candidate selection and
+  failover; putting a provider/model id in audit-tools recreates the duplicate configuration this
+  boundary exists to remove. Ask the router's own `/v1/models` for the live roster rather than
+  trusting any written list, this one included.
+  (b2) **A dead model NAME passes the reach probe and fails only at work time.**
+  `resolveAmbientSources` proves an `openai-compatible` lane by ENDPOINT liveness (`/v1/models`,
+  `/health`), which a running router answers regardless of whether the declared `model` resolves. So
+  a `sources-declared.json` naming a retired model resolves green, is admitted as a CapacityPool,
+  and 400s on every packet. Bit 2026-08-08. Probe the declared MODEL with a
   real `/v1/chat/completions` round-trip after any relay upgrade — endpoint-alive is not lane-alive.
   (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
-  (d) the ladder's agy lane pins can go stale against the installed agy model roster (2026-08-05:
-  `agy-claude-sonnet` pinned `claude-sonnet-5`, agy only offers `Claude Sonnet 4.6 (Thinking)`; also
-  `--effort` is rejected for the Claude models). On an "invalid model selection" error, run the same
-  command with a roster model name from the error's list — a relay-config fix belongs in
-  `~/.llm-relay/config.json`, not here.
+  (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:
+  `claude-sonnet-5` pinned, agy only offers `Claude Sonnet 4.6 (Thinking)`; also `--effort` is
+  rejected for the Claude models). On an "invalid model selection" error, re-run with a roster model
+  name from the error's own list, and read the roster rather than hand-typing it.
 
 - **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance
   routine runs as a local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`) and lands
@@ -474,11 +474,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED
   checkout — it runs this repo's hooks and can mutate git state (2026-08-07).** Observed: a
-  trivial one-prompt probe (`ANTHROPIC_BASE_URL` overlay onto llm-relay, `--model pool/<name>`)
+  trivial one-prompt probe (`ANTHROPIC_BASE_URL` overlay onto the local router)
   hit the closeout-challenge Stop hook, spent its whole reply answering it, and PUSHED the
   checkout's unpushed commits on its way out — an uninstructed `git push` of another session's
   in-flight work (benign that day only because every commit was green). The overlay lane DOES
-  work mechanically (the CLI accepts the env override + a relay pool model string), but before
+  work mechanically (the CLI accepts the env override + a router model string), but before
   using it as a worker harness: run workers in an isolated worktree or neutral cwd, set the hook
   bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).

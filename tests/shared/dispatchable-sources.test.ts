@@ -274,7 +274,7 @@ test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend
   // tool-stamped one would re-split exactly the identity `service` exists to merge.
   const proxied: DispatchableSource = {
     transport: "claude-worker",
-    endpoint: "http://127.0.0.1:8791",
+    endpoint: "http://127.0.0.1:3001",
     service: "nim",
     model: "z-ai/glm-5.2",
     worker_kind: "agentic",
@@ -293,7 +293,7 @@ test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend
 test("3c: the transport never enters the identity — service keying, and an operator id outranks it", () => {
   const proxied: DispatchableSource = {
     transport: "claude-worker",
-    endpoint: "http://127.0.0.1:8791",
+    endpoint: "http://127.0.0.1:3001",
     service: "nim",
     model: "z-ai/glm-5.2",
   };

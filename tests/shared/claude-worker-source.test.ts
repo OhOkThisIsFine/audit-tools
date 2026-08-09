@@ -23,7 +23,7 @@ const { validateSessionConfig } = await import(
 const CLAUDE_WORKER: DispatchableSource = {
   id: "claude-worker:nim/z-ai/glm-5.2",
   transport: "claude-worker",
-  endpoint: "http://127.0.0.1:8791",
+  endpoint: "http://127.0.0.1:3001",
   service: "nim",
   model: "z-ai/glm-5.2",
   worker_kind: "agentic",

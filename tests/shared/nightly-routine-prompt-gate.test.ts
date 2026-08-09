@@ -262,13 +262,17 @@ describe("nightly scheduler prompt live parity", () => {
     expect(target).toBe(renderNightlyRoutinePrompt(routine, guidelines));
   });
 
-  it("names the /llm-relay skill as the second lane and carries no retired helper", () => {
+  it("names the free-provider launcher as the second lane and carries no retired helper", () => {
     const target = readFileSync(join(REPO_ROOT, TARGET_PROMPT), "utf8");
-    // Owner determination 979bce8d: the second independent lane is reached by
-    // activating the /llm-relay skill — the skill owns routing mechanics, this
-    // prompt never restates them. The retired llm-call.mjs helper (and the
-    // one-call-at-a-time serialization rule that rode with it) must not resurface.
-    expect(target).toContain("`/llm-relay`");
+    // Owner determination 979bce8d, retargeted 2026-08-09: the second
+    // independent lane is a separate free-provider session. The LAUNCHER owns
+    // the routing mechanics (endpoint, key, model alias), so this prompt never
+    // restates them and cannot drift from them — the same reasoning that
+    // previously pointed at a skill, now that llm-relay is retired. The retired
+    // llm-call.mjs helper (and the one-call-at-a-time serialization rule that
+    // rode with it) must not resurface, and neither may a relay reference.
+    expect(target).toContain("freellmapi\\claude.ps1");
+    expect(target).not.toMatch(/llm-relay/);
     expect(target).not.toMatch(/llm-call\.mjs/);
     expect(target).not.toMatch(/one call at a time/i);
     expect(target).not.toMatch(/POST directly with a TASK-SHAPED json_schema/i);

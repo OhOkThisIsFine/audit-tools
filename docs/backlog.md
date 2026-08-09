@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 173 entr(y/ies) indexed.
+> and at commit). 172 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -156,7 +156,6 @@
 - `forward-tracks.md:282` — CI wall-clock: shard balance and the single-file floor.
 - `forward-tracks.md:289` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:301` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
-- `forward-tracks.md:310` — llm-relay is being deprecated for another tool — repoint the two tracked call sites that shell out to it (owner, 2026-08-09).
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -183,7 +182,7 @@
 - `durable-traps.md:166` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
 - `durable-traps.md:177` — `codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate, not by each spawn site.
 - `durable-traps.md:192` — An unrecognized key in the machine declaration can fail as a missing lane.
-- `durable-traps.md:199` — The free offload lane is the local `llm-relay` broker — it must be RUNNING, and callers should request a named pool.
+- `durable-traps.md:199` — The free offload lane is a local router — it must be RUNNING, and callers should request the `auto` alias.
 - `durable-traps.md:223` — After an unattended run, `git diff` the tracked docs before committing.
 - `durable-traps.md:236` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
 - `durable-traps.md:258` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.

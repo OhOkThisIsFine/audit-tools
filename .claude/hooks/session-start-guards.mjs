@@ -221,12 +221,12 @@ try {
 }
 
 // ── Offload-lane liveness ────────────────────────────────────────────────────
-// The llm-relay proxy is the free offload lane and it has no standalone fallback,
+// The local router is the free offload lane and it has no standalone fallback,
 // so when it is down every delegated call fails — but only once the lap has
 // already planned around delegation. Ten seconds at session start converts a
 // mid-lap stall into a known constraint. Probe only; starting it is the owner's
 // call (a second instance would collide on the port).
-const PROXY_URL = process.env.AUDIT_TOOLS_OFFLOAD_PROBE_URL ?? 'http://127.0.0.1:8791/health';
+const PROXY_URL = process.env.AUDIT_TOOLS_OFFLOAD_PROBE_URL ?? 'http://127.0.0.1:3001/health';
 const proxyUp = await new Promise((resolve) => {
   let settled = false;
   const done = (v) => {
@@ -251,9 +251,9 @@ const proxyUp = await new Promise((resolve) => {
 });
 if (!proxyUp) {
   notes.push(
-    `OFFLOAD LANE DOWN — the llm-relay proxy is not answering on ${PROXY_URL}, and it has no standalone ` +
+    `OFFLOAD LANE DOWN — the local router is not answering on ${PROXY_URL}, and it has no standalone ` +
       'fallback: every delegated recon/review call will fail. Plan this lap without delegation, or start it:\n' +
-      '    llm-relay',
+      '    powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1',
   );
 }
 

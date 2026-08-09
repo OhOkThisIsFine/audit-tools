@@ -47,10 +47,11 @@ retirement still holds.
 
 ## 3. Have an independent lane try to refute the plan
 
-Delegate — do not self-assess; the point is a reader who did not author the plan. Route it through
-the dispatch ladder the `/llm-relay` skill owns: `llm-relay dispatch -t "<task>"` names the lane and
-hands you the exact command to execute. Pass the plan plus the evidence files from step 2 as file
-PATHS in the prompt; never paste file bodies into it.
+Delegate — do not self-assess; the point is a reader who did not author the plan. Pick an
+independent lane and run it yourself: `codex exec --skip-git-repo-check "<prompt>" < /dev/null`
+(closing stdin is load-bearing), `agy -p "<prompt>"`, or a free-provider session via
+`powershell -File C:\Users\ethan\freellmapi\claude.ps1 -p "<prompt>"`. Pass the plan plus the
+evidence files from step 2 as file PATHS in the prompt; never paste file bodies into it.
 
 **Hand the lane the recon rather than the job of redoing it.** What a round must not do is judge work
 it authored — that is independence of *verdict*, and it is the whole point of delegating. Independence

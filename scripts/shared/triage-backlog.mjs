@@ -45,13 +45,13 @@
 // strongest verdict belongs only to probe evaluation in the nightly writer,
 // whose probes are authored to be checkable against the tree.
 //
-//   TRIAGE_MODEL=<spec>        explicit llm-relay spec (pool/<name> or
-//                              <provider>/<model>). DEFAULT IS DISCOVERED LIVE:
-//                              the script asks `llm-relay config get
-//                              routing.pools` and picks medium > low > high >
-//                              xhigh — a hardcoded pool name is a hand-held
-//                              copy of the relay's config and went stale twice
-//                              (pool/fast + pool/coding died at relay v0.15.4).
+//   TRIAGE_MODEL=<spec>        explicit model id served by the router. DEFAULT
+//                              IS DISCOVERED LIVE from the router's own
+//                              /v1/models, preferring the `auto` alias — a
+//                              hardcoded model name is a hand-held copy of the
+//                              router's roster and went stale twice before.
+//   TRIAGE_ENDPOINT=<url>      router origin, default http://127.0.0.1:3001
+//   FREELLMAPI_API_KEY=<key>   router bearer key (dashboard -> Keys)
 //   TRIAGE_CONCURRENCY=<n>     default 3
 //
 // HEALTH CONTRACT (P11, owner decision sol-4 2026-08-06). Three consecutive
@@ -59,7 +59,7 @@
 // fault. Now: (1) the model target is resolved live (above) and an unresolvable
 // lane ABORTS at startup naming the escape; (2) one PREFLIGHT call runs before
 // the sweep — a dead lane fails loudly at entry 0, not silently at entry 154
-// (single attempt, matching the per-entry policy: failover is the relay's job);
+// (single attempt, matching the per-entry policy: failover is the router's job);
 // (3) a COVERAGE STAMP (<out>-coverage.json) records model/attempted/
 // classified/errored/aborted, rewritten as the sweep progresses, so "did leg 2
 // actually cover the backlog" is a number the routine reads, never a wc -l.
@@ -99,7 +99,9 @@ const USAGE = 'Usage: node scripts/shared/triage-backlog.mjs [outPath]';
 if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {
   console.log(USAGE);
   console.log('  outPath                  default .audit-tools/backlog-triage.jsonl');
-  console.log('  TRIAGE_MODEL=<spec>      llm-relay spec; the default is discovered live');
+  console.log('  TRIAGE_MODEL=<spec>      model id; the default is discovered live');
+  console.log('  TRIAGE_ENDPOINT=<url>    router origin, default http://127.0.0.1:3001');
+  console.log('  FREELLMAPI_API_KEY=<key> router bearer key');
   console.log('  TRIAGE_CONCURRENCY=<n>   default 3');
   process.exit(0);
 }
@@ -115,63 +117,69 @@ const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
   : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
-// llm-relay on :8791 — the LiteLLM proxy this script was born against (:4000)
-// was retired 2026-07-28, which left the whole lane dead transport.
+// The router is a local OpenAI-compatible gateway (FreeLLMAPI on :3001 by
+// default). This lane has now outlived two transports — LiteLLM on :4000 and
+// a previous local relay — so nothing about the router is hardcoded beyond the
+// origin, which TRIAGE_ENDPOINT overrides.
+const ENDPOINT = new URL(process.env.TRIAGE_ENDPOINT || 'http://127.0.0.1:3001');
+const API_KEY = process.env.FREELLMAPI_API_KEY || '';
 
-function defaultPoolsCli() {
-  // shell:true so the platform shim (.cmd on Windows) resolves — the same
-  // reason product spawns route through resolveWindowsShimSpawnCommand.
-  const r = spawnSync('llm-relay config get routing.pools', {
-    shell: true,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 15_000,
-  });
+function defaultRosterSource() {
+  const r = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      `fetch(${JSON.stringify(new URL('/v1/models', ENDPOINT).href)},{headers:${JSON.stringify({ authorization: `Bearer ${API_KEY}` })}})` +
+        `.then(r=>r.text()).then(t=>process.stdout.write(t)).catch(e=>{console.error(e.message);process.exit(1)})`,
+    ],
+    { encoding: 'utf8', windowsHide: true, timeout: 15_000 },
+  );
   if (r.error || r.status !== 0) {
-    throw new Error(r.error?.message || (r.stderr || '').trim() || `llm-relay exited ${r.status}`);
+    throw new Error(r.error?.message || (r.stderr || '').trim() || `roster probe exited ${r.status}`);
   }
   return r.stdout;
 }
 
 /**
  * Resolve the model spec: an explicit TRIAGE_MODEL wins verbatim; otherwise the
- * live pool roster is asked for. Never a hardcoded pool name — the relay owns
- * its roster and renames it without telling this script.
+ * router's live roster is asked for. Never a hardcoded model id — the router
+ * owns its roster and changes it without telling this script.
  */
-export function resolveTriageModel(env = process.env, poolsCli = defaultPoolsCli) {
+export function resolveTriageModel(env = process.env, rosterSource = defaultRosterSource) {
   const explicit = env.TRIAGE_MODEL;
   if (typeof explicit === 'string' && explicit.trim() !== '') return explicit.trim();
   let raw;
   try {
-    raw = poolsCli();
+    raw = rosterSource();
   } catch (err) {
     throw new Error(
-      `triage lane cannot resolve a model target: llm-relay pool discovery failed ` +
-        `(${err?.message ?? err}). The lane is DEAD, not slow — fix the relay or set ` +
+      `triage lane cannot resolve a model target: router roster discovery failed ` +
+        `(${err?.message ?? err}). The lane is DEAD, not slow — start the router or set ` +
         `TRIAGE_MODEL=<spec> to bypass discovery.`,
     );
   }
-  let pools;
+  let roster;
   try {
-    pools = JSON.parse(raw);
+    roster = JSON.parse(raw);
   } catch {
     throw new Error(
-      `triage lane cannot resolve a model target: llm-relay returned unparseable pool config ` +
+      `triage lane cannot resolve a model target: router returned an unparseable roster ` +
         `(${String(raw).slice(0, 120)}). Set TRIAGE_MODEL=<spec> to bypass discovery.`,
     );
   }
-  const names = Object.keys(pools ?? {});
-  if (names.length === 0) {
+  const ids = (Array.isArray(roster?.data) ? roster.data : [])
+    .map((m) => (typeof m?.id === 'string' ? m.id : null))
+    .filter(Boolean);
+  if (ids.length === 0) {
     throw new Error(
-      'triage lane cannot resolve a model target: llm-relay reports no configured pools. ' +
+      'triage lane cannot resolve a model target: router reports no available models. ' +
         'Set TRIAGE_MODEL=<spec> to bypass discovery.',
     );
   }
-  // Mechanical classification wants the flash tier (the header notes measure a
-  // heavy reasoner at ~4min/entry vs seconds): medium first, then cheaper, then
-  // heavier, then whatever the roster offers.
-  const preferred = ['medium', 'low', 'high', 'xhigh'].find((n) => names.includes(n)) ?? names[0];
-  return `pool/${preferred}`;
+  // Mechanical classification wants a fast target (the header notes measure a
+  // heavy reasoner at ~4min/entry vs seconds). `auto` delegates that choice to
+  // the router, which is the only thing that knows live health and quota.
+  return ids.includes('auto') ? 'auto' : ids[0];
 }
 
 /** `<out minus .jsonl>-coverage.json` — the leg-2 coverage stamp sidecar. */
@@ -383,8 +391,12 @@ function post(body) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req = http.request(
-      { host: '127.0.0.1', port: 8791, path: '/v1/chat/completions', method: 'POST',
-        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } },
+      { host: ENDPOINT.hostname, port: ENDPOINT.port || 80, path: '/v1/chat/completions', method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(data),
+          ...(API_KEY ? { authorization: `Bearer ${API_KEY}` } : {}),
+        } },
       (res) => {
         let buf = '';
         res.on('data', (d) => (buf += d));
@@ -526,7 +538,7 @@ async function main() {
         // A provider/relay error body has no choices array. Surface ITS message —
         // it names the real cause (and often its own retry-after) — never the
         // information-free `finish_reason=undefined` it used to be reported as.
-        // Deliberately NO retry/backoff here: pool failover is llm-relay's job,
+        // Deliberately NO retry/backoff here: failover is the router's job,
         // and duplicating it in the caller would hide a relay defect.
         if (r?.error || !Array.isArray(r?.choices)) {
           const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);

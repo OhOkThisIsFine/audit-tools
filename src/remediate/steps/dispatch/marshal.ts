@@ -476,7 +476,7 @@ export async function prepareImplementDispatch(
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);
 
   if (waveOptions?.hostOwnedDispatch === true) {
-    // The attended host and llm-relay own provider selection, failover, quota,
+    // The attended host owns provider selection, failover, quota,
     // and concurrency. The marshal's only job here is to hand over the complete
     // eligible plan. Remove a stale generated quota file so merge cannot mistake
     // an earlier headless pass's refusal for this host-owned dispatch.

@@ -1,10 +1,11 @@
 // P11 (nightly sol-4, owner decision 2026-08-06): the leg-2 triage lane's
-// health contract. The model target is resolved LIVE from llm-relay (a
-// hardcoded pool name is a hand-held copy of the relay's config and died twice
-// at relay v0.15.4); an unresolvable lane aborts naming the TRIAGE_MODEL
-// escape; coverage is a recorded stamp, not a wc -l. These tests cover the
-// exported resolution + stamp helpers; importing the module must not start a
-// sweep (the run is guarded behind direct invocation).
+// health contract. The model target is resolved LIVE from the router's own
+// /v1/models (a hardcoded model id is a hand-held copy of the router's roster
+// and has gone stale twice, across two different transports); an unresolvable
+// lane aborts naming the TRIAGE_MODEL escape; coverage is a recorded stamp, not
+// a wc -l. These tests cover the exported resolution + stamp helpers; importing
+// the module must not start a sweep (the run is guarded behind direct
+// invocation).
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,36 +19,40 @@ import {
 
 describe("resolveTriageModel", () => {
   it("uses an explicit TRIAGE_MODEL verbatim, never touching discovery", () => {
-    const model = resolveTriageModel({ TRIAGE_MODEL: "nim/z-ai/glm-5.2" }, () => {
+    const model = resolveTriageModel({ TRIAGE_MODEL: "kimi-k2.6" }, () => {
       throw new Error("discovery must not run when the operator pinned a spec");
     });
-    expect(model).toBe("nim/z-ai/glm-5.2");
+    expect(model).toBe("kimi-k2.6");
   });
 
-  it("discovers the live roster and prefers the medium tier", () => {
-    const model = resolveTriageModel(
-      {},
-      () => JSON.stringify({ low: {}, medium: {}, high: {}, xhigh: {} }),
+  it("discovers the live roster and prefers the router's own auto alias", () => {
+    const model = resolveTriageModel({}, () =>
+      JSON.stringify({ data: [{ id: "kimi-k2.6" }, { id: "auto" }, { id: "glm-4.7" }] }),
     );
-    expect(model).toBe("pool/medium");
+    // `auto` delegates the speed/cost tradeoff to the only component that knows
+    // live health and quota, rather than this script guessing a tier.
+    expect(model).toBe("auto");
   });
 
-  it("falls through the preference order when the preferred tiers are absent", () => {
-    expect(resolveTriageModel({}, () => JSON.stringify({ xhigh: {}, high: {} }))).toBe("pool/high");
-    expect(resolveTriageModel({}, () => JSON.stringify({ bespoke: {} }))).toBe("pool/bespoke");
+  it("falls back to the first advertised model when auto is absent", () => {
+    expect(
+      resolveTriageModel({}, () => JSON.stringify({ data: [{ id: "glm-4.7" }, { id: "kimi-k2.6" }] })),
+    ).toBe("glm-4.7");
   });
 
   it("aborts loudly when discovery fails, naming the escape", () => {
     expect(() =>
       resolveTriageModel({}, () => {
-        throw new Error("connect ECONNREFUSED 127.0.0.1:8791");
+        throw new Error("connect ECONNREFUSED 127.0.0.1:3001");
       }),
     ).toThrow(/DEAD, not slow.*TRIAGE_MODEL=/s);
   });
 
   it("aborts loudly on an unparseable or empty roster", () => {
     expect(() => resolveTriageModel({}, () => "not json")).toThrow(/TRIAGE_MODEL=/);
-    expect(() => resolveTriageModel({}, () => "{}")).toThrow(/no configured pools/);
+    expect(() => resolveTriageModel({}, () => JSON.stringify({ data: [] }))).toThrow(
+      /no available models/,
+    );
   });
 });
 
