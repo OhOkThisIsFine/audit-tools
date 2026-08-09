@@ -22,7 +22,13 @@
   [31297966782](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31297966782) green across
   all 6 jobs, critical path 246s (summed 850s). **Tag and `main` are level at `148c1734` — no gap.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
-- **The owner's three nightly answers are APPLIED and the queue is EMPTY** (`af37bbad`). `docs-1`:
+- **The nightly queue holds FOUR unanswered propositions** (`7a0bb2da`, 2026-08-09) — `sol-1` a
+  Bash-tool guard rule for env vars unset in that shell, `sol-2` both shipped bins running the
+  installer on `<verb> --help`, `sol-3` the leg-2 sweep's `gone` verdict being wrong every time it
+  fires, `sol-4` leg 2 having no writable escalation channel since 2026-08-06. Each carries options
+  and a full proposal under `.audit-tools/nightly/proposals/`; answer by ticking a box in
+  [`nightly-inbox.md`](nightly-inbox.md), then `npm run nightly:ingest`.
+- **The owner's three earlier answers are APPLIED and recorded DONE** (`af37bbad`). `docs-1`:
   CLAUDE.md now states Node 22+, matching `engines >=22`. `sol-1`: the shipped
   <!-- doc-citation-exempt: naming the file this lap deleted is the point of the sentence -->
   `examples/catalog/sources-declared.json` is DELETED rather than re-pinned — its three model values
