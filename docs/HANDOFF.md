@@ -117,21 +117,11 @@
    in-place repair: the artifacts are unrecoverable, CP-NODE-1's contract is already on main
    (`14677902`), and the stale `remediation/dispatch-effectiveness-observability` branch + worktree get
    cleaned up with it.
-   **`/design-check` steps 1–2 are DONE — verdict clean, do not redo them.** No retirement collision:
-   `deriveFinalizedModuleContracts` (`src/remediate/contractPipeline/derive.ts:225`) is a strict
-   `drafts.map(...)` carrying `name` verbatim, and `63034e58`'s message states the invariant outright
-   ("carry the interface fields verbatim … LLM finalization stays only as the gate-failure /
-   judge-repair fallback"). So the gate is a POST-CONDITION on a documented guarantee, and that LLM
-   fallback is the only writer that can break it. Two facts the plan needs: the drafted payload is not
-   in scope at the critic block and needs its own `readContractArtifact(artifactsDir,
-   "module_contracts")`; and adding an 8th entry to `evaluateContractPipelineCrossGates` touches no
-   production consumer (both `.flat()`/iterate) but does break four `toHaveLength(7)` assertions in
-   `tests/remediate/validate-artifact-cross-gates.test.ts`.
-   **Still open:** step 3's refutation is PARTIAL (the adjacent-strand answer returned; the
-   retirement and failing-test questions died on lane timeouts) and step 4's failing test is unwritten
-   — that is the resume point. ⚠ A delegated lane claimed a module-name gate already exists in that
-   7-gate list; it does NOT ([`contractPipelineGates.ts:1628`](../src/remediate/validation/contractPipelineGates.ts)) —
-   taken at face value it would close this item as already-solved. [[verify-delegated-findings-mechanism-not-just-citation]]
+   **Resume at `/design-check` step 3.** Steps 1–2 are done and the retirement verdict is CLEAN — the
+   gate is a post-condition on a guarantee `63034e58` already states, evidence in `72f87e2e`. Step 3's
+   refutation is partial and step 4's failing test is unwritten.
+   ⚠ A delegated lane claimed a module-name gate already exists among the cross-gates; it does NOT.
+   Believed, it closes this item as already-solved. [[verify-delegated-findings-mechanism-not-just-citation]]
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing
