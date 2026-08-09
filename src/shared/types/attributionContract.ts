@@ -146,6 +146,25 @@ export type DispatchAttemptOutcome = z.infer<
 export const DispatchAttemptRowSchema = z
   .object({
     row_kind: z.literal("attempt"),
+    /**
+     * Produced by `buildAttemptKey` (`audit-tools/shared`, single-sourced beside the
+     * other key derivations) over {packet task ids, bound pool id, emit-source
+     * discriminator}. Deterministic and replay-stable: nothing minted, nothing
+     * positional.
+     *
+     * ⚠ The originating contract specified this as hashing "the admission identity
+     * the admission-control seam already mints". No such identity exists — verified
+     * against source 2026-08-09 — and the nearest candidates all fail: `lease_id` is
+     * null on the unmetered default lane, `packet_id` is a position ordinal that
+     * renumbers on re-partition, and `newInstanceId` is random. `buildAttemptKey`'s
+     * docblock carries the full reasoning.
+     *
+     * ROW-SET INVARIANT: rows are expected to be UNIQUE per attempt_key. Two
+     * concurrent admissions of one packet to one pool under one emit-source are one
+     * logical attempt by design, so the producer dedupes on write rather than every
+     * consumer deduping on read — `deriveAggregates` is a pure fold and counts rows.
+     * No producer exists yet; whatever emits these rows must honour this.
+     */
     attempt_key: z.string().min(1),
     ...AttributionTripleSchema.shape,
     lens: OptionalLensSchema,

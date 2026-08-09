@@ -12,6 +12,8 @@ import {
   VERDICT_DETAILS,
   VERDICT_STAGES,
   asOpaqueModelId,
+  buildAttemptKey,
+  buildResultContentDiscriminator,
   classifyDetail,
   deriveAggregates,
   isLegalDetail,
@@ -801,5 +803,135 @@ describe("dispatch effectiveness attribution contract", () => {
         ?.attempts_admitted,
     ).toBe(1);
     expect(aggregates.verdicts).toEqual({});
+  });
+});
+
+// The attempt_key repair. The originating contract derived this key from "the
+// admission identity the admission-control seam already mints", which does not
+// exist — the design survived three adversarial laps because those lanes were
+// scoped to the pipeline's own artifacts and could not read src/. These tests pin
+// the properties the replacement derivation must actually have.
+describe("buildAttemptKey", () => {
+  const DISCRIMINATOR = buildResultContentDiscriminator({ source: "base" });
+
+  it("is deterministic for the same packet, pool and emit-source", () => {
+    const a = buildAttemptKey({
+      packet_task_ids: ["task-b", "task-a"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    });
+    const b = buildAttemptKey({
+      packet_task_ids: ["task-b", "task-a"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    });
+    expect(a).toBe(b);
+  });
+
+  // The defect this repair exists for. partitionTaskGraph assigns packet_id as a
+  // position ordinal (`packet-${i + 1}`) AFTER a sort, so a resume that
+  // re-partitions the remaining tasks renumbers it. A key keyed on packet_id would
+  // move for the same tasks; keying on the task ids is what survives the resume.
+  it("is replay-stable: identical for the same task SET regardless of order", () => {
+    const before = buildAttemptKey({
+      packet_task_ids: ["alpha", "beta", "gamma"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    });
+    const afterRepartition = buildAttemptKey({
+      packet_task_ids: ["gamma", "alpha", "beta"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    });
+    expect(afterRepartition).toBe(before);
+  });
+
+  // INV-CAP-1: a provider that ran and failed must be distinguishable from one
+  // that never ran. An unbound attempt therefore cannot share a key with a bound
+  // one over the same packet. This is where candidate (c) died.
+  it("keys an unbound (stranded) attempt distinctly from a bound one", () => {
+    const shared = {
+      packet_task_ids: ["task-a"],
+      result_content_discriminator: DISCRIMINATOR,
+    };
+    expect(buildAttemptKey({ ...shared, bound_pool_id: null })).not.toBe(
+      buildAttemptKey({ ...shared, bound_pool_id: "pool-1" }),
+    );
+  });
+
+  it("moves when any single component moves", () => {
+    const base = {
+      packet_task_ids: ["task-a"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    } as const;
+    const baseline = buildAttemptKey(base);
+    expect(buildAttemptKey({ ...base, packet_task_ids: ["task-z"] })).not.toBe(baseline);
+    expect(buildAttemptKey({ ...base, bound_pool_id: "pool-2" })).not.toBe(baseline);
+    expect(
+      buildAttemptKey({
+        ...base,
+        result_content_discriminator: buildResultContentDiscriminator({
+          source: "redispatch",
+          attempt: 2,
+        }),
+      }),
+    ).not.toBe(baseline);
+  });
+
+  // A re-dispatch is distinguished by EMIT SOURCE, exactly as idempotencyKey does
+  // it — no minted id, no counter the dispatch layer would have to persist.
+  it("separates a redispatch from the base attempt, and each retry from the last", () => {
+    const shared = { packet_task_ids: ["task-a"], bound_pool_id: "pool-1" } as const;
+    const first = buildAttemptKey({
+      ...shared,
+      result_content_discriminator: buildResultContentDiscriminator({
+        source: "redispatch",
+        attempt: 1,
+      }),
+    });
+    const second = buildAttemptKey({
+      ...shared,
+      result_content_discriminator: buildResultContentDiscriminator({
+        source: "redispatch",
+        attempt: 2,
+      }),
+    });
+    const base = buildAttemptKey({ ...shared, result_content_discriminator: DISCRIMINATOR });
+    expect(new Set([first, second, base]).size).toBe(3);
+  });
+
+  // fail-3: refuse rather than mint a key that silently collides.
+  it("refuses a missing component instead of hashing a hole", () => {
+    expect(() =>
+      buildAttemptKey({
+        packet_task_ids: [],
+        bound_pool_id: "pool-1",
+        result_content_discriminator: DISCRIMINATOR,
+      }),
+    ).toThrow(/packet_task_ids/u);
+    expect(() =>
+      buildAttemptKey({
+        packet_task_ids: ["task-a"],
+        bound_pool_id: "",
+        result_content_discriminator: DISCRIMINATOR,
+      }),
+    ).toThrow(/bound_pool_id/u);
+    expect(() =>
+      buildAttemptKey({
+        packet_task_ids: ["task-a"],
+        bound_pool_id: "pool-1",
+        result_content_discriminator: "",
+      }),
+    ).toThrow(/result_content_discriminator/u);
+  });
+
+  it("produces a key the contract schema accepts", () => {
+    const key = buildAttemptKey({
+      packet_task_ids: ["task-a"],
+      bound_pool_id: "pool-1",
+      result_content_discriminator: DISCRIMINATOR,
+    });
+    expect(DispatchAttemptRowSchema.shape.attempt_key.safeParse(key).success).toBe(true);
   });
 });

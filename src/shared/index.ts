@@ -480,6 +480,7 @@ export type {
   ResultContentDiscriminatorInput,
   IdempotencyKeyInput,
   ContentKeyInput,
+  AttemptKeyInput,
 } from "./contentKey.js";
 export {
   buildTaskContentSignature,
@@ -490,6 +491,7 @@ export {
   identityKey,
   idempotencyKey,
   contentKey,
+  buildAttemptKey,
   newInstanceId,
 } from "./contentKey.js";
 

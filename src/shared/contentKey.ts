@@ -358,10 +358,79 @@ export function contentKey(input: ContentKeyInput): string {
   );
 }
 
+/** Input to {@link buildAttemptKey}. */
+export interface AttemptKeyInput {
+  /**
+   * The task ids the packet carries. Order-insensitive: sorted before hashing, so
+   * a re-partition that reorders the same tasks yields the same identity.
+   */
+  packet_task_ids: readonly string[];
+  /**
+   * The pool the packet was bound to, or `null` when it was never bound (a
+   * stranded or provider_unavailable attempt). `null` is a distinct hashed value,
+   * never a sentinel string — a sentinel could collide with a real pool id.
+   */
+  bound_pool_id: string | null;
+  /** Output of {@link buildResultContentDiscriminator} — the emit-source component. */
+  result_content_discriminator: string;
+}
+
+/**
+ * sha256 over {packet_identity, bound_pool_id, result_content_discriminator}, where
+ * packet_identity is itself sha256 over the packet's SORTED task ids.
+ *
+ * ⚠ Deliberately NOT keyed on `packet_id`. That field is a position ordinal —
+ * `partitionTaskGraph` assigns `packet-${i + 1}` after a sort, so a resume that
+ * re-partitions the remaining tasks renumbers it, and the same tasks come back under
+ * a different id. Hashing the task ids instead is what makes this replay-stable.
+ *
+ * ⚠ Also deliberately NOT keyed on any per-admission identity. The dispatch layer
+ * mints none: the `engine_admitted` record carries no such field, `lease_id` is null
+ * on the unmetered pools that are the default lane, `packet_id` is explicitly the
+ * field that repeats, and `newInstanceId` is random so a resume cannot reproduce it.
+ * The contract that specified one was wrong about the codebase.
+ *
+ * This follows `idempotencyKey`'s precedent exactly — distinguish a re-dispatch by
+ * EMIT SOURCE rather than by a minted id — and inherits its accepted consequence:
+ * two concurrent admissions of the same packet to the same pool with the same
+ * emit-source are ONE logical attempt. A stranded attempt keys distinctly from an
+ * admitted one because `bound_pool_id` differs, which is what lets the row set
+ * distinguish a provider that ran and failed from one that never ran.
+ *
+ * Throws rather than minting a colliding key when a component is missing (fail-3).
+ */
+export function buildAttemptKey(input: AttemptKeyInput): string {
+  const ids = input?.packet_task_ids;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error(
+      'buildAttemptKey: packet_task_ids is required and must be a non-empty array',
+    );
+  }
+  for (const id of ids) {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new Error('buildAttemptKey: every packet_task_ids entry must be a non-empty string');
+    }
+  }
+  const bound_pool_id = input.bound_pool_id;
+  if (bound_pool_id !== null && (typeof bound_pool_id !== 'string' || bound_pool_id.length === 0)) {
+    // `null` is meaningful (never bound); undefined/'' is a caller bug, and
+    // folding it into null would silently merge a stranded row with a bound one.
+    throw new Error('buildAttemptKey: bound_pool_id must be a non-empty string or explicitly null');
+  }
+  const result_content_discriminator = requireField(
+    input?.result_content_discriminator,
+    'result_content_discriminator',
+  );
+  const packet_identity = sha256(stableStringify([...ids].sort()));
+  return sha256(
+    stableStringify({ packet_identity, bound_pool_id, result_content_discriminator }),
+  );
+}
+
 /**
  * Mint a fresh per-record instance id (CE-001 / fail-2). The ledger keys on this,
  * so every appended record is distinct and identityKey/idempotencyKey are never
- * primary keys. This is the ONLY non-deterministic helper in the seam — the three
+ * primary keys. This is the ONLY non-deterministic helper in the seam — the four
  * key derivations above are pure.
  */
 export function newInstanceId(): string {
