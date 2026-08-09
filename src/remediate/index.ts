@@ -359,14 +359,38 @@ program
     process.exit(result.status === "reverified" ? 0 : 1);
   });
 
-program
-  .command("ensure")
-  .description("Repair/check global /remediate-code host assets")
-  .option("--root <path>", "Repository root", ".")
-  .option("--quiet", "Suppress all output")
-  .action(async (options) => {
-    ensureGlobalAssets(options.quiet ?? false, console.log, homedir(), resolve(options.root));
-  });
+// The four installer verbs are intercepted by the remediate-code bin BEFORE the
+// dist CLI is reached (`remediate-code.mjs` main), so nothing registered here can
+// run them. `ensure` used to be registered WITH an action calling
+// `ensureGlobalAssets` — unreachable through the bin, which calls
+// `installer.ensureBootstrap` instead. So the help page described one
+// implementation while the bin ran another, and the dead one was invisible.
+//
+// They stay registered, description-only, because `--help` must list the bin's
+// real surface. `wrapper/installer-verb-help.mjs` is the single source for these
+// summaries; the wrapper is `.mjs` and this tree is typechecked TypeScript with
+// no allowJs, so a contract test pins the two lists rather than an import.
+const BIN_ROUTED_INSTALLER_VERBS: ReadonlyArray<readonly [string, string]> = [
+  ["ensure", "lazily bootstraps repo-local /remediate-code assets when they are missing or stale"],
+  ["install", "bootstraps /remediate-code into supported repo-local host surfaces"],
+  ["install-host", "installs /remediate-code into ONE named host surface (--host <name>)"],
+  ["verify-install", "smoke-tests the generated host assets after an install"],
+];
+
+for (const [verb, summary] of BIN_ROUTED_INSTALLER_VERBS) {
+  program
+    .command(verb)
+    .description(`${summary} — handled by the remediate-code bin, not the dist CLI`)
+    .action(() => {
+      // Reachable only by invoking dist directly, bypassing the bin. Say so
+      // rather than silently doing nothing, which is what a description-only
+      // command would do.
+      console.log(
+        `${verb} is handled by the remediate-code bin, not the dist CLI. ` +
+          `Run: remediate-code ${verb} --help`,
+      );
+    });
+}
 
 program
   .command("validate-artifacts")

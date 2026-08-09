@@ -297,3 +297,12 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   planned change:** whether the obligation id should be DERIVED from the decomposition rather than
   authored alongside it, so the join cannot be broken by a rename at all.
   [[prefix-join-between-two-name-spaces-fails-empty]]
+
+- **`ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely
+  dead.** Deleting the shadowed `ensure` ACTION (sol-2, 2026-08-09) removed its only non-test caller:
+  the bin routes `ensure` to `installer.ensureBootstrap` in `wrapper/`, never to
+  `src/remediate/index.ts`. It stays exported and its tests still pass, so default-mode knip cannot
+  see it — this is exactly the tested-but-unwired class CLAUDE.md assigns to the periodic manual
+  `knip --production` audit. The open question is whether the wrapper's `ensureBootstrap` already
+  covers the global-asset half it writes, in which case both it and
+  `src/remediate/utils/hostAssets.ts`'s comment naming it go too.

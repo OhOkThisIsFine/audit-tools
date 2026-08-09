@@ -15,6 +15,9 @@ import { spawnSync } from "child_process";
 // on a published install where wrapper/ is present but for the normal run path we
 // never pay to resolve it — and unit tests that copy this file alone still load.
 const INSTALLER_MODULE = "./wrapper/remediate-code-wrapper-install-hosts.mjs";
+// Same lazy treatment, same reason: the verb list and help bodies are shared
+// with audit-code so the two bins cannot document the same verb differently.
+const VERB_HELP_MODULE = "./wrapper/installer-verb-help.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distEntry = join(__dirname, "dist", "remediate", "index.js");
@@ -133,6 +136,21 @@ export async function main(argv = process.argv.slice(2)) {
   // these manage repo-local host assets and never touch the built orchestrator.
   const verb = argv[0];
   if (verb === "install" || verb === "ensure" || verb === "verify-install" || verb === "install-host") {
+    // An informational flag never performs work. These verbs are intercepted
+    // here, so commander's native `<verb> --help` never reaches them — without
+    // this, `remediate-code install --help` ran the installer and wrote four
+    // files. "Ask the tool what this does" is the likeliest first command a new
+    // operator types, and two of these verbs write to the repo and to HOME.
+    const { wantsInstallerVerbHelp, installerVerbHelp } = await import(VERB_HELP_MODULE);
+    if (wantsInstallerVerbHelp(argv)) {
+      console.log(
+        installerVerbHelp(verb, {
+          usageName: "remediate-code.mjs",
+          product: "/remediate-code",
+        }),
+      );
+      return;
+    }
     const installer = await import(INSTALLER_MODULE);
     if (verb === "install") await installer.installBootstrap(argv.slice(1));
     else if (verb === "ensure") await installer.ensureBootstrap(argv.slice(1));

@@ -15,6 +15,7 @@ import {
   _getInstallProfile,
   _renderGeminiCommandToml,
 } from './audit-code-wrapper-install-hosts.mjs';
+import { wantsInstallerVerbHelp, installerVerbHelp } from './installer-verb-help.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
@@ -285,6 +286,16 @@ export async function runAuditCodeWrapper({
 
   if (hasLeadingFlag(argv, '--version') || hasLeadingFlag(argv, '-v')) {
     console.log(await readPackageVersion());
+    return;
+  }
+
+  // An informational flag never performs work. The installer verbs are handled
+  // here rather than by the dist CLI, so commander's native `<verb> --help` never
+  // reaches them — without this, `install --help` INSTALLED. hasLeadingFlag
+  // cannot answer it: it stops at the first non-flag token by design, so a dist
+  // command's own `-h`/`-v` is forwarded rather than hijacked (CE-007).
+  if (wantsInstallerVerbHelp(argv)) {
+    console.log(installerVerbHelp(argv[0], { usageName, product: '/audit-code' }));
     return;
   }
 

@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 170 entr(y/ies) indexed.
+> and at commit). 171 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -154,6 +154,7 @@
 - `forward-tracks.md:280` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
 - `forward-tracks.md:282` — CI wall-clock: shard balance and the single-file floor.
 - `forward-tracks.md:289` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:301` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
 
 ### [`deferred.md`](backlog/deferred.md)
 
