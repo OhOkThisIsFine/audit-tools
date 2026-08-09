@@ -37,13 +37,14 @@
   **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
   switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
   [`durable-traps.md`](backlog/durable-traps.md).
-  ⚠ **The free router changed under this lap (2026-08-09).** `app/.env` gained
-  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload` and the router RESTARTED mid-session; while that
-  lane is on, the `/v1` **Anthropic** surface delegates auth upstream, so a router-local key now 401s
-  there with an Anthropic-shaped `request_id`. Dispatch directly against
-  `POST /v1/chat/completions` with `Authorization: Bearer <key>`, which still authenticates locally.
-  Do NOT diagnose this as a dead pool — the router answered a probe in 0.4s throughout. Full trap,
-  plus the `finish_reason: max_tokens` and listed-but-unreachable-model traps, in
+  ⚠ **Subagent offload went LIVE under this lap (2026-08-09)** — `app/.env` gained
+  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload` and the router restarted mid-session. The
+  credential you send picks the lane; the global `CLAUDE.md` holds the table. For a window right after
+  that restart, `POST /v1/messages` with the router key forwarded UPSTREAM and 401'd with an
+  Anthropic-shaped `request_id`; **re-probed 15 min later it worked, so that was transient — do not
+  treat it as a permanent surface property.** Triage by error shape (Anthropic `request_id` = delegated
+  upstream; `Invalid API key` with no id = the router; `All models exhausted` = pool). Those traps,
+  plus `finish_reason: max_tokens` and listed-but-unreachable models, are in
   [`durable-traps.md`](backlog/durable-traps.md).
   ⚠ **The declared offload lane is DEAD right now**, which matters for dispatch in the resumed run:
   every `remediate-code next-step` reports four unresolved `relay-*` sources at `127.0.0.1:8791` — the

@@ -535,18 +535,22 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   which is the same shape the shell-trap guard already forces on suite commands for the exit-code
   reason.
 
-- **The free router's `/v1` Anthropic surface DELEGATES auth while the passthrough lane is on, so a
-  router-local key 401s there (2026-08-09).** `app/.env` gained
-  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload`, which splits a Claude Code session pointed at
-  the router: subagent turns to the free pool, everything else forwarded to Anthropic **under the
-  caller's own credential**. Its side effect is the trap — while on, the router stops validating its
-  own `freellmapi-…` key on `/v1/messages` and forwards it upstream, so a direct call that worked
-  minutes earlier starts failing with `invalid x-api-key` and an **Anthropic-shaped `request_id`
-  (`req_011C…`)**. That id is the tell: the router's own refusal reads `Invalid API key` with no
-  request id. The router had also RESTARTED mid-session, so the config flip was invisible. Use the
-  OpenAI-compatible surface `POST /v1/chat/completions` with `Authorization: Bearer <key>` for direct
-  dispatch — it still authenticates locally. ⚠ This also makes the global `CLAUDE.md` claim that
-  FreeLLMAPI has "no outbound Anthropic provider at all" **stale**.
+- **Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key
+  UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).** When
+  `FREELLMAPI_ANTHROPIC_PASSTHROUGH=subagent-offload` is enabled the server delegates auth on the
+  whole `/v1` Anthropic surface. In the minutes after the restart that enabled it, `POST /v1/messages`
+  with the `freellmapi-…` key returned `invalid x-api-key` carrying an **Anthropic-shaped `request_id`
+  (`req_011C…`)** — the request had left the machine. **Re-probed ~15 min later the same call
+  succeeded**, so the documented credential table (unified key → everything free) does hold; the
+  failure was a startup window, and treating it as a permanent surface property would send every
+  later session to the wrong endpoint.
+  **How to tell it apart from a dead pool**, which is the mistake this entry exists to stop: an
+  Anthropic `request_id` means auth was delegated upstream (wait and re-probe); the router's own
+  refusal reads `Invalid API key` with **no** request id; and a pool problem says
+  `rate_limit_error` / `All models exhausted` with a reset time. `POST /v1/chat/completions` with
+  `Authorization: Bearer <key>` kept working throughout and is the safe fallback surface.
+  ⚠ Check `Get-Process` start time on the listener before diagnosing anything — the router restarts on
+  config change, so behaviour can flip under a running session with nothing in `server.log`.
 
 - **A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s
   (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung

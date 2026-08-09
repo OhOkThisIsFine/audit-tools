@@ -213,10 +213,10 @@
 - `durable-traps.md:507` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
 - `durable-traps.md:518` — Every `remediate-code next-step` announces four DEAD offload sources, and the port they name is the retired proxy's (2026-08-09).
 - `durable-traps.md:529` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:538` — The free router's `/v1` Anthropic surface DELEGATES auth while the passthrough lane is on, so a router-local key 401s there (2026-08-09).
-- `durable-traps.md:551` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
-- `durable-traps.md:558` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
-- `durable-traps.md:569` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:538` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
+- `durable-traps.md:555` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
+- `durable-traps.md:562` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
+- `durable-traps.md:573` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
 
 <!-- END GENERATED SEEK INDEX -->
 
