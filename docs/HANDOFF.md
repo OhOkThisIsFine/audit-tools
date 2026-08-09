@@ -93,7 +93,9 @@
 
 1. **Decide the fate of `remediation/dispatch-effectiveness-observability` (pushed, 2 commits), then
    repair its two upstream defects.** The observability feature request ran through the contract
-   pipeline (3 adversarial laps → judge approved) into implementation. CP-NODE-1 landed
+   pipeline (3 adversarial laps → judge approved) into implementation. CP-NODE-1 landed the shared
+   attribution-contract type surface on that branch;
+   <!-- doc-citation-exempt: the module lives on the unmerged remediation branch, not on main -->
    `src/shared/types/attributionContract.ts`; CP-NODE-2/3/4 are halted. Two repairs gate the rest,
    neither fixable by retry: (a) `attempt_key` rests on an admission identity the dispatch layer does
    NOT mint — verified against source, `lease_id` is null on the unmetered lane, `packet_id` repeats
