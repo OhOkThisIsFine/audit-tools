@@ -16,28 +16,26 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.9 SHIPPED 2026-08-08.** npm live at 0.39.9, both global bins reinstalled and the deferred
+- **v0.39.10 SHIPPED 2026-08-08.** npm live at 0.39.10, both global bins reinstalled and the deferred
   postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
-  bins report 0.39.9. Release CI run
-  [31244546675](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31244546675) green across
-  all 6 jobs, critical path 294s (summed 854s). **Tag and `main` are level — no gap.**
-- **v0.39.7 was burned and is deliberately absent** — its gate job failed on five eslint errors and
-  the release + tag were deleted (`gh release delete --cleanup-tag`), then forward-bumped. A gap in
-  the version sequence is expected, not a missing publish.
-- **The analyzer sweep's dedup cluster is COMPLETE — 10 of 10.** Items 6 and 8 landed this lap,
-  along with the `providers/index.ts` descriptor twin that item 4 had exposed. What each one
-  actually turned out to be — and where the written spec was wrong — is in
-  [`reviews/dedup-cluster-2026-08-07b.md`](reviews/dedup-cluster-2026-08-07b.md).
-- **"Built in N places" was a floor twice more, not a count.** Item 6a's spec said two branches; the
-  family was three (`prepareContractDispatch` builds the same notice pair for the contract pass).
-  Item 8's spec named three drivers, one of which (`run-wrapper.mjs`) turned out not to be a driver
-  at all, while the real third (`next-step-harness.advancePastDesignReview`) went unmentioned. Grep
-  the whole family before sizing any remaining extraction — `extraction-spec-scope-is-a-floor`.
-- **Item 8 exposed a test that never called its subject.** `"advancePastDesignReview throws on
-  unknown pause kind"` asserted against a hand-copied replica of the walker declared inside the test
-  body; the production helper could have been deleted and it would have stayed green. Now driven
-  against real code. It is a defect CLASS no gate catches — the sweep for siblings is a backlog
-  entry in [`open-bugs.md`](backlog/open-bugs.md), which carries the tell and the remedy.
+  bins report 0.39.10. Release CI run
+  [31297966782](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31297966782) green across
+  all 6 jobs, critical path 246s (summed 850s). **Tag and `main` are level at `148c1734` — no gap.**
+  (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
+- **The owner's three nightly answers are APPLIED and the queue is EMPTY** (`af37bbad`). `docs-1`:
+  CLAUDE.md now states Node 22+, matching `engines >=22`. `sol-1`: the shipped
+  <!-- doc-citation-exempt: naming the file this lap deleted is the point of the sentence -->
+  `examples/catalog/sources-declared.json` is DELETED rather than re-pinned — its three model values
+  named llm-relay pools retired at v0.15.4, so the example the README told operators to copy failed
+  every dispatch. `examples/README.md` now documents the shape in prose with no runnable values.
+  `sol-2`: `triage-backlog.mjs` no longer treats `--help` as its output filename.
+  ⚠ **The sol-1 sweep was wider than the item stated** — a fourth dead-name copy sat in
+  `examples/auditor-descriptor/self-with-sources.json`, named nowhere in the item. Record channels
+  (`docs/reviews/`, `.audit-tools/`, the decisions ledger) are deliberately untouched.
+- **Record the constitutional-doc override AFTER staging the complete set, never before.** It binds
+  to an exact staged-tree hash and names only the constitutional docs in *that* tree, so attesting
+  against a partial stage both invalidates on the next `git add` and can under-cover the real commit.
+  [[constitutional-override-binds-to-final-staged-tree]]
 - **⚠ Offload from a Desktop session is shell-out ONLY, and lane quality varies sharply.** Subagents
   here bypass the relay entirely. `llm-relay dispatch` works, but of three long DeepSeek recon jobs
   two died with `API Error: Server error mid-response` after ~10min and the third took ~25min, while
@@ -59,18 +57,20 @@
 ## Verification state
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31244546675](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31244546675)** (v0.39.9 —
+  [31297966782](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31297966782)** (v0.39.10 —
   gate + all 4 shards green). Read that, not the local run, as the release signal.
-- A LOCAL full suite also covers this source, unlike the last two releases: **592 files passed /
-  4 skipped, 7684 passed / 15 skipped, 264.9s**, on a clean committed tree at `f6f99cb3`. The test
-  count is identical to the pre-lap run, which is the expected signature of a pure split plus a
-  rewritten-in-place test.
-- Each landing was additionally verified before its commit: `build` + `check` + `check:tests` +
-  `check:lint` + `check:deadcode` + `check:depgraph` green, plus targeted suites — 180 tests across
-  the 9 design-review/conceptual suites and 68 in graph-manifest-edges (item 6), 166/2-skipped across
-  12 provider suites (providers twin), 65 across the 15 harness-affected suites (item 8), 7 across
-  the three new wrapper files (T4).
-- **The shard-duration baseline is now CURRENT** — regenerated from this lap's 596-file run.
+- The pre-release lap was additionally verified locally on the clean committed tree at `af37bbad`:
+  the whole `verify:checks` green (exit 0, including `pack:smoke` and both packaged smokes), plus
+  `ci` and `audit-code-test-suite` green on that commit before the bump. Targeted suites: 55 tests
+  across the three affected suites (`examples-session-config`, `auditor-sources`,
+  `triage-lane-health`).
+- **The arg guard is red-green validated both ways** — no junk files under a flag, and a flag-shaped
+  `argv[2]` no longer exits an *importer*. That second half matters: `triage-lane-health.test.ts`
+  imports the module and its stated invariant is that importing must not start a sweep, so an
+  unconditional `process.exit` in the guard would have killed the test worker. Both guards are bound
+  to a single-sourced `IS_CLI`.
+- **The shard-duration baseline is still CURRENT** — regenerated from the 596-file run one lap ago;
+  nothing this lap changed test counts materially.
 - **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
   `7ebb8976`). It previously ran `npm run check` alone — a typecheck — which is how v0.39.7 got
   tagged with eslint errors; `tsc` cannot see an unused destructured binding. Expect ~2min at the
@@ -126,6 +126,17 @@
    are added. Re-measure, and only then decide whether anything still needs splitting.
    ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
    for a cluster.
+5. **Decide what happens to the passages describing the RETIRED `~/.claude/llm-call.mjs` as live.**
+   The 2026-08-08 nightly recorded this under "could not cover" because its writer refuses a premise
+   probe aimed at `docs/backlog/`, so it has no channel and needs an answer rather than a sweep. The
+   helper was retired 2026-07-28 and is confirmed absent from disk; six passages in
+   [`durable-traps.md`](backlog/durable-traps.md) (`:96`, `:135`, `:153`, `:155`, `:207`, `:221`) and
+   three in [`open-bugs.md`](backlog/open-bugs.md) (`:325`, `:841`, `:846`) still describe its
+   behaviour as current. The nightly's own note says four and cites older line numbers — it drifted,
+   so re-grep rather than trusting either list. The traps around the dead helper still carry live
+   lessons, which is why deleting them wholesale is a judgment call and not a reference fix.
+   ⚠ `open-bugs.md` is 129,560 bytes against the 120,000 ceiling — grandfathered, so the budget gate
+   accepts only SHRINKAGE there. Any edit to that file must come out net-negative.
 
 ### Standing notes — not tasks
 
