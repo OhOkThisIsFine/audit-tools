@@ -62,12 +62,12 @@ afterEach(async () => {
 // ── evaluateContractPipelineCrossGates — unit ──────────────────────────────────
 
 describe("evaluateContractPipelineCrossGates", () => {
-  it("returns 7 sub-arrays, all empty, for an empty payload map (no false-fail on nothing)", () => {
+  it("returns 8 sub-arrays, all empty, for an empty payload map (no false-fail on nothing)", () => {
     const result = evaluateContractPipelineCrossGates({
       payloads: new Map(),
       root: "/does/not/matter",
     });
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
     for (const gateIssues of result) {
       expect(gateIssues).toEqual([]);
     }
@@ -86,7 +86,7 @@ describe("evaluateContractPipelineCrossGates", () => {
       ],
     ]);
     const result = evaluateContractPipelineCrossGates({ payloads, root: "/does/not/matter" });
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
     for (const gateIssues of result) {
       expect(gateIssues).toEqual([]);
     }
@@ -128,7 +128,7 @@ describe("evaluateContractPipelineCrossGates", () => {
       ],
     ]);
     const result = evaluateContractPipelineCrossGates({ payloads, root: "/does/not/matter" });
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
     const [gate1, ...rest] = result;
     expect(gate1.length).toBeGreaterThan(0);
     expect(gate1.some((i) => i.message.includes("CE-006"))).toBe(true);
@@ -138,7 +138,7 @@ describe("evaluateContractPipelineCrossGates", () => {
     }
   });
 
-  it("a 7-failing-inputs matrix fails all 7 gates, in the fixed canonical order", async () => {
+  it("an 8-failing-inputs matrix fails all 8 gates, in the fixed canonical order", async () => {
     const root = await makeTempDir(); // plain dir, no git init → gate 7 fails closed
 
     const obligationLedger = {
@@ -201,10 +201,17 @@ describe("evaluateContractPipelineCrossGates", () => {
       modules: [{ name: "installer", file_scope: ["src/anything.ts"] }],
     }; // gate 7: unreadable git tree → fails closed
 
+    // gate 8: the drafts name a module the finalized contracts above dropped
+    // (they carry only modA), which is the 7→4 collapse shape.
+    const draftedContracts = {
+      module_contracts: [{ name: "modA" }, { name: "modB" }],
+    };
+
     const payloads = new Map<ContractPipelineArtifactName, unknown>([
       ["goal_spec", { source_type: "structured_audit" }],
       ["obligation_ledger", obligationLedger],
       ["test_validator_plan", testValidatorPlan],
+      ["module_contracts", draftedContracts],
       ["finalized_module_contracts", finalizedContracts],
       ["seam_reconciliation_report", seamReport],
       ["contract_assessment_report", assessment],
@@ -217,7 +224,7 @@ describe("evaluateContractPipelineCrossGates", () => {
     }; // gate 3: F-UNCOVERED maps to no obligation
 
     const result = evaluateContractPipelineCrossGates({ payloads, findingEnumeration, root });
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
     result.forEach((gateIssues, i) => {
       expect(gateIssues.length, `gate index ${i} expected to fail`).toBeGreaterThan(0);
     });

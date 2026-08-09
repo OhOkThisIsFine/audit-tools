@@ -15,6 +15,7 @@ import {
   validateEvidenceThreaded,
   validateDigestCoverage,
   validateReconciliationDerivation,
+  validateFinalizedModuleSetPreserved,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
 } from "../../src/remediate/validation/contractPipeline.js";
@@ -771,6 +772,68 @@ async function writeDag(nodes: unknown[]): Promise<void> {
     created_at: CREATED_AT,
   });
 }
+
+describe("validateFinalizedModuleSetPreserved (INV-CO-13)", () => {
+  const drafted = (...names: string[]) => ({
+    module_contracts: names.map((name) => ({ name })),
+  });
+
+  it("passes when the finalized contracts carry exactly the drafted module names", () => {
+    expect(
+      validateFinalizedModuleSetPreserved(drafted("a", "b", "c"), drafted("a", "b", "c")),
+    ).toEqual([]);
+  });
+
+  it("ignores ORDER — the gate is a set comparison, not a sequence comparison", () => {
+    expect(validateFinalizedModuleSetPreserved(drafted("a", "b"), drafted("b", "a"))).toEqual([]);
+  });
+
+  it("names every dropped module, listing the full drafted set as the fix", () => {
+    const issues = validateFinalizedModuleSetPreserved(
+      drafted("attribution-contract", "verdict-capture-audit", "effectiveness-render"),
+      drafted("attribution-contract"),
+    );
+    expect(issues).toHaveLength(2);
+    expect(issues.every((i) => i.severity === "error")).toBe(true);
+    const rendered = issues.map((i) => `${i.path} ${i.message}`).join("\n");
+    expect(rendered).toMatch(/verdict-capture-audit/);
+    expect(rendered).toMatch(/effectiveness-render/);
+  });
+
+  it("reports a merged/renamed module as BOTH a drop and an invention", () => {
+    // The observed collapse: two drafted modules replaced by one invented name.
+    const issues = validateFinalizedModuleSetPreserved(
+      drafted("verdict-capture-audit", "verdict-capture-remediate"),
+      drafted("verdict-capture"),
+    );
+    const rendered = issues.map((i) => i.message).join("\n");
+    expect(rendered).toMatch(/verdict-capture-audit/);
+    expect(rendered).toMatch(/verdict-capture-remediate/);
+    expect(rendered).toMatch(/in no drafted module contract/);
+  });
+
+  it("rejects a repeated module name, which is set-equal to the drafts but still loses content", () => {
+    // Consumers key by name and keep the FIRST entry, so the second is discarded.
+    const issues = validateFinalizedModuleSetPreserved(
+      drafted("a", "b"),
+      { module_contracts: [{ name: "a" }, { name: "b" }, { name: "b" }] },
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/appears more than once/);
+    expect(issues[0].message).toMatch(/keeps the FIRST entry/);
+  });
+
+  it("is absent-tolerant on both sides so a partial pipeline never false-fails", () => {
+    // Every shape a run reaches BEFORE finalization, plus malformed payloads.
+    expect(validateFinalizedModuleSetPreserved(undefined, undefined)).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(drafted("a"), undefined)).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(undefined, drafted("a"))).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved({}, {})).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved("nonsense", 42)).toEqual([]);
+    // A drafted payload naming no module cannot establish ground truth.
+    expect(validateFinalizedModuleSetPreserved(drafted(), drafted("a"))).toEqual([]);
+  });
+});
 
 describe("evaluatePreCriticStructuralGate (S5 pre-adversarial structural floor)", () => {
   beforeEach(async () => {

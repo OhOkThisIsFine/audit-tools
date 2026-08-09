@@ -321,6 +321,7 @@ export {
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   validateDecompositionFileScope,
+  validateFinalizedModuleSetPreserved,
   evaluateContractPipelineCrossGates,
   enumerateRepoTreePaths,
   isInsideGitWorkTree,

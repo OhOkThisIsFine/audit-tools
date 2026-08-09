@@ -1542,9 +1542,107 @@ export function validateDecompositionFileScope(
   return issues;
 }
 
+// ── INV-CO-13: the finalized module SET is preserved from the drafts ──────────
+
+/** Non-empty `name` values of a `{module_contracts: [...]}` payload, in order. */
+function moduleContractNames(payload: unknown): string[] {
+  const record = isRecord(payload) ? payload : {};
+  const modules = Array.isArray(record.module_contracts) ? record.module_contracts : [];
+  const names: string[] = [];
+  for (const mod of modules) {
+    if (isRecord(mod) && typeof mod.name === "string" && mod.name.length > 0) {
+      names.push(mod.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * INV-CO-13 — `finalized_module_contracts` must carry EXACTLY the module names
+ * its drafted `module_contracts` input carries. Finalization is a mechanical
+ * merge (`deriveFinalizedModuleContracts` maps the drafts 1:1), and the
+ * contract_finalization role text says "for every module contract in
+ * module_contracts", so this is a POST-CONDITION on a guarantee the pipeline
+ * already states — not a new authoring requirement on any host.
+ *
+ * It exists because the derive is not the only writer: a judge repair or a
+ * critique repair re-emits `contract_finalization` as an LLM step, and that
+ * rewrite re-enters through ingestion, whose validator for this artifact
+ * (`validateFinalizedModuleContracts`) is shape-only and structurally cannot see
+ * the drafts. An LLM rewrite that merges two modules under an invented name and
+ * drops a third is therefore shape-valid, and every downstream consumer — the
+ * phase cut, the derived obligation ids, and the DAG write-scope prefix join —
+ * is then built on a module set that has already silently lost a module. That is
+ * not hypothetical: it collapsed 7 modules to 4 in the
+ * dispatch-effectiveness-observability run and stranded two DAG nodes with an
+ * empty write scope (docs/reviews/observability-dag-scope-join-2026-08-09.md).
+ *
+ * Ground truth is unambiguous and no host discretion is involved, so this is an
+ * exact comparison rather than any form of tolerant matching: a renamed module is
+ * reported as BOTH a drop and an invention, which is exactly what it is. It checks
+ * multiplicity as well as membership — a repeated name is set-equal to the drafts
+ * but still loses content, since consumers keep the first entry per name.
+ *
+ * Absent-tolerant on both sides (a run that has not reached finalization yet, or
+ * a partial single-artifact self-check, must never fabricate an issue).
+ */
+export function validateFinalizedModuleSetPreserved(
+  draftedModuleContracts: unknown,
+  finalizedModuleContracts: unknown,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(draftedModuleContracts) || !Array.isArray(draftedModuleContracts.module_contracts)) {
+    return issues;
+  }
+  if (
+    !isRecord(finalizedModuleContracts) ||
+    !Array.isArray(finalizedModuleContracts.module_contracts)
+  ) {
+    return issues;
+  }
+  const drafted = new Set(moduleContractNames(draftedModuleContracts));
+  const finalizedNames = moduleContractNames(finalizedModuleContracts);
+  const finalized = new Set(finalizedNames);
+  if (drafted.size === 0) return issues;
+
+  const dropped = [...drafted].filter((name) => !finalized.has(name)).sort();
+  const invented = [...finalized].filter((name) => !drafted.has(name)).sort();
+  // Multiplicity, not just membership: a name repeated in the finalized contracts
+  // is set-equal to the drafts and would slip past the comparison above, but every
+  // consumer keys modules BY NAME and keeps the first occurrence
+  // (`finalizedModulesByName`, contractPipeline/derive.ts) — so the second entry's
+  // interface is silently discarded, which is the same content loss by another route.
+  const duplicated = [
+    ...new Set(finalizedNames.filter((name, i) => finalizedNames.indexOf(name) !== i)),
+  ].sort();
+
+  for (const name of dropped) {
+    pushValidationIssue(
+      issues,
+      `finalized_module_contracts.module_contracts[${name}]`,
+      `Drafted module "${name}" is missing from finalized_module_contracts. Finalization carries every drafted module through verbatim — it may adjust a module's interface per the seam reconciliation, but it may never drop, merge, or rename one. Re-emit the finalized contracts with all ${drafted.size} drafted module(s): ${[...drafted].sort().join(", ")}.`,
+    );
+  }
+  for (const name of invented) {
+    pushValidationIssue(
+      issues,
+      `finalized_module_contracts.module_contracts[${name}]`,
+      `Module "${name}" appears in finalized_module_contracts but in no drafted module contract. Finalization may not invent or merge module names — downstream obligation ids and the DAG write-scope join are keyed on the drafted names, so an invented name resolves to an empty scope. Use only the drafted module names: ${[...drafted].sort().join(", ")}.`,
+    );
+  }
+  for (const name of duplicated) {
+    pushValidationIssue(
+      issues,
+      `finalized_module_contracts.module_contracts[${name}]`,
+      `Module "${name}" appears more than once in finalized_module_contracts. Every consumer keys modules by name and keeps the FIRST entry, so the duplicate's interface is silently discarded. Emit exactly one finalized contract per drafted module.`,
+    );
+  }
+  return issues;
+}
+
 // ── Single-sourced cross-gate SET (MNT — validate-artifact self-check parity) ──
 //
-// The 7 CROSS-artifact gates below (as opposed to the per-artifact structural
+// The 8 CROSS-artifact gates below (as opposed to the per-artifact structural
 // CONTRACT_PIPELINE_VALIDATORS) are run by BOTH the plural `validate-artifacts`
 // sweep (validation/artifacts.ts) and the singular `validate-artifact --name X`
 // self-check (index.ts). Single-sourcing them here means a self-check can never
@@ -1570,7 +1668,7 @@ export interface ContractPipelineCrossGateInputs {
 }
 
 /**
- * Evaluate the SAME 7 cross-artifact gates the plural `validate-artifacts`
+ * Evaluate the SAME 8 cross-artifact gates the plural `validate-artifacts`
  * sweep runs, returning one `ValidationIssue[]` PER gate in a FIXED canonical
  * order (never a flattened single array — callers that need per-gate issue
  * counts, e.g. INV-CVG-1's "one issue-string entry per failing gate", rely on
@@ -1600,6 +1698,9 @@ export interface ContractPipelineCrossGateInputs {
  *      record with a `nodes` array.
  *   7. validateDecompositionFileScope  — returns [] when moduleDecompositionPayload
  *      is not a record with a `modules` array.
+ *   8. validateFinalizedModuleSetPreserved — returns [] unless BOTH the drafted
+ *      and the finalized module contracts are records with a `module_contracts`
+ *      array (and the drafted one names at least one module).
  *
  * So a partial pipeline (most artifacts absent — e.g. a single-artifact
  * self-check in an otherwise-empty run) can never false-fail: every gate
@@ -1618,6 +1719,7 @@ export function evaluateContractPipelineCrossGates(
   const obligationLedger = payloads.get("obligation_ledger");
   const testValidatorPlan = payloads.get("test_validator_plan");
   const finalizedContracts = payloads.get("finalized_module_contracts");
+  const draftedContracts = payloads.get("module_contracts");
   const seamReport = payloads.get("seam_reconciliation_report");
   const assessment = payloads.get("contract_assessment_report");
   const judge = payloads.get("judge_report");
@@ -1633,6 +1735,7 @@ export function evaluateContractPipelineCrossGates(
     validateDesignSpecGates(finalizedContracts, obligationLedger),
     validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
     validateDecompositionFileScope(moduleDecomposition, root),
+    validateFinalizedModuleSetPreserved(draftedContracts, finalizedContracts),
   ];
 }
 

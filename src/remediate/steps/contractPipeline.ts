@@ -119,6 +119,7 @@ import {
   validateWorkBlockSeamPreparation,
   validateReconciliationDerivation,
   validateContractCitationGrounding,
+  validateFinalizedModuleSetPreserved,
   deriveNodeModelTierFromNode,
 } from "../validation/contractPipeline.js";
 import type { Finding } from "audit-tools/shared";
@@ -2045,6 +2046,62 @@ Every contract-pipeline artifact must share the same goal_id. The following mism
 ${goalIdErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
 
 Rewrite the output so its goal_id matches the goal_id established in goal_spec.json.
+${rejectionRewriteInstruction(archived)}`,
+      );
+    }
+  }
+
+  // 2.55. Finalized-module-SET gate (INV-CO-13). `deriveFinalizedModuleContracts`
+  //      maps the drafts 1:1, so the deterministic path can never violate this —
+  //      but it is not the only writer: a judge repair or a critique repair
+  //      re-emits contract_finalization as an LLM step, and that rewrite is
+  //      ingested under a SHAPE-ONLY validator that structurally cannot see the
+  //      drafts. A rewrite that merges modules under an invented name and drops
+  //      another is therefore accepted, and the phase cut, the derived obligation
+  //      ids and the DAG write-scope join are all then built on a module set that
+  //      has already lost a module.
+  //
+  //      DELIBERATELY PHASE-INDEPENDENT, like the goal-ID gate above, rather than
+  //      hung off `nextPhase === "critic"`. Rewriting finalized_module_contracts
+  //      stales its declared dependent conceptual_design_critique, which is
+  //      archived at step 2 BEFORE nextPhase is computed — so the phase right
+  //      after a corrupting rewrite is `critique`, not `critic`. Gating at the
+  //      critic boundary would not fire until critique, obligation_ledger,
+  //      cyclic_seam_resolution, test_validator_plan and assessment had all been
+  //      re-spent on the collapsed set. Here it refuses on the same invocation
+  //      that ingests the rewrite — before the phase cut, before the DAG, and
+  //      before any dispatch.
+  //
+  //      The corrupted artifact is archived rather than repaired in place: the
+  //      re-emitted phase is the one that OWNS the finalized contracts, and if
+  //      the host simply re-runs next-step instead, the now-absent artifact makes
+  //      nextPhase `contract_finalization`, whose deterministic derive rebuilds
+  //      the correct set from the drafts. Both exits are valid states; neither is
+  //      the collapsed one.
+  {
+    const draftedContracts = envelopePayload(
+      await readContractArtifact(artifactsDir, "module_contracts"),
+    );
+    const finalizedContracts = envelopePayload(
+      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+    );
+    const moduleSetErrors = validateFinalizedModuleSetPreserved(
+      draftedContracts,
+      finalizedContracts,
+    ).filter((issue) => issue.severity === "error");
+    if (moduleSetErrors.length > 0) {
+      const archived = await archiveContractArtifact(
+        artifactsDir,
+        "finalized_module_contracts",
+        "invalid",
+      );
+      return buildPhaseStep(
+        "contract_finalization",
+        `## Finalized Module Set Does Not Match the Drafted Contracts
+
+Finalization carries every drafted module contract through — it may incorporate seam-reconciliation decisions into a module's interface, but it may never drop, merge, rename, or invent a module. The following mismatches were detected:
+
+${moduleSetErrors.map((issue) => `- [${issue.path}] ${issue.message}`).join("\n")}
 ${rejectionRewriteInstruction(archived)}`,
       );
     }

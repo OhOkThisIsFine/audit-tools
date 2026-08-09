@@ -366,6 +366,80 @@ describe("clean run: approved judge verdict proceeds to implementation planning"
 });
 
 // ---------------------------------------------------------------------------
+// The finalized module-name SET must equal the drafted module-name set.
+// `deriveFinalizedModuleContracts` preserves the drafts 1:1, so the deterministic
+// path can never violate this — but an LLM repair/critique rewrite of
+// finalized_module_contracts re-enters through ingestion, whose validator for this
+// artifact is shape-only (`validateFinalizedModuleContracts(value, path)`) and
+// structurally cannot see the drafts. A rewrite that invents a merged module name
+// and drops a drafted one is therefore accepted, and every downstream artifact
+// (phase cut, obligation ids, DAG write-scope join) is built on a module set that
+// has already silently lost a module.
+// ---------------------------------------------------------------------------
+describe("finalized module set is gated against its drafted module_contracts input", () => {
+  it("refuses a finalized rewrite that drops a drafted module and invents a merged name", async () => {
+    const all = payloads();
+    // goal_spec..contract_assessment_report — the point the critic is dispatched.
+    for (const name of CHAIN_THROUGH_JUDGE.slice(0, 11)) {
+      await writeRawArtifact(name, all[name]);
+    }
+    // The rewrite shape observed in the dispatch-effectiveness-observability run:
+    // the drafted module is gone, replaced by a merged name present in NO other
+    // artifact. The drafted module_contracts above still declare `auth-module`.
+    await writeRawArtifact("finalized_module_contracts", {
+      ...all.finalized_module_contracts,
+      module_contracts: all.finalized_module_contracts.module_contracts.map((mod) => ({
+        ...mod,
+        name: "auth-capture",
+      })),
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+
+    // The dropped drafted module must be named back to the phase that owns the
+    // finalized contracts — not discovered downstream at the dispatch wall.
+    expect(prompt).toMatch(/Per-Module Contract Finalization/);
+    expect(prompt).toMatch(/auth-module/);
+    // And the adversarial budget must NOT be spent on the collapsed module set.
+    expect(prompt).not.toMatch(/Adversarial Critic/);
+  });
+
+  // Placement, not just existence. The corrupting rewrite arrives through the
+  // judge/critique REPAIR path, and rewriting finalized_module_contracts stales
+  // its declared dependent conceptual_design_critique — which is archived before
+  // `nextPhase` is computed, so the next phase is `critique`, NOT `critic`. A gate
+  // wired only into the `nextPhase === "critic"` block therefore does not fire
+  // until critique, obligation_ledger, cyclic_seam_resolution, test_validator_plan
+  // and assessment have all been re-spent on the collapsed module set.
+  it("refuses on the invocation right after the rewrite, before re-spending the back half", async () => {
+    await writeRawChainThroughJudge();
+    // Settle the full chain into validated envelopes first.
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+
+    // Now the repair rewrite lands: same artifact, a module name present in no
+    // other artifact, exactly as an LLM re-author produced in the real run.
+    const all = payloads();
+    await writeRawArtifact("finalized_module_contracts", {
+      ...all.finalized_module_contracts,
+      module_contracts: all.finalized_module_contracts.module_contracts.map((mod) => ({
+        ...mod,
+        name: "auth-capture",
+      })),
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+
+    expect(prompt).toMatch(/Per-Module Contract Finalization/);
+    expect(prompt).toMatch(/auth-module/);
+    // The very next step must not be any downstream phase re-authored on the
+    // collapsed set — critique is the first of the five.
+    expect(prompt).not.toMatch(/Conceptual Design Critique/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CP-NODE-3: state-transition equivalence fixture
 //
 // Pins the full phase-progression table of buildNextContractPipelineStep:
