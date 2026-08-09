@@ -20,8 +20,8 @@
   0.39.13, both global bins reinstalled and the deferred postinstall run manually (npm skips it on
   `-g`) — 6 host integrations deployed, 0 failed; both bins report 0.39.13. Release CI run
   [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177) green across
-  all 6 jobs, critical path 286s (summed 830s). **`v0.39.13` tags `f2a2e9c2`; `main` is level with
-  the tag, so nothing is unpublished.**
+  all 6 jobs, critical path 286s (summed 830s). **`v0.39.13` tags `f2a2e9c2`; `main` carries only
+  docs-after-the-tag since, so nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
 - **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
   owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
