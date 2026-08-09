@@ -36,6 +36,7 @@ const BYPASS_VARS = [
   'AUDIT_TOOLS_ALLOW_DESTRUCTIVE_RESTORE',
   'AUDIT_TOOLS_ALLOW_BACKTICKS',
   'AUDIT_TOOLS_ALLOW_MASKED_EXIT',
+  'AUDIT_TOOLS_ALLOW_UNSET_ENV',
 ];
 
 interface HookPayload {
@@ -151,6 +152,51 @@ describe('shell-trap-guard: Bash-tool syntax traps', () => {
 
   it('mktemp as a SEARCH TERM (`rg mktemp docs`) is not an invocation', () => {
     expect(runHook(SHELL_GUARD, bash('rg mktemp docs/')).code).toBe(0);
+  });
+
+  // P15 (nightly sol-1, owner decision 2026-08-09). $TMPDIR is not set by Git
+  // Bash here and $CLAUDE_PROJECT_DIR is a hook-invocation variable Claude Code
+  // substitutes into .claude/settings.json command lines, never exported to a
+  // tool shell. An unset name expands to the EMPTY STRING, so the failure names
+  // the wrong cause — hit four times on four dates, the last one with an
+  // accurate durable-traps entry already written, which is why it is now a rule.
+  it('blocks a DOUBLE-QUOTED $TMPDIR expansion (the form every observed hit took)', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, bash('npm run check > "$TMPDIR/parity.log" 2>&1'));
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/\$TMPDIR/);
+    expect(stderr).toMatch(/EMPTY STRING/);
+  });
+
+  it('blocks a BARE $TMPDIR expansion', () => {
+    expect(runHook(SHELL_GUARD, bash('cat $TMPDIR/out.txt')).code).toBe(2);
+  });
+
+  it('blocks ${CLAUDE_PROJECT_DIR}, the braced form, and names it', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash('node "${CLAUDE_PROJECT_DIR}/.claude/hooks/x.mjs"'),
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/CLAUDE_PROJECT_DIR/);
+  });
+
+  it('does not fire on a SINGLE-quoted $TMPDIR — inside single quotes it is inert text', () => {
+    expect(runHook(SHELL_GUARD, bash("rg '$TMPDIR' docs/")).code).toBe(0);
+  });
+
+  it('does not fire when the command SETS the variable itself (correct usage)', () => {
+    expect(runHook(SHELL_GUARD, bash('TMPDIR=/c/tmp; node x.mjs "$TMPDIR/a"')).code).toBe(0);
+  });
+
+  it('honours AUDIT_TOOLS_ALLOW_UNSET_ENV as a deliberate inline bypass', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('AUDIT_TOOLS_ALLOW_UNSET_ENV=1 cat "$TMPDIR/x"')).code,
+    ).toBe(0);
+  });
+
+  it('does not fire on an unrelated variable whose name merely CONTAINS a listed one', () => {
+    // The name regex must match a whole variable name: TMPDIR_OTHER is not TMPDIR.
+    expect(runHook(SHELL_GUARD, bash('echo "$TMPDIR_OTHER/x"')).code).toBe(0);
   });
 });
 

@@ -163,16 +163,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   scratchpad; resolves only with the repo as cwd). Use `node:http` — or `node:https` for a non-local
   endpoint — with an explicit request `timeout`.
 
-- **`$TMPDIR` is UNSET in the Bash tool, so `"$TMPDIR/x"` writes to the shell's install dir
-  (2026-07-25, low).** A heredoc to `"$TMPDIR/plan.md"` became `/plan.md` → `Permission denied`, and the
-  reader then resolved it against cwd as `C:\Program Files\Git\plan.md`. The failure is loud but names
-  the wrong cause (it reads as a missing file, not an unset var). Write scratch files to the session
-  scratchpad path by its absolute value; never assume a POSIX temp var is exported.
-  Same class, confirmed 2026-07-28: **`$CLAUDE_PROJECT_DIR` is also unset in the Bash tool** — it is a
-  hook-invocation variable (the hook command lines in `.claude/settings.json` resolve it), not a shell
-  export, so `"$CLAUDE_PROJECT_DIR/.audit-tools/x.log"` becomes the root path `/.audit-tools/x.log` and
-  fails. Any env var seen only in hook command lines is suspect in a tool shell.
-
 - **An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right
   (2026-07-20, medium).** A NIM (`glm-5.2`) call to verify an axis claim returned an accurate
   per-call-site breakdown that correctly refuted the claim — but attributed sentences to

@@ -22,6 +22,7 @@ import {
   splitShellStatements,
   stripHeredocBodies,
   findLiveBackticks,
+  findLiveExpansions,
 } from './shell-split.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -256,6 +257,53 @@ if (isBash) {
       '`mktemp` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that node / the packaged CLI ' +
         'cannot resolve — it is re-rooted at the Windows CWD.\n' +
         '  fix: use the session scratchpad directory (an absolute `C:/...` path) for temp files.',
+    );
+  }
+
+  // An env var that is UNSET in this shell expands to the empty string, and the
+  // failure names the wrong cause: `> "$TMPDIR/x.log"` becomes `> /x.log` →
+  // "Permission denied" (reads as a temp-dir permissions problem), and a path
+  // read back later resolves against the Windows CWD as
+  // `C:\Program Files\Git\x.log` (reads as a missing file). Hit 2026-07-25,
+  // -07-28, -07-29 and again 2026-08-09 — the last one WITH an accurate
+  // durable-traps entry already written, which is why this is a rule and not
+  // prose. [[an-advisory-that-fires-and-is-read-past]]
+  //
+  // Enumerated, not heuristic. `TMPDIR` is simply not set by Git Bash here;
+  // `CLAUDE_PROJECT_DIR` is a HOOK-INVOCATION variable that Claude Code
+  // substitutes into the command lines in `.claude/settings.json` and never
+  // exports to a tool shell. The generalisation worth carrying: any env var seen
+  // only in hook command lines is suspect in a tool shell — but the rule names
+  // the two that have actually bitten rather than guessing at a class.
+  //
+  // findLiveExpansions, not stripQuoted: the trap's every observed instance was
+  // DOUBLE-quoted (`"$TMPDIR/x"`), which stripQuoted blanks. Single-quoted
+  // occurrences are inert and must not fire — `rg '$TMPDIR' docs/` is a search.
+  const UNSET_IN_BASH_TOOL = ['TMPDIR', 'CLAUDE_PROJECT_DIR'];
+  const expansions = findLiveExpansions(cmd, UNSET_IN_BASH_TOOL);
+  // A command that SETS the variable first is correct usage. Same statement-
+  // anchored form bypassEnabled() uses, so a mere mention in a string cannot
+  // suppress the rule.
+  const selfAssigned = new Set(
+    UNSET_IN_BASH_TOOL.filter((n) =>
+      new RegExp(String.raw`(?:^|[;&|]\s*|\bexport\s+)${n}=`).test(cmd),
+    ),
+  );
+  const liveUnset = [...new Set(expansions.map((e) => e.name))].filter(
+    (n) => !selfAssigned.has(n),
+  );
+  if (liveUnset.length > 0 && !bypassEnabled('AUDIT_TOOLS_ALLOW_UNSET_ENV')) {
+    denials.push(
+      `${liveUnset.map((n) => `$${n}`).join(' and ')} — UNSET in the Bash tool, so the expansion is the ` +
+        'EMPTY STRING and the failure names the wrong cause. `> "$TMPDIR/x.log"` becomes `> /x.log` ' +
+        '("Permission denied", which reads as a temp-dir problem), and a path read back later resolves ' +
+        'against the Windows CWD as `C:\\Program Files\\Git\\x.log` (which reads as a missing file).\n' +
+        '  fix: write the SESSION SCRATCHPAD path by its absolute value (the `C:/Users/.../scratchpad` ' +
+        'path in the system prompt); for the repo root use a relative path or $(git rev-parse --show-toplevel).\n' +
+        '  note: CLAUDE_PROJECT_DIR is a hook-invocation variable — it is substituted into the command ' +
+        'lines in .claude/settings.json and never exported to a tool shell.\n' +
+        '  deliberate: set it in the command itself (`TMPDIR=/c/tmp …`), or re-run with ' +
+        'AUDIT_TOOLS_ALLOW_UNSET_ENV=1.',
     );
   }
 
