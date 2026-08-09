@@ -87,23 +87,20 @@
 
 ## Immediate next
 
-> **The dogfood gate has CLEARED.** The owner's 2026-08-07 call was that dogfooding could run
-> whenever, but **known refactoring goals came first**. Those are now done — dedup cluster 10 of 10,
-> providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
-> leads this list.
-
 1. **Resume the FRESH `dispatch-effectiveness-observability` run — it is IN FLIGHT and paused at the
    `decomposition` phase.** This is a deliberate stopping point at a clean phase boundary, not a
    breakage. Just run `remediate-code next-step` from the repo root and author the artifact it asks
    for.
-   **State:** the old completed run was archived wholesale to
-   `.audit-tools/remediation.archived-observability-2026-08-08/` (including its promoted
-   `remediation-report.md` / `-outcomes.json`), and a fresh run bootstrapped in its place. Intake,
-   intent confirmation, `goal_spec` and `context_bundle` are all written and validated `status: "ok"`;
-   `goal_id` is `dispatch-effectiveness-observability`. The confirmed checkpoint carries
-   `must_not_touch` guards on `audit-findings.json` / `audit-report.md` / the archive — added because
-   the PREVIOUS run's second commit rewrote the promoted outcomes and would have dropped ~54k lines of
-   an earlier run record (see `14677902`'s message).
+   **State:** the old completed run's DIRECTORY was archived to
+   `.audit-tools/remediation.archived-observability-2026-08-08/` and a fresh run bootstrapped in its
+   place. Intake, intent confirmation, `goal_spec` and `context_bundle` are all written and validated
+   `status: "ok"`; `goal_id` is `dispatch-effectiveness-observability`.
+   ⚠ The promoted `.audit-tools/remediation-report.md` / `-outcomes.json` are back at their canonical
+   paths and unchanged — they are **git-tracked**, so moving them aside was a tracked-file deletion of
+   ~56k lines and was reverted. Leave them alone; this run overwrites them on completion, which is the
+   intended lifecycle. Mechanism in [`durable-traps.md`](backlog/durable-traps.md).
+   The confirmed checkpoint carries `must_not_touch` guards on `audit-findings.json` /
+   `audit-report.md` / the archive.
    ⚠ **The contract is INPUT, not output.** `src/shared/types/attributionContract.ts` is already on
    main (`14677902`) — `AttributionTriple`, `DispatchAttemptRow`, `FindingVerdictRow`, `classifyDetail`,
    `deriveAggregates`, and the four enums that fix scope (`DRAWS`, `VERDICT_STAGES`, `VERDICT_DETAILS`,
@@ -113,12 +110,13 @@
    `src/remediate/phases/close.ts` are exactly what the previous attempt lost when its module set
    collapsed 7 → 4. That collapse is now gated (INV-CO-13, shipped in v0.39.13), which is what unblocked
    this run.
-   ⚠ **The two stale branches were NOT deleted, deliberately.** The plan said they get cleaned up with
-   the changeover, but they carry commits that are *not* on main —
-   `remediation/dispatch-effectiveness-observability` has 2 (`6fcff985` the old run report, `d5ef739b`
-   the worker commit) and `remediate-CP-BLOCK-CP-NODE-1-…` has 1 (`28ab1175`). The CP-NODE-1 *content*
-   re-landed as `14677902`, but `6fcff985` is unique. Deleting them is a real loss, so it is an
-   explicit call, not cleanup. **Your decision.**
+   ⚠ **The two stale branches stay until THIS run completes — owner's call, 2026-08-09; decided, do
+   not re-raise.** The earlier plan assumed they were redundant; they are not. They carry commits that
+   are *not* on main: `remediation/dispatch-effectiveness-observability` has 2 (`6fcff985`, the old
+   run's report, which exists nowhere else, and `d5ef739b`), and `remediate-CP-BLOCK-CP-NODE-1-…` has 1
+   (`28ab1175`). CP-NODE-1's *content* re-landed as `14677902`, but `6fcff985` is unique, so deleting
+   now would be a real loss. **Delete both once this run lands** — that is the trigger, and it is the
+   only remaining action on them.
 2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing
