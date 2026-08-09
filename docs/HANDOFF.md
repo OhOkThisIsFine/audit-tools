@@ -26,12 +26,16 @@
   ⚠ This one carries a real BEHAVIOR change, not just docs: a contract-pipeline DAG whose node
   resolves to an empty write scope is now REFUSED at validation. A pipeline run that previously
   promoted such a node and died later at dispatch will now be rejected earlier and regenerate.
-- **The nightly queue holds FOUR unanswered propositions** (`7a0bb2da`, 2026-08-09) — `sol-1` a
-  Bash-tool guard rule for env vars unset in that shell, `sol-2` both shipped bins running the
-  installer on `<verb> --help`, `sol-3` the leg-2 sweep's `gone` verdict being wrong every time it
-  fires, `sol-4` leg 2 having no writable escalation channel since 2026-08-06. Each carries options
-  and a full proposal under `.audit-tools/nightly/proposals/`; answer by ticking a box in
-  [`nightly-inbox.md`](nightly-inbox.md), then `npm run nightly:ingest`.
+- **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
+  owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
+  the landing refs, so none will be raised again. `sol-4` split the record-path probe refusal by
+  direction (`56a58330`), which **restores leg 2's escalation channel** — the thing that had been
+  costing a hand-carried HANDOFF slot; `sol-1` made the unset-`$TMPDIR`/`$CLAUDE_PROJECT_DIR` trap a
+  Bash-tool guard rule and DELETED its durable-traps entry (`0bdb216e`); `sol-2` fixed the whole
+  `<verb> --help` class on both shipped bins and removed the shadowed `ensure` (`d2e77ed7`); `sol-3`
+  retired the sweep's `gone` verdict and repaired the probe inputs (`b564d36a`).
+  ⚠ `sol-2` carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb now
+  prints help instead of installing. Two of those verbs previously wrote to the repo and to HOME.
 - **⚠ Offload from a Desktop session is shell-out ONLY** — subagents here bypass the relay entirely —
   **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
   switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
@@ -50,15 +54,23 @@
 - **The authoritative full-suite green for the SHIPPED source is release CI run
   [31309218005](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31309218005)** (v0.39.11 —
   gate + all 4 shards green). Read that, not the local run, as the release signal.
-- The pre-release lap was additionally verified locally on the clean committed tree at `37d2cc44`:
-  the whole `verify:checks` green (exit 0, including `pack:smoke` and both packaged smokes), plus
-  `ci` and `audit-code-test-suite` green on that commit before the bump. Suites: whole remediate area
-  145 files / 2465 tests, and 80 across the five files touching the content-key seam.
-- **Both repairs are red-green validated on the property that matters, not just written with tests.**
-  Dropping the sort in `buildAttemptKey` turns the replay-stability test red and only that test;
-  disabling the new empty-write-scope condition turns exactly the new DAG test red. Both restored by
-  INVERTING the edit, never by checkout. A test that has not been seen to fail proves nothing here —
-  the defect being repaired is precisely one that green builds and clean self-reviews missed.
+- **Every one of this lap's four changes is red-green validated, each restored by INVERTING the edit,
+  never by checkout** — nine inversions across the four, and in each the named tests went red and
+  only those. Two are worth knowing about:
+  - `sol-4`'s auto-close guarantee is STRUCTURAL, not caller-dependent: `record_present` /
+    `record_missing` are never `absent`/`appeared`/`holds`, so `resolved` is unreachable for a
+    record probe even if a future caller passes the creation flag on the close path. Breaking it
+    needs BOTH the default flipped and the state renamed — and doing both also reds the original P8
+    test.
+  - `sol-2`'s inversion reproduces the bug exactly: with the help check disabled, `install --help`
+    wrote six entries into the test sandbox on each bin. Its `-h` case initially stayed green, which
+    made it vacuous, so it now carries the same no-work assertion — the installer's own JSON output
+    also contains the word "install".
+- Gates run green on the staged tree for each commit: `check`, `check:tests`, `check:lint`,
+  `check:deadcode`, `check:guard-reach`, `check:gate-enumeration`, the doc-contract subset and the
+  backlog budget/index. No commit this lap touches a `LOOP_CORE_PATTERNS` path, so no review
+  attestation was required — `.claude/hooks/`, `wrapper/`, `scripts/` and `src/remediate/index.ts`
+  are all outside the list.
 - **The shard-duration baseline is still CURRENT** — regenerated from the 596-file run one lap ago;
   nothing this lap changed test counts materially.
 - **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
@@ -125,10 +137,13 @@
    are added. Re-measure, and only then decide whether anything still needs splitting.
    ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
    for a cluster.
-5. **Answer nightly `sol-4` — leg 2 has no writable escalation channel.** Its writer refuses a premise
-   probe aimed at `docs/backlog/`, which blocks three other backlog questions and is why leg 2 has
-   produced zero escalations since it landed. This is the item that was blocking the retired-helper
-   sweep (now done), so it will keep costing a hand-carried HANDOFF slot until it is answered.
+5. **Use the escalation channel `sol-4` just restored — the four questions it was blocking are still
+   unasked.** They are listed in
+   [`P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md):
+   the retired `~/.claude/llm-call.mjs` described as live in nine backlog passages, `open-bugs#de319d16`
+   and `#0487b95c` (both close-or-keep calls), and the run's wider `already_shipped_or_stale` set. Leg 2
+   can now write them as `auto_close: false` items, so the next nightly run should surface them itself
+   rather than needing a hand-carried slot.
    ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
    SHRINKAGE there. Any edit to that file must come out net-negative.
 
