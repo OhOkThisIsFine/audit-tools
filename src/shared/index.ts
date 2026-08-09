@@ -42,6 +42,39 @@ export type {
 } from "./types/runLedger.js";
 export { RUN_LEDGER_STATUSES } from "./types/runLedger.js";
 export type {
+  RowKind,
+  OpaqueModelId,
+  AttributionTriple,
+  Draw,
+  VerdictStage,
+  VerdictDetail,
+  AttributionProvenance,
+  DispatchAttemptOutcome,
+  DispatchAttemptRow,
+  FindingVerdictRow,
+  DetailClassification,
+  ReachPopulation,
+  VerdictStagePopulation,
+  VerdictPopulation,
+  ReachAggregate,
+  VerdictAggregate,
+  DispatchEffectivenessAggregates,
+} from "./types/attributionContract.js";
+export {
+  DRAWS,
+  VERDICT_STAGES,
+  VERDICT_DETAILS,
+  STAGE_OWNERSHIP,
+  AttributionProvenanceSchema,
+  AttributionTripleSchema,
+  DispatchAttemptRowSchema,
+  FindingVerdictRowSchema,
+  asOpaqueModelId,
+  isLegalDetail,
+  classifyDetail,
+  deriveAggregates,
+} from "./types/attributionContract.js";
+export type {
   GraphEdge,
   RouteEdge,
   GraphBundle,
