@@ -131,6 +131,13 @@
    ⚠ `/design-check` found a retirement collision on the obvious fix — requiring the host to declare
    `output_files` is the stance `c60eb73f` deliberately removed. The owner's call (2026-08-09) was
    **verify the scope, don't re-author it**, which is what the gate above does.
+   **Run disposition (owner, 2026-08-09): FRESH RUN once the gate lands** — not an in-place artifact
+   repair. The existing artifacts are unrecoverable (finalized contracts lost 3 modules with no
+   archived predecessor), so the goal restarts with a clean artifact dir and finalization guarded from
+   the first pass; CP-NODE-1's contract is already on main (`14677902`), so the re-run starts with it
+   in place. The stale branch + worktree
+   (`remediation/dispatch-effectiveness-observability`, `remediate-CP-BLOCK-CP-NODE-1-…`) get cleaned
+   up as part of that.
    ⚠ The run's friction record holds **four** entries, not seven; its two DEFECTS are in
    [`open-bugs.md`](backlog/open-bugs.md). Ceiling re-ratcheted 129,610 → 129,162 → **129,156** bytes,
    so that headroom is spent, not banked.
