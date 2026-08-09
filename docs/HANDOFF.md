@@ -91,18 +91,32 @@
 > providers twin closed, nothing unpublished — so the pinned cluster is no longer held back and
 > leads this list.
 
-1. **Triage the 2,241 audit findings — decide the CUT before reading them.** They are unfiltered output.
+1. **Decide the fate of `remediation/dispatch-effectiveness-observability` (pushed, 2 commits), then
+   repair its two upstream defects.** The observability feature request ran through the contract
+   pipeline (3 adversarial laps → judge approved) into implementation. CP-NODE-1 landed
+   `src/shared/types/attributionContract.ts`; CP-NODE-2/3/4 are halted. Two repairs gate the rest,
+   neither fixable by retry: (a) `attempt_key` rests on an admission identity the dispatch layer does
+   NOT mint — verified against source, `lease_id` is null on the unmetered lane, `packet_id` repeats
+   by design, `newInstanceId` is random; `contentKey`'s `result_content_discriminator` is the existing
+   precedent, and the amendment needs a critic/judge lap
+   ([[attempt-key-has-no-admission-identity]]). (b) `implementation_dag` carries no per-node file
+   scope, so the dispatch boundary refuses CP-NODE-2/3 structurally. Evidence:
+   `.audit-tools/remediation/scratch/dispatch-effectiveness-observability/C-024-verification.md`.
+   ⚠ Seven frictions from the run are in the run's friction record but **NOT in open-bugs.md** — that
+   file is 129.6KB against a 120KB ceiling and the budget gate allows only shrinkage, so landing them
+   requires an offsetting condensation.
+2. **Triage the 2,241 audit findings — decide the CUT before reading them.** They are unfiltered output.
    Maintainability alone is 1,417 (63%), and the auditor's severity calibration has a standing
    open-bugs entry against it (2026-08-06: 0 of 9 self-audit criticals survived mechanism verification).
    The 4 criticals + 92 high are the only tractable starting set; the four criticals are summarized in
    [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md). Feeding this to
    `/remediate-code` wholesale would be a mistake — verify by MECHANISM first
    ([[verify-delegated-findings-mechanism-not-just-citation]]).
-2. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
+3. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
    ⬇ Two of its still-live properties were exercised this run: a pause/cooldown DID occur (pool
    exhaustion), and the remedy a refusal names was NOT reachable — the pool surfaced one member's 402
    rather than an aggregate naming the exhausted set.
-3. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
+4. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
    The floor is a four-file completion cluster within 7s (see *Live state*), so further single-file
    splits redistribute time rather than lower it. The cost to attack: each completion test runs ~35s
    because it spins a real audit run through real subprocesses, so the target is the shared
