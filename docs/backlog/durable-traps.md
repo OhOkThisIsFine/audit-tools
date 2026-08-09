@@ -128,8 +128,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   hooksPath/no-verify bypass tokens (2026-07-21).** A commit whose message names the literal tokens
   (e.g. a fix commit describing the bypass) is rejected as if it were the bypass. This is deliberate:
   quoted text cannot be safely excluded, because a genuinely quoted flag still reaches git
-  (`git commit "--no-verify"` works), so stripping quotes would reopen the hole. Reword the message
-  (drop the `core.` prefix / the double-dash) rather than weakening the gate.
+  (`git commit "--no-verify"` works), so stripping quotes would reopen the hole.
+  A **heredoc** message has the same problem for the SHORT flag, and one the `-m "..."` form does not:
+  `stripQuoted` neutralises a bare `-n` inside a quoted message, but a heredoc body is raw command
+  text, so prose merely mentioning the flag trips it. Both were hit landing `56cd944d` — the commit
+  that narrowed the short-form check to `git commit`, where `-n` alone means skip-the-hooks (on
+  cherry-pick and revert it is `--no-commit`, the safer form this gate wants).
+  **Remedy for both: write the message to a file and `git commit -F <path>`** — the command string
+  then carries no message text to false-match. Rewording works too; neither is a reason to weaken the
+  gate.
 
 - **The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable
   (2026-07-20, medium).** `~/.claude/llm-call.mjs` inlines each file as raw text. An adversarial
