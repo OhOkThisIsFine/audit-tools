@@ -16,20 +16,13 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.12 SHIPPED 2026-08-09.** npm live at 0.39.12, both global bins reinstalled and the deferred
-  postinstall run manually (npm skips it on `-g`) — 7 + 6 host integrations deployed, 0 failed; both
-  bins report 0.39.12. Release CI run
-  [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039) green across
-  all 6 jobs, critical path 274s (summed 819s). **`v0.39.12` tags `b1375ee6`.**
-  ⚠ **`main` is now AHEAD of the tag by a source change, so there IS something unpublished:**
-  `80b3be6a` (the INV-CO-13 module-set gate). npm still serves 0.39.12, which does not carry it.
-  Ship it whenever the next release runs — it is not urgent, since the only consumer of the gate is a
-  local remediation run, which uses the repo tree.
+- **v0.39.13 SHIPPED 2026-08-09 — carries the INV-CO-13 module-set gate (`80b3be6a`).** npm live at
+  0.39.13, both global bins reinstalled and the deferred postinstall run manually (npm skips it on
+  `-g`) — 6 host integrations deployed, 0 failed; both bins report 0.39.13. Release CI run
+  [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177) green across
+  all 6 jobs, critical path 286s (summed 830s). **`v0.39.13` tags `f2a2e9c2`; `main` is level with
+  the tag, so nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
-  ⚠ This one carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb
-  (`ensure`/`install`/`install-host`/`verify-install`) now prints help on BOTH bins instead of
-  performing the verb. Two of those previously wrote to the repo and to HOME. Verified against the
-  installed global bin, not only in tests.
 - **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
   owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
   the landing refs, so none will be raised again. `sol-4` split the record-path probe refusal by
@@ -56,10 +49,9 @@
 ## Verification state
 
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31321715039](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31321715039)** (v0.39.12 —
+  [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177)** (v0.39.13 —
   gate + all 4 shards green). Read that, not the local run, as the release signal. `verify:checks`
-  was additionally green locally (exit 0, both packaged smokes) on the clean tree at `b4b785b5`
-  before the bump.
+  was additionally green locally (exit 0, both packaged smokes) on the clean tree before the bump.
 - **This lap's one change (`80b3be6a`, the INV-CO-13 gate) is red-green validated by INVERTING the
   gate, never by checkout** — twice, and in each the named tests went red and only those. Worth
   knowing:
