@@ -298,11 +298,13 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    handshake) — and a config block describing a backend's context and output caps IS transport
    configuration. So the answer is none of them.
 
-   **The reading this plan now proceeds under, stated so it can be corrected rather than assumed:**
-   the tool partitions on **content coherence** and reports a **token estimate**; it never partitions
-   to fit a backend's context window. Work blocks survive — "batch work into logical units of
-   reasonable size" is a product conviction — but *"reasonable"* stops meaning "fits model X's window".
-   The host bundles for its chosen backend, because only the host knows what that backend is.
+   **CONFIRMED by the owner 2026-08-09** (asked as an explicit either/or against "grouping goes too,
+   flat per-task metadata only"): the tool partitions on **content coherence** and reports a **token
+   estimate**; it never partitions to fit a backend's context window. Work blocks survive — "batch
+   work into logical units of reasonable size" is a product conviction — but *"reasonable"* stops
+   meaning "fits model X's window". The host bundles for its chosen backend, because only the host
+   knows what that backend is. So `mergeBlocksSharingFiles` and the block concept STAY; the window
+   resolvers and the budget splitters go.
 
    **Consequences:** `block_quota` and `quota.*` stop being sizing inputs entirely;
    `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and `resolveSizingWindowTokens`
@@ -316,5 +318,5 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    `work_blocks` in `audit-findings.json` stops being a fit claim and becomes a coherence grouping
    plus an estimate. Any consumer reading it as "this fits in one context" must be re-pointed.
 
-**Nothing open** except the reading in decision 6, which is an interpretation of a directional steer
-rather than a quoted answer — correct it and the S-sequence changes again.
+**Nothing open.** Every question this record raised has an owner answer above, including decision 6,
+which was put back to the owner as an explicit either/or and confirmed.

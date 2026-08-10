@@ -106,10 +106,11 @@
    *"ANSWERED 2026-08-09"* below for why the S-sequence is superseded.
 
    **The next commit** deletes `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and
-   `resolveSizingWindowTokens`, plus the splitters they feed, and stops `block_quota` / `quota.*` being
-   sizing inputs. It is a removal, not a re-sourcing.
-   ⚠ Confirm the open reading first (decision 6): does content-coherence grouping survive, or does all
-   grouping become the host's? That changes how much comes out.
+   `resolveSizingWindowTokens`, plus the budget splitters they feed, and stops `block_quota` /
+   `quota.*` being sizing inputs. It is a removal, not a re-sourcing.
+   ✅ **Scope is settled** (owner-confirmed 2026-08-09): content-coherence grouping SURVIVES —
+   `mergeBlocksSharingFiles` and the block concept stay, and `work_blocks` is demoted to a coherence
+   grouping plus an estimate rather than deleted. Nothing here is open.
    Loop-core: staged-tree review attestation on every commit, full suite before each one.
    ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
    section — read them before S2; they reshape the sequence.** The fifth is the cut change to (d)
@@ -239,11 +240,11 @@ backend's context and output caps, i.e. transport configuration.** This is exact
 the separation plan's *Owner decisions* 2 wrote down: *"If the intent is that even this must go, the
 tool cannot partition at all and packet sizing becomes the host's job too."* It fired.
 
-**The reading now of record** (stated as a reading, not a quote — correct it and the sequence changes
-again; full statement in the plan's *Owner decisions* 6): the tool partitions on **content coherence**
-and reports a **token estimate**, and never partitions to fit a backend's window. Work blocks survive
-— batching into logical units is a product conviction — but "reasonable size" stops meaning "fits
-model X". The host bundles for the backend it chose, because only the host knows what that is.
+**The shape now of record** (plan's *Owner decisions* 6, put back to the owner as an explicit
+either/or and **confirmed**): the tool partitions on **content coherence** and reports a **token
+estimate**, and never partitions to fit a backend's window. Work blocks survive — batching into
+logical units is a product conviction — but "reasonable size" stops meaning "fits model X". The host
+bundles for the backend it chose, because only the host knows what that is.
 
 **So the S-sequence is superseded, and the next lap is a REMOVAL, not S2's rewrite:**
 `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and `resolveSizingWindowTokens` go,

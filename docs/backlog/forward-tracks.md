@@ -44,8 +44,8 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   itself, so what remains is a REMOVAL (`resolvePlanContextBudget`,
   `resolveCurrentWorkPartitionRuntime`, `resolveSizingWindowTokens`, the splitters they feed), not a
   re-sourcing. ⚠ `work_blocks` stops being a FIT CLAIM — re-point consumers reading it as one.
-  ⚠ **Open:** decision 6 is a *reading* of a steer, not a quoted answer — does content-coherence
-  grouping survive, or is all grouping the host's? Confirm before the removal lands.
+  Grouping SURVIVES (owner-confirmed): `mergeBlocksSharingFiles` and the block concept stay; only the
+  window resolvers and budget splitters go.
   Loop-core → `/design-check` first, staged-tree attestation on every commit.
   ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run** — its attribution triple
   resolves from `CapacityPool`, and its provider axis is now dropped, so its 8-module set needs
