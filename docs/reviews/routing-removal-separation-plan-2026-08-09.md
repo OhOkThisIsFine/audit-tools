@@ -117,11 +117,12 @@ the KEPT `collectOversizedWarnings` at `:791-793`. So the "reporting arm needs z
 this file already on main (`14677902`) and states *"The contract is INPUT, not output… The run is the
 WIRING."*
 
-Deleting `PROVIDER_NAMES` stops it compiling. Worse: under cut (c) the provider axis is single-valued
-by construction, so `deriveAggregates`'s provider→model→lens indexing collapses and the run's central
-question — *which backend produces findings that survive* — is **voided, not re-pointed**. HANDOFF
-accepts only the narrower break (the triple resolving from `CapacityPool`). This one is new and is an
-owner call.
+Deleting `PROVIDER_NAMES` stops it compiling. Worse: under cut (d) there is no provider concept left
+for the axis to range over, so it is **unvalidatable** and `deriveAggregates`'s provider→model→lens
+indexing carries no information — the run's central question, *which backend produces findings that
+survive*, is **voided, not re-pointed**. HANDOFF accepted only the narrower break (the triple
+resolving from `CapacityPool`); this break is wider. **Answered — see *Owner decisions* 1: the
+provider axis is DROPPED and the run re-scopes to model × lens.**
 
 ### 7. Self-spawn safety has no replacement in the candidate survivor
 

@@ -483,6 +483,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
 
+- **In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit
+  (2026-08-09).** Same failure as the nested `claude -p` entry above, but with no subprocess and no
+  env to set: a read-only recon fan-out ended its turns inside the checkout, the closeout-challenge
+  gate fired on each, and two of them answered it by editing docs and committing to `main`
+  (`00d6fbfd`, `c687fed9`) while the parent was still mapping. The gate's own state marker is keyed by
+  the CHILD's session id, so the parent's cap never sees it and the parent's `git status` silently
+  changes underfoot mid-task. The bypass envs exist (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`,
+  `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`) but a subagent inherits the parent's environment, so there
+  is no per-call place to set them — the parent would have to be launched with them, which disarms
+  the gate for the parent too. Until that is fixed mechanically: re-read `git log` after any fan-out
+  in this checkout and treat a moved HEAD as expected, not as a concurrent human session.
+
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
   (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the
   extraction was written came back describing the new shared helper as pre-existing — its "finding"
