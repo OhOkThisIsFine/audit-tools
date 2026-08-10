@@ -145,7 +145,7 @@
    ⚠ **DECIDED 2026-08-09 — the provider axis is DROPPED; re-scope the run to model × lens.**
    `src/shared/types/attributionContract.ts` — this run's declared INPUT — imports `PROVIDER_NAMES`
    (`:9-11`) and validates `AttributionTriple.provider` against it (`:26-34`), so cut (c) stops it
-   compiling; and under one adapter the axis is single-valued anyway, so `deriveAggregates`'
+   compiling; and with no adapter and no provider concept the axis is unvalidatable, so `deriveAggregates`'
    provider→model→lens indexing carries no information. The run answers *which model*, never *which
    backend* — the accepted cost. **The 8-module set must be re-authored against the reduced triple
    before the shards are written**, since three of its modules name attribution capture and

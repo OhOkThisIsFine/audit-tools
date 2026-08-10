@@ -171,8 +171,8 @@ host discretion* class `CLAUDE.md` forbids.
 
 ## The corrected sequence
 
-Separation only. Nothing below deletes a live mechanism; the collapse (one adapter, `PROVIDER_NAMES`,
-the driver tree) is a second pass, gated on the owner questions at the end.
+Separation only. Nothing below deletes a live mechanism; the collapse (NO adapter — see decision 5 —
+plus `PROVIDER_NAMES`, quota in full and the driver tree) is a second pass.
 
 **S1 — Give sizing one declared window.** Replace `probeBudget`'s `computeDispatchCapacity` round-trip
 (`dispatch/quotaPool.ts:166-176`) with a direct `resolveLimits` call against the handshake /
@@ -254,10 +254,14 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    — not a permanent lenient parser, and not a hard refusal that would discard the in-flight
    observability run. A crash mid-migration needs its own recovery path; write it.
 
-4. **Self-spawn refusal moves INTO the surviving adapter**, in the same commit that deletes
-   `dispatchExclusion.ts`. Not asked — the philosophy settles it: whatever can be enforced in tooling
-   must be, and the host being careful is never the mechanism. `spec/backend-identity-axes.md`'s
-   invariant stands.
+4. **Self-spawn refusal — SUPERSEDED by decision 5, and the resolution flipped.** It was settled
+   without asking (the philosophy: whatever can be enforced in tooling must be), as "the surviving
+   adapter gains the check in the same commit that deletes `dispatchExclusion.ts`". Under cut (d)
+   there is no surviving adapter and nothing in-tool spawns anything, so there is no recursion to
+   refuse: `isSelfSpawnBlocked`, `buildSelfSpawnExclusion` and `providerPathGuard`'s probes all go
+   with the spawn substrate, and `spec/backend-identity-axes.md`'s invariant is satisfied vacuously
+   rather than retired. ⚠ That is only true while nothing spawns — re-introducing any subprocess
+   launch re-opens it, so the spec line stays.
 
 5. **THE CUT ITSELF CHANGED — (d) ZERO execution adapters, superseding (c).** Asked to name the one
    surviving adapter, the owner rejected the premise: *"I'm not clear on why audit-tools needs to
