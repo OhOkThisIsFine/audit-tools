@@ -106,6 +106,10 @@
    atomic-replace invariant forbids splitting a new-mechanism-plus-deletion across commits.
    **Start at design §5** — the findings draw's mass ceiling is the one open element, with a
    recommendation and its binding red-green test already written down.
+   ⚠ **PARKED by owner call 2026-08-09 pending weekly-quota reset — decided, do not re-litigate.**
+   Design-check is complete and committed, so this resumes cold with no loss; the park exists because
+   the change cannot be split and a half-run cannot land. ⚠ Item 2 below is blocked behind this, so it
+   is parked with it.
    The old separation-plan sequence below is superseded but kept for its owner-decision record.
 
    The routing-removal directive, cut (d) and all six
