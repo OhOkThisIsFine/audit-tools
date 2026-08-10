@@ -98,7 +98,38 @@ over it. Mitigation already present: the `reason` field carries the full contrib
 just the dominant `kind` (`:220, 235`), so a host can discriminate saturated edges — provided the
 contract says so.
 
-## 5. Provenance
+## 5. Are the two groupers one mechanism? Not yet — and the join is missing
+
+Owner's question, 2026-08-09: *"Findings groupings are meant to follow the same information source as
+task affinity, right?"* Directionally yes, mechanically no.
+
+| Signal | Task affinity (`taskAffinityGraph.ts`) | Findings grouping (`workBlocks.ts` + `workPartition.ts`) |
+|---|---|---|
+| shared file | `:171, :190-194` | `:188`, jaccard `workPartition.ts:400-403` |
+| shared unit | `:200` | `normalizeOwnedUnits :29-39`, jaccard `:403` |
+| same lens | weight bonus `:221-224` | `lens:` semantic tag `:141` |
+| directory | `same_dir :96, :208` | — |
+| call/import adjacency | `call_adjacent :120-127, :201-207` | present, but feeds **block dependency ordering** (`:64-84`), not cohesion |
+| critical-flow tag | `same_flow :102-107, :197-199` | present, but feeds **dependency ordering** (`:87-100`), not cohesion |
+| semantic tags (category, title tokens) | — | `semanticTagsForFinding :133-144` |
+| `finding.systemic` role | — | `:193`, `workPartition.ts:740-754` |
+
+The algorithms differ too: task affinity is weighted-edge agglomerative merging under a ceiling
+(`partitionTaskGraph.ts:118-142`); findings grouping is seeded multi-objective constrained assignment
+with explicit seam surfacing (`workPartition.ts:531-577, :579-605`). `workPartition.ts:4` says so
+outright — *"Shared units and files are affinity signals, not union-find edges."*
+
+**The blocker on unifying them is a missing key, not a missing algorithm.** `Finding` has no
+`task_id` (`src/shared/types/finding.ts:103-118`) and `WorkBlock` carries only `finding_ids`
+(`:173-175`), so findings grouping *cannot* be re-expressed as a draw over task affinity today — the
+join does not exist. Add that key and the granularity mismatch is still real: one task produces many
+findings, one finding spans many files and units.
+
+Per *one core, two draws*, two groupers over the same information source is the repo's most-warned-
+against shape, so the endpoint is one coherence core with a task draw and a findings draw. That is a
+larger track than the sizing-window removal and should not be smuggled into it.
+
+## 6. Provenance
 
 Recon dispatched off-quota to peer lanes; every load-bearing claim re-verified locally against source
 before landing here. `agy` / `gemini-3.6-flash-high` found site 1 and the degenerate output. `codex` /
