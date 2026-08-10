@@ -610,6 +610,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   index edit. The prescribed reduction is MERGING closed sagas and cutting obsolete memories, never a
   mechanical line-trim (tried, failed).
 
+- **The pre-commit gate can tell you to regenerate a file AFTER you have already attested, which
+  silently invalidates the attestation (2026-08-09).** Loop-core commits carry an attestation bound to
+  the exact staged tree. Attest, then commit, and the gate refuses on a stale `docs/backlog.md` seek
+  index — the fix regenerates a tracked file, which changes the staged tree, which voids the
+  attestation you just wrote. You then attest a second time for the same review. Ordering that works
+  today: run the derived-file regenerators (`generate-backlog-index.mjs`,
+  `generate-handoff-roadmap.mjs`, `check:philosophy-brief -- --write`) FIRST, stage everything, and
+  attest last. ⚠ Enforceable and NOT yet enforced: the gate evaluates the attestation before the
+  derived-index check, so it fails in the order that maximises rework. Reordering those legs — index
+  regeneration checks before attestation binding — removes the trap entirely, at which point this
+  entry goes.
+
 ## Doc-set hygiene (enforced)
 
 
