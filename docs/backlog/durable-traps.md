@@ -51,6 +51,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   currently grants `command(*)`, i.e. every headless agy session auto-approves any command — narrow it
   if agy is ever pointed at untrusted input.
 
+- **A broad multi-file review scope kills both peer-CLI lanes, and they fail in OPPOSITE shapes
+  (2026-08-09 and 2026-08-10, four deaths in two nights).** `agy -p` dies fast and loud —
+  `Error: timeout waiting for response`, ~36 bytes, nothing salvageable. `codex exec` dies slow and
+  quiet: it works for ~20-50 minutes, then wedges inside its own collab/agent-spawn subsystem
+  (`ERROR codex_core::tools::router:` — `timeout_ms must be at least 10000` one night,
+  `Full-history forked agents inherit the parent agent type` then `collab spawn failed: agent thread
+  limit reached` the next) and sits at `collab: Wait` until killed. ⚠ **Codex's output is NOT lost —
+  read the trace before writing the scope off.** The 2026-08-10 lane had already emitted 24 findings
+  into its transcript before wedging; the run that assumed a wedge meant no output would have
+  discarded them. Redirect to a file, and on a wedge `awk '/^FINDING:/,0'` the trace. Mitigation is
+  the standing one ([[nim-offload-reliable-unit-is-one-entry]]): one bounded scope per dispatch, not
+  seven files in one prompt.
+
 - **A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).**
   A refused `git add <files> && git commit …` is refused at the tool call, before any statement executes, so
   the `add` did not happen either — and the retry fails identically, reading as "the gate ignored my fix".
