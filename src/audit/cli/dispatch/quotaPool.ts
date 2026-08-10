@@ -19,6 +19,7 @@ import type {
 import type { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { type HostSessionEscalation } from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { resolveFreshSessionProviderName } from "../../providers/index.js";
+import { resolveSizingWindowTokens } from "./sizingWindow.js";
 import {
   computeDispatchCapacity,
   lookupDiscoveredLimits,
@@ -163,17 +164,18 @@ export async function buildDispatchPool(params: {
   });
   const { pools, hostModel, hostSession } = preamble;
 
-  const probeBudget = (pool: CapacityPool): number | null => {
-    const probe = computeDispatchCapacity({
-      pools: [pool],
+  // Sizing resolves its window DIRECTLY (`sizingWindow.ts`) rather than folding the
+  // pool through `computeDispatchCapacity` and reading `resolved_limits` back out.
+  // The fold answers a routing question — how many slots may this backend take —
+  // that packet sizing never asked; the window it returned was `resolveLimits`
+  // called with these same pool fields. Same number, no capacity dependency.
+  const probeBudget = (pool: CapacityPool): number | null =>
+    resolveSizingWindowTokens({
+      providerName: pool.providerName,
       sessionConfig,
-      pendingItemTokens: [],
+      hostModel: pool.hostModel,
+      discoveredLimits: pool.discoveredLimits ?? null,
     });
-    const limits = probe.primary.schedule.resolved_limits;
-    if (limits.context_tokens == null || limits.output_tokens == null) return null;
-    const budget = limits.context_tokens - limits.output_tokens;
-    return budget > 0 ? budget : null;
-  };
   const requireProbeBudget = (pool: CapacityPool): number => {
     const budget = probeBudget(pool);
     if (budget == null) {

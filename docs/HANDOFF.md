@@ -123,17 +123,40 @@
    (`PROVIDER_NAMES` and provider auto-resolution go too). The accepted consequence, called out when
    the cut was chosen: **headless/CI autonomy is given up** — nothing in-tool will run a packet
    unattended. Conversation-first is unaffected. This is a deliberate trade, not a regression to file.
-   **First implementation step is SEPARATION, not deletion:** quota currently mixes *reporting* (tokens
-   used — kept) with *routing input* (admission, spill, failover — removed). Split those before any
-   file is deleted, and run `/design-check` first — this is loop-core, so every commit carries a
-   staged-tree review attestation.
+   **The separation is UNDERWAY and its plan is a verified record** —
+   [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md)
+   carries the surface map, the four adversarial refutations that overturned its first draft, the
+   corrected S1–S6 sequence and **five open owner questions**. Read it before the next commit; do not
+   re-derive it.
+   ⚠ **The seam is SIZING, not admission** — the correction that changes the work. The attended-host
+   branch already drops admission, leases, caps and the wall, so that half looks done; but packet
+   sizing, remediate block sizing, the `model_hint` cut points and the oversize warning are each still
+   computed from a pool, a roster or a `ResolvedProviderName`. And TWO of the three audit callers —
+   including the `prepare-dispatch` verb itself — still take the ADMITTED arm (only
+   `semanticReviewStep.ts:102` passes `hostOwnedDispatch: true`), so "delete the admitted arm" does
+   not reduce to deleting dead code.
+   **S1 has LANDED:** packet sizing resolves its window directly (`src/audit/cli/dispatch/
+   sizingWindow.ts`) instead of folding a `CapacityPool` through `computeDispatchCapacity`. Behaviour
+   is unchanged by construction and pinned both ways by
+   `tests/audit/dispatch-sizing-window.test.ts` (an import-closure invariant + a fold-equivalence
+   check). **Next is S2** — the same cut on the remediate draw (`resolvePlanContextBudget`,
+   `src/remediate/phases/plan.ts:772-817`, drops the roster-capability max and the provider argument).
+   Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
+   each one.
 2. **THEN resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner
    call, 2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
    `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per
    module, 8 modules).
    ⚠ **Do not author those shards before item 1 is settled.** This run's design of record resolves its
-   attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool machinery two of the
-   three candidate cuts DELETE. Authoring now risks encoding a layer that is being removed.
+   attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool machinery the cut
+   DELETES. Authoring now risks encoding a layer that is being removed.
+   ⚠ **The collision is BIGGER than the line above accepts, and it is owner question 1 in the
+   separation plan.** `src/shared/types/attributionContract.ts` — this run's declared INPUT — imports
+   `PROVIDER_NAMES` (`:9-11`) and validates `AttributionTriple.provider` against it (`:26-34`), so cut
+   (c) stops it compiling. Worse, under one adapter the provider axis is single-valued by
+   construction, so `deriveAggregates`' provider→model→lens indexing collapses and the run's central
+   question — *which backend produces findings that survive* — is **voided, not re-pointed**. That
+   needs an answer before the 8 shards are authored.
    **Why the re-cut:** round 3 rejected the contract on CDC-T1/T2, and source verification showed the
    repair was not authorable at all — every candidate landed one file short and inverted the phase cut,
    because **the old 7 modules were drawn over the attribution contract's vocabulary rather than over
