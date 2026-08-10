@@ -108,20 +108,13 @@
    **The next commit** deletes `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and
    `resolveSizingWindowTokens`, plus the budget splitters they feed, and stops `block_quota` /
    `quota.*` being sizing inputs. It is a removal, not a re-sourcing.
-   ✅ **Scope is settled** (owner-confirmed 2026-08-09): content-coherence grouping SURVIVES —
-   `mergeBlocksSharingFiles` and the block concept stay, and `work_blocks` is demoted to a coherence
-   grouping plus an estimate rather than deleted. Nothing here is open.
+   ✅ **Scope is settled, nothing open** — grouping survives, so `mergeBlocksSharingFiles` and the
+   block concept STAY. The shape and its one consequence are stated once, below.
    Loop-core: staged-tree review attestation on every commit, full suite before each one.
-   ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
-   section — read them before S2; they reshape the sequence.** The fifth is the cut change to (d)
-   above; of the rest the sharpest is that **quota goes ENTIRELY**
-   (owner: *"audit-tools shouldn't be doing any dispatch, any routing. Why would it need to know
-   about quota?"*) — not a reduced `quota` verb but the verb, the nine sources, the learned
-   `tokens_per_pct` slope, cooldowns, RPM/TPM and reservations. **The single host-declared sizing
-   window stays** (`--host-context-tokens` / `--host-output-tokens`); that is the host stating how
-   big a packet may be, not a quota query, and S1 already resolves sizing straight from it. That last
-   sentence is the plan's stated assumption — if even the declared window must go, partitioning
-   itself becomes the host's job and the sequence changes shape.
+   ⚠ **SIX owner decisions are recorded in the plan's *Owner decisions* section — read them there,
+   not from a summary.** The sharpest is that **quota goes ENTIRELY** (the verb, the nine sources, the
+   learned `tokens_per_pct` slope, cooldowns, RPM/TPM, reservations), and decision 6 takes the
+   declared sizing window with it.
 2. **THEN resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner
    call, 2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
    `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per

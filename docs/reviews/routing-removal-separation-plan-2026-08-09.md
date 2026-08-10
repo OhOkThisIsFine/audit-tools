@@ -248,13 +248,17 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    quota?"* So this is not a reduced `quota` verb: the verb, the nine quota sources, the learned
    `tokens_per_pct` slope, cooldowns, RPM/TPM, reservations and the whole allowance model go. A
    backend's remaining allowance is never the tool's business.
-   **The one thing that stays, stated as the reading this plan proceeds under:** the single
+   ⚠ **The paragraph below is SUPERSEDED by decision 6 — the window did NOT stay.** Kept as written
+   because its final sentence is the escape clause that decision 6 fired, and a record that quietly
+   rewrites its own superseded assumption destroys the evidence that the assumption was declared.
+
+   ~~**The one thing that stays, stated as the reading this plan proceeds under:** the single
    **host-declared window** used to size a unit of work — `--host-context-tokens` /
    `--host-output-tokens` and the handshake that carries them. That is not a quota query; it is the
    host telling the tool how big a packet may be, and partitioning is meaningless without it. S1
-   already made sizing resolve straight from it. If the intent is that even this must go, the tool
+   already made sizing resolve straight from it.~~ **If the intent is that even this must go, the tool
    cannot partition at all and packet sizing becomes the host's job too — say so and the sequence
-   changes shape.
+   changes shape.** ← this happened; see decision 6.
 
 3. **Persisted run state gets a ONE-TIME MIGRATION on first read**, self-liquidating once it has run
    — not a permanent lenient parser, and not a hard refusal that would discard the in-flight
