@@ -2,9 +2,14 @@
 
 Design record for the FIRST implementation step of the routing-removal directive
 (`CLAUDE.md` → *audit-tools does NOT route*; program in
-[`forward-tracks.md`](../backlog/forward-tracks.md)). The cut is decided — **(c) one execution
-adapter, no backend choice at all**. This record settles *where the separation seam actually is*,
-which the directive left open, and it exists because the obvious answer is wrong.
+[`forward-tracks.md`](../backlog/forward-tracks.md)). This record settles *where the separation seam
+actually is*, which the directive left open, and it exists because the obvious answer is wrong.
+
+⚠ **Read *Owner decisions* at the end FIRST.** This record was written while the cut was **(c) one
+execution adapter**; by the end of the same day the owner had re-cut it to **(d) ZERO execution
+adapters, metadata only**, and had removed quota entirely. The findings below are unchanged and still
+hold — they are about where reporting is coupled to routing, which (d) does not alter — but wherever
+the body reasons "under cut (c)" or about a *surviving* adapter, the decisions section supersedes it.
 
 Method: seven parallel area maps over `src/shared/{quota,providers,dispatch}`, both draws' consumers,
 the kept-metadata contract and the gate surface → one synthesized plan → four adversarial refuters

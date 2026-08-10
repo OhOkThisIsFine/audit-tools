@@ -92,10 +92,11 @@
 1. **FIRST — settle the routing-removal boundary; it gates item 2** (owner directive, 2026-08-09:
    *audit-tools should not be routing; it should report task risk / complexity / token counts and let
    the host dispatch — all this routing stuff is pollution*). The directive is recorded in `CLAUDE.md`
-   (Preferences & standing decisions) and the program, measured surface and three candidate cuts are in
+   (Preferences & standing decisions) and the program lives in
    [`forward-tracks.md`](backlog/forward-tracks.md). It **retired two forward tracks** that assumed the
    opposite (quota-arbitrage source pools; the tool-enforced dispatch broker — parts of which had
-   already shipped, so this is a removal).
+   already shipped, so this is a removal). The three candidate cuts it once listed are gone: the cut
+   is decided below.
    **The boundary is DECIDED — cut (d), owner 2026-08-09: ZERO execution adapters, metadata only.**
    Supersedes the same day's cut (c) ("one execution adapter"), which kept an adapter while accepting
    that nothing runs unattended — and an adapter's only job IS the unattended run. The tool atomizes
@@ -109,8 +110,8 @@
    **The separation is UNDERWAY and its plan is a verified record** —
    [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md)
    carries the surface map, the four adversarial refutations that overturned its first draft, the
-   corrected S1–S6 sequence and **five open owner questions**. Read it before the next commit; do not
-   re-derive it.
+   corrected S1–S6 sequence and the **five owner decisions — all ANSWERED, nothing open in it**. Read
+   it before the next commit; do not re-derive it.
    ⚠ **The seam is SIZING, not admission** — the correction that changes the work. The attended-host
    branch already drops admission, leases, caps and the wall, so that half looks done; but packet
    sizing, remediate block sizing, the `model_hint` cut points and the oversize warning are each still
@@ -126,8 +127,9 @@
    `src/remediate/phases/plan.ts:772-817`, drops the roster-capability max and the provider argument).
    Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
    each one.
-   ⚠ **FOUR owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
-   section — read them before S2; they reshape the sequence.** The sharpest: **quota goes ENTIRELY**
+   ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
+   section — read them before S2; they reshape the sequence.** The fifth is the cut change to (d)
+   above; of the rest the sharpest is that **quota goes ENTIRELY**
    (owner: *"audit-tools shouldn't be doing any dispatch, any routing. Why would it need to know
    about quota?"*) — not a reduced `quota` verb but the verb, the nine sources, the learned
    `tokens_per_pct` slope, cooldowns, RPM/TPM and reservations. **The single host-declared sizing
