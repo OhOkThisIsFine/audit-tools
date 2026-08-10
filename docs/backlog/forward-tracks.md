@@ -33,17 +33,20 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 - **Remove routing from audit-tools — the tool reports task METADATA, the host dispatches (owner
   directive, 2026-08-09).** **Cut (d) — ZERO execution adapters, metadata only**; the shape and its
-  three boundaries (quota goes entirely; the host-declared sizing window, result ingestion and
-  recording-what-ran all stay) are stated once in `CLAUDE.md`, not restated here.
-  **The plan, its four adversarial refutations and all five owner decisions are in**
-  [`routing-removal-separation-plan-2026-08-09.md`](../reviews/routing-removal-separation-plan-2026-08-09.md)
-  — a pointer, not a summary; nothing is open in it.
-  **Open property:** the separation seam is **SIZING, not admission**. The attended-host branch
-  already drops admission, leases, caps and the wall, so that half looks done — but packet sizing,
-  block sizing, `model_hint` cut points and the oversize warning are each still pool-, roster- or
-  `ResolvedProviderName`-derived, and two of the three audit callers (the `prepare-dispatch` verb
-  included) still take the admitted arm. Loop-core → `/design-check` first, staged-tree attestation
-  on every commit.
+  boundaries (quota goes entirely; **the declared sizing window goes too**; result ingestion and
+  recording-what-ran stay) are stated once in `CLAUDE.md`, not restated here.
+  **The plan, its adversarial refutations and all six owner decisions are in**
+  [`routing-removal-separation-plan-2026-08-09.md`](../reviews/routing-removal-separation-plan-2026-08-09.md),
+  corrected by [`s2-sizing-window-design-check-2026-08-09.md`](../reviews/s2-sizing-window-design-check-2026-08-09.md)
+  — pointers, not summaries.
+  **Open property:** sizing must owe nothing to a pool, a roster, a provider name **or a config block
+  describing a backend's window**. S1–S6 is SUPERSEDED — the owner rejected the declared window
+  itself, so what remains is a REMOVAL (`resolvePlanContextBudget`,
+  `resolveCurrentWorkPartitionRuntime`, `resolveSizingWindowTokens`, the splitters they feed), not a
+  re-sourcing. ⚠ `work_blocks` stops being a FIT CLAIM — re-point consumers reading it as one.
+  ⚠ **Open:** decision 6 is a *reading* of a steer, not a quoted answer — does content-coherence
+  grouping survive, or is all grouping the host's? Confirm before the removal lands.
+  Loop-core → `/design-check` first, staged-tree attestation on every commit.
   ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run** — its attribution triple
   resolves from `CapacityPool`, and its provider axis is now dropped, so its 8-module set needs
   re-authoring against a model × lens triple before any shard is written.

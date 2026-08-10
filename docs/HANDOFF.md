@@ -97,61 +97,20 @@
 
 ## Immediate next
 
-1. **FIRST — settle the routing-removal boundary; it gates item 2** (owner directive, 2026-08-09:
-   *audit-tools should not be routing; it should report task risk / complexity / token counts and let
-   the host dispatch — all this routing stuff is pollution*). The directive is recorded in `CLAUDE.md`
-   (Preferences & standing decisions) and the program lives in
-   [`forward-tracks.md`](backlog/forward-tracks.md). It **retired two forward tracks** that assumed the
-   opposite (quota-arbitrage source pools; the tool-enforced dispatch broker — parts of which had
-   already shipped, so this is a removal). The three candidate cuts it once listed are gone: the cut
-   is decided below.
-   **The boundary is DECIDED — cut (d), owner 2026-08-09: ZERO execution adapters, metadata only.**
-   Supersedes the same day's cut (c) ("one execution adapter"), which kept an adapter while accepting
-   that nothing runs unattended — and an adapter's only job IS the unattended run. The tool atomizes
-   work and emits per-task metadata (risk, complexity, local token estimate, lens, scope,
-   write-disjointness, relative tier), mandating nothing; all 10 provider classes, `PROVIDER_NAMES`,
-   auto-resolution, the launch contract and the spawn substrate go. **Headless/CI autonomy is given
-   up** — a deliberate trade, not a regression to file. Conversation-first is unaffected.
-   ⚠ **Result INGESTION is not execution and stays.** ⚠ Not routing does not mean not knowing — the
-   host still picks a backend and the tool may faithfully RECORD what it is told ran; only the
-   choosing is pollution.
-   **The separation is UNDERWAY and its plan is a verified record** —
-   [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md)
-   carries the surface map, the four adversarial refutations that overturned its first draft, the
-   corrected S1–S6 sequence and the **five owner decisions — all ANSWERED, nothing open in it**. Read
-   it before the next commit; do not re-derive it.
-   ⚠ **The seam is SIZING, not admission** — the correction that changes the work. The attended-host
-   branch already drops admission, leases, caps and the wall, so that half looks done; but packet
-   sizing, remediate block sizing, the `model_hint` cut points and the oversize warning are each still
-   computed from a pool, a roster or a `ResolvedProviderName`. And TWO of the three audit callers —
-   including the `prepare-dispatch` verb itself — still take the ADMITTED arm (only
-   `semanticReviewStep.ts:102` passes `hostOwnedDispatch: true`), so "delete the admitted arm" does
-   not reduce to deleting dead code.
-   **S1 has LANDED:** packet sizing resolves its window directly (`src/audit/cli/dispatch/
-   sizingWindow.ts`) instead of folding a `CapacityPool` through `computeDispatchCapacity`.
-   **S2 WAS DESIGN-CHECKED AND ITS PLAN REFUTED — the record is
-   [`s2-sizing-window-design-check-2026-08-09.md`](reviews/s2-sizing-window-design-check-2026-08-09.md).
-   Read it before touching sizing; it supersedes the separation plan's S2 paragraph.** Two refuters
-   returned REFUTED. Three corrections matter most:
-   - **The plan's finding 2 is false at HEAD.** `src/audit/cli/workPartitionRuntime.ts` also passed a
-     provider AND folded a roster with `Math.max`. It is a THREE-site class.
-   - **"Resolve the same single declared window as S1" is not a drop-in.** `resolveLimits` reads
-     `sessionConfig.quota`; the two hand-rolled draws read `block_quota` — different fields, inverted
-     precedence. Done literally it would stop remediate honouring the repo-root `session-config.json`.
-   - **The refusal S2 planned to keep was destroying data.** See the fix below.
+1. **REMOVE the sizing window — it gates item 2.** The routing-removal directive, cut (d) and all six
+   owner decisions live in `CLAUDE.md` and
+   [`forward-tracks.md`](backlog/forward-tracks.md); the verified plan is
+   [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md),
+   **corrected by** [`s2-sizing-window-design-check-2026-08-09.md`](reviews/s2-sizing-window-design-check-2026-08-09.md).
+   Read both before touching sizing; do not re-derive them, and do not implement the plan's S2 — see
+   *"ANSWERED 2026-08-09"* below for why the S-sequence is superseded.
 
-   **What LANDED this lap** (both loop-core-attested, full suite green before each):
-   `d7146254` narrows `handlePendingExtractedPlan`'s discard-and-re-extract recovery to the
-   plan-validity region — a sizing refusal used to delete `extracted-plan.json`, report it as
-   corruption, and loop deterministically; and `fafca0fb` removes provider identity from sizing on all
-   three draws (equality enforced by a both-host-classes fold check, not asserted).
-
-   ⚠ **The REST of S2 IS SUPERSEDED — the owner rejected the declared sizing window itself on
-   2026-08-09.** Do not implement S2's remaining half; read *"ANSWERED 2026-08-09"* below and the
-   plan's *Owner decisions* 6 first. The next lap is a REMOVAL of the sizing window, not a rewrite of
-   where it reads from.
-   Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
-   each one.
+   **The next commit** deletes `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and
+   `resolveSizingWindowTokens`, plus the splitters they feed, and stops `block_quota` / `quota.*` being
+   sizing inputs. It is a removal, not a re-sourcing.
+   ⚠ Confirm the open reading first (decision 6): does content-coherence grouping survive, or does all
+   grouping become the host's? That changes how much comes out.
+   Loop-core: staged-tree review attestation on every commit, full suite before each one.
    ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
    section — read them before S2; they reshape the sequence.** The fifth is the cut change to (d)
    above; of the rest the sharpest is that **quota goes ENTIRELY**
