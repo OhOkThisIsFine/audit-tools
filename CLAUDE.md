@@ -249,9 +249,17 @@ instead of a rewrite. Trivial mechanical edits skip it.
   the same day's "one execution adapter"): the tool atomizes work and emits per-task metadata,
   mandating nothing, so every provider class, `PROVIDER_NAMES`, auto-resolution, the launch contract
   and the spawn substrate go — and **quota goes entirely** (the verb, the sources, the learned slope,
-  cooldowns, RPM/TPM, reservations); a backend's allowance is never the tool's business. What stays
-  is the single HOST-DECLARED sizing window, result **ingestion** (consumption, not execution), and
-  the right to faithfully RECORD what the host says ran — *not routing does not mean not knowing*.
+  cooldowns, RPM/TPM, reservations); a backend's allowance is never the tool's business. **The
+  declared sizing window goes with them** (owner, 2026-08-09, superseding the same day's "the single
+  host-declared window stays"): asked which config field should carry it, the owner rejected the
+  premise — *"audit-tools should not be involved in dispatching, routing, or transport"* — and a
+  config block describing a backend's context and output caps IS transport config. So the tool
+  partitions on **content coherence** and reports a **token estimate**; it never partitions to fit a
+  backend's window, and the host bundles for the backend only it knows. Work blocks survive; "reasonable
+  size" stops meaning "fits model X". What stays is result **ingestion** (consumption, not execution)
+  and the right to faithfully RECORD what the host says ran — *not routing does not mean not knowing*.
+  ⚠ Consequence: `work_blocks` in `audit-findings.json` stops being a FIT CLAIM and becomes a
+  coherence grouping plus an estimate.
   ⚠ Headless/CI autonomy is deliberately given up. ⚠ Much of the current dispatch/quota substrate
   predates this and is being removed, not extended; see the removal track in
   [`forward-tracks.md`](docs/backlog/forward-tracks.md). Do not add routing capability in the meantime.

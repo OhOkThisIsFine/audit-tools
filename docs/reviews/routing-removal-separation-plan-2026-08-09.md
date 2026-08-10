@@ -287,4 +287,34 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    **Consequence for the sequence:** S6 stops being a late safeguard against write-only metadata and
    becomes the centre of the work — the emitted per-task contract IS the product. Re-plan S6 first.
 
-**Nothing open.** Every question this record raised has an owner answer above.
+6. **THE DECLARED WINDOW GOES TOO — decision 2's escape clause fired.** Decision 2 kept "the single
+   host-declared window" and said outright: *"If the intent is that even this must go, the tool cannot
+   partition at all and packet sizing becomes the host's job too — say so and the sequence changes
+   shape."* Asked which config field should carry that window, the owner rejected the premise:
+   *"This question seems to demonstrate deep confusion about the point of this refactoring. The
+   audit-tools should not be involved in dispatching, routing, or transport."*
+
+   Every option offered was a **config** source (`block_quota`, `quota.models[<name>]`, the persisted
+   handshake) — and a config block describing a backend's context and output caps IS transport
+   configuration. So the answer is none of them.
+
+   **The reading this plan now proceeds under, stated so it can be corrected rather than assumed:**
+   the tool partitions on **content coherence** and reports a **token estimate**; it never partitions
+   to fit a backend's context window. Work blocks survive — "batch work into logical units of
+   reasonable size" is a product conviction — but *"reasonable"* stops meaning "fits model X's window".
+   The host bundles for its chosen backend, because only the host knows what that backend is.
+
+   **Consequences:** `block_quota` and `quota.*` stop being sizing inputs entirely;
+   `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and `resolveSizingWindowTokens`
+   become REMOVALS rather than rewrites, along with the splitters they feed; S1's single declared
+   window was a waypoint, not the endpoint. **This also dissolves two questions rather than answering
+   them** — the roster max (a roster is routing by construction) and the 1.43× safety-margin
+   divergence (no window to apply a margin to). The owner marked both "[No preference]", which is
+   consistent with both being moot.
+
+   ⚠ **What this costs, stated plainly:** the tool can no longer promise a unit of work fits anywhere.
+   `work_blocks` in `audit-findings.json` stops being a fit claim and becomes a coherence grouping
+   plus an estimate. Any consumer reading it as "this fits in one context" must be re-pointed.
+
+**Nothing open** except the reading in decision 6, which is an interpretation of a directional steer
+rather than a quoted answer — correct it and the S-sequence changes again.

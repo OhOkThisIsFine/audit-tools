@@ -16,11 +16,12 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.14 SHIPPED 2026-08-09 — carries S1 of the routing-removal separation (`100b9117`).** npm
-  live at 0.39.14, both global bins reinstalled and the deferred postinstall run manually (npm skips
-  it on `-g`) — 13 host integrations deployed, 0 failed; both bins report 0.39.14. Release CI run
-  [31348958340](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31348958340) green across
-  all 6 jobs, critical path 287s (summed 826s). **`v0.39.14` tags `fb5637ff`; nothing is unpublished.**
+- **v0.39.15 SHIPPED 2026-08-09 — carries the extracted-plan recovery fix (`d7146254`) and the
+  provider-identity removal from sizing (`fafca0fb`).** npm live at 0.39.15, both global bins
+  reinstalled and the deferred postinstall run manually (npm skips it on `-g`) — 6 host integrations
+  deployed, 0 failed; both bins report 0.39.15. Release CI run
+  [31353302415](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31353302415) green across
+  all 6 jobs, critical path 241s (summed 824s). **`v0.39.15` tags `5dc2ace0`; nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
 - **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
   owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
@@ -145,8 +146,10 @@
    corruption, and loop deterministically; and `fafca0fb` removes provider identity from sizing on all
    three draws (equality enforced by a both-host-classes fold check, not asserted).
 
-   ⚠ **The REST of S2 is blocked on three owner decisions** — see *Owner decisions needed* below.
-   Until they are answered the roster max and the declared-window field stay exactly as they are.
+   ⚠ **The REST of S2 IS SUPERSEDED — the owner rejected the declared sizing window itself on
+   2026-08-09.** Do not implement S2's remaining half; read *"ANSWERED 2026-08-09"* below and the
+   plan's *Owner decisions* 6 first. The next lap is a REMOVAL of the sizing window, not a rewrite of
+   where it reads from.
    Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
    each one.
    ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
@@ -263,36 +266,37 @@
    ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
    SHRINKAGE there. Any edit to that file must come out net-negative.
 
-## Owner decisions needed — these BLOCK the rest of S2
+## ⚠ ANSWERED 2026-08-09 — the declared sizing window goes too; S2 is superseded
 
-Asked in chat 2026-08-09; recorded here so they survive the session. Each moves a number for a real
-configuration, so none can be settled by an agent. Full evidence:
-[`s2-sizing-window-design-check-2026-08-09.md`](reviews/s2-sizing-window-design-check-2026-08-09.md).
+Three questions were put to the owner. The first was **rejected at the premise**, and that dissolves
+the other two — both were marked "[No preference]", consistent with being moot.
 
-1. **Which field is the single declared sizing window?**
-   - `block_quota.{context_tokens,reserved_output_tokens}` — the cut-(d) survivor, the persisted
-     spelling on both hand-rolled draws, zero migration. ⚠ Validated NOWHERE
-     (`src/shared/validation/sessionConfig.ts` has no `block_quota` reference), so a typo'd
-     `100000000` would silently size every packet; needs load validation in the same commit. Also
-     entrenches `block_quota.host_model`, which `open-bugs.md` already says should move to
-     `self.model_id`.
-   - model-name-keyed `quota.models[<name>]` — the rung `spec/unified-dispatch-worker-model.md`
-     blesses as the operator escape hatch that may outrank discovery, and it is already
-     integer-guarded. ⚠ `QuotaConfig` is slated for deletion with quota, and ~15 remediate fixtures
-     would be rewritten.
-   - handshake/descriptor only, no operator override at all — purest reading of "host-declared".
-     ⚠ Removes the escape hatch entirely.
-2. **What replaces the roster max** at `plan.ts` and `workPartitionRuntime.ts`? Deleting it and
-   falling to the scalar pair is NOT monotone — persisted scalars plus a later `--host-models` makes
-   the budget *grow* (worked case 16 800 → 117 600) and stops blocks splitting against the small model
-   the operator declared. And on the work-block draw the number is persisted as `work_blocks` in
-   `audit-findings.json` and read cross-run by remediate, so it is a schema contract change.
-   Candidates: delete → scalar; fold with `min`; or **refuse on a roster** (a roster is N windows, not
-   one) — cleanest under the directive, hardest break for roster users.
-3. **Converge the safety margin?** Audit packets size at 1.0, blocks and work blocks at 0.7 — the same
-   declared window yields a 1.43× larger audit packet. Evidence the raw path over-claims: `dispatch.ts`
-   subtracts a 15 000-token harness overhead from it, and `rollingDispatch.ts` spends the same
-   reservation again. Converging on 0.7 changes every audit packet in every run.
+> *"This question seems to demonstrate deep confusion about the point of this refactoring. The
+> audit-tools should not be involved in dispatching, routing, or transport."*
+
+The question offered three sources for the single declared sizing window — `block_quota`,
+model-name-keyed `quota.models[<name>]`, the persisted handshake. **All three are config describing a
+backend's context and output caps, i.e. transport configuration.** This is exactly the escape clause
+the separation plan's *Owner decisions* 2 wrote down: *"If the intent is that even this must go, the
+tool cannot partition at all and packet sizing becomes the host's job too."* It fired.
+
+**The reading now of record** (stated as a reading, not a quote — correct it and the sequence changes
+again; full statement in the plan's *Owner decisions* 6): the tool partitions on **content coherence**
+and reports a **token estimate**, and never partitions to fit a backend's window. Work blocks survive
+— batching into logical units is a product conviction — but "reasonable size" stops meaning "fits
+model X". The host bundles for the backend it chose, because only the host knows what that is.
+
+**So the S-sequence is superseded, and the next lap is a REMOVAL, not S2's rewrite:**
+`resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and `resolveSizingWindowTokens` go,
+with the splitters they feed; `block_quota` / `quota.*` stop being sizing inputs. S1 was a waypoint,
+not the endpoint. The roster max and the safety-margin divergence are moot, not deferred.
+
+⚠ **The cost, stated so it is not discovered later:** the tool can no longer promise a unit of work
+fits anywhere. `work_blocks` in `audit-findings.json` stops being a fit claim and becomes a coherence
+grouping plus an estimate — any consumer reading it as "this fits in one context" must be re-pointed.
+
+⚠ This lap's two landed commits are unaffected and stay: removing provider identity from sizing and
+narrowing the extracted-plan recovery are both on the path to the smaller endpoint, not off it.
 
 ### Standing notes — not tasks
 
