@@ -496,6 +496,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   is the bar — a single alone-pass is not, because these are the slowest four files in the suite
   (155-165s each in-suite) and spin real audit runs through real subprocesses.
 
+- **`tests/shared/quota-state.test.ts` INV-QD-15 flakes on Windows with `EPERM … rename`, and it is a
+  TEST hermeticity bug, not a code regression (2026-08-09).** Seen in a full run: `Failed to write
+  …/quota-state.json: EPERM: operation not permitted, rename '…tmp' -> 'quota-state.json'` out of
+  `writeFileAtomic` (`src/shared/io/json.ts:98`), plus an unhandled `QuotaStateUnavailableError`
+  reporting a torn read from a *different* temp dir. Passed **alone twice**, 34/34. The test
+  deliberately races a lock-free reader against in-flight writes, and on Windows a reader holding the
+  target open makes the atomic `rename` fail `EPERM` — the very interleaving the test induces. Not in
+  `scripts/shared/test-flake-baseline.json`, so nothing tells you. Standing rule already covers the
+  triage (`EBUSY`/`EPERM` on Windows = suspect flake first); what this entry adds is that the fix
+  belongs in the **test's** isolation, not in `writeFileAtomic` — do not "harden" the production
+  atomic write in response to it.
+
 - **In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit
   (2026-08-09).** Same failure as the nested `claude -p` entry above, but with no subprocess and no
   env to set: a read-only recon fan-out ended its turns inside the checkout, the closeout-challenge
