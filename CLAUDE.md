@@ -239,6 +239,16 @@ instead of a rewrite. Trivial mechanical edits skip it.
   both follow. The README block was previously a hand-maintained restatement kept honest by an instruction
   to *remember* to update it — a drift test made of memory, which is the thing this project bans.
 - **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
+- **audit-tools does NOT route — it reports task metadata and the HOST dispatches** (owner directive,
+  2026-08-09). The tool's job is to characterize work: per-task risk, complexity, local token
+  estimates, scope and lens. Choosing *which backend runs it* — pools, capability tiers, failover,
+  cost-first admission, provider rosters — is the host's, and owning any of it here is pollution.
+  This is the same inversion as *Conversation-first* and *never hand-maintain a model/price table*,
+  applied to selection itself: those rules say don't own the model FACTS, this one says don't own the
+  CHOICE. ⚠ Much of the current dispatch/quota substrate predates this and is being removed, not
+  extended — the boundary (how much of quota is *reporting* vs *routing input*) is still being settled;
+  see the removal track in [`forward-tracks.md`](docs/backlog/forward-tracks.md). Do not add routing
+  capability in the meantime.
 - **A needed manual flag is a bug signal.** Fix auto-resolution; don't document the flag.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
 - **Budget context before LLM dispatch.** Small obligation-specific packets; expand only when genuinely needed.

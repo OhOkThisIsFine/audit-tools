@@ -31,6 +31,36 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 ## Forward tracks
 
+- **Remove routing from audit-tools — the tool reports task METADATA, the host dispatches
+  (owner directive, 2026-08-09).** audit-tools should emit per-task risk, complexity and local token
+  estimates and let the host decide which backend runs the work; owning backend selection, pools,
+  failover and cost tiering is pollution. This supersedes and retires the two tracks previously here
+  that assumed the opposite (the quota-arbitrage source-pool tier and the tool-enforced dispatch
+  broker with its capability-tiered driver) — both were routing programs, and parts of the broker
+  had already shipped, so this is a removal, not a non-start.
+  **Surface to remove, measured at `e0ec020d`:** 14 modules reference `DispatchableSource`; the
+  declared-source layer is `src/shared/providers/auditorSources.ts` (450 lines) reading
+  `~/.audit-code/sources-declared.json`; the routing/selection machinery is
+  `src/shared/providers/providerFactory.ts` (584) plus `src/shared/quota/apiPool.ts` (983) and
+  `capacity.ts` (864); `PROVIDER_NAMES` carries 11 entries; ~178 `routing` references live under
+  `src/`. Most of it is loop-core (`src/shared/{dispatch,engine,quota,rolling}/`), so every commit
+  needs a staged-tree review attestation.
+  **The boundary to settle FIRST, before any deletion** — three defensible cuts, and they differ by
+  thousands of lines: (a) drop only the declared-source/proxy-lane layer and keep host-provider
+  auto-resolution; (b) also drop pools/capacity/admission, keeping only local token estimation; (c)
+  keep a single execution adapter and delete every notion of choosing between backends. Quota
+  tracking is the sharp edge — some of it is *reporting* (tokens used, which the metadata contract
+  wants) and some is *routing input* (admission, spill, failover), and the two are currently one
+  subsystem.
+  ⚠ **This collides with the in-flight `dispatch-effectiveness-observability` run**, whose design of
+  record resolves its attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool
+  machinery cut (b) and (c) remove. Settle the boundary before authoring that run's module contracts,
+  or the contracts encode a layer that is being deleted.
+  ⚠ Relay/proxy references still sit in `docs/backlog/`, `docs/reviews/`, `.claude/nightly-decisions.json`
+  and ~20 `src/` files. The owner approved scrubbing all three doc classes (2026-08-09); most of the
+  `src/` mentions disappear with the code, so scrub docs as part of the removal rather than twice.
+
+
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"
   ([`open-bugs.md`](open-bugs.md)): without ground truth, per-lane yield is a noisy signal and
@@ -101,56 +131,6 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   tool-owned gate that can't pass on a clean tree fails the release, not a dogfood run. Sibling of the
   packaged-bin smokes but for the *gate execution path*, not just `--version`.
 
-- **Free/cheap "quota-arbitrage" dispatch tier — extra SOURCE POOLS on existing
-  machinery, not a new provider engine.** Fan dispatch across genuinely-free backends and (Phase 1)
-  N captured subscription-OAuth accounts, rotating on 429/cooldown to exceed any single subscription's
-  limit. The rotation engine is already ours: pool identity is `(provider, account[, model])`, the
-  admission loop (`admitBatch` cost-first + spill) IS the rotation, `ReservationLedger` does per-key
-  backoff, and Claude/Codex/Copilot accounts get live per-account quota free via `BaseHttpQuotaSource`.
-  Worker shape ≈ `OpenAiCompatibleProvider` (thin `buildHeaders`/`buildUrl` subclass) except Kiro
-  (AWS EventStream) + Cursor (protobuf). **Acquire and normalize:** use a vetted, externally maintained
-  provider OAuth catalogue, token-refresh endpoints/client ids, and text-error classes rather than
-  owning those volatile tables. Continue using models.dev for price data.
-  ⚠ **This entry previously declared Phase 1 "RULED OUT, not deferred" on ToS grounds; that ruling was
-  REVERSED by operator directive 2026-07-23** (the 2026-07-14 "don't cross it" decision was removed as a misinterpretation —
-  [[repair-proxy-registry-and-codex-tos]]). Subscription-OAuth replay — read the CLI's on-disk creds,
-  replay against the vendor's own model API (Codex → Responses, Gemini → Cloud Code Assist) — is IN, on
-  the operator's own accounts at his own risk, and must stay **opt-in, per-provider, operator-consented,
-  never default-on**. So the multi-account credential store + refresh-under-lock (encrypted,
-  rotation-loss-safe, generalizing `ClaudeOAuthQuotaSource`) is live work again, and so is its named
-  risk: long-lived refresh tokens at rest — never logged, atomic rotation under lock (recall the
-  Antigravity OAuth-fragment leak).
-  **The next move is an owner scoping decision, not code.** The directive's "run agents via the Claude
-  harness" has two readings the design memory keeps distinct: (A) point a harness's `ANTHROPIC_BASE_URL`
-  at a failover proxy so the Claude loop is served by whichever backend has quota — deployment/config,
-  fastest; (B) build the arbitrage tier into audit/remediate dispatch so the loops themselves fan across
-  captured accounts — the phased build. They compose but are different work; confirm which, and the
-  target harness (Desktop vs Code), before building.
-  **Property to hold:** free capacity is saturated before any metered pool, and every credential-capture
-  lane is per-provider opt-in, operator-consented, and never default-on. Design of record + phases in
-  [[arbitrage-dispatch-tier-design]]. Relates [[quota-dispatch-vision]] /
-  [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
-  [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
-  - **Phase-0 opencode-free — env-bound live validation remaining.** opencode-free ships as a pure-config
-    source entry (`cost_per_mtok: 0`). It is declared
-    machine-level in `~/.audit-code/sources-declared.json`, NOT the repo session-config, which cannot
-    represent it — G2 put `sources`/`provider` in `DISPATCH_INVENTORY_FIELDS`, stripped from the persisted
-    `RepoSessionIntent` (`src/shared/types/sessionConfig.ts`). Its key must be an `api_key_env`
-    (`OPENCODE_ZEN_API_KEY=public`); the inline `api_key` field is RETIRED — a config carrying one is
-    refused at validation (`src/shared/validation/sessionConfig.ts`). Declared-free demotion is wired: a pool
-    declared `0` that reports a positive cost is demoted out of free-first for the run and fires a
-    `declared_cost_drift` friction event (`src/shared/friction/stepBoundaryCapture.ts`).
-    **vertex-trial → deferred** (needs the operator's GCP $300-trial SA JSON). **Remaining = live
-    validation only** (no more code): a real opencode-free run confirming declared-free routing, a live
-    lapsed-free demotion, and the `declared_cost_drift` event end-to-end.
-  ⚠ **OWNER DECISION 2026-07-25 — reading (B): build the arbitrage tier INTO audit/remediate dispatch.**
-  The scoping question is settled: (A) (pointing a harness's `ANTHROPIC_BASE_URL` at a failover proxy) is
-  deployment config that rescues the HOST loop, while (B) adds captured-account source pools so the
-  existing admission loop rotates across them, rescuing DISPATCHED work. The owner chose (B) with (A)
-  not adopted. So the multi-account credential store + refresh-under-lock is live work, under the
-  standing constraint that every capture lane stays per-provider opt-in, operator-consented and never
-  default-on.
-
 - **models.dev static window can over-state a specific deployment (carried from W1).** With no capability
   handshake and no `quota.models` override, `resolveLimits` falls to the vendored snapshot
   (`src/shared/quota/limits.ts` rung 2.5 → `source: "static_metadata"`, confidence `medium`), and the snapshot
@@ -182,19 +162,6 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   simply the one that can never be routed around.
   - **⬇ Live-run watch** on an openai-compatible run: results conform on first emit (repair rounds for
     schema-shape errors drop to ~0).
-
-- **Tool-enforced dispatch broker with capability-tiered driver.** Desired end-state: (1) a gated
-  primitive set as the single dispatch chokepoint (read quota, estimate tokens locally, dispatch/await);
-  (2) a capability-tiered driver — Y-dispatcher (thin agent, no judgment) where the host supports nesting,
-  slot-pull where it can't; (3) classify agent hosts off the cold-start floor. The single-source
-  classifier, broker primitive, `HostSessionQuotaSource`, and driver selection/prompt rendering are
-  **shipped**. **Open (env-bound):** live Y-dispatcher validation (needs a nested-agent host + live run)
-  + proactive pre-wall quota-aware pacing.
-  - **⬇ Live-run watch** (Codex backend, which nests agents): the driver-selection step must pick the
-    **Y-dispatcher** path (thin dispatcher agent, no judgment) rather than slot-pull — confirm from the
-    run's driver-selection log. Separately, on a metered run, pacing should slow *before* the wall (proactive)
-    rather than only reacting after a 429. FAIL = slot-pull chosen on a nesting-capable host, or pacing that
-    only ever reacts post-wall.
 
 - **Deterministic analyzers: own-vs-acquire engine.** **Open:** clippy/rubocop landed fixture-only (no
   Rust/Ruby repo → live spawn unvalidated). *(Mutation testing was

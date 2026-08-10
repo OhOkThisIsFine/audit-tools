@@ -33,7 +33,7 @@
   retired the sweep's `gone` verdict and repaired the probe inputs (`b564d36a`).
   ⚠ `sol-2` carries a **user-visible CLI behavior change**: `<verb> --help` on an installer verb now
   prints help instead of installing. Two of those verbs previously wrote to the repo and to HOME.
-- **⚠ Offload from a Desktop session is shell-out ONLY** — subagents here bypass the relay entirely —
+- **⚠ Offload from a Desktop session is shell-out ONLY** — subagents here bypass the proxy entirely —
   **and lane quality varies sharply by job length.** Probe small, one bounded item per dispatch, and
   switch lanes rather than retrying the one that just failed. Both traps, with the evidence, are in
   [`durable-traps.md`](backlog/durable-traps.md).
@@ -50,14 +50,15 @@
   `~/.audit-code/sources-declared.json` (not the repo, and not `~/.audit-tools/`, which is where the
   previous lap looked and gave up). They pointed at the retired proxy's port, failed the liveness probe
   on every invocation, and have been removed; `next-step` now runs with zero source warnings. The file
-  is now an empty `sources` list, so **there is no declared offload lane** — dispatch is host-only
-  until the owner declares one. Declaring sources is owner-owned config, not an agent's call.
+  is now an empty `sources` list, so **there is no declared offload lane** — dispatch is host-only.
+  ⚠ Do NOT declare a replacement: the owner directive in *Immediate next* 1 removes routing from
+  audit-tools altogether, so an empty declaration is the intended end state, not a gap to fill.
 - **T4's floor is no longer a single outlier — it is a CLUSTER, which changes what the next split
   buys.** `audit-code-wrapper-packets.test.ts` was split three ways this lap and the baseline was
   regenerated from the 596-file run. The top of the list is now four completion files within 7s of
   each other: `audit-code-completion-present` 134.9s, `-ingest-dir` 134.5s, `-promote` 131.6s,
   `-force-synthesis` 128.0s, then `linux-cycle-regression` 125.9s. Splitting any ONE of them moves
-  the floor by ~3s, which is why the mechanism changed — see *Immediate next* 4.
+  the floor by ~3s, which is why the mechanism changed — see *Immediate next* 5.
   ⚠ Baseline numbers are under full-suite contention and run ~3× the isolated timings (the new
   wrapper files measure 37-40s alone, 107s in-suite) — compare like with like.
 
@@ -111,10 +112,23 @@
 
 ## Immediate next
 
-1. **Resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner call,
-   2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
+1. **FIRST — settle the routing-removal boundary; it gates item 2** (owner directive, 2026-08-09:
+   *audit-tools should not be routing; it should report task risk / complexity / token counts and let
+   the host dispatch — all this routing stuff is pollution*). The directive is recorded in `CLAUDE.md`
+   (Preferences & standing decisions) and the program, measured surface and three candidate cuts are in
+   [`forward-tracks.md`](backlog/forward-tracks.md). It **retired two forward tracks** that assumed the
+   opposite (quota-arbitrage source pools; the tool-enforced dispatch broker — parts of which had
+   already shipped, so this is a removal).
+   **The open question is the boundary, and it is an owner call:** how much of the quota subsystem is
+   *reporting* (tokens used — the metadata contract wants this) versus *routing input* (admission,
+   spill, failover)? Today they are one subsystem. Nothing should be deleted until that line is drawn.
+2. **THEN resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner
+   call, 2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
    `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per
    module, 8 modules).
+   ⚠ **Do not author those shards before item 1 is settled.** This run's design of record resolves its
+   attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool machinery two of the
+   three candidate cuts DELETE. Authoring now risks encoding a layer that is being removed.
    **Why the re-cut:** round 3 rejected the contract on CDC-T1/T2, and source verification showed the
    repair was not authorable at all — every candidate landed one file short and inverted the phase cut,
    because **the old 7 modules were drawn over the attribution contract's vocabulary rather than over
@@ -171,7 +185,7 @@
    (`28ab1175`). CP-NODE-1's *content* re-landed as `14677902`, but `6fcff985` is unique, so deleting
    now would be a real loss. **Delete both once the observability run in this item lands** — that is
    the trigger, and it is the only remaining action on them.
-2. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
+3. **Triage the 2,241 audit findings — the owner's cut is CALIBRATE ON A SAMPLE FIRST** (decided
    2026-08-09). Mechanism-verify a stratified sample across severities, then choose the cut from
    measured precision rather than the auditor's own severity ranking, which is the signal a standing
    open-bugs entry says is broken (2026-08-06: 0 of 9 self-audit criticals survived mechanism
@@ -179,12 +193,12 @@
    [`reviews/dogfood-run-2026-08-08.md`](reviews/dogfood-run-2026-08-08.md). Feeding this to
    `/remediate-code` wholesale would be a mistake — verify by MECHANISM first
    ([[verify-delegated-findings-mechanism-not-just-citation]]).
-3. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
+4. **Dogfood/meta-review 2026-07-30 cluster** (open-bugs, pinned) — live-run-watch properties.
    ⬇ Two of its still-live properties were exercised by the **2026-08-08 dogfood audit** (not the
    observability run in item 1): a pause/cooldown DID occur (pool exhaustion), and the remedy a refusal
    names was NOT reachable — the pool surfaced one member's 402 rather than an aggregate naming the
    exhausted set.
-4. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
+5. **T4 changes mechanism — attack PER-TEST COST, stop splitting files** (owner call, 2026-08-08).
    The floor is a four-file completion cluster within 7s (see *Live state*), so further single-file
    splits redistribute time rather than lower it. The cost to attack: each completion test runs ~35s
    because it spins a real audit run through real subprocesses, so the target is the shared
@@ -192,7 +206,7 @@
    are added. Re-measure, and only then decide whether anything still needs splitting.
    ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
    for a cluster.
-5. **Use the escalation channel `sol-4` just restored — the four questions it was blocking are still
+6. **Use the escalation channel `sol-4` just restored — the four questions it was blocking are still
    unasked.** They are listed in
    [`P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md)
    (read [`SHIPPED-2026-08-09.md`](../.audit-tools/nightly/proposals/SHIPPED-2026-08-09.md) first —
