@@ -22,8 +22,140 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-09 at `05a4d3fe`.*
+*Last run: 2026-08-10 at `cdb00ba8`.*
 
+
+---
+
+
+# Documentation
+
+
+<!-- nightly:item key=0958f57afe5837c2 -->
+
+## `docs-1` — Retire or supersede the ~1,540 lines of dispatch/quota/routing design docs whose subject the (d) directive deletes
+
+*Documentation · open 1 night · `spec/dispatch-quota.md`*
+
+### In plain terms
+
+On 2026-08-09 you decided that audit-tools stops routing work altogether: no provider selection, no execution adapters, and quota goes away entirely along with the declared sizing window. The code that does all of that is still in the repo — the removal has not been implemented yet. But the DESIGN DOCUMENTATION for that subsystem is large and it is written in the present tense, as the design of record. Four spec files plus one section of the operator guide, about 1,540 lines in total, describe a machine you have decided to delete: spec/dispatch-quota.md (760 lines, and it is on the constitutional list so it cannot be edited without an owner-decision record), spec/cross-provider-quota-matrix.md (466 lines of per-provider quota endpoints), spec/unified-dispatch-worker-model.md (232 lines), spec/backend-identity-axes.md (85 lines, which opens by saying dispatch inversion 'does not remove the identities required for quota'), and the operator guide's dispatch/quota configuration section. Nothing here is factually wrong TODAY — the code still matches the docs — so the routine will not touch it on its own. The question is timing. If they stay as-is, the next person to read them learns a design you have retired, and they get more wrong every week the removal proceeds. If they are deleted now, the docs stop describing code that is still shipping, which is its own kind of wrong. A middle option is to leave the text alone and add one line at the top of each saying the subject is being removed and pointing at the directive.
+
+### The question
+
+What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spec/unified-dispatch-worker-model.md, spec/backend-identity-axes.md and the operator guide's dispatch/quota section, given that cut (d) deletes the subsystem they document but that subsystem still ships today?
+
+### Your answer
+
+- [ ] **1. Supersede-mark now** — Leave the text alone but add a one-line superseded-by pointer at the top of each of the four specs and the operator-guide section, naming the (d) directive. Delete them when the removal lands.
+- [ ] **2. Retire now** — Delete all four specs and the operator-guide dispatch/quota section now. The directive is settled; documenting a design of record you have retired is worse than documenting nothing.
+- [ ] **3. Leave until the code lands** — Change nothing. The docs match shipping code today, and they get deleted in the same atomic commit as the code they describe.
+- [ ] **4. Keep one, retire the rest** — Keep spec/backend-identity-axes.md, rewritten down to only the identities that survive metadata-only reporting, and retire the other three plus the operator-guide section.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- CLAUDE.md records the cut: "The cut is (d) — ZERO execution adapters, metadata only" and "quota goes entirely (the verb, the sources, the learned slope, cooldowns, RPM/TPM, reservations)", with the declared sizing window going with them (owner, 2026-08-09).
+- spec/dispatch-quota.md:1-12 — "This spec owns the whole dispatch/quota model as one subject", 760 lines. It is on the constitutional list (src/shared/constitutionalDocPaths.ts:59), so any edit needs an owner-decision attestation.
+- spec/cross-provider-quota-matrix.md:1-8 — 466 lines of per-provider QuotaSource endpoints and credential paths, explicitly the design rationale for src/shared/quota/.
+- spec/unified-dispatch-worker-model.md:1-6 — 232 lines; "Audit-tools declares only stable pool intents and retains the enforcement that must remain local: packet fit, capability floors, quota/headroom, concurrency".
+- spec/backend-identity-axes.md:7-11 — "Dispatch inversion removes provider approval and ordering from audit-tools, but it does not remove the identities required for quota, launch, reachability, and self-spawn safety." Its axes table and its "Which learned quota/cooldown ledger applies?" row are both quota-premised.
+- docs/audit-pkg/operator-guide.md:141-215 — documents the dispatch backend/launch set (provider, host_provider, sources[], parallel_workers, dispatch.rolling_engine), relay-backed dispatch sources, and "enforces packet size/context fit, capability floors, quota/headroom".
+- NOT a factual-stale fix: verified the code still ships this today (PROVIDER_NAMES is live at src/shared/types/sessionConfig.ts:4-16, src/shared/quota/ is intact). The docs are stale only against the directive, which is exactly why this is escalated rather than applied.
+
+</details>
+
+---
+
+
+# Backlog disambiguation
+
+
+<!-- nightly:item key=5892df1b9af69154 -->
+
+## `backlog-1` — Close the doc-lint-rewrite entry, or name the process that rewrote the bytes — the entry states its own close condition and nobody has met it
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+
+### In plain terms
+
+Back on 2026-07-16 an agent tried to edit a paragraph it had written minutes earlier and the edit failed with 'string to replace not found'. The theory recorded at the time was that some hook had quietly rewritten the file underneath it. A backlog entry was opened demanding that any tool which rewrites a file mid-edit must announce it. Then on 2026-07-25 someone went looking for that rewriter and could not find one: no hook in .claude/hooks writes into docs/ at all, and the one mechanism that does rewrite the tree (the pre-commit gate's staged snapshot) restores the bytes exactly and already announces itself. So the entry's premise was falsified, and the entry itself now says, in its own text, 'Before rebuilding this: name the process that rewrote the bytes, or close the entry.' That condition has been sitting unmet for over two weeks. The mechanical sweep has now flagged this entry twice, on two separate nights, as already-shipped-or-stale. It is not stale — it is undecided, and the routine is not allowed to decide it, because deleting an entry that still carries a working mitigation is a judgment call. Note that whichever way you go, the mitigation in the entry ('after a not-found on text you just wrote, grep the anchor instead of re-reading the file') is worth keeping — it just may belong in durable traps rather than in open bugs.
+
+### The question
+
+The entry at docs/backlog/open-bugs.md:588 states its own exit condition — name the rewriting process or close it — and the process has not been named in over two weeks. Close it, or keep it open?
+
+### Your answer
+
+- [ ] **1. Close, keep the mitigation** — Delete the entry from open-bugs.md and move its working mitigation ("after a not-found on text you just wrote, grep the anchor instead of re-reading the file") into docs/backlog/durable-traps.md as a one-liner.
+- [ ] **2. Close outright** — Delete the entry. The premise is falsified and the mitigation is already common practice; it does not need a durable home.
+- [ ] **3. Keep it open** — Leave the entry. The observed failure was real even if the cause was misattributed, and a recurrence would be much harder to diagnose with no record of the first one.
+- [ ] **4. Keep, restated** — Keep the entry but rewrite it around what is actually unknown — an edit failed on text the agent had just written and the cause was never found — dropping the falsified hook theory entirely.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md:588-600 — the entry, including its own stated exit condition: "Before rebuilding this: name the process that rewrote the bytes, or close the entry."
+- The 2026-08-10 sweep classified it already_shipped_or_stale (triage-2026-08-10.jsonl, open-bugs#de319d16), as did the 2026-08-09 sweep. Both were treated as leads, not verdicts; neither run deleted it.
+- Verified the falsification still holds at HEAD: no file under .claude/hooks/ writes into docs/.
+- auto_close is false because the premise is prose in a backlog record with no code side — the record-path door in scripts/nightly/items.mjs. It leaves the queue when answered.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=a360d39985d537e8 -->
+
+## `backlog-2` — The 2026-07-28 friction walk states a property nothing enforces — enforce it, accept it as advice, or close the entry
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+
+### In plain terms
+
+A friction walk recorded on 2026-07-28 says that during a lap, the real execution state lived only in an untracked scratch file while the tracked records — HANDOFF, the backlog entry, the answer queue — all still said the opposite. Reconciling that cost a full re-verification of every claim against the code. The property the entry asks for is: when a lap executes tracked work, the tracked record updates in the SAME commit, or the next reader has to re-derive everything. That property is currently enforced by nobody. The closest thing is the closeout-challenge hook, which fires at the end of a session and points out uncommitted work and a HANDOFF that no longer matches the backlog — but it only asks a question, it does not block, and it does not tie a record update to the same commit as the work. So this entry is neither shipped nor abandoned. The repo's own rule says a trap that CAN be enforced mechanically must be, and its entry then gets deleted rather than restated; a trap only PARTLY enforced is not deletable, and the uncovered half has to be stated outright. That rule is what makes this a question rather than something the routine can settle: deciding whether the closeout hook is close enough, or whether a real gate is wanted, is a judgment about how much friction to spend.
+
+### The question
+
+The 2026-07-28 friction walk's item (1) states "when a lap executes tracked work, the tracked record updates in the SAME commit". Nothing enforces it. Build the enforcement, downgrade it to advice, or close the entry?
+
+### Your answer
+
+- [ ] **1. Accept the closeout hook as the coverage** — Treat .claude/hooks/closeout-challenge-gate.mjs as sufficient coverage: delete item (1) from the entry and state the uncovered half (it prompts, it does not bind the record update to the same commit) in durable-traps.md.
+- [ ] **2. Build the gate** — Keep the entry open as real work: a commit that touches a tracked-work path must carry the corresponding record update, enforced in the pre-commit gate rather than asked about at session end.
+- [ ] **3. Downgrade to advice** — Keep the property as written guidance only — move it into CLAUDE.md as a convention and delete the backlog entry. It is a habit, not something worth a gate.
+- [ ] **4. Close outright** — Delete the entry. It records a one-off reconciliation cost from a lap that is long finished, and no recurrence has been logged since.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md:761-771 — the friction walk; item (1) states the property, items (2) and (3) are already resolved or empty.
+- The 2026-08-09 nightly recorded this entry as escalate-rather-than-guess: "its item (1) still states an unenforced property, so its proof of shipping is incomplete" — but had no channel to raise it. The channel exists now (sol-4, 56a58330).
+- .claude/hooks/closeout-challenge-gate.mjs asks about uncommitted work and a HANDOFF/backlog mismatch, capped at 2 per session; it does not block and does not bind a record update to the work commit.
+- CLAUDE.md: a trap enforced only partly is NOT deletable — state the uncovered half outright, or the covered half reads as a close.
+
+</details>
 
 ---
 
@@ -31,30 +163,26 @@ records them in the tracked ledger, and does the work.
 # Recurring-problem solutions
 
 
-<!-- nightly:item key=23abd7578f6d8b05 -->
+<!-- nightly:item key=6bb133894505286a -->
 
-## `sol-1` — An env var that is unset in the Bash tool expands to nothing and the error names the wrong cause — hit four times, the last WITH the durable-traps entry already written. Add a guard rule, or keep it as prose?
+## `sol-1` — Make the attest scripts refuse to bind to a tree the pre-commit gate would reject — and correct the durable-traps entry whose stated remedy is falsified
 
-*Recurring-problem solutions · open 1 night · `.claude/hooks/shell-trap-guard.mjs`*
+*Recurring-problem solutions · open 1 night · `.claude/hooks/attest-loop-core-review.mjs`*
 
 ### In plain terms
 
-In the Bash tool on this machine, two environment variables that look like they should exist do not: $TMPDIR is simply never set by Git Bash here, and $CLAUDE_PROJECT_DIR is a variable Claude Code substitutes into hook command lines — it is never exported to a normal shell. In POSIX sh an unset variable expands to nothing at all, so a command like `npm run check > "$TMPDIR/out.log"` quietly becomes `> /out.log`, which fails with "Permission denied". The person reading that message concludes they cannot write to the temp directory. They have no reason to suspect the variable was empty. If the path is read back later instead of written, it is worse — `/out.log` resolves against the Windows working directory as `C:\Program Files\Git\out.log`, and the failure reads as a missing file.
-
-This has now happened four times on four separate dates: 2026-07-25 and 2026-07-28 (recorded together in docs/backlog/durable-traps.md), 2026-07-29 (a friction walk in open-bugs.md), and again tonight, on this run's very first redirect. The fourth hit is the reason this is being raised. The durable-traps entry describing the trap is accurate, complete, and states the fix — and it did not prevent anything, because a written entry only helps a reader who has read it and happens to remember it at the moment they type a redirect. CLAUDE.md's own rule says a trap that can be enforced must be enforced, and that "be careful" is never a fix.
-
-The proposal adds one rule to the existing Bash-tool guard: refuse a command that expands either of those two names, and say in the refusal what to write instead. Commands that set the variable themselves, or that only mention it inside single quotes (searching for the literal text), are unaffected. The detection logic was prototyped and run against eleven commands — the four real historical ones plus six that must NOT be blocked — and all eleven behaved correctly, so this is not a guess about whether it works. If it lands, the durable-traps entry is deleted in the same commit, which is what CLAUDE.md asks for when a trap becomes mechanical.
+Commits that touch the loop-core substrate need an attestation: a small signed record that says a review happened, bound to the exact set of files being committed. The trap is this. You stage your work, write the attestation, then run git commit — and the gate refuses, because a generated index file (the backlog seek index, say) is now out of date. Regenerating it changes a tracked file, which changes the staged set, which means the attestation you wrote sixty seconds ago no longer matches. So you write the same attestation a second time for the same review. This has now been written down four times across three dates, including once in HANDOFF describing exactly this happening on a real commit. Three of the four records deal with it by telling you to remember an ordering, which the repo's own rules say is a latent failure mode. There is a second problem, and it is the more interesting one: the most recent record prescribes a fix — reorder the gate's legs so the index checks run before the attestation check — and that fix is already in place. I read the gate: the index checks are at lines 642 and 693, the attestation check is at 910. Reordering would ship a no-op and delete the entry that records the real trap. The real cause is that the gate runs at commit time, and the attestation was written in an earlier, separate step, so no arrangement of the gate's own legs can reach backwards to inform it. The proposal moves the check into the attest script instead: before it binds anything, it runs the same derived-file checks the gate will run, and refuses to write an attestation at all if one fails. Nothing is bound, so nothing is wasted.
 
 ### The question
 
-Should `.claude/hooks/shell-trap-guard.mjs` gain a rule refusing a Bash-tool command that expands $TMPDIR or $CLAUDE_PROJECT_DIR (with the durable-traps entry deleted in the same commit), or should the trap stay as documented prose?
+Should the attest scripts run the gate's derived-file checks before binding, refusing to write an attestation for a tree the gate would reject?
 
 ### Your answer
 
-- [ ] **1. Add the guard rule** — Add the rule to shell-trap-guard.mjs as proposed (including the findLiveExpansions helper in shell-split.mjs and the six contract tests), run the red-green validation both ways, and DELETE the $TMPDIR / $CLAUDE_PROJECT_DIR entry from docs/backlog/durable-traps.md in the same commit — moving its "any env var seen only in hook command lines is suspect" generalisation into the rule comment.
-- [ ] **2. Guard, keep the entry** — Add the rule, but keep the durable-traps entry rather than deleting it — the generalisation it carries about hook-only variables is broader than the two names the rule enumerates.
-- [ ] **3. Widen it first** — Do not enumerate two names. Work out the general rule (any variable not present in the tool shell environment) and build that instead, even though it is a bigger change and has a real false-positive surface.
-- [ ] **4. Leave it as prose** — Do not add a rule. The trap is documented, the failure is loud, and the cost of each hit is one wasted command — not worth another always-on refusal in the Bash path.
+- [ ] **1. Yes — build it with the shared module** — Implement P19: extract the gate's trigger predicates into one module, have both attest scripts import it, run those checks before write-tree, and refuse to bind on failure. Correct the durable-traps entry in the same commit.
+- [ ] **2. Correct the entry only** — Do not change the attest scripts. Just fix docs/backlog/durable-traps.md so it stops prescribing a leg reorder that is already in place and would ship a no-op.
+- [ ] **3. Regenerate-and-restage instead** — Take the simpler shape: have the attest script run the regenerators itself and stage their output before binding, so the tree it binds to is already correct rather than merely validated.
+- [ ] **4. Leave it** — Accept the double-attest as a known cost. Correct the falsified remedy sentence, keep the ordering advice, and spend the effort elsewhere.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -63,108 +191,42 @@ Should `.claude/hooks/shell-trap-guard.mjs` gain a rule refusing a Bash-tool com
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P15-unset-env-var-expands-to-nothing/PROPOSAL.md`](../.audit-tools/nightly/proposals/P15-unset-env-var-expands-to-nothing/PROPOSAL.md)
+Full proposal: [`.audit-tools/nightly/proposals/P19-attestation-binds-a-tree-the-gate-rejects/PROPOSAL.md`](../.audit-tools/nightly/proposals/P19-attestation-binds-a-tree-the-gate-rejects/PROPOSAL.md)
 
 <details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
+<summary>Evidence (5) — what was verified against code, and how</summary>
 
-- Hit this run at 2026-08-09T09:05Z: `npm run check:nightly-routine-prompt > "$TMPDIR/parity.log" 2>&1` returned `/usr/bin/bash: line 1: /parity.log: Permission denied`.
-- docs/backlog/durable-traps.md:161-168 records the same trap for 2026-07-25 ($TMPDIR) and 2026-07-28 ($CLAUDE_PROJECT_DIR, "Same class, confirmed").
-- docs/backlog/open-bugs.md:467 records it again in the 2026-07-29 friction walk, item (2).
-- The guard already carries four Bash-tool syntax rules of the same shape (.claude/hooks/shell-trap-guard.mjs:226-289: Windows backslash path, PowerShell here-string, mktemp, live backtick).
-- stripQuoted cannot be reused: it blanks double-quoted spans, and every observed instance was double-quoted ("$TMPDIR/x"). The patch generalises findLiveBackticks — which already walks the same three-way quote context — into findLiveExpansions.
-- The scanner + self-assignment logic was prototyped in the session scratchpad and run against 11 commands (4 historical + ${BRACED} + 6 must-not-fire). All 11 gave the wanted verdict, including `echo "$HOME/$PATH and $TMPDIR_OTHER"`, where the name regex matches TMPDIR_OTHER and correctly misses the set.
-- NOT verified: nothing was written into .claude/hooks/ or tests/, so the wiring (rule placement, exit-2 path, bypass scrub in the test harness) has not executed.
+- Full analysis, patch shape, false-positive surface and four red-green tests: .audit-tools/nightly/proposals/P19-attestation-binds-a-tree-the-gate-rejects/PROPOSAL.md
+- Recurrence, 4 records / 3 dates: docs/backlog/durable-traps.md:54-60 (2026-07-25); memory constitutional-override-binds-to-final-staged-tree; docs/backlog/durable-traps.md:650-660 (2026-08-09); docs/HANDOFF.md:85-87 — S1 100b9117, "Its attestation had to be written TWICE".
+- The prescribed remedy is FALSIFIED at HEAD. durable-traps.md:657-659 says "the gate evaluates the attestation before the derived-index check". Read from .claude/hooks/pre-commit-gate.mjs runGate(): check:doc-manifest 517, check:guard-reach 561, check:handoff-roadmap 642, check:backlog-index 693, constitutional override 841, loop-core attestation 910. The derived checks already run first.
+- .claude/hooks/attest-loop-core-review.mjs:142 binds unconditionally on git write-tree with no check that the tree is acceptable; scripts/attest-constitutional-doc-change.mjs has the same hole.
+- Bound stated honestly in the proposal: this covers the four derived-file legs, not the 240s doc-contract test leg, so the entry is corrected rather than deleted.
 
 </details>
 
 ---
 
 
-<!-- nightly:item key=cb327d44d31852ec -->
+<!-- nightly:item key=c8a2bfb1a352d9cd -->
 
-## `sol-2` — Both shipped bins run the installer instead of printing help when asked `<verb> --help`, and remediate-code lists a shadowed `ensure` that can never execute. Fix the class, or accept it?
-
-*Recurring-problem solutions · open 1 night · `wrapper/audit-code-wrapper-lib.mjs`*
-
-### In plain terms
-
-Running `remediate-code install --help` does not print help. It runs the installation and writes four files. The same is true of `audit-code verify-install --help`, and of every other installer verb on both bins — this was confirmed by running them tonight, not inferred.
-
-The cause is slightly different on each side. remediate-code checks for the installer verbs first thing and hands off before any help handling exists at all. audit-code does have a real --help check, but it uses a helper that stops looking as soon as it sees a word that is not a flag — so `audit-code --help` works and `audit-code install --help` does not. Neither is careless; each is a reasonable local decision that adds up to the same surprise.
-
-Why it matters more here than in a repo script: these are the published commands, and the affected verbs are the first ones a new operator touches. Two of the four (install, ensure) write files into the user's repository and home directory. "Ask the tool what this does" is the single most likely first command, and it performs the installation instead of describing it.
-
-There is a second, sharper problem underneath. remediate-code's help page lists a command called `ensure`, described as "Repair/check global /remediate-code host assets". That entry belongs to an implementation inside src/remediate/index.ts which can never run — the wrapper intercepts `ensure` first and calls a completely different function. So a reader is shown one implementation's description and gets another's behaviour, and the dead one is invisible to the dead-code checker, because a registered command looks like a live consumer. The other three installer verbs do not appear in the help at all, even though the skill docs tell people to use them.
-
-This is the third date for the same underlying defect — a command treating --help as data rather than as a request. It was fixed at one script on 2026-07-30 and at another on 2026-08-08, both times only at the site where it was found.
-
-### The question
-
-Should the informational-flag check move above verb routing in both wrappers (with per-verb help text, the shadowed src/remediate `ensure` deleted, the other three verbs registered so they appear in --help, and a contract test asserting every verb answers --help with no filesystem writes)?
-
-### Your answer
-
-- [ ] **1. Fix the class** — Do all four parts: hoist the informational-flag check above verb routing in both wrappers, give each installer verb its own help body from a single source, delete the unreachable `ensure` action in src/remediate/index.ts and register all four verbs as description-only stubs so they appear in --help, and add one contract test that enumerates every verb of both bins and asserts `<verb> --help` exits 0, prints the verb name, and writes nothing.
-- [ ] **2. Help only** — Fix only the --help behaviour and the contract test. Leave the shadowed `ensure` and the missing help entries alone for now — they are a separate cleanup.
-- [ ] **3. Shadow only** — Fix only the shadowed `ensure` and the missing --help entries in remediate-code. The `<verb> --help` behaviour is a smaller surprise than a help page that describes code which cannot run.
-- [ ] **4. Accept it** — Accept both. Record the invariant ("an informational flag never performs work; every verb of a shipped bin answers --help") in docs/backlog/open-bugs.md with an offsetting condensation, and move on.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P16-installer-verb-swallows-help/PROPOSAL.md`](../.audit-tools/nightly/proposals/P16-installer-verb-swallows-help/PROPOSAL.md)
-
-<details>
-<summary>Evidence (8) — what was verified against code, and how</summary>
-
-- Observed this run: `node remediate-code.mjs install --help` exited 0 and emitted the install JSON, writing .remediate-code/install/{remediate-code.import.md,SKILL.md,GETTING-STARTED.md,manifest.json}.
-- Observed this run: `node audit-code.mjs verify-install --help` exited 0 and emitted the verify JSON.
-- remediate-code.mjs:129-138 routes install/ensure/verify-install/install-host to the B2 bootstrap before any help handling; the installer reads flags with hasFlag/getFlag (wrapper/remediate-code-wrapper-install-hosts.mjs:40-51), neither of which knows --help.
-- wrapper/audit-code-wrapper-lib.mjs:281 short-circuits on --help via hasLeadingFlag (:39-45), which returns false at the first token not starting with "-" — so a verb consumes the leading position.
-- src/remediate/index.ts:362-369 registers `ensure` -> ensureGlobalAssets. remediate-code.mjs:130 catches `ensure` first and calls installer.ensureBootstrap (wrapper/remediate-code-wrapper-install-hosts.mjs:1115), so the commander action is unreachable through the bin. It still appears in `node dist/remediate/index.js --help`.
-- install, verify-install and install-host appear in no `remediate-code --help` entry, yet skills/remediate-code/SKILL.md:62,71 document ensure and install as the normal bootstrap path.
-- Same class fixed twice before, single-site each time: scripts/check-gate-enumeration.mjs:22 (6b8f8d7a, 2026-07-30) and scripts/shared/triage-backlog.mjs (af37bbad, 2026-08-08, nightly P14).
-- NOT verified: whether ensureGlobalAssets has any other live caller. Establish that before deleting it.
-
-</details>
-
----
-
-
-<!-- nightly:item key=f6edd3affec55a2a -->
-
-## `sol-3` — The backlog sweep's strongest verdict is wrong every time it fires — both of tonight's `gone` stamps are false, and 30 of 121 records hide unusable probes under the same word as an honest one.
+## `sol-2` — The backlog sweep counts any record that parses as JSON as CLASSIFIED — five of tonight's 120 carry no verdict at all
 
 *Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
 
 ### In plain terms
 
-Every night a sweep classifies each backlog entry using a model, and stamps each record with what it thinks happened to the entry's premise. The strongest stamp is "gone" — meaning the code the entry is about has verifiably disappeared — and it is the stamp a deletion would rest on.
-
-Both of tonight's two "gone" stamps are wrong, and last night's digest recorded a third. No correct one has been observed. They fail the same way, and it is not the model being sloppy — it is doing exactly what it was told.
-
-The sweep's instructions say: quote the fragment verbatim from the entry, because you cannot see the repository. That is sensible — it stops the model inventing code. But a fragment quoted from a backlog entry is only a usable probe if the entry itself quoted the file word for word, and backlog prose paraphrases all the time. One entry tonight had three probes all quoting the phrase "the core dispatch-inventory READ switch lives" — that is the entry's own English sentence, not code. It appears in no file, so all three probes came back absent, and the record was stamped "gone" while the problem it describes is entirely live. Another quoted `finish_reason === "stop"` when the code says `finish_reason !== 'stop'` — inverted comparison, different quote style. Present in substance, absent as a literal string.
-
-Separately, while measuring that, a wholly fabricated record turned up: title "Multi-Veterinarian", reason "bad file", recommended action "delete file", against an entry that is really 1,500 characters about a postinstall migration gap. It was schema-valid and counted toward "121 classified, 0 errored". Replaying the whole sweep showed it is not alone — 30 of the 121 records supplied probes of which not one was usable, and all 30 report the same stamp as the 58 records that honestly supplied none. Two of the five records recommending deletion sit in that bucket.
-
-The fix has two independent halves. The narrow one is nearly free: the code already knows the difference between "supplied no probes" and "supplied probes, none usable", and throws it away — one branch keeps it. The broader one is that the sweep should probably stop emitting "gone" at all, since a lane that cannot read the repository has no business asserting a fact about it; let the probe evaluation, which does read the tree, be the only thing that says it.
+Every night a mechanical sweep sends each backlog entry to a model and asks it to classify the entry. It writes a coverage stamp afterwards saying how many entries it managed to classify, and the routine's contract says to report leg-2 coverage from that stamp rather than eyeballing it — precisely because the sweep used to degrade in silence. Tonight the stamp says 120 of 124 entries were classified. Five of those 120 are not classifications. One is the JSON schema itself echoed back instead of an answer, so the real verdict is nested one level down where nothing reads it. Four are bare fragments carrying a quoted string and nothing else — no verdict, no reasoning, no recommended action. The reason they count is that the script's only test is whether the text parsed as JSON: if it parsed and there is no error field, it is called classified. There is a second, quieter bug in the same line. The script builds the record by taking its own facts about which entry this is and then spreading the model's output on top, so the model's keys overwrite them. One of tonight's records now claims to live in a TypeScript source file rather than in a backlog file — it has lost the ability to say which entry it is about. This is the fourth time in five days that this sweep has been found reporting coverage it did not achieve; the three earlier fixes all hardened the transport, and none of them checks that what came back is actually a triage record.
 
 ### The question
 
-Should the sweep stop emitting the `gone` verdict entirely (leaving it to probe evaluation, which can actually read the tree), and should `premiseStamp` distinguish "supplied probes, none usable" from "honestly supplied none"?
+Should the sweep validate each parsed record against its schema — verdict in the enum, why and action present — and count a mismatch as errored rather than classified?
 
 ### Your answer
 
-- [ ] **1. Both: drop gone + split the stamp** — Do both. Stop the sweep emitting `gone` — downgrade it to premise_unconfirmed and let only probe evaluation in the nightly writer, which reads the tree, ever assert goneness. And add the probes_unusable stamp so a record whose probes all evaluate to nothing is visibly distinct from one that honestly supplied none, counted in the coverage stamp, and never a deletion lead when paired with already_shipped_or_stale.
-- [ ] **2. Split the stamp only** — Add the probes_unusable stamp and the coverage-stamp count, but keep `gone`. Its false rate is measured on three instances across two nights; watch it with the new stamp in place before removing a signal.
-- [ ] **3. Corroborate gone instead** — Keep `gone` but require corroboration: the model emits a symbol name alongside the literal fragment, and `gone` only stamps when BOTH are absent. Plus the probes_unusable split.
-- [ ] **4. Go further — fix the probe inputs too** — Do the above plus the input-side repairs: resolve a bare basename against the tracked tree and record it as recovered rather than substituted (20 of 72 occurrences), widen the schema so the model can name a symbol when it does not know the path, and teach the system prompt that a probe aimed at docs/backlog or docs/reviews carries no evidence (26 of 72 occurrences).
-- [ ] **5. Leave it** — Leave the sweep as is. Its verdicts are already documented as advisory leads that must be verified against HEAD, and that rule caught every bad record this run.
+- [ ] **1. Yes — validate and own the identity** — Implement P20: put the spread before id/file so the model cannot overwrite the record's identity, and require verdict/why/action after parsing, routing a mismatch into the existing errored-and-retry path.
+- [ ] **2. Validate only** — Add the shape check, but leave the object spread as it is. The clobbered file field is cosmetic and a single record showed it.
+- [ ] **3. Also fix the stamp** — Do P20 and additionally add a classified_total field to the coverage stamp, since after a retry pass the field named "classified" reports only that pass and reads as near-total failure.
+- [ ] **4. Leave it** — Accept it. Five bad records out of 124 is within tolerance for an advisory sweep, and every verdict is meant to be verified before it is acted on anyway.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -173,79 +235,16 @@ Should the sweep stop emitting the `gone` verdict entirely (leaving it to probe 
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P17-fabricated-triage-record-stamps-as-honest/PROPOSAL.md`](../.audit-tools/nightly/proposals/P17-fabricated-triage-record-stamps-as-honest/PROPOSAL.md)
+Full proposal: [`.audit-tools/nightly/proposals/P20-invalid-triage-record-counts-as-classified/PROPOSAL.md`](../.audit-tools/nightly/proposals/P20-invalid-triage-record-counts-as-classified/PROPOSAL.md)
 
 <details>
-<summary>Evidence (10) — what was verified against code, and how</summary>
+<summary>Evidence (5) — what was verified against code, and how</summary>
 
-- open-bugs#aea07705: all three probes quote "the core dispatch-inventory READ switch lives" — the ENTRY's prose, in no source file — so the record stamped `gone`. Premise verified HOLDING at HEAD: src/audit/cli/{nextStepCommand,semanticReviewStep,prompts}.ts all exist and none appears in LOOP_CORE_PATTERNS (src/shared/loopCorePaths.ts:26-46).
-- open-bugs#8b808454: probe quotes `finish_reason === "stop"`; the code at scripts/shared/triage-backlog.mjs:414 reads `if (c?.finish_reason !== 'stop')`. Mechanism present, literal absent, stamp `gone`.
-- Root cause is the system prompt at scripts/shared/triage-backlog.mjs:266-269 — "Quote the fragment VERBATIM from the entry — you cannot see the repo". Correct for its purpose, and it is what produces both false stamps.
-- The 2026-08-08 digest recorded a third false gone (forward-tracks#ecd20cf4). Three across two nights; no true one observed.
-- Fabricated record open-bugs#03d4bc94: title "Multi-Veterinarian", why "bad file", action "delete file", code_paths ["agdoskka"], three probes naming README/names/text. The real entry, recovered via the sweep's own chunk() hash, is "External shared-logic audit V1-V7 residuals" (1,508 chars).
-- Measured by replaying the JSONL: 30 of 121 records supplied probes with none usable, all reporting `premise: unprobed` — identical to the 58 that honestly supplied []. Of their 72 probe occurrences: 26 record-path, 20 uniquely resolvable by basename, 6 ambiguous, 20 junk.
-- Two of the five already_shipped_or_stale verdicts fall in that bucket (03d4bc94, de319d16).
-- Second title fabrication found while verifying: open-bugs#0487b95c reported as "Outbox truncation limit (RED 089) pending"; the entry is "Untracked-exclusion scope rule — residuals only" with four live residuals.
-- The signal already exists and is discarded at scripts/shared/triage-backlog.mjs:184-191: premiseStamp collapses "every surviving probe is signal-free" into the same `unprobed` it returns when none were supplied.
-- NOT verified: no code was changed, so the proposed branch has not executed inside the sweep. The 30/121 rate is one night on pool/medium; stability across models or nights is unknown.
-
-</details>
-
----
-
-
-<!-- nightly:item key=493f2c67e57b9e64 -->
-
-## `sol-4` — Leg 2 is defined to escalate and, since 2026-08-06, structurally cannot — a probe about a backlog entry is refused at write. Four questions are stuck behind it.
-
-*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
-
-### In plain terms
-
-The nightly routine's second leg reviews the backlog. It is allowed to do mechanical cleanup on its own, and everything else — deciding what a vague entry should become, whether an entry should be kept or closed — is explicitly the owner's call, so it must be escalated to you.
-
-An escalated item has to carry a premise probe: a literal string, quoted from a tracked source file, that pins the fact the item is about. That requirement exists so an item can auto-close when the thing it is about changes, and so a question already fixed in the code does not keep being asked.
-
-The probe writer refuses to accept a probe pointing at docs/backlog, docs/reviews, HANDOFF or the inbox. That refusal is right, for the reason it was written: a backlog entry quotes the code it is about, so the entry's own text vanishing tells you nothing about whether the underlying defect was fixed. A probe aimed at a record is probing the record, not the premise.
-
-But a leg-2 escalation IS about a backlog entry. Its premise is prose in docs/backlog, and often there is no code side at all — the question is "should this entry still exist", not "does this doc match the code". So the only probe that could pin it is refused, and the item cannot be written down. One rule, correct for closing items, silently removed a whole leg's ability to ask anything.
-
-The history shows it cleanly. The last backlog-leg item the routine ever produced was written at 02:51 on 2026-08-06; the refusal landed at 09:24 the same day, about six and a half hours later. Every run since has produced zero. Four real questions are now stuck behind it, including one that has been telling its reader "name the process, or close the entry" since 2026-07-16, and one whose only escape was being typed into HANDOFF.md by hand — which is exactly the lose-the-escalation failure the tracked inbox was built to end.
-
-The proposed fix splits the rule by direction rather than weakening it: keep the refusal absolutely for closing, and at creation allow a record-path probe on an item that declares it never auto-closes. Such an item still has to be true when written, still shows up normally, and leaves the queue when you answer it — which for "what should this entry become" is the only sensible exit anyway.
-
-### The question
-
-Should writeOpenItems accept a record-path `contains` probe on an item explicitly marked as never-auto-closing (with the auto-close refusal unchanged, and the flag refused whenever any probe targets a non-record path), so leg 2 can write the escalations it is defined to produce?
-
-### Your answer
-
-- [ ] **1. Split by direction** — Accept a record-path contains probe at CREATION on an item carrying auto_close:false, refuse that flag whenever any probe targets a non-record path, and leave the auto-close path exactly as it is — a record-path probe still never produces absent, gone, or a close.
-- [ ] **2. A separate escalation channel** — Do not touch the probe contract. Give leg 2 its own escalation surface for backlog-about-backlog questions, with its own lifecycle, rather than bending an item shape designed around code premises.
-- [ ] **3. Answer the four directly** — Leave the mechanism alone; the four blocked questions are the actual cost. Surface them individually by whatever means works this run and decide whether the channel is worth building after seeing whether a fifth ever appears.
-- [ ] **4. Narrow leg 2 instead** — Accept that leg 2 is mechanical-cleanup-only in practice, and amend nightly-routine.md so its leg table stops promising an escalation path that does not exist.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-Full proposal: [`.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md)
-
-<details>
-<summary>Evidence (9) — what was verified against code, and how</summary>
-
-- scripts/nightly/items.mjs:257-263 defines RECORD_PATH_PREFIXES (docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .claude); evaluateOneProbe:281 returns untrackable for any of them, and writeOpenItems:444-454 turns that into a refusal at write.
-- nightly-routine.md's leg table gives leg 2 exactly one escalation class: "Any genuine disambiguation — turning a vague item into a spec is the owner's call".
-- backlog-1 (e2fa990a, 2026-08-06 02:51) is the last leg-2 escalation ever written; its probe was {file: "docs/backlog/open-bugs.md", contains: "Test-tree `.mjs`→`.ts` conversion: COMPLETE at its floor"} — refused by the current writer.
-- The refusal landed in 9d307314 at 2026-08-06 09:24, ~6.5h after backlog-1 was written.
-- Runs 44137e5f (08-07), 1d203e89 (08-07) and f02138eb (08-08) carry 0 backlog-leg items out of 1, 1 and 3 respectively.
-- Blocked question 1: the retired ~/.claude/llm-call.mjs described as live in six durable-traps.md passages and three in open-bugs.md. The 2026-08-08 digest names the refusal as the reason it could not be raised; it now lives as HANDOFF.md Immediate next item 5.
-- Blocked question 2: open-bugs#de319d16 has said "Before rebuilding this: name the process that rewrote the bytes, or close the entry" since 2026-07-16 — three weeks unasked.
-- Blocked question 3: open-bugs#0487b95c was flagged shipped; verification found four live residuals including a live-run watch, leaving a keep/trim call with no channel.
-- NOT verified: that no other mechanism suppressed leg-2 items in those three runs — they may have found nothing to escalate. The counts are consistent with the refusal, the four blocked questions are the direct evidence.
+- Full analysis, the five offending records quoted verbatim, patch shape and five red-green tests: .audit-tools/nightly/proposals/P20-invalid-triage-record-counts-as-classified/PROPOSAL.md
+- scripts/shared/triage-backlog.mjs:566-567 — "if (rec.error) stamp.errored += 1; else stamp.classified += 1;" is the whole test.
+- scripts/shared/triage-backlog.mjs:556 — the spread is last, so model keys overwrite the script's own id/file. Tonight open-bugs#2ab6801e persisted with file "src/shared/dispatch/admissionLoop.ts".
+- Tonight's data: .audit-tools/nightly/triage-2026-08-10.jsonl holds 124 records; 5 have neither a verdict nor an error field, and all 5 are inside the 120 the stamp calls classified. True coverage is 115.
+- Recurrence, 4 dates: P11/sol-4 2026-08-06 (silent partial sweeps, three nights); P17 2026-08-09 (fabricated record stamps as honest); sol-3 2026-08-09 (the gone verdict wrong 3/3); tonight.
 
 </details>
 
@@ -256,7 +255,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P18-leg2-escalations-are-structu
 <summary>What the last run changed on its own</summary>
 
 
-- docs/backlog/open-bugs.md — DELETED the entry "Friction walk (buildAccountScopedQuotaSource lap, 2026-07-29)" (was :721-731, 843 bytes). Shipped-entry removal, code-anchored both ways: leg (1)'s Grep-mangling trap already lives in its durable home at docs/backlog/durable-traps.md:432-435 with the same information; leg (2)'s "nightly surface presented answered items as open" is mechanized as premise probes (scripts/nightly/items.mjs partitionBySettled, consumed at scripts/nightly/answer.mjs:48); leg (3) states "none". Reviewer + independent adversary lane both verified the anchors and the adversary returned ORPHANED-IF-DELETED: none, so no judge was needed. check:backlog-budget stays green and open-bugs.md shrinks 129,560 -> 128,717 bytes, which the shrink-only ceiling wants.
+- docs/HANDOFF.md — rewrote Immediate-next item 6. It claimed four escalations were "still unasked" and hand-carried, naming the retired ~/.claude/llm-call.mjs passages first. Two of its four claims are false at HEAD: the llm-call.mjs rewrite LANDED in e31ce34e (no file under docs/backlog/ contains the string, verified by grep here and independently re-grepped by a second lane), and open-bugs#0487b95c is not a "close-or-keep call" but a live residuals entry (open-bugs.md:999) the sweep mis-titled. The remaining two questions are raised by THIS run as backlog-1 and backlog-2, so the slot has nothing left to hand-carry. Stale-factual fix, code-anchored both ways; the item is outside HANDOFF's generated-roadmap markers so check:handoff-roadmap is unaffected.
 
 
 </details>
@@ -266,19 +265,17 @@ Full proposal: [`.audit-tools/nightly/proposals/P18-leg2-escalations-are-structu
 <summary>What the last run could NOT cover</summary>
 
 
-- leg 1 — the Codex reviewer lane DIED mid-run and its scope was re-covered, not dropped. `codex exec --model gpt-5.6-sol` ran ~20 minutes over the doc corpus and then wedged on an internal tool-router fault (`ERROR codex_core::tools::router: error=timeout_ms must be at least 10000`, then "collab: Wait" with no further output); it was stopped. Its scope was re-dispatched to two agy lanes. Lane B (skills/**, .claude/skills/**, docs/nightly-routine.md — CLI invocations and flag literals) returned all-clean. Lane A (docs/audit-pkg/*, README.md, the package READMEs) ALSO died — "timeout waiting for response" after 297s. That scope was then covered mechanically instead, by extracting every npm script, repo path and directory those nine docs cite and reconciling each against package.json and git ls-files: 4 candidates surfaced, all 4 verified as correct relative-path prose (`agents/openai.yaml` relative to the installed skill dir — skills/audit-code/agents/openai.yaml exists; `steps/current-step.json` relative to the stated `.audit-tools/audit/`; `examples/catalog/` deliberately naming the directory sol-1 deleted; `auditor-descriptor/self-with-sources.json` relative to examples/). No factual doc finding this run.
+- leg 1 — BOTH independent review lanes DIED, for the second consecutive night, but only ONE scope was actually lost. The agy lane (spec/backend-identity-axes.md, docs/project-philosophy.md, docs/glossary-ids.md, the three package READMEs, README.md) returned 36 bytes: "Error: timeout waiting for response" — nothing. The codex lane (docs/audit-pkg/*) ran ~50 minutes and DID emit 24 findings before it wedged on its own agent-spawn router ("Full-history forked agents inherit the parent agent type", then "collab spawn failed: agent thread limit reached") and was stopped; last night it wedged on a different internal router fault. The agy scope was re-covered directly: src/audit/README.md reconciled against PROVIDER_NAMES (10 non-auto names, exact match), src/audit/adapters/README.md against its directory (6 adapters, exact match), spec/backend-identity-axes.md read end to end (it is the source of docs-1).
 
-- leg 1 — the semantic half of the package-docs scope is the part the mechanical fallback does NOT cover. Reference existence was checked exhaustively; whether a doc's PROSE still describes what the code does was covered only by the agy lanes that survived plus the spec-vs-registry pass, not by a reviewer reading docs/audit-pkg/*.md end to end. Two dead lanes is the reason, and it is a genuine gap rather than a clean result.
+- leg 1 — the codex lane produced 24 doc-drift findings across docs/audit-pkg/* and 21 of them are UNVERIFIED, because the lane died before any adversary pass ran. They are held, not dropped, at .audit-tools/nightly/proposals/LEADS-audit-pkg-doc-drift-2026-08-10/LEADS.md, and NONE was applied — the safety gate is reviewer→adversary→judge and only the reviewer ran. Three were spot-verified against source this run and all three confirmed: release.md:167 claims CI matrixes Node majors when every workflow pins 22.14.0; contracts.md:38 names schemas/audit_result.schema.json (root type object) for an array submission whose real schema is audit_results.schema.json (root type array); operator-guide.md:170 recommends ui_mode "visible" when both dispatch launch sites hard-code headless — that last one needs a nuanced fix, not a deletion, since uiMode is still honoured downstream. Working the other 21 is a lap, not a nightly step.
 
-- leg 1 — one confirmed staleness has NO channel for the second night running, and is NOT re-raised here because writeOpenItems refuses a premise probe aimed at docs/backlog. Six passages in docs/backlog/durable-traps.md and three in docs/backlog/open-bugs.md describe the retired ~/.claude/llm-call.mjs as a live mechanism. It is carried as docs/HANDOFF.md Immediate next item 5, and the refusal that blocks it is now itself raised as sol-4.
+- leg 2 — 124 entries, 120 classified across three passes, 4 hard-errored (open-bugs#4f88e0d8, #933241fc, #6e8be540, #84fa0f94 — all JSON-dialect failures that did not recover on two retries). Stamp: .audit-tools/nightly/triage-2026-08-10-coverage.json, model resolved live as "auto", preflight passed, aborted null. ⚠ TRUE coverage is 115, not 120 — five of the classified records carry no verdict at all, which is what sol-2 is about. ⚠ The stamp is rewritten per invocation, so after the final retry its "classified" field reads 2; the cumulative number is prior_classified + classified.
 
-- leg 2 — FULL COVERAGE. Stamp .audit-tools/nightly/triage-2026-08-09-coverage.json: model pool/medium resolved live, preflight passed, total 121, attempted 121, classified 121, errored 0, aborted null. Verdicts: 71 actionable_now, 24 live_run_blocked, 14 owner_decision_needed, 7 accepted_residual_no_work, 5 already_shipped_or_stale. ⚠ Read that coverage alongside sol-3: 30 of the 121 records carry probes that all evaluate to nothing while reporting the same stamp as an honest record, and both `gone` stamps this run are FALSE. The sweep covered the backlog; how much of what it returned is trustworthy is the open question.
+- leg 2 — 0 deletions. Both already_shipped_or_stale verdicts were REFUTED on verification, so neither was acted on. forward-tracks#55883634 (CI wall-clock shard balance) is a live pointer entry whose implementation was assigned outside this repo's loop on 2026-08-07 — the model read "no task for this tracker" as "shipped". open-bugs#de319d16 is a genuine owner close-or-keep call and is raised as backlog-1.
 
-- leg 2 — of the five already_shipped_or_stale verdicts, ONE was deleted (see applied) and four were REFUTED by verification, so they are neither deleted nor raised. open-bugs#03d4bc94 is a wholly fabricated record (the real entry is live, with four residuals). open-bugs#0487b95c was mis-titled by the sweep and has four live residuals. open-bugs#de319d16 states its own close-or-keep condition and is a genuine owner decision with no channel (sol-4). open-bugs#31d38188 is a friction walk whose item (1) still states an unenforced property, so its proof of shipping is incomplete — escalating rather than guessing, which also has no channel.
+- leg 3 — the recurrence pass read the project memory store and its MEMORY.md index, the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md, docs/backlog/open-bugs.md, and this run's own friction. One candidate was DROPPED rather than raised: the offload lanes dying on long jobs (agy twice, codex twice, four deaths in two nights) is already covered by the memories offload-classify-failure-by-output-size and nim-offload-reliable-unit-is-one-entry plus a durable-traps entry, and its mitigation — one bounded item per dispatch — is already written down. Re-proposing it would be the repeat-nightly shape the routine warns about. What IS new and is not yet written down anywhere: codex specifically wedges in its collab/agent-spawn subsystem on a broad multi-file review scope, twice in two nights on two different router faults, losing ~50 minutes each time. That belongs in durable-traps.md as one line; leg 3 is propose-only so it is not added here.
 
-- leg 3 — the recurrence pass read the project memory store (235 files + MEMORY.md), the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md, docs/backlog/open-bugs.md, .audit-tools/audit-friction-run.json and .audit-tools/remediation/friction/dispatch-effectiveness-observability.json, plus this run's own friction. One strong candidate was DROPPED rather than raised: the "incoming charter/design-review/challenge artifacts have no submit chokepoint" theme (9 of 10 lanes wrapped JSON in markdown fences on 2026-08-08, 5 of 8 drifted on 2026-08-05) is already a live open-bugs entry at :1181 with its property stated and its 2026-08-08 recurrence appended. Re-proposing it would be the repeat-nightly shape the routine warns about.
-
-- /insights — NOT DUE, which is not a skipped leg. Stamp .audit-tools/nightly/insights-last-run.json shows ran_at 2026-08-07T09:09:53Z, two days old against the seven-day gate.
+- /insights — NOT DUE, which is not a skipped leg. .audit-tools/nightly/insights-last-run.json shows ran_at 2026-08-07T09:09:53Z, three days against the seven-day gate.
 
 
 </details>

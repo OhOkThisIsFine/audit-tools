@@ -236,15 +236,12 @@
    are added. Re-measure, and only then decide whether anything still needs splitting.
    ⚠ Do not resume the one-file-at-a-time protocol without new numbers; it is not the mechanism
    for a cluster.
-6. **Use the escalation channel `sol-4` just restored — the four questions it was blocking are still
-   unasked.** They are listed in
-   [`P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md`](../.audit-tools/nightly/proposals/P18-leg2-escalations-are-structurally-unwritable/PROPOSAL.md)
-   (read [`SHIPPED-2026-08-09.md`](../.audit-tools/nightly/proposals/SHIPPED-2026-08-09.md) first —
-   P15–P18 all landed, so their proposals' present tense is stale):
-   the retired `~/.claude/llm-call.mjs` described as live in nine backlog passages, `open-bugs#de319d16`
-   and `#0487b95c` (both close-or-keep calls), and the run's wider `already_shipped_or_stale` set. Leg 2
-   can now write them as `auto_close: false` items, so the next nightly run should surface them itself
-   rather than needing a hand-carried slot.
+6. **Nothing to hand-carry — the restored `sol-4` channel is now carrying leg 2's escalations itself.**
+   The 2026-08-10 nightly run raised the remaining close-or-keep calls as `auto_close: false` items, so
+   they live in the inbox rather than in this slot. Of the four questions P18 listed, the retired
+   `~/.claude/llm-call.mjs` passages were rewritten by `e31ce34e` (no backlog file names the helper),
+   and `#0487b95c` was not a close-or-keep call at all — it is a live residuals entry the sweep
+   mis-titled.
    ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
    SHRINKAGE there. Any edit to that file must come out net-negative.
 
