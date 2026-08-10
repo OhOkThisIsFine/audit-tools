@@ -483,6 +483,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
 
+- **The four `audit-code-completion-*` files flake TOGETHER under full-suite load, and the symptom
+  reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, `-ingest-dir` and
+  `-force-synthesis` all failed in one full run with `next-step did not reach present_report within
+  10 calls` and `expected only blocked/present_report while finalizing, got design_review_parallel`.
+  All four passed **alone**, and a second full run on the **identical tree** was green — 597 files,
+  0 failed. They are not in `scripts/shared/test-flake-baseline.json`, so nothing tells you this.
+  The symptom is a *call-count* limit, not a timeout, which is why it does not look load-related:
+  under contention a step can come back `blocked` (or re-enter an obligation after a staleness
+  cascade) and burn one of the 10 allowed calls. Before treating this cluster as a regression: run
+  the four alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
+  is the bar — a single alone-pass is not, because these are the slowest four files in the suite
+  (155-165s each in-suite) and spin real audit runs through real subprocesses.
+
 - **In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit
   (2026-08-09).** Same failure as the nested `claude -p` entry above, but with no subprocess and no
   env to set: a read-only recon fan-out ended its turns inside the checkout, the closeout-challenge

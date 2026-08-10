@@ -67,16 +67,23 @@
   [31348958340](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31348958340)** (v0.39.14 —
   gate + all 4 shards green). Read that, not the local run, as the release signal. The full suite was
   additionally green locally on the final source: **596 files passed, 4 skipped, 0 failed** (274s).
-- **S1 (`100b9117`) is red-green validated, and by INVERTING the edit rather than by checkout.** Both
-  tests in `tests/audit/dispatch-sizing-window.test.ts` were written and run RED before the module
-  existed. Worth knowing: the two fail *independently*. Temporarily routing the resolver's import
-  through the shared barrel (which re-exports the fold) turned the import-closure invariant red while
-  the fold-equivalence check stayed green — so neither test rides on the other's red, and the
-  invariant demonstrably reaches what it names.
-- S1 touches two `LOOP_CORE_PATTERNS` paths, so it carries a review attestation (staged tree
-  `d6dd5160`, verdict clear, attester class `agent`). ⚠ The attestation had to be written TWICE: the
-  pre-commit gate rejected the first because regenerating the backlog seek index changed the staged
-  tree afterwards. Stage *everything* — including generated indexes — then attest.
+- **This lap's two commits are each full-suite green and loop-core-attested.** `d7146254` (staged
+  tree `3217e56c`) and `fafca0fb` (staged tree `872afc69`), both verdict clear, attester class
+  `agent`. Local full suite on the final source: **597 files passed, 4 skipped, 0 failed** (7757
+  tests) — run TWICE, deliberately; see the flake note below.
+- **Both are red-green validated by INVERTING the production edit, never by checkout.** `d7146254`:
+  re-running `applyPlanPipeline` inside the narrowed try turns the new test red while the three guard
+  tests stay green, so they fail independently. `fafca0fb`: making the `provider_default` rung return
+  a different pair turns the strengthened fold check red and names the failing case and provider.
+- ⚠ **An intervening full run had FOUR `audit-code-completion-*` failures that were a flake.** They
+  passed alone and did not reproduce on a re-run of the identical tree, and no mechanism connects the
+  change to them. They are NOT in the flake baseline, so the signature is recorded in
+  [`durable-traps.md`](backlog/durable-traps.md) — the bar before calling that cluster a regression is
+  two greens plus a mechanism argument, not a single alone-pass.
+- S1 (`100b9117`) was red-green validated the same way. ⚠ Its attestation had to be written TWICE:
+  the pre-commit gate rejected the first because regenerating the backlog seek index changed the
+  staged tree afterwards. Stage *everything* — including generated indexes — then attest, and make
+  the attest call and the commit call SEPARATE tool calls.
 - ⚠ **`LOOP_CORE_PATTERNS` is wider than this document previously claimed, and the error was
   load-bearing.** It is not just `src/shared/{dispatch,engine,quota,rolling}/` plus the two step
   machines: `src/audit/cli/dispatch.ts` is the FIRST entry, and `src/audit/cli/dispatch/`,
@@ -120,11 +127,26 @@
    `semanticReviewStep.ts:102` passes `hostOwnedDispatch: true`), so "delete the admitted arm" does
    not reduce to deleting dead code.
    **S1 has LANDED:** packet sizing resolves its window directly (`src/audit/cli/dispatch/
-   sizingWindow.ts`) instead of folding a `CapacityPool` through `computeDispatchCapacity`. Behaviour
-   is unchanged by construction and pinned both ways by
-   `tests/audit/dispatch-sizing-window.test.ts` (an import-closure invariant + a fold-equivalence
-   check). **Next is S2** — the same cut on the remediate draw (`resolvePlanContextBudget`,
-   `src/remediate/phases/plan.ts:772-817`, drops the roster-capability max and the provider argument).
+   sizingWindow.ts`) instead of folding a `CapacityPool` through `computeDispatchCapacity`.
+   **S2 WAS DESIGN-CHECKED AND ITS PLAN REFUTED — the record is
+   [`s2-sizing-window-design-check-2026-08-09.md`](reviews/s2-sizing-window-design-check-2026-08-09.md).
+   Read it before touching sizing; it supersedes the separation plan's S2 paragraph.** Two refuters
+   returned REFUTED. Three corrections matter most:
+   - **The plan's finding 2 is false at HEAD.** `src/audit/cli/workPartitionRuntime.ts` also passed a
+     provider AND folded a roster with `Math.max`. It is a THREE-site class.
+   - **"Resolve the same single declared window as S1" is not a drop-in.** `resolveLimits` reads
+     `sessionConfig.quota`; the two hand-rolled draws read `block_quota` — different fields, inverted
+     precedence. Done literally it would stop remediate honouring the repo-root `session-config.json`.
+   - **The refusal S2 planned to keep was destroying data.** See the fix below.
+
+   **What LANDED this lap** (both loop-core-attested, full suite green before each):
+   `d7146254` narrows `handlePendingExtractedPlan`'s discard-and-re-extract recovery to the
+   plan-validity region — a sizing refusal used to delete `extracted-plan.json`, report it as
+   corruption, and loop deterministically; and `fafca0fb` removes provider identity from sizing on all
+   three draws (equality enforced by a both-host-classes fold check, not asserted).
+
+   ⚠ **The REST of S2 is blocked on three owner decisions** — see *Owner decisions needed* below.
+   Until they are answered the roster max and the declared-window field stay exactly as they are.
    Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
    each one.
    ⚠ **FIVE owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
@@ -240,6 +262,37 @@
    rather than needing a hand-carried slot.
    ⚠ `open-bugs.md` is over the 120,000-byte ceiling — grandfathered, so the budget gate accepts only
    SHRINKAGE there. Any edit to that file must come out net-negative.
+
+## Owner decisions needed — these BLOCK the rest of S2
+
+Asked in chat 2026-08-09; recorded here so they survive the session. Each moves a number for a real
+configuration, so none can be settled by an agent. Full evidence:
+[`s2-sizing-window-design-check-2026-08-09.md`](reviews/s2-sizing-window-design-check-2026-08-09.md).
+
+1. **Which field is the single declared sizing window?**
+   - `block_quota.{context_tokens,reserved_output_tokens}` — the cut-(d) survivor, the persisted
+     spelling on both hand-rolled draws, zero migration. ⚠ Validated NOWHERE
+     (`src/shared/validation/sessionConfig.ts` has no `block_quota` reference), so a typo'd
+     `100000000` would silently size every packet; needs load validation in the same commit. Also
+     entrenches `block_quota.host_model`, which `open-bugs.md` already says should move to
+     `self.model_id`.
+   - model-name-keyed `quota.models[<name>]` — the rung `spec/unified-dispatch-worker-model.md`
+     blesses as the operator escape hatch that may outrank discovery, and it is already
+     integer-guarded. ⚠ `QuotaConfig` is slated for deletion with quota, and ~15 remediate fixtures
+     would be rewritten.
+   - handshake/descriptor only, no operator override at all — purest reading of "host-declared".
+     ⚠ Removes the escape hatch entirely.
+2. **What replaces the roster max** at `plan.ts` and `workPartitionRuntime.ts`? Deleting it and
+   falling to the scalar pair is NOT monotone — persisted scalars plus a later `--host-models` makes
+   the budget *grow* (worked case 16 800 → 117 600) and stops blocks splitting against the small model
+   the operator declared. And on the work-block draw the number is persisted as `work_blocks` in
+   `audit-findings.json` and read cross-run by remediate, so it is a schema contract change.
+   Candidates: delete → scalar; fold with `min`; or **refuse on a roster** (a roster is N windows, not
+   one) — cleanest under the directive, hardest break for roster users.
+3. **Converge the safety margin?** Audit packets size at 1.0, blocks and work blocks at 0.7 — the same
+   declared window yields a 1.43× larger audit packet. Evidence the raw path over-claims: `dispatch.ts`
+   subtracts a 15 000-token harness overhead from it, and `rollingDispatch.ts` spends the same
+   reservation again. Converging on 0.7 changes every audit packet in every run.
 
 ### Standing notes — not tasks
 

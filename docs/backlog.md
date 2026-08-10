@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 183 entr(y/ies) indexed.
+> and at commit). 184 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -207,21 +207,22 @@
 - `durable-traps.md:459` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
 - `durable-traps.md:470` — A backlog entry's bold title must not contain `
 - `durable-traps.md:475` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
-- `durable-traps.md:486` — In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit (2026-08-09).
-- `durable-traps.md:498` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:505` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:519` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
-- `durable-traps.md:530` — The operator's declared offload sources live in `~/.audit-code/sources-declared.json` — NOT in the repo, and not under `~/.audit-tools/` (2026-08-09).
-- `durable-traps.md:542` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:551` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
-- `durable-traps.md:568` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
-- `durable-traps.md:575` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
-- `durable-traps.md:586` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
-- `durable-traps.md:595` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
-- `durable-traps.md:603` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
-- `durable-traps.md:612` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
-- `durable-traps.md:619` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:625` — The pre-commit gate can tell you to regenerate a file AFTER you have already attested, which silently invalidates the attestation (2026-08-09).
+- `durable-traps.md:486` — The four `audit-code-completion-*` files flake TOGETHER under full-suite load, and the symptom reads exactly like a regression (2026-08-09).
+- `durable-traps.md:499` — In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit (2026-08-09).
+- `durable-traps.md:511` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
+- `durable-traps.md:518` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:532` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
+- `durable-traps.md:543` — The operator's declared offload sources live in `~/.audit-code/sources-declared.json` — NOT in the repo, and not under `~/.audit-tools/` (2026-08-09).
+- `durable-traps.md:555` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
+- `durable-traps.md:564` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
+- `durable-traps.md:581` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
+- `durable-traps.md:588` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
+- `durable-traps.md:599` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:608` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
+- `durable-traps.md:616` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
+- `durable-traps.md:625` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
+- `durable-traps.md:632` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
+- `durable-traps.md:638` — The pre-commit gate can tell you to regenerate a file AFTER you have already attested, which silently invalidates the attestation (2026-08-09).
 
 <!-- END GENERATED SEEK INDEX -->
 
