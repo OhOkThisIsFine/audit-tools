@@ -35,18 +35,18 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   directive, 2026-08-09).** **Cut (d) — ZERO execution adapters, metadata only**; the shape and its
   boundaries (quota goes entirely; **the declared sizing window goes too**; result ingestion and
   recording-what-ran stay) are stated once in `CLAUDE.md`, not restated here.
-  **The plan, its adversarial refutations and all six owner decisions are in**
-  [`routing-removal-separation-plan-2026-08-09.md`](../reviews/routing-removal-separation-plan-2026-08-09.md),
-  corrected by [`s2-sizing-window-design-check-2026-08-09.md`](../reviews/s2-sizing-window-design-check-2026-08-09.md)
+  **The plan and all six owner decisions:**
+  [`routing-removal-separation-plan-2026-08-09.md`](../reviews/routing-removal-separation-plan-2026-08-09.md)
   — pointers, not summaries.
   **Open property:** sizing must owe nothing to a pool, a roster, a provider name **or a config block
-  describing a backend's window**. S1–S6 is SUPERSEDED — the owner rejected the declared window
-  itself, so what remains is a REMOVAL (`resolvePlanContextBudget`,
-  `resolveCurrentWorkPartitionRuntime`, `resolveSizingWindowTokens`, the splitters they feed), not a
-  re-sourcing. ⚠ `work_blocks` stops being a FIT CLAIM — re-point consumers reading it as one.
-  Grouping SURVIVES (owner-confirmed): `mergeBlocksSharingFiles` and the block concept stay; only the
-  window resolvers and budget splitters go.
-  Loop-core → `/design-check` first, staged-tree attestation on every commit.
+  describing a backend's window**. ⚠ S1–S6 AND "what remains is a REMOVAL" are BOTH superseded —
+  **owner cut 2026-08-09 is FULL UNIFICATION (one coherence core, two draws); the removal falls out
+  of it.** ⚠ "Grouping SURVIVES … only the window resolvers go" was FALSE: grouping is gated on the
+  window in five sites (one silent, four throws). Design of record + those sites:
+  [`coherence-core-design-2026-08-09.md`](../reviews/coherence-core-design-2026-08-09.md),
+  [`sizing-window-removal-blocker-2026-08-09.md`](../reviews/sizing-window-removal-blocker-2026-08-09.md).
+  **Open element:** the findings draw's mass ceiling (design §5) — settle against its written test.
+  ⚠ `work_blocks` stops being a FIT CLAIM. Loop-core → ONE atomic commit, staged-tree attestation.
   ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run** — its attribution triple
   resolves from `CapacityPool`, and its provider axis is now dropped, so its 8-module set needs
   re-authoring against a model × lens triple before any shard is written.
