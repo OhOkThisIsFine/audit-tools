@@ -16,12 +16,11 @@
   auditor's own severity calibration is a known-weak signal (see the 2026-08-06 entry in open-bugs).
   Grounding says 1,054 grounded / 10 ungrounded, so ~1,177 findings carry no grounding verdict at all.
 
-- **v0.39.13 SHIPPED 2026-08-09 — carries the INV-CO-13 module-set gate (`80b3be6a`).** npm live at
-  0.39.13, both global bins reinstalled and the deferred postinstall run manually (npm skips it on
-  `-g`) — 6 host integrations deployed, 0 failed; both bins report 0.39.13. Release CI run
-  [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177) green across
-  all 6 jobs, critical path 286s (summed 830s). **`v0.39.13` tags `f2a2e9c2`; `main` carries only
-  docs-after-the-tag since, so nothing is unpublished.**
+- **v0.39.14 SHIPPED 2026-08-09 — carries S1 of the routing-removal separation (`100b9117`).** npm
+  live at 0.39.14, both global bins reinstalled and the deferred postinstall run manually (npm skips
+  it on `-g`) — 13 host integrations deployed, 0 failed; both bins report 0.39.14. Release CI run
+  [31348958340](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31348958340) green across
+  all 6 jobs, critical path 287s (summed 826s). **`v0.39.14` tags `fb5637ff`; nothing is unpublished.**
   (v0.39.7 is deliberately absent: its gate failed on eslint and the tag was deleted + forward-bumped.)
 - **The nightly queue is EMPTY — all four propositions were answered and LANDED 2026-08-09.** The
   owner took the recommended cut on each; `.claude/nightly-decisions.json` carries the answers and
@@ -64,51 +63,29 @@
 
 ## Verification state
 
-- **This lap changed NO source — only run artifacts under `.audit-tools/` (gitignored) and docs.**
-  `npm run build` and `npm run check` both exit 0 on the final tree. No suite run was warranted and
-  none is claimed. The shipped-source signal below is unchanged.
-- Every file attribution in the decomposition was verified by reading the named symbol off disk before
-  it was scoped, and all 50 `path:line` citations the drafted shards made were mechanically resolved
-  against the tree (0 unresolved). The critique's two highest-stakes claims — the phase inversion and
-  the cross-phase artifact dependency — were each confirmed against `phase_cut.json` and the contract
-  payload rather than accepted from the reviewing lane.
-
 - **The authoritative full-suite green for the SHIPPED source is release CI run
-  [31331291177](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31331291177)** (v0.39.13 —
-  gate + all 4 shards green). Read that, not the local run, as the release signal. `verify:checks`
-  was additionally green locally (exit 0, both packaged smokes) on the clean tree before the bump.
-- **This lap's one change (`80b3be6a`, the INV-CO-13 gate) is red-green validated by INVERTING the
-  gate, never by checkout** — twice, and in each the named tests went red and only those. Worth
-  knowing:
-  - The placement is proven by execution, not argument. With the gate absent, the step emitted
-    immediately after a finalized rewrite is literally `# Conceptual Design Critique` — which is why
-    the `nextPhase === "critic"` home the plan named would have been five phases too late.
-  - The membership check and the multiplicity (duplicate-name) check were inverted **separately**, so
-    neither rides on the other's red. 5 tests red for the first, 1 for the second.
-  - The three tolerance tests correctly stay GREEN under inversion (they assert *no* issues), so the
-    red set is the refusal behaviour alone.
-- `verify:checks` exit 0 on the final tree, including both packaged smokes; `npm run build` and
-  `npm run check` clean; `tests/remediate` + `tests/shared` = **4912 passed, 0 failed** (332 files).
-  ⚠ `tests/audit` was NOT run locally this lap — the change is remediate-only, but CI's sharded run
-  is the signal for it.
-- `80b3be6a` touches `src/remediate/steps/contractPipeline.ts`, a `LOOP_CORE_PATTERNS` path, so it
-  carries a review attestation (staged tree `7fed2c11`, verdict clear, attester class `agent`).
-- **The shard-duration baseline is still CURRENT** — regenerated from the 596-file run one lap ago;
-  nothing this lap changed test counts materially.
-- **A release now runs the whole `verify:checks` BEFORE it tags** (`scripts/release-and-publish.mjs`,
-  `7ebb8976`). It previously ran `npm run check` alone — a typecheck — which is how v0.39.7 got
-  tagged with eslint errors; `tsc` cannot see an unused destructured binding. Expect ~2min at the
-  pre-tag gate now, and expect a red gate to refuse BEFORE `vX.Y.Z` exists rather than after. The
-  vitest suite is unchanged (sharded, in CI). Red-green validated, and
-  `tests/audit/release-contract.test.ts` now pins the invocation — it previously pinned the word
-  `verify:release` appearing in a COMMENT while the script ran `check`.
-- A strict all-cycles `depcruise` (`tsPreCompilationDeps` on) reports zero cycles of any kind across
-  542 modules; the tightened `no-circular` rule was red-green validated (reintroduced cycle → exit 1)
-  and restored by inverting the edit, never by checkout.
-- `LOOP_CORE_PATTERNS` covers `src/shared/{dispatch,engine,quota,rolling}/` and the two step
-  machines; `.claude/hooks/`, `wrapper/`, `scripts/`, `src/remediate/index.ts` and
-  `src/remediate/validation/` are all OUTSIDE it. That is why this lap's validator changes needed no
-  attestation and its one `steps/` change did.
+  [31348958340](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/31348958340)** (v0.39.14 —
+  gate + all 4 shards green). Read that, not the local run, as the release signal. The full suite was
+  additionally green locally on the final source: **596 files passed, 4 skipped, 0 failed** (274s).
+- **S1 (`100b9117`) is red-green validated, and by INVERTING the edit rather than by checkout.** Both
+  tests in `tests/audit/dispatch-sizing-window.test.ts` were written and run RED before the module
+  existed. Worth knowing: the two fail *independently*. Temporarily routing the resolver's import
+  through the shared barrel (which re-exports the fold) turned the import-closure invariant red while
+  the fold-equivalence check stayed green — so neither test rides on the other's red, and the
+  invariant demonstrably reaches what it names.
+- S1 touches two `LOOP_CORE_PATTERNS` paths, so it carries a review attestation (staged tree
+  `d6dd5160`, verdict clear, attester class `agent`). ⚠ The attestation had to be written TWICE: the
+  pre-commit gate rejected the first because regenerating the backlog seek index changed the staged
+  tree afterwards. Stage *everything* — including generated indexes — then attest.
+- ⚠ **`LOOP_CORE_PATTERNS` is wider than this document previously claimed, and the error was
+  load-bearing.** It is not just `src/shared/{dispatch,engine,quota,rolling}/` plus the two step
+  machines: `src/audit/cli/dispatch.ts` is the FIRST entry, and `src/audit/cli/dispatch/`,
+  `src/audit/orchestrator/`, `src/audit/cli/{dispatchAttempted,mergeAndIngestCommand,ownerTokens,
+  rollingAuditDispatch}.ts` and `src/remediate/{riskSignal.ts,steps/…}` are all in it. Read
+  `src/shared/loopCorePaths.ts`, never a restatement — the stale summary here is what led this lap's
+  first plan to budget the audit dispatch commit as attestation-free.
+- **The shard-duration baseline is still CURRENT** — the 596-file count is unchanged by this lap's
+  single added test file.
 
 ## Immediate next
 
@@ -248,11 +225,14 @@
 
 ### Standing notes — not tasks
 
-⚠ The memory-index size chore is **closed, not pending** (owner call, 2026-08-07): the index is one
-line per cluster already, so its size is the file count rather than padding, and it sits well under
-the harness's real 24.4KB read limit. The harness's 17.1KB compaction reminder still fires on memory
-edits — ignore it. Rationale and the re-open condition are in the note at the top of `MEMORY.md`.
-Do not re-add this as a task.
+⚠ The memory-index size chore was **RE-OPENED by the owner on 2026-08-09** — this note previously
+said "closed (owner call, 2026-08-07)" and was stale by two days. `MEMORY.md`'s own header is the
+current authority: the index is AT the 24.4KB read limit, and the instruction is to **merge closed
+sagas and cut obsolete memories**, never a mechanical line-trim (tried, failed). It stands at 23.6KB.
+Two gates on deleting a file: repo docs cite memories by name (`check:memory-citations` fails on a
+dangling one), and memories cite each other as `[[name]]`, which that gate does NOT check. The
+harness's 17.1KB compaction reminder is a separate thing and still fires on every memory edit —
+ignore that one.
 
 ⚠ `session-config.json` at repo root (untracked,
 `block_quota: {context_tokens: 200000, reserved_output_tokens: 32000, host_model: claude-opus-5}`)
