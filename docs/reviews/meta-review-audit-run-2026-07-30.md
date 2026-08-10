@@ -16,13 +16,13 @@ Every LLM judgment step ran on a non-Anthropic lane; primary quota was spent onl
 |---|---|---|
 | critical-flow enrichment | agy-gemini (flash-high) | 12 verified multi-file flows |
 | conceptual design review | agy-gemini | 4 findings |
-| contract (adversarial) review | agy-claude (sonnet-4-6) | 13 findings; codex rung was quota-dead until Aug 4 — recorded via `llm-relay dispatch -x codex`, ladder walked on |
-| wave 1: 58 packets / 527 tasks | tier-mapped subagent offload → relay pools | ~15.1M worker tokens, 58/58 valid results, 885 findings |
+| contract (adversarial) review | agy-claude (sonnet-4-6) | 13 findings; codex rung was quota-dead until Aug 4 — recorded via `the offload router dispatch -x codex`, ladder walked on |
+| wave 1: 58 packets / 527 tasks | tier-mapped subagent offload → offload pools | ~15.1M worker tokens, 58/58 valid results, 885 findings |
 | wave 2 + mega-packet (97 tasks) | pool/fast + pool/reasoning | 81 findings; see partitioner defect below |
 | lens-steward packets | tool's own rolling engine → agy | after the write-permission repair below |
 | synthesis narrative | agy-gemini | 6 themes over 2,100 findings |
 
-Total offloaded worker volume ≈ 16M tokens. The tier-mapped offload path (`llm-relay offload on`,
+Total offloaded worker volume ≈ 16M tokens. The tier-mapped offload path (`the offload router offload on`,
 Agent `model` param → `routing.subagents`) held up under a 58-agent concurrent wave with zero
 transport failures surfaced to the host.
 

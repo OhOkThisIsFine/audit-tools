@@ -455,7 +455,7 @@
   the Bash tool's `$TMPDIR` is unset under Git Bash on win32, so `> "$TMPDIR/x.log"` degrades to
   `/x.log` → permission denied; `/tmp` works. (3) **inefficient-feeding:** none new — the offload
   tier path carried 9 subagents (six doc edits, condensation draft, adversarial verify, loop-core
-  review) with zero relay-side failures. (4) **tool-should-decide (small,
+  review) with zero lane-side failures. (4) **tool-should-decide (small,
   cost: one burned tag v0.34.40):** a doc edit has no edit-time surface naming the TESTS that
   assert its content — `nightly-routine.md`'s approved lane swap was green through every local
   doc gate and failed release CI on `nightly-routine-prompt-gate.test.ts`, which pinned the

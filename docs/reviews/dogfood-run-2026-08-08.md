@@ -17,9 +17,9 @@ recorded as they happen; the run's own findings land in `audit-findings.json` / 
 
 ## Offload posture
 
-Host is a Claude Desktop session, so subagents bypass the relay entirely
+Host is a Claude Desktop session, so subagents bypass the router entirely
 ([[claude-desktop-proxy-redirect-flip-flops]]). LLM lanes were therefore offloaded by POSTing the
-lane prompt + inlined packet to llm-relay's OpenAI-compatible endpoint directly
+lane prompt + inlined packet to the offload router's OpenAI-compatible endpoint directly
 (`127.0.0.1:8791/v1/chat/completions`), with every returned artifact verified against
 `repo_manifest.json` before it was written.
 
@@ -47,12 +47,12 @@ Resumability held under an uncontrolled failure, which is a stronger test than a
 
 ## Observations
 
-### O1 — the declared relay lanes were dead, and looked alive (fixed in-run)
+### O1 — the declared offload lanes were dead, and looked alive (fixed in-run)
 
 `~/.audit-code/sources-declared.json` declared `pool/fast`, `pool/coding`, `pool/reasoning`. All three
-were retired at llm-relay v0.15.4 and now return a 400 naming the valid set. The lanes still resolved
+were retired at the offload router and now return a 400 naming the valid set. The lanes still resolved
 GREEN through `resolveAmbientSources`, because an `openai-compatible` source proves reach by ENDPOINT
-liveness (`/v1/models`, `/health`) — which a running relay answers regardless of whether the declared
+liveness (`/v1/models`, `/health`) — which a running router answers regardless of whether the declared
 `model` resolves. So the lanes would have been admitted as CapacityPools and 400'd on every packet.
 
 Root cause was a tracked doc: `docs/backlog/durable-traps.md` told operators to use exactly those three
@@ -88,7 +88,7 @@ verifying every cited path against `repo_manifest.json`; the flow was trimmed, n
 
 `durable-traps.md` recorded a lane-wide concurrency ceiling (≤2/model) and a size threshold where 48KB+
 calls produced no first byte in 28 min and 105KB died `ECONNRESET`. Neither held here. Three lanes ran
-concurrently against the relay and all three returned `finish_reason: "stop"`, served by
+concurrently against the router and all three returned `finish_reason: "stop"`, served by
 `gemini-3.6-flash`, at 162KB / 77KB / 26KB prompts in 148s / 141s / 142s respectively.
 
 The owner had already narrowed the concurrency axis to NIM on 2026-07-28; the trap entry had not picked
@@ -149,10 +149,10 @@ round prompt carries the covered-themes digest and variation bar the tool alread
 (prior findings live at `systemic_challenge.json` → `findings`, not `rounds[].findings`); and a
 host-forced stop is recordable as such rather than as convergence.
 
-### O8 — agentic dispatch through the relay WORKS, but loses the deliverable at the last step
+### O8 — agentic dispatch through the router WORKS, but loses the deliverable at the last step
 
-llm-relay 0.23.0 (owner fix, mid-run) makes agentic dispatch viable: a `claude -p` child fronted by
-the relay onto a free backend, with real Read/Grep/Glob tools. First single-packet test passed
+the offload router (owner fix, mid-run) makes agentic dispatch viable: a `claude -p` child fronted by
+the router onto a free backend, with real Read/Grep/Glob tools. First single-packet test passed
 end-to-end — the child read its five files, wrote a schema-valid result, and returned the packet's
 exact confirmation line. `validate-results` reported 0 errors / 0 warnings.
 
@@ -238,7 +238,7 @@ One packet (`src-remediate:maintainability:packet-85`), same prompt, same effort
 | Backend | Findings |
 |---|---|
 | `gpt-5.6-sol` (codex) | **6** |
-| `deepseek-v4-flash-0731` (relay, OpenRouter) | 5 |
+| `deepseek-v4-flash-0731` (offload router, OpenRouter) | 5 |
 | `gpt-5.6-terra` (codex) | 3 |
 | `gpt-5.3-codex-spark` (codex) | **1** |
 | `gpt-5.6-luna` (codex) | malformed JSON |
@@ -252,10 +252,10 @@ tell you, since the worker asserts it about itself.
 **Property to hold:** worker model identity is recorded per result, so a lane's finding-rate is
 auditable after the fact rather than an assumption.
 
-### O11 — codex honors the packet contract that the relay-backed lane did not
+### O11 — codex honors the packet contract that the offload-backed lane did not
 
 The codex lane WROTE its own `result_path` on every success (`source: worker_write`), where the
-relay-backed `claude -p` lane routinely skipped the Write call entirely (O8). Codex also exposes
+offload-backed `claude -p` lane routinely skipped the Write call entirely (O8). Codex also exposes
 `-o/--output-last-message`, which captures the final message to a file — a guaranteed backstop that
 needs no stdout parsing. Running the worker under `--sandbox workspace-write` with `-o` as fallback
 gets both: the real contract is exercised, and a skipped write cannot lose the work.

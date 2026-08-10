@@ -76,7 +76,7 @@ The worthwhile result is a meta-finding: deterministic graph heuristics are bein
 4. Implementation nodes should follow cohesive contract seams. The original CP-NODE-4 combined findings identity, dedupe, projection, validation, and graph arithmetic; the six-file, 776-line worktree diff and red test show that this cut is too broad for reliable review.
 5. Verification must use canonical command identities, not raw commands embedded in node descriptions. The repository's Vitest gate is the authority.
 6. Findings need immutable producer/generation/provenance lineage. The graph output showed same-primary-path fuzzy dedupe mixing titles, summaries, and file sets; a global failed test was also copied as `not_confirmed` evidence onto many unrelated findings.
-7. Design-check/refutation outcomes, including unavailable relay lanes and fallback reviewers, should be persisted as node-bound attestations rather than surviving only in conversation history.
+7. Design-check/refutation outcomes, including unavailable offload lanes and fallback reviewers, should be persisted as node-bound attestations rather than surviving only in conversation history.
 
 ## Planned durable direction
 

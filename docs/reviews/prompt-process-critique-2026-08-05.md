@@ -280,7 +280,7 @@ mechanism, one owner question, eight binding constraints.**
      validation layer. The charter per-lane split moves the merge from host to tool
      (`assembleCharters` currently ingests one merged submission).
   5. **Fan-out quota-gate scope** *(corrected at implementation recon)*: at HEAD
-     `gateHostFanout` is a permissive no-op hand-off (host/relay own admission since the dispatch
+     `gateHostFanout` is a permissive no-op hand-off (host/router own admission since the dispatch
      inversion — no leases, no pauses; the lease/TTL framing in the original constraint was stale,
      read from the pre-inversion backlog entry rather than the file). Extension = broaden
      `HostFanoutFamily` + call the gate uniformly at every fan-out emitter so the seam exists when

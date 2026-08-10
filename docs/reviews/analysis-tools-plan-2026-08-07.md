@@ -3,7 +3,7 @@
 Date: 2026-08-07 · Inputs: the owner's Codex-lane analyzer runs in `analysis-results-2026-08-07/`
 (jscpd, similarity-ts, eslint+sonarjs, knip, ts-prune, madge, dependency-cruiser, sonar-attempt) ·
 Verification: every lead below was checked against source before a verdict (parallel agent fan-out +
-relay-lane dispatch + inline reads); an analyzer hit is a LEAD, not a finding.
+offload-lane dispatch + inline reads); an analyzer hit is a LEAD, not a finding.
 
 **This document is the record of (1) which tools became permanent dev fixtures and why, (2) which
 were declined and why, (3) every verified finding and its disposition.** Fix-now items were applied

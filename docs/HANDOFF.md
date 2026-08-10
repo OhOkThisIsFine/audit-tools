@@ -46,7 +46,7 @@
   upstream; `Invalid API key` with no id = the router; `All models exhausted` = pool). Those traps,
   plus `finish_reason: max_tokens` and listed-but-unreachable models, are in
   [`durable-traps.md`](backlog/durable-traps.md).
-  ✅ **The four dead `relay-*` declared sources are GONE (2026-08-09)** — they lived in
+  ✅ **The four dead declared sources are GONE (2026-08-09)** — they lived in
   `~/.audit-code/sources-declared.json` (not the repo, and not `~/.audit-tools/`, which is where the
   previous lap looked and gave up). They pointed at the retired proxy's port, failed the liveness probe
   on every invocation, and have been removed; `next-step` now runs with zero source warnings. The file

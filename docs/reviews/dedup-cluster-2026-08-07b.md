@@ -5,7 +5,7 @@ which listed ten verified duplication/cycle findings. This document records the 
 landed and carries a **verified, diff-ready spec for each one that did not**, so the remaining work
 is a bounded edit rather than a repeat of the analysis.
 
-Method: each item was analyzed on the llm-relay offload lane (relay-routed `claude -p`, DeepSeek V4
+Method: each item was analyzed on the the offload router offload lane (offload-routed `claude -p`, DeepSeek V4
 Flash and `pool/high`) and then **verified against source before any edit**. Where the lane's
 proposal was wrong, the correction is recorded below — the lane's output is advisory, and three of
 its proposals would have introduced defects.

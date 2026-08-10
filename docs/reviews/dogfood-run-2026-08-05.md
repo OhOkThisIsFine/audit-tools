@@ -9,7 +9,7 @@ fully audited, promoted to `.audit-tools/audit-report.md` + `audit-findings.json
 ## Dispatch shape (what actually ran)
 
 - 358 packets / 703 tasks wave 1, then 50 (81 retries + 161 deepening), 5, 2, 1 — clean convergence.
-- Owner directive: no primary-quota burn. Lanes: **relay pool** (tier-mapped subagent offload,
+- Owner directive: no primary-quota burn. Lanes: **offload pool** (tier-mapped subagent offload,
   deep→`pool/xhigh`; ~460 packets total across waves on Kimi-K3 / gemini-3.6-flash / DeepSeek /
   GLM-5.2), **codex** (40 packets, headless `codex exec` driver, prompt-on-stdin, 4-way concurrency,
   zero failures), **agy** — dead on arrival: the trap-guard's documented flag-latch derail makes it
@@ -57,7 +57,7 @@ fully audited, promoted to `.audit-tools/audit-report.md` + `audit-findings.json
   tier routing collapsed 354/358→deep, making the multi-rank roster dead weight; merge exit-2
   semantics vs prompt stop-on-failure language.
 - **ambiguous_direction (4):** resumed runs skip the scope echo; subagent model choice unspecified
-  (and with relay offload ON the handshake roster is not what serves); charter delta-miner
+  (and with offload routing ON the handshake roster is not what serves); charter delta-miner
   independence implicit; run_id null in step envelopes while dispatch artifacts carry timestamped
   run ids — the friction record path (`friction/run.json`) and the substrate's dispatch-run-id
   keying diverge, so a substrate-keyed walk was invisible to the present_report gate.

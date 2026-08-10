@@ -606,7 +606,7 @@
   },
   "979bce8dff1452b5": {
     "disposition": "settled",
-    "answer": "Drop serialization - that never should have been in there anyway. Rather than writing up something about llm-relay, just activate the /llm-relay skill. That will make it easier to change later if necessary.",
+    "answer": "Drop serialization - that never should have been in there anyway. Rather than writing up something about the offload router, just activate the /the offload router skill. That will make it easier to change later if necessary.",
     "subject": "The routine's second review lane is a command that no longer exists — and this run had to route around it",
     "path": "docs/nightly-routine.md",
     "decided_at": "2026-07-29T14:47:06.520Z",
@@ -620,7 +620,7 @@
     "path": ".claude/skills/design-check/SKILL.md",
     "decided_at": "2026-07-29T14:48:44.011Z",
     "completed_at": "2026-07-29T15:01:37.906Z",
-    "completed_ref": "commit 1d4a81fc — SKILL.md step 3 routes via the llm-relay dispatch ladder; ~/.claude/backups/llm-call.mjs.retired-2026-07-28 deleted and the ~/.claude/CLAUDE.md restore-pointer trimmed"
+    "completed_ref": "commit 1d4a81fc — SKILL.md step 3 routes via the the offload router dispatch ladder; ~/.claude/backups/llm-call.mjs.retired-2026-07-28 deleted and the ~/.claude/CLAUDE.md restore-pointer trimmed"
   },
   "80768a9c94ab0065": {
     "disposition": "settled",
@@ -705,7 +705,7 @@
   },
   "41b0006a30468211": {
     "disposition": "settled",
-    "answer": "Approved in chat 2026-08-04 ('let's do it all') per the revised split: surface the provider error body + HTTP status, drop errored ids from the resume set so a re-run retries them, content-derived entry ids. Deliberately NO retry/backoff in the caller - pool failover is llm-relay's job; relay failover defect to be filed against llm-relay separately.",
+    "answer": "Approved in chat 2026-08-04 ('let's do it all') per the revised split: surface the provider error body + HTTP status, drop errored ids from the resume set so a re-run retries them, content-derived entry ids. Deliberately NO retry/backoff in the caller - pool failover is the offload router's job; router failover defect to be filed against the offload router separately.",
     "subject": "Leg 2 has failed two nights running on a masked rate limit — the lane throws away the error that names its own retry-after",
     "path": "scripts/shared/triage-backlog.mjs",
     "decided_at": "2026-08-05T01:22:40.300Z",
@@ -759,8 +759,8 @@
   },
   "d3e50981fd854566": {
     "disposition": "settled",
-    "answer": "Build P11 in full: resolve the triage model target live from llm-relay (never a hardcoded pool name), preflight once and abort loudly with the relay's own error when the lane is dead, and write a seen/classified/errored coverage stamp beside the JSONL.",
-    "subject": "Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool llm-relay deleted. Give the lane a health contract?",
+    "answer": "Build P11 in full: resolve the triage model target live from the offload router (never a hardcoded pool name), preflight once and abort loudly with the router's own error when the lane is dead, and write a seen/classified/errored coverage stamp beside the JSONL.",
+    "subject": "Leg 2's triage lane has degraded silently three nights running — its default model spec is a pool the offload router deleted. Give the lane a health contract?",
     "path": "scripts/shared/triage-backlog.mjs",
     "decided_at": "2026-08-06T16:13:27.110Z",
     "completed_at": "2026-08-06T16:33:00.250Z",
@@ -777,8 +777,8 @@
   },
   "2994bbdaf341d0c4": {
     "disposition": "settled",
-    "answer": "Drop the pool names from the HANDOFF routing sentence (llm-relay owns the roster; naming pools here is a standing drift source) AND delete the pool/coding failover defect note — a defect against a lane that no longer exists is a dead record; if failover-past-rate-limit is still real it will resurface against the live pools.",
-    "subject": "The handoff routes work through three llm-relay pools that no longer exist — remap them, or drop the pool names?",
+    "answer": "Drop the pool names from the HANDOFF routing sentence (the offload router owns the roster; naming pools here is a standing drift source) AND delete the pool/coding failover defect note — a defect against a lane that no longer exists is a dead record; if failover-past-rate-limit is still real it will resurface against the live pools.",
+    "subject": "The handoff routes work through three the offload router pools that no longer exist — remap them, or drop the pool names?",
     "path": "docs/HANDOFF.md",
     "decided_at": "2026-08-06T16:13:36.881Z",
     "completed_at": "2026-08-06T16:17:56.575Z",
@@ -825,7 +825,7 @@
     "answer": "Delete examples/catalog/sources-declared.json and document the sources-declared SHAPE only, in prose, with no runnable model values. Nothing in the tree then names another system's pools, and there is no example to keep current.",
     "subject": "the shipped sources-declared example names the broker pools pool/fast, pool/coding and pool/reasoning",
     "path": "examples/catalog/sources-declared.json",
-    "note": "This repo doesn't need to do anything specific. It dispatches normally, and the llm-relay tool will interject. We don't need any of this crap.",
+    "note": "This repo doesn't need to do anything specific. It dispatches normally, and the the offload router tool will interject. We don't need any of this crap.",
     "decided_at": "2026-08-09T05:47:21.519Z",
     "completed_at": "2026-08-09T09:05:38.223Z",
     "completed_ref": "af37bbad — examples/catalog/sources-declared.json deleted; pool names de-pinned repo-wide"

@@ -212,7 +212,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `/health`), which a running router answers regardless of whether the declared `model` resolves. So
   a `sources-declared.json` naming a retired model resolves green, is admitted as a CapacityPool,
   and 400s on every packet. Bit 2026-08-08. Probe the declared MODEL with a
-  real `/v1/chat/completions` round-trip after any relay upgrade — endpoint-alive is not lane-alive.
+  real `/v1/chat/completions` round-trip after any router upgrade — endpoint-alive is not lane-alive.
   (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
   (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:
@@ -484,13 +484,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
 
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
-  (2026-08-07).** A relay lane dispatched to analyze a duplication and left running while the
+  (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the
   extraction was written came back describing the new shared helper as pre-existing — its "finding"
   was the edit in flight. Nothing warns; the report simply describes a tree that did not exist when
   the task was written. Dispatch recon BEFORE editing the files it covers, or hold the edit until it
   returns. Same reason its output is advisory: verify against source at the moment you act.
 
-- **Long relay recon jobs die mid-response; short ones do not (2026-08-07).** Three multi-file
+- **Long offload recon jobs die mid-response; short ones do not (2026-08-07).** Three multi-file
   analysis dispatches on the DeepSeek lane: two failed with `API Error: Server error mid-response`
   after ~10 min, the third returned only after ~25 min; a one-line probe on the same lane answered
   instantly, and the same work on the agy lane returned complete in minutes. `claude -p` buffers to
@@ -500,7 +500,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   ⚠ **The variable is job LENGTH, not the lane (2026-08-09).** agy is no longer the escape hatch this
   entry's first paragraph implies: one long refutation died there with `status: "ERROR"`,
   `timeout waiting for response` at 296s, having generated 15,532 output tokens that were discarded —
-  while an 8s probe on that same lane passed, and the free relay pool hung past 10 min on the same
+  while an 8s probe on that same lane passed, and the free offload pool hung past 10 min on the same
   prompt and was marked exhausted. Splitting the one job into three bounded questions returned two of
   three. Shrink the unit before walking the ladder.
 
@@ -524,7 +524,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `SOURCE_DECLARATION_FILENAME` rather than probing ports. Any stale entry there is announced on every
   invocation as `declared source "<id>" not resolved: …failed the liveness probe` and otherwise
   silently costs the run its offload lane while it looks configured — so a dead entry is removed, not
-  left to warn. (The four `relay-*` entries pointing at the retired proxy port were removed
+  left to warn. (The four stale entries pointing at the retired proxy port were removed
   2026-08-09; `$env:AUDIT_TOOLS_STATE_DIR` overrides the location.)
 
 - **A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).**

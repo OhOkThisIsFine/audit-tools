@@ -119,7 +119,7 @@ const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
 // The router is a local OpenAI-compatible gateway (FreeLLMAPI on :3001 by
 // default). This lane has now outlived two transports — LiteLLM on :4000 and
-// a previous local relay — so nothing about the router is hardcoded beyond the
+// a previous local router — so nothing about it is hardcoded beyond the
 // origin, which TRIAGE_ENDPOINT overrides.
 const ENDPOINT = new URL(process.env.TRIAGE_ENDPOINT || 'http://127.0.0.1:3001');
 const API_KEY = process.env.FREELLMAPI_API_KEY || '';
@@ -496,8 +496,8 @@ async function main() {
   stampSafe(stamp);
 
   // Preflight: one call before the sweep, SINGLE attempt (matching the
-  // per-entry no-retry policy — failover is the relay's job). A dead lane must
-  // fail loudly at entry 0, with the relay's own message, not silently at
+  // per-entry no-retry policy — failover is the router's job). A dead lane must
+  // fail loudly at entry 0, with the router's own message, not silently at
   // entry 154.
   try {
     const { status, body: r } = await post({
@@ -514,7 +514,7 @@ async function main() {
     stampSafe(stamp);
     process.stderr.write(
       `${stamp.aborted}\nThe lane is DEAD, not slow — nothing was attempted. ` +
-        `Fix the relay, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
+        `Fix the router, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
     );
     process.exit(1);
   }
@@ -535,11 +535,11 @@ async function main() {
           ],
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         });
-        // A provider/relay error body has no choices array. Surface ITS message —
+        // A provider/router error body has no choices array. Surface ITS message —
         // it names the real cause (and often its own retry-after) — never the
         // information-free `finish_reason=undefined` it used to be reported as.
         // Deliberately NO retry/backoff here: failover is the router's job,
-        // and duplicating it in the caller would hide a relay defect.
+        // and duplicating it in the caller would hide a router defect.
         if (r?.error || !Array.isArray(r?.choices)) {
           const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
           throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());

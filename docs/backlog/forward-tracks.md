@@ -48,9 +48,13 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
   first, and every commit carries a staged-tree review attestation.
   ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run**, which resolves its attribution
   triple from `CapacityPool.{providerName,hostModel,rank}` — machinery this cut deletes.
-  ⚠ Relay/proxy references remain in `docs/backlog/`, `docs/reviews/`, `.claude/nightly-decisions.json`
-  and ~20 `src/` files; owner approved scrubbing all three doc classes. Most `src/` mentions go with
-  the code — scrub as part of this, not twice.
+  ⚠ The retired router's name is scrubbed from every doc class (backlog, dated reviews,
+  nightly-decisions) as of `61413818`+. What REMAINS is feature surface, not stray prose:
+  `docs/audit-pkg/operator-guide.md` still documents "Relay-backed dispatch sources" for users, and
+  ~15 `src/` comments name the router as the routing owner. Both describe the capability this track
+  deletes, so they go WITH the code — do not scrub them separately.
+  ⚠ Keep `tests/shared/nightly-routine-prompt-gate.test.ts`'s `not.toMatch(/llm-relay/)` assertion —
+  it is the guard that stops the name resurfacing.
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"

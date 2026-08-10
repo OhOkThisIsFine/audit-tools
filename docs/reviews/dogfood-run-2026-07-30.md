@@ -48,5 +48,5 @@ terminal strand.
   193k-token one) ran on agy `gemini-3.6-flash-high` via a plain spawn driver, all accepted by the
   merge gate's validation.
 - `merge-and-ingest` recovery-by-task_id is a working escape hatch for any wedged packet.
-- Owner directive issued mid-run: **dispatch inversion** — llm-relay owns routing; audit-tools only
+- Owner directive issued mid-run: **dispatch inversion** — the offload router owns routing; audit-tools only
   estimates per-task/packet tokens (specced in `docs/backlog/forward-tracks.md`).

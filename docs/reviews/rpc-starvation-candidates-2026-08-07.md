@@ -9,7 +9,7 @@ while every test passes. A full-suite run reproduced the error with the long-bla
 `tests/audit/audit-code-completion.test.ts` worker measuring ZERO >5s event-loop stalls — the
 blocker is elsewhere, or contention-emergent.
 
-Sweep executed on the relay dispatch lane (DeepSeek, advisory); every claim below was verified or
+Sweep executed on the offload dispatch lane (DeepSeek, advisory); every claim below was verified or
 corrected against source by the driving session before landing here.
 
 ## Verified

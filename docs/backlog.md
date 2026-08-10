@@ -140,21 +140,21 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:34` — Remove routing from audit-tools — the tool reports task METADATA, the host dispatches (owner directive, 2026-08-09).
-- `forward-tracks.md:55` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:82` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
-- `forward-tracks.md:95` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.
-- `forward-tracks.md:110` — Generate the executor↔artifact mapping from the registries (anti-drift).
-- `forward-tracks.md:117` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:125` — models.dev static window can over-state a specific deployment (carried from W1).
-- `forward-tracks.md:145` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
-- `forward-tracks.md:157` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:172` — Cross-provider quota — live-endpoint confirmation.
-- `forward-tracks.md:183` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
-- `forward-tracks.md:194` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
-- `forward-tracks.md:238` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
-- `forward-tracks.md:240` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:247` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:259` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
+- `forward-tracks.md:59` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
+- `forward-tracks.md:86` — Backend-identity axes — settle transport / service / locus once (design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)).
+- `forward-tracks.md:99` — One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell.
+- `forward-tracks.md:114` — Generate the executor↔artifact mapping from the registries (anti-drift).
+- `forward-tracks.md:121` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:129` — models.dev static window can over-state a specific deployment (carried from W1).
+- `forward-tracks.md:149` — Schema-enforced generation — CE-004 residual is every prompt-only backend, not just the host.
+- `forward-tracks.md:161` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:176` — Cross-provider quota — live-endpoint confirmation.
+- `forward-tracks.md:187` — Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.
+- `forward-tracks.md:198` — Slice-3 — no live heartbeat on the LONG-lived execution claims (doc-review D-66/D-67/C-7; last open slice of the rolling-lifecycle unification).
+- `forward-tracks.md:242` — Packet `task_ids`/`lens` attribution is missing from the token-usage ledger
+- `forward-tracks.md:244` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:251` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:263` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -208,7 +208,7 @@
 - `durable-traps.md:470` — A backlog entry's bold title must not contain `
 - `durable-traps.md:475` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
 - `durable-traps.md:486` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:493` — Long relay recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:493` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
 - `durable-traps.md:507` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
 - `durable-traps.md:518` — The operator's declared offload sources live in `~/.audit-code/sources-declared.json` — NOT in the repo, and not under `~/.audit-tools/` (2026-08-09).
 - `durable-traps.md:530` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).

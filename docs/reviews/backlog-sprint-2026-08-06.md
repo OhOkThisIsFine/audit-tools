@@ -66,7 +66,7 @@ refuses the zero-byte WindowsApps stub.
 
 **Hooks:** friction-stop-gate skips an area whose `steps/current-step.json` churned within 2min
 (bystander stops no longer blocked by a concurrent live run; real contract tests). hk-1
-(relay-liveness 403) and hk-4 (doc-manifest predicate) were STALE entries — both already enforced
+(offload-liveness 403) and hk-4 (doc-manifest predicate) were STALE entries — both already enforced
 at HEAD; hk-4's incident mechanism was most plausibly the registered chained-`add+commit`
 gate-miss trap.
 
@@ -92,7 +92,7 @@ gate-miss trap.
   provider-unavailable errors, N-consecutive threshold per pool, transition to the existing
   `waiting_for_provider` resumable pause NAMING the dead provider; resume re-runs
   `buildConfirmedPools` (re-detects PATH/env, folds in alternatives; settled-exclusion prevents
-  re-offering dead ones). No Gate-0/confirmation resurrection; llm-relay keeps concrete routing.
+  re-offering dead ones). No Gate-0/confirmation resurrection; the offload router keeps concrete routing.
   Rejected: wave-boundary active re-probe (latency + pool-construction coupling), hybrid (two
   failure paths). Open: threshold value; pause-prompt guidance; exclusion persistence across
   cycles.
