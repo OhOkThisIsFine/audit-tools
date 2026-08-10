@@ -94,7 +94,10 @@ import {
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
-import { groundExtractedFindings } from "../phases/grounding.js";
+import {
+  groundExtractedFindings,
+  type ExtractedFindingGrounding,
+} from "../phases/grounding.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
@@ -2866,9 +2869,25 @@ async function handlePendingExtractedPlan(
   existing: RemediationState,
   extractedPlan: unknown,
 ): Promise<RemediationState | null> {
+  // The discard-and-re-extract recovery below covers EXACTLY the region whose
+  // failures mean the extracted PLAN is unusable: normalization and grounding.
+  // It deliberately stops there. Everything after it — sizing, the dirty
+  // snapshot, the coverage ledger, persistence — fails for reasons that have
+  // nothing to do with the plan's content, so discarding the plan on those is
+  // both a data loss and a misdiagnosis.
+  //
+  // `resolvePlanContextBudget`'s refusal is the case that proved it. Its message
+  // asks the operator to declare a window, but it threw into this catch: the
+  // plan was deleted and the operator was told the file was corrupt. Because
+  // re-extraction cannot change the host's declared window, the next step
+  // reproduced it exactly — a deterministic loop that ate the extracted plan on
+  // every lap. Pinned by `tests/remediate/plan-sizing-refusal.test.ts`.
+  let plan: RemediationPlan;
+  let sourceFindings: Finding[];
+  let mergeMap: Map<string, string>;
+  let grounding: ExtractedFindingGrounding;
   try {
-    const { plan, sourceFindings, mergeMap } =
-      normalizeExtractedPlan(extractedPlan);
+    ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(extractedPlan));
 
     // Deterministic grounding for the LLM-extracted plan (this path never sees
     // structured audit findings): strip phantom affected_files paths, drop
@@ -2878,7 +2897,7 @@ async function handlePendingExtractedPlan(
     // are grounded by construction (the traceability gate ties every node to
     // obligations/accepted counterexamples), so their obligation-reference
     // evidence is exempt from the path-citation check.
-    const grounding = await groundExtractedFindings(plan.findings, {
+    grounding = await groundExtractedFindings(plan.findings, {
       root,
       evidenceGrounding: plan.source !== "contract_pipeline",
     });
@@ -2897,73 +2916,6 @@ async function handlePendingExtractedPlan(
         "Every extracted finding cited only phantom paths; re-extract with real repo-relative paths.",
       );
     }
-
-    const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
-    // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
-    // extracted-plan join runs at plan time (before any remediation edit), so
-    // the dirty set here is pre-existing user dirt — the close phase excludes
-    // it from DECLARED-surface staging.
-    if (!existing.run_start_dirty) {
-      existing = {
-        ...existing,
-        run_start_dirty: [...stagedAndUntracked(root)].sort(),
-      };
-    }
-    // Discarded on mismatch, so the gate re-asks rather than replaying operator
-    // decisions under semantics they were not made under. Re-asking costs a repeat
-    // answer; applying them blind could act on a keep/decline that no longer means
-    // what it meant when it was recorded.
-    const reviewDecision = discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir)),
-      REVIEW_DECISION_SCHEMA_VERSION,
-    );
-    // Coverage ledger. Path A (structured_audit): the single filter pass ran at
-    // intake over the ORIGINAL findings and persisted its dispositions — build
-    // coverage over those originals so every audit finding gets exactly one
-    // disposition (planned / folded_into / dropped_* / dropped_by_checkpoint /
-    // declined_by_review), reconciling to the original count. Path B (no persisted
-    // dispositions): build over the post-pipeline node findings as before. Either
-    // way declined findings are recorded; their payloads recover at close from the
-    // unfiltered intake source.
-    const filterDisp = await readOptionalJsonFile<PersistedReviewFilterDispositions>(
-      reviewFilterDispositionsPath(artifactsDir),
-    );
-    const pipelinedBlockIds = blockIdsByFinding(pipelined);
-    const coverage = filterDisp
-      ? buildCoverageLedger({
-          planId: pipelined.plan_id,
-          sourceFindings: filterDisp.originals,
-          droppedNoEvidence: filterDisp.droppedNoEvidence,
-          droppedByCheckpoint: filterDisp.droppedByCheckpoint,
-          declinedByReview: reviewDecision?.declined ?? [],
-          droppedPhantomPaths: new Map(filterDisp.droppedPhantomPaths),
-          phantomPathsRemoved: new Map(filterDisp.phantomPathsRemoved),
-          mergeMap: new Map(filterDisp.mergeMap),
-          items: {}, // originals carry no node block_id; planned entries omit it
-        })
-      : buildCoverageLedger({
-          planId: pipelined.plan_id,
-          sourceFindings,
-          droppedNoEvidence: [],
-          droppedByCheckpoint: [],
-          declinedByReview: reviewDecision?.declined ?? [],
-          droppedPhantomPaths: new Map(
-            grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
-          ),
-          phantomPathsRemoved: grounding.phantomPathsByFinding,
-          mergeMap,
-          items: Object.fromEntries(
-            pipelined.findings.map((finding) => [
-              finding.id,
-              {
-                finding_id: finding.id,
-                status: "pending" as const,
-                block_id: pipelinedBlockIds.get(finding.id) ?? "UNKNOWN",
-              },
-            ]),
-          ),
-        });
-    return await saveStateForPlan(artifactsDir, existing, pipelined, coverage);
   } catch (error) {
     const paths = intakePaths(artifactsDir);
     try {
@@ -2971,10 +2923,78 @@ async function handlePendingExtractedPlan(
       await unlink(paths.extractedPlan);
     } catch { /* already gone */ }
     process.stderr.write(
-      `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+      `[remediate-code] Unusable extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
     );
     return null;
   }
+
+  // Past the recovery boundary: a failure below is a real failure and propagates.
+  const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
+  // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
+  // extracted-plan join runs at plan time (before any remediation edit), so
+  // the dirty set here is pre-existing user dirt — the close phase excludes
+  // it from DECLARED-surface staging.
+  if (!existing.run_start_dirty) {
+    existing = {
+      ...existing,
+      run_start_dirty: [...stagedAndUntracked(root)].sort(),
+    };
+  }
+  // Discarded on mismatch, so the gate re-asks rather than replaying operator
+  // decisions under semantics they were not made under. Re-asking costs a repeat
+  // answer; applying them blind could act on a keep/decline that no longer means
+  // what it meant when it was recorded.
+  const reviewDecision = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir)),
+    REVIEW_DECISION_SCHEMA_VERSION,
+  );
+  // Coverage ledger. Path A (structured_audit): the single filter pass ran at
+  // intake over the ORIGINAL findings and persisted its dispositions — build
+  // coverage over those originals so every audit finding gets exactly one
+  // disposition (planned / folded_into / dropped_* / dropped_by_checkpoint /
+  // declined_by_review), reconciling to the original count. Path B (no persisted
+  // dispositions): build over the post-pipeline node findings as before. Either
+  // way declined findings are recorded; their payloads recover at close from the
+  // unfiltered intake source.
+  const filterDisp = await readOptionalJsonFile<PersistedReviewFilterDispositions>(
+    reviewFilterDispositionsPath(artifactsDir),
+  );
+  const pipelinedBlockIds = blockIdsByFinding(pipelined);
+  const coverage = filterDisp
+    ? buildCoverageLedger({
+        planId: pipelined.plan_id,
+        sourceFindings: filterDisp.originals,
+        droppedNoEvidence: filterDisp.droppedNoEvidence,
+        droppedByCheckpoint: filterDisp.droppedByCheckpoint,
+        declinedByReview: reviewDecision?.declined ?? [],
+        droppedPhantomPaths: new Map(filterDisp.droppedPhantomPaths),
+        phantomPathsRemoved: new Map(filterDisp.phantomPathsRemoved),
+        mergeMap: new Map(filterDisp.mergeMap),
+        items: {}, // originals carry no node block_id; planned entries omit it
+      })
+    : buildCoverageLedger({
+        planId: pipelined.plan_id,
+        sourceFindings,
+        droppedNoEvidence: [],
+        droppedByCheckpoint: [],
+        declinedByReview: reviewDecision?.declined ?? [],
+        droppedPhantomPaths: new Map(
+          grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
+        ),
+        phantomPathsRemoved: grounding.phantomPathsByFinding,
+        mergeMap,
+        items: Object.fromEntries(
+          pipelined.findings.map((finding) => [
+            finding.id,
+            {
+              finding_id: finding.id,
+              status: "pending" as const,
+              block_id: pipelinedBlockIds.get(finding.id) ?? "UNKNOWN",
+            },
+          ]),
+        ),
+      });
+  return await saveStateForPlan(artifactsDir, existing, pipelined, coverage);
 }
 
 // ── Review-approval gate (go-forward program item 1) ───────────────────────────

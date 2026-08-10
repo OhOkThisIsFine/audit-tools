@@ -264,6 +264,18 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
     await writeFile(join(REPO_DIR, "src", "a.ts"), "// a\n", "utf8");
     await writeFile(join(REPO_DIR, "src", "b.ts"), "// b\n", "utf8");
+    // A declared sizing window, without which `applyPlanPipeline` refuses and no
+    // planning state is built. This fixture predates the refusal propagating:
+    // the refusal used to be swallowed as "corrupted extracted-plan.json", so
+    // these two cases passed on their NEGATIVE assertions while exercising the
+    // re-emit-extraction path the comment above says they must avoid.
+    await writeFile(
+      join(REPO_DIR, "session-config.json"),
+      JSON.stringify({
+        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
+      }),
+      "utf8",
+    );
     await writeFile(
       join(ARTIFACTS_DIR, "extracted-plan.json"),
       JSON.stringify(makePlanningState().plan),
@@ -276,6 +288,10 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     await seedPromotedPlanWithIntake();
     // No state.json (entry state is null) and no --input.
     const step = await decideNextStep({ root: REPO_DIR });
+    // Positive first: these cases are only meaningful if the intake actually
+    // BUILT a plan. Asserting only the negatives let them pass for years while
+    // the join was refusing and re-emitting an extraction step instead.
+    await expectIntakeBuiltAPlan();
     expect(step.step_kind).not.toBe("confirm_resume_or_restart");
     expect(step.step_kind).not.toBe("confirm_intent");
   });
@@ -287,9 +303,27 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
       root: REPO_DIR,
       input: join(REPO_DIR, "audit-report.md"),
     });
+    await expectIntakeBuiltAPlan();
     expect(step.step_kind).not.toBe("input_conflict");
     expect(step.step_kind).not.toBe("confirm_intent");
   });
+
+  /**
+   * The precondition both cases share: the promoted extracted plan survived the
+   * join and became a planning state. If it did not, every `not.toBe(...)` below
+   * is vacuously true and the case tests nothing.
+   */
+  async function expectIntakeBuiltAPlan(): Promise<void> {
+    const { existsSync } = await import("node:fs");
+    expect(
+      existsSync(join(ARTIFACTS_DIR, "state.json")),
+      "the extracted plan must have been joined into a planning state",
+    ).toBe(true);
+    expect(
+      existsSync(join(ARTIFACTS_DIR, "extracted-plan.json")),
+      "a successful join keeps the extracted plan; its absence means the recovery path discarded it",
+    ).toBe(true);
+  }
 });
 
 describe("resolveHostDispatchCapability", () => {
