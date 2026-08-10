@@ -107,9 +107,23 @@
 
    **The next commit** deletes `resolvePlanContextBudget`, `resolveCurrentWorkPartitionRuntime` and
    `resolveSizingWindowTokens`, plus the budget splitters they feed, and stops `block_quota` /
-   `quota.*` being sizing inputs. It is a removal, not a re-sourcing.
-   ✅ **Scope is settled, nothing open** — grouping survives, so `mergeBlocksSharingFiles` and the
-   block concept STAY. The shape and its one consequence are stated once, below.
+   `quota.*` being sizing inputs.
+   ⚠ **"It is a removal, not a re-sourcing" and "scope is settled, nothing open" were BOTH WRONG —
+   corrected 2026-08-09, read
+   [`sizing-window-removal-blocker-2026-08-09.md`](reviews/sizing-window-removal-blocker-2026-08-09.md)
+   before touching this.** Grouping does not survive a bare deletion: the decision *to group at all*
+   is gated on the window being deleted, in FIVE places — `partitionTaskGraph.ts:126` collapses
+   SILENTLY to one-task-per-packet (its `:124-125` comment states the inverted conviction outright),
+   and `workBlocks.ts:167-176`, `workPartition.ts:103-107`, `quotaPool.ts:179-186`,
+   `plan.ts:815-823` all THROW. No planning document mentions any of the five.
+   ✅ **The shape of record is the owner's reframe (2026-08-09): the tool emits tasks + an affinity
+   metric and the HOST decides grouping and targets.** That is already built — `task_affinity_graph.json`
+   is a persisted, versioned, provider-neutral artifact today (`artifacts.ts:284`,
+   `dependencyMap.ts:194-198`, `taskAffinityGraph.ts:59-66`) whose edge kinds are pure content signals
+   and whose nodes already carry `token_estimate` + `risk_estimate`. So the directive's end state ships
+   already; what goes is the internal consumer that folds that graph under a backend window.
+   Two properties to settle first (both in the review doc, §4): the `edges` array order is inherited
+   from upstream task order rather than content-derived, and edge `weight` saturates at `1.0`.
    Loop-core: staged-tree review attestation on every commit, full suite before each one.
    ⚠ **SIX owner decisions are recorded in the plan's *Owner decisions* section — read them there,
    not from a summary.** The sharpest is that **quota goes ENTIRELY** (the verb, the nine sources, the
