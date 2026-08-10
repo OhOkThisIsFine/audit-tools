@@ -32,25 +32,21 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 ## Forward tracks
 
 - **Remove routing from audit-tools — the tool reports task METADATA, the host dispatches (owner
-  directive, 2026-08-09).** audit-tools emits per-task risk, complexity and local token estimates;
-  owning backend selection, pools, failover and cost tiering is pollution. Retires the two tracks
-  previously here that assumed the opposite (quota-arbitrage source pools; the tool-enforced dispatch
-  broker) — parts of the broker had shipped, so this is a removal, not a non-start.
-  **CUT DECIDED — (c) one execution adapter, no choice at all** (owner, 2026-08-09): delete every
-  notion of selecting a backend, `PROVIDER_NAMES` and provider auto-resolution included.
-  ⚠ **Accepted consequence, stated when the cut was chosen — NOT a defect to file later: headless/CI
-  autonomy is given up.** Nothing in-tool runs a packet unattended; conversation-first is unaffected.
-  **First step is SEPARATION, not deletion** — and the seam is **SIZING, not admission**. The
-  separation plan, the seven-area surface map, the four adversarial refutations that overturned its
-  first draft, the corrected commit sequence and **five open owner questions** are in
+  directive, 2026-08-09).** **Cut (d) — ZERO execution adapters, metadata only**; the shape and its
+  three boundaries (quota goes entirely; the host-declared sizing window, result ingestion and
+  recording-what-ran all stay) are stated once in `CLAUDE.md`, not restated here.
+  **The plan, its four adversarial refutations and all five owner decisions are in**
   [`routing-removal-separation-plan-2026-08-09.md`](../reviews/routing-removal-separation-plan-2026-08-09.md)
-  — a pointer, not a summary. The correction: the attended-host branch already drops admission,
-  leases, caps and the wall, so that half looks done — but packet sizing, block sizing, `model_hint`
-  cut points and the oversize warning are each still pool-, roster- or `ResolvedProviderName`-derived,
-  and TWO of the three audit callers (the `prepare-dispatch` verb included) still take the admitted
-  arm. Loop-core → `/design-check` first, staged-tree attestation on every commit.
-  ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run**, which resolves its attribution
-  triple from `CapacityPool.{providerName,hostModel,rank}` — machinery this cut deletes.
+  — a pointer, not a summary; nothing is open in it.
+  **Open property:** the separation seam is **SIZING, not admission**. The attended-host branch
+  already drops admission, leases, caps and the wall, so that half looks done — but packet sizing,
+  block sizing, `model_hint` cut points and the oversize warning are each still pool-, roster- or
+  `ResolvedProviderName`-derived, and two of the three audit callers (the `prepare-dispatch` verb
+  included) still take the admitted arm. Loop-core → `/design-check` first, staged-tree attestation
+  on every commit.
+  ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run** — its attribution triple
+  resolves from `CapacityPool`, and its provider axis is now dropped, so its 8-module set needs
+  re-authoring against a model × lens triple before any shard is written.
   ⚠ The retired router's name is scrubbed from every doc class (backlog, dated reviews,
   nightly-decisions) as of `61413818`+. What REMAINS is feature surface, not stray prose:
   `docs/audit-pkg/operator-guide.md` still documents "Relay-backed dispatch sources" for users, and

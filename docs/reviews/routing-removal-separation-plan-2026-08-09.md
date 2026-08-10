@@ -259,8 +259,22 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
    must be, and the host being careful is never the mechanism. `spec/backend-identity-axes.md`'s
    invariant stands.
 
-**Still open — the only one left:** the surviving adapter's NAME. `worker-command` today means both
-the subprocess adapter class and the "no automated backend, the host does this manually" sentinel
-(`semanticReviewStep.ts:82`, `envelope.ts:80-85`, `operatorHandoff.ts:203-204`). Keep the collision,
-rename the adapter, or retire the name from the reporting sites entirely. Not urgent — it gates the
-collapse commit, not the separation.
+5. **THE CUT ITSELF CHANGED — (d) ZERO execution adapters, superseding (c).** Asked to name the one
+   surviving adapter, the owner rejected the premise: *"I'm not clear on why audit-tools needs to
+   manage the subprocess or the host doing things manually. It can atomize tasks and provide metadata
+   including whether things are parallelizable, and what tier of model they might require, without
+   mandating anything."* Cut (c) kept one adapter while accepting that nothing runs unattended — and
+   the unattended run is an adapter's only job, so it served nothing. All 10 provider classes,
+   `PROVIDER_NAMES`, auto-resolution, `constructProvider`, the `FreshSessionProvider` launch contract
+   and the spawn substrate go, and the `worker-command` naming collision dissolves because both of its
+   meanings are deleted.
+   **Two boundaries this does NOT cross.** Result **ingestion** stays — reading back and validating
+   what the host produced against the `AuditResult` contract is consumption, not execution. And *not
+   routing does not mean not knowing*: the host still picks a backend, and the tool may faithfully
+   RECORD what it is told ran. Only the choosing is pollution. (That correction also retires the
+   reasoning offered for decision 1 — the axis was dropped because it is single-valued and unvalidatable
+   post-cut, NOT because "there is nothing to attribute", which was wrong.)
+   **Consequence for the sequence:** S6 stops being a late safeguard against write-only metadata and
+   becomes the centre of the work — the emitted per-task contract IS the product. Re-plan S6 first.
+
+**Nothing open.** Every question this record raised has an owner answer above.

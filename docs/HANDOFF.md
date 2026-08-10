@@ -96,10 +96,16 @@
    [`forward-tracks.md`](backlog/forward-tracks.md). It **retired two forward tracks** that assumed the
    opposite (quota-arbitrage source pools; the tool-enforced dispatch broker — parts of which had
    already shipped, so this is a removal).
-   **The boundary is DECIDED — cut (c), owner 2026-08-09: one execution adapter, no choice at all**
-   (`PROVIDER_NAMES` and provider auto-resolution go too). The accepted consequence, called out when
-   the cut was chosen: **headless/CI autonomy is given up** — nothing in-tool will run a packet
-   unattended. Conversation-first is unaffected. This is a deliberate trade, not a regression to file.
+   **The boundary is DECIDED — cut (d), owner 2026-08-09: ZERO execution adapters, metadata only.**
+   Supersedes the same day's cut (c) ("one execution adapter"), which kept an adapter while accepting
+   that nothing runs unattended — and an adapter's only job IS the unattended run. The tool atomizes
+   work and emits per-task metadata (risk, complexity, local token estimate, lens, scope,
+   write-disjointness, relative tier), mandating nothing; all 10 provider classes, `PROVIDER_NAMES`,
+   auto-resolution, the launch contract and the spawn substrate go. **Headless/CI autonomy is given
+   up** — a deliberate trade, not a regression to file. Conversation-first is unaffected.
+   ⚠ **Result INGESTION is not execution and stays.** ⚠ Not routing does not mean not knowing — the
+   host still picks a backend and the tool may faithfully RECORD what it is told ran; only the
+   choosing is pollution.
    **The separation is UNDERWAY and its plan is a verified record** —
    [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md)
    carries the surface map, the four adversarial refutations that overturned its first draft, the

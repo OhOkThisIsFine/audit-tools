@@ -245,10 +245,16 @@ instead of a rewrite. Trivial mechanical edits skip it.
   cost-first admission, provider rosters — is the host's, and owning any of it here is pollution.
   This is the same inversion as *Conversation-first* and *never hand-maintain a model/price table*,
   applied to selection itself: those rules say don't own the model FACTS, this one says don't own the
-  CHOICE. ⚠ Much of the current dispatch/quota substrate predates this and is being removed, not
-  extended — the boundary (how much of quota is *reporting* vs *routing input*) is still being settled;
-  see the removal track in [`forward-tracks.md`](docs/backlog/forward-tracks.md). Do not add routing
-  capability in the meantime.
+  CHOICE. **The cut is (d) — ZERO execution adapters, metadata only** (owner, 2026-08-09, superseding
+  the same day's "one execution adapter"): the tool atomizes work and emits per-task metadata,
+  mandating nothing, so every provider class, `PROVIDER_NAMES`, auto-resolution, the launch contract
+  and the spawn substrate go — and **quota goes entirely** (the verb, the sources, the learned slope,
+  cooldowns, RPM/TPM, reservations); a backend's allowance is never the tool's business. What stays
+  is the single HOST-DECLARED sizing window, result **ingestion** (consumption, not execution), and
+  the right to faithfully RECORD what the host says ran — *not routing does not mean not knowing*.
+  ⚠ Headless/CI autonomy is deliberately given up. ⚠ Much of the current dispatch/quota substrate
+  predates this and is being removed, not extended; see the removal track in
+  [`forward-tracks.md`](docs/backlog/forward-tracks.md). Do not add routing capability in the meantime.
 - **A needed manual flag is a bug signal.** Fix auto-resolution; don't document the flag.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
 - **Budget context before LLM dispatch.** Small obligation-specific packets; expand only when genuinely needed.
