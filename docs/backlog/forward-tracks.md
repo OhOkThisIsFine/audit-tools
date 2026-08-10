@@ -31,35 +31,26 @@ Unpinned on purpose: this is a map to draw from, not the next thing to do.
 
 ## Forward tracks
 
-- **Remove routing from audit-tools — the tool reports task METADATA, the host dispatches
-  (owner directive, 2026-08-09).** audit-tools should emit per-task risk, complexity and local token
-  estimates and let the host decide which backend runs the work; owning backend selection, pools,
-  failover and cost tiering is pollution. This supersedes and retires the two tracks previously here
-  that assumed the opposite (the quota-arbitrage source-pool tier and the tool-enforced dispatch
-  broker with its capability-tiered driver) — both were routing programs, and parts of the broker
-  had already shipped, so this is a removal, not a non-start.
-  **Surface to remove, measured at `e0ec020d`:** 14 modules reference `DispatchableSource`; the
-  declared-source layer is `src/shared/providers/auditorSources.ts` (450 lines) reading
-  `~/.audit-code/sources-declared.json`; the routing/selection machinery is
-  `src/shared/providers/providerFactory.ts` (584) plus `src/shared/quota/apiPool.ts` (983) and
-  `capacity.ts` (864); `PROVIDER_NAMES` carries 11 entries; ~178 `routing` references live under
-  `src/`. Most of it is loop-core (`src/shared/{dispatch,engine,quota,rolling}/`), so every commit
-  needs a staged-tree review attestation.
-  **The boundary to settle FIRST, before any deletion** — three defensible cuts, and they differ by
-  thousands of lines: (a) drop only the declared-source/proxy-lane layer and keep host-provider
-  auto-resolution; (b) also drop pools/capacity/admission, keeping only local token estimation; (c)
-  keep a single execution adapter and delete every notion of choosing between backends. Quota
-  tracking is the sharp edge — some of it is *reporting* (tokens used, which the metadata contract
-  wants) and some is *routing input* (admission, spill, failover), and the two are currently one
-  subsystem.
-  ⚠ **This collides with the in-flight `dispatch-effectiveness-observability` run**, whose design of
-  record resolves its attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool
-  machinery cut (b) and (c) remove. Settle the boundary before authoring that run's module contracts,
-  or the contracts encode a layer that is being deleted.
-  ⚠ Relay/proxy references still sit in `docs/backlog/`, `docs/reviews/`, `.claude/nightly-decisions.json`
-  and ~20 `src/` files. The owner approved scrubbing all three doc classes (2026-08-09); most of the
-  `src/` mentions disappear with the code, so scrub docs as part of the removal rather than twice.
-
+- **Remove routing from audit-tools — the tool reports task METADATA, the host dispatches (owner
+  directive, 2026-08-09).** audit-tools emits per-task risk, complexity and local token estimates;
+  owning backend selection, pools, failover and cost tiering is pollution. Retires the two tracks
+  previously here that assumed the opposite (quota-arbitrage source pools; the tool-enforced dispatch
+  broker) — parts of the broker had shipped, so this is a removal, not a non-start.
+  **CUT DECIDED — (c) one execution adapter, no choice at all** (owner, 2026-08-09): delete every
+  notion of selecting a backend, `PROVIDER_NAMES` and provider auto-resolution included.
+  ⚠ **Accepted consequence, stated when the cut was chosen — NOT a defect to file later: headless/CI
+  autonomy is given up.** Nothing in-tool runs a packet unattended; conversation-first is unaffected.
+  **First step is SEPARATION, not deletion.** Quota mixes *reporting* (tokens used — KEPT, the metadata
+  contract needs it) with *routing input* (admission, spill, failover — removed); split those before
+  deleting any file. Surface at `e0ec020d`: 14 modules reference `DispatchableSource`;
+  `providers/auditorSources.ts` 450, `providers/providerFactory.ts` 584, `quota/apiPool.ts` 983,
+  `quota/capacity.ts` 864; ~178 `routing` references under `src/`. Mostly loop-core → `/design-check`
+  first, and every commit carries a staged-tree review attestation.
+  ⚠ **Blocks the in-flight `dispatch-effectiveness-observability` run**, which resolves its attribution
+  triple from `CapacityPool.{providerName,hostModel,rank}` — machinery this cut deletes.
+  ⚠ Relay/proxy references remain in `docs/backlog/`, `docs/reviews/`, `.claude/nightly-decisions.json`
+  and ~20 `src/` files; owner approved scrubbing all three doc classes. Most `src/` mentions go with
+  the code — scrub as part of this, not twice.
 
 - **A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled
   self-audit runs.** The mechanical answer to "a lane can return success-shaped EMPTY results"

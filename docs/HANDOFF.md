@@ -119,9 +119,14 @@
    [`forward-tracks.md`](backlog/forward-tracks.md). It **retired two forward tracks** that assumed the
    opposite (quota-arbitrage source pools; the tool-enforced dispatch broker — parts of which had
    already shipped, so this is a removal).
-   **The open question is the boundary, and it is an owner call:** how much of the quota subsystem is
-   *reporting* (tokens used — the metadata contract wants this) versus *routing input* (admission,
-   spill, failover)? Today they are one subsystem. Nothing should be deleted until that line is drawn.
+   **The boundary is DECIDED — cut (c), owner 2026-08-09: one execution adapter, no choice at all**
+   (`PROVIDER_NAMES` and provider auto-resolution go too). The accepted consequence, called out when
+   the cut was chosen: **headless/CI autonomy is given up** — nothing in-tool will run a packet
+   unattended. Conversation-first is unaffected. This is a deliberate trade, not a regression to file.
+   **First implementation step is SEPARATION, not deletion:** quota currently mixes *reporting* (tokens
+   used — kept) with *routing input* (admission, spill, failover — removed). Split those before any
+   file is deleted, and run `/design-check` first — this is loop-core, so every commit carries a
+   staged-tree review attestation.
 2. **THEN resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner
    call, 2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
    `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per
