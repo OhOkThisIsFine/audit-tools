@@ -97,7 +97,18 @@
 
 ## Immediate next
 
-1. **REMOVE the sizing window — it gates item 2.** The routing-removal directive, cut (d) and all six
+1. **IMPLEMENT the unified coherence core — the sizing-window removal falls OUT of it, it no longer
+   precedes it.** ⚠ **Owner cut 2026-08-09: FULL UNIFICATION NOW.** The design of record is
+   [`coherence-core-design-2026-08-09.md`](reviews/coherence-core-design-2026-08-09.md) — read it
+   first; it is the `/design-check` output and the algorithm choice in it is forced by evidence, not
+   preference. Branch `unify/coherence-core` exists and currently carries only the design docs (it is
+   even with `main`); the implementation lands there as ONE atomic commit, because the
+   atomic-replace invariant forbids splitting a new-mechanism-plus-deletion across commits.
+   **Start at design §5** — the findings draw's mass ceiling is the one open element, with a
+   recommendation and its binding red-green test already written down.
+   The old separation-plan sequence below is superseded but kept for its owner-decision record.
+
+   The routing-removal directive, cut (d) and all six
    owner decisions live in `CLAUDE.md` and
    [`forward-tracks.md`](backlog/forward-tracks.md); the verified plan is
    [`routing-removal-separation-plan-2026-08-09.md`](reviews/routing-removal-separation-plan-2026-08-09.md),
