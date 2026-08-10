@@ -580,6 +580,36 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   missing. Put custom rules **after** the closing marker; later rules win, so a negation there still
   overrides the block's `.audit-tools/*` / `.audit-tools/*/*` patterns.
 
+- **The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).**
+  A critique repair renders `Regenerate \`finalized_module_contracts\` IN FULL`
+  (`renderContractRepairPrompt`, reached from `src/remediate/steps/contractPipeline.ts`), while the
+  standing requirement — and the reason INV-CO-13 exists — is a TARGETED EDIT, because regeneration is
+  what silently collapsed a 7-module set to 4. A host that follows the prompt does the banned thing.
+  Until the prompt text is fixed: repair by editing the payload, and assert the module-name list before
+  and after.
+
+- **A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).**
+  CDC-T1 said to widen a module's `file_scope`, but `file_scope` lives in the module decomposition —
+  *"the finalized contracts carry interface fields, not paths"*
+  (`src/remediate/steps/contractPipeline.ts:2951-2953, 2978`) — and the only route back to the
+  decomposition is the pre-critic citation-grounding gate, which fires on a non-existent cited path,
+  never on a critique repair. So the repair step could not do what its own critique asked. Nothing
+  validates that a critique's remedy is reachable from the phase it is dispatched to; when one is not,
+  the fix is a decomposition re-cut, not another repair round.
+
+- **The per-project memory store has NO locking, and a concurrent session silently reverts your edits
+  (2026-08-09).** Two Claude sessions purging `~/.claude/projects/<slug>/memory/` at once: three files
+  deleted at 17:29 were re-created byte-identical at 17:30:57, and `MEMORY.md` was rewritten three
+  times by the other session mid-pass. There is no lock and no conflict signal — the loser's work just
+  disappears. Detect it by `stat`-ing mtimes before and after a write; when a second session is live,
+  stop and let one own the store rather than interleaving.
+
+- **`MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).** The index
+  is bounded by a ~24.4KB read limit with no check enforcing it; adding one index line plus a note
+  pushed it to 24,414 bytes — over — and it was caught only by a manual `wc -c`. Measure after any
+  index edit. The prescribed reduction is MERGING closed sagas and cutting obsolete memories, never a
+  mechanical line-trim (tried, failed).
+
 ## Doc-set hygiene (enforced)
 
 
