@@ -171,7 +171,6 @@ export async function buildDispatchPool(params: {
   // called with these same pool fields. Same number, no capacity dependency.
   const probeBudget = (pool: CapacityPool): number | null =>
     resolveSizingWindowTokens({
-      providerName: pool.providerName,
       sessionConfig,
       hostModel: pool.hostModel,
       discoveredLimits: pool.discoveredLimits ?? null,

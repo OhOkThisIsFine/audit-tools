@@ -15,8 +15,11 @@ export function resolveCurrentWorkPartitionRuntime(
   self: AuditorSelf,
 ): { capacityTokens: number; availableParallelism: number | null } | null {
   const configured = sessionConfig.block_quota ?? {};
+  // Model-only — see the matching note in `remediate/phases/plan.ts`. This draw
+  // is the reason the routing-removal plan's finding 2 was wrong: it claimed the
+  // audit side already resolved statics provider-free, and this call did not.
   const staticLimits = self.model_id
-    ? resolveModelStatics(self.model_id, self.provider)
+    ? resolveModelStatics(self.model_id)
     : undefined;
   const capacityCandidates = (self.roster?.length
     ? self.roster.map((entry) =>

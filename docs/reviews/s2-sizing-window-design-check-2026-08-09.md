@@ -76,9 +76,9 @@ of the plan's S2 would stop remediate honouring the owner's own declared window.
 ## 4. What is provably inert, and therefore shippable without an owner call
 
 - **`providerName` on the audit sizing input.** It reaches exactly one expression,
-  `hostClassFor(providerName)` at `limits.ts:219`, and **both branches return the same `defaults`
-  object** (`:221` vs `:225`) — only the `source` label differs, and `sizingWindow.ts:43` destructures
-  `{ limits }` and discards `source`. Exact identity on every rung.
+  `hostClassFor(providerName)`, and **both branches return the same `defaults` object** — only the
+  `source` label differs, and `sizingWindow.ts` destructures `{ limits }` and discards `source`.
+  Exact identity on every rung.
 - **The provider argument to `resolveModelStatics`** at `plan.ts:802` and `workPartitionRuntime.ts:19`.
   `src/shared/data/model-statics.generated.json` has no `__by_provider` key, so `modelStatics.ts:142-149`
   already falls through to the flat table. Byte-identical. ⚠ Removing it now is the point: the next
@@ -86,12 +86,19 @@ of the plan's S2 would stop remediate honouring the owner's own declared window.
 
 Both were attacked by two independent refuters and neither could be moved.
 
-⚠ **`providerName` cannot simply be deleted from `SizingWindowInput`** — `ResolveLimitsOptions.providerName`
-is required, so the parameter has to become optional and `hostClassFor` needs a null guard. That is
-still inert for every existing caller: `resolveLimits` has four call sites
-(`quotaCommand.ts:24`, `sizingWindow.ts:43`, `capacity.ts:49`, `scheduler.ts:746`), two of which read
-`source` — and all four keep passing a provider, so only the sizing call takes the new path, where
-`source` is discarded. It does mean the change touches two loop-core files and carries an attestation.
+⚠ **`providerName` could not simply be deleted from `SizingWindowInput`** — `ResolveLimitsOptions.providerName`
+was required, so the parameter became optional and `hostClassFor` gained a nullish guard returning
+`"unknown"`. Still inert for every existing caller: `resolveLimits` has four call sites
+(`src/audit/cli/quotaCommand.ts`, `src/audit/cli/dispatch/sizingWindow.ts`,
+`src/shared/quota/capacity.ts`, `src/shared/quota/scheduler.ts`), two of which read `source` — and
+the three routing-flavoured ones keep passing a provider, so only sizing takes the new path, where
+`source` is discarded.
+
+**How the equality is now enforced rather than asserted:** `tests/audit/dispatch-sizing-window.test.ts`
+folds every case through **both** host classes (`claude-code` = hosted, `opencode` = local — the two
+branches `hostClassFor` can take) and requires the single provider-free resolution to equal both. If a
+provider could ever move the window, one fold disagrees. Validated by inversion: making the
+`provider_default` rung return a different pair turns it red, naming the case and the provider.
 
 ## 5. What had to be fixed FIRST — a data-loss bug, not an S2 artifact
 
@@ -122,9 +129,10 @@ and they assert the precondition positively.
 
 **S2 is split into two safe commits plus an owner gate.**
 
-1. the recovery-boundary fix (§5) — lands with this record;
-2. the provably-inert provider removal (§4) — the three sites lose `host_provider` / `self.provider` /
-   `providerName` as sizing inputs, equality shown not asserted;
+1. the recovery-boundary fix (§5) — landed with this record (`d7146254`);
+2. the provably-inert provider removal (§4) — LANDED. The three sites lose `host_provider` /
+   `self.provider` / `providerName` as sizing inputs; equality is enforced by the strengthened
+   both-host-classes fold check, not asserted in prose;
 3. **held for the owner: the three questions in §3.** Each moves a number for a real configuration,
    and one of them changes a persisted schema contract field. Until they are answered, the roster max
    and the choice of declared-window field stay exactly as they are.

@@ -114,6 +114,14 @@ test("the direct window agrees with the capacity fold on every resolution rung",
   const { resolveSizingWindowTokens } = await import("../../src/audit/cli/dispatch/sizingWindow.js");
   const { computeDispatchCapacity } = await import("../../src/shared/quota/capacity.js");
 
+  // Sizing names no provider at all (see SizingWindowInput). The fold still
+  // does, so the equivalence is checked against BOTH host classes — `claude-code`
+  // is `hosted` and `opencode` is `local`, the two branches `hostClassFor` can
+  // take. Agreeing with both is the mechanical statement that the window pair is
+  // provider-independent: if the provider could ever move the number, one of
+  // these two folds would disagree with the single provider-free resolution.
+  const PROVIDERS = ["claude-code", "opencode"] as const;
+
   const cases: Array<{ label: string; pool: CapacityPool }> = [
     {
       label: "discovered capability (the handshake rung)",
@@ -136,26 +144,29 @@ test("the direct window agrees with the capacity fold on every resolution rung",
   ];
 
   for (const { label, pool } of cases) {
-    const folded = computeDispatchCapacity({
-      pools: [pool],
+    const direct = resolveSizingWindowTokens({
       sessionConfig: SESSION_CONFIG,
-      pendingItemTokens: [],
-    }).primary.schedule.resolved_limits;
-    const expected =
-      folded.context_tokens == null || folded.output_tokens == null
-        ? null
-        : folded.context_tokens - folded.output_tokens > 0
-          ? folded.context_tokens - folded.output_tokens
-          : null;
+      hostModel: pool.hostModel,
+      discoveredLimits: pool.discoveredLimits ?? null,
+    });
 
-    expect(
-      resolveSizingWindowTokens({
-        providerName: pool.providerName,
+    for (const providerName of PROVIDERS) {
+      const folded = computeDispatchCapacity({
+        pools: [{ ...pool, providerName }],
         sessionConfig: SESSION_CONFIG,
-        hostModel: pool.hostModel,
-        discoveredLimits: pool.discoveredLimits ?? null,
-      }),
-      `${label}: the direct window must equal the folded window`,
-    ).toBe(expected);
+        pendingItemTokens: [],
+      }).primary.schedule.resolved_limits;
+      const expected =
+        folded.context_tokens == null || folded.output_tokens == null
+          ? null
+          : folded.context_tokens - folded.output_tokens > 0
+            ? folded.context_tokens - folded.output_tokens
+            : null;
+
+      expect(
+        direct,
+        `${label} / ${providerName}: the provider-free window must equal the folded window`,
+      ).toBe(expected);
+    }
   }
 });

@@ -799,7 +799,13 @@ async function resolvePlanContextBudget(
     : [];
   if (rosterBudgets.length > 0) return Math.max(...rosterBudgets);
 
-  const statics = resolveModelStatics(caps?.model_id, sessionConfig?.host_provider);
+  // Model-only: a window is a property of the MODEL, not of the backend serving
+  // it, and `host_provider` is a quota-attribution key rather than a window
+  // authority. Passing it also resolves to the identical statics today (the
+  // snapshot carries no per-provider index), so this removes a routing input
+  // without moving a number — and stops the next `npm run update-models` from
+  // silently reintroducing a provider axis into sizing.
+  const statics = resolveModelStatics(caps?.model_id);
   const budget = resolveContextBudget({
     contextTokens:
       quota.context_tokens ?? finite(caps?.context_tokens) ?? statics?.context_tokens,

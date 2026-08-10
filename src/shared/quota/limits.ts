@@ -45,9 +45,17 @@ const PROVIDER_TRAITS: Record<
   "openai-compatible": { hostClass: "unknown", agentHost: false },
 };
 
-/** Map a provider to its relative host-class (see {@link PROVIDER_TRAITS}). */
-export function hostClassFor(providerName: ResolvedProviderName): ProviderType {
-  return PROVIDER_TRAITS[providerName].hostClass;
+/**
+ * Map a provider to its relative host-class (see {@link PROVIDER_TRAITS}).
+ *
+ * A nullish provider classifies as `"unknown"` — the same class a provider whose
+ * traits declare no host class gets. Callers asking a window question rather than
+ * a routing question pass nothing (see {@link ResolveLimitsOptions.providerName}).
+ */
+export function hostClassFor(
+  providerName: ResolvedProviderName | null | undefined,
+): ProviderType {
+  return providerName ? PROVIDER_TRAITS[providerName].hostClass : "unknown";
 }
 
 /**
@@ -100,7 +108,17 @@ export interface LimitResolutionResult {
 }
 
 export interface ResolveLimitsOptions {
-  providerName: ResolvedProviderName;
+  /**
+   * OPTIONAL, and deliberately so: it selects the `provider_default` vs
+   * `default` *label* on the operator-defaults rung and nothing else — both
+   * branches return the same `defaults` window pair. A caller asking "how big a
+   * window is this?" therefore has no reason to name a backend, and audit-tools
+   * does not route, so packet sizing omits it rather than carrying a
+   * `PROVIDER_NAMES`-derived type into a sizing input. Routing-flavoured callers
+   * (the scheduler, the capacity fold, the `quota` verb) still pass it, because
+   * they report the label.
+   */
+  providerName?: ResolvedProviderName | null;
   sessionConfig: SessionConfig;
   hostModel?: string | null;
   /**

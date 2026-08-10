@@ -1,16 +1,22 @@
 import { resolveLimits } from "audit-tools/shared/quota/limits";
 import type { DiscoveredRateLimitsInput } from "audit-tools/shared/quota/types";
-import type { ResolvedProviderName, SessionConfig } from "audit-tools/shared/types/sessionConfig";
+import type { SessionConfig } from "audit-tools/shared/types/sessionConfig";
 
 /**
- * Inputs the packet-sizing window is a function of. Deliberately the four scalar
+ * Inputs the packet-sizing window is a function of. Deliberately the scalar
  * fields `resolveLimits` reads — NOT a `CapacityPool`. A pool is a routing
  * concept (a selectable backend with slots, cost, rank and an allowance); the
  * sizing window is task metadata (how much review content fits in one packet),
  * and the two must not be reachable from one another.
+ *
+ * There is deliberately NO `providerName` here. It was carried only to satisfy
+ * `resolveLimits`, where it picks the `provider_default` vs `default` label and
+ * nothing else — both branches return the same window pair, and this module
+ * discards the label. Keeping it would have threaded a `PROVIDER_NAMES`-derived
+ * type through the one sizing surface that survives the routing removal, for a
+ * value that cannot move the number.
  */
 export interface SizingWindowInput {
-  providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
   /** Model whose window is being sized against; null when none resolved. */
   hostModel: string | null;
@@ -41,7 +47,6 @@ export interface SizingWindowInput {
  */
 export function resolveSizingWindowTokens(input: SizingWindowInput): number | null {
   const { limits } = resolveLimits({
-    providerName: input.providerName,
     sessionConfig: input.sessionConfig,
     hostModel: input.hostModel,
     discoveredLimits: input.discoveredLimits ?? null,
