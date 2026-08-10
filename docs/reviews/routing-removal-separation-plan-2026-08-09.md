@@ -229,29 +229,38 @@ symbols, never line ranges, which C1/S4 invalidate by construction.
 
 ---
 
-## Owner questions
+## Owner decisions (2026-08-09) — settled, do not re-raise
 
-These gate the **collapse**, not S1–S6. Each is a genuine call, not a re-litigation of the cut.
+1. **The observability run's provider dimension is DROPPED — re-scope to model × lens.**
+   `attributionContract.ts` loses the `provider` axis and its `PROVIDER_NAMES` dependency;
+   `deriveAggregates` indexes by model → lens. The run can then answer *which model* and never *which
+   backend*, which is the accepted cost. HANDOFF item 2's 8-module set is re-authored against the
+   reduced triple, not against `CapacityPool`.
 
-1. **Does the observability run's provider dimension survive cut (c)?** `attributionContract.ts` is
-   HANDOFF item 2's declared input and cannot compile without `PROVIDER_NAMES`; under one adapter its
-   provider axis is single-valued, so *which backend produces surviving findings* is unanswerable.
-   Options: re-scope the run to model×lens; keep a provider axis as a free-text recorded label with
-   no enum; or park item 2 until the collapse lands and re-author it afterwards.
-2. **Where does self-spawn refusal live post-collapse?** The spec makes it an invariant that survives
-   dispatch inversion, and the candidate survivor has no check. Options: the surviving adapter gains
-   the check in the same commit that deletes `dispatchExclusion.ts`; or the spec invariant is
-   explicitly retired.
-3. **The one adapter's name.** `worker-command` currently means both the subprocess adapter class and
-   the "no automated backend, the host does this manually" sentinel (`semanticReviewStep.ts:82`,
-   `envelope.ts:80-85`, `operatorHandoff.ts:203-204`). Keep the collision; rename the adapter; or
-   retire the name from the reporting sites entirely.
-4. **Does a residual quota report survive?** The `audit-code quota` verb reaches its answer *through*
-   `buildDispatchPool` and prints a pool capacity preview; the learned `tokens_per_pct` slope
-   (`quota/state.ts:225-497`) is keyed on `providerModelKey` and documented as admission's exchange
-   rate, so it has no consumer once admission is gone.
-5. **Persisted run state carrying routing fields** (`transient_admission_refusals`,
-   `partial_completion_terminal` with `empty_pool`/`quota_paused`, `hybrid-settled-pools.json`,
-   `dispatch-quota.json`, `quota-state.json` keyed `provider[#account]/model`): hard-fail, tolerate
-   and ignore, or one-time migration. The in-flight observability run is live state under exactly
-   this question.
+2. **QUOTA GOES ENTIRELY — the owner rejected all three options as still conceding too much:**
+   *"audit-tools shouldn't be doing any dispatch, any routing. Why would it need to know about
+   quota?"* So this is not a reduced `quota` verb: the verb, the nine quota sources, the learned
+   `tokens_per_pct` slope, cooldowns, RPM/TPM, reservations and the whole allowance model go. A
+   backend's remaining allowance is never the tool's business.
+   **The one thing that stays, stated as the reading this plan proceeds under:** the single
+   **host-declared window** used to size a unit of work — `--host-context-tokens` /
+   `--host-output-tokens` and the handshake that carries them. That is not a quota query; it is the
+   host telling the tool how big a packet may be, and partitioning is meaningless without it. S1
+   already made sizing resolve straight from it. If the intent is that even this must go, the tool
+   cannot partition at all and packet sizing becomes the host's job too — say so and the sequence
+   changes shape.
+
+3. **Persisted run state gets a ONE-TIME MIGRATION on first read**, self-liquidating once it has run
+   — not a permanent lenient parser, and not a hard refusal that would discard the in-flight
+   observability run. A crash mid-migration needs its own recovery path; write it.
+
+4. **Self-spawn refusal moves INTO the surviving adapter**, in the same commit that deletes
+   `dispatchExclusion.ts`. Not asked — the philosophy settles it: whatever can be enforced in tooling
+   must be, and the host being careful is never the mechanism. `spec/backend-identity-axes.md`'s
+   invariant stands.
+
+**Still open — the only one left:** the surviving adapter's NAME. `worker-command` today means both
+the subprocess adapter class and the "no automated backend, the host does this manually" sentinel
+(`semanticReviewStep.ts:82`, `envelope.ts:80-85`, `operatorHandoff.ts:203-204`). Keep the collision,
+rename the adapter, or retire the name from the reporting sites entirely. Not urgent — it gates the
+collapse commit, not the separation.

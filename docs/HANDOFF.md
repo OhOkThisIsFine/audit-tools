@@ -120,6 +120,15 @@
    `src/remediate/phases/plan.ts:772-817`, drops the roster-capability max and the provider argument).
    Loop-core: every commit carries a staged-tree review attestation, and the full suite runs before
    each one.
+   ⚠ **FOUR owner decisions landed 2026-08-09 and are recorded in the plan's *Owner decisions*
+   section — read them before S2; they reshape the sequence.** The sharpest: **quota goes ENTIRELY**
+   (owner: *"audit-tools shouldn't be doing any dispatch, any routing. Why would it need to know
+   about quota?"*) — not a reduced `quota` verb but the verb, the nine sources, the learned
+   `tokens_per_pct` slope, cooldowns, RPM/TPM and reservations. **The single host-declared sizing
+   window stays** (`--host-context-tokens` / `--host-output-tokens`); that is the host stating how
+   big a packet may be, not a quota query, and S1 already resolves sizing straight from it. That last
+   sentence is the plan's stated assumption — if even the declared window must go, partitioning
+   itself becomes the host's job and the sequence changes shape.
 2. **THEN resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner
    call, 2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
    `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per
@@ -127,13 +136,14 @@
    ⚠ **Do not author those shards before item 1 is settled.** This run's design of record resolves its
    attribution triple from `CapacityPool.{providerName,hostModel,rank}` — pool machinery the cut
    DELETES. Authoring now risks encoding a layer that is being removed.
-   ⚠ **The collision is BIGGER than the line above accepts, and it is owner question 1 in the
-   separation plan.** `src/shared/types/attributionContract.ts` — this run's declared INPUT — imports
-   `PROVIDER_NAMES` (`:9-11`) and validates `AttributionTriple.provider` against it (`:26-34`), so cut
-   (c) stops it compiling. Worse, under one adapter the provider axis is single-valued by
-   construction, so `deriveAggregates`' provider→model→lens indexing collapses and the run's central
-   question — *which backend produces findings that survive* — is **voided, not re-pointed**. That
-   needs an answer before the 8 shards are authored.
+   ⚠ **DECIDED 2026-08-09 — the provider axis is DROPPED; re-scope the run to model × lens.**
+   `src/shared/types/attributionContract.ts` — this run's declared INPUT — imports `PROVIDER_NAMES`
+   (`:9-11`) and validates `AttributionTriple.provider` against it (`:26-34`), so cut (c) stops it
+   compiling; and under one adapter the axis is single-valued anyway, so `deriveAggregates`'
+   provider→model→lens indexing carries no information. The run answers *which model*, never *which
+   backend* — the accepted cost. **The 8-module set must be re-authored against the reduced triple
+   before the shards are written**, since three of its modules name attribution capture and
+   projection directly.
    **Why the re-cut:** round 3 rejected the contract on CDC-T1/T2, and source verification showed the
    repair was not authorable at all — every candidate landed one file short and inverted the phase cut,
    because **the old 7 modules were drawn over the attribution contract's vocabulary rather than over
