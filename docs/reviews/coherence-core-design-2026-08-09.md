@@ -120,9 +120,22 @@ Policy axes — every difference between the draws must land here or it is a for
 ## 5. Open before coding — the findings draw's mass ceiling
 
 The task draw's ceiling is risk mass. The findings draw has no equivalent today, because capacity was
-doing that job. Candidates: summed finding severity weight, distinct-unit count, or distinct-file
-count. **This is the one genuinely undecided element of the design** — it decides whether findings
-blocks stay bounded, and picking wrong reproduces the single-giant-block failure in a new place.
+doing that job. **This is the one genuinely undecided element of the design** — it decides whether
+findings blocks stay bounded, and picking wrong reproduces the single-giant-block failure in a new
+place, so it is settled in the implementation lap against a test, not guessed here.
+
+**Recommendation: a severity-derived scalar mass, mirroring `risk_estimate` on the task draw.** The
+core's ceiling has one currency — mass — and both draws must denominate in it or the ceiling is a
+policy fork rather than a policy value. Note what is *not* reusable: `src/remediate/riskSignal.ts`
+does have findings-side risk, but `findingRiskEvidence` (`:409`) and `RiskTier` (`:38`) are a
+three-level classifier that selects review depth and adversarial granularity — a different job from a
+summable mass, and findings carry five severities, not three. Structural alternatives
+(distinct-unit or distinct-file count) are a different *kind* of ceiling — spread, not mass — and
+would break the symmetry that makes this one core.
+
+Whichever is chosen, the binding test is the same and must be red-green validated: a synthetic input
+whose items are all mutually related must still produce more than one group, and inverting the
+ceiling check must turn that test red.
 
 ## 6. Honest losses
 
