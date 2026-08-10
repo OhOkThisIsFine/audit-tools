@@ -515,16 +515,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `git ls-files .audit-tools/` before moving anything under that path.
   [[gitignore-deliverable-tracking]]
 
-- **Every `remediate-code next-step` announces four DEAD offload sources, and the port they name is
-  the retired proxy's (2026-08-09).** Each invocation prints `declared source "relay-{xhigh,high,
-  medium,low}" not resolved: keyless endpoint "http://127.0.0.1:8791" failed the liveness probe`.
-  Probed at the time: **8791 answers nothing**, while freellmapi (3001) and headroom (8787) both
-  respond — and 8791 appears nowhere in `src/`, the repo `session-config.json`, the environment, or
-  `~/.audit-tools/`; only in historical `docs/reviews/` about the retired repair-proxy. So the
-  declaration outlived the proxy `866d67de` repointed away from. Consequence: a run silently has no
-  offload lane while looking configured. **Unresolved:** where the `relay-*` source set is actually
-  declared — it is constructed or read from somewhere this lap did not find, so start there rather
-  than re-probing the ports.
+- **The operator's declared offload sources live in `~/.audit-code/sources-declared.json` — NOT in the
+  repo, and not under `~/.audit-tools/` (2026-08-09).** A previous lap searched `src/`, the repo
+  `session-config.json`, the environment and `~/.audit-tools/` and concluded the declaration was
+  unfindable; the state dir is `.audit-code` (`AUDIT_CODE_STATE_DIR_NAME`,
+  `src/shared/io/stateDir.ts`), reached via `resolveAuditCodeStateDir` and read as
+  `SOURCE_DECLARATION_FILENAME` in `src/shared/providers/auditorSources.ts`. Grep for
+  `SOURCE_DECLARATION_FILENAME` rather than probing ports. Any stale entry there is announced on every
+  invocation as `declared source "<id>" not resolved: …failed the liveness probe` and otherwise
+  silently costs the run its offload lane while it looks configured — so a dead entry is removed, not
+  left to warn. (The four `relay-*` entries pointing at the retired proxy port were removed
+  2026-08-09; `$env:AUDIT_TOOLS_STATE_DIR` overrides the location.)
 
 - **A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).**
   Running a refutation lane as `codex exec '<prompt>' < /dev/null 2>&1 | tail -120` in the background

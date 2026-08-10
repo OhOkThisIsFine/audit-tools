@@ -46,10 +46,12 @@
   upstream; `Invalid API key` with no id = the router; `All models exhausted` = pool). Those traps,
   plus `finish_reason: max_tokens` and listed-but-unreachable models, are in
   [`durable-traps.md`](backlog/durable-traps.md).
-  ⚠ **The declared offload lane is DEAD right now**, which matters for dispatch in the resumed run:
-  every `remediate-code next-step` reports four unresolved `relay-*` sources at `127.0.0.1:8791` — the
-  retired proxy's port. Probed 2026-08-09: 8791 answers nothing, while freellmapi (3001) and headroom
-  (8787) both respond. Plan dispatch as host-only until that is repointed.
+  ✅ **The four dead `relay-*` declared sources are GONE (2026-08-09)** — they lived in
+  `~/.audit-code/sources-declared.json` (not the repo, and not `~/.audit-tools/`, which is where the
+  previous lap looked and gave up). They pointed at the retired proxy's port, failed the liveness probe
+  on every invocation, and have been removed; `next-step` now runs with zero source warnings. The file
+  is now an empty `sources` list, so **there is no declared offload lane** — dispatch is host-only
+  until the owner declares one. Declaring sources is owner-owned config, not an agent's call.
 - **T4's floor is no longer a single outlier — it is a CLUSTER, which changes what the next split
   buys.** `audit-code-wrapper-packets.test.ts` was split three ways this lap and the baseline was
   regenerated from the 596-file run. The top of the list is now four completion files within 7s of
@@ -109,30 +111,34 @@
 
 ## Immediate next
 
-1. **Resume the `dispatch-effectiveness-observability` run — it is IN FLIGHT and parked at the ROUND-3
-   REPAIR of `finalized_module_contracts`.** Clean phase boundary, not a breakage: run
-   `remediate-code next-step` from the repo root and author the artifact it asks for.
-   **The two blocking items to resolve are already stated and each was verified against source:**
-   - **CDC-T1** — `INV-ORIGIN-STAMP-TOTAL` requires stamping an originating `attempt_ref` + triple onto
-     each finding, but `FindingSchema` (`src/shared/types/finding.ts:102`, re-exported at
-     `src/audit/types.ts:186`) defines no such fields and `WorkerFindingSchema`
-     (`src/audit/contracts/workerSchemas.ts:40`) adds none. **No module scopes
-     `src/shared/types/finding.ts`**, so as written the stamp is unimplementable. Decide: widen a
-     module's `file_scope` to include the Finding type, or re-home the join.
-   - **CDC-T2** — that repair justified itself by analogy to "the way identity/idempotency keys are
-     already stamped", but that precedent is on the RUN LEDGER
-     (`src/audit/orchestrator/ledger.ts:9-21`), not on findings. There is no existing
-     worker-unauthorable stamp on a `Finding` to copy, so the analogy cannot carry the decision.
-   ⚠ **Repair by TARGETED EDIT of the payload, never regeneration** — regeneration is the exact path
-   that collapsed 7 modules to 4 last time. Assert the module-name list before and after; the two
-   repairs this lap did that and INV-CO-13 stayed green each time.
-   **Where the design state lives — read it there, it is not restated here.** Each module's
-   `seam_adjustments` in `finalized_module_contracts.json` records verbatim what every seam and repair
-   decided and why; `phase_cut.json` carries the ordering (`has_cycle: false`, 5 phases). The 7-module
-   set is `attribution-triple-resolution`, `attempt-row-emission`, `verdict-dedup-shared`,
-   `verdict-audit-ingest`, `verdict-remediate-gates`, `attribution-artifact`, `effectiveness-render`.
-   Durable lessons from the rounds are in project memory
-   ([[inverted-neighbor-edges-manufacture-a-cycle]]).
+1. **Resume the `dispatch-effectiveness-observability` run — the DECOMPOSITION WAS RE-CUT (owner call,
+   2026-08-09) and it is now at `module_contract_drafting`.** Clean phase boundary: run
+   `remediate-code next-step` from the repo root and author the per-module shards it asks for (one per
+   module, 8 modules).
+   **Why the re-cut:** round 3 rejected the contract on CDC-T1/T2, and source verification showed the
+   repair was not authorable at all — every candidate landed one file short and inverted the phase cut,
+   because **the old 7 modules were drawn over the attribution contract's vocabulary rather than over
+   the codebase's real seams**. `file_scope` lives in the decomposition, so no rewrite of
+   `finalized_module_contracts` could fix it. The full evidence — including two refuted candidate
+   designs, an empirically-demonstrated worker-forgery surface, and the design of record (C) — is in
+   [`reviews/observability-contract-round3-source-verification-2026-08-09.md`](reviews/observability-contract-round3-source-verification-2026-08-09.md).
+   **Read that before authoring the shards; the new decomposition's `responsibilities` fields already
+   encode its conclusions and every load-bearing `path:line` in them was verified at HEAD.**
+   **The design of record, in one line each:** carry attribution on the **`AuditResult`**, never the
+   `Finding` (exact cardinality, durable idempotent ledger persistence, and `token_usage` is the exact
+   precedent — the worker cannot know it); project attempt rows from the ledger rather than a live
+   sink; carry per-attempt provenance through merge as an **object-identity side map** so absorption is
+   a set union and no `FindingSchema` change is needed at all; and mark attribution explicitly
+   **unavailable**, never `"unknown"`, where the contract pipeline's DAG re-derivation has destroyed
+   the key.
+   ⚠ **The 8-module set is** `attempt-attribution-capture`, `audit-result-attribution-field`,
+   `attempt-row-projection`, `dedup-attempt-provenance`, `verdict-audit-ingest`, `attribution-artifact`,
+   `verdict-remediate-gates`, `effectiveness-render`. Assert that list before and after any repair —
+   regeneration is what collapsed 7 modules to 4 on the previous attempt (now gated by INV-CO-13).
+   ⚠ The superseded artifacts (old decomposition, seam report, finalized contracts, critique, phase
+   cut, repair-state, and the 7 stale drafting shards) are archived under
+   `.audit-tools/remediation/intake/contract/history/`, not deleted. `goal_spec` and `context_bundle`
+   were kept and are unchanged.
    **State:** the old completed run's DIRECTORY was archived to
    `.audit-tools/remediation.archived-observability-2026-08-08/` and a fresh run bootstrapped in its
    place. Intake, intent confirmation, `goal_spec` and `context_bundle` are all written and validated
