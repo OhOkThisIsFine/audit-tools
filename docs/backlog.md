@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 111 entr(y/ies) indexed.
+> and at commit). 112 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -76,6 +76,7 @@
 - `open-bugs.md:507` — `ensure` writes opencode.json with unstable key order.
 - `open-bugs.md:512` — Two run-id notions; friction record keyed both ways.
 - `open-bugs.md:518` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:523` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

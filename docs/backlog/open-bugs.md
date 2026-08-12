@@ -519,3 +519,12 @@
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
   [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
+
+- **`hostInputPause.ts` says analyzer consent lives in session config; it lives in
+  `analyzer-policy.json` (2026-08-12, nightly, low).** `src/audit/orchestrator/hostInputPause.ts:31`
+  documents `analyzerConsent` as "recorded per-candidate consent decisions (session config)". It
+  cannot be: `SessionIntentV1Schema` is `.strict()` with exactly `review_mode` and `observability`.
+  Consent persists via `AnalyzerPolicySchema` at `.audit-tools/audit/analyzer-policy.json`. The
+  identical claim was corrected in `spec/mechanical-analyzer-layer-design.md` (`4d5987bf`); this is
+  its code-comment sibling, left because the nightly's autonomy covers docs only.
+  **Property to hold:** doc and code name the same persistence home for consent.
