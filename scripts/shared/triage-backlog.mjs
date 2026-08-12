@@ -362,6 +362,38 @@ const SCHEMA = {
   },
 };
 
+// Single-sourced from the schema so the validation below can never disagree
+// with what the lane was asked to produce.
+export const TRIAGE_VERDICTS = new Set(SCHEMA.schema.properties.verdict.enum);
+
+// P20 (owner decision sol-2, 2026-08-12): parsing is not classifying. A
+// response that parses as JSON but is not a triage record — the schema
+// envelope echoed back, a bare probe fragment — used to count as classified:
+// the fourth route in four dates by which the sweep reported coverage it did
+// not achieve. Every prior fix hardened the transport; this validates the
+// payload. The check asserts only what the stamp reader consumes (verdict in
+// the schema's enum, non-empty why/action), so a schema extension does not
+// become a false red. A mismatch throws, landing in the worker's existing
+// errored/resume path — no new lifecycle.
+export function buildTriageRecord(entry, raw) {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('no JSON object in response');
+  // Spread first, identity last: id/file are the sweep's facts about which
+  // entry this is — never the model's to state. (With the spread last, one
+  // record acquired a TypeScript source path as its `file` and lost the
+  // ability to say which entry it was about.)
+  const rec = { ...JSON.parse(raw.slice(start, end + 1)), id: entry.id, file: entry.file };
+  const bad = [];
+  if (!TRIAGE_VERDICTS.has(rec.verdict)) bad.push(`verdict=${JSON.stringify(rec.verdict ?? null)}`);
+  if (typeof rec.why !== 'string' || rec.why.trim() === '') bad.push('why');
+  if (typeof rec.action !== 'string' || rec.action.trim() === '') bad.push('action');
+  if (bad.length > 0) {
+    throw new Error(`response did not match the triage schema (${bad.join(', ')})`);
+  }
+  return rec;
+}
+
 const SYS = `You triage backlog entries for a TypeScript repo. Classify ONE entry.
 
 Verdicts:
@@ -441,6 +473,7 @@ async function main() {
       prior_classified: 0,
       attempted: 0,
       classified: 0,
+      classified_total: 0,
       errored: 0,
     });
     process.stderr.write(`${err.message}\n`);
@@ -487,6 +520,7 @@ async function main() {
     prior_classified: done.size,
     attempted: 0,
     classified: 0,
+    classified_total: done.size,
     errored: 0,
     // Counted so "the sweep covered 121 entries" cannot hide how many of those
     // carried probes that could not be evaluated at all. 30 of 121 did on
@@ -546,14 +580,11 @@ async function main() {
         }
         const c = r.choices?.[0];
         if (c?.finish_reason !== 'stop') throw new Error(`finish_reason=${c?.finish_reason}`);
-        // Some lanes prepend prose before the JSON despite the schema. Salvage the
-        // object, but only from a response that finished cleanly (checked above), so
-        // a truncated body can never be laundered into a valid-looking record.
-        const raw = c.message.content ?? '';
-        const start = raw.indexOf('{');
-        const end = raw.lastIndexOf('}');
-        if (start < 0 || end <= start) throw new Error('no JSON object in response');
-        rec = { id: e.id, file: e.file, ...JSON.parse(raw.slice(start, end + 1)) };
+        // Some lanes prepend prose before the JSON despite the schema. Salvage +
+        // parse + shape-validate live in buildTriageRecord — only a response that
+        // finished cleanly (checked above) reaches it, so a truncated body can
+        // never be laundered into a valid-looking record.
+        rec = buildTriageRecord(e, c.message.content ?? '');
         {
           const { stamp, recovered } = premiseVerdict(rec);
           rec.premise = stamp;
@@ -565,6 +596,11 @@ async function main() {
       stamp.attempted += 1;
       if (rec.error) stamp.errored += 1;
       else stamp.classified += 1;
+      // Cumulative, because the per-pass `classified` reads as near-total
+      // failure after a retry pass (a 2-entry retry stamped "classified: 2"
+      // while true coverage was 120) and the routine's contract reads the
+      // stamp verbatim.
+      stamp.classified_total = stamp.prior_classified + stamp.classified;
       if (rec.premise === 'probes_unusable') stamp.probes_unusable += 1;
       // Rewritten per completion (cheap, atomic-enough for a progress sidecar):
       // a killed run leaves an honest partial stamp, not silence.
@@ -578,8 +614,8 @@ async function main() {
   stamp.finished_at = new Date().toISOString();
   stampSafe(stamp);
   process.stderr.write(
-    `leg-2 coverage: ${stamp.classified} classified / ${stamp.errored} errored / ` +
-      `${stamp.probes_unusable} probes-unusable of ` +
+    `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
+      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ${stampPath}\n`,
   );
 }

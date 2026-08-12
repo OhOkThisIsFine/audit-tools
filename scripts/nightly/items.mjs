@@ -411,34 +411,37 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
   // entry quotes the code it is about), so a match there says nothing about
   // the premise — excluded, or every probe would read 'moved' off its own
   // entry and no item could ever close.
-  const elsewhere = gitLines(
-    root,
-    ['grep', '-l', '-F', '-e', needle, '--', ...PREMISE_GREP_PATHSPECS],
-    { okStatuses: [0, 1] },
-  );
-  if (elsewhere !== null && elsewhere.length > 0) {
-    return { state: 'moved', moved_to: elsewhere.slice(0, 5) };
-  }
+  const grepElsewhere = () =>
+    gitLines(root, ['grep', '-l', '-F', '-e', needle, '--', ...PREMISE_GREP_PATHSPECS], {
+      okStatuses: [0, 1],
+    });
 
   if (fileText !== null) {
+    const elsewhere = grepElsewhere();
+    if (elsewhere !== null && elsewhere.length > 0) {
+      return { state: 'moved', moved_to: elsewhere.slice(0, 5) };
+    }
     // File present, fragment nowhere: the direct read IS the absence evidence —
     // git adds rename protection (above) and a citation (below), and when it
     // cannot answer we lose only those extras, not the verdict itself.
     const removal = gitLines(root, ['log', '-1', '--format=%h', '-S', probe.contains, '--', probe.file]);
     return { state: 'absent', commit: removal?.[0] ?? null };
   }
-  // File MISSING: here git evidence is REQUIRED — without history we cannot
-  // tell deleted code from a typo'd path, and the old ENOENT⇒absent inference
-  // is exactly what sol-3 retires.
-  if (elsewhere === null) return { state: 'unknown' };
 
-  // File missing entirely. Distinguish "deleted" (premise vanished with the
-  // code) from "never existed" (malformed probe) via history — a question the
-  // old ENOENT check could not ask.
+  // File MISSING: git evidence is REQUIRED — without history we cannot tell
+  // deleted code from a typo'd path, and the old ENOENT⇒absent inference is
+  // exactly what sol-3 retires. History comes BEFORE the moved-grep here:
+  // 'moved' is only meaningful for a file that once held the fragment, and
+  // consulting the grep for a never-existed path manufactures 'moved' — a
+  // live-premise stamp — out of any common fragment (a probe on a typo'd path
+  // with the fragment "x" read 'holds' off unrelated text while P22 landed).
   const history = gitLines(root, ['log', '--all', '--full-history', '-1', '--format=%h', '--', probe.file]);
   if (history === null) return { state: 'unknown' };
-  if (history.length > 0) return { state: 'absent', commit: history[0] };
-  return { state: 'bad_path' };
+  if (history.length === 0) return { state: 'bad_path' };
+  const elsewhere = grepElsewhere();
+  if (elsewhere === null) return { state: 'unknown' };
+  if (elsewhere.length > 0) return { state: 'moved', moved_to: elsewhere.slice(0, 5) };
+  return { state: 'absent', commit: history[0] };
 }
 
 /**
