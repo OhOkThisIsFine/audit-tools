@@ -4,7 +4,6 @@ import {
   isFileMissingError,
   readJsonFile,
   withFileLock,
-  writeJsonFile,
 } from "audit-tools/shared";
 import {
   type ArtifactBundle,
@@ -14,53 +13,46 @@ import {
 import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditState } from "../types/auditState.js";
 import type { AuditTask } from "../types.js";
-import type { WorkerTask } from "../types/workerSession.js";
 import {
   buildRunId,
   getRunPaths,
-  writeWorkerTaskFiles,
+  writeReviewRunFiles,
 } from "../io/runArtifacts.js";
-import { renderWorkerPrompt } from "../prompts/renderWorkerPrompt.js";
 import {
   buildAuditCodeHandoff,
   writeAuditCodeHandoffArtifacts,
+  CURRENT_TASK_FILENAME,
   type ActiveReviewRun,
 } from "../supervisor/operatorHandoff.js";
-import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 import { addFileLineCountHints } from "./lineIndex.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { buildBlockedAuditState, buildManualReviewBlocker } from "./envelope.js";
 
-export function activeReviewRunFromTask(
-  artifactsDir: string,
-  task: WorkerTask,
-): ActiveReviewRun | null {
-  if (task.preferred_executor !== "agent" || !task.audit_results_path) {
-    return null;
-  }
-  const paths = getRunPaths(artifactsDir, task.run_id);
-  return {
-    run_id: task.run_id,
-    task_path: paths.taskPath,
-    prompt_path: paths.promptPath,
-    pending_audit_tasks_path: task.pending_audit_tasks_path,
-    audit_results_path: task.audit_results_path,
-    worker_command: task.worker_command,
-  };
+function isActiveReviewRun(value: unknown): value is ActiveReviewRun {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const run = value as Record<string, unknown>;
+  return (
+    run.contract_version === "audit-review-run/v1alpha1" &&
+    typeof run.run_id === "string" &&
+    typeof run.review_run_path === "string" &&
+    typeof run.pending_audit_tasks_path === "string" &&
+    typeof run.host_workload_path === "string" &&
+    typeof run.host_result_map_path === "string"
+  );
 }
 
 export async function loadCurrentActiveReviewRun(
   artifactsDir: string,
 ): Promise<ActiveReviewRun | null> {
+  const path = join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME);
   try {
-    const task = await readJsonFile<WorkerTask>(
-      join(artifactsDir, "dispatch", "current-task.json"),
-    );
-    return activeReviewRunFromTask(artifactsDir, task);
-  } catch (error) {
-    if (isFileMissingError(error)) {
-      return null;
+    const value = await readJsonFile<unknown>(path);
+    if (!isActiveReviewRun(value)) {
+      throw new Error(`Invalid audit review-run manifest: ${path}`);
     }
+    return value;
+  } catch (error) {
+    if (isFileMissingError(error)) return null;
     throw error;
   }
 }
@@ -71,132 +63,66 @@ export async function writeHandoffOnly(params: {
   bundle: ArtifactBundle;
   audit_state: AuditState;
   progress_summary: string;
-  providerName?: string | null;
   isConfigError?: boolean;
   activeReviewRun?: ActiveReviewRun;
 }): Promise<void> {
-  const handoff = buildAuditCodeHandoff({
-    root: params.root,
-    artifactsDir: params.artifactsDir,
-    state: params.audit_state,
-    bundle: params.bundle,
-    providerName: params.providerName,
-    progressSummary: params.progress_summary,
-    isConfigError: params.isConfigError,
-    activeReviewRun: params.activeReviewRun,
-  });
-  await writeAuditCodeHandoffArtifacts(handoff);
+  await writeAuditCodeHandoffArtifacts(
+    buildAuditCodeHandoff({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      state: params.audit_state,
+      bundle: params.bundle,
+      progressSummary: params.progress_summary,
+      isConfigError: params.isConfigError,
+      activeReviewRun: params.activeReviewRun,
+    }),
+  );
 }
 
-/** Inputs needed to materialize a semantic-review run's on-disk artifacts. */
 export interface MaterializeReviewRunParams {
   root: string;
   artifactsDir: string;
   bundle: ArtifactBundle;
   obligationId: string | null;
-  selfCliPath: string;
-  timeoutMs: number;
-  /**
-   * Materialize the review over an explicit task subset rather than the full
-   * coverage-derived pending set. The A-8 hybrid's in-process run passes the NIM
-   * PARTITION so the run's pending-audit-tasks.json lists exactly those tasks — which is
-   * what `driveRollingAuditDispatch`'s mergeAndIngest reads to fold the NIM results. The
-   * host complement is NOT passed here: once the NIM tasks are ingested+covered, the host
-   * `ensureSemanticReviewRun` re-derives the complement from coverage automatically.
-   */
+  /** Retained only for call-shape stability; execution is host-owned. */
+  selfCliPath?: string;
+  /** Retained only for call-shape stability; audit-tools launches nothing. */
+  timeoutMs?: number;
   tasksOverride?: AuditTask[];
-  /**
-   * Whether this run owns the shared host-facing dispatch pointer
-   * (`dispatch/current-task.json`, which `loadCurrentActiveReviewRun` reads). Default
-   * true (the host review run IS the current run). The A-8 hybrid's EPHEMERAL in-process
-   * NIM run passes false: it must NOT become the "current" run, or the subsequent host
-   * `ensureSemanticReviewRun` would reuse the NIM partition's task set (orphaning the
-   * complement) instead of re-deriving the full coverage-driven host complement.
-   */
-  updateDispatch?: boolean;
 }
 
-/**
- * Materialize a semantic-review run's on-disk artifacts — the deterministic run id
- * (`buildRunId(obligationId, 1)`), pending-audit-tasks.json, task.json, and the
- * worker prompt — and return the active review run. This is the pure run-setup the
- * host-subagent path (`ensureSemanticReviewRun`) and the in-process rolling path
- * (`driveRollingAuditDispatch`) share; it writes NO blocked state and NO handoff,
- * so the in-process driver doesn't have to first stamp a misleading "manual review"
- * block it immediately drives past.
- */
 export async function materializeReviewRun(
   params: MaterializeReviewRunParams,
-): Promise<{ task: WorkerTask; activeReviewRun: ActiveReviewRun; pendingTasks: AuditTask[] }> {
+): Promise<{ activeReviewRun: ActiveReviewRun; pendingTasks: AuditTask[] }> {
   const runId = buildRunId(params.obligationId, 1);
   const paths = getRunPaths(params.artifactsDir, runId);
   const pendingTasks = await addFileLineCountHints(
     params.root,
     params.tasksOverride ?? buildPendingAuditTasks(params.bundle),
   );
-  const pendingTasksPath = join(paths.runDir, "pending-audit-tasks.json");
-  const auditResultsPath = join(paths.runDir, "run-results.json");
-  const taskReadPaths = new Set<string>();
-  for (const pt of pendingTasks) {
-    for (const fp of pt.file_paths) taskReadPaths.add(fp);
-  }
-  const task: WorkerTask = {
-    contract_version: "audit-code-worker/v1alpha1",
+  const activeReviewRun: ActiveReviewRun = {
+    contract_version: "audit-review-run/v1alpha1",
     run_id: runId,
-    repo_root: params.root,
-    artifacts_dir: params.artifactsDir,
-    obligation_id: params.obligationId,
-    preferred_executor: "agent",
-    result_path: paths.resultPath,
-    worker_command: [
-      process.execPath,
-      params.selfCliPath,
-      "worker-run",
-      "--task",
-      paths.taskPath,
-      "--result",
-      paths.resultPath,
-    ],
-    audit_results_path: auditResultsPath,
-    pending_audit_tasks_path: pendingTasksPath,
-    timeout_ms: params.timeoutMs,
-    max_retries: 0,
-    access: {
-      read_paths: [...taskReadPaths],
-      write_paths: [auditResultsPath, paths.resultPath],
-    },
+    review_run_path: paths.reviewRunPath,
+    pending_audit_tasks_path: paths.pendingTasksPath,
+    host_workload_path: paths.hostWorkloadPath,
+    host_result_map_path: paths.hostResultMapPath,
   };
-  const prompt = renderWorkerPrompt(task);
-  await writeWorkerTaskFiles(
-    task,
-    prompt,
-    paths,
-    params.artifactsDir,
-    pendingTasks,
-    { updateDispatch: params.updateDispatch },
-  );
-  await writeJsonFile(pendingTasksPath, pendingTasks);
-
-  const activeReviewRun = activeReviewRunFromTask(params.artifactsDir, task);
-  if (!activeReviewRun) {
-    throw new Error("Internal error: failed to materialize active review run.");
-  }
-  // The HINT-ENRICHED set (file_line_counts) — drivers passing a tasksOverride to
-  // `driveRollingAuditDispatch` must use THIS, not their raw input, or packet
-  // sizing and the workers' total_lines contract inputs silently degrade
-  // (review h2c3 F6).
-  return { task, activeReviewRun, pendingTasks };
+  await writeReviewRunFiles(params.artifactsDir, activeReviewRun, pendingTasks);
+  return { activeReviewRun, pendingTasks };
 }
 
-function sortedTaskIds(tasks: AuditTask[]): string[] {
-  const ids: string[] = [];
-  for (const task of tasks) {
-    if (typeof task.task_id !== "string") {
-      throw new Error("Invalid pending audit task manifest: task_id must be a string.");
-    }
-    ids.push(task.task_id);
-  }
-  return ids.sort();
+function sortedTaskIds(tasks: readonly AuditTask[]): string[] {
+  return tasks.map((task) => task.task_id).sort();
+}
+
+function sameTaskIds(left: readonly AuditTask[], right: readonly AuditTask[]): boolean {
+  const leftIds = sortedTaskIds(left);
+  const rightIds = sortedTaskIds(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((taskId, index) => taskId === rightIds[index])
+  );
 }
 
 export async function ensureSemanticReviewRun(params: {
@@ -205,97 +131,66 @@ export async function ensureSemanticReviewRun(params: {
   bundle: ArtifactBundle;
   state: AuditState;
   obligationId: string | null;
-  selfCliPath: string;
-  timeoutMs: number;
-}): Promise<{ state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }> {
+  selfCliPath?: string;
+  timeoutMs?: number;
+}): Promise<{
+  state: AuditState;
+  bundle: ArtifactBundle;
+  activeReviewRun: ActiveReviewRun;
+}> {
+  const currentPending = buildPendingAuditTasks(params.bundle);
   const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
   if (existingRun) {
-    let existingPendingTasks: AuditTask[] | null = null;
-    if (existingRun.pending_audit_tasks_path) {
-      try {
-        existingPendingTasks = await readJsonFile<AuditTask[]>(
-          existingRun.pending_audit_tasks_path,
-        );
-      } catch (error) {
-        if (!isFileMissingError(error)) {
-          throw error;
-        }
+    try {
+      const existingPending = await readJsonFile<AuditTask[]>(
+        existingRun.pending_audit_tasks_path,
+      );
+      if (sameTaskIds(existingPending, currentPending)) {
+        return await persistReviewPause(params, existingRun);
       }
-    }
-
-    const currentPendingTaskIds = sortedTaskIds(buildPendingAuditTasks(params.bundle));
-    const existingPendingTaskIds =
-      existingPendingTasks === null
-        ? undefined
-        : sortedTaskIds(existingPendingTasks);
-    const manifestMatches =
-      existingPendingTaskIds !== undefined &&
-      existingPendingTaskIds.length === currentPendingTaskIds.length &&
-      existingPendingTaskIds.every(
-        (taskId, index) => taskId === currentPendingTaskIds[index],
-      );
-
-    // Source-pool ingestion can advance coverage between materializing the host
-    // run and preparing its dispatch. Reusing the old pointer in that window
-    // would send the host a packet for tasks already accepted by the source
-    // pool, while leaving the current complement unreviewed. A missing manifest
-    // is equally untrusted: fail closed by rematerializing it below.
-    if (manifestMatches) {
-      const blockedState =
-        params.bundle.audit_state?.status === "blocked"
-          ? params.bundle.audit_state
-          : buildBlockedAuditState({
-              state: params.state,
-              obligationId: params.obligationId,
-              executor: "agent",
-              blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-            });
-      const blockedBundle = { ...params.bundle, audit_state: blockedState };
-      await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-        writeCoreArtifacts(params.artifactsDir, blockedBundle),
-      );
-      await writeHandoffOnly({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        bundle: blockedBundle,
-        audit_state: blockedState,
-        progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-        providerName: WORKER_COMMAND_PROVIDER_NAME,
-        activeReviewRun: existingRun,
-      });
-      return {
-        state: blockedState,
-        bundle: blockedBundle,
-        activeReviewRun: existingRun,
-      };
+    } catch (error) {
+      if (!isFileMissingError(error)) throw error;
     }
   }
 
-  const blockedState = buildBlockedAuditState({
-    state: params.state,
-    obligationId: params.obligationId,
-    executor: "agent",
-    blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-  });
-  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-    writeCoreArtifacts(params.artifactsDir, {
-      ...params.bundle,
-      audit_state: blockedState,
-    }),
-  );
-
   const { activeReviewRun } = await materializeReviewRun(params);
-  const blockedBundle = {
-    ...params.bundle,
-    audit_state: blockedState,
-  };
+  return await persistReviewPause(params, activeReviewRun);
+}
+
+async function persistReviewPause(
+  params: {
+    root: string;
+    artifactsDir: string;
+    bundle: ArtifactBundle;
+    state: AuditState;
+    obligationId: string | null;
+  },
+  activeReviewRun: ActiveReviewRun,
+): Promise<{
+  state: AuditState;
+  bundle: ArtifactBundle;
+  activeReviewRun: ActiveReviewRun;
+}> {
+  const blocker = buildManualReviewBlocker();
+  const blockedState =
+    params.bundle.audit_state?.status === "blocked"
+      ? params.bundle.audit_state
+      : buildBlockedAuditState({
+          state: params.state,
+          obligationId: params.obligationId,
+          executor: "semantic_review_executor",
+          blocker,
+        });
+  const blockedBundle = { ...params.bundle, audit_state: blockedState };
+  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+    writeCoreArtifacts(params.artifactsDir, blockedBundle),
+  );
   await writeHandoffOnly({
     root: params.root,
     artifactsDir: params.artifactsDir,
     bundle: blockedBundle,
     audit_state: blockedState,
-    progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
-    providerName: WORKER_COMMAND_PROVIDER_NAME,
+    progress_summary: blocker,
     activeReviewRun,
   });
   return { state: blockedState, bundle: blockedBundle, activeReviewRun };
@@ -306,36 +201,25 @@ export async function persistConfigErrorHandoff(params: {
   artifactsDir: string;
   progressSummary: string;
 }): Promise<void> {
-  // O2: load→modify→persist is one artifact-tree mutation; hold the lock across
-  // the whole RMW so it never interleaves with a concurrent next-step/ingest.
-  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
-    persistConfigErrorHandoffLocked(params),
-  );
-}
-
-async function persistConfigErrorHandoffLocked(params: {
-  root: string;
-  artifactsDir: string;
-  progressSummary: string;
-}): Promise<void> {
-  const bundle = await loadArtifactBundle(params.artifactsDir);
-  const blockedState = buildBlockedAuditState({
-    state: bundle.audit_state ?? deriveAuditState(bundle),
-    obligationId: null,
-    executor: null,
-    blocker: params.progressSummary,
+  await withFileLock(artifactTreeLockPath(params.artifactsDir), async () => {
+    const bundle = await loadArtifactBundle(params.artifactsDir);
+    const blockedState = buildBlockedAuditState({
+      state: bundle.audit_state ?? deriveAuditState(bundle),
+      obligationId: null,
+      executor: null,
+      blocker: params.progressSummary,
+    });
+    const blockedBundle = { ...bundle, audit_state: blockedState };
+    await writeCoreArtifacts(params.artifactsDir, blockedBundle);
+    await writeAuditCodeHandoffArtifacts(
+      buildAuditCodeHandoff({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        state: blockedState,
+        bundle: blockedBundle,
+        progressSummary: params.progressSummary,
+        isConfigError: true,
+      }),
+    );
   });
-  await writeCoreArtifacts(params.artifactsDir, {
-    ...bundle,
-    audit_state: blockedState,
-  });
-  const handoff = buildAuditCodeHandoff({
-    root: params.root,
-    artifactsDir: params.artifactsDir,
-    state: blockedState,
-    bundle: { ...bundle, audit_state: blockedState },
-    progressSummary: params.progressSummary,
-    isConfigError: true,
-  });
-  await writeAuditCodeHandoffArtifacts(handoff);
 }

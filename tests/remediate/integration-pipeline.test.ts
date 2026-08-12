@@ -7,17 +7,15 @@
  * 3. Universal contract pipeline — both Path A and Path B enter it
  * 4. Seam negotiation + reconciliation + cyclic-seam break
  * 5. Deterministic design gates incl. circular-interface detection
- * 6. Rolling worktree dispatch: per-node verification before merge,
- *    multi-node-attributed post-merge failure
- * 7. Ownership-gated affected_files amendment
- * 8. Infra-node live-surface verification
- * 9. Context-carrying triage retries
- * 10. Evidence-backed close verification report
+ * 6. Infra-node live-surface verification
+ * 7. Context-carrying triage retries
+ * 8. Evidence-backed close verification report
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
@@ -35,14 +33,7 @@ import {
 import {
   validateDesignSpecGates,
 } from "../../src/remediate/validation/contractPipeline.js";
-import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
-import { routeAmendmentRequest } from "../../src/remediate/dispatch/amendmentClaim.js";
-import { mergeImplementResults } from "../../src/remediate/steps/dispatch.js";
 import { isInfraModifyingBlock } from "../../src/remediate/steps/dispatch.js";
-import {
-  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-} from "../../src/remediate/steps/types.js";
 import {
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
@@ -61,6 +52,28 @@ const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 async function resetTestRepo(): Promise<void> {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(ARTIFACTS_DIR, { recursive: true });
+}
+
+async function initializeGitHead(): Promise<void> {
+  await writeFile(join(REPO_DIR, ".gitignore"), ".audit-tools/\n", "utf8");
+  await writeFile(join(REPO_DIR, "README.md"), "# Test repository\n", "utf8");
+  const git = (...args: string[]): void => {
+    const result = spawnSync("git", args, {
+      cwd: REPO_DIR,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (result.error || result.status !== 0) {
+      throw new Error(
+        `git ${args.join(" ")} failed: ${result.error?.message ?? result.stderr}`,
+      );
+    }
+  };
+  git("init", "-q");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  git("add", ".gitignore", "README.md");
+  git("commit", "--no-gpg-sign", "-q", "-m", "fixture baseline");
 }
 
 async function saveState(state: RemediationState): Promise<void> {
@@ -275,7 +288,7 @@ describe("confirm_intent gate: no path bypasses it", () => {
     await writeReadyStructuredAuditIntake(auditPath);
     // No intent_checkpoint.json written.
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({ root: REPO_DIR });
 
     // Must gate on confirm_intent (not skip to contract_pipeline).
     expect(step.step_kind).toBe("confirm_intent");
@@ -295,7 +308,7 @@ describe("confirm_intent gate: no path bypasses it", () => {
     await writeReadyStructuredAuditIntake(auditPath);
     await writeIntentCheckpoint();
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({ root: REPO_DIR });
 
     expect(step.step_kind).not.toBe("confirm_intent");
   });
@@ -347,6 +360,7 @@ describe("zero-findings planning state: presents user question instead of fallin
 
   it("at least one pending finding still dispatches implement step (regression guard)", async () => {
     await saveState(makePlanningState());
+    await initializeGitHead();
     await acknowledgeResume();
     await writeIntentCheckpoint();
     // Satisfy the Path-B planning review gate (approve-all) so the run proceeds
@@ -712,398 +726,7 @@ describe("deterministic design gates: circular interface detection via validateD
 });
 
 // ---------------------------------------------------------------------------
-// 6. Rolling worktree dispatch: per-node verification before merge
-// ---------------------------------------------------------------------------
-
-describe("rolling dispatch: per-node verification before merge via mergeImplementResults", () => {
-  const MERGE_TEST_DIR = scratchDir(".test-integration-merge");
-  const MERGE_ARTIFACTS_DIR = join(MERGE_TEST_DIR, ".audit-tools", "remediation");
-
-  beforeEach(async () => {
-    await rm(MERGE_TEST_DIR, { recursive: true, force: true });
-    await mkdir(MERGE_ARTIFACTS_DIR, { recursive: true });
-  });
-  afterEach(async () => {
-    await rm(MERGE_TEST_DIR, { recursive: true, force: true });
-  });
-
-  async function writeDispatchPlanForMerge(
-    runId: string,
-    blockId: string,
-    findingId: string,
-  ): Promise<void> {
-    const dir = join(MERGE_ARTIFACTS_DIR, "runs", runId, "implement");
-    await mkdir(dir, { recursive: true });
-    const plan = {
-      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-      phase: "implement",
-      run_id: runId,
-      repo_root: MERGE_TEST_DIR.replace(/\\/g, "/"),
-      artifacts_dir: MERGE_ARTIFACTS_DIR.replace(/\\/g, "/"),
-      items: [
-        {
-          task_id: `implement-${blockId}`,
-          block_id: blockId,
-          prompt_path: join(dir, `implement-${blockId}.md`).replace(/\\/g, "/"),
-          result_path: join(dir, `implement-${blockId}.result.json`).replace(/\\/g, "/"),
-          access: {
-            read_paths: [`src/${findingId.toLowerCase()}.ts`],
-            write_paths: [`src/${findingId.toLowerCase()}.ts`],
-          },
-        },
-      ],
-    };
-    await writeFile(join(dir, "dispatch-plan.json"), JSON.stringify(plan, null, 2), "utf8");
-    // Write a stub prompt file so the path exists.
-    await writeFile(join(dir, `implement-${blockId}.md`), "# Implement\n", "utf8");
-  }
-
-  async function writeImplementingState(planId: string, blockId: string, findingId: string): Promise<void> {
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: planId,
-        findings: [
-          {
-            id: findingId,
-            title: "Fix item",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix it.",
-            affected_files: [{ path: `src/${findingId.toLowerCase()}.ts` }],
-            evidence: [`src/${findingId.toLowerCase()}.ts:1`],
-          },
-        ],
-        blocks: [{ block_id: blockId, items: [findingId], parallel_safe: true, touched_files: [] }],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        [findingId]: {
-          finding_id: findingId,
-          status: "pending",
-          block_id: blockId,
-          item_spec: {
-            finding_id: findingId,
-            concrete_change: "fix it",
-            no_change: false,
-            touched_files: [`src/${findingId.toLowerCase()}.ts`],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await new StateStore(MERGE_ARTIFACTS_DIR).saveState(state);
-  }
-
-  it("failed dispatch result keeps item blocked with test-failure context", async () => {
-    const RUN_ID = "PLAN-MERGE";
-    const BLOCK_ID = "B-001";
-    const FINDING_ID = "F-001";
-
-    await writeImplementingState(RUN_ID, BLOCK_ID, FINDING_ID);
-    await writeDispatchPlanForMerge(RUN_ID, BLOCK_ID, FINDING_ID);
-
-    // Write a result indicating the item is blocked (targeted tests failed).
-    const dir = join(MERGE_ARTIFACTS_DIR, "runs", RUN_ID, "implement");
-    const resultPath = join(dir, `implement-${BLOCK_ID}.result.json`);
-    await writeFile(
-      resultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: FINDING_ID,
-            status: "blocked",
-            failure_reason: "AssertionError: expected true to be false at auth.test.ts:42",
-          },
-        ],
-      }),
-      "utf8",
-    );
-
-    const mergedState = await mergeImplementResults(
-      { root: MERGE_TEST_DIR, artifactsDir: MERGE_ARTIFACTS_DIR },
-      RUN_ID,
-    );
-
-    // After merge, item should remain blocked (not resolved).
-    expect(mergedState.items![FINDING_ID].status).toBe("blocked");
-    // failure_reason must contain the specific test output, not just a generic message.
-    expect(mergedState.items![FINDING_ID].failure_reason).toContain("AssertionError");
-  });
-
-  it("passed dispatch result transitions item to resolved", async () => {
-    const RUN_ID = "PLAN-MERGE2";
-    const BLOCK_ID = "B-002";
-    const FINDING_ID = "F-002";
-
-    await writeImplementingState(RUN_ID, BLOCK_ID, FINDING_ID);
-    await writeDispatchPlanForMerge(RUN_ID, BLOCK_ID, FINDING_ID);
-
-    const dir = join(MERGE_ARTIFACTS_DIR, "runs", RUN_ID, "implement");
-    const resultPath = join(dir, `implement-${BLOCK_ID}.result.json`);
-    await writeFile(
-      resultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: FINDING_ID,
-            status: "resolved",
-            evidence: ["Tests pass: npm test output shows all passing."],
-          },
-        ],
-      }),
-      "utf8",
-    );
-
-    const mergedState = await mergeImplementResults(
-      { root: MERGE_TEST_DIR, artifactsDir: MERGE_ARTIFACTS_DIR },
-      RUN_ID,
-    );
-
-    // After merge, item should be resolved.
-    expect(mergedState.items![FINDING_ID].status).toBe("resolved");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7. Ownership-gated affected_files amendment
-// ---------------------------------------------------------------------------
-
-describe("ownership-gated affected_files amendment", () => {
-  it("amendment to file outside any node scope is granted", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-      { node_id: "NODE-B", write_paths: ["src/b.ts"] },
-    ]);
-
-    const result = registry.claimAmendment("NODE-A", "src/c.ts");
-    expect(result).toBe("granted");
-  });
-
-  it("amendment to file in another node's declared scope is rejected as owned", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-      { node_id: "NODE-B", write_paths: ["src/b.ts"] },
-    ]);
-
-    const result = registry.claimAmendment("NODE-A", "src/b.ts");
-    expect(result).toBe("owned");
-  });
-
-  it("routeAmendmentRequest partitions in-scope vs out-of-scope paths correctly", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-      { node_id: "NODE-B", write_paths: ["src/b.ts"] },
-    ]);
-
-    const { granted, seam_routed } = routeAmendmentRequest(registry, "NODE-A", [
-      "src/c.ts",  // unowned → can be claimed (granted)
-    ]);
-
-    // src/c.ts is unowned → granted
-    expect(granted).toContain("src/c.ts");
-    // Nothing from src/b.ts was in the list.
-    expect(seam_routed).toHaveLength(0);
-  });
-
-  it("amendment to file owned by another node is rejected via routeAmendmentRequest", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-      { node_id: "NODE-B", write_paths: ["src/b.ts"] },
-    ]);
-
-    const { granted, seam_routed } = routeAmendmentRequest(registry, "NODE-A", [
-      "src/b.ts", // owned by NODE-B
-    ]);
-
-    expect(granted).not.toContain("src/b.ts");
-    expect(seam_routed.map((r) => r.path)).toContain("src/b.ts");
-  });
-
-  it("mergeImplementResults: worker result with out-of-scope amended_files blocks the item", async () => {
-    const OWNERSHIP_DIR = scratchDir(".test-integration-ownership");
-    const OWNERSHIP_ARTIFACTS = join(OWNERSHIP_DIR, ".audit-tools", "remediation");
-    await rm(OWNERSHIP_DIR, { recursive: true, force: true });
-    await mkdir(OWNERSHIP_ARTIFACTS, { recursive: true });
-
-    const RUN_ID = "PLAN-OWNERSHIP";
-
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: RUN_ID,
-        findings: [
-          {
-            id: "F-001",
-            title: "Fix auth",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix it.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["src/a.ts:1"],
-          },
-          {
-            id: "F-002",
-            title: "Fix session",
-            category: "correctness",
-            severity: "medium",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix session.",
-            affected_files: [{ path: "src/b.ts" }],
-            evidence: ["src/b.ts:1"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
-          { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-        "F-002": {
-          finding_id: "F-002",
-          status: "pending",
-          block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "fix b",
-            no_change: false,
-            touched_files: ["src/b.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await new StateStore(OWNERSHIP_ARTIFACTS).saveState(state);
-
-    const dir = join(OWNERSHIP_ARTIFACTS, "runs", RUN_ID, "implement");
-    await mkdir(dir, { recursive: true });
-
-    // Dispatch plan covers BOTH B-001 (src/a.ts) and B-002 (src/b.ts) so the
-    // ownership registry knows B-002 owns src/b.ts before processing B-001's result.
-    const plan = {
-      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-      phase: "implement",
-      run_id: RUN_ID,
-      repo_root: OWNERSHIP_DIR.replace(/\\/g, "/"),
-      artifacts_dir: OWNERSHIP_ARTIFACTS.replace(/\\/g, "/"),
-      items: [
-        {
-          task_id: "implement-B-001",
-          block_id: "B-001",
-          prompt_path: join(dir, "implement-B-001.md").replace(/\\/g, "/"),
-          result_path: join(dir, "implement-B-001.result.json").replace(/\\/g, "/"),
-          access: {
-            read_paths: ["src/a.ts"],
-            write_paths: ["src/a.ts"], // B-001 only owns src/a.ts
-          },
-        },
-        {
-          task_id: "implement-B-002",
-          block_id: "B-002",
-          prompt_path: join(dir, "implement-B-002.md").replace(/\\/g, "/"),
-          result_path: join(dir, "implement-B-002.result.json").replace(/\\/g, "/"),
-          access: {
-            read_paths: ["src/b.ts"],
-            write_paths: ["src/b.ts"], // B-002 owns src/b.ts — must be in registry
-          },
-        },
-      ],
-    };
-    await writeFile(join(dir, "dispatch-plan.json"), JSON.stringify(plan, null, 2), "utf8");
-    await writeFile(join(dir, "implement-B-001.md"), "# Implement\n", "utf8");
-    await writeFile(join(dir, "implement-B-002.md"), "# Implement\n", "utf8");
-
-    // B-002 completes successfully and does not claim any out-of-scope files.
-    await writeFile(
-      join(dir, "implement-B-002.result.json"),
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: "F-002",
-            status: "resolved",
-            evidence: ["Implemented fix for b.ts."],
-          },
-        ],
-      }),
-      "utf8",
-    );
-
-    // B-001 worker tries to amend src/b.ts — owned by B-002 — via top-level
-    // amended_files (the actual ImplementWorkerResult field, not item_results).
-    // This must be detected as a seam conflict and F-001 must be blocked.
-    await writeFile(
-      join(dir, "implement-B-001.result.json"),
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        amended_files: ["src/b.ts"], // top-level field — B-001 claims B-002's file
-        item_results: [
-          {
-            finding_id: "F-001",
-            status: "resolved",
-            evidence: ["Implemented fix."],
-          },
-        ],
-      }),
-      "utf8",
-    );
-
-    const mergedState = await mergeImplementResults(
-      { root: OWNERSHIP_DIR, artifactsDir: OWNERSHIP_ARTIFACTS },
-      RUN_ID,
-    );
-
-    // B-001 claimed src/b.ts (owned by B-002) via amended_files.
-    // The seam_routed path in mergeImplementResults must block F-001.
-    const f001 = mergedState.items!["F-001"];
-    expect(f001.status).toBe("blocked");
-    expect(f001.failure_reason).toContain("src/b.ts");
-
-    // F-002 was resolved by B-002's result and must not be disturbed.
-    const f002 = mergedState.items!["F-002"];
-    expect(f002.status).toBe("resolved");
-
-    await rm(OWNERSHIP_DIR, { recursive: true, force: true });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 8. Infra-node live-surface verification
+// 6. Infra-node live-surface verification
 // ---------------------------------------------------------------------------
 
 describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
@@ -1140,86 +763,10 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
     ).toBe(true);
   });
 
-  it("infra-modifying block produces a dispatch prompt with live-surface verification instructions", async () => {
-    await resetTestRepo();
-    await saveState({
-      status: "implementing",
-      plan: {
-        plan_id: "PLAN-INFRA",
-        findings: [
-          {
-            id: "F-001",
-            title: "Fix dispatcher",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix the dispatcher.",
-            affected_files: [{ path: "src/remediate/steps/nextStep.ts" }],
-            evidence: ["src/steps/nextStep.ts:1"],
-          },
-        ],
-        blocks: [
-          {
-            block_id: "B-001",
-            items: ["F-001"],
-            parallel_safe: false,
-            touched_files: [],
-          },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix dispatcher",
-            no_change: false,
-            touched_files: ["src/remediate/steps/nextStep.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-    process.env.REMEDIATE_ROLLING_ENGINE = "false";
-
-    // Implementing state dispatches directly — no intermediate preview hop.
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-
-    // TST-9730c3bc: the loop MUST reach dispatch_implement for this fixture (an
-    // infra-touching block with every ack written). A regression that prevents
-    // the infra block from ever reaching dispatch must FAIL here, not pass
-    // vacuously via an early return.
-    expect(
-      step.step_kind,
-      `infra block never reached dispatch_implement (stuck at '${step.step_kind}')`,
-    ).toBe("dispatch_implement");
-
-    // Read the dispatch plan and check the infra-node prompt contains verification instructions.
-    const dispatchPlan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
-    expect(dispatchPlan.items.length).toBeGreaterThan(0);
-
-    const promptPath = dispatchPlan.items[0].prompt_path;
-    const implPrompt = await readFile(promptPath, "utf8");
-
-    // Infra-modifying blocks must include the live-surface verification section.
-    expect(implPrompt).toMatch(/infra-modifying block/i);
-    expect(implPrompt).toMatch(/npm (run )?build/i);
-
-    await rm(TEST_DIR, { recursive: true, force: true });
-  });
 });
 
 // ---------------------------------------------------------------------------
-// 9. Context-carrying triage retries
+// 7. Context-carrying triage retries
 // ---------------------------------------------------------------------------
 
 describe("context-carrying triage retries", () => {
@@ -1286,7 +833,7 @@ describe("context-carrying triage retries", () => {
     );
     // Deterministic transitions fold inside a single decideNextStep drain — there
     // is no "state_transition" step kind for the host to consume.
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({ root: REPO_DIR });
 
     // The run must not dispatch a retry — it must close or present report.
     expect(["present_report", "run_close_action", "no_closing_actions", "collect_triage"]).toContain(step.step_kind);
@@ -1351,7 +898,7 @@ describe("context-carrying triage retries", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. Evidence-backed close verification report
+// 8. Evidence-backed close verification report
 // ---------------------------------------------------------------------------
 
 describe("evidence-backed close verification report", () => {

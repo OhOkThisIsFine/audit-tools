@@ -1,36 +1,13 @@
 /**
- * Guard-script failure classification (COR-85a995a0 / COR-85a995a0-2 /
- * REL-eb3aeddf): the pipeline guard scripts must fail on EVERY non-success —
+ * Guard-script failure classification (COR-85a995a0 / COR-85a995a0-2): the
+ * pipeline guard scripts must fail on EVERY non-success —
  * spawn error, non-zero exit status, AND signal termination (spawnSync yields
- * `status: null` with `signal` set) — and `update-models.mjs` must never fire
- * its live network fetch / snapshot write on a `--help` or unknown-arg
- * invocation.
+ * `status: null` with `signal` set).
  */
-import { test, expect, afterEach } from "vitest";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import type { SpawnSyncReturns } from "node:child_process";
-import { readFileSync, statSync, rmSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { runProfiledCommands, toSeconds, npmCommand } from "../../scripts/shared/profile.mjs";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, "../../");
-
-const tmpDirs: string[] = [];
-afterEach(() => {
-  while (tmpDirs.length) {
-    const dir = tmpDirs.pop();
-    if (dir) {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
-    }
-  }
-});
 
 interface FakeSpawnResult {
   status?: number | null;
@@ -138,36 +115,4 @@ test("runProfiledCommands: all-success returns one timed entry per step and thro
 test("toSeconds/npmCommand helpers stay stable", () => {
   expect(toSeconds(1234)).toBe(1.2);
   expect(npmCommand()).toBe(process.platform === "win32" ? "npm.cmd" : "npm");
-});
-
-// ── update-models.mjs invocation guard ───────────────────────────────────────
-
-const UPDATE_MODELS = resolve(REPO_ROOT, "scripts/shared/update-models.mjs");
-const SNAPSHOT = resolve(REPO_ROOT, "src/shared/data/model-statics.generated.json");
-
-test("update-models --help prints usage, exits 0, and never fetches or rewrites the snapshot", () => {
-  const before = statSync(SNAPSHOT).mtimeMs;
-  const beforeContent = readFileSync(SNAPSHOT, "utf8");
-  const r = spawnSync(process.execPath, [UPDATE_MODELS, "--help"], {
-    encoding: "utf8",
-    timeout: 30_000,
-  });
-  expect(r.status, `--help must exit 0\nstdout:${r.stdout}\nstderr:${r.stderr}`).toBe(0);
-  expect(r.stdout).toMatch(/[Uu]sage/);
-  expect(r.stdout).toMatch(/update-models/);
-  // The snapshot must be untouched — a help invocation must never run the
-  // networked refresh (REL-eb3aeddf).
-  expect(statSync(SNAPSHOT).mtimeMs, "--help must not rewrite the snapshot").toBe(before);
-  expect(readFileSync(SNAPSHOT, "utf8")).toBe(beforeContent);
-});
-
-test("update-models rejects an unknown argument with a non-zero exit and no snapshot write", () => {
-  const before = statSync(SNAPSHOT).mtimeMs;
-  const r = spawnSync(process.execPath, [UPDATE_MODELS, "--no-such-flag"], {
-    encoding: "utf8",
-    timeout: 30_000,
-  });
-  expect(r.status, "unknown args must fail loudly, never silently refresh").not.toBe(0);
-  expect(`${r.stderr}${r.stdout}`).toMatch(/--no-such-flag/);
-  expect(statSync(SNAPSHOT).mtimeMs, "unknown arg must not rewrite the snapshot").toBe(before);
 });

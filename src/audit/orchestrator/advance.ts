@@ -178,8 +178,8 @@ async function runSingleAdvanceStep(
 
   const runner = EXECUTOR_RUNNERS[selectedExecutor];
   if (!runner) {
-    // No deterministic runner. The host-delegation dispatch executors (`agent`,
-    // `rolling_dispatch_executor`) are routed through host delegation before
+    // No deterministic runner. Host-delegation executors (including
+    // `semantic_review_executor`) are routed through the host before
     // reaching advanceAudit; dispatched directly they return a no-progress
     // "selected but not yet dispatched" handoff rather than throwing — the
     // absence of a runner is the single source of truth for "not deterministically
@@ -210,7 +210,7 @@ async function runSingleAdvanceStep(
       selected_executor: selectedExecutor,
       progress_made: false,
       artifacts_written: ["audit_state.json"],
-      progress_summary: `Executor ${selectedExecutor} is selected but not yet dispatched through advance-audit.`,
+      progress_summary: `Executor ${selectedExecutor} is selected and requires its bound host step.`,
       next_likely_step: selectedObligation,
       updated_bundle: { ...bundle, audit_state: state },
     };
@@ -434,7 +434,7 @@ function mergeDrainStep(
  * cases) or a natural "nothing left" halts the fold exactly where it did
  * before. `!result.progress_made` (no obligation selected, or the selected one
  * has no deterministic runner — a host-delegation dispatch point like
- * `rolling_dispatch_executor`/`agent`) always emits immediately, mirroring the
+ * `semantic_review_executor`) always emits immediately, mirroring the
  * hand loop's unconditional first call.
  */
 async function runDrainStep(

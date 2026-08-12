@@ -2,7 +2,6 @@ import { test, expect } from "vitest";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ExternalAnalyzerResults } from "../../src/shared/analyzers/types.js";
 import { buildFileAnchorSummary } from "../../src/audit/orchestrator/fileAnchors.js";
-import { buildLargeFileSection } from "../../src/audit/cli/dispatch/packetPrompt.js";
 
 test("symbol scan and keyword scan are independent — a line matching both SYMBOL_PATTERNS and KEYWORD_PATTERN produces both a symbol/route anchor and a keyword anchor", () => {
   // The function declaration matches SYMBOL_PATTERNS (function), and the
@@ -140,24 +139,6 @@ test("symbol spans: only symbol-kind anchors carry end_line (routes/keywords/imp
   const handler = summary.anchors.find((a) => a.kind === "symbol" && a.name === "handler");
   // The route on line 3 is a declaration boundary → handler's span stops at 2.
   expect(handler!.end_line, "handler span bounded by the route at line 3 → [2,2]").toBe(2);
-});
-
-test("symbol spans reach the worker prompt as a path:START-END targeted read range", () => {
-  const content = [
-    "function alpha() {",
-    "  return 1;",
-    "}",
-    "function beta() {}",
-  ].join("\n");
-  const summary = buildFileAnchorSummary({
-    path: "src/render.ts",
-    content,
-    totalLines: 4,
-  });
-  const section = buildLargeFileSection(true, summary, "run/anchors.json").join("\n");
-  // alpha spans [1,3] → rendered as a range; the guidance names the slice discipline.
-  expect(section.includes("src/render.ts:1-3 [symbol] alpha"), section).toBe(true);
-  expect(section.includes("approximate line span"), "guidance must frame spans as advisory").toBe(true);
 });
 
 // ── MAX_ANCHORS cap ───────────────────────────────────────────────────────────

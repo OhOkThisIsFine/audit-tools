@@ -1,0 +1,97 @@
+{
+  "contract_version": "zero-adapter-production-scope/v1",
+  "module_id": "canonical-session-intent",
+  "capture_boundary": "after-designated-test-closure-freeze-before-red-run-and-production-edit",
+  "immutable": true,
+  "scope_rule": "existing legacy config plus shared loader boundary, both consumer loaders, all direct loader consumers, and advertised-path owners",
+  "absent_paths": [
+    ".audit-tools/audit/session-config.json",
+    ".audit-tools/remediation/session-config.json",
+    ".remediation-artifacts/session-config.json",
+    "src/shared/sessionConfig.ts"
+  ],
+  "entries": [
+    {
+      "path": "session-config.json",
+      "sha256": "6c1075b274961d2957be2e98326796ab6ce5aa10f879585a2584c3a446800a17"
+    },
+    {
+      "path": "src/audit/cli/advanceAuditCommand.ts",
+      "sha256": "9bf179847265b94ed9c416bfb42f46793e72718b7f401f3085f78cca31a7861b"
+    },
+    {
+      "path": "src/audit/cli/dispatch.ts",
+      "sha256": "1a33e4b9e8546c4eef3975f9258bcfa18e0efb2f76b1c399f2f7d2f32eb160fe"
+    },
+    {
+      "path": "src/audit/cli/forceSynthesisCommand.ts",
+      "sha256": "ba027f2c7b9d58750c323e68292eebaf27976ffafdb3b1bd061d649c4774bb04"
+    },
+    {
+      "path": "src/audit/cli/nextStepCommand.ts",
+      "sha256": "8c1ac342d9366195136aeceaa8b5ae77647d4a7d91f7fb99e6b4b652c20239f2"
+    },
+    {
+      "path": "src/audit/cli/prepareDispatchCommand.ts",
+      "sha256": "8e2b33c9700188ffda9ca4e1ed9114a54fff0e2c2dcca554af46de49665554d5"
+    },
+    {
+      "path": "src/audit/cli/semanticReviewStep.ts",
+      "sha256": "2dd844803cfd91b6e08b35d291b6e948c97f752d425ea3f76cd40125c23c9b08"
+    },
+    {
+      "path": "src/audit/providers/index.ts",
+      "sha256": "0f591aa43e7da2ad10bf22a77d0702e0de79642340385f20498235b097311cd8"
+    },
+    {
+      "path": "src/audit/supervisor/operatorHandoff.ts",
+      "sha256": "378cd4db75e4538207f9c478aa5985ca0167f95650f8984ba3fd6e15f75322d1"
+    },
+    {
+      "path": "src/audit/supervisor/sessionConfig.ts",
+      "sha256": "fd28e1b9183383aa336ed4ba6de54899be7d1179ebdcb6ccfb66a39aa2bf4dd9"
+    },
+    {
+      "path": "src/remediate/phases/closeVerifyAnalyzerLeads.ts",
+      "sha256": "609c35abdd805f51010626079d109073c682890a68015f27116dc2928aea05b9"
+    },
+    {
+      "path": "src/remediate/phases/plan.ts",
+      "sha256": "be99fab7a704721b76988e7ebc99ceb93da43b594ed9e4b53b59d7e948cfef39"
+    },
+    {
+      "path": "src/remediate/providers/index.ts",
+      "sha256": "d5f3cee521d844c34a0c1dff751871bce008688467d49ce727dd52ec24d122d5"
+    },
+    {
+      "path": "src/remediate/steps/contractPipeline.ts",
+      "sha256": "46665f9704e34d87114de578a4b6a9a9dc770c48c7fe0da68ee804c7b598edde"
+    },
+    {
+      "path": "src/remediate/steps/nextStep.ts",
+      "sha256": "f96091480b8819c1044e4dcdbb21e117c7373a037c6ce8d35419944a948cefb9"
+    },
+    {
+      "path": "src/remediate/steps/sessionConfigLoad.ts",
+      "sha256": "99e0e4b8b8f57c9693e6368bdc1992cd942995293c496000420d735ab32231a0"
+    },
+    {
+      "path": "src/shared/index.ts",
+      "sha256": "ab66b51e22e03a0b6369c98e25648e1974ea2e138a82c3de3735a185883bad5c"
+    },
+    {
+      "path": "src/shared/io/json.ts",
+      "sha256": "818b1797fdb6e06116c409c81330508b4743a0c650cd6c8a93fed1b05512ef6a"
+    },
+    {
+      "path": "src/shared/types/sessionConfig.ts",
+      "sha256": "c2b06e39e102d77bd8b773ea824dbf405667fbbd2985cb9e3aff2ac29e3d9982"
+    },
+    {
+      "path": "src/shared/validation/sessionConfig.ts",
+      "sha256": "4a4cee5a93967335c1a8c141d1fbf1fe2a635697ad430ea3fe390e2e30497868"
+    }
+  ],
+  "tree_sha256": "4191d5c5b52f82b9e8484560440bbbaca3c4bd657b1e7fb2828e90f2517c7fbe",
+  "manifest_sha256": "8bd7f4b58c7153f696b0e36c3863469aaed00850c547f906502287fc7e9263dc"
+}

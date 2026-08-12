@@ -18,6 +18,7 @@ const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/sta
 const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
+const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 const FEEDBACK_FILE = "agent-feedback.jsonl";
@@ -135,14 +136,22 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
     const artDir = join(root, ".audit-tools/audit");
     await mkdir(artDir, { recursive: true });
 
-    // Advance one bounded step (auto-answering the agent handoff), mirroring
-    // the production load → decide → advance → persist(prune) loop.
+    // Seed the real pre-planning frontier through the shared scripted-host
+    // fixture. Direct advanceAudit calls intentionally stop at semantic host
+    // boundaries, so repeatedly calling them cannot manufacture checkpoint,
+    // charter, or design-review results.
+    const preplanningBundle = await buildAdvancedBundle(root, "planning_artifacts");
+    await writeCoreArtifacts(artDir, preplanningBundle, { prune: true });
+
+    // Advance one bounded step, supplying explicit scripted-host results at the
+    // semantic review and synthesis-narrative boundaries, while mirroring the
+    // production load → decide → advance → persist(prune) loop.
     const step = async () => {
       const bundle = await loadArtifactBundle(artDir);
       const decision = decideNextStep(bundle);
       if (decision.state.status === "complete") return null;
       const options: AdvanceAuditOptions = { root, lineIndex };
-      if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
+      if (decision.selected_executor === "semantic_review_executor") {
         const have = new Set((bundle.audit_results ?? []).map((r) => r.task_id));
         options.preferredExecutor = "result_ingestion_executor";
         options.auditResults = (bundle.audit_tasks ?? [])
@@ -162,6 +171,10 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
             notes: [],
             requires_followup: false,
           }));
+      }
+      if (decision.selected_executor === "synthesis_narrative_executor") {
+        options.preferredExecutor = "synthesis_narrative_executor";
+        options.narrativeResults = { themes: [], top_risks: [] };
       }
       const res = await advanceAudit(bundle, options);
       await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });

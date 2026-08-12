@@ -34,12 +34,49 @@
       "evidence": ["No rate-limit middleware applied in src/auth/reset.ts"]
     }
   ],
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "F-001",
+        "file_paths": ["src/auth/login.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      },
+      {
+        "id": "F-002",
+        "file_paths": ["src/auth/reset.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      }
+    ],
+    "pair_scores": [
+      {
+        "left": "F-001",
+        "right": "F-002",
+        "evidence": {
+          "call_import_reference_adjacency": false,
+          "same_directory": true,
+          "shared_critical_flow": false,
+          "shared_file": false,
+          "shared_semantic_tag_or_same_lens": true,
+          "shared_unit": false
+        },
+        "score": 40,
+        "eligible": false
+      }
+    ],
+    "eligible_candidates": [],
+    "merge_trace": [],
+    "merge_decisions": [],
+    "components": [["F-001"], ["F-002"]]
+  },
   "work_blocks": [
     {
       "id": "B-001",
       "finding_ids": ["F-001"],
       "unit_ids": [],
       "owned_files": ["src/auth/login.ts"],
+      "role": "implementation",
       "max_severity": "high",
       "rationale": "Isolated security finding in the login handler.",
       "depends_on": []
@@ -49,9 +86,11 @@
       "finding_ids": ["F-002"],
       "unit_ids": [],
       "owned_files": ["src/auth/reset.ts"],
+      "role": "implementation",
       "max_severity": "medium",
       "rationale": "Isolated security finding in password reset.",
       "depends_on": []
     }
-  ]
+  ],
+  "work_block_seams": []
 }

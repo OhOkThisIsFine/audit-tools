@@ -1,0 +1,133 @@
+{
+  "contract_version": "zero-adapter-red-green-evidence-contract/v1",
+  "schema_status": "finalized",
+  "immutable": true,
+  "hash_algorithm": "sha256",
+  "canonicalization": "utf8-json-stable-v1",
+  "object_policy": "exact-required-keys",
+  "run_output_schema": {
+    "required_keys": [
+      "stderr",
+      "stdout"
+    ],
+    "normalization": "crlf-and-cr-to-lf",
+    "digest_rule": "sha256-of-utf8-length-prefixed-stdout-and-stderr-v1"
+  },
+  "production_red_claims": [],
+  "red_records": [],
+  "green_companions": [],
+  "command_schema": {
+    "required_keys": [
+      "argv",
+      "cwd",
+      "normalized_environment"
+    ],
+    "constraints": {
+      "argv": "nonempty-ordered-string-array",
+      "cwd": "repository-root-token-dot",
+      "normalized_environment": "content-sorted-string-map-with-secret-values-excluded"
+    }
+  },
+  "test_closure_schema": {
+    "required_keys": [
+      "closure_sha256",
+      "files",
+      "runner",
+      "test_id"
+    ],
+    "file_entry_required_keys": [
+      "path",
+      "role",
+      "sha256"
+    ],
+    "required_file_roles": [
+      "designated_test",
+      "lockfile",
+      "runner_entrypoint",
+      "test_config"
+    ],
+    "transitive_repository_roles": [
+      "transitive_repository_fixture",
+      "transitive_repository_helper",
+      "transitive_repository_import"
+    ],
+    "runner_required_keys": [
+      "entrypoint_sha256",
+      "name",
+      "version"
+    ],
+    "closure_rule": "all-designated-and-transitively-reachable-repository-owned-test-inputs-plus-test-config-runner-entrypoint-runner-version-and-lockfile",
+    "digest_rule": "sha256-of-canonical-test-closure-excluding-closure_sha256"
+  },
+  "production_scope_schema": {
+    "required_keys": [
+      "entries",
+      "tree_sha256"
+    ],
+    "entry_required_keys": [
+      "path",
+      "sha256"
+    ],
+    "digest_rule": "sha256-of-content-sorted-production-path-and-byte-digest-pairs"
+  },
+  "red_record_schema": {
+    "contract_version": "zero-adapter-red-record/v1",
+    "required_keys": [
+      "command",
+      "contract_version",
+      "exit_code",
+      "expected_failure_signature",
+      "module_id",
+      "output_sha256",
+      "pre_edit_production_scope",
+      "record_sha256",
+      "test_closure",
+      "test_id"
+    ],
+    "constraints": {
+      "exit_code": "nonzero-integer",
+      "expected_failure_signature": "nonempty-exact-output-substring-or-stable-diagnostic-code",
+      "output_sha256": "sha256-of-complete-normalized-stdout-and-stderr",
+      "record_sha256": "sha256-of-canonical-record-excluding-record_sha256",
+      "write_once": "before-first-production-edit"
+    }
+  },
+  "green_companion_schema": {
+    "contract_version": "zero-adapter-green-companion/v1",
+    "required_keys": [
+      "command",
+      "contract_version",
+      "exit_code",
+      "module_id",
+      "output_sha256",
+      "post_edit_production_scope",
+      "record_sha256",
+      "red_record_sha256",
+      "test_closure_sha256",
+      "test_id"
+    ],
+    "constraints": {
+      "exit_code": "exactly-zero",
+      "output_sha256": "sha256-of-complete-normalized-stdout-and-stderr",
+      "record_sha256": "sha256-of-canonical-companion-excluding-record_sha256",
+      "red_record_sha256": "exact-red-record-content-hash"
+    }
+  },
+  "cross_record_invariants": [
+    "same-module-id",
+    "same-test-id",
+    "identical-argv",
+    "identical-cwd",
+    "identical-normalized-environment",
+    "identical-test-closure-sha256",
+    "green-references-red-record-sha256",
+    "red-pre-edit-production-tree-digest-recomputes",
+    "green-post-edit-production-tree-digest-recomputes",
+    "red-exit-code-is-nonzero",
+    "red-output-contains-expected-failure-signature",
+    "green-exit-code-is-zero",
+    "red-and-green-output-digests-recompute",
+    "red-and-green-record-content-hashes-recompute",
+    "red-record-and-test-closure-are-read-only-after-production-mutation"
+  ]
+}

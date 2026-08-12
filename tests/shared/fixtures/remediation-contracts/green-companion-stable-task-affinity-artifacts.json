@@ -1,0 +1,73 @@
+{
+  "command": {
+    "argv": [
+      "npx",
+      "vitest",
+      "run",
+      "tests/shared/task-affinity-artifacts.test.ts"
+    ],
+    "cwd": ".",
+    "normalized_environment": {
+      "CI": "1",
+      "NO_COLOR": "1",
+      "TZ": "UTC"
+    }
+  },
+  "contract_version": "zero-adapter-green-companion/v1",
+  "exit_code": 0,
+  "module_id": "stable-task-affinity-artifacts",
+  "output_sha256": "a799ceb8f7588346c9a0f81b431ca49fc5918088033078341d9868b658dc91b3",
+  "post_edit_production_scope": {
+    "entries": [
+      {
+        "path": "src/audit/cli/dispatch.ts",
+        "sha256": "dc35e181e5dce2510ae282f2537f0a4215808f21b1c61e13ad178fc9af26549b"
+      },
+      {
+        "path": "src/audit/cli/lineIndex.ts",
+        "sha256": "956636ba7b2d02104cd28a8a5ff48ea88b4393bd467337d8d97cd4eb3a56d9d1"
+      },
+      {
+        "path": "src/audit/io/artifacts.ts",
+        "sha256": "5f29b8fe48976a8ea1b5ccf3af0dd2d860d63d1012b481757c52e5a04ec08e58"
+      },
+      {
+        "path": "src/audit/io/runArtifacts.ts",
+        "sha256": "cb52092a655d03e3ff82c838f2d165afd434daae5b11141084c019b3b91c235b"
+      },
+      {
+        "path": "src/audit/orchestrator/ingestionExecutors.ts",
+        "sha256": "4bada845fe9fb1c348ba5985ff661190b24108d8f1ec21473600cf5c31d8807c"
+      },
+      {
+        "path": "src/audit/orchestrator/pendingTasks.ts",
+        "sha256": "d9a5e7e8e1fae83cdbff9b42785c60131b511126533f12a66b322f9513353de5"
+      },
+      {
+        "path": "src/audit/orchestrator/planningExecutors.ts",
+        "sha256": "7c921c7bcf48d705f062ab43f68401dddbd628134cac89212bd00b4aa131f7ab"
+      },
+      {
+        "path": "src/audit/orchestrator/taskAffinityGraph.ts",
+        "sha256": "0b402a4ec27b284e93dd40ca5b2f0f353ea571638bf8b7d96cdc0285e98e9768"
+      },
+      {
+        "path": "src/shared/affinityArtifacts.ts",
+        "sha256": "408075791d6b7b26e1924090c216942af5fe1132842d86da60ec464017e6b9c4"
+      },
+      {
+        "path": "src/shared/artifactFreshness.ts",
+        "sha256": "e31edee9760a87a4a9221994a89d6bc107f435adbec6d0d4915764dd1c068ac6"
+      },
+      {
+        "path": "src/shared/stableStringify.ts",
+        "sha256": "2c9dbd76cc62c73411c6b000069a1f2018e84f27c17696e2fa78371071053954"
+      }
+    ],
+    "tree_sha256": "f1234c717addb9f172f4a0607573213fc2118bc4ee614753816a7c4f8bf220d3"
+  },
+  "red_record_sha256": "66b87c4dbb4cbd57493bff30d47f714ded036fc8d9f975b80030417ff6d1f354",
+  "test_closure_sha256": "96842caeec44a5e990f77545c0511706e97b45ebb417d2da2fbd463ce7eb506b",
+  "test_id": "stable-task-affinity-artifacts-red-green-v1",
+  "record_sha256": "7a31a9a528caa5c0ab5e865a620a97821c9777d5d3737c6f35bc48effce5c71b"
+}

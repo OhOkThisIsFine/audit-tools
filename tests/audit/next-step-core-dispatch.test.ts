@@ -1,14 +1,13 @@
 import { test, expect } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   advancePastDesignReview,
-  TEST_AUDITOR_ARGS,
   withTempRepo,
 } from "./helpers/next-step-harness.js";
 
-test.concurrent("next-step defaults to dispatch_review when host dispatch capability is not configured", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step publishes a provider-neutral semantic-review workload", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     const currentStep = JSON.parse(
@@ -19,51 +18,13 @@ test.concurrent("next-step defaults to dispatch_review when host dispatch capabi
     expect(step.step_kind).toBe("dispatch_review");
     expect(currentStep.step_kind).toBe("dispatch_review");
     expect(step.run_id).toBeTruthy();
-    expect(prompt).toMatch(/merge-and-ingest/);
-    expect(prompt).not.toMatch(/single-task fallback/i);
-  });
-});
-
-test.concurrent("next-step reads host_can_dispatch_subagents from session-config", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
-  await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "session-config.json"),
-      JSON.stringify(
-        {
-          host_can_dispatch_subagents: true,
-        },
-        null,
-        2,
-      ) + "\n",
+    expect(step.artifact_paths.host_workload).toMatch(/host-workload\.json$/);
+    expect(step.artifact_paths.host_result_map).toMatch(/host-result-map\.json$/);
+    expect(prompt).toMatch(/provider-neutral workload/i);
+    expect(prompt).toMatch(/next-step/);
+    const promptWithoutNeutralClaim = prompt.replace(/provider-neutral/gi, "");
+    expect(promptWithoutNeutralClaim).not.toMatch(
+      /merge-and-ingest|\bprovider\b|\bmodel(?:_id)?\b|\b(?:route|routing)\b|\bquota\b/i,
     );
-
-    const step = await advancePastDesignReview(root, [
-      "next-step",
-      "--auditor",
-      JSON.stringify({
-        self: {
-          provider: "worker-command",
-          context_tokens: 200_000,
-          output_tokens: 8_000,
-        },
-      }),
-    ]);
-
-    expect(step.step_kind).toBe("dispatch_review");
-    expect(step.artifact_paths.dispatch_plan).toMatch(/dispatch-plan\.json$/);
-  });
-});
-
-test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value is set", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
-  await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(
-      root,
-      ["next-step", ...TEST_AUDITOR_ARGS],
-      { env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" } },
-    );
-
-    expect(step.step_kind).toBe("dispatch_review");
   });
 });

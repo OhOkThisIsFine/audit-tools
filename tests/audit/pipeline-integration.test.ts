@@ -1,7 +1,7 @@
 /**
  * N-A08: Audit pipeline integration tests.
  *
- * Six integration scenarios:
+ * Five integration scenarios:
  *   1. Batch-deterministic block — all five sub-steps complete in a single
  *      next-step invocation; no intermediate deterministic pauses returned.
  *   2. Intent-checkpoint gating — planning_artifacts stays missing until the
@@ -9,12 +9,10 @@
  *      initialises; lens_selection restricts tasks to effective lenses only.
  *   3. Parallel design review — both contract and conceptual host_delegation
  *      entries are present before either is consumed.
- *   4. Rolling dispatch — ingestion folds inline; synthesis follows directly
- *      after results; the rolling_dispatch_executor owns audit_tasks_completed.
- *   5. Headless narrative omission — synthesis_narrative writes status='omitted'
- *      without a provider; run terminates cleanly.
- *   6. CE-301 partial-coverage terminal — empty provider pool marks stranded
- *      units uncovered; livelock guard advances to synthesis on partial coverage.
+ *   4. Semantic review — ingestion folds inline; synthesis follows directly
+ *      after results; semantic_review_executor owns audit_tasks_completed.
+ *   5. Narrative omission — synthesis_narrative writes status='omitted' when no
+ *      optional narrative is submitted; the run terminates cleanly.
  */
 import { test, expect } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -432,14 +430,14 @@ test("S3: after contract review completes, conceptual review is still missing (s
   expect(decision.selected_obligation, "After contract review, conceptual review should be next").toBe("design_review_conceptual_completed");
 });
 
-// ── Scenario 4: Rolling dispatch ──────────────────────────────────────────────
+// ── Scenario 4: Semantic review ──────────────────────────────────────────────
 
-test("S4: rolling_dispatch_executor is the sole owner of audit_tasks_completed", () => {
+test("S4: semantic_review_executor is the sole owner of audit_tasks_completed", () => {
   const owners = EXECUTOR_REGISTRY.filter((e) =>
     e.obligation_ids.includes("audit_tasks_completed"),
   );
   expect(owners.length, "exactly one executor must own audit_tasks_completed").toBe(1);
-  expect(owners[0].id).toBe("rolling_dispatch_executor");
+  expect(owners[0].id).toBe("semantic_review_executor");
   expect(owners[0].kind).toBe("host_delegation");
 });
 
@@ -451,37 +449,22 @@ test("S4: result_ingestion_executor is deterministic (ingestion folds inline, no
   expect(ingestionEntry!.kind).toBe("deterministic");
 });
 
-test("S4: after audit_tasks_completed, audit_results_ingested is next deterministic step toward synthesis", () => {
-  // Bundle where audit tasks are complete (via partial terminal) but ingestion hasn't run
-  const bundle = {
+test("S4: after review completion, audit_results_ingested is next toward synthesis", () => {
+  const bundle = settleIntentBaseline({
     ...makePostDesignReviewBundle(),
     coverage_matrix: { files: [] },
     flow_coverage: { flows: [] },
     runtime_validation_tasks: { tasks: [] },
     audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
+      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "complete" as const },
     ],
     requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 1,
-      task_count: 1,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "empty_pool" as const,
-        stranded_ids: ["T1"],
-      },
-    },
-  };
+  });
   const decision = decideNextStep(bundle);
-  // audit_tasks_completed is now satisfied via terminal; next should be audit_results_ingested
   const state = deriveAuditState(bundle);
   const auditTasksObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
   expect(auditTasksObl?.state, "audit_tasks_completed must be satisfied").toBe("satisfied");
-  // Next step advances toward ingestion / synthesis
-  expect(decision.selected_obligation).not.toBe("audit_tasks_completed");
+  expect(decision.selected_obligation).toBe("audit_results_ingested");
 });
 
 test("S4: synthesis follows ingestion without an intermediate host pause between them", () => {
@@ -499,7 +482,7 @@ test("S4: synthesis follows ingestion without an intermediate host pause between
   expect(synthEntry?.kind).toBe("deterministic");
 });
 
-// ── Scenario 5: Headless narrative omission ───────────────────────────────────
+// ── Scenario 5: Narrative omission ───────────────────────────────────────────
 
 test("S5: runSynthesisNarrativeExecutor writes status='omitted' when no narrative is supplied", () => {
   const synth = runSynthesisExecutor({ audit_results: [] });
@@ -563,6 +546,14 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
         runtime_validation_status_breakdown: {},
       },
       findings: [],
+      coherence_trace: {
+        normalized_items: [],
+        pair_scores: [],
+        eligible_candidates: [],
+        merge_trace: [],
+        merge_decisions: [],
+        components: [],
+      },
       work_blocks: [],
       work_block_seams: [],
     },
@@ -602,176 +593,4 @@ test("S5: omitted narrative does not inject narrative sections into audit-findin
 
   expect(findings?.themes, "themes must be absent when narrative is omitted").toBe(undefined);
   expect(findings?.executive_summary, "executive_summary must be absent when narrative is omitted").toBe(undefined);
-});
-
-// ── Scenario 6: CE-301 partial-coverage terminal ─────────────────────────────
-
-test("S6: empty provider pool sets partial_completion_terminal and satisfies audit_tasks_completed", () => {
-  const bundle = {
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
-      { task_id: "T2", unit_id: "U2", pass_id: "P1", lens: "correctness", file_paths: ["src/b.ts"], rationale: "correctness test", status: "pending" as const },
-    ],
-    requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 2,
-      task_count: 2,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "empty_pool" as const,
-        stranded_ids: ["T1", "T2"],
-      },
-    },
-  };
-
-  const state = deriveAuditState(bundle);
-  const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(atc?.state, "audit_tasks_completed must be satisfied when all pending tasks are stranded by partial_completion_terminal").toBe("satisfied");
-});
-
-test("S6: livelock_guard terminal also satisfies audit_tasks_completed", () => {
-  const bundle = {
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
-    ],
-    requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 1,
-      task_count: 1,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "livelock_guard" as const,
-        stranded_ids: ["T1"],
-      },
-    },
-  };
-
-  const state = deriveAuditState(bundle);
-  const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(atc?.state).toBe("satisfied");
-});
-
-test("S6: non-stranded pending tasks still block even with a partial terminal for other tasks", () => {
-  const bundle = {
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
-      { task_id: "T2", unit_id: "U2", pass_id: "P1", lens: "correctness", file_paths: ["src/b.ts"], rationale: "correctness test", status: "pending" as const },
-    ],
-    requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 2,
-      task_count: 2,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "empty_pool" as const,
-        stranded_ids: ["T1"], // T2 not stranded
-      },
-    },
-  };
-
-  const state = deriveAuditState(bundle);
-  const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(atc?.state, "T2 is pending and not stranded — audit_tasks_completed must remain missing").toBe("missing");
-});
-
-test("S6: after partial terminal, synthesis produces valid audit-findings with stranded count", () => {
-  // Use runSynthesisExecutor as the integration surface
-  const partialBundle = {
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
-    ],
-    requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 1,
-      task_count: 1,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "empty_pool" as const,
-        stranded_ids: ["T1"],
-      },
-    },
-  };
-
-  // Synthesis can run because audit_tasks_completed is satisfied
-  const state = deriveAuditState(partialBundle);
-  const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(atc?.state, "terminal must satisfy audit_tasks_completed first").toBe("satisfied");
-
-  // runSynthesisExecutor produces a valid findings contract
-  const run = runSynthesisExecutor(partialBundle, []);
-  expect(run.updated.audit_findings, "audit_findings must be produced").toBeTruthy();
-  expect(typeof run.updated.audit_findings!.contract_version).toBe("string");
-  expect(run.updated.audit_report, "audit_report must be rendered").toBeTruthy();
-
-  // stranded_unit_count flows through synthesis into audit_findings/audit_report;
-  // see the CE-301 test for exhaustive stranded-count checks.
-  expect(run.artifacts_written.includes("audit-findings.json"), "audit-findings.json must be written").toBeTruthy();
-});
-
-test("S6: run does not stall — terminal satisfies audit_tasks_completed and never re-selects rolling_dispatch", () => {
-  // Once partial_completion_terminal fires, audit_tasks_completed is satisfied
-  // and the engine must NOT re-select rolling_dispatch / audit_tasks_completed.
-  // (In real runs with artifact_metadata, staleness propagation is resolved;
-  // for in-memory bundles we verify the key invariant: audit_tasks_completed
-  // stays satisfied and rolling_dispatch is not re-entered.)
-  const terminalBundle = {
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "pending" as const },
-    ],
-    requeue_tasks: [],
-    audit_results: [],
-    active_dispatch: {
-      run_id: "R1",
-      created_at: "2026-01-01T00:00:00Z",
-      packet_count: 1,
-      task_count: 1,
-      status: "active" as const,
-      partial_completion_terminal: {
-        reason: "livelock_guard" as const,
-        stranded_ids: ["T1"],
-      },
-    },
-  };
-
-  // Core invariant: audit_tasks_completed is satisfied (terminal fired)
-  const state = deriveAuditState(terminalBundle);
-  const atcObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(atcObl?.state, "audit_tasks_completed must be satisfied after terminal fires").toBe("satisfied");
-
-  // decideNextStep must not re-select rolling_dispatch_executor (livelock guard)
-  const decision = decideNextStep(terminalBundle);
-  expect(decision.selected_obligation, "decideNextStep must not re-select audit_tasks_completed after terminal").not.toBe("audit_tasks_completed");
-  expect(decision.selected_executor, "rolling_dispatch_executor must not be re-entered after terminal").not.toBe("rolling_dispatch_executor");
 });

@@ -62,7 +62,6 @@ function assertRunLedgerEntry(
 
   return {
     run_id: requireString("run_id"),
-    provider: requireString("provider"),
     obligation_id: requireNullableString("obligation_id"),
     selected_executor: requireNullableString("selected_executor"),
     status: status as RunLedgerEntry["status"],

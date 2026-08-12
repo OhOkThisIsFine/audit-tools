@@ -94,6 +94,41 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     expect(await readFile(CONFIG_PATH, "utf8")).toBe(firstRaw);
   });
 
+  it("migration removes retired execution-adapter command allows", async () => {
+    const retired = [
+      "remediate-code prepare-document-dispatch*",
+      "remediate-code merge-document-results*",
+      "remediate-code prepare-implement-dispatch*",
+      "remediate-code merge-implement-results*",
+      "remediate-code accept-node*",
+      "*remediate-code.mjs* prepare-implement-dispatch*",
+      "*remediate-code.mjs* merge-implement-results*",
+      "*remediate-code.mjs* accept-node*",
+    ];
+    const retiredAllows = Object.fromEntries(retired.map((key) => [key, "allow"]));
+    await seedConfig({
+      permission: { bash: { ...retiredAllows, "custom-user-tool *": "allow" } },
+      agent: {
+        remediator: {
+          permission: { bash: { ...retiredAllows, "custom-agent-tool *": "allow" } },
+        },
+      },
+    });
+
+    const result = runPostinstall();
+    expect(result.status).toBe(0);
+
+    const config = await readConfig();
+    for (const bash of [
+      config.permission.bash,
+      config.agent.remediator.permission.bash,
+    ]) {
+      for (const key of retired) expect(bash[key]).toBeUndefined();
+    }
+    expect(config.permission.bash["custom-user-tool *"]).toBe("allow");
+    expect(config.agent.remediator.permission.bash["custom-agent-tool *"]).toBe("allow");
+  });
+
   it("leaves non-matching top-level broad rules byte-for-byte untouched", async () => {
     await seedConfig({
       permission: {

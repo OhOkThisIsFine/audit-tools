@@ -1,16 +1,18 @@
 import { z } from "zod";
 import type { AuditTask } from "../types.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+import {
+  canonicalizeAuditTasks,
+  canonicalizeTaskAffinityGraph,
+} from "../../shared/affinityArtifacts.js";
 
 // ---------------------------------------------------------------------------
-// Task-affinity graph (Phase A of the plan/dispatch seam).
+// Task-affinity graph for semantic workload coherence.
 //
-// Nodes are audit tasks carrying their FROZEN provider-neutral estimates;
-// edges express SOFT, weighted relatedness between tasks. This graph is the
-// persisted, provider-neutral planning artifact. It encodes no model, packet,
-// tier, or concurrency decision. At dispatch time a provider partitions this
-// graph into packets just-in-time, under its own model's context + risk-mass
-// ceilings (see spec/audit-workflow-design.md).
+// Nodes are audit tasks carrying frozen local estimates; edges express soft,
+// weighted relatedness between tasks. The persisted graph contains semantic
+// planning metadata only. The host workload projects its connected coherence
+// groups without consulting backend identity, capacity, or concurrency.
 //
 // Reuses the language-neutral edge contract shape (from/to/kind/weight/reason)
 // and is kept DISTINCT from graph_bundle.json (which is code structure, not
@@ -48,7 +50,7 @@ export const TaskAffinityEdgeSchema = z
     to: z.string(),
     /** Dominant relatedness kind (the one contributing the max weight). */
     kind: TaskAffinityEdgeKindSchema,
-    /** Affinity weight in [0,1]; higher = pack together first. */
+    /** Affinity strength in [0,1], retained as explanatory metadata. */
     weight: z.number(),
     /** All contributing kinds (+ "same_lens" bonus), for transparency. */
     reason: z.string().optional(),
@@ -62,22 +64,58 @@ export const TaskAffinityGraphSchema = z
     nodes: z.array(TaskAffinityNodeSchema),
     edges: z.array(TaskAffinityEdgeSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((graph, context) => {
+    const nodeIds = new Set<string>();
+    for (const [index, node] of graph.nodes.entries()) {
+      if (nodeIds.has(node.task_id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["nodes", index, "task_id"],
+          message: `Duplicate task-affinity node id: ${node.task_id}`,
+        });
+      }
+      nodeIds.add(node.task_id);
+    }
+    for (const [index, edge] of graph.edges.entries()) {
+      if (edge.from === edge.to) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["edges", index],
+          message: `Self task-affinity edge: ${edge.from}`,
+        });
+      }
+      if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["edges", index],
+          message: `Dangling task-affinity edge: ${edge.from} -> ${edge.to}`,
+        });
+      }
+    }
+  });
 export type TaskAffinityGraph = z.infer<typeof TaskAffinityGraphSchema>;
 
 /**
  * Restrict a task-affinity graph to a set of task ids, keeping only nodes whose
- * task survives and edges whose both endpoints survive. Used at dispatch to
- * partition only the still-pending tasks from a persisted full-run graph.
+ * task survives and edges whose both endpoints survive. Used when projecting
+ * only the still-pending tasks from a persisted full-run graph.
  */
 export function filterTaskAffinityGraph(
   graph: TaskAffinityGraph,
   keep: ReadonlySet<string>,
 ): TaskAffinityGraph {
-  const nodes = graph.nodes.filter((n) => keep.has(n.task_id));
+  const validated = TaskAffinityGraphSchema.parse(graph);
+  const nodes = validated.nodes.filter((n) => keep.has(n.task_id));
   const have = new Set(nodes.map((n) => n.task_id));
-  const edges = graph.edges.filter((e) => have.has(e.from) && have.has(e.to));
-  return { schema_version: graph.schema_version, nodes, edges };
+  const edges = validated.edges.filter(
+    (e) => have.has(e.from) && have.has(e.to),
+  );
+  return canonicalizeTaskAffinityGraph({
+    schema_version: validated.schema_version,
+    nodes,
+    edges,
+  });
 }
 
 // Per-kind base weights. Tuned so stronger structural coupling packs first.
@@ -149,7 +187,7 @@ function intersects<T>(a: Set<T>, b: Iterable<T>): boolean {
 }
 
 /**
- * Build the provider-neutral task-affinity graph from frozen tasks. Each task
+ * Build the task-affinity graph from frozen tasks. Each task
  * must already carry `token_estimate` and `risk_estimate` (planning freezes
  * them); missing values default to 0 so the graph is always well-formed.
  */
@@ -157,7 +195,8 @@ export function buildTaskAffinityGraph(
   tasks: ReadonlyArray<AuditTask>,
   options: { graphBundle?: GraphBundle } = {},
 ): TaskAffinityGraph {
-  const nodes: TaskAffinityNode[] = tasks.map((task) => ({
+  const canonicalTasks = canonicalizeAuditTasks(tasks);
+  const nodes: TaskAffinityNode[] = canonicalTasks.map((task) => ({
     task_id: task.task_id,
     unit_id: task.unit_id,
     lens: task.lens,
@@ -168,12 +207,12 @@ export function buildTaskAffinityGraph(
 
   const adjacency = buildFileAdjacency(options.graphBundle);
   // Precompute per-task derived sets to keep the O(n^2) pass cheap.
-  const fileSets = tasks.map((t) => new Set(t.file_paths.map((p) => p.replace(/\\/g, "/"))));
-  const dirSets = tasks.map(
+  const fileSets = canonicalTasks.map((t) => new Set(t.file_paths.map((p) => p.replace(/\\/g, "/"))));
+  const dirSets = canonicalTasks.map(
     (t) => new Set(t.file_paths.map((p) => dirOf(p))),
   );
-  const flowSets = tasks.map((t) => flowIdsOf(t));
-  const neighborSets = tasks.map((t) => {
+  const flowSets = canonicalTasks.map((t) => flowIdsOf(t));
+  const neighborSets = canonicalTasks.map((t) => {
     const out = new Set<string>();
     for (const p of t.file_paths) {
       const adj = adjacency.get(p.replace(/\\/g, "/"));
@@ -183,21 +222,21 @@ export function buildTaskAffinityGraph(
   });
 
   const edges: TaskAffinityEdge[] = [];
-  for (let i = 0; i < tasks.length; i++) {
-    for (let j = i + 1; j < tasks.length; j++) {
+  for (let i = 0; i < canonicalTasks.length; i++) {
+    for (let j = i + 1; j < canonicalTasks.length; j++) {
       const kinds: TaskAffinityEdgeKind[] = [];
 
       const sharesFile = intersects(fileSets[i], fileSets[j]);
       if (sharesFile) {
         // Same file(s), different lens → a single agent could cover both lenses.
         kinds.push(
-          tasks[i].lens !== tasks[j].lens ? "cross_lens_same_file" : "shared_file",
+          canonicalTasks[i].lens !== canonicalTasks[j].lens ? "cross_lens_same_file" : "shared_file",
         );
       }
       if (flowSets[i].size > 0 && intersects(flowSets[i], flowSets[j])) {
         kinds.push("same_flow");
       }
-      if (tasks[i].unit_id === tasks[j].unit_id) kinds.push("same_unit");
+      if (canonicalTasks[i].unit_id === canonicalTasks[j].unit_id) kinds.push("same_unit");
       if (
         neighborSets[i].size > 0 &&
         (intersects(neighborSets[i], fileSets[j]) ||
@@ -218,15 +257,15 @@ export function buildTaskAffinityGraph(
         }
       }
       const reasons: string[] = [...kinds];
-      if (tasks[i].lens === tasks[j].lens) {
+      if (canonicalTasks[i].lens === canonicalTasks[j].lens) {
         weight = Math.min(1, weight + SAME_LENS_BONUS);
         reasons.push("same_lens");
       }
 
       const [from, to] =
-        tasks[i].task_id < tasks[j].task_id
-          ? [tasks[i].task_id, tasks[j].task_id]
-          : [tasks[j].task_id, tasks[i].task_id];
+        canonicalTasks[i].task_id < canonicalTasks[j].task_id
+          ? [canonicalTasks[i].task_id, canonicalTasks[j].task_id]
+          : [canonicalTasks[j].task_id, canonicalTasks[i].task_id];
       edges.push({
         from,
         to,
@@ -237,5 +276,9 @@ export function buildTaskAffinityGraph(
     }
   }
 
-  return { schema_version: "task-affinity-graph/v1", nodes, edges };
+  return canonicalizeTaskAffinityGraph({
+    schema_version: "task-affinity-graph/v1",
+    nodes,
+    edges,
+  });
 }

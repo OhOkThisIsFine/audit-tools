@@ -9,7 +9,6 @@ export type RunLedgerStatus = (typeof RUN_LEDGER_STATUSES)[number];
 /** One persisted supervisor run entry, including the terminal worker outcome. */
 export interface RunLedgerEntry {
   run_id: string;
-  provider: string;
   obligation_id: string | null;
   selected_executor: string | null;
   status: RunLedgerStatus;

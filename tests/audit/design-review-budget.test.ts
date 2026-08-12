@@ -3,7 +3,7 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { RiskItem } from "audit-tools/shared";
 import type { AuditUnit } from "../../src/audit/types.js";
 
-const { renderDesignReviewPrompt } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
+const { renderContractReviewPrompt } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
 
 /**
  * Slice out just the "Prioritised reading list" section so assertions about
@@ -45,7 +45,7 @@ function bundleWithRisk(n: number, { unitCount = n }: { unitCount?: number } = {
 
 test("renders top-N units by risk score (default budget)", () => {
   const bundle = bundleWithRisk(15);
-  const prompt = renderDesignReviewPrompt(bundle);
+  const prompt = renderContractReviewPrompt(bundle);
   // default = max(5, min(20, ceil(15/5))) = 5
   expect(prompt).toMatch(/Top 5 highest-risk unit\(s\) by risk score \(out of 15 total\):/);
   // The five highest-scoring units appear in the reading list; the sixth does not.
@@ -67,7 +67,7 @@ test("renders top-N units by risk score (default budget)", () => {
 
 test("respects max_units from options (lower)", () => {
   const bundle = bundleWithRisk(10);
-  const prompt = renderDesignReviewPrompt(bundle, { max_units: 3 });
+  const prompt = renderContractReviewPrompt(bundle, { max_units: 3 });
   expect(prompt).toMatch(/Top 3 highest-risk unit\(s\)/);
   const list = readingList(prompt);
   for (let i = 0; i < 3; i++) expect(list.includes(`unit-${i}`)).toBeTruthy();
@@ -76,7 +76,7 @@ test("respects max_units from options (lower)", () => {
 
 test("respects max_units from options (higher than available)", () => {
   const bundle = bundleWithRisk(10);
-  const prompt = renderDesignReviewPrompt(bundle, { max_units: 25 });
+  const prompt = renderContractReviewPrompt(bundle, { max_units: 25 });
   // Only 10 units exist; cannot exceed the available count.
   expect(prompt).toMatch(/Top 10 highest-risk unit\(s\) by risk score \(out of 10 total\):/);
   for (let i = 0; i < 10; i++) expect(prompt.includes(`unit-${i}`)).toBeTruthy();
@@ -85,19 +85,19 @@ test("respects max_units from options (higher than available)", () => {
 test("default budget scales and clamps with repo size", () => {
   // 50 units → ceil(50/5)=10, within [5,20] → 10
   const big = bundleWithRisk(50);
-  expect(renderDesignReviewPrompt(big)).toMatch(/Top 10 highest-risk unit\(s\)/);
+  expect(renderContractReviewPrompt(big)).toMatch(/Top 10 highest-risk unit\(s\)/);
 
   // 3 units → ceil(3/5)=1, clamped up to the minimum 5; only 3 risk items exist
   const small = bundleWithRisk(3);
-  expect(renderDesignReviewPrompt(small)).toMatch(/Top 3 highest-risk unit\(s\) by risk score \(out of 3 total\):/);
+  expect(renderContractReviewPrompt(small)).toMatch(/Top 3 highest-risk unit\(s\) by risk score \(out of 3 total\):/);
 
   // 200 units → ceil(200/5)=40, clamped down to the maximum 20
   const huge = bundleWithRisk(200);
-  expect(renderDesignReviewPrompt(huge)).toMatch(/Top 20 highest-risk unit\(s\)/);
+  expect(renderContractReviewPrompt(huge)).toMatch(/Top 20 highest-risk unit\(s\)/);
 });
 
 test("uses the orient-then-roam reading directive (not the old open-ended one)", () => {
-  const prompt = renderDesignReviewPrompt(bundleWithRisk(8));
+  const prompt = renderContractReviewPrompt(bundleWithRisk(8));
   expect(!prompt.includes(
       "Read the project source to understand what it does and how it works",
     ), "old open-ended instruction must be removed").toBeTruthy();
@@ -124,7 +124,7 @@ test("summarizeFlows — caps at 15 items and emits '... and N more' suffix", ()
     concerns: [`concern-${i}`],
   }));
   const bundle: ArtifactBundle = { critical_flows: { flows } };
-  const prompt = renderDesignReviewPrompt(bundle);
+  const prompt = renderContractReviewPrompt(bundle);
   const section = extractSection(prompt, "### Critical flows", "\n###");
 
   expect(section).toMatch(/20 critical flows:/);
@@ -141,7 +141,7 @@ test("summarizeSurfaces — caps at 20 items and emits '... and N more' suffix",
     entrypoint: `/api/${i}`,
   }));
   const bundle: ArtifactBundle = { surface_manifest: { surfaces } };
-  const prompt = renderDesignReviewPrompt(bundle);
+  const prompt = renderContractReviewPrompt(bundle);
   const section = extractSection(prompt, "### Externally reachable surfaces", "\n###");
 
   expect(section).toMatch(/25 surfaces:/);
@@ -166,7 +166,7 @@ test("formatDeterministicFindings — caps at 20 items and emits '... and N more
   const bundle: ArtifactBundle = {
     design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings },
   };
-  const prompt = renderDesignReviewPrompt(bundle);
+  const prompt = renderContractReviewPrompt(bundle);
   const section = extractSection(prompt, "### Deterministic structural findings", "\n##");
 
   expect(section).toMatch(/25 structural findings from deterministic analysis:/);
@@ -180,7 +180,7 @@ test("summarizeFlows — within cap shows all items without suffix", () => {
   const flows = Array.from({ length: 10 }, (_, i) => ({
     id: `flow-${i}`, name: `flow-${i}`, entrypoints: [], paths: [], concerns: [],
   }));
-  const prompt = renderDesignReviewPrompt({ critical_flows: { flows } });
+  const prompt = renderContractReviewPrompt({ critical_flows: { flows } });
   expect(prompt).toMatch(/10 critical flows:/);
   expect(!prompt.includes("... and"), "no truncation suffix expected when within cap").toBeTruthy();
 });
@@ -189,19 +189,19 @@ test("summarizeSurfaces — within cap shows all items without suffix", () => {
   const surfaces = Array.from({ length: 5 }, (_, i) => ({
     id: `s-${i}`, kind: "interface" as const, entrypoint: `/api/${i}`,
   }));
-  const prompt = renderDesignReviewPrompt({ surface_manifest: { surfaces } });
+  const prompt = renderContractReviewPrompt({ surface_manifest: { surfaces } });
   expect(prompt).toMatch(/5 surfaces:/);
   expect(!prompt.includes("... and"), "no truncation suffix expected when within cap").toBeTruthy();
 });
 
 // ── contract assessment ───────────────────────────────────────────────────────
 
-test("includes observational contract assessment guidance separate from conceptual critique", () => {
-  const prompt = renderDesignReviewPrompt(bundleWithRisk(8));
+test("includes observational contract assessment guidance without conceptual-critique mixing", () => {
+  const prompt = renderContractReviewPrompt(bundleWithRisk(8));
 
-  expect(prompt).toMatch(/### Contract assessment/);
-  expect(prompt).toMatch(/### Conceptual design critique/);
-  expect(prompt).toMatch(/inferred or existing project contracts/);
+  expect(prompt).toMatch(/## Contract assessment instructions/);
+  expect(prompt).not.toMatch(/Conceptual design critique/);
+  expect(prompt).toMatch(/infer existing contracts/);
   expect(prompt).toMatch(/invariants/);
   expect(prompt).toMatch(/trust boundaries/);
   expect(prompt).toMatch(/concrete counterexamples/);
@@ -225,14 +225,14 @@ test("falls back gracefully when risk data is absent", () => {
       ],
     },
   };
-  const prompt1 = renderDesignReviewPrompt(unitsOnly);
+  const prompt1 = renderContractReviewPrompt(unitsOnly);
   expect(prompt1).toMatch(/no risk scores available/);
   expect(prompt1.includes("u-a")).toBeTruthy();
   expect(prompt1.includes("u-b")).toBeTruthy();
 
   // Neither risk_register nor unit_manifest → orientation fallback string.
   const empty: ArtifactBundle = {};
-  const prompt2 = renderDesignReviewPrompt(empty);
+  const prompt2 = renderContractReviewPrompt(empty);
   expect(prompt2.includes(
       "No risk or unit data available; read the repository root files to orient yourself.",
     )).toBeTruthy();

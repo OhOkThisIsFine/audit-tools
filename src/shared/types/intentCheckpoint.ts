@@ -108,9 +108,8 @@ export const IntentCheckpointSchema = z
       .optional(),
     /**
      * Conceptual design-review depth, confirmed by the host during
-     * `confirm_intent`. Provider-neutral: it records *how much* conceptual review
-     * to do, never *which model* runs it (model choice is resolved JIT at dispatch
-     * against the active provider's discovered roster).
+     * `confirm_intent`. It records *how much* conceptual review to do, never how
+     * the host chooses to execute that work.
      * - `conceptual_depth: "shallow"` (default when omitted) — a single conceptual
      *   reviewer.
      * - `conceptual_depth: "deep"` — fan out `perspectives` independent reviewers

@@ -68,9 +68,9 @@ export const CharterProvenanceSchema = z
 export type CharterProvenance = z.infer<typeof CharterProvenanceSchema>;
 
 /**
- * A single charter. `purpose` MUST be stated in telos terms ("quota/dispatch exists
- * so N cooperating auditors extract max value from finite provider budgets"), never
- * mechanism ("it manages quota") — a charter that restates the code collapses the
+ * A single charter. `purpose` MUST be stated in telos terms ("the audit pipeline
+ * exists so maintainers can act on trustworthy findings"), never mechanism
+ * ("it builds a graph") — a charter that restates the code collapses the
  * delta against the impl to zero and the review can never find under-delivery.
  *
  * `nominated_alternative` + `nominated_cost` are the falsifiable-or-drop payload of a

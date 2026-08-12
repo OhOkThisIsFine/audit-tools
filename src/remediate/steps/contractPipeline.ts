@@ -33,16 +33,12 @@ import {
   type JudgeReport,
   type ImplementationDAG,
   type ObligationLedger,
-  type SessionConfig,
   type CounterexampleReport,
   type WorkBlock,
   type WorkBlockSeam,
+  projectApprovedFindings,
   captureStepBoundaryFriction,
-  HostModelRosterEntrySchema,
 } from "audit-tools/shared";
-import { z } from "zod";
-import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
-import { StateStore } from "../state/store.js";
 import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   CP_ARTIFACT_NAMES,
@@ -120,11 +116,9 @@ import {
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   validateFinalizedModuleSetPreserved,
-  deriveNodeModelTierFromNode,
 } from "../validation/contractPipeline.js";
 import type { Finding } from "audit-tools/shared";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
-import { scheduleWave, type WaveScheduleResult } from "./dispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import { loaderCommand } from "./prompts.js";
 import type { RemediationStep } from "./types.js";
@@ -609,13 +603,6 @@ export interface ContractPipelineStepOptions {
   artifactsDir: string;
   runId: string;
   sourcePaths?: string[];
-  /**
-   * Session config for the parallel per-module wave scheduler (DC-3). Optional:
-   * when omitted it is loaded from `<root>/session-config.json`, so the wave cap
-   * is derived from the SAME quota/host machinery (`scheduleWave`) implement
-   * dispatch uses. Threaded explicitly only so tests can inject it deterministically.
-   */
-  sessionConfig?: SessionConfig | null;
 }
 
 // ── Path-A seed ───────────────────────────────────────────────────────────────
@@ -648,98 +635,45 @@ export async function writePathASeedFromFindings(
   auditFindingsPath: string,
   auditFindings: unknown,
 ): Promise<void> {
+  // Contract-claiming input must pass the strict shared validator before even
+  // the idempotence shortcut. No seed/state/plan artifact may be derived from a
+  // partially parsed or permissively defaulted report.
+  const approved = projectApprovedFindings(auditFindings);
   const seedPath = pathASeedFilePath(artifactsDir);
   if (existsSync(seedPath)) return; // idempotent
 
-  const findings = isRecord(auditFindings) && Array.isArray(auditFindings.findings)
-    ? (auditFindings.findings as Array<Record<string, unknown>>)
-    : [];
+  const findings = [...approved.findings].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
 
   const affectedFilesSet = new Set<string>();
-  const findingsSummary: PathASeed["findings_summary"] = [];
-  for (const f of findings) {
-    if (typeof f.id === "string" && typeof f.title === "string") {
-      findingsSummary.push({
-        id: f.id,
-        title: f.title,
-        lens: typeof f.lens === "string" ? f.lens : "correctness",
-      });
-    }
-    if (Array.isArray(f.affected_files)) {
-      for (const af of f.affected_files as Array<Record<string, unknown>>) {
-        if (typeof af.path === "string") {
-          affectedFilesSet.add(af.path);
-        }
-      }
+  const findingsSummary: PathASeed["findings_summary"] = findings.map((finding) => ({
+    id: finding.id,
+    title: finding.title,
+    lens: finding.lens,
+  }));
+  for (const finding of findings) {
+    for (const affectedFile of finding.affected_files) {
+      affectedFilesSet.add(affectedFile.path);
     }
   }
 
-  const rawWorkBlocks =
-    isRecord(auditFindings) && Array.isArray(auditFindings.work_blocks)
-      ? (auditFindings.work_blocks as unknown[])
-      : [];
-  const workBlocks: WorkBlock[] = rawWorkBlocks
-    .filter(isRecord)
-    .filter((block) => typeof block.id === "string")
+  const workBlocks: WorkBlock[] = approved.workBlocks
     .map((block): WorkBlock => ({
-      id: block.id as string,
-      finding_ids: Array.isArray(block.finding_ids)
-        ? block.finding_ids.filter((id): id is string => typeof id === "string").sort()
-        : [],
-      unit_ids: Array.isArray(block.unit_ids)
-        ? block.unit_ids.filter((id): id is string => typeof id === "string").sort()
-        : [],
-      owned_files: Array.isArray(block.owned_files)
-        ? block.owned_files.filter((file): file is string => typeof file === "string").sort()
-        : [],
-      role: block.role === "coordination" ? "coordination" : "implementation",
-      max_severity:
-        block.max_severity === "critical" ||
-        block.max_severity === "high" ||
-        block.max_severity === "medium" ||
-        block.max_severity === "low" ||
-        block.max_severity === "info"
-          ? block.max_severity
-          : "medium",
-      rationale: typeof block.rationale === "string" ? block.rationale : "",
-      depends_on: Array.isArray(block.depends_on)
-        ? block.depends_on.filter((id): id is string => typeof id === "string").sort()
-        : [],
+      ...block,
+      finding_ids: [...block.finding_ids].sort(),
+      unit_ids: [...block.unit_ids].sort(),
+      owned_files: [...block.owned_files].sort(),
+      depends_on: [...block.depends_on].sort(),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
-  const rawSeams =
-    isRecord(auditFindings) && Array.isArray(auditFindings.work_block_seams)
-      ? (auditFindings.work_block_seams as unknown[])
-      : [];
-  const workBlockSeams: WorkBlockSeam[] = rawSeams
-    .filter(isRecord)
-    .filter(
-      (seam) =>
-        typeof seam.id === "string" &&
-        Array.isArray(seam.block_ids) &&
-        seam.block_ids.length === 2 &&
-        seam.block_ids.every((id) => typeof id === "string"),
-    )
-    .map((seam): WorkBlockSeam => {
-      const blockIds = seam.block_ids as [unknown, unknown];
-      return {
-      id: seam.id as string,
-      block_ids: [blockIds[0] as string, blockIds[1] as string],
-      kind:
-        seam.kind === "predicted_write_conflict" ||
-        seam.kind === "systemic_coordination"
-          ? seam.kind
-          : "shared_context",
-      shared_files: Array.isArray(seam.shared_files)
-        ? seam.shared_files.filter((file): file is string => typeof file === "string").sort()
-        : [],
-      shared_unit_ids: Array.isArray(seam.shared_unit_ids)
-        ? seam.shared_unit_ids.filter((id): id is string => typeof id === "string").sort()
-        : [],
-      requires_preparation: seam.requires_preparation === true,
-      rationale: typeof seam.rationale === "string" ? seam.rationale : "",
-    };
-    })
+  const workBlockSeams: WorkBlockSeam[] = approved.workBlockSeams
+    .map((seam): WorkBlockSeam => ({
+      ...seam,
+      block_ids: [...seam.block_ids] as [string, string],
+      shared_files: [...seam.shared_files].sort(),
+      shared_unit_ids: [...seam.shared_unit_ids].sort(),
+    }))
     .sort((a, b) => a.id.localeCompare(b.id));
 
   const seed: PathASeed = {
@@ -747,7 +681,7 @@ export async function writePathASeedFromFindings(
     audit_findings_path: auditFindingsPath,
     finding_count: findings.length,
     findings_summary: findingsSummary,
-    affected_files: [...affectedFilesSet],
+    affected_files: [...affectedFilesSet].sort(),
     work_blocks: workBlocks,
     work_block_seams: workBlockSeams,
     created_at: new Date().toISOString(),
@@ -1347,11 +1281,10 @@ export async function evaluatePromotedPlanCitationGrounding(
 // ── DC-3: parallel per-module contract drafting ───────────────────────────────
 //
 // `module_contract_drafting` (→ module_contracts) aggregates a `module_contracts[]`
-// array keyed by module name. DC-3 fans it out to ONE agent per module through the
-// shared wave scheduler (`scheduleWave`, the SAME quota/host machinery implement
-// dispatch uses), replacing the former single sequential agent — each agent reads
-// its own module's file scope, so no single agent owns both sides of a seam. Each
-// agent writes a per-module SHARD; the orchestrator merges all shards into the
+// array keyed by module name. DC-3 exposes one bounded host workload per module,
+// replacing the former single sequential workload — each agent reads its own
+// module's file scope, so no single agent owns both sides of a seam. Each agent
+// writes a per-module SHARD; the orchestrator merges all shards into the
 // aggregated artifact — byte-identical in shape to the single-agent output — and
 // guarantees the merge is COMPLETE (every decomposed module present) before
 // downstream derivation runs. A missing shard re-emits the wave (never a partial
@@ -1780,62 +1713,16 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
   const buildParallelModuleWaveStep = async (
     phase: ParallelModulePhase,
   ): Promise<RemediationStep> => {
-    // DC-3: fan the phase out to ONE agent per module, concurrency-capped by the
-    // shared wave scheduler (the same quota/host machinery implement dispatch
-    // uses). Each agent writes a per-module shard; the orchestrator merges the
-    // shards into the aggregated artifact on the next next-step (see the
-    // module-shard-merge intercept), guaranteeing completeness before any
+    // Fan the phase out to one bounded item per module. The host owns grouping,
+    // concurrency, and execution choices; this tool supplies only the complete
+    // coherent workload. Each item writes a per-module shard, and the next
+    // next-step merges every shard into the aggregated artifact before any
     // downstream derivation. A degenerate decomposition (zero or one module)
-    // has no parallelism to exploit — fall back to the single aggregated step.
+    // falls back to the single aggregated step.
     const modules = await readDecomposedModules(artifactsDir);
     if (modules.length <= 1) {
       return buildPhaseStep(phase);
     }
-
-    // Concurrency cap from the shared scheduler: session config is loaded from
-    // the same path decideNextStep uses, env + on-disk learned quota feed the
-    // same wave-sizing implement dispatch consumes. itemCount = module count.
-    // scheduleWave sizes concurrency from dispatch fields, so load the effective config
-    // through the single remediate loader (always the ambient descriptor — see there).
-    // d4 fix: also load persisted host capabilities (the multi-rank handshake) so
-    // the scheduler can size concurrency from the actual roster instead of degrading
-    // to a conservative single-pool when no explicit hostModels are passed.
-    const sessionConfig = await loadRemediateSessionConfig({
-      root,
-      override: options.sessionConfig,
-      artifactsFirst: false,
-    });
-    const stateStore = new StateStore(artifactsDir);
-    const state = await stateStore.loadState();
-    const persistedCaps = state?.host_capabilities;
-    // The persisted `models` field is `unknown` by design — validate before the
-    // scheduler reads it (a malformed persisted roster degrades to null, never
-    // a crash or an unchecked cast).
-    const persistedRoster = z
-      .array(HostModelRosterEntrySchema)
-      .safeParse(persistedCaps?.models);
-
-    const schedule: WaveScheduleResult = await scheduleWave({
-      sessionConfig: sessionConfig ?? null,
-      itemCount: modules.length,
-      env: process.env,
-      // d4 fix: pass the multi-rank roster from persisted host_capabilities
-      // so the scheduler can derive concurrency from the actual available ranks
-      hostMaxConcurrent: persistedCaps?.max_concurrent ?? undefined,
-      hostContextTokens: persistedCaps?.context_tokens ?? null,
-      hostOutputTokens: persistedCaps?.output_tokens ?? null,
-      hostModels: persistedRoster.success && persistedRoster.data.length > 0
-        ? persistedRoster.data
-        : null,
-      hostModelId: persistedCaps?.model_id ?? null,
-      // Genuinely sizing-only: the sole field read is `max_concurrent`, interpolated
-      // into the prompt as a fan-out cap. `capacity_pools` never reaches
-      // `buildDispatchQuota` from here, so no capability floor bands against this
-      // schedule and there is nothing for ranks to affect. Stated in writing because
-      // the field is required — an omission must never again pass for a decision.
-      capabilityRanks: null,
-    });
-    const maxConcurrent = schedule.max_concurrent;
 
     const inputArtifact = "module_decomposition";
     const inputPaths = (
@@ -1868,9 +1755,9 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
 
     const cwdNote = `\n> Set the shell/tool working directory to \`${root}\` before running any commands.\n`;
     const nextCommand = loaderCommand("next-step");
-    const prompt = `# Per-Module Contract Drafting — Parallel Wave (${modules.length} modules)
+    const prompt = `# Per-Module Contract Drafting (${modules.length} modules)
 
-This phase fans out to ONE sub-agent PER MODULE. Dispatch the ${modules.length} modules below as parallel sub-agents in waves of at most **${maxConcurrent}** concurrent agents (the quota/host concurrency cap). Each sub-agent reads only its module's file scope, then writes ONLY that module's contract shard — no agent owns both sides of a seam, and no agent writes the aggregated artifact.
+This phase publishes one bounded item per module. Complete all ${modules.length} items below; the host owns how they are grouped or executed. Each item reads only its module's file scope, then writes ONLY that module's contract shard — no item owns both sides of a seam, and no item writes the aggregated artifact.
 ${cwdNote}
 ## Shared Inputs (every sub-agent may read these)
 
@@ -3095,7 +2982,7 @@ const OBLIGATION_KIND_PRIORITY: ObligationKind[] = [
 
 function deriveObligationLensAndSeverity(kinds: ObligationKind[]): {
   lens: string;
-  severity: string;
+  severity: Finding["severity"];
 } {
   if (kinds.length === 0) {
     return { lens: "correctness", severity: "medium" };
@@ -3116,7 +3003,7 @@ function deriveObligationLensAndSeverity(kinds: ObligationKind[]): {
     structural: "architecture",
     test: "tests",
   };
-  const severityMap: Record<ObligationKind, string> = {
+  const severityMap: Record<ObligationKind, Finding["severity"]> = {
     invariant: "high",
     behavioral: "medium",
     structural: "low",
@@ -3149,12 +3036,23 @@ export async function promoteImplementationDagToExtractedPlan(
       status?: string;
       /** Declared output paths (write scope); preferred over files_likely_touched for affected_files. */
       output_files?: string[];
+      /** Canonical audit finding ids implemented by this DAG node. */
+      source_finding_ids?: string[];
       files_likely_touched?: string[];
       preconditions?: string[];
       expected_changes?: string;
       depends_on?: string[];
     }>;
   };
+
+  const pathASeed = await readOptionalJsonFile<PathASeed>(
+    pathASeedFilePath(artifactsDir),
+  );
+  const approvedSource = pathASeed
+    ? projectApprovedFindings(
+        await readOptionalJsonFile<unknown>(pathASeed.audit_findings_path),
+      )
+    : undefined;
 
   // Load obligation_ledger for lens/severity derivation (graceful: may be absent).
   const ledgerPayload = envelopePayload(
@@ -3199,8 +3097,66 @@ export async function promoteImplementationDagToExtractedPlan(
   // nothing for — see buildNodeWriteScopeResolver.
   const { resolve: deriveNodeFiles } = await buildNodeWriteScopeResolver(artifactsDir);
 
-  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
-  const findings = nodes.map((node, index) => {
+  const nodes = (Array.isArray(dag?.nodes) ? [...dag.nodes] : []).sort((left, right) =>
+    String(left.id).localeCompare(String(right.id)),
+  );
+
+  // Path-A promotion is an identity-preserving projection. DAG node ids describe
+  // implementation tasks; they may not replace the canonical auditor finding
+  // ids or split/merge the canonical coherence components.
+  const canonicalItemsByNodeId = new Map<string, string[]>();
+  if (
+    approvedSource &&
+    nodes.some((node) => Array.isArray(node.source_finding_ids))
+  ) {
+    const signature = (ids: readonly string[]): string =>
+      JSON.stringify(
+        [...ids].sort((left, right) => left.localeCompare(right)),
+      );
+    const canonicalGroups = new Map(
+      approvedSource.workBlocks.map((block) => [
+        signature(block.finding_ids),
+        [...block.finding_ids].sort((left, right) => left.localeCompare(right)),
+      ]),
+    );
+    const usedGroups = new Set<string>();
+    for (const [index, node] of nodes.entries()) {
+      const nodeId = ensureNodeId(node.id, index);
+      const sourceIds = node.source_finding_ids;
+      if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
+        throw new Error(
+          `implementation_dag node "${nodeId}" must declare source_finding_ids for Path-A promotion.`,
+        );
+      }
+      const uniqueIds = [...new Set(sourceIds)];
+      if (uniqueIds.length !== sourceIds.length) {
+        throw new Error(
+          `implementation_dag node "${nodeId}" repeats a source_finding_ids member.`,
+        );
+      }
+      const groupSignature = signature(uniqueIds);
+      const canonicalGroup = canonicalGroups.get(groupSignature);
+      if (!canonicalGroup) {
+        throw new Error(
+          `implementation_dag node "${nodeId}" source_finding_ids do not match a canonical audit work block.`,
+        );
+      }
+      if (usedGroups.has(groupSignature)) {
+        throw new Error(
+          `implementation_dag node "${nodeId}" duplicates a canonical audit work block.`,
+        );
+      }
+      usedGroups.add(groupSignature);
+      canonicalItemsByNodeId.set(nodeId, canonicalGroup);
+    }
+    if (usedGroups.size !== canonicalGroups.size) {
+      throw new Error(
+        "implementation_dag source_finding_ids do not cover every canonical audit work block exactly once.",
+      );
+    }
+  }
+
+  let findings: Finding[] = nodes.map((node, index) => {
     const id = ensureNodeId(node.id, index);
     const contractObligations = [...new Set(node.satisfies_obligations ?? [])];
     const verificationObligations = [
@@ -3243,14 +3199,45 @@ export async function promoteImplementationDagToExtractedPlan(
       contract_obligation_ids: contractObligations,
       verification_obligation_ids: verificationObligations,
       addresses_counterexamples: addressedCounterexamples,
-      // Relative model rank for this node (small | standard | deep) derived from
-      // complexity — never a model name (no-hardcoded-models invariant).
-      model_tier: deriveNodeModelTierFromNode(node),
       targeted_commands: node.targeted_commands ?? [],
       preconditions: node.preconditions ?? [],
       expected_changes: node.expected_changes ?? "",
     };
   });
+
+  if (approvedSource && canonicalItemsByNodeId.size > 0) {
+    const nodeByFindingId = new Map<string, (typeof nodes)[number]>();
+    for (const [index, node] of nodes.entries()) {
+      const nodeId = ensureNodeId(node.id, index);
+      for (const findingId of canonicalItemsByNodeId.get(nodeId) ?? []) {
+        nodeByFindingId.set(findingId, node);
+      }
+    }
+    findings = [...approvedSource.findings]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((finding) => {
+        const node = nodeByFindingId.get(finding.id)!;
+        const contractObligations = [...new Set(node.satisfies_obligations ?? [])];
+        const verificationObligations = [
+          ...new Set(node.verification_obligation_ids ?? []),
+        ];
+        return {
+          ...finding,
+          affected_files: [...finding.affected_files].sort((left, right) =>
+            left.path.localeCompare(right.path),
+          ),
+          contract_goal_id: dag?.goal_id,
+          contract_obligation_ids: contractObligations,
+          verification_obligation_ids: verificationObligations,
+          addresses_counterexamples: [
+            ...new Set(node.addresses_counterexamples ?? []),
+          ],
+          targeted_commands: [...(node.targeted_commands ?? [])],
+          preconditions: [...(node.preconditions ?? [])],
+          expected_changes: node.expected_changes ?? "",
+        };
+      });
+  }
 
   // finding_id → { obligation_ids, node_ids } trace. Each promoted finding maps
   // 1:1 to a DAG node, so its node_ids are itself plus every node it depends on
@@ -3272,7 +3259,13 @@ export async function promoteImplementationDagToExtractedPlan(
     ];
     const dependsOn = (node.depends_on ?? []).filter((dep) => nodeIdSet.has(dep));
     const nodeIds = [...new Set([id, ...dependsOn])];
-    traceability[id] = { obligation_ids: obligationIds, node_ids: nodeIds };
+    const findingIds = canonicalItemsByNodeId.get(id) ?? [id];
+    for (const findingId of findingIds) {
+      traceability[findingId] = {
+        obligation_ids: obligationIds,
+        node_ids: nodeIds,
+      };
+    }
   }
 
   const blocks = nodes.map((node, index) => {
@@ -3299,7 +3292,7 @@ export async function promoteImplementationDagToExtractedPlan(
       : undefined;
     return {
       block_id: toBlockId(nodeId),
-      items: [nodeId],
+      items: canonicalItemsByNodeId.get(nodeId) ?? [nodeId],
       // INV-remediate-pipeline-02: a block with prerequisites is never
       // wave-dispatched as independent — parallel_safe derives from depends_on.
       parallel_safe: deps.length === 0,

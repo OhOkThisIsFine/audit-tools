@@ -80,7 +80,6 @@ describe("SeamNegotiationRecord round-trips through JSON", () => {
           seam_id: "seam-001",
           node_id: "N-001",
           role: "author",
-          agent_hint: "claude-code",
           handoff_artifact: ".audit-tools/remediation/seams/N-001-author.json",
           read_artifacts: ["packages/shared/src/types/contractPipeline.ts"],
           write_artifacts: ["packages/shared/src/types/contractPipeline.ts"],
@@ -107,9 +106,7 @@ describe("SeamNegotiationRecord round-trips through JSON", () => {
     expect(deserialized.seams.length).toBe(2);
     expect(deserialized.seams[0].seam_id).toBe("seam-001");
     expect(deserialized.seams[0].role).toBe("author");
-    expect(deserialized.seams[0].agent_hint).toBe("claude-code");
     expect(deserialized.seams[1].role).toBe("reviewer");
-    expect(deserialized.seams[1].agent_hint).toBe(undefined);
   });
 
   it("contract_version equals CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION constant", () => {

@@ -75,16 +75,19 @@ async function withTempRepo<T>(
   }
 }
 
-test("audit-code advance-audit fails loudly on malformed session-config.json", async () => {
+test("audit-code next-step emits a blocked step for malformed canonical session intent", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(join(artifactsDir, "session-config.json"), "{not-json\n");
 
-    const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
+    const result = await runNode(wrapperPath, ["next-step"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
-    expect(result.code).not.toBe(0);
+    // A controlled blocker is a successfully emitted step contract, not an
+    // abnormal command failure. Fatal throws still exit nonzero through the
+    // shared blocked-step backstop.
+    expect(result.code).toBe(0);
     expect(combined).toMatch(/session-config\.json/i);
     expect(combined).toMatch(/json|parse|invalid/i);
     const handoff = JSON.parse(
@@ -95,27 +98,27 @@ test("audit-code advance-audit fails loudly on malformed session-config.json", a
   });
 });
 
-test("audit-code advance-audit fails loudly on invalid session-config fields", async () => {
+test("audit-code next-step emits a blocked step for invalid session-intent fields", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "definitely-not-a-provider" }, null, 2),
+      JSON.stringify({ review_mode: "sometimes" }, null, 2),
     );
 
-    const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
+    const result = await runNode(wrapperPath, ["next-step"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
-    expect(result.code).not.toBe(0);
+    expect(result.code).toBe(0);
     expect(combined).toMatch(/session-config\.json/i);
-    expect(combined).toMatch(/provider/i);
-    expect(combined).toMatch(/unsupported provider/i);
+    expect(combined).toMatch(/review_mode/i);
+    expect(combined).toMatch(/attended|autonomous/i);
     const handoff = JSON.parse(
       await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"),
     );
     expect(handoff.status).toBe("blocked");
-    expect(handoff.summary).toMatch(/provider/i);
+    expect(handoff.summary).toMatch(/review_mode/i);
   });
 });
 
@@ -138,63 +141,41 @@ test("validate fails loudly on corrupted artifact json", async () => {
   });
 });
 
-test("loadSessionConfig fails closed on an invalid config field (no permissive default)", async () => {
+test("loadSessionIntent fails closed on an invalid config field (no permissive default)", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
-    // A tampered/invalid config: dangerously_skip_permissions must be a boolean.
-    // Fail-closed means loadSessionConfig REJECTS rather than degrading to {}.
+    // A transport-owned field is outside the strict canonical intent contract.
+    // Fail-closed means loadSessionIntent rejects rather than dropping it.
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
-        { claude_code: { dangerously_skip_permissions: "yes" } },
+        { command: "external-runner" },
         null,
         2,
       ),
     );
 
-    const { loadSessionConfig } = await import(
-      "../../src/audit/supervisor/sessionConfig.js"
-    );
-    await expect(loadSessionConfig(artifactsDir)).rejects.toThrow(
+    const { loadSessionIntent } = await import("../../src/shared/sessionConfig.js");
+    await expect(loadSessionIntent(root)).rejects.toThrow(
       /session-config\.json/i,
     );
   });
 });
 
-test("dispatch + semantic-review load session-config fail-closed (no swallow-to-empty)", async () => {
-  // Guard: the fail-open `.catch(() => ({} as SessionConfig))` that silently
-  // degraded a tampered/invalid session-config to an empty (permissive) default
-  // must never be reintroduced at the dispatch / semantic-review seams. Both must
-  // let loadSessionConfig's validation error propagate, matching every sibling
-  // caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/quotaCommand).
-  const sources = await Promise.all(
-    ["dispatch.ts", "semanticReviewStep.ts"].map((name) =>
-      readFile(join(repoRoot, "src", "audit", "cli", name), "utf8"),
-    ),
-  );
-  for (const source of sources) {
-    expect(source).toContain("loadSessionConfig(artifactsDir)");
-    expect(source).not.toMatch(/catch\(\s*\(\)\s*=>\s*\(\{\}\s*as SessionConfig\)\s*\)/);
-  }
-});
-
-test("loadSessionConfig default leaves provider unspecified for auto-resolution", async () => {
+test("loadSessionIntent returns canonical defaults without creating a config file", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
-    const { loadSessionConfig } = await import(
-      "../../src/audit/supervisor/sessionConfig.js"
-    );
-    const config: Awaited<ReturnType<typeof loadSessionConfig>> & {
-      provider?: unknown;
-    } = await loadSessionConfig(artifactsDir);
-    const persisted = JSON.parse(
-      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
-    );
-
-    expect(config.provider).toBeUndefined();
-    expect(persisted.provider).toBeUndefined();
+    const { loadSessionIntent } = await import("../../src/shared/sessionConfig.js");
+    const loaded = await loadSessionIntent(root);
+    expect(loaded).toEqual({
+      status: "not_configured",
+      intent: { review_mode: "attended", observability: "standard" },
+    });
+    await expect(
+      readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

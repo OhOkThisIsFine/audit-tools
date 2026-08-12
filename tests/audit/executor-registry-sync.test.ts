@@ -36,9 +36,8 @@ test("every engine-dispatched PRIORITY obligation has an entry in the CLI fold's
 test("isHostDelegationExecutor recognizes the registered host-delegation executors", () => {
   expect(isHostDelegationExecutor("design_review_contract")).toBe(true);
   expect(isHostDelegationExecutor("design_review_conceptual")).toBe(true);
-  expect(isHostDelegationExecutor("agent")).toBe(true);
+  expect(isHostDelegationExecutor("semantic_review_executor")).toBe(true);
   expect(isHostDelegationExecutor("intent_checkpoint_executor")).toBe(true);
-  expect(isHostDelegationExecutor("provider_confirmation_executor")).toBe(false);
   expect(isHostDelegationExecutor("synthesis_narrative_executor")).toBe(true);
   expect(isHostDelegationExecutor("intake_executor")).toBe(false);
   expect(isHostDelegationExecutor("synthesis_executor")).toBe(false);
@@ -57,10 +56,9 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
     "systemic_challenge_executor",
     "design_review_contract",
     "design_review_conceptual",
-    "agent",
     "intent_checkpoint_executor",
     "intent_equivalence_executor",
-    "rolling_dispatch_executor",
+    "semantic_review_executor",
     "synthesis_narrative_executor",
   ]);
   for (const entry of EXECUTOR_REGISTRY) {
@@ -73,18 +71,19 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   }
   // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
-  expect(hostEntries.map((e) => e.id).sort()).toEqual(["agent", "charter_clarification_executor", "charter_delta_executor", "charter_extraction_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "rolling_dispatch_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
+  expect(hostEntries.map((e) => e.id).sort()).toEqual(["charter_clarification_executor", "charter_delta_executor", "charter_extraction_executor", "critical_flow_fallback_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "intent_equivalence_executor", "semantic_review_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
 });
 
-test("every registry executor with a PRIORITY obligation has a runner in EXECUTOR_RUNNERS (host-delegation dispatch executors excepted)", () => {
+test("every registry executor with a PRIORITY obligation has the expected runner ownership", () => {
   const prioritySet = new Set(PRIORITY);
-  // agent + rolling_dispatch_executor are host-delegation *dispatch* points:
-  // routed through host delegation before advanceAudit, they intentionally have
-  // NO deterministic runner and produce a no-progress handoff (the "no runner"
-  // branch in advanceAudit) if dispatched directly. EXECUTOR_RUNNERS is now the
-  // single source of dispatch — this replaces the old "explicit case in the
-  // advance.ts switch" invariant (the switch is gone).
-  const HOST_DELEGATED_DISPATCH = new Set(["agent", "rolling_dispatch_executor"]);
+  // These host-owned steps are emitted and consumed by the conversation fold;
+  // they must never have deterministic fallback runners.
+  const HOST_OWNED_WITHOUT_RUNNER = new Set([
+    "design_review_contract",
+    "design_review_conceptual",
+    "intent_checkpoint_executor",
+    "semantic_review_executor",
+  ]);
 
   for (const entry of EXECUTOR_REGISTRY) {
     const hasPriorityObligation = entry.obligation_ids.some((id) =>
@@ -93,8 +92,8 @@ test("every registry executor with a PRIORITY obligation has a runner in EXECUTO
     if (!hasPriorityObligation) continue;
 
     const hasRunner = Object.hasOwn(EXECUTOR_RUNNERS, entry.id);
-    if (HOST_DELEGATED_DISPATCH.has(entry.id)) {
-      expect(!hasRunner, `host-delegation dispatch executor "${entry.id}" must NOT have a deterministic runner in EXECUTOR_RUNNERS`).toBeTruthy();
+    if (HOST_OWNED_WITHOUT_RUNNER.has(entry.id)) {
+      expect(!hasRunner, `host-owned executor "${entry.id}" must NOT have a deterministic runner in EXECUTOR_RUNNERS`).toBeTruthy();
     } else {
       expect(hasRunner, `EXECUTOR_REGISTRY entry "${entry.id}" has PRIORITY obligation(s) [${entry.obligation_ids.filter((id) => prioritySet.has(id)).join(", ")}] but no runner in EXECUTOR_RUNNERS — advanceAudit could not dispatch it`).toBeTruthy();
     }

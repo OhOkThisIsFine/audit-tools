@@ -8,7 +8,7 @@ const {
   shellQuote,
   platformCommand,
   runTracked,
-  stripClaudeCodeEnv,
+  stripAuditToolsControlEnv,
   renderPromptCommand,
   toPromptPathToken,
   coerceJsonObjectArg,
@@ -153,71 +153,32 @@ test("runTracked empty-argv early-return path includes duration_ms of 0", () => 
   expect(result.cwd).toBe(undefined);
 });
 
-// ── stripClaudeCodeEnv unit tests ─────────────────────────────────────────────
+// ── audit-tools control-env scrubbing ────────────────────────────────────────
 
-test("stripClaudeCodeEnv removes CLAUDECODE and CLAUDE_CODE* keys", () => {
+test("stripAuditToolsControlEnv removes only the wrapper caller-cwd stamp", () => {
   const input = {
     PATH: "/usr/bin",
-    CLAUDECODE: "1",
-    CLAUDE_CODE_ENTRYPOINT: "cli",
-    CLAUDE_CODE_OTHER: "x",
-    // CLAUDE_CODEX starts with CLAUDE_CODE so it is also stripped
-    CLAUDE_CODEX: "stripped",
-    // Keys that do NOT start with CLAUDE_CODE and are not CLAUDECODE are kept
-    OTHER_CLAUDE: "kept",
-    CLAUDECODEFOO: "kept",
+    AUDIT_TOOLS_CALLER_CWD: "C:/driver",
+    HOST_MARKER: "preserved",
   };
-  const result = stripClaudeCodeEnv(input);
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDECODE"), "CLAUDECODE should be stripped").toBeTruthy();
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_ENTRYPOINT"), "CLAUDE_CODE_ENTRYPOINT should be stripped").toBeTruthy();
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_OTHER"), "CLAUDE_CODE_OTHER should be stripped").toBeTruthy();
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODEX"), "CLAUDE_CODEX (starts with CLAUDE_CODE) should be stripped").toBeTruthy();
+  const result = stripAuditToolsControlEnv(input);
+  expect(result.AUDIT_TOOLS_CALLER_CWD).toBeUndefined();
   expect(result.PATH).toBe("/usr/bin");
-  expect(result.OTHER_CLAUDE).toBe("kept");
-  // CLAUDECODEFOO does not equal "CLAUDECODE" and does not start with "CLAUDE_CODE" so it is kept
-  expect(result.CLAUDECODEFOO).toBe("kept");
+  expect(result.HOST_MARKER).toBe("preserved");
 });
 
-test("stripClaudeCodeEnv does not mutate the input object", () => {
-  const input = { CLAUDECODE: "1", PATH: "/usr/bin" };
+test("stripAuditToolsControlEnv does not mutate the input object", () => {
+  const input = { AUDIT_TOOLS_CALLER_CWD: "C:/driver", PATH: "/usr/bin" };
   const copy = { ...input };
-  stripClaudeCodeEnv(input);
+  stripAuditToolsControlEnv(input);
   expect(input).toEqual(copy);
 });
 
-test("stripClaudeCodeEnv with no argument strips from process.env", () => {
-  const result = stripClaudeCodeEnv();
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDECODE"), "should strip CLAUDECODE from process.env").toBeTruthy();
-  expect(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_ENTRYPOINT"), "should strip CLAUDE_CODE_ENTRYPOINT from process.env").toBeTruthy();
-});
-
-// ── runTracked env-strip integration (real child process) ────────────────────
-
-test("runTracked child sees neither CLAUDECODE nor CLAUDE_CODE* even when parent env has them", () => {
-  // Use node -e to print env keys; detect which env vars are passed through.
-  // We inject CLAUDECODE and a CLAUDE_CODE_ key into options.env and verify
-  // the child doesn't receive them.
-  const script = [
-    "const keys = Object.keys(process.env);",
-    "const found = keys.filter(k => k === 'CLAUDECODE' || /^CLAUDE_CODE/.test(k));",
-    "process.stdout.write(JSON.stringify(found));",
-  ].join(" ");
-
-  // Test 1: explicit env with CLAUDECODE injected
-  const explicitEnv = {
-    ...process.env,
-    CLAUDECODE: "1",
-    CLAUDE_CODE_TEST_KEY: "should-not-appear",
-  };
-  const result1 = runTracked(["node", "-e", script], { env: explicitEnv });
-  expect(result1.status, `node exited non-zero: ${result1.stderr}`).toBe(0);
-  const found1 = JSON.parse(result1.stdout);
-  expect(found1, `child saw CLAUDE* keys with explicit env: ${JSON.stringify(found1)}`).toEqual([]);
-
-  // Test 2: no explicit env (inherits process.env) — CLAUDECODE is unset in this
-  // test process (runner must unset it), so result should also be empty.
-  const result2 = runTracked(["node", "-e", script]);
-  expect(result2.status, `node exited non-zero: ${result2.stderr}`).toBe(0);
-  const found2 = JSON.parse(result2.stdout);
-  expect(found2, `child saw CLAUDE* keys with inherited env: ${JSON.stringify(found2)}`).toEqual([]);
+test("runTracked child does not inherit the wrapper caller-cwd stamp", () => {
+  const script = "process.stdout.write(String(process.env.AUDIT_TOOLS_CALLER_CWD))";
+  const result = runTracked(["node", "-e", script], {
+    env: { ...process.env, AUDIT_TOOLS_CALLER_CWD: "C:/driver" },
+  });
+  expect(result.status, `node exited non-zero: ${result.stderr}`).toBe(0);
+  expect(result.stdout).toBe("undefined");
 });

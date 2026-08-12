@@ -1,0 +1,37 @@
+{
+  "entries": [
+    {
+      "path": "src/remediate/phases/plan.ts",
+      "sha256": "ce53db80173e775a19aded1b67dbfdab6f97fe92d3d7e2be6bb1b76dde0ed9f4"
+    },
+    {
+      "path": "src/remediate/state/types.ts",
+      "sha256": "df30420e331325f12213ba66951e35fd2cda1650fc9c013cd2db2dbb012614c0"
+    },
+    {
+      "path": "src/remediate/steps/contractPipeline.ts",
+      "sha256": "bb79d6daef296d46d338df2bd58dd29ce1275ce9dcc6d7cf5a4fe69d57323cf9"
+    },
+    {
+      "path": "src/remediate/utils/fileIntegrity.ts",
+      "sha256": "12ed84f1bb49aa5ba5eae17c869e72fa5cad2e80bde5db95c4022a611ce4ce25"
+    },
+    {
+      "path": "src/shared/index.ts",
+      "sha256": "041c589380ade82977b7e1da9ac38c49fd51a5886028bf32bd57604e93ce02ab"
+    },
+    {
+      "path": "src/shared/types/contractPipeline.ts",
+      "sha256": "1bf072b7a31ac26c5080c29d1fed747bcc207cada45740a0f5fbf788b0b86156"
+    },
+    {
+      "path": "src/shared/types/finding.ts",
+      "sha256": "a0173f8cc326a8f094f707f9a34b50134de674d4690a44d1d4761a1243ec5d8c"
+    },
+    {
+      "path": "src/shared/validation/findingsReport.ts",
+      "sha256": "d5534748e11fcccab87e42389c394681629cfbffc480303b3d03a25d81932c3f"
+    }
+  ],
+  "tree_sha256": "a51d43f7ae149f9bae0ffb8127af99ff58418275b505ae277999e6f73e2a5c00"
+}

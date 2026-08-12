@@ -1,0 +1,117 @@
+{
+  "command": {
+    "argv": [
+      "npx",
+      "vitest",
+      "run",
+      "tests/shared/session-intent.test.ts"
+    ],
+    "cwd": ".",
+    "normalized_environment": {
+      "CI": "1",
+      "NO_COLOR": "1",
+      "TZ": "UTC"
+    }
+  },
+  "contract_version": "zero-adapter-green-companion/v1",
+  "exit_code": 0,
+  "module_id": "canonical-session-intent",
+  "output_sha256": "6cf60a99204f79a2ef005b1f86b9a77870c23305e6bf8d30adfc32a1c7d4ef24",
+  "post_edit_production_scope": {
+    "entries": [
+      {
+        "path": "src/audit/cli/advanceAuditCommand.ts",
+        "sha256": "5e1cd6c75ca66333c379922b57a78116fe060016113a62b733971925d5cc8b0a"
+      },
+      {
+        "path": "src/audit/cli/dispatch.ts",
+        "sha256": "dc35e181e5dce2510ae282f2537f0a4215808f21b1c61e13ad178fc9af26549b"
+      },
+      {
+        "path": "src/audit/cli/forceSynthesisCommand.ts",
+        "sha256": "763e7994b8392cd544a901b767bb7adbb0955e689386e60681035864ad35225a"
+      },
+      {
+        "path": "src/audit/cli/nextStepCommand.ts",
+        "sha256": "0432b303d29f7b9069baf0de15d68a796c851186594c6be9a445ca77fc067461"
+      },
+      {
+        "path": "src/audit/cli/prepareDispatchCommand.ts",
+        "sha256": "2660e236f51e3c00f7c65ab303523c536c86c0cba0ac9cf2f0070479cb871ccb"
+      },
+      {
+        "path": "src/audit/cli/semanticReviewStep.ts",
+        "sha256": "c4163054ac36a95ae0216bcf64271dccd5d1da1437a7d5c32959366746cb4418"
+      },
+      {
+        "path": "src/audit/cli/validateCommand.ts",
+        "sha256": "ce542d2584953eec2511f9050882b8f3760541d11ae0fa981caeb6f31b941fd6"
+      },
+      {
+        "path": "src/audit/providers/index.ts",
+        "sha256": "782c2999d1e0fa174086d156064cde5a179a41ac652c49435d03dea528224ea7"
+      },
+      {
+        "path": "src/audit/supervisor/operatorHandoff.ts",
+        "sha256": "5d9e3394b997d2a83ba019a10423447f0ff10ebf03855c4d1ab88dc9cf326934"
+      },
+      {
+        "path": "src/audit/supervisor/sessionConfig.ts",
+        "sha256": "5d56df6b907614e60d35d108df14d57e83ac3221d13fd6f642d54bd1379177af"
+      },
+      {
+        "path": "src/remediate/phases/closeVerifyAnalyzerLeads.ts",
+        "sha256": "a3d90940310fa98ad8c9afed7d9da53ba8887770daea18ede36d1bcd3adb474f"
+      },
+      {
+        "path": "src/remediate/phases/plan.ts",
+        "sha256": "ce53db80173e775a19aded1b67dbfdab6f97fe92d3d7e2be6bb1b76dde0ed9f4"
+      },
+      {
+        "path": "src/remediate/providers/index.ts",
+        "sha256": "889dacadd375d0ee78c812a1e87634d3f38aecee9a2225ee8741cba2878fc552"
+      },
+      {
+        "path": "src/remediate/steps/contractPipeline.ts",
+        "sha256": "2847f93d984fccff70d3a0419b9f60cab4a4ef4a4a3b96d23964669bfa3854b5"
+      },
+      {
+        "path": "src/remediate/steps/nextStep.ts",
+        "sha256": "7e3734a92ea5d8089ce55c2b73ee1d3a32f83c1c43f8d0efebc9d64c1340cd73"
+      },
+      {
+        "path": "src/remediate/steps/sessionConfigLoad.ts",
+        "sha256": "c67bca3e4b3460140e32190f4963523562851156e7e10930dd7069cc4c0f89d6"
+      },
+      {
+        "path": "src/shared/analyzerPolicy.ts",
+        "sha256": "32495c874e922a7958edb5a31a8b053adc64da943b93eec73eb6b6978223a0e2"
+      },
+      {
+        "path": "src/shared/index.ts",
+        "sha256": "b0254f3e5c8481204b4aa3b28b8c42ba64714ed8f8d14600b5ee4a69ac40a85e"
+      },
+      {
+        "path": "src/shared/io/json.ts",
+        "sha256": "818b1797fdb6e06116c409c81330508b4743a0c650cd6c8a93fed1b05512ef6a"
+      },
+      {
+        "path": "src/shared/sessionConfig.ts",
+        "sha256": "7eee146c9e56c57b6ebedc68197cbdd19ff4943e04d26f94fbd6e4755e7b0e7d"
+      },
+      {
+        "path": "src/shared/types/sessionConfig.ts",
+        "sha256": "c2b06e39e102d77bd8b773ea824dbf405667fbbd2985cb9e3aff2ac29e3d9982"
+      },
+      {
+        "path": "src/shared/validation/sessionConfig.ts",
+        "sha256": "4a4cee5a93967335c1a8c141d1fbf1fe2a635697ad430ea3fe390e2e30497868"
+      }
+    ],
+    "tree_sha256": "8f24254592f02d497fcc3bd601b6054248721c5fa5353ff7503645e65cabfc97"
+  },
+  "record_sha256": "0c812cc9038be84b911d3611b23bbb313606a9639f2834c8213a32c56d4105ce",
+  "red_record_sha256": "f2332def0ca7e9f93251a0aa61e6cc8859e6d93038065eec507a14a9335ef1f4",
+  "test_closure_sha256": "6d09b968a77b7aa560ccd44ed01ba4711bd1c1f4c5ca19fe2e1d72e6e9f16ef1",
+  "test_id": "canonical-session-intent-red-green-v1"
+}

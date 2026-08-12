@@ -6,7 +6,10 @@ import {
   AuditFindingsReportSchema,
   type AuditFindingsReport,
   type Finding,
+  type WorkBlock,
+  type WorkBlockSeam,
 } from "../types/finding.js";
+import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { severityRank } from "../types/lens.js";
 import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
@@ -23,6 +26,9 @@ export interface ApprovedFindingDisposition {
 
 export interface ApprovedFindingsProjection {
   findings: Finding[];
+  coherenceTrace: ContentCoherenceTrace;
+  workBlocks: WorkBlock[];
+  workBlockSeams: WorkBlockSeam[];
   dispositionById: Map<string, ApprovedFindingDisposition>;
 }
 
@@ -328,7 +334,13 @@ function buildProjection(
       themeId: null,
     });
   }
-  return { findings: report.findings, dispositionById };
+  return {
+    findings: report.findings,
+    coherenceTrace: report.coherence_trace,
+    workBlocks: report.work_blocks,
+    workBlockSeams: report.work_block_seams,
+    dispositionById,
+  };
 }
 
 function inspectAuditFindingsReport(value: unknown, path = ""): Inspection {
@@ -395,6 +407,197 @@ export function projectApprovedFindings(value: unknown): ApprovedFindingsProject
     throw new TypeError(`Invalid AuditFindingsReport: ${detail}`);
   }
   return inspection.projection;
+}
+
+function projectedBreakdown(
+  original: Readonly<Record<string, number>>,
+  values: readonly string[],
+): Record<string, number> {
+  const projected = Object.fromEntries(
+    Object.keys(original).map((key) => [key, 0]),
+  ) as Record<string, number>;
+  for (const value of values) {
+    projected[value] = (projected[value] ?? 0) + 1;
+  }
+  return projected;
+}
+
+function stableUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+}
+
+/**
+ * Project a validated audit report onto an approved finding subset without
+ * recomputing its canonical content-coherence membership.
+ *
+ * The original report is validated before any projection is attempted. Each
+ * surviving coherence component is the original component with rejected ids
+ * removed; empty components (and their corresponding work blocks) disappear.
+ * This preserves the auditor's membership decision while ensuring no rejected
+ * finding can leak back through trace, block, seam, theme, or summary metadata.
+ * The finished projection is validated again before it is returned.
+ */
+export function projectAuditFindingsReportSubset(
+  value: unknown,
+  selectedFindings: readonly Finding[],
+): AuditFindingsReport {
+  // Validate fail-closed before inspecting or copying any report fields.
+  const originalProjection = projectApprovedFindings(value);
+  const report = AuditFindingsReportSchema.parse(value);
+  const originalIds = new Set(
+    originalProjection.findings.map((finding) => finding.id),
+  );
+  const selectedById = new Map<string, Finding>();
+  for (const finding of selectedFindings) {
+    if (!originalIds.has(finding.id)) {
+      throw new TypeError(
+        `Cannot project unknown approved finding "${finding.id}".`,
+      );
+    }
+    if (selectedById.has(finding.id)) {
+      throw new TypeError(
+        `Cannot project duplicate approved finding "${finding.id}".`,
+      );
+    }
+    selectedById.set(finding.id, finding);
+  }
+  const selectedIds = new Set(selectedById.keys());
+
+  const normalizedItems = report.coherence_trace.normalized_items.filter(
+    (item) => selectedIds.has(item.id),
+  );
+  const normalizedById = new Map(
+    normalizedItems.map((item) => [item.id, item]),
+  );
+  const pairSurvives = (entry: { left: string; right: string }): boolean =>
+    selectedIds.has(entry.left) && selectedIds.has(entry.right);
+  const mergeTrace = report.coherence_trace.merge_trace.filter(
+    (entry) => pairSurvives(entry) && selectedIds.has(entry.root),
+  );
+
+  const componentBlocks = report.coherence_trace.components.flatMap(
+    (component, index) => {
+      const findingIds = component.filter((id) => selectedIds.has(id));
+      if (findingIds.length === 0) return [];
+      const originalBlock = report.work_blocks[index]!;
+      const members = findingIds.map((id) => selectedById.get(id)!);
+      const maxSeverity = members.reduce((highest, finding) =>
+        severityRank(finding.severity) > severityRank(highest.severity)
+          ? finding
+          : highest,
+      ).severity;
+      return [{
+        component: findingIds,
+        block: {
+          id: originalBlock.id,
+          finding_ids: findingIds,
+          unit_ids: stableUnique(
+            findingIds.flatMap(
+              (id) => normalizedById.get(id)?.unit_ids ?? [],
+            ),
+          ),
+          owned_files: stableUnique(
+            members.flatMap((finding) =>
+              finding.affected_files.map((location) =>
+                location.path.replace(/\\/gu, "/"),
+              ),
+            ),
+          ),
+          role: members.some((finding) => finding.systemic === true)
+            ? "coordination" as const
+            : "implementation" as const,
+          max_severity: maxSeverity,
+          rationale: `Canonical coherence subset retaining ${members.length} approved finding(s) from ${originalBlock.id}.`,
+          depends_on: originalBlock.depends_on,
+        },
+      }];
+    },
+  );
+  const survivingBlockIds = new Set(
+    componentBlocks.map(({ block }) => block.id),
+  );
+  const workBlocks: WorkBlock[] = componentBlocks.map(({ block }) => ({
+    ...block,
+    depends_on: block.depends_on.filter((id) => survivingBlockIds.has(id)),
+  }));
+  const findings = report.findings
+    .filter((finding) => selectedIds.has(finding.id))
+    .map((finding) => {
+      const selected = selectedById.get(finding.id)!;
+      return selected.related_findings === undefined
+        ? selected
+        : {
+            ...selected,
+            related_findings: selected.related_findings.filter((id) =>
+              selectedIds.has(id),
+            ),
+          };
+    });
+  const themes = report.themes
+    ?.map((theme) => ({
+      ...theme,
+      finding_ids: theme.finding_ids.filter((id) => selectedIds.has(id)),
+    }))
+    .filter((theme) => theme.finding_ids.length > 0);
+  const groundingPopulation = [
+    ...findings,
+    ...(report.quarantined_findings ?? []),
+  ];
+
+  const projected: AuditFindingsReport = {
+    ...report,
+    findings,
+    coherence_trace: {
+      normalized_items: normalizedItems,
+      pair_scores: report.coherence_trace.pair_scores.filter(pairSurvives),
+      eligible_candidates:
+        report.coherence_trace.eligible_candidates.filter(pairSurvives),
+      merge_trace: mergeTrace,
+      merge_decisions: mergeTrace.map((entry) => entry.decision),
+      components: componentBlocks.map(({ component }) => component),
+    },
+    work_blocks: workBlocks,
+    work_block_seams: report.work_block_seams.filter((seam) =>
+      seam.block_ids.every((id) => survivingBlockIds.has(id)),
+    ),
+    ...(themes === undefined ? {} : { themes }),
+    summary: {
+      ...report.summary,
+      finding_count: findings.length,
+      work_block_count: workBlocks.length,
+      severity_breakdown: projectedBreakdown(
+        report.summary.severity_breakdown,
+        findings.map((finding) => finding.severity),
+      ),
+      ...(report.summary.lens_breakdown === undefined
+        ? {}
+        : {
+            lens_breakdown: projectedBreakdown(
+              report.summary.lens_breakdown,
+              findings.map((finding) => finding.lens),
+            ),
+          }),
+      ...(report.summary.grounding_status_breakdown === undefined
+        ? {}
+        : {
+            grounding_status_breakdown: projectedBreakdown(
+              report.summary.grounding_status_breakdown,
+              groundingPopulation.flatMap((finding) =>
+                finding.grounding === undefined
+                  ? []
+                  : [finding.grounding.status],
+              ),
+            ),
+          }),
+    },
+  };
+
+  // A projection is a first-class canonical report, not a permissive internal
+  // intermediate. Catch any membership/summary drift at the write boundary.
+  projectApprovedFindings(projected);
+  return projected;
 }
 
 export function isValidAuditFindingsReport(

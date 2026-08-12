@@ -182,8 +182,6 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- next-step advances deterministic audit state one bounded step and writes',
     '  .audit-tools/audit/steps/current-step.json plus current-prompt.md; the host',
     '  agent follows only the returned step prompt and calls next-step again',
-    '- advance-audit runs exactly one deterministic advance and prints the',
-    '  execution envelope (debugging / bounded-step testing)',
     '',
     'Helper commands:',
     '- prompt-path prints the absolute path to the canonical /audit-code prompt asset',
@@ -192,14 +190,11 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- verify-install smoke-tests the generated host assets after install',
     '- mcp starts the local stdio MCP server for repo-local IDE integrations',
     '- install-host --host copilot keeps the narrower Copilot-focused install path available',
-    '- validate checks the current artifact bundle plus session-config/provider readiness and exits non-zero when issues exist',
+    '- validate checks the current artifact bundle and canonical session intent and exits non-zero when issues exist',
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
-    '- prepare-dispatch --run-id <id> [--artifacts-dir <dir>] creates packet prompt files and a slim dispatch-plan.json for parallel subagent dispatch',
-    '- submit-packet --run-id <id> --packet-id <id> [--artifacts-dir <dir>] validates AuditResult[] from stdin and writes only backend-assigned result files',
-    '- merge-and-ingest --run-id <id> [--root <dir>] [--artifacts-dir <dir>] merges assigned packet results and ingests them into the coverage matrix',
-    '- validate-result --run-id <id> --task-id <id> [--artifacts-dir <dir>] validates a single task result against the schema and line counts',
-    '  generated packet prompts may use --run-id-b64, --task-id-b64, and --artifacts-dir-b64 to avoid shell-sensitive raw ids',
+    '- ingest-results --results FILE validates and ingests canonical AuditResult payloads',
+    '- status summarizes deterministic audit state and pending review work',
     '',
     'Defaults:',
     '- --root .',
@@ -337,21 +332,6 @@ export async function runAuditCodeWrapper({
 
   if (argv[0] === 'next-step') {
     await runDistCommand('next-step', argv.slice(1), { ensureArtifactsDir: true });
-    return;
-  }
-
-  if (argv[0] === 'quota') {
-    await runDistCommand('quota', argv.slice(1), { ensureArtifactsDir: true });
-    return;
-  }
-
-  if (argv[0] === 'merge-and-ingest') {
-    await runDistCommand('merge-and-ingest', argv.slice(1), { ensureArtifactsDir: true });
-    return;
-  }
-
-  if (argv[0] === 'advance-audit') {
-    await runDistCommand('advance-audit', argv.slice(1), { ensureArtifactsDir: true });
     return;
   }
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Finding } from "../../src/remediate/state/types.js";
 import {
   checkAffectedFileIntegrity,
+  hashAffectedPathSync,
   hashFile,
   hashFileSync,
   snapshotAffectedFileHashes,
@@ -108,19 +109,15 @@ describe("checkAffectedFileIntegrity I/O-error classification (OBS-005)", () => 
     expect(result.is_clean).toBe(false);
   });
 
-  it("snapshotAffectedFileHashes records a directory digest and unchanged directories stay clean", async () => {
+  it("snapshotAffectedFileHashes refuses a directory as a trusted planning baseline", async () => {
     const rel = "dir-path";
     await mkdir(join(TEST_DIR, rel, "nested"), { recursive: true });
     await writeFile(join(TEST_DIR, rel, "nested", "a.ts"), "a", "utf8");
     const findings = [mkFinding(rel)];
-    snapshotAffectedFileHashes(TEST_DIR, findings);
-    expect(findings[0].affected_files[0].hash_at_plan_time).toBeTruthy();
-
-    const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
-    expect(result.changed).not.toContain(rel);
-    expect(result.missing).not.toContain(rel);
-    expect(result.io_errors).not.toContain(rel);
-    expect(result.is_clean).toBe(true);
+    expect(() => snapshotAffectedFileHashes(TEST_DIR, findings)).toThrow(
+      /existing path is not a regular file/u,
+    );
+    expect(findings[0].affected_files[0].hash_at_plan_time).toBeUndefined();
   });
 
   it("a content change is reported as changed, not missing/io_errors", async () => {
@@ -153,7 +150,7 @@ describe("directory affected_files hashing", () => {
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a1", "utf8");
     const findings = [mkFinding(rel)];
 
-    snapshotAffectedFileHashes(TEST_DIR, findings);
+    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a2", "utf8");
 
     const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
@@ -168,7 +165,7 @@ describe("directory affected_files hashing", () => {
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a", "utf8");
     const findings = [mkFinding(rel)];
 
-    snapshotAffectedFileHashes(TEST_DIR, findings);
+    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
     await writeFile(join(TEST_DIR, rel, "b.ts"), "b", "utf8");
     expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).changed).toContain(rel);
 
@@ -186,7 +183,7 @@ describe("directory affected_files hashing", () => {
     await writeFile(join(TEST_DIR, rel, "index.ts"), "v1", "utf8");
     const findings = [mkFinding(rel)];
 
-    snapshotAffectedFileHashes(TEST_DIR, findings);
+    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
     await writeFile(join(TEST_DIR, rel, "index.ts"), "v2", "utf8");
     expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(false);
 

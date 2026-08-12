@@ -7,12 +7,11 @@ import { fileURLToPath } from "node:url";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
-import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-triage");
 
-const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
+const BASE_OPTIONS = { root: dirname(TEST_DIR), artifactsDir: TEST_DIR };
 
 function makeState(items: Record<string, unknown>): RemediationState {
   return makeBaseState({ status: "triage", items });
@@ -40,10 +39,9 @@ describe("runTriagePhase", () => {
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
-        // Both retry budgets exhausted → auto-retry is skipped, so the run
+        // Retry budget exhausted → auto-retry is skipped, so the run
         // escalates to human triage rather than re-attempting the item.
         rework_count: 99,
-        infra_rework_count: 99,
         started_at: "2026-06-05T12:00:00.000Z",
         completed_at: "2026-06-05T12:01:00.000Z",
       },
@@ -337,7 +335,7 @@ describe("runTriagePhase", () => {
     expect(state.items!.F1.failure_context).not.toBe("first failure context from prior retry");
   });
 
-  it("infra failure increments infra_rework_count, not rework_count", async () => {
+  it("an explicit retry increments the unified rework counter", async () => {
     const state = makeState({
       F1: {
         finding_id: "F1",
@@ -356,11 +354,10 @@ describe("runTriagePhase", () => {
     );
 
     await runTriagePhase(state, BASE_OPTIONS);
-    expect(state.items!.F1.infra_rework_count).toBe(1);
-    expect(state.items!.F1.rework_count ?? 0).toBe(0);
+    expect(state.items!.F1.rework_count).toBe(1);
   });
 
-  it("contract failure increments rework_count, not infra_rework_count", async () => {
+  it("retry counting is independent of failure wording", async () => {
     const state = makeState({
       F1: {
         finding_id: "F1",
@@ -380,42 +377,22 @@ describe("runTriagePhase", () => {
 
     await runTriagePhase(state, BASE_OPTIONS);
     expect(state.items!.F1.rework_count).toBe(1);
-    expect(state.items!.F1.infra_rework_count ?? 0).toBe(0);
   });
 
-  it("infra item below infra cap is auto-retried even when rework_count >= CONTRACT cap", async () => {
+  it("an item at the unified retry cap routes to human triage", async () => {
     const state = makeState({
       F1: {
         finding_id: "F1",
         status: "blocked",
         failure_reason: "EPERM: file locked by another process",
         block_id: "B1",
-        rework_count: 2,      // at contract cap, but failure is infra
-        infra_rework_count: 1, // below infra cap (5)
-      },
-    });
-
-    const next = await runTriagePhase(state, BASE_OPTIONS);
-    expect(next.status).toBe("implementing");
-    expect(state.items!.F1.infra_rework_count).toBe(2);
-    // rework_count must not change for an infra failure
-    expect(state.items!.F1.rework_count).toBe(2);
-  });
-
-  it("infra item exhausting MAX_AUTO_RETRIES_INFRA routes to human triage", async () => {
-    const state = makeState({
-      F1: {
-        finding_id: "F1",
-        status: "blocked",
-        failure_reason: "provider error — quota exceeded",
-        block_id: "B1",
-        infra_rework_count: 5,
+        rework_count: 2,
       },
     });
 
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("waiting_for_triage");
-    expect(state.items!.F1.status).toBe("blocked");
+    expect(state.items!.F1.rework_count).toBe(2);
   });
 
   it("logs cap exhaustion distinctly from auto-retry (OBS-df30208a)", async () => {
@@ -594,25 +571,6 @@ describe("runTriagePhase", () => {
   // node is reconciled to resolved_no_change instead of looping through retries
   // and human triage. `exit 0`/`exit 1` are shell builtins on both cmd.exe and
   // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
-  // The reverify-before-retry path only trusts a green tree as "already
-  // satisfied" if an implement WORKER actually ran and left a result file (the
-  // no-worker guard — a `worker-command` no-op leaves none, and a generic
-  // `build && check` would then false-resolve an un-implemented node). Every
-  // reconcile test below models a node whose worker DID run (and failed), so it
-  // must seed the result file the merge would have written.
-  async function seedImplementResult(
-    blockId: string,
-    planId = "P1",
-  ): Promise<void> {
-    const dir = join(TEST_DIR, "runs", planId, "implement");
-    await mkdir(dir, { recursive: true });
-    await writeFile(
-      nodeArtifactPathsIn(dir, blockId).resultPath,
-      JSON.stringify({ item_results: [] }),
-      "utf8",
-    );
-  }
-
   function planWithBlocks(
     blocks: {
       block_id: string;
@@ -650,12 +608,9 @@ describe("runTriagePhase", () => {
           block_id: "B1",
           // Budget exhausted: without re-verify this would route to human triage.
           rework_count: 99,
-          infra_rework_count: 99,
         },
       },
     }) as RemediationState;
-    await seedImplementResult("B1");
-
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("closing");
     expect(state.items!.F1.status).toBe("resolved_no_change");
@@ -679,8 +634,6 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
-    await seedImplementResult("B1");
-
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("implementing");
     expect(state.items!.F1.status).toBe("pending");
@@ -711,60 +664,10 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
-    // Seed the worker result so the no-worker guard passes and the test actually
-    // exercises the deliverable-existence guard (the missing touched_file), not
-    // the missing result.
-    await seedImplementResult("B1");
-
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("implementing");
     expect(state.items!.F1.status).toBe("pending");
     expect(state.items!.F1.rework_count).toBe(1);
-  });
-
-  it("does NOT reconcile to resolved_no_change when NO worker result exists, even if a generic targeted_command passes (no-worker guard)", async () => {
-    // No-worker guard (2026-07-06): the 2026-07-06 max-sweep run had a
-    // `worker-command` provider produce no worker results; the nodes edited
-    // pre-existing files (backlog.md, dispatch.ts…) so the deliverable-existence
-    // guard couldn't catch them, and their generic `build && check` verify passed
-    // on the green tree → un-implemented nodes false-resolved to
-    // resolved_no_change. A blocked node with NO result file on disk must route to
-    // retry, never reconcile. Note: NO seedImplementResult call here — that is the
-    // whole point.
-    const state = makeBaseState({
-      status: "triage",
-      plan: planWithBlocks([
-        {
-          block_id: "B1",
-          items: ["F1"],
-          // Generic verify that passes on any green tree (the real-run culprit).
-          targeted_commands: ["exit 0"],
-          // Edit-node: touched path pre-exists, so the deliverable guard is inert.
-          touched_files: ["docs/backlog.md"],
-        },
-      ]),
-      items: {
-        F1: {
-          finding_id: "F1",
-          status: "blocked",
-          failure_reason:
-            "Implementation worker did not produce a result file: implement-B1.result.json",
-          block_id: "B1",
-          rework_count: 99,
-          infra_rework_count: 99,
-        },
-      },
-    }) as RemediationState;
-    // Make the touched path EXIST so the deliverable-existence guard passes —
-    // isolating the no-worker guard as the only thing that can catch this node.
-    await mkdir(join(TEST_DIR, "docs"), { recursive: true });
-    await writeFile(join(TEST_DIR, "docs", "backlog.md"), "x", "utf8");
-
-    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
-    // Budget exhausted + genuinely un-implemented → human triage, NOT closing.
-    expect(next.status).toBe("waiting_for_triage");
-    expect(state.items!.F1.status).toBe("blocked");
-    expect(state.items!.F1.status).not.toBe("resolved_no_change");
   });
 
   it("reconciles only the satisfied node and routes the rest to human triage (no whole-run abandonment)", async () => {
@@ -793,11 +696,6 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
-    // B1's worker ran (and failed) → its result exists, so it can reconcile.
-    // B2 stays genuinely open (exit 1) and routes to triage.
-    await seedImplementResult("B1");
-    await seedImplementResult("B2");
-
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("waiting_for_triage");
     expect(state.items!.F1.status).toBe("resolved_no_change");

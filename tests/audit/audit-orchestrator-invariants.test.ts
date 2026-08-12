@@ -33,7 +33,6 @@ import { buildPendingAuditTasks } from "../../src/audit/cli/dispatch/packetFilte
 import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
 import type { AuditScopeManifest } from "../../src/audit/types/auditScope.js";
 import type { AuditPlanMetrics } from "../../src/audit/types/reviewPlanning.js";
-import type { ActiveDispatchState } from "../../src/audit/types/activeDispatch.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const orchestratorDir = join(here, "..", "..", "src", "audit", "orchestrator");
@@ -621,12 +620,8 @@ test("INV-11: all ARTIFACT_DEPENDENTS_MAP keys and values are known artifact fil
 });
 
 // ---------------------------------------------------------------------------
-// INV-STATE-PURE-AND-REACHABLE (COR-b019d3b9): deriveAuditState is sync + pure,
-// and every AuditTopLevelStatus value is reachable from it — in particular the
-// "blocked" branch must be LIVE: a persisted DC-4 dispatch pause
-// (active_dispatch.paused_state) with still-pending audit tasks derives a
-// blocked (non-actionable) obligation, so the top-level status becomes
-// "blocked" from state derivation alone, not only from step-write paths.
+// INV-STATE-PURE: deriveAuditState stays synchronous and pending work remains
+// actionable until strictly bound results are ingested.
 // ---------------------------------------------------------------------------
 
 function pendingTaskFixture(taskId = "u:security"): AuditTask {
@@ -641,72 +636,7 @@ function pendingTaskFixture(taskId = "u:security"): AuditTask {
   };
 }
 
-function pausedActiveDispatchFixture(): ActiveDispatchState {
-  return {
-    run_id: "run-paused",
-    created_at: "2026-01-01T00:00:00.000Z",
-    packet_count: 0,
-    task_count: 1,
-    status: "active",
-    paused_state: {
-      lifecycle: { kind: "waiting_for_provider", paused_at: "2026-01-01T00:00:00.000Z", pause_count: 1, stranded_node_ids: [] },
-      settled_exclusions: [],
-    },
-  };
-}
-
-test("INV-STATE-REACHABLE: a persisted dispatch pause with pending tasks derives top-level 'blocked'", () => {
-  const bundle: ArtifactBundle = {
-    repo_manifest: makeRepoManifest(),
-    audit_tasks: [pendingTaskFixture()],
-    active_dispatch: pausedActiveDispatchFixture(),
-  };
-  const state = deriveAuditState(bundle);
-  expect(
-    state.obligations.some((o) => o.state === "blocked"),
-    "a paused dispatch with pending tasks must derive at least one blocked obligation",
-  ).toBeTruthy();
-  expect(state.status, "top-level status must be 'blocked' while the dispatch pause holds").toBe("blocked");
-});
-
-test("INV-STATE-REACHABLE: the blocked derivation never masks the resume path — audit_tasks_completed stays actionable ('missing')", () => {
-  const bundle: ArtifactBundle = {
-    repo_manifest: makeRepoManifest(),
-    audit_tasks: [pendingTaskFixture()],
-    active_dispatch: pausedActiveDispatchFixture(),
-  };
-  const state = deriveAuditState(bundle);
-  const completed = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(completed?.state, "audit_tasks_completed must remain 'missing' (actionable) so re-running next-step re-drives dispatch and DC-4 resume works").toBe("missing");
-});
-
-test("INV-STATE-REACHABLE: a pause with NO pending tasks does not block (moot pause)", () => {
-  const task = pendingTaskFixture();
-  const bundle: ArtifactBundle = {
-    repo_manifest: makeRepoManifest(),
-    audit_tasks: [{ ...task, status: "complete" }],
-    audit_results: [
-      {
-        task_id: task.task_id,
-        unit_id: task.unit_id,
-        pass_id: task.pass_id,
-        lens: task.lens,
-        file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
-        findings: [],
-        reviewed_clean: true,
-      },
-    ],
-    active_dispatch: pausedActiveDispatchFixture(),
-  };
-  const state = deriveAuditState(bundle);
-  expect(
-    state.obligations.some((o) => o.state === "blocked"),
-    "a moot pause (no pending tasks) must not derive a blocked obligation",
-  ).toBeFalsy();
-  expect(state.status).not.toBe("blocked");
-});
-
-test("INV-STATE-REACHABLE: no pause => no blocked obligation (default path unchanged)", () => {
+test("INV-STATE-REACHABLE: pending work remains active without execution state", () => {
   const bundle: ArtifactBundle = {
     repo_manifest: makeRepoManifest(),
     audit_tasks: [pendingTaskFixture()],
@@ -775,47 +705,4 @@ test("INV-PENDING-SINGLE-SOURCE: dispatch pending set and audit_tasks_completed 
   const state = deriveAuditState(bundle);
   const completed = state.obligations.find((o) => o.id === "audit_tasks_completed");
   expect(completed?.state).toBe("satisfied");
-});
-
-// ---------------------------------------------------------------------------
-// INV-CLAIM-LIFECYCLE pin: AUDIT_TASK_CLAIM_LEASE_MS is single-sourced in
-// cli/dispatch.ts; the merge-side ownership gate imports it rather than
-// defining its own lease window (liveness judged against ONE window, never two).
-// INV-CLAIM-ROUND-FACTS pin: PrepareDispatchResult exposes the claim-round
-// facts (candidate_task_count, granted_task_ids) alongside packet_count.
-// ---------------------------------------------------------------------------
-
-test("INV-CLAIM-LIFECYCLE pin: the claim lease window is defined exactly once (cli/dispatch.ts) and imported by the merge gate", async () => {
-  const auditSrcDir = join(here, "..", "..", "src", "audit");
-  const definitionSites: string[] = [];
-  async function walk(dir: string) {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) await walk(full);
-      else if (entry.name.endsWith(".ts")) {
-        const text = await readFile(full, "utf8");
-        if (/AUDIT_TASK_CLAIM_LEASE_MS\s*=/.test(text)) definitionSites.push(entry.name);
-      }
-    }
-  }
-  await walk(auditSrcDir);
-  expect(definitionSites, "exactly one definition site for the claim lease").toEqual(["dispatch.ts"]);
-  const mergeText = await readFile(join(auditSrcDir, "cli", "mergeAndIngestCommand.ts"), "utf8");
-  expect(/AUDIT_TASK_CLAIM_LEASE_MS/.test(mergeText), "merge gate must consume the single-sourced lease").toBeTruthy();
-});
-
-test("INV-CLAIM-ROUND-FACTS pin: PrepareDispatchResult declares candidate_task_count and granted_task_ids and dispatch returns them", async () => {
-  const typesText = await readFile(join(here, "..", "..", "src", "audit", "cli", "dispatch", "types.ts"), "utf8");
-  expect(/candidate_task_count\s*:\s*number/.test(typesText)).toBeTruthy();
-  expect(/granted_task_ids\s*:\s*string\[\]/.test(typesText)).toBeTruthy();
-  const dispatchText = await readFile(join(here, "..", "..", "src", "audit", "cli", "dispatch.ts"), "utf8");
-  expect(/candidate_task_count:\s*candidateTasks\.length/.test(dispatchText), "claim-round candidate fact must come from the eligible set").toBeTruthy();
-  expect(/granted_task_ids:\s*grantedTaskIds/.test(dispatchText), "claim-round granted fact must come from the claim grant").toBeTruthy();
-});
-
-test("INV-WALL-PAUSE pin: prepare-dispatch consults detectHostDispatchWall and pauses the at-wall round", async () => {
-  const dispatchText = await readFile(join(here, "..", "..", "src", "audit", "cli", "dispatch.ts"), "utf8");
-  expect(/detectHostDispatchWall\(/.test(dispatchText), "the wall detector must gate the host dispatch round").toBeTruthy();
-  expect(/advanceHostDispatchPause\(/.test(dispatchText), "an at-wall round must advance the persisted pause").toBeTruthy();
-  expect(/reconcileAdmissionLeasesFromQuotaFile\(/.test(dispatchText), "pausing must release the granted leases (C3)").toBeTruthy();
 });

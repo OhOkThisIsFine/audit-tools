@@ -229,7 +229,8 @@ shape:
   `absent` genuinely absent) — `writeOpenItems()` refuses the batch otherwise —
   and **every probe target must be a git-TRACKED source file**: a gitignored
   runtime artifact or a record file (docs/backlog, docs/reviews, HANDOFF, the
-  inbox, .claude) carries no evidence and is refused at write.
+  inbox, `.audit-tools/nightly`, .claude) carries no evidence and is refused at
+  write.
   **One door exists, for a question ABOUT a record.** A leg-2 escalation asks
   what a backlog entry should *become* — its premise is prose in `docs/backlog`
   and there is frequently no code side at all, so the record-path refusal made
@@ -433,8 +434,8 @@ start of every run:
 2. **[`project-philosophy.md`](project-philosophy.md)** — the *content-conformance* rubric: the
    project's organizing convictions, split into those that govern the product itself (Part A) and
    those that govern its development (Part B). Governs whether a doc's *claims and guidance align
-   with the project's stated philosophy* — e.g. a doc that recommends hardcoding a model, forking
-   planning per-language, gating LLM review behind a provider, or leaning on host discretion where
+   with the project's stated philosophy* — e.g. a doc that gives audit-tools a backend/model inventory, forking
+   planning per-language, gating LLM review behind an internal provider, or leaning on host discretion where
    the tool should enforce, **contradicts** a conviction. `project-philosophy.md` is itself a map
    that points at each conviction's canonical home (`CLAUDE.md` / `spec/` / memory); where the map
    and a home disagree, the **home** is ground truth (verify against it, not the map).
@@ -489,7 +490,7 @@ The split is the entire safety surface. The classifying rule:
 > **Factual** = verifiable true/false against code (apply).
 > **Policy / conceptual / judgment** = needs the owner (escalate).
 > A policy is **not** stale because no code "uses" it — code-absence is the
-> policy *working* ("never hardcode model identities" is load-bearing precisely
+> policy *working* ("never own execution-backend metadata" is load-bearing precisely
 > when nothing violates it). Never flag a policy as obsolete by absence.
 
 When in doubt, it is a design-decision. Escalate.
@@ -571,11 +572,12 @@ factually accurate yet **advocates or documents something that cuts against a st
 the class the other two checks miss. Smells that trigger it (non-exhaustive — the convictions in
 `project-philosophy.md` are the full rubric):
 
-- Hardcoded model/provider/window/tier assumptions presented as normal (violates *everything-agnostic*, A4).
+- Any provider roster, model/window/price table, quota policy, capability tier, launch adapter, or execution
+  discovery path presented as audit-tools state (violates the host boundary and *everything-agnostic*, A4/A11).
 - Per-language / per-ecosystem forks of planning logic (violates *language-neutral*, A4).
 - Correctness resting on the host *remembering / noticing / being careful*, or a manual flag treated as
   the fix (violates *enforce-in-tooling*, A3 — "a needed manual flag is a bug signal").
-- LLM review gated behind "if a provider exists"; CLI treated as the primary product (violates
+- LLM review gated behind "if an internal provider exists"; CLI treated as the primary product (violates
   *conversation-first* / *LLM always in the loop*, A2/A5).
 - "Deterministic by default / 100% deterministic" framing (violates *right tool, not dogma*, A2).
 - A separate lean/fast path proposed instead of one self-scaling pipeline (violates A6).
@@ -598,8 +600,8 @@ its own). Hunt for:
 
 - **Overlap / duplication** — two docs stating the same concept (a fact in two homes will
   drift). Propose: pick the most-durable home, fold the other in, leave a pointer not a copy.
-- **Fold candidates** — a doc whose content is really a *section* of another (e.g. a single
-  provider's credential mechanics belongs in the per-provider matrix, not its own file).
+- **Fold candidates** — a doc whose content is really a *section* of another (e.g. one artifact's
+  validation notes belong in the artifact contract, not a second standalone spec).
 - **Lapsed reason-to-exist** — the work shipped, the concept moved into code/policy, or it was
   always current-state. Propose retire.
 - **Bloat** — a concept doc grown into a changelog/log; propose trim to the durable core.
@@ -622,7 +624,7 @@ the check for its type:
 | **ops / usage** | `README.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
 | **package docs (audit)** | `docs/audit-pkg/product.md`, `docs/audit-pkg/contracts.md`, `docs/audit-pkg/development.md`, `docs/audit-pkg/operator-guide.md`, `docs/audit-pkg/release.md` | Claims vs code/spec (these page the normative `spec/audit/*`); flag current-state / changelog creep. | factual-stale → yes |
 | **backlog** | `docs/backlog.md`, `docs/backlog/open-bugs.md`, `docs/backlog/forward-tracks.md`, `docs/backlog/deferred.md`, `docs/backlog/durable-traps.md` | Shipped-detection (see *Shipped-entry deletion* below — a fully-shipped entry is **deleted outright**, never kept as a `SHIPPED`/`FIXED`/`DONE` marker; a partial entry is **trimmed to its open remainder**); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
-| **handoff (sequencing view)** | `docs/HANDOFF.md` | The ordered roadmap of everything open + current state (sanctioned per the philosophy's HANDOFF row): each open item appears once, in suggested order, with a pointer to its `backlog.md` detail. Flag **changelog creep** (narrated already-shipped work) and **per-item specs duplicated from `backlog.md`**; verify each item vs code; a done item → clear it, with proof. NOT immediate-next-only. | yes |
+| **handoff (sequencing view)** | `docs/HANDOFF.md` | Current published state + immediate next only (sanctioned per the philosophy's HANDOFF row). The roadmap block is generated from `▶`-pinned backlog entries; the live nightly block is generated from the persisted queue + decision ledger and must render no visible nightly text when the queue is empty. Never hand-edit either generated block. Flag **changelog creep** and per-item specs duplicated from their authoritative backlog/queue source; verify hand-written current state against code and clear stale state with proof. | hand-written state → yes; generated blocks → generator only |
 | **design / concept (`spec/`)** | `spec/**/*.md` (the normative design corpus — workflow designs, contracts, goals docs; routed by pattern, so a new spec is registered the moment it lands) | Claims vs code (drift); flag current-state / changelog creep (durable design only). A `> **Status:** <type-declaration>` preamble identifying the kind of design artifact is permitted; a dated/versioned status string in it is still status-noise → escalate. The goals docs and the `spec/audit/*` contracts are **normative** — see *Normative goals docs* above and the constitutional-doc refusal in `src/shared/constitutionalDocPaths.ts`: a change to one is a design-decision → escalate. | factual-stale → yes (except the constitutional subset — escalate-only) |
 | **excluded** | `docs/doc-review-guidelines.md` (this spec — excluded from its own review), `docs/reviews/*-<date>.md` (dated review / plan / diagnosis / dogfood records — excluded BY CONSTRUCTION. Each is a one-off record of what was decided on a day, never a timeless concept; the durable outcome lives in `spec/`, the backlog, or project memory. This pattern replaced a 21.5k-character exhaustive list that grew every lap), `.audit-tools/nightly/proposals/**/*.md` (nightly leg-3 proposal records — the full analysis behind an escalated item (recurrence evidence, proposed mechanism, false-positive surface). TRACKED so a proposal outlives the machine that produced it, but excluded BY CONSTRUCTION for the same reason as a dated review: each is a one-off record of a proposition as it stood that night, never a timeless concept. They deliberately cite paths that do not exist — a file the proposal proposes CREATING, or one deleted since — so reviewing them for staleness, or citation-checking them, would be checking a historical record against a present tree. Accepted outcomes land in code, `spec/`, the backlog or memory; the record stays as provenance), `.audit-tools/audit-report.md` (runtime run-artifact — an audit-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed), `.audit-tools/remediation-report.md` (runtime run-artifact — a remediate-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed), `tests/audit/fixtures/simple-app/README.md` (test-fixture content — a sample-app README, its own concern, not a project doc) | — | — |
 | **generated host assets** | `.agent/skills/audit-code/SKILL.md`, `.agent/skills/remediate-code/SKILL.md`, `.github/agents/auditor.agent.md`, `.github/agents/remediator.agent.md`, `.github/copilot-instructions.md`, `.github/prompts/audit-code.prompt.md`, `.github/prompts/remediate-code.prompt.md` | ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — governed by renderer drift tests (`tests/audit/host-asset-renderer-drift.test.ts`, `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`, `tests/remediate/install-repo-assets.test.ts`). Review the canonical source, not the generated copy; a diff = a drift-test/renderer gap, not a doc edit. | **No — renderer-owned.** |
@@ -630,7 +632,7 @@ the check for its type:
 | **generated scheduler prompt** | `docs/nightly-routine-prompt.md` | WHOLE-FILE GENERATED from `docs/nightly-routine.md` (cross-leg routine) + `docs/doc-review-guidelines.md` (leg-1 rubric) by `scripts/check-nightly-routine-prompt.mjs`. Never hand-edit or resolve a conflict in the target; edit the owning source and regenerate. `check:nightly-routine-prompt` gates byte parity plus its `package.json` check/release wiring in `verify:checks` and at commit. | **No — generator-owned.** |
 | **generated decision inbox** | `docs/nightly-inbox.md` | GENERATED by `scripts/nightly/render-inbox.mjs` from `.audit-tools/nightly/open-items.json` — the nightly routine's answering surface, and the ONE tracked doc that is deliberately current-state rather than timeless. The owner answers by ticking a checkbox; `scripts/nightly/ingest-answers.mjs` reads the ticks into `.claude/nightly-decisions.json` and re-renders, so answered items drop out on their own. Everything except the ticked boxes and the `notes` blocks is rewritten on each run — review the item CONTENT at its source (`open-items.json`), never by hand-editing this file. Its status-noise is the point: it is a work queue, the same sanctioned exception as `docs/HANDOFF.md`. | **No — generator-owned** (and the owner's answers are the only hand-written part). |
 | **meta-tooling / dev-workflow** | `.claude/skills/design-check/SKILL.md`, `.claude/skills/disambiguate-backlog/SKILL.md`, `.claude/skills/ship/SKILL.md`, `.claude/skills/start-lap/SKILL.md`, `docs/nightly-routine.md` | Standalone dev-workflow how-to and scheduler-prompt SOURCE; do the documented commands/paths still resolve. Changes to `docs/nightly-routine.md` must regenerate the generated scheduler prompt. | factual-stale → yes |
-| **package READMEs (non-`docs/`)** | `src/audit/README.md`, `src/audit/adapters/README.md`, `examples/README.md` | Claims vs code; do documented commands/paths/providers still resolve (e.g. the provider list must match `PROVIDER_NAMES`). | factual-stale → yes |
+| **package READMEs (non-`docs/`)** | `src/audit/README.md`, `src/audit/adapters/README.md`, `examples/README.md` | Claims vs code; do documented commands, paths, provider-neutral host-workload contracts, and result-ingestion boundaries still resolve. These docs must not reintroduce a provider registry, execution adapter, or quota surface. | factual-stale → yes |
 
 <!-- END doc-manifest table -->
 

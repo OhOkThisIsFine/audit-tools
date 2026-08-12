@@ -20,7 +20,6 @@
  * `AUDIT_CODE_DISABLE_ANCHORS=1`; the per-anchor timeout (60s default) can be
  * raised with `AUDIT_CODE_ANCHOR_TIMEOUT_MS` for slow checks on large repos.
  */
-import { availableParallelism } from "node:os";
 import {
   ALLOWLISTED_EXEC_TIMEOUT_MS,
   ANCHOR_ALLOWLIST,
@@ -58,18 +57,6 @@ export function resolveAnchorTimeoutMs(
   const override = Number(env.AUDIT_CODE_ANCHOR_TIMEOUT_MS);
   return Number.isFinite(override) && override > 0 ? override : ANCHOR_TIMEOUT_MS;
 }
-
-/**
- * Bounded concurrency for the ingest grounding pass. Anchors spawn child
- * processes, so a serial pass over many anchored findings costs the *sum* of
- * their runtimes — noticeably slow in practice. Grounding each finding under a
- * pool of this size turns that into ~N/cap batches while capping concurrent
- * spawns so the audited machine is not thrashed. CPU-derived, clamped to [2, 8].
- */
-export const ANCHOR_GROUNDING_CONCURRENCY = Math.max(
-  2,
-  Math.min(8, availableParallelism()),
-);
 
 export type AnchorRunner = AllowlistedExecRunner;
 
@@ -233,9 +220,4 @@ export function combineGroundingWithAnchor(
     };
   }
   return tier1;
-}
-
-/** One evidence line summarising the anchor run, appended to the finding's evidence. */
-export function anchorEvidenceLine(anchor: AnchorResult): string {
-  return `anchor: ${anchor.summary}`;
 }

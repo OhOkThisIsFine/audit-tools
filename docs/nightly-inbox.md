@@ -22,55 +22,8 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-10 at `cdb00ba8`.*
+*Last run: 2026-08-11 at `3f123b9b`.*
 
-
----
-
-
-# Documentation
-
-
-<!-- nightly:item key=0958f57afe5837c2 -->
-
-## `docs-1` — Retire or supersede the ~1,540 lines of dispatch/quota/routing design docs whose subject the (d) directive deletes
-
-*Documentation · open 1 night · `spec/dispatch-quota.md`*
-
-### In plain terms
-
-On 2026-08-09 you decided that audit-tools stops routing work altogether: no provider selection, no execution adapters, and quota goes away entirely along with the declared sizing window. The code that does all of that is still in the repo — the removal has not been implemented yet. But the DESIGN DOCUMENTATION for that subsystem is large and it is written in the present tense, as the design of record. Four spec files plus one section of the operator guide, about 1,540 lines in total, describe a machine you have decided to delete: spec/dispatch-quota.md (760 lines, and it is on the constitutional list so it cannot be edited without an owner-decision record), spec/cross-provider-quota-matrix.md (466 lines of per-provider quota endpoints), spec/unified-dispatch-worker-model.md (232 lines), spec/backend-identity-axes.md (85 lines, which opens by saying dispatch inversion 'does not remove the identities required for quota'), and the operator guide's dispatch/quota configuration section. Nothing here is factually wrong TODAY — the code still matches the docs — so the routine will not touch it on its own. The question is timing. If they stay as-is, the next person to read them learns a design you have retired, and they get more wrong every week the removal proceeds. If they are deleted now, the docs stop describing code that is still shipping, which is its own kind of wrong. A middle option is to leave the text alone and add one line at the top of each saying the subject is being removed and pointing at the directive.
-
-### The question
-
-What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spec/unified-dispatch-worker-model.md, spec/backend-identity-axes.md and the operator guide's dispatch/quota section, given that cut (d) deletes the subsystem they document but that subsystem still ships today?
-
-### Your answer
-
-- [ ] **1. Supersede-mark now** — Leave the text alone but add a one-line superseded-by pointer at the top of each of the four specs and the operator-guide section, naming the (d) directive. Delete them when the removal lands.
-- [ ] **2. Retire now** — Delete all four specs and the operator-guide dispatch/quota section now. The directive is settled; documenting a design of record you have retired is worse than documenting nothing.
-- [ ] **3. Leave until the code lands** — Change nothing. The docs match shipping code today, and they get deleted in the same atomic commit as the code they describe.
-- [ ] **4. Keep one, retire the rest** — Keep spec/backend-identity-axes.md, rewritten down to only the identities that survive metadata-only reporting, and retire the other three plus the operator-guide section.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (7) — what was verified against code, and how</summary>
-
-- CLAUDE.md records the cut: "The cut is (d) — ZERO execution adapters, metadata only" and "quota goes entirely (the verb, the sources, the learned slope, cooldowns, RPM/TPM, reservations)", with the declared sizing window going with them (owner, 2026-08-09).
-- spec/dispatch-quota.md:1-12 — "This spec owns the whole dispatch/quota model as one subject", 760 lines. It is on the constitutional list (src/shared/constitutionalDocPaths.ts:59), so any edit needs an owner-decision attestation.
-- spec/cross-provider-quota-matrix.md:1-8 — 466 lines of per-provider QuotaSource endpoints and credential paths, explicitly the design rationale for src/shared/quota/.
-- spec/unified-dispatch-worker-model.md:1-6 — 232 lines; "Audit-tools declares only stable pool intents and retains the enforcement that must remain local: packet fit, capability floors, quota/headroom, concurrency".
-- spec/backend-identity-axes.md:7-11 — "Dispatch inversion removes provider approval and ordering from audit-tools, but it does not remove the identities required for quota, launch, reachability, and self-spawn safety." Its axes table and its "Which learned quota/cooldown ledger applies?" row are both quota-premised.
-- docs/audit-pkg/operator-guide.md:141-215 — documents the dispatch backend/launch set (provider, host_provider, sources[], parallel_workers, dispatch.rolling_engine), relay-backed dispatch sources, and "enforces packet size/context fit, capability floors, quota/headroom".
-- NOT a factual-stale fix: verified the code still ships this today (PROVIDER_NAMES is live at src/shared/types/sessionConfig.ts:4-16, src/shared/quota/ is intact). The docs are stale only against the directive, which is exactly why this is escalated rather than applied.
-
-</details>
 
 ---
 
@@ -82,7 +35,7 @@ What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spe
 
 ## `backlog-1` — Close the doc-lint-rewrite entry, or name the process that rewrote the bytes — the entry states its own close condition and nobody has met it
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+*Backlog disambiguation · open 2 nights · `docs/backlog/open-bugs.md`*
 
 ### In plain terms
 
@@ -123,7 +76,7 @@ The entry at docs/backlog/open-bugs.md:588 states its own exit condition — nam
 
 ## `backlog-2` — The 2026-07-28 friction walk states a property nothing enforces — enforce it, accept it as advice, or close the entry
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+*Backlog disambiguation · open 2 nights · `docs/backlog/open-bugs.md`*
 
 ### In plain terms
 
@@ -167,7 +120,7 @@ The 2026-07-28 friction walk's item (1) states "when a lap executes tracked work
 
 ## `sol-1` — Make the attest scripts refuse to bind to a tree the pre-commit gate would reject — and correct the durable-traps entry whose stated remedy is falsified
 
-*Recurring-problem solutions · open 1 night · `.claude/hooks/attest-loop-core-review.mjs`*
+*Recurring-problem solutions · open 2 nights · `.claude/hooks/attest-loop-core-review.mjs`*
 
 ### In plain terms
 
@@ -211,7 +164,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P19-attestation-binds-a-tree-the
 
 ## `sol-2` — The backlog sweep counts any record that parses as JSON as CLASSIFIED — five of tonight's 120 carry no verdict at all
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/shared/triage-backlog.mjs`*
 
 ### In plain terms
 
@@ -251,31 +204,178 @@ Full proposal: [`.audit-tools/nightly/proposals/P20-invalid-triage-record-counts
 ---
 
 
+<!-- nightly:item key=285b804c0aef617d -->
+
+## `sol-3` — Leg 1 has no coverage accounting — build the stamp that leg 2 already has, build the full scope ledger the rubric specifies, or delete the ledger section
+
+*Recurring-problem solutions · open 1 night · `docs/doc-review-guidelines.md`*
+
+### In plain terms
+
+The nightly routine has three legs. Leg 2 (the backlog sweep) writes a little scoreboard file every night saying how many entries it actually looked at, how many it classified, and how many errored. That scoreboard exists because three nights in a row the sweep quietly only did part of the job and nobody noticed — the fix was to stop eyeballing coverage and start reading it off a stamp.
+
+Leg 1 (the docs review) has no such scoreboard. The rubric document says it should: it describes a 'ledger' that records, for each reviewable item, the commit it was last checked at. But that ledger was never built. There is no code for it anywhere and no such file on disk. So when leg 1 finishes, the only evidence of what it examined is the reviewing agent's own say-so.
+
+Tonight that failed in exactly the predictable way. A helper agent was asked to review every spec document. It examined seven of them and reported back that it had covered 'all 7 tracked spec markdown files.' There are nineteen. The twelve it missed were caught only because the coordinating agent happened to run a file listing by hand and noticed the number was wrong. Nothing in the tooling would have caught it, and the report would have read as a clean, complete pass.
+
+The question is what to do about it. The cheap option is to copy what leg 2 already does — have leg 1 write the list of files it actually opened and mechanically compare that against the list of documents that are supposed to be reviewed, so a gap is a loud failure rather than a silent one. The expensive option is to build the whole ledger the rubric describes, which additionally remembers when each item was last checked so future runs can narrow their reading to what changed since. The third option is to admit the ledger is never going to be built and delete the paragraph describing it, so the rubric stops promising a mechanism that does not exist.
+
+### The question
+
+Leg 1 produces no mechanical record of what it examined, and the scope ledger `docs/doc-review-guidelines.md` specifies ("Ledger maps `itemHash → { lastCheckedCommit, lastCheckedAt }`") has no implementation at all. Tonight a delegated leg-1 lane reported covering "all 7 tracked spec markdown files" when 19 are tracked. Should leg 1 get a coverage stamp mirroring leg 2's, get the full scope ledger the rubric describes, or should the ledger section be deleted as an unbuilt promise?
+
+### Your answer
+
+- [ ] **1. Coverage stamp** — Build leg 1 a coverage stamp mirroring leg 2's: the run writes the list of doc paths it actually examined, and a mechanical check reconciles that against the doc-manifest's in-scope set, failing loudly on a gap. Do not build the lastCheckedCommit half. Delete the rubric's ledger paragraph or rewrite it to describe the stamp.
+- [ ] **2. Full scope ledger** — Build the full scope ledger as `docs/doc-review-guidelines.md` specifies — content-hash item keys mapped to { lastCheckedCommit, lastCheckedAt }, persisted as a sidecar under `.audit-tools/nightly/` — so leg 1 gets both coverage accounting and the diff-window scoping the rubric wants it for.
+- [ ] **3. Delete the section** — Delete the 'Item keying & the ledger (incremental scope)' section from `docs/doc-review-guidelines.md`. The ledger is not going to be built; a rubric that describes a mechanism nobody implemented is worse than one that admits leg 1 coverage is unmeasured.
+- [ ] **4. Leave it** — Leave leg 1 without coverage accounting and leave the rubric section standing. The orchestrating agent catching the gap by hand tonight is good enough.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
 <details>
-<summary>What the last run changed on its own</summary>
+<summary>Evidence (6) — what was verified against code, and how</summary>
 
-
-- docs/HANDOFF.md — rewrote Immediate-next item 6. It claimed four escalations were "still unasked" and hand-carried, naming the retired ~/.claude/llm-call.mjs passages first. Two of its four claims are false at HEAD: the llm-call.mjs rewrite LANDED in e31ce34e (no file under docs/backlog/ contains the string, verified by grep here and independently re-grepped by a second lane), and open-bugs#0487b95c is not a "close-or-keep call" but a live residuals entry (open-bugs.md:999) the sweep mis-titled. The remaining two questions are raised by THIS run as backlog-1 and backlog-2, so the slot has nothing left to hand-carry. Stale-factual fix, code-anchored both ways; the item is outside HANDOFF's generated-roadmap markers so check:handoff-roadmap is unaffected.
-
+- `docs/doc-review-guidelines.md:269` specifies the ledger: "- Ledger maps `itemHash → { lastCheckedCommit, lastCheckedAt }`." The surrounding section also specifies content-hash item keys, a sidecar under `.audit-tools/nightly/`, autonomous ledger writes, and "Stamp an item only after an agent actually examined it this run."
+- No implementation exists: `git grep -n -E "lastCheckedCommit|lastCheckedAt|itemHash" -- scripts src tests .claude` returns zero matches at HEAD 3f123b9b.
+- No such sidecar exists on disk. `.audit-tools/nightly/` holds only open-items.json, last-viewed.json, insights-last-run.json, the dated triage-*.jsonl/.log/-coverage.json sets, and proposals/.
+- Tonight's failure: a delegated leg-1 lane reported "all 7 tracked spec markdown files" were verified. `git ls-files "spec/**/*.md" "spec/*.md"` returns 19. The 12 unexamined files were caught only because the orchestrator ran that listing by hand; a re-dispatch then covered them (result: no drift). Nothing mechanical would have caught the gap.
+- Leg 2 already solved this exact class. `scripts/shared/triage-backlog.mjs` writes `<out>-coverage.json` (model, total_entries, attempted, classified, errored, aborted) after three consecutive nights degraded silently to partial sweeps — P11, owner decision sol-4, 2026-08-06. `docs/nightly-routine.md` states the resulting rule: "Coverage is read from the stamp, never eyeballed."
+- The asymmetry is not principled: leg 1 is the leg that can WRITE to tracked docs, so an unmeasured-coverage failure there is higher blast radius than the same failure in the propose-only legs.
 
 </details>
+
+---
+
+
+<!-- nightly:item key=5fa08752c53097bb -->
+
+## `sol-4` — Extend the buffering-pipe DENY to peer-CLI dispatch (`codex exec` / `agy -p`), or accept that a piped dispatch lane stays invisible until it exits
+
+*Recurring-problem solutions · open 1 night · `tests/shared/hook-trap-guards.test.ts`*
+
+### In plain terms
+
+When you run a long command and pipe its output through something like `tail` or `grep`, those filters hold everything in a buffer until the command finishes. So while the command is running you see nothing at all — and a run that is working normally looks exactly like a run that has hung. There is no way to tell them apart from the outside.
+
+This already bit hard enough once that a hard block was added: the guard now refuses to let a test suite be piped into a filter. That rule works — it fired earlier tonight and stopped exactly that mistake.
+
+But the rule only recognises test-suite commands. The two peer-CLI lanes this project dispatches work to, `codex exec` and `agy -p`, are not in its list, and they are precisely the commands most likely to run for many minutes with no visible output. The same blindness is therefore still fully available on the lanes where it costs the most. It hit again on 2026-08-09, and in a related incident a wedged codex run's two dozen salvageable findings survived only by luck — that particular call happened not to be piped.
+
+The proposal is to teach the existing rule to also recognise `codex exec` and `agy -p`, reusing the same matching machinery rather than writing a new guard. The cost is that a short, deliberately-piped dispatch call would also be refused, which is the same trade-off the existing suite rule already accepted, and an environment-variable escape hatch is included.
+
+The honest caveat, which the proposal states itself: this is two incidents on two dates. That is thin evidence for a new hard block. The alternative is to leave it, on the grounds that one more instance should be required before adding friction.
+
+### The question
+
+Leg 3 proposes P21: extend `.claude/hooks/shell-trap-guard.mjs`'s buffering-pipe rule so it also DENIES `codex exec` and `agy -p/--print` piped into a buffering filter, reusing the existing `FILTER_PIPE`/`bypassEnabled()` machinery. Recurrence is honestly thin — two incidents on two dates. Ship the guard extension, downgrade it to an advisory, or leave the lanes unguarded until it recurs again?
+
+### Your answer
+
+- [ ] **1. Ship P21 as DENY** — Apply the P21 patch: extend the existing buffering-pipe rule with a `codex exec` / `agy -p` matcher as a hard DENY, with the `AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1` escape hatch and the red-green tests in `tests/shared/hook-trap-guards.test.ts`. Same treatment the sibling suite rule already gets.
+- [ ] **2. Advisory first** — Ship P21 as a warning rather than a DENY. Two incidents on two dates does not yet justify blocking; promote it to DENY if it is read past and the trap recurs — the same escalation path the suite rule itself went through.
+- [ ] **3. Leave it** — Do not add the rule. Two incidents is below the bar for new friction on the dispatch lanes; revisit if it recurs.
+- [ ] **4. Widen instead** — Do not special-case peer CLIs. Instead widen the existing rule to any long-running command piped into a buffering filter, so the guard stops maintaining a list of command families it has to keep chasing.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- Premise verified at HEAD 3f123b9b: `.claude/hooks/shell-trap-guard.mjs:351` defines `SUITE_CMD` and `:353` `FILTER_PIPE`, and `:362` gates the rule on `SUITE_CMD.test(stripped) && FILTER_PIPE.test(stripped)`. Neither `codex` nor `agy` appears in `SUITE_CMD`. The separate codex rule at `:106-127` covers only unclosed stdin, not piping.
+- The rule works for the family it does cover: it fired earlier in this very run, blocking `npm run check:nightly-routine-prompt ... | Select-Object -Last 15`.
+- Recurrence, counted and NOT inflated — 2 distinct dates: `docs/backlog/durable-traps.md` "A background lane piped through tail/head shows ZERO bytes until it exits" (2026-08-09), and the linked "A broad multi-file review scope kills both peer-CLI lanes" entry (2026-08-09/10, commit b3e5fcf5), where a wedged `codex exec` run's 24 salvageable findings survived only because that call happened not to be piped. The general class was already promoted from advisory to DENY once, for the suite family, on 2026-07-24.
+- Full patch and red-green tests written to `.audit-tools/nightly/proposals/P21-peer-cli-dispatch-piped-into-buffering-filter/` (PROPOSAL.md, patch.md). Nothing applied.
+- False-positive surface as stated by the proposal: short bounded dispatch calls piped for convenience get blocked (the trade-off the sibling rule already accepted); quoted textual mentions are exempt via the existing quote-stripping; `tee` remains unguarded (pre-existing, not a new gap); escape hatch `AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1`.
+- Probe caveat: the code side of this item lives in `.claude/hooks/`, which `writeOpenItems` refuses as a probe target (see the sibling item sol-5), so the probe is an `absent` on the test file the patch adds its red-green cases to. If the fix ships under a different identifier than `CLI_DISPATCH_CMD`, this item will mis-HOLD rather than mis-close — it will need closing by hand.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=2c8b18b3c63984bf -->
+
+## `sol-5` — Stop classifying `.claude/hooks/**` as a record path — it is executable guard source, and treating it as a record makes every hook item unprobeable
+
+*Recurring-problem solutions · open 1 night · `scripts/nightly/items.mjs`*
+
+### In plain terms
+
+Every question the nightly routine raises has to carry a 'probe': a literal snippet of a real source file that pins down the fact the question is about. The probe is what lets the question close itself automatically once the underlying code changes, instead of nagging forever.
+
+To keep probes honest there is a rule about where they may point. They may not point at record files — a backlog entry, a review write-up, the handoff doc — because those files merely quote the code, so probing one checks the write-up rather than the actual fact. The list of banned locations includes the whole `.claude` directory.
+
+That is right for most of `.claude`: the decisions ledger, the settings file, the skill write-ups. But `.claude/hooks/` is not a record. It is live executable code — the guards that block commits and refuse dangerous shell commands. The project treats it as source everywhere else: the guards have contract tests under `tests/`, and a registry file declares each one's reach and is mechanically reconciled against the tree.
+
+The consequence showed up while writing tonight's other proposal. That proposal is about a gap in one of those guards, so its natural probe points straight at the guard file — and the probe rule refuses it. The workaround was to probe a test file instead using a guessed identifier, which is weaker: if the fix lands under a different name, the question will not close on its own.
+
+This is the same shape as a problem already fixed once for the backlog leg, where the probe rule made an entire category of question unwritable. The fix here is narrower: keep `.claude` banned but carve out `.claude/hooks/`, so guard source can be probed like the source it is.
+
+### The question
+
+`scripts/nightly/items.mjs` lists `.claude` in `RECORD_PATH_PREFIXES`, so `writeOpenItems` refuses any premise probe pointing into it. But `.claude/hooks/**` is executable guard source, not a record — it has contract tests under `tests/` and a declared reach registry. As a result a leg-3 item proposing a hook change cannot carry a code-side probe (this bit sol-4 tonight). Should `.claude/hooks/` be carved out of the record-path ban?
+
+### Your answer
+
+- [ ] **1. Carve out hooks** — Narrow the record-path rule so `.claude/hooks/` is treated as ordinary tracked source and may carry premise probes, while the rest of `.claude` (the decisions ledger, settings, skill write-ups) stays banned as a record channel.
+- [ ] **2. Whole-list rethink** — Do not special-case hooks. Re-derive `RECORD_PATH_PREFIXES` from what a record actually is — a file that QUOTES code rather than being code — and apply that test to every prefix on the list, rather than patching the one case that bit.
+- [ ] **3. Leave it** — Leave the ban as-is. Hook items can probe their contract tests under `tests/` instead; the weaker auto-close on those items is an acceptable cost for keeping the record-path rule simple.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- Premise verified at HEAD 3f123b9b: `scripts/nightly/items.mjs:257-263` defines `RECORD_PATH_PREFIXES = ['docs/backlog', 'docs/reviews', 'docs/HANDOFF.md', 'docs/nightly-inbox.md', '.claude']`, and `isRecordPath` (`:265-268`) matches any path equal to or under a prefix. `evaluateOneProbe` (`:295-328`) returns `{ state: 'untrackable', reason: 'record_path' }` for such a path unless the item declares `auto_close: false`.
+- `.claude/hooks/**` is treated as source everywhere else in the repo: `scripts/guard-reach-data.mjs` is the declared registry of every guard and its file-set reach, reconciled against the tracked tree by `npm run check:guard-reach` (in `verify:checks` plus an unconditional pre-commit leg); the guards' contract tests live under `tests/` (e.g. `tests/shared/hook-trap-guards.test.ts`, `tests/shared/hook-session-start-guards.test.ts`) precisely because vitest excludes `.claude/**`.
+- Concrete consequence tonight: sol-4 proposes a change to `.claude/hooks/shell-trap-guard.mjs`. Its natural code-side probe points at that file and is refused, so it falls back to an `absent` probe on a guessed identifier in the test file — which mis-HOLDS if the fix ships under a different name.
+- The `auto_close: false` door does not help: it is refused unless EVERY probe is a positive record-path probe, and it is documented as existing only for a question ABOUT a record. A hook item has a genuine code side, so using that door would be an abuse of the escape hatch rather than a fix.
+- Same shape as the already-fixed P18 ("leg-2 escalations are structurally unwritable"), where the record-path refusal made a whole category of item unwritable and was resolved by splitting the rule rather than loosening it globally.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- leg 1 — BOTH independent review lanes DIED, for the second consecutive night, but only ONE scope was actually lost. The agy lane (spec/backend-identity-axes.md, docs/project-philosophy.md, docs/glossary-ids.md, the three package READMEs, README.md) returned 36 bytes: "Error: timeout waiting for response" — nothing. The codex lane (docs/audit-pkg/*) ran ~50 minutes and DID emit 24 findings before it wedged on its own agent-spawn router ("Full-history forked agents inherit the parent agent type", then "collab spawn failed: agent thread limit reached") and was stopped; last night it wedged on a different internal router fault. The agy scope was re-covered directly: src/audit/README.md reconciled against PROVIDER_NAMES (10 non-auto names, exact match), src/audit/adapters/README.md against its directory (6 adapters, exact match), spec/backend-identity-axes.md read end to end (it is the source of docs-1).
+- ALL APPLY-SIDE ACTION — the working tree was dirty at run start and stayed dirty, so per the clean-tree rule this run reviewed and reported but wrote nothing to any tracked file. Ten modified files, no untracked ones, no stash: .claude/hooks/closeout-challenge-gate.mjs, .claude/hooks/pre-commit-gate.mjs, CLAUDE.md, docs/HANDOFF.md, scripts/guard-reach-data.mjs, scripts/nightly/items.mjs, scripts/shared/generate-handoff-roadmap.mjs, tests/shared/handoff-roadmap.test.ts, tests/shared/nightly-completion-ledger.test.ts, tests/shared/nightly-routine.test.ts (+619/-54). That is one coherent in-flight feature (handoff-roadmap generator + pre-commit gate + guard-reach registry + their tests) from a prior session, left untouched. NOTE: scripts/nightly/items.mjs is itself modified, so this run's writeOpenItems call used the WORKING-TREE version of the writer, not HEAD's.
 
-- leg 1 — the codex lane produced 24 doc-drift findings across docs/audit-pkg/* and 21 of them are UNVERIFIED, because the lane died before any adversary pass ran. They are held, not dropped, at .audit-tools/nightly/proposals/LEADS-audit-pkg-doc-drift-2026-08-10/LEADS.md, and NONE was applied — the safety gate is reviewer→adversary→judge and only the reviewer ran. Three were spot-verified against source this run and all three confirmed: release.md:167 claims CI matrixes Node majors when every workflow pins 22.14.0; contracts.md:38 names schemas/audit_result.schema.json (root type object) for an array submission whose real schema is audit_results.schema.json (root type array); operator-guide.md:170 recommends ui_mode "visible" when both dispatch launch sites hard-code headless — that last one needs a nuanced fix, not a deletion, since uiMode is still honoured downstream. Working the other 21 is a lap, not a nightly step.
+- leg 1 — 17 CONFIRMED doc fixes are held unapplied, blocked only by the dirty tree. These are last night's stranded codex-lane leads (24 findings, 21 of which had never had an adversary pass because the lane wedged). This run ran that adversary pass: 21 re-verified independently, verdicts written to .audit-tools/nightly/proposals/LEADS-audit-pkg-doc-drift-2026-08-10/ADVERSARY-2026-08-11.md with minimal corrected wording for each. Tally 17 CONFIRMED / 0 REFUTED / 3 NOT-A-FACTUAL-FIX. ⚠ TREAT THE 0 REFUTED AS A YELLOW FLAG, NOT AS STRENGTH: a 0% refute rate over 21 unverified single-lane LLM claims is exactly the agreeable-adversary shape this project has been bitten by before, and no judge pass ran because nothing was contested. Re-verify before applying rather than treating the 17 as gated-and-ready.
 
-- leg 2 — 124 entries, 120 classified across three passes, 4 hard-errored (open-bugs#4f88e0d8, #933241fc, #6e8be540, #84fa0f94 — all JSON-dialect failures that did not recover on two retries). Stamp: .audit-tools/nightly/triage-2026-08-10-coverage.json, model resolved live as "auto", preflight passed, aborted null. ⚠ TRUE coverage is 115, not 120 — five of the classified records carry no verdict at all, which is what sol-2 is about. ⚠ The stamp is rewritten per invocation, so after the final retry its "classified" field reads 2; the cumulative number is prior_classified + classified.
+- leg 1 — one adversary finding is a possible CODE bug, not a doc bug, and is left for the owner rather than converted into a doc edit: docs/audit-pkg/contracts.md:106 describes the 'hybrid' engine branch as still routing, and the adversary's independent grep of every auditSourcePools assignment found the branch is dead code. Fixing the doc to describe dead code would be the wrong direction if the branch is meant to be live.
 
-- leg 2 — 0 deletions. Both already_shipped_or_stale verdicts were REFUTED on verification, so neither was acted on. forward-tracks#55883634 (CI wall-clock shard balance) is a live pointer entry whose implementation was assigned outside this repo's loop on 2026-08-07 — the model read "no task for this tracker" as "shipped". open-bugs#de319d16 is a genuine owner close-or-keep call and is raised as backlog-1.
+- leg 1 — the leg has NO mechanical coverage accounting, and that cost real coverage tonight before it was caught by hand. A delegated lane reported verifying 'all 7 tracked spec markdown files' when git ls-files returns 19; the 12 unexamined files were found only because the orchestrator ran the listing manually, and a re-dispatch then covered them (result: no drift). Final leg-1 coverage this run, counted: 9/9 package+ops docs, 19/19 spec docs, 13/13 concept + meta-tooling + skills-loader docs. docs/doc-review-guidelines.md is excluded from its own review by contract. This gap is raised as sol-3.
 
-- leg 3 — the recurrence pass read the project memory store and its MEMORY.md index, the global ~/.claude/CLAUDE.md, docs/backlog/durable-traps.md, docs/backlog/open-bugs.md, and this run's own friction. One candidate was DROPPED rather than raised: the offload lanes dying on long jobs (agy twice, codex twice, four deaths in two nights) is already covered by the memories offload-classify-failure-by-output-size and nim-offload-reliable-unit-is-one-entry plus a durable-traps entry, and its mitigation — one bounded item per dispatch — is already written down. Re-proposing it would be the repeat-nightly shape the routine warns about. What IS new and is not yet written down anywhere: codex specifically wedges in its collab/agent-spawn subsystem on a broad multi-file review scope, twice in two nights on two different router faults, losing ~50 minutes each time. That belongs in durable-traps.md as one line; leg 3 is propose-only so it is not added here.
+- leg 2 — the sweep COMPLETED: 124 of 124 entries attempted, not aborted. Stamp: .audit-tools/nightly/triage-2026-08-11-coverage.json, model resolved live as 'auto', preflight passed, finished_at 2026-08-11T17:15:58Z. ⚠ But classification coverage is 96/124: 28 entries hard-errored with no verdict (JSON-dialect failures and finish_reason=length truncations). ⚠ And PREMISE coverage is thinner still — of the 96 classified, only 27 'holds' + 6 'partial' had a verifiable premise; 36 came back probes_unusable and 26 unprobed. So roughly a quarter of the backlog got no verdict and two-thirds of the verdicts rest on an unverified premise. This is the honest number, read off the stamp and the JSONL rather than eyeballed.
 
-- /insights — NOT DUE, which is not a skipped leg. .audit-tools/nightly/insights-last-run.json shows ran_at 2026-08-07T09:09:53Z, three days against the seven-day gate.
+- leg 2 — 0 deletions, 0 mechanical cleanups. Exactly one entry came back already_shipped_or_stale (open-bugs#609496df, 'Accept-latch open residuals') and it FAILS the deletion bar: its code_paths array is empty and its premise evaluated probes_unusable, so there is no code anchor, and leg 2's rule is that deletion requires the same anchor a doc auto-apply requires. Left standing as a lead. (The dirty tree independently blocked applying anything regardless.)
+
+- leg 3 — one proposal, P21, written to .audit-tools/nightly/proposals/P21-peer-cli-dispatch-piped-into-buffering-filter/ (PROPOSAL.md + patch.md, including red-green tests targeted at tests/shared/hook-trap-guards.test.ts because vitest excludes .claude/**). Nothing applied; leg 3 is propose-only. Raised as sol-4. Its recurrence evidence is honestly thin (2 incidents, 2 dates) and the item says so rather than inflating it. Candidates considered and rejected: the peer-CLI wedge itself (external CLI behaviour, not hook-fixable); the Bash 600000ms timeout clamp (one dated incident); attestation tree-binding (duplicate of P19); vitest worker RPC starvation (tracked open bug, root cause unlocated, not a minimal mechanism); in-process subagents tripping Stop gates (already a declared uncovered half with no per-call injection point); direct child_process.spawn (single architectural note, already a declared uncovered half in guard-reach-data.mjs).
+
+- leg 3 — sol-5 was discovered BY writing sol-4, not by the recurrence pass: scripts/nightly/items.mjs classifies all of .claude as a record path, so a probe pointing at .claude/hooks/** is refused even though those files are executable guard source with contract tests under tests/ and a declared reach registry. sol-4 therefore had to fall back to a weaker guessed-identifier probe on its test file, which will mis-HOLD rather than mis-close if the fix ships under a different name.
+
+- /insights — NOT DUE, which per the routine contract is not a skipped leg. .audit-tools/nightly/insights-last-run.json shows ran_at 2026-08-07T09:09:53Z, four days against the seven-day gate.
+
+- GREEN GATE — not run. The routine requires npm run build && npm run check && npm test before any push to main; this run pushed nothing and applied nothing, so the gate had no apply to gate. It would not have been meaningful anyway against a tree carrying someone else's uncommitted feature work. Mechanical gates that WERE run clean this run: check:nightly-routine-prompt (parity, exit 0), check:doc-manifest (exit 0), check:memory-citations (exit 0), check:backlog-budget (exit 0 — 185 entries across 4 files within budget, 2 grandfathered).
 
 
 </details>

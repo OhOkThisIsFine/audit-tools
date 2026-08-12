@@ -142,8 +142,8 @@ test("stepBoundaryFrictionCategory maps every named fact to a REAL category and 
   expect(stepBoundaryFrictionCategory("node_quarantine")).toBe("tool_should_decide");
   expect(stepBoundaryFrictionCategory("artifact_rejected")).toBe("tool_should_decide");
   // Unknown fact → the safe "avoidable re-work" default, never undefined, never 'trap'.
-  expect(stepBoundaryFrictionCategory("brand_new_backend_fact")).toBe("inefficient_feeding");
-  for (const ft of ["phase_reemit", "repair_round", "node_quarantine", "quota_escalation"]) {
+  expect(stepBoundaryFrictionCategory("brand_new_workflow_fact")).toBe("inefficient_feeding");
+  for (const ft of ["phase_reemit", "repair_round", "node_quarantine", "artifact_rejected"]) {
     expect(FRICTION_CATEGORIES).toContain(stepBoundaryFrictionCategory(ft));
   }
 });
@@ -157,7 +157,7 @@ test("decideFrictionTriage pre-populates a category from N same-artifact mechani
   // (an idempotent id like "run-1" exercises none of the encoding).
   const runId = "run/1:derive";
   try {
-    // Two backend facts on the SAME artifact (node-6) → one inefficient_feeding aggregate.
+    // Two workflow facts on the SAME artifact (node-6) → one inefficient_feeding aggregate.
     await captureStepBoundaryFriction(
       dir,
       runId,

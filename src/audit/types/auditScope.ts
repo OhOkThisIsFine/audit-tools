@@ -29,10 +29,9 @@ export const AuditScopeManifestSchema = z
   .object({
     /**
      * `full` audits every auditable file; `delta` scopes to a changed
-     * neighbourhood; `budget` dispatches only the top-K review packets under a
-     * `max_packets` cap and defers the rest.
+     * neighbourhood.
      */
-    mode: z.enum(["full", "delta", "budget"]),
+    mode: z.enum(["full", "delta"]),
     /** Git ref/SHA the delta was measured against; `null` in full mode. */
     since: z.string().nullable(),
     /**
@@ -52,16 +51,6 @@ export const AuditScopeManifestSchema = z
      * requested `--since` could not be honoured and the run fell back to full.
      */
     dropped_note: z.string().optional(),
-    /**
-     * When `mode === 'budget'`: the number of review packets that were NOT
-     * dispatched due to the `max_packets` cap. Present only in budget mode.
-     */
-    deferred_packet_count: z.number().int().min(0).optional(),
-    /**
-     * When `mode === 'budget'`: the task_ids skipped due to the budget cap.
-     * Present only in budget mode.
-     */
-    deferred_task_ids: z.array(z.string()).optional(),
   })
   .strict();
 export type AuditScopeManifest = z.infer<typeof AuditScopeManifestSchema>;

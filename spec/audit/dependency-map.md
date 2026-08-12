@@ -125,8 +125,8 @@ result ledger (which files/lenses each step covered, with recency in
 step-ordinal space) — the ingestion executor writes it in the same
 `advanceAudit` call that appends the ledger, so it records the post-append
 `audit_results.jsonl` revision (dependency-first, no cycle). Nothing plans off
-it yet: it exists to bias later packet composition toward continuity, and that
-bias threads in at the dispatch *code* level (reading `bundle.access_memory`),
+it yet: it exists to bias later host-work composition toward continuity, and that
+bias threads in at the handoff code level (reading `bundle.access_memory`),
 deliberately **not** as a DAG edge — a `coverage_matrix → audit_results →
 access_memory → coverage_matrix` edge would be a cycle.
 
@@ -139,8 +139,8 @@ matrix (same files/buckets) still re-stales tasks. No cycle: planning writes
 `advanceAudit` call, dependency-first.
 
 `task_affinity_graph.json` is the provider-neutral task-affinity graph derived
-from `audit_tasks.json` (Phase A of the plan/dispatch seam); dispatch partitions
-it just-in-time and persists nothing back — see
+from `audit_tasks.json`; the host-handoff builder consumes it to form complete
+bounded work items and persists no executor choice — see
 [`audit-workflow-design.md`](../audit-workflow-design.md).
 
 Findings land in `audit_results.jsonl` (NDJSON, one `AuditResult` per line) —
@@ -221,7 +221,7 @@ truth remains the pair of registries — `EXECUTOR_REGISTRY`
 | `audit_plan_metrics.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
 | `task_affinity_graph.json` | `planning_executor` | — |
 | `requeue_tasks.json` | `planning_executor` | `result_ingestion_executor` |
-| `audit_results.jsonl` | `result_ingestion_executor` (appends; results produced by `rolling_dispatch_executor`) | — |
+| `audit_results.jsonl` | `result_ingestion_executor` (appends validated results returned through `semantic_review_executor`) | — |
 | `access_memory.json` | `result_ingestion_executor` | — |
 | `audit-report.md` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with narrative) |
 | `audit-findings.json` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with narrative) |

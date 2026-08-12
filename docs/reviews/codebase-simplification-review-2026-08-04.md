@@ -44,8 +44,8 @@ consolidation. Per-item dispositions:
    while `blockIdsByFinding(plan)` (line 1707) already builds the Map and is used at 1728.
    Fix: use the helper at both loops.
 
-3. **`hostLimits.ts` twin files** — [audit](../../src/audit/quota/hostLimits.ts) /
-   [remediate](../../src/remediate/quota/hostLimits.ts). VERIFIED — `diff` shows the only
+3. **`hostLimits.ts` twin files** — historical paths `src/audit/quota/hostLimits.ts` /
+   `src/remediate/quota/hostLimits.ts`. VERIFIED — `diff` shows the only
    delta is `ENV_PREFIX` (`AUDIT_CODE` vs `REMEDIATE_CODE`). Fix: one shared function
    taking `envPrefix`; both orchestrators call it. Reuse agent's broader sweep found the
    rest of the audit/remediate wrapper pairs to be legitimate policy draws — this is the
@@ -67,7 +67,7 @@ consolidation. Per-item dispositions:
 ## Tier 2 — altitude: name-inference and per-provider special cases (verified direction, loop-core adjacent — run /design-check before touching)
 
 6. **`isCapableAgentHost` name-check** —
-   [scheduler.ts:224](../../src/shared/quota/scheduler.ts). VERIFIED. Hardcodes
+   `src/shared/quota/scheduler.ts:224`. VERIFIED. Hardcodes
    `claude-code || vscode-task`; sits right beside the INV-BROKER-CLASSIFY-SINGLE-SOURCE
    classify struct. Deeper fix: a declared `fansOutToSubagents` capability on the provider
    contract, folded into `classifyProvider`. Same defect class as the pool-class repair
@@ -75,21 +75,21 @@ consolidation. Per-item dispositions:
    never name inference).
 
 7. **`isSelfSpawnBlocked` special-cases beside its own data map** —
-   [providerPathGuard.ts:88–107](../../src/shared/providers/providerPathGuard.ts).
+   `src/shared/providers/providerPathGuard.ts:88–107`.
    Agent-verified. `codex`/`agy` env-signal checks are hardcoded if-blocks while
    `SELF_SPAWN_ENV_SIGNAL` holds only `claude-code`. Fix: widen the map to multi-env
    arrays and iterate.
 
 8. **Provider classification Sets as literals** —
-   [inProcessWorkers.ts:26–41](../../src/shared/providers/inProcessWorkers.ts), plus the
+   `src/shared/providers/inProcessWorkers.ts:26–41`, plus the
    manual `transport === undefined && typeof provider === "string"` inference in
-   [sessionConfig.ts:235, 766](../../src/shared/validation/sessionConfig.ts). Agent-verified.
+   `src/shared/validation/sessionConfig.ts:235,766`. Agent-verified.
    Classification scattered across sets/factory/validation; validation re-derives what the
    provider predicates already know. Fix: single provider registry declaring worker class;
    validation imports the predicates.
 
 9. **Per-provider copy-paste blocks** — provider command validation
-   ([audit/validation/sessionConfig.ts:65–132](../../src/audit/validation/sessionConfig.ts)),
+   (`src/audit/validation/sessionConfig.ts:65–132`),
    global-asset install ([remediate/index.ts:742–823](../../src/remediate/index.ts)),
    platform→asset mapping repeated per external binary
    ([candidates.ts:32–55 and 423–679](../../src/shared/analyzers/candidates.ts)).

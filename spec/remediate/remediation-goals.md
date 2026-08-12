@@ -17,7 +17,8 @@ but runs independently; when the two are paired, read alongside the auditor's
    and returns; it never prompts the user itself, and its question never
    interrupts a sibling item's remaining work. (A batched *question* window is
    not the same thing as a pause: a run can also halt resumably without asking
-   anything — a provider quota wall is one such pause, see Resume semantics.
+   anything — waiting at a host-workload boundary is one such pause, see Resume
+   semantics.
    The windows above are not an exhaustive list of every point a run can stop.)
 3. Remediation is binary: every remediation item ends in a TERMINAL state, and a
    run cannot complete while any item has not. The terminal states are resolved,
@@ -156,8 +157,8 @@ that are remediated and others declared inappropriate without dropping the block
 
 `ItemSpec` is OPTIONAL enrichment, not a mandatory per-finding write-up: when a
 node carries one it seeds test authoring and the code-vs-spec conformance check;
-when it is absent, implement dispatch reads file scope directly from
-`finding.affected_files` (`buildImplementDispatchItem`). Any produced `item_spec`
+when it is absent, the implementation workload reads file scope directly from
+`finding.affected_files`. Any produced `item_spec`
 and the project-level `closing_plan` persist inline on `RemediationState`
 (`state.items[id].item_spec`, `state.closing_plan`), validated against
 `ItemSpecSchema` / `ClosingPlanSchema` before the next phase may read them.
@@ -165,14 +166,15 @@ and the project-level `closing_plan` persist inline on `RemediationState`
 After the gates exit cleanly, the next user *question* is the deferred
 clarification window at the end of Phase 3, or the end-of-run triage window.
 
-### Phase 3: Implement (LLM, sequential or parallel)
+### Phase 3: Implement (host-executed LLM work)
 
-Blocks are dispatched in dependency order. When the harness supports it and
-a block is parallel-safe, blocks may run in isolated worktrees. Sequential
-execution is the default.
+The tool emits every dependency-ready block as a complete provider-neutral host
+workload. Each item carries its bounded prompt, scope, worktree binding, result
+path, and content-derived metadata. The host chooses sequential or parallel
+execution; audit-tools does not configure or infer host concurrency.
 
 **Deterministic Merge & Fallback:**
-Parallel worktrees must be merged back into the main branch in the exact order they were originally dispatched. Before merging, the worktree is rebased onto the current `HEAD` and tests are run. If tests fail, the node is quarantined and re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
+Completed worktrees are accepted in the workload's deterministic item order. Before merging, the worktree is rebased onto the current `HEAD` and tests are run. If tests fail, the node is quarantined and re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
 
 Within a block, each item runs through:
 
@@ -205,9 +207,9 @@ accurate reason.
 Every item that can make progress does, even if other items are blocked or
 awaiting an answer. No item-level user prompts during Phase 3. Phase 3 does not
 run to completion in one call: like every phase it advances one bounded step per
-invocation, and it can halt mid-phase at a resumable pause that is not a question
-(a provider quota wall emits `quota_paused`, leaving the stranded nodes pending —
-see Resume semantics) or re-block at a phase-boundary test gate.
+invocation, and it can halt mid-phase at the provider-neutral host handoff or
+re-block at a phase-boundary test gate. A host that cannot yet complete an item
+leaves its bound result absent; no backend failure class is persisted by audit-tools.
 
 ### Phase 3b: Triage (user, batched)
 
@@ -367,22 +369,22 @@ a run. On resume the remediator reads persisted item state and continues
 from the last non-complete step of each item. User-answered clarifications
 and triage decisions are persisted so resume does not re-prompt.
 
-A provider quota wall is a first-class retryable pause, not a failure: the
-tool emits a `quota_paused` step and resume re-enters the paused dispatch
-once the window resets. Mechanism detail lives in
-[`spec/remediation-workflow-design.md`](../remediation-workflow-design.md).
+An incomplete host workload is resumable: accepted prompt-bound results remain
+recorded, while items without an accepted result stay pending and are emitted
+again from the dependency-ready frontier. Backend retries, allowance recovery,
+and transport errors remain host state and never enter the remediation schema.
 
 ## Parallelism
 
-Optional. Default sequential. Enabled per-run via configuration. When
-enabled:
+Host-owned. The tool exposes all currently eligible items without choosing a
+parallelism level. Regardless of how the host executes them:
 
 - parallel-safety is determined deterministically in Phase 1 and is NOT revoked by
   an LLM `public_contract` inference (that automatic stripping is not wired); a
   dependency that surfaces later is resolved through triage.
 - each parallel block runs in an isolated workspace (worktree or
   equivalent),
-- merge-back is serialized in deterministic dispatch order; before merging, the
+- merge-back is serialized in deterministic workload order; before merging, the
   worktree is rebased onto `HEAD` and tests run, and on failure the node is
   quarantined into the end-of-run triage window (there is no sorted sequential
   fallback queue — see Phase 3's Deterministic Merge & Fallback).

@@ -102,7 +102,7 @@ export async function buildSyntheticResults(tasks, root, smokeLabel) {
 }
 
 // Drive `next-step` past the host pause steps that precede review dispatch by
-// answering each pause headlessly (skip analyzer installs, confirm the default
+// answering each pause with scripted host inputs (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review).
 async function advanceToDispatchReady(runNextStep, root, log) {
@@ -194,26 +194,25 @@ async function advanceToDispatchReady(runNextStep, root, log) {
   throw new Error("next-step did not reach a dispatch-ready step");
 }
 
-// Disable the synthesis narrative so finalization stays fully deterministic
-// (no synthesis_narrative host pause). Merges into any session config that the
-// run has already persisted (e.g. analyzer skip decisions).
-async function disableNarrative(root) {
-  const configPath = join(root, ".audit-tools", "audit", "session-config.json");
-  let config = {};
-  try {
-    config = JSON.parse(await readFile(configPath, "utf8"));
-  } catch {
-    // No session config yet — start fresh.
-  }
-  config.synthesis = { ...(config.synthesis ?? {}), narrative: false };
-  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
-}
-
 async function nextStepUntilPresentReport(runNextStep, log) {
   for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
     const step = JSON.parse((await runNextStep()).stdout);
     assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
     log.detail(`next-step -> ${step.step_kind} (${step.status})`);
+    if (step.step_kind === "synthesis_narrative") {
+      const narrativeResultsPath = step.artifact_paths?.synthesis_narrative_results;
+      assert.equal(
+        typeof narrativeResultsPath,
+        "string",
+        "synthesis_narrative step must emit its results path",
+      );
+      await mkdir(dirname(narrativeResultsPath), { recursive: true });
+      await writeFile(
+        narrativeResultsPath,
+        JSON.stringify({ themes: [], top_risks: [] }, null, 2) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "present_report") {
       // Mandatory friction triage: present_report pauses at status:"ready" until
       // the host covers every friction category. Attest each clean the way a host
@@ -276,16 +275,6 @@ const legacyLocalAuditCodeSurfaceSpecs = [
   },
   {
     path: [".codex", "skills", "audit-code", "agents", "openai.yaml"],
-    content: [
-      "interface:",
-      "  display_name: \"audit-code\"",
-      "  short_description: \"Run the autonomous /audit-code repository audit workflow.\"",
-      "  default_prompt: \"Start /audit-code for this repository.\"",
-      "",
-    ].join("\n"),
-  },
-  {
-    path: [".codex", "skills", "audit-code", "agents", "local-model.yaml"],
     content: [
       "interface:",
       "  display_name: \"audit-code\"",
@@ -624,29 +613,10 @@ export async function runAuditFlowPhase({
   smokeLabel,
   distCliPath,
 }) {
-  // The smoke drives next-step the way a real conversation host does: with the
-  // `--auditor` capability handshake (single-model shorthand from the skill).
-  // Post dispatch-inversion, packet sizing REFUSES a host whose token limits are
-  // unknown (a resumable blocked step) — so a handshake-less drive can never
-  // reach dispatch_review, and a smoke without one would only ever test the
-  // refusal path. The handshake rides the `@<path>` FILE form: inline JSON
-  // through the `.cmd` bin shim is the known batch-%*-requoting trap.
-  const auditorHandshakePath = join(root, ".audit-tools", "smoke-auditor.json");
-  await mkdir(join(root, ".audit-tools"), { recursive: true });
-  await writeFile(
-    auditorHandshakePath,
-    JSON.stringify({
-      self: {
-        can_dispatch_subagents: true,
-        context_tokens: 200_000,
-        output_tokens: 32_000,
-      },
-    }) + "\n",
-  );
   const runNextStep = () =>
     runCommand(
       auditCodeCommand,
-      ["next-step", "--auditor", `@${auditorHandshakePath}`],
+      ["next-step"],
       {
         cwd: root,
         label: "audit-code next-step",
@@ -675,7 +645,6 @@ export async function runAuditFlowPhase({
     resultsPath,
     JSON.stringify(await buildSyntheticResults(tasks, root, smokeLabel), null, 2),
   );
-  await disableNarrative(root);
   const ingested = JSON.parse(
     (
       await runCommand(

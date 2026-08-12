@@ -85,7 +85,7 @@ export interface UnresolvedConstraintClause {
    * Stable clause identity — the resolution key (CE-004). A `constraint_clauses`
    * entry resolves this clause when its `clause_id` matches, NOT when its
    * rendered `checkpoint_question` matches (two distinct clauses can render to
-   * the same question). The host/headless recorder threads this back so the
+   * the same question). The host recorder threads this back so the
    * answer is keyed on identity.
    */
   clause_id: string;
@@ -154,4 +154,3 @@ export function unresolvedConstraintClauses(
   }
   return unresolved;
 }
-

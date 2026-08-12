@@ -39,21 +39,16 @@ The intended workflow is:
 1. The user invokes `/audit-code`.
 2. The prompt runs `audit-code ensure --quiet`.
 3. Deterministic backend steps build or refresh artifacts.
-4. The active conversation dispatches bounded review packets when semantic
+4. The backend emits complete provider-neutral host work items when semantic
    judgment is required.
-5. Packet workers submit validated `AuditResult` objects through backend-owned
-   commands.
+5. The active conversation assigns them through its native facilities and
+   returns prompt-bound `AuditResult` objects.
 6. The backend ingests results, performs selective deepening and runtime
    validation when needed, and writes the final `audit-report.md`.
 
-Concrete provider/model ordering and failover belong to the external dispatch
-broker. The audit workflow consumes provider-neutral pool intents and never asks
-the user to confirm a provider roster.
-
-Semantic review belongs to the active host conversation by default. The backend
-provider adapters — the authoritative current roster is `PROVIDER_NAMES`
-(`src/shared/types/sessionConfig.ts`) — are compatibility bridges for
-repo-local fallback workflows.
+Semantic execution belongs entirely to the active host conversation. audit-tools
+does not configure, rank, probe, instantiate, or account for execution backends;
+it emits bounded work and validates the returned records.
 
 ## Language strategy
 
@@ -99,8 +94,8 @@ local ESLint configuration, not merely because the binary is installed.
 
 ## Packet planning
 
-`AuditTask` is the deterministic coverage identity; `ReviewPacket` is the
-worker-facing unit of understanding. Packetization aims for packets that read as
+`AuditTask` is the deterministic coverage identity and the host-facing unit of
+understanding. Planning aims for work items that read as
 coherent code-ownership or execution-flow units, not merely budget-sized bundles:
 
 - build packets around coherent subsystems and execution flows
@@ -119,6 +114,6 @@ crossings, weak-packet gaps) is how extraction gaps are found and prioritized.
 
 - repositioning the CLI as a peer product surface
 - making session config the normal way to redirect semantic review into a
-  second external LLM
+  second execution backend
 - making backend implementation details outrank the conversation contract
 - tying packetization quality to one programming language

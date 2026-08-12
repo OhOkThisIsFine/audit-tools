@@ -34,10 +34,9 @@ human-readable render (markdown):
 - Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.
 - Batch work into logical units of reasonable size — rigor balanced against token cost, not 100 agents
   for 100 files.
-- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: discovered at runtime or
-  abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
-  for it is how that is honored — their output is normalized into shared contracts, never forked per
-  ecosystem.
+- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: outside the product
+  contract or abstracted, never baked in. The host owns semantic execution; audit-tools detects repo
+  structure and normalizes analyzer output into shared contracts, never forks planning per ecosystem.
 - Auditing and remediating are not two tools — they are two cases of ONE logical core, drawn read-only or
   write-and-apply. The boundary between them is continuously being dissolved, and re-introducing it is the
   most persistent mistake made against this project; a difference between the two is a policy axis of the
@@ -67,10 +66,10 @@ Running `/audit-code` inside a repo then bootstraps any remaining per-repo host 
 ## Usage
 
 The tools are meant to be run as slash-commands inside a host agent. Just invoke the
-command - no manual path, provider, or model flags. The agent you're conversing with works
-its way through the whole workflow on its own, dispatching subagents where appropriate, and
-only stops to ask you when it needs a real decision (but it does its best to ask those
-questions at the outset so it can run autonomously for as long as possible).
+command—there are no provider, model, or quota flags. audit-tools plans bounded work and
+emits self-contained host workloads; the host chooses how to execute them, writes the bound
+result records, and returns them for strict validation and ingestion. The agent you're
+conversing with works through the persisted workflow and stops only for a real decision.
 
 **Audit a code base:**
 
@@ -128,22 +127,21 @@ a summary before anything is committed.
   clarifications, and tries to front-load those questions so it can run uninterrupted.
 - **Runs are resumable.** State persists to `.audit-tools/` in the target repo, so an
   interrupted run picks up where it left off.
-- **Work runs in parallel** where it safely can, even allowing for coordination between
-  different IDEs, different providers, CLIs, local models, etc.
+- **The host owns execution.** It can run independent work items in parallel using whatever
+  native subagent or collaboration facilities are available in the current session.
 - **Effort scales to the work.** Trivial work gets light review; risky or complex work
   gets deeper scrutiny.
-- **Quota-aware dispatch.** When work is parallelizable, will dispatch agents according to
-  the resources you have available, and the quota and rate limits it can detect.
+- **Results are untrusted input.** Prompt bindings, file coverage, worktree identity, commit
+  evidence, and test evidence are checked before host-produced work changes persisted state.
 
 ### The pipelines, step by step
 
 **audit-code:**
 
-1. **Confirm providers** — discovers the LLMs available in your session and confirms which to use.
-2. **Understand the repo** — deterministically maps files, public surfaces, the dependency
+1. **Understand the repo** — deterministically maps files, public surfaces, the dependency
    graph, critical flows, and a risk register; runs available static analyzers and auto-fixes.
-3. **Confirm intent** — you review the scope and pick the review lenses.
-4. **Map the subsystems** — deterministically clusters the code into real subsystems by
+2. **Confirm intent** — you review the scope and pick the review lenses.
+3. **Map the subsystems** — deterministically clusters the code into real subsystems by
    overlaying how it actually behaves (call/import, co-change, shared state) against how it's
    declared to be organized (directories, docs, comments), and flags where the two disagree:
    a tightly-coupled cluster no declared boundary owns, or a declared purpose smeared across
@@ -151,14 +149,15 @@ a summary before anything is committed.
    charter — what it's *stated* to do versus what the code *reveals* it does — and surfaces the
    gaps, then triangulates any charter question still worth resolving into a clear yes/no before
    moving on.
-5. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
+4. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
    obligations) and a conceptual pass (philosophy, alternatives, better directions). On a deeper
    review it also runs a second-order adversarial pass over the whole codebase asking "is there a
    fundamentally better way to do this?", looping until a round turns up nothing new.
-6. **Plan** — turns the risk register into bounded, prioritized review tasks.
-7. **Review in parallel** — dispatches the review tasks to your LLMs, routing riskier work to
-   more capable models, and deep-dives selectively.
-8. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
+5. **Plan** — turns the risk register into bounded, prioritized review tasks and emits a
+   complete, provider-neutral host workload.
+6. **Review through the host** — the conversation host assigns the bounded items, then
+   audit-tools validates and ingests the bound result records and deep-dives selectively.
+7. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
    then layers on a narrative (themes, executive summary, top risks).
 
 The numbering is a conceptual grouping, not the literal execution sequence — the authoritative
@@ -167,21 +166,21 @@ steps (e.g. deterministic subsystem clustering runs before the intent checkpoint
 
 **remediate-code:**
 
-1. **Confirm providers** — same session-level provider check as audit-code.
-2. **Intake** — reads the findings and/or free-form intent, validates the input, and drafts a
+1. **Intake** — reads the findings and/or free-form intent, validates the input, and drafts a
    summary with any open questions.
-3. **Confirm intent** — you confirm scope, answer open questions, and set the closing action
+2. **Confirm intent** — you confirm scope, answer open questions, and set the closing action
    (commit, push, open PR, publish, or halt).
-4. **Design the change** — decomposes the work into modules, drafts a contract per module in
+3. **Design the change** — decomposes the work into modules, drafts a contract per module in
    parallel, detects and reconciles seams (where one module's output must match another's
    input), then derives obligations and a test plan. Riskier changes get an independent
    critic-and-judge pass.
-5. **Review the findings** — presents every finding bucketed by how much of your judgment it
+4. **Review the findings** — presents every finding bucketed by how much of your judgment it
    needs (strategic / concrete / mechanical); you approve or decline each before anything
    proceeds to implementation.
-6. **Implement in parallel** — executes the changes in isolated worktrees, running tests and
-   verifying each unit; failures are triaged and retried or blocked.
-7. **Close** — previews the file list and commit message for your confirmation (unless
+5. **Implement through the host** — emits all eligible provider-neutral work items. The host
+   performs the edits and returns prompt-bound commit and test evidence; audit-tools validates
+   that evidence before accepting completion.
+6. **Close** — previews the file list and commit message for your confirmation (unless
    pre-authorized), then runs the closing action and writes `remediation-outcomes.json` +
    `remediation-report.md`.
 

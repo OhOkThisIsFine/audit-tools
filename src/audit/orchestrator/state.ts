@@ -459,61 +459,12 @@ export function deriveAuditState(
   // recorded content-key baseline re-dispatches even though its stale result
   // left it status `complete`.
   const { pendingTasks } = derivePendingTaskPartition(bundle);
-  // Tasks deferred by a budget cap (FINDING-013) will never have results, so
-  // they must be excluded from the completion check — otherwise the obligation
-  // loops forever under a budget. Absent active_dispatch => empty set => the
-  // logic is unchanged (all tasks must be complete).
-  const deferredTaskIds = new Set<string>(
-    bundle.active_dispatch?.deferred_task_ids ?? [],
-  );
-  // Tasks stranded by a partial-completion terminal (OBL-A06): when the dispatch
-  // engine fires an empty-pool or livelock terminal and records it on
-  // active_dispatch, those tasks will never be dispatched. Treat them as
-  // uncovered so the pipeline can proceed to synthesis on partial coverage
-  // rather than stalling forever. This shortcut fires ONLY when the terminal
-  // was deliberately written — gate on its presence, not on the deferred list.
-  const partialTerminal = bundle.active_dispatch?.partial_completion_terminal;
-  const strandedTaskIds = new Set<string>(
-    partialTerminal?.stranded_ids ?? [],
-  );
-
-  const hasPendingAuditTasks = pendingTasks.some(
-    (task) =>
-      // Deferred/stranded wins over pending: a budget-deferred or
-      // terminal-stranded task must not hold the completion gate open.
-      !deferredTaskIds.has(task.task_id) &&
-      !strandedTaskIds.has(task.task_id),
-  );
+  const hasPendingAuditTasks = pendingTasks.length > 0;
 
   if (hasPendingAuditTasks) {
     obligations.push(obligation("audit_tasks_completed", "missing"));
   } else if (has(bundle.audit_tasks)) {
     obligations.push(obligation("audit_tasks_completed", "satisfied"));
-  }
-
-  // INV-STATE-PURE-AND-REACHABLE (COR-b019d3b9): the top-level "blocked" status
-  // is derivable from the BUNDLE, not only from step-write paths. A persisted
-  // DC-4 dispatch pause (`active_dispatch.paused_state`: the run is waiting on
-  // an exhausted provider pool) with work still pending is exactly that state:
-  // the run is live but cannot advance until capacity returns. The obligation is
-  // deliberately NON-ACTIONABLE ("blocked", and its id is not in the PRIORITY
-  // scan) so it never masks the resume path — `audit_tasks_completed` stays
-  // `missing` (actionable) above, and re-running next-step re-drives dispatch,
-  // which resumes or promotes the pause (`advancePausedState`). A moot pause
-  // (nothing pending) derives nothing; resume/terminal promotion clears
-  // `paused_state`, which clears this.
-  if (bundle.active_dispatch?.paused_state && hasPendingAuditTasks) {
-    const pauseCount =
-      bundle.active_dispatch.paused_state.lifecycle?.pause_count ?? 0;
-    obligations.push(
-      obligation(
-        "dispatch_capacity",
-        "blocked",
-        `Rolling dispatch is paused waiting for provider capacity (pause ${pauseCount + 1}); ` +
-          "re-run next-step once capacity returns — the run resumes automatically, or " +
-          "yields to synthesis on partial coverage after the pause limit.",
-      ),
-    );
   }
 
   obligations.push(

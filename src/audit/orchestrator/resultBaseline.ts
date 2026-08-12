@@ -158,7 +158,7 @@ export function isMetadataManifestCurrent(
  * time from the CURRENT task content (never off a stored ledger record). Only the
  * fields that define the audited material feed the signature — the identity
  * (`task_id`), lifecycle (`status`, `completed_at`, `completion_reason`), and
- * provider-neutral routing estimates (`token_estimate`, `risk_estimate`, `tags`)
+ * planning metadata (`token_estimate`, `risk_estimate`, `tags`)
  * are deliberately excluded so a benign status flip or estimate refresh never
  * re-fires staleness. A genuine change to the files/ranges/inputs/rationale under
  * review moves the signature and re-fires (CE-011). The basis is single-sourced
@@ -233,8 +233,9 @@ export function refreshResultBaselines(
 /**
  * The set of task_ids whose CURRENT result has DRIFTED from its recorded baseline
  * — the live task content moved since the result was produced. Consumed by the
- * obligation model + dispatch filter to treat those tasks as not-yet-complete so
- * they re-dispatch. Caller passes the SUPERSESSION-RESOLVED results
+ * obligation state and pending-work selection to treat those tasks as
+ * not-yet-complete so they return for review. Caller passes the
+ * SUPERSESSION-RESOLVED results
  * (`selectCurrentResults`) so a superseded base record never keeps firing after
  * its re-dispatch landed. A result with no matching task, no recorded baseline
  * (never compared), or an underivable signature is not reported stale here.

@@ -124,13 +124,13 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
     );
     expect(next.step_kind).not.toBe("analyzer_install");
 
-    // Both decisions persist durably to session config: the install skip AND
+    // Both decisions persist durably to the analyzer policy: the install skip AND
     // the consent declines (Item B — decisions durable, tokens never).
-    const config = JSON.parse(
-      await readFile(join(root, ".audit-tools/audit", "session-config.json"), "utf8"),
+    const policy = JSON.parse(
+      await readFile(join(root, ".audit-tools/audit", "analyzer-policy.json"), "utf8"),
     );
-    expect(config.analyzers.typescript).toBe("skip");
-    expect(config.analyzer_consent.eslint).toBe("declined");
+    expect(policy.analyzers.typescript).toBe("skip");
+    expect(policy.analyzer_consent.eslint).toBe("declined");
   });
 });
 
@@ -214,7 +214,7 @@ test("a fatal next-step exit overwrites the stale step with a blocked step namin
     );
     expect(step.step_kind).toBe("blocked");
     expect(step.status).toBe("blocked");
-    // The step JSON names the cause on its own (headless consumers never read
+    // The step JSON names the cause on its own (automated consumers never read
     // the prompt file).
     expect(step.progress.summary).toContain("no-such-guidance.md");
 

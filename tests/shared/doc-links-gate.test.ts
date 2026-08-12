@@ -206,8 +206,8 @@ describe("rebaseRelativeLinks — the LIFT carries the rewrite", () => {
   const lift = (md: string) => rebaseRelativeLinks(md, "docs/backlog/forward-tracks.md", "docs/HANDOFF.md");
 
   it("re-bases the exact wrong-depth shape that broke HEAD", () => {
-    expect(lift("[`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md)")).toBe(
-      "[`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md)",
+    expect(lift("[`spec/audit-workflow-design.md`](../../spec/audit-workflow-design.md)")).toBe(
+      "[`spec/audit-workflow-design.md`](../spec/audit-workflow-design.md)",
     );
   });
 

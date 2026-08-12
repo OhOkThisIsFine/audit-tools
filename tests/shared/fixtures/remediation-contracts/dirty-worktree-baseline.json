@@ -1,0 +1,550 @@
+{
+  "contract_version": "zero-adapter-dirty-worktree-baseline/v1",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "capture_boundary": "before-remediation-contract-tests-first-edit",
+  "captured_branch": "codex/fix-remaining-audit-findings",
+  "captured_head": "3f123b9b4be813d39d7f45197c23628745c7b8ba",
+  "hash_algorithm": "sha256",
+  "patch_digest_format": "git-binary-patch-sequence-v1",
+  "hunk_identity_format": "source-path-normalized-unified-hunk-sha256-v1",
+  "status_format": "git-status-porcelain-v1-z-uall",
+  "status_snapshot_sha256": "c995df669aff4544865e9d52ff5a84386f5354d6a6fd285b3daf6ddf03d4c1ad",
+  "path_count": 17,
+  "worktree_was_clean": false,
+  "immutable": true,
+  "status_entries": [
+    {
+      "path": ".audit-tools/nightly/open-items.json",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "e49cdea7c460a11abcfbbaaaf68ccfffa125f642c3ccdc1d8c9cf8b88899849d",
+      "index_sha256": "e49cdea7c460a11abcfbbaaaf68ccfffa125f642c3ccdc1d8c9cf8b88899849d",
+      "worktree_sha256": "4ae40849e04a148a52a51cd768079419b29b8f79c80243b4443f8fb7047d9227",
+      "head_bytes": 27986,
+      "index_bytes": 27986,
+      "worktree_bytes": 48234,
+      "binary_patch_sha256": "6672b9110a855caa13dc94d490b88d564604f07dfdea99c2994c6c4402e4aa90",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:9316ad0ba1d1451e562f06b63820d997b58ed5498c7fccda1f939a31de2b1bbb",
+          "source": "worktree-vs-index",
+          "header": "@@ -1,8 +1,8 @@",
+          "patch_sha256": "9316ad0ba1d1451e562f06b63820d997b58ed5498c7fccda1f939a31de2b1bbb"
+        },
+        {
+          "hunk_id": "hunk-sha256:8b646a5331f7f55d6e4df46f5d208c77f80976ed947476b25e086b3abad6f845",
+          "source": "worktree-vs-index",
+          "header": "@@ -38,7 +38,9 @@",
+          "patch_sha256": "8b646a5331f7f55d6e4df46f5d208c77f80976ed947476b25e086b3abad6f845"
+        },
+        {
+          "hunk_id": "hunk-sha256:242a12c8bb2042c3e1b75f32a846f4e25b47d7863da7cefd4ace502e0c1a6086",
+          "source": "worktree-vs-index",
+          "header": "@@ -51,7 +53,7 @@",
+          "patch_sha256": "242a12c8bb2042c3e1b75f32a846f4e25b47d7863da7cefd4ace502e0c1a6086"
+        },
+        {
+          "hunk_id": "hunk-sha256:3e4bf0b1b898df2ce65814041535bec15f58647d1c05998ae08a49f9a485a6c7",
+          "source": "worktree-vs-index",
+          "header": "@@ -93,7 +95,7 @@",
+          "patch_sha256": "3e4bf0b1b898df2ce65814041535bec15f58647d1c05998ae08a49f9a485a6c7"
+        },
+        {
+          "hunk_id": "hunk-sha256:67559716aaa033c98c8196fc712a9212c87922386b1b28af2a42d3dcf35f9b4c",
+          "source": "worktree-vs-index",
+          "header": "@@ -135,7 +137,7 @@",
+          "patch_sha256": "67559716aaa033c98c8196fc712a9212c87922386b1b28af2a42d3dcf35f9b4c"
+        },
+        {
+          "hunk_id": "hunk-sha256:50e08577bcc88df95aafa4a1e595fc7c40dee3d4d22e4875a29ef58b45cfa5cd",
+          "source": "worktree-vs-index",
+          "header": "@@ -183,7 +185,7 @@",
+          "patch_sha256": "50e08577bcc88df95aafa4a1e595fc7c40dee3d4d22e4875a29ef58b45cfa5cd"
+        },
+        {
+          "hunk_id": "hunk-sha256:f31db5dfc4efd3a28d5ba5a2b3b41d86287d97f6edd7c0508fe51e25911da5c9",
+          "source": "worktree-vs-index",
+          "header": "@@ -231,18 +233,152 @@",
+          "patch_sha256": "f31db5dfc4efd3a28d5ba5a2b3b41d86287d97f6edd7c0508fe51e25911da5c9"
+        }
+      ]
+    },
+    {
+      "path": ".audit-tools/nightly/proposals/LEADS-audit-pkg-doc-drift-2026-08-10/ADVERSARY-2026-08-11.md",
+      "original_path": null,
+      "status": "??",
+      "head_sha256": null,
+      "index_sha256": null,
+      "worktree_sha256": "84b09926ad2464854f5720c3c6d3f61ac7c47e15bddbdd18bc74da4c520ccbba",
+      "head_bytes": null,
+      "index_bytes": null,
+      "worktree_bytes": 18430,
+      "binary_patch_sha256": "89a213758baab392189bd6931dbf310fd941764450bbb5182931d45da75a3f8f",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:9a59d1c62876c86b192f94c86ee0522d6cef07e8499aec23ab97cc1d74093d09",
+          "source": "untracked-vs-null",
+          "header": "@@ -0,0 +1,246 @@",
+          "patch_sha256": "9a59d1c62876c86b192f94c86ee0522d6cef07e8499aec23ab97cc1d74093d09"
+        }
+      ]
+    },
+    {
+      "path": ".audit-tools/nightly/proposals/P21-peer-cli-dispatch-piped-into-buffering-filter/PROPOSAL.md",
+      "original_path": null,
+      "status": "??",
+      "head_sha256": null,
+      "index_sha256": null,
+      "worktree_sha256": "ded8e159284fa5475c80942cb66d36e4857389f6dcd9fbb548ff96e563948e58",
+      "head_bytes": null,
+      "index_bytes": null,
+      "worktree_bytes": 7071,
+      "binary_patch_sha256": "0b9b40ca3558cd80a35dff3550b0a12d7f6042df0ee028eb9b2433065d01d5a5",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:9f68710a88cc538e9fc26f7f80ba9f14794986aec028ea6f3ee64e7cd5bf23c1",
+          "source": "untracked-vs-null",
+          "header": "@@ -0,0 +1,109 @@",
+          "patch_sha256": "9f68710a88cc538e9fc26f7f80ba9f14794986aec028ea6f3ee64e7cd5bf23c1"
+        }
+      ]
+    },
+    {
+      "path": ".audit-tools/nightly/proposals/P21-peer-cli-dispatch-piped-into-buffering-filter/patch.md",
+      "original_path": null,
+      "status": "??",
+      "head_sha256": null,
+      "index_sha256": null,
+      "worktree_sha256": "4803529c32bec16c348bf1a5ddb16d8a1c8bacb2d33d6ed24abcdea77cf3a5df",
+      "head_bytes": null,
+      "index_bytes": null,
+      "worktree_bytes": 6672,
+      "binary_patch_sha256": "2f56572fa73b26090ce1699d7a16fdb7ea1a125f46a7ff1571c0ebb1923b5ba5",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:864c17febd5a6a99adc1495c7fa521a4bed588da382f3a6fde59e3c925b97692",
+          "source": "untracked-vs-null",
+          "header": "@@ -0,0 +1,142 @@",
+          "patch_sha256": "864c17febd5a6a99adc1495c7fa521a4bed588da382f3a6fde59e3c925b97692"
+        }
+      ]
+    },
+    {
+      "path": ".audit-tools/remediation-outcomes.json",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "3f596628cea45802d249542711a9b4de77a71a2c5a25c388c2761168d04cb74f",
+      "index_sha256": "3f596628cea45802d249542711a9b4de77a71a2c5a25c388c2761168d04cb74f",
+      "worktree_sha256": "9d8c20008f012a89e2933ae9c59ea0e70936552ab03f8fc7c09b697d19dca0dd",
+      "head_bytes": 2654273,
+      "index_bytes": 2654273,
+      "worktree_bytes": 56498,
+      "binary_patch_sha256": "69fefac7ec2c6ff8ccb12e0a7b0e7ca4412696f1fd03616c712eb8e47f156f29",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:de6e0fd8601aa6c5b77b2503c7f05e768cd6157a8fcf335b88572e551d7c6f2e",
+          "source": "worktree-vs-index",
+          "header": "@@ -1,54030 +1,1020 @@",
+          "patch_sha256": "de6e0fd8601aa6c5b77b2503c7f05e768cd6157a8fcf335b88572e551d7c6f2e"
+        }
+      ]
+    },
+    {
+      "path": ".audit-tools/remediation-report.md",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "c9a661300410454bcc757711571f138930b47a939930fdb031b1fbe6000b4592",
+      "index_sha256": "c9a661300410454bcc757711571f138930b47a939930fdb031b1fbe6000b4592",
+      "worktree_sha256": "0851f4b3334bbf80345c5e155f00018336213c0c579d83f1c1d42504020ac05b",
+      "head_bytes": 212198,
+      "index_bytes": 212198,
+      "worktree_bytes": 269,
+      "binary_patch_sha256": "0d735b8181a99e9829a1f4fdd74a70c69683959ff0d8ddd120dfc8339a1333f9",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:cd862b268feb9eb2d2b2d9913176a5bd3bf0a2edce34b419402912c9b8044abc",
+          "source": "worktree-vs-index",
+          "header": "@@ -1,1821 +1,8 @@",
+          "patch_sha256": "cd862b268feb9eb2d2b2d9913176a5bd3bf0a2edce34b419402912c9b8044abc"
+        },
+        {
+          "hunk_id": "hunk-sha256:29844edaa225dc48e90642e3ab708db1ce295b3bbbf49c710d67544c02c9eee5",
+          "source": "worktree-vs-index",
+          "header": "@@ -1824,94 +11,7 @@ Status: skipped",
+          "patch_sha256": "29844edaa225dc48e90642e3ab708db1ce295b3bbbf49c710d67544c02c9eee5"
+        }
+      ]
+    },
+    {
+      "path": ".claude/hooks/closeout-challenge-gate.mjs",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "64cead080dac085f34413cc3a5225bd47c14d28599636536e66a837e8e066459",
+      "index_sha256": "64cead080dac085f34413cc3a5225bd47c14d28599636536e66a837e8e066459",
+      "worktree_sha256": "2dca87c423254188cb693aed2b75b51a5c2f996407caeb7d5d89c57a78b33a1f",
+      "head_bytes": 10950,
+      "index_bytes": 10950,
+      "worktree_bytes": 11014,
+      "binary_patch_sha256": "0b593dcbb64a3cac20bd27e78037829afe7699c88089c38c79f2510e1099e5bd",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:fa99a16e1fa2f05483b8859321d7a05f9aa75e15a6a417cfccdea31c9323b496",
+          "source": "worktree-vs-index",
+          "header": "@@ -2,7 +2,7 @@",
+          "patch_sha256": "fa99a16e1fa2f05483b8859321d7a05f9aa75e15a6a417cfccdea31c9323b496"
+        },
+        {
+          "hunk_id": "hunk-sha256:6725d5b6823c4ce51af0d4efac627be94494bb81799f11a9a7adfd314307f9a1",
+          "source": "worktree-vs-index",
+          "header": "@@ -111,8 +111,8 @@ if (unpushed) {",
+          "patch_sha256": "6725d5b6823c4ce51af0d4efac627be94494bb81799f11a9a7adfd314307f9a1"
+        },
+        {
+          "hunk_id": "hunk-sha256:128dc969df43c2a23063d0f6d9f309e89de6a600e8fddc4681eddbb1227e7eb4",
+          "source": "worktree-vs-index",
+          "header": "@@ -128,7 +128,8 @@ try {",
+          "patch_sha256": "128dc969df43c2a23063d0f6d9f309e89de6a600e8fddc4681eddbb1227e7eb4"
+        }
+      ]
+    },
+    {
+      "path": ".claude/hooks/pre-commit-gate.mjs",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "39ca9d04cc7cb5026c358e990bca236e85bb26a6a3ad2535f0abdbbdede18b8e",
+      "index_sha256": "39ca9d04cc7cb5026c358e990bca236e85bb26a6a3ad2535f0abdbbdede18b8e",
+      "worktree_sha256": "7e8d2859c2db83562fca88b1b323564e9a9cf9681a3aacf553b834397f215e62",
+      "head_bytes": 64133,
+      "index_bytes": 64133,
+      "worktree_bytes": 66780,
+      "binary_patch_sha256": "0acf5ec2509aa4d0a91a69941ba94e8db04fefa8400ebe6603758813b2fbec25",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:cd90094d66e8ceacaacffc82daced7a8dbcb31d15b38bf8073a2382b01bda2dd",
+          "source": "worktree-vs-index",
+          "header": "@@ -62,6 +62,10 @@ import { LOOP_CORE_PATTERNS } from \"./loop-core-patterns.mjs\";",
+          "patch_sha256": "cd90094d66e8ceacaacffc82daced7a8dbcb31d15b38bf8073a2382b01bda2dd"
+        },
+        {
+          "hunk_id": "hunk-sha256:4b56fc0718cec285ee7bc6773d639dd3fd30f76fcfcbd7026eaf0c31b31db63c",
+          "source": "worktree-vs-index",
+          "header": "@@ -637,21 +641,86 @@ function runGate(committedPaths) {",
+          "patch_sha256": "4b56fc0718cec285ee7bc6773d639dd3fd30f76fcfcbd7026eaf0c31b31db63c"
+        },
+        {
+          "hunk_id": "hunk-sha256:36053f672e3f14d3f49632ea6774cbf786475b678e781ec32a4bead3910ad925",
+          "source": "worktree-vs-index",
+          "header": "@@ -665,12 +734,12 @@ function runGate(committedPaths) {",
+          "patch_sha256": "36053f672e3f14d3f49632ea6774cbf786475b678e781ec32a4bead3910ad925"
+        }
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "83b50282e87f8adb123c5fa7614fbf90729948be34364b1a4014532841ca7344",
+      "index_sha256": "83b50282e87f8adb123c5fa7614fbf90729948be34364b1a4014532841ca7344",
+      "worktree_sha256": "ce29c91eeec0d76319ad195580288c63fb68cc088801f7b4f4a81d10fedd8d10",
+      "head_bytes": 38312,
+      "index_bytes": 38312,
+      "worktree_bytes": 38365,
+      "binary_patch_sha256": "dd0b6caf11711e0dcefe4387649168cf2e1fe1790843e6b909b3fe261d448dd7",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:254bd248b8ae0950257dc91edac19421798649409f1f5bf0fc2de3bc37d65a38",
+          "source": "worktree-vs-index",
+          "header": "@@ -204,7 +204,8 @@ instead of a rewrite. Trivial mechanical edits skip it.",
+          "patch_sha256": "254bd248b8ae0950257dc91edac19421798649409f1f5bf0fc2de3bc37d65a38"
+        }
+      ]
+    },
+    {
+      "path": "docs/HANDOFF.md",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "42cdc448311698717f4a91e931644d1b9c4295ec6e945605c1dbc6fca49ba10e",
+      "index_sha256": "42cdc448311698717f4a91e931644d1b9c4295ec6e945605c1dbc6fca49ba10e",
+      "worktree_sha256": "3fc2d2d641106a0fd97219a4cfc5d3b2c15ae6830bb7d977479433693d0cbf3b",
+      "head_bytes": 24839,
+      "index_bytes": 24839,
+      "worktree_bytes": 25394,
+      "binary_patch_sha256": "8e9628626858d24c1b0cad3113191355dbb0b4643871fc88c1337145b2e07dae",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:78893117af67050d38717ebd32d87463a9545ffa44ffa0897293ef518399e141",
+          "source": "worktree-vs-index",
+          "header": "@@ -23,16 +23,21 @@",
+          "patch_sha256": "78893117af67050d38717ebd32d87463a9545ffa44ffa0897293ef518399e141"
+        }
+      ]
+    },
+    {
+      "path": "docs/nightly-inbox.md",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "129b235d14a8cd684319d70a8d4a7916e1274e9880e48fe12c669a0a1254333b",
+      "index_sha256": "129b235d14a8cd684319d70a8d4a7916e1274e9880e48fe12c669a0a1254333b",
+      "worktree_sha256": "a6d90b4fc5032f08cc16c10c584502ccb660ecdf4a2b3524bfaa8167dd5d4bc9",
+      "head_bytes": 27731,
+      "index_bytes": 27731,
+      "worktree_bytes": 47113,
+      "binary_patch_sha256": "815ceeef2467ccaa6eae3fb9d0cfd1cd5734ad8a4d42ee4536a76f529a5f2516",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:d5dc1270140a92c75e956738139e6da9b441b3165fbea80f7d5cd0d40dd78828",
+          "source": "worktree-vs-index",
+          "header": "@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)",
+          "patch_sha256": "d5dc1270140a92c75e956738139e6da9b441b3165fbea80f7d5cd0d40dd78828"
+        },
+        {
+          "hunk_id": "hunk-sha256:2e5f9f43e6313fa32a3cc340f1d295d40a9aedddf3f72db575c0b8c9fd1b0a15",
+          "source": "worktree-vs-index",
+          "header": "@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.",
+          "patch_sha256": "2e5f9f43e6313fa32a3cc340f1d295d40a9aedddf3f72db575c0b8c9fd1b0a15"
+        },
+        {
+          "hunk_id": "hunk-sha256:1c42541aea25d8cecdaa5ecea7c40a472c9493691cdd71ae5c727651cbd4f569",
+          "source": "worktree-vs-index",
+          "header": "@@ -60,7 +60,7 @@ What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spe",
+          "patch_sha256": "1c42541aea25d8cecdaa5ecea7c40a472c9493691cdd71ae5c727651cbd4f569"
+        },
+        {
+          "hunk_id": "hunk-sha256:56d340fe39322800acfc219699b40d719426575789210361b30f88c9ce5c853a",
+          "source": "worktree-vs-index",
+          "header": "@@ -69,6 +69,8 @@ What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spe",
+          "patch_sha256": "56d340fe39322800acfc219699b40d719426575789210361b30f88c9ce5c853a"
+        },
+        {
+          "hunk_id": "hunk-sha256:bebc36c8e5abbac841c3ff9a7091ec630f99fe06e324318d06e3e6e132f1523d",
+          "source": "worktree-vs-index",
+          "header": "@@ -82,7 +84,7 @@ What happens to spec/dispatch-quota.md, spec/cross-provider-quota-matrix.md, spe",
+          "patch_sha256": "bebc36c8e5abbac841c3ff9a7091ec630f99fe06e324318d06e3e6e132f1523d"
+        },
+        {
+          "hunk_id": "hunk-sha256:3e590748d4c15bdde4b89869ad72228526057cf3dbe36f86789bf2700771af03",
+          "source": "worktree-vs-index",
+          "header": "@@ -123,7 +125,7 @@ The entry at docs/backlog/open-bugs.md:588 states its own exit condition — nam",
+          "patch_sha256": "3e590748d4c15bdde4b89869ad72228526057cf3dbe36f86789bf2700771af03"
+        },
+        {
+          "hunk_id": "hunk-sha256:27edd0391e061a670e334d8b935b909b0321a6458d54e5eb9faf31fa484d4a9a",
+          "source": "worktree-vs-index",
+          "header": "@@ -167,7 +169,7 @@ The 2026-07-28 friction walk's item (1) states \"when a lap executes tracked work",
+          "patch_sha256": "27edd0391e061a670e334d8b935b909b0321a6458d54e5eb9faf31fa484d4a9a"
+        },
+        {
+          "hunk_id": "hunk-sha256:c7aae2f27bbeda63fc7df591b8fae50217865bf8bcf0621b10786e747b924435",
+          "source": "worktree-vs-index",
+          "header": "@@ -211,7 +213,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P19-attestation-binds-a-tree-the",
+          "patch_sha256": "c7aae2f27bbeda63fc7df591b8fae50217865bf8bcf0621b10786e747b924435"
+        },
+        {
+          "hunk_id": "hunk-sha256:1ac049a55c841630a4280d0f4878a47a44a2d970807e0986051639c98d20f523",
+          "source": "worktree-vs-index",
+          "header": "@@ -251,31 +253,178 @@ Full proposal: [`.audit-tools/nightly/proposals/P20-invalid-triage-record-counts",
+          "patch_sha256": "1ac049a55c841630a4280d0f4878a47a44a2d970807e0986051639c98d20f523"
+        }
+      ]
+    },
+    {
+      "path": "scripts/guard-reach-data.mjs",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "6f9c4f9486369d5f941b0f1c70b75a9f7081d22ccf998a51dcf30232eef55dab",
+      "index_sha256": "6f9c4f9486369d5f941b0f1c70b75a9f7081d22ccf998a51dcf30232eef55dab",
+      "worktree_sha256": "28108efea9699a48744e477a55aeace7dbc0ddf6b89e23ac5d8aacf944523f90",
+      "head_bytes": 17245,
+      "index_bytes": 17245,
+      "worktree_bytes": 18352,
+      "binary_patch_sha256": "bdbbb31bde7ebb22a8d77d0aa71db69032cd8ac0855c605a47004ac09837c605",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:8faee5f415e0dd9581050784179922918eb9da308abdac3a73fd1b393c3097bb",
+          "source": "worktree-vs-index",
+          "header": "@@ -362,14 +362,40 @@ export const REACH = [",
+          "patch_sha256": "8faee5f415e0dd9581050784179922918eb9da308abdac3a73fd1b393c3097bb"
+        }
+      ]
+    },
+    {
+      "path": "scripts/nightly/items.mjs",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "5d07d7d842a88906a4e6867a4f487763f0a6cf34f7ac2a8fc8d64cfa0b91dc65",
+      "index_sha256": "5d07d7d842a88906a4e6867a4f487763f0a6cf34f7ac2a8fc8d64cfa0b91dc65",
+      "worktree_sha256": "d07acc57321058da737648af1f8e15635f545196cbe940077d4e2ffc4a441137",
+      "head_bytes": 29446,
+      "index_bytes": 29446,
+      "worktree_bytes": 30389,
+      "binary_patch_sha256": "37d4c697c9f1a6aaab366097e115f659d847a86c52362395e2b5d651f43da86f",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:798f01450325792c9ac5bfd45e5bad453ef878d5b55af4657347813764ad0b4f",
+          "source": "worktree-vs-index",
+          "header": "@@ -273,6 +273,17 @@ export function isRecordPath(file) {",
+          "patch_sha256": "798f01450325792c9ac5bfd45e5bad453ef878d5b55af4657347813764ad0b4f"
+        },
+        {
+          "hunk_id": "hunk-sha256:038f021964e00966fcfb287ee5849d180048aaffb30fdc375397602c7f84053a",
+          "source": "worktree-vs-index",
+          "header": "@@ -366,8 +377,7 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}",
+          "patch_sha256": "038f021964e00966fcfb287ee5849d180048aaffb30fdc375397602c7f84053a"
+        },
+        {
+          "hunk_id": "hunk-sha256:10cae702253d43d26eb8b1473174b1b4497c6b63309e211c2a5e442180f923b8",
+          "source": "worktree-vs-index",
+          "header": "@@ -421,6 +431,12 @@ export function evaluateProbes(root, item, options = {}) {",
+          "patch_sha256": "10cae702253d43d26eb8b1473174b1b4497c6b63309e211c2a5e442180f923b8"
+        },
+        {
+          "hunk_id": "hunk-sha256:8cf71f1d4c18001a7eba27194b8564eefbcfcdc669d0f7a28c7838231488f02b",
+          "source": "worktree-vs-index",
+          "header": "@@ -572,6 +588,8 @@ export function nightsBetween(fromDate, toDate) {",
+          "patch_sha256": "8cf71f1d4c18001a7eba27194b8564eefbcfcdc669d0f7a28c7838231488f02b"
+        },
+        {
+          "hunk_id": "hunk-sha256:2992f0daf4fc4c7b0103b3aeab254bf631d82bcd8ac3bda140ebed12b7d2a88f",
+          "source": "worktree-vs-index",
+          "header": "@@ -581,8 +599,9 @@ export function partitionBySettled(items, decisions, root) {",
+          "patch_sha256": "2992f0daf4fc4c7b0103b3aeab254bf631d82bcd8ac3bda140ebed12b7d2a88f"
+        }
+      ]
+    },
+    {
+      "path": "scripts/shared/generate-handoff-roadmap.mjs",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "109e3c7675d82312eb22a88479ce374e99027c1e34704ed02a8d0fd7957f4042",
+      "index_sha256": "109e3c7675d82312eb22a88479ce374e99027c1e34704ed02a8d0fd7957f4042",
+      "worktree_sha256": "18a6d235cb809cf6a890afb0823cf62141af142c75a74d71baaf50498aec5736",
+      "head_bytes": 13151,
+      "index_bytes": 13151,
+      "worktree_bytes": 20790,
+      "binary_patch_sha256": "c1fb732d35dcaf68a6c81d128794f8d2433df5e9ad4dacaf8dd489e1397b6615",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:671996597f54dcf9f1d069531cf6956f4e2a4729760bdc4c7443589b2535b414",
+          "source": "worktree-vs-index",
+          "header": "@@ -1,6 +1,7 @@",
+          "patch_sha256": "671996597f54dcf9f1d069531cf6956f4e2a4729760bdc4c7443589b2535b414"
+        },
+        {
+          "hunk_id": "hunk-sha256:dd2bda0672684c2533361428d461171fe43c3eed4346712409e714b5d3d25f7e",
+          "source": "worktree-vs-index",
+          "header": "@@ -43,6 +44,11 @@",
+          "patch_sha256": "dd2bda0672684c2533361428d461171fe43c3eed4346712409e714b5d3d25f7e"
+        },
+        {
+          "hunk_id": "hunk-sha256:ec917cb767c8b0c393e2bcba21019a5554b6b41ea761a259b7934ef5161646ab",
+          "source": "worktree-vs-index",
+          "header": "@@ -53,6 +59,15 @@ const handoffPath = join(repoRoot, \"docs\", \"HANDOFF.md\");",
+          "patch_sha256": "ec917cb767c8b0c393e2bcba21019a5554b6b41ea761a259b7934ef5161646ab"
+        },
+        {
+          "hunk_id": "hunk-sha256:5f8de92791688aa7e84c2eb81ac203a08d17e45a158a35020a494ac7999ecdb7",
+          "source": "worktree-vs-index",
+          "header": "@@ -90,6 +105,113 @@ export const ROADMAP_SOURCES = [",
+          "patch_sha256": "5f8de92791688aa7e84c2eb81ac203a08d17e45a158a35020a494ac7999ecdb7"
+        },
+        {
+          "hunk_id": "hunk-sha256:20c985a7f6c767969d7caa8d5f98ff3a04cdd6de2c9dc5c0709a80244f9df558",
+          "source": "worktree-vs-index",
+          "header": "@@ -252,17 +374,93 @@ export function renderRoadmap(groups) {",
+          "patch_sha256": "20c985a7f6c767969d7caa8d5f98ff3a04cdd6de2c9dc5c0709a80244f9df558"
+        },
+        {
+          "hunk_id": "hunk-sha256:0986ee6f98ffae83edbbd641ca33088b51368267065e9d21f25d2373a6b9a8d6",
+          "source": "worktree-vs-index",
+          "header": "@@ -271,22 +469,32 @@ function readSources() {",
+          "patch_sha256": "0986ee6f98ffae83edbbd641ca33088b51368267065e9d21f25d2373a6b9a8d6"
+        }
+      ]
+    },
+    {
+      "path": "tests/shared/handoff-roadmap.test.ts",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "6674a1a58dcb1b554b5d16a3411605a7860202b9ec10591a096fed5ec644fe08",
+      "index_sha256": "6674a1a58dcb1b554b5d16a3411605a7860202b9ec10591a096fed5ec644fe08",
+      "worktree_sha256": "5454da70eda1a467bf47c2106f990fd3d15ac04f46b03bc87d74272f42ea3f94",
+      "head_bytes": 17658,
+      "index_bytes": 17658,
+      "worktree_bytes": 26333,
+      "binary_patch_sha256": "de64804d51f9fc4e5c54f8cb38d1eac2d4c82e303d0e14fec4c75736c344b2db",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:5e979ec1fd4709f3247b2d971ecb951532409758a9d922bac0cc4c259985a49a",
+          "source": "worktree-vs-index",
+          "header": "@@ -28,13 +28,19 @@ import { join, resolve, dirname } from 'node:path';",
+          "patch_sha256": "5e979ec1fd4709f3247b2d971ecb951532409758a9d922bac0cc4c259985a49a"
+        },
+        {
+          "hunk_id": "hunk-sha256:55316fab12e5205551d9e17ca66dc00fe2aa8e87529a08f279ac777860f3db07",
+          "source": "worktree-vs-index",
+          "header": "@@ -190,6 +196,149 @@ describe('rendering — a pointer, never a restated spec', () => {",
+          "patch_sha256": "55316fab12e5205551d9e17ca66dc00fe2aa8e87529a08f279ac777860f3db07"
+        },
+        {
+          "hunk_id": "hunk-sha256:9e08c2707062b2bcfaaafaa8f602c7000dc1932f89a91722a47a40b5cb4a8c48",
+          "source": "worktree-vs-index",
+          "header": "@@ -220,7 +369,10 @@ describe('the live tree', () => {",
+          "patch_sha256": "9e08c2707062b2bcfaaafaa8f602c7000dc1932f89a91722a47a40b5cb4a8c48"
+        },
+        {
+          "hunk_id": "hunk-sha256:510e7f73e89e0d2cdcf1e8903055453ef10b8896335ec009295306a1853bb113",
+          "source": "worktree-vs-index",
+          "header": "@@ -318,6 +470,12 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =",
+          "patch_sha256": "510e7f73e89e0d2cdcf1e8903055453ef10b8896335ec009295306a1853bb113"
+        },
+        {
+          "hunk_id": "hunk-sha256:453203ad080de6e5deb2ab42f9573020e6e8e53eb6d6896ab19c627efb9f2493",
+          "source": "worktree-vs-index",
+          "header": "@@ -360,6 +518,62 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =",
+          "patch_sha256": "453203ad080de6e5deb2ab42f9573020e6e8e53eb6d6896ab19c627efb9f2493"
+        }
+      ]
+    },
+    {
+      "path": "tests/shared/nightly-completion-ledger.test.ts",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "cbae6248334fa57b745f3d50153b9e324b9a136459526a9de61f49615384f3ac",
+      "index_sha256": "cbae6248334fa57b745f3d50153b9e324b9a136459526a9de61f49615384f3ac",
+      "worktree_sha256": "75fc26211f18b3933595ff8199ae05b981dc9c2400c4b53dee79dc323b41f4c3",
+      "head_bytes": 6157,
+      "index_bytes": 6157,
+      "worktree_bytes": 6511,
+      "binary_patch_sha256": "d06f8cc775feb0d313f3dc7a106088e1327bb1a2fc8e499f8eac8a78df810f90",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:174d27bc59d59d2e03858a65f89f74fee0e182e6c7b29bc41cb8319296c9adad",
+          "source": "worktree-vs-index",
+          "header": "@@ -139,4 +139,16 @@ describe(\"partitionBySettled — a counter-question is still open\", () => {",
+          "patch_sha256": "174d27bc59d59d2e03858a65f89f74fee0e182e6c7b29bc41cb8319296c9adad"
+        }
+      ]
+    },
+    {
+      "path": "tests/shared/nightly-routine.test.ts",
+      "original_path": null,
+      "status": " M",
+      "head_sha256": "0b6b7c8eb7047e9d5643921b9f6516a74a4229e811b83b5d3040f58be88c4a50",
+      "index_sha256": "0b6b7c8eb7047e9d5643921b9f6516a74a4229e811b83b5d3040f58be88c4a50",
+      "worktree_sha256": "973ba3c5fc9e781c55bf4fa70e0664ca6382cd0c88c2fe008939a8a424ccb107",
+      "head_bytes": 24844,
+      "index_bytes": 24844,
+      "worktree_bytes": 25367,
+      "binary_patch_sha256": "f6519602722004dc9c835ef821a9e448225e8b898d8bbb1ff61969dc0949347e",
+      "hunks": [
+        {
+          "hunk_id": "hunk-sha256:17edc341384904b19f472706237c8b0770738c272323399852f3b5e5592c505b",
+          "source": "worktree-vs-index",
+          "header": "@@ -240,6 +240,19 @@ describe('premise probes — an item whose quoted code has vanished closes itsel",
+          "patch_sha256": "17edc341384904b19f472706237c8b0770738c272323399852f3b5e5592c505b"
+        }
+      ]
+    }
+  ],
+  "manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68"
+}

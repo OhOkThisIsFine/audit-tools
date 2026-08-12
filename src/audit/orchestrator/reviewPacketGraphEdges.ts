@@ -1,13 +1,11 @@
 import type { AuditTask } from "../types.js";
 import type { GraphEdge } from "audit-tools/shared";
 import { collectGraphEdges } from "audit-tools/shared";
-import { UnionFind } from "./unionFind.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 
 // Graph-edge primitives: collection, scoring, degree indexing, expansion
-// predicate, group-key utilities, and the union-find merge step that derives
-// the initial clustering from shared-file links and filtered graph edges.
-// Imported by reviewPacketGraphClustering and reviewPacketGraph (barrel).
+// predicate, and group-key utilities used only for presentation metrics.
+// Membership comes exclusively from shared content coherence.
 // `collectGraphEdges` is single-sourced in `audit-tools/shared` (the shared
 // continuity scorer needs it too) and re-exported here so this barrel's
 // consumers are unchanged.
@@ -110,76 +108,4 @@ export function buildFileToGroupKeys(
     }
   }
   return fileToGroupKeys;
-}
-
-export function unionFindFromGroups(
-  groups: Map<string, AuditTask[]>,
-  graphEdges: GraphEdge[],
-): UnionFind {
-  const uf = new UnionFind(groups.keys());
-  const fileToGroupKeys = buildFileToGroupKeys(groups);
-  const degreeIndex = buildGraphDegreeIndex(graphEdges);
-  const verbose = Boolean(process.env.AUDIT_CODE_VERBOSE);
-
-  for (const keys of fileToGroupKeys.values()) {
-    const [first, ...rest] = [...keys].sort((a, b) => a.localeCompare(b));
-    if (!first) continue;
-    for (const key of rest) {
-      if (verbose) {
-        const rootBefore = uf.find(key);
-        const rootFirst = uf.find(first);
-        uf.union(first, key);
-        if (rootFirst !== rootBefore) {
-          process.stderr.write(
-            `[audit-code:packet-planning] shared-file merge: "${first}" + "${key}" (roots "${rootFirst}" + "${rootBefore}" → "${uf.find(first)}")\n`,
-          );
-        }
-      } else {
-        uf.union(first, key);
-      }
-    }
-  }
-
-  for (const edge of graphEdges) {
-    const fromGroups = fileToGroupKeys.get(normalizeGraphPath(edge.from));
-    const toGroups = fileToGroupKeys.get(normalizeGraphPath(edge.to));
-    if (!isPacketExpansionEdge(edge, degreeIndex)) {
-      if (verbose && fromGroups && toGroups) {
-        // Edge has group mappings but was filtered — check if it was the
-        // high fan-degree guard specifically.
-        const fromFanOut = degreeIndex.fanOut.get(normalizeGraphPath(edge.from)) ?? 0;
-        const toFanIn = degreeIndex.fanIn.get(normalizeGraphPath(edge.to)) ?? 0;
-        const highFanEdge =
-          fromFanOut > HIGH_FAN_DEGREE_THRESHOLD ||
-          toFanIn > HIGH_FAN_DEGREE_THRESHOLD;
-        if (highFanEdge) {
-          process.stderr.write(
-            `[audit-code:packet-planning] edge skip (high-fan-degree): "${edge.from}" → "${edge.to}" (fanOut=${fromFanOut}, fanIn=${toFanIn})\n`,
-          );
-        }
-      }
-      continue;
-    }
-    if (!fromGroups || !toGroups) {
-      continue;
-    }
-    for (const fromKey of fromGroups) {
-      for (const toKey of toGroups) {
-        if (verbose) {
-          const rootFrom = uf.find(fromKey);
-          const rootTo = uf.find(toKey);
-          uf.union(fromKey, toKey);
-          if (rootFrom !== rootTo) {
-            process.stderr.write(
-              `[audit-code:packet-planning] edge-driven merge: "${fromKey}" + "${toKey}" via edge "${edge.from}" → "${edge.to}" (kind=${edge.kind ?? "unknown"})\n`,
-            );
-          }
-        } else {
-          uf.union(fromKey, toKey);
-        }
-      }
-    }
-  }
-
-  return uf;
 }

@@ -1,0 +1,47 @@
+{
+  "contract_version": "zero-adapter-overlap-write-once-gate/v1",
+  "module_id": "remediation-contract-tests",
+  "target_path": "tests/shared/fixtures/remediation-contracts/owned-overlap-remediation-contract-tests.json",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "baseline_status_snapshot_sha256": "c995df669aff4544865e9d52ff5a84386f5354d6a6fd285b3daf6ddf03d4c1ad",
+  "pre_edit_test_tree": {
+    "capture_rule": "reconstructed-from-head-and-baseline-while-foundation-test-absent-v2",
+    "captured_head": "3f123b9b4be813d39d7f45197c23628745c7b8ba",
+    "head_tests_tree_oid": "567bc1dfe3d70561d0888723d8ba9e234b0330a6",
+    "dirty_test_overrides": [
+      {
+        "path": "tests/shared/handoff-roadmap.test.ts",
+        "status": " M",
+        "worktree_sha256": "5454da70eda1a467bf47c2106f990fd3d15ac04f46b03bc87d74272f42ea3f94"
+      },
+      {
+        "path": "tests/shared/nightly-completion-ledger.test.ts",
+        "status": " M",
+        "worktree_sha256": "75fc26211f18b3933595ff8199ae05b981dc9c2400c4b53dee79dc323b41f4c3"
+      },
+      {
+        "path": "tests/shared/nightly-routine.test.ts",
+        "status": " M",
+        "worktree_sha256": "973ba3c5fc9e781c55bf4fa70e0664ca6382cd0c88c2fe008939a8a424ccb107"
+      }
+    ],
+    "untracked_test_paths": [],
+    "tree_sha256": "3af6651f8860c21fd14ef1013a9142c87bc854de3f49bbfaf8def271acd88c44"
+  },
+  "foundation_owned_paths_absent": [
+    "tests/shared/fixtures/remediation-contracts/contract-harness.ts",
+    "tests/shared/fixtures/remediation-contracts/contract-matrix.json",
+    "tests/shared/fixtures/remediation-contracts/dependency-manifest.json",
+    "tests/shared/fixtures/remediation-contracts/dirty-worktree-baseline.json",
+    "tests/shared/fixtures/remediation-contracts/owned-overlap-remediation-contract-tests.json",
+    "tests/shared/fixtures/remediation-contracts/provider-neutral-workloads.json",
+    "tests/shared/fixtures/remediation-contracts/red-run-evidence.json",
+    "tests/shared/fixtures/remediation-contracts/write-once-gate-remediation-contract-tests.json",
+    "tests/shared/remediation-contracts.test.ts"
+  ],
+  "sealed_overlap_manifest_sha256": "30aaf9b42650df973bf4edd2b54e0e6a8981bd5287b1d27ca3bed3f7771c37a9",
+  "finalized_before_first_test_edit": true,
+  "write_once": true,
+  "gate_manifest_sha256": "e5c9215e1b86d772fc3441f683a83b0244f005b3afe4224d8814d5d31b826f4b"
+}

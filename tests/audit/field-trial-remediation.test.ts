@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
@@ -11,7 +11,7 @@ import type {
   Finding,
 } from "../../src/audit/types.js";
 import type { AuditReportModel } from "../../src/audit/reporting/synthesis.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
+import { loadSessionIntent } from "../../src/shared/sessionConfig.js";
 
 const { validateAuditResults }: typeof import(
   "../../src/audit/validation/auditResults.js"
@@ -25,7 +25,7 @@ const { buildAuditReportModel: buildAuditReportModelRaw }: typeof import(
 );
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
-) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+) => buildAuditReportModelRaw(params);
 const { buildRequeuePayload }: typeof import(
   "../../src/audit/orchestrator/requeueCommand.js"
 ) = await importSourceModule(
@@ -45,11 +45,6 @@ const { autoCompleteTrivialCoverage }: typeof import(
   "../../src/audit/orchestrator/trivialAudit.js"
 ) = await importSourceModule(
   "src/orchestrator/trivialAudit.ts",
-);
-const { loadSessionConfig }: typeof import(
-  "../../src/audit/supervisor/sessionConfig.js"
-) = await importSourceModule(
-  "src/supervisor/sessionConfig.ts",
 );
 
 function requireDefined<T>(value: T | undefined, message: string): T {
@@ -799,74 +794,77 @@ test("autoCompleteTrivialCoverage marks trivial files as excluded", () => {
   expect(coverage.files[2].audit_status).toBe("pending");
 });
 
-test("loadSessionConfig writes a default repo-local session config when missing", async () => {
-  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+test("loadSessionIntent defaults a missing canonical intent without writing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
-    const config = await loadSessionConfig(artifactsDir);
-    expect(config).toBeTypeOf("object");
-
-    // The default config was persisted repo-locally and is parseable JSON.
-    const persisted = JSON.parse(
-      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
-    );
-    expect(persisted).toBeTypeOf("object");
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const config = await loadSessionIntent(root);
+    expect(config).toEqual({
+      status: "not_configured",
+      intent: { review_mode: "attended", observability: "standard" },
+    });
+    await assert.rejects(readFile(join(artifactsDir, "session-config.json"), "utf8"));
   } finally {
-    await rm(artifactsDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 
-test("loadSessionConfig reads and returns a pre-existing intent config without clobbering it", async () => {
-  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+test("loadSessionIntent reads and returns a pre-existing intent config without clobbering it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
-    // G2: the persisted config is a RepoSessionIntent — no dispatch fields (provider
-    // now rides the --auditor descriptor). Use an intent field to pin the read.
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const original = JSON.stringify({ review_mode: "autonomous" });
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ timeout_ms: 45000 }),
+      original,
       "utf8",
     );
-    const config = await loadSessionConfig(artifactsDir);
-    expect(config.timeout_ms).toBe(45000);
-    // File must not have been overwritten to a default value.
-    const persisted = JSON.parse(
-      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
-    );
-    expect(persisted.timeout_ms).toBe(45000);
+    const config = await loadSessionIntent(root);
+    expect(config).toEqual({
+      status: "configured",
+      intent: { review_mode: "autonomous", observability: "standard" },
+    });
+    expect(await readFile(join(artifactsDir, "session-config.json"), "utf8")).toBe(original);
   } finally {
-    await rm(artifactsDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 
-test("loadSessionConfig returns a partial intent config as a plain object", async () => {
-  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+test("loadSessionIntent expands defaults for a partial canonical intent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
-    // Only one intent field is set; all other fields are absent.
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ synthesis: { narrative: false } }),
+      JSON.stringify({ observability: "verbose" }),
       "utf8",
     );
-    const config = await loadSessionConfig(artifactsDir);
-    expect(config.synthesis?.narrative).toBe(false);
-    // The returned object must be a plain object (not null, not a string).
-    expect(typeof config).toBe("object");
-    expect(config !== null).toBeTruthy();
+    const config = await loadSessionIntent(root);
+    expect(config).toEqual({
+      status: "configured",
+      intent: { review_mode: "attended", observability: "verbose" },
+    });
   } finally {
-    await rm(artifactsDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 
-test("loadSessionConfig handles malformed JSON in the config file", async () => {
-  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+test("loadSessionIntent handles malformed JSON in the config file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
       "{not json}",
       "utf8",
     );
-    // loadSessionConfig must throw — it must not silently swallow a parse error.
+    // loadSessionIntent must throw — it must not silently swallow a parse error.
     await assert.rejects(
-      loadSessionConfig(artifactsDir),
+      loadSessionIntent(root),
       (err) => {
         if (!(err instanceof Error)) {
           return false;
@@ -879,6 +877,6 @@ test("loadSessionConfig handles malformed JSON in the config file", async () => 
       },
     );
   } finally {
-    await rm(artifactsDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });

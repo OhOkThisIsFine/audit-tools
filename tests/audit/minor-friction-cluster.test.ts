@@ -1,8 +1,6 @@
 /**
  * 2026-08-05 minor-friction cluster — the four items two dispatch waves punted
  * on, pinned tool-side:
- *  au-1: the auditor handshake renders as `--auditor @<file>` on continue
- *        commands once persisted, never the full JSON re-echoed per step;
  *  au-3: every step prompt carries the scope echo line from the persisted
  *        scope_summary.json, so a RESUMED run is no longer blind;
  *  au-4: advanceAudit runs a bounded-interval progress heartbeat naming the
@@ -14,12 +12,6 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  renderAuditorDescriptor,
-  persistAuditorHandshake,
-  auditorHandshakePath,
-  nextStepCommand,
-} from "../../src/audit/cli/prompts.js";
 import { scopeEchoLine, writeCurrentStep } from "../../src/audit/cli/steps.js";
 import { emitStalenessRecord } from "../../src/audit/orchestrator/staleness.js";
 import { startAdvanceHeartbeat } from "../../src/audit/orchestrator/advance.js";
@@ -41,39 +33,6 @@ afterEach(() => {
       // best-effort temp cleanup
     }
   }
-});
-
-const DESCRIPTOR = {
-  self: { provider: "claude-code", can_dispatch_subagents: true },
-} as Parameters<typeof renderAuditorDescriptor>[0];
-
-describe("au-1: handshake echoed once, continue-commands reference the file", () => {
-  it("persists the handshake and renders `--auditor @<file>` instead of inline JSON", () => {
-    const artifactsDir = tempDir("handshake-");
-    persistAuditorHandshake(artifactsDir, DESCRIPTOR);
-    const path = auditorHandshakePath(artifactsDir);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(DESCRIPTOR);
-
-    const cmd = nextStepCommand("C:/repo", artifactsDir, DESCRIPTOR);
-    // renderCommand normalizes host-facing paths to forward slashes.
-    expect(cmd).toContain(`@${path.replace(/\\/g, "/")}`);
-    expect(cmd).not.toContain('"can_dispatch_subagents"');
-  });
-
-  it("falls back to inline JSON when no handshake file exists", () => {
-    const tokens = renderAuditorDescriptor(DESCRIPTOR, join(tempDir("none-"), "absent.json"));
-    expect(tokens[0]).toBe("--auditor");
-    expect(tokens[1]).toContain('"can_dispatch_subagents"');
-  });
-
-  it("persist is write-if-changed (byte-stable across resumes)", () => {
-    const artifactsDir = tempDir("handshake-stable-");
-    persistAuditorHandshake(artifactsDir, DESCRIPTOR);
-    const path = auditorHandshakePath(artifactsDir);
-    const before = readFileSync(path, "utf8");
-    persistAuditorHandshake(artifactsDir, DESCRIPTOR);
-    expect(readFileSync(path, "utf8")).toBe(before);
-  });
 });
 
 describe("au-3: scope echo rides every step prompt from the persisted summary", () => {

@@ -2,7 +2,6 @@ import { test, expect } from "vitest";
 import { AuditFindingsReportSchema } from "audit-tools/shared";
 import type { AuditFindingsReport, SynthesisNarrative } from "audit-tools/shared";
 import type { AuditResult } from "../../src/audit/types.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 function assertMatchesJsonSchema(_schema: unknown, value: unknown, label: string): void {
   const result = AuditFindingsReportSchema.safeParse(value);
@@ -25,15 +24,15 @@ const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js")
 
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
-) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+) => buildAuditReportModelRaw(params);
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
   results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results, { workPartition: TEST_WORK_PARTITION });
+) => runSynthesisExecutorRaw(bundle, results);
 const runSynthesisNarrativeExecutor = (
   bundle: Parameters<typeof runSynthesisNarrativeExecutorRaw>[0],
   narrative?: Parameters<typeof runSynthesisNarrativeExecutorRaw>[1],
-) => runSynthesisNarrativeExecutorRaw(bundle, narrative, { workPartition: TEST_WORK_PARTITION });
+) => runSynthesisNarrativeExecutorRaw(bundle, narrative);
 
 
 function syntheticResults(): AuditResult[] {

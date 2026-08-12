@@ -31,26 +31,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   every patch against source before landing (two waves of this sprint each shipped
   inverted-semantics fixes that read plausibly).
 
-- **A local test RED can be an ambient-PATH artifact, not a regression.** `INV-shared-core-14`
-  stubbed only two provider constructors while auto-resolution walks the real `PATH`, so it passed in CI
-  (no CLIs on the runner) and failed on any box with `agy`/`codex` installed — reading as a product
-  defect. Fixed, but the CLASS recurs: before believing a local red, check whether the fixture depends on
-  what happens to be installed. [[lap-green-must-match-ci-evidence]] cuts BOTH ways — CI green over a
-  local red is as real a signal as the reverse.
-
-- **agy's headless lane is INERT until `~/.gemini/antigravity-cli/settings.json` grants tool
-  permissions — and the grammar is `tool(target)` (verified live 2026-07-25).** Without that file
-  `agy -p` exits 0 and prints only `jetski: no output produced — a tool required the "command"
-  permission that headless mode cannot prompt for`, which reads as a dead lane. The error message
-  itself names the grammar: a `permissions.allow` array of `tool(target)` entries, `*` accepted as the
-  target wildcard. `read_file`/`glob`/`list_directory`/`search_file_content` are NOT sufficient on
-  their own — agy shells out, so `command(...)` is required for any file work. The CLI's cwd defaults
-  to its own `…/antigravity-cli/scratch`, so pass `--add-dir <repo>` AND absolute paths in the prompt
-  or it reports the file missing. `--dangerously-skip-permissions` remains refused by
-  `shell-trap-guard.mjs` (prompt-derail trap) and is not needed. ⚠ The allow-list is MACHINE-GLOBAL and
-  currently grants `command(*)`, i.e. every headless agy session auto-approves any command — narrow it
-  if agy is ever pointed at untrusted input.
-
 - **A broad multi-file review scope kills both peer-CLI lanes, and they fail in OPPOSITE shapes
   (2026-08-09 and 2026-08-10, four deaths in two nights).** `agy -p` dies fast and loud —
   `Error: timeout waiting for response`, ~36 bytes, nothing salvageable. `codex exec` dies slow and
@@ -73,8 +53,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   [[pretooluse-gate-misses-chained-git-add-commit]], where the chain BYPASSES the gate.)
 
 - **An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).** The memory
-  consolidation found a memory listing 4 open items of which 3 were long done (audit's symmetric
-  `runRollingDispatch` wiring, INV-QD-14 spill, `rate_limited` handling). Same decay as
+  consolidation found a memory listing four open items of which three were long done. Same decay as
   [[backlog-prose-decays-verify-against-head]], but in the memory store, where nothing ever forces a
   re-read. Verify any "open"/"remaining"/"TODO" claim against HEAD before it becomes work.
 
@@ -97,8 +76,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the limit. ⚠ This has been wrong in BOTH directions (first "pool ~6-wide", then a blanket lane-wide
   ceiling), which is why the fact is stated per-backend. `finish_reason` is `undefined`, not `length`.
   [[nim-offload-reliable-unit-is-one-entry]]
-  Scope is ad-hoc scripts only: audit-tools' own dispatch is paced by declared
-  `quota.max_concurrent`/`requests_per_minute` and `laneWorkerKindConflict`. Record:
+  Scope is ad-hoc development scripts only; audit-tools does not schedule these calls. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
   ⚠ **Never hand-rotate `model` per batch/retry** — the proxy owns retries and same-tier fallbacks
   (the router owns them); caller-side rotation crosses
@@ -160,54 +138,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   model incapacity and is purely a caller defect. Number every inlined line (`N<TAB>source`) and say so
   in the system prompt; a smoke check ("what is on line 166?") confirms the worker can see them.
 
-- **Global `fetch` cannot outlast a long reasoning call — undici's 300s `headersTimeout` is measured to
-  the FIRST byte and `globalThis.fetch` cannot be told otherwise (2026-07-20, low; remedy corrected
-  2026-07-24).** A multi-file adversarial dispatch to `deepseek-v4-pro` died at ~5min with
-  `[TypeError: fetch failed] / UND_ERR_HEADERS_TIMEOUT`, which reads like a dead proxy and is not
-  (the default is `300e3` — `undici/lib/dispatcher/client.js:262`). The remedy is split by WHERE the
-  caller lives; the original "always use `node:http`" advice is now wrong for two of the three cases:
-  (a) **in-repo** — `undici` is a runtime dep (`^7.28.0`, added v0.34.27), so build an `Agent` whose
-  `headersTimeout`/`bodyTimeout` follow the declared deadline and pass it as `dispatcher`. That is what
-  shipped (`deadlineBoundFetch` in `src/shared/providers/openAiCompatibleProvider.ts`) and hand-rolling a `node:http`
-  transport there was deliberately rejected — undici IS Node's fetch implementation, pure JS, and HTTP
-  transport is correctness-sensitive enough to acquire rather than own.
-  (b) **a standalone script you hand-roll** (`~/.claude/*.mjs`, scratchpad) — `import("undici")` still
-  does NOT resolve (re-verified 2026-07-24: `ERR_MODULE_NOT_FOUND` from `~/.claude` and from the
-  scratchpad; resolves only with the repo as cwd). Use `node:http` — or `node:https` for a non-local
-  endpoint — with an explicit request `timeout`.
-
 - **An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right
   (2026-07-20, medium).** A NIM (`glm-5.2`) call to verify an axis claim returned an accurate
-  per-call-site breakdown that correctly refuted the claim — but attributed sentences to
-  `spec/backend-identity-axes.md` that actually came from the just-written source file passed in the
-  same call, and invented a verbatim "host quota pools … still key on transport or host identity"
-  quote from the identity module that exists nowhere. The lane's structural analysis was worth the
+  per-call-site breakdown that correctly refuted the claim — but attributed sentences to the design
+  record that actually came from a just-written source file passed in the same call, and invented a
+  verbatim supporting quote that exists nowhere. The lane's structural analysis was worth the
   call; every citation in it was worthless. Treat quoted evidence from the lane as the LEAST reliable
   part of its output, not the most — the opposite of the intuition that a quote is checkable proof.
   ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
   failure — confident output with fake support.)
-
-- **`codex exec` hangs on an open stdin — inside the product that is guaranteed by the spawn substrate,
-  not by each spawn site.** The shell-trap guard refuses the trap only for commands the HOST runs. In
-  `src/` there is one spawn substrate, `spawnLoggedCommand` (`src/shared/providers/spawnLoggedCommand.ts`),
-  and it closes stdin on both branches: `stdio[0]` is `"ignore"` when no `stdinText` is supplied, and a
-  pipe that is `.end()`ed immediately when one is. Every CLI provider — codex, claude-code, claude-worker,
-  agy, opencode, worker-command, subprocess-template — routes through it, so no provider carries (or
-  needs) stdin handling of its own.
-  ⚠ **HALF-CLOSED, and the open half is the likelier one.** Nothing prevents new code from calling
-  `child_process.spawn` DIRECTLY, where Node's default stdio leaves the child's stdin an open pipe →
-  the silent exit-0/empty-output hang. Routing through the substrate is a convention here, not an
-  enforced invariant: no gate refuses a direct spawn in `src/`. And only the `stdinText` pipe branch
-  is asserted in `tests/shared/spawnLoggedCommand.test.ts` — the `"ignore"` default, which is the
-  branch a `worker_command` of `["codex","exec",…]` actually takes, has no test. So the substrate is
-  correct and unproven, and bypassing it is undetected.
-
-- **An unrecognized key in the machine declaration can fail as a missing lane.**
-  `~/.audit-code/sources-declared.json` is operator-authored machine config that repo tests do not read
-  directly (tests inject `readDeclarationFile`). `readSourceDeclaration` consumes `sources` only, and
-  the validator does not reject unknown top-level keys. Per-source reach failures are printed on stderr
-  as `[audit-tools] declared source "<id>" not resolved: <reason>`. After a source-contract change,
-  validate the live declaration through `resolveAmbientSources`; do not infer health from a green suite.
 
 - **The free offload lane is a local router — it must be RUNNING, and callers should request the
   `auto` alias.** Requests go to `127.0.0.1:3001`; start it with
@@ -217,15 +156,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (a) there is no standalone fallback — every offload call goes to that one endpoint, so a failing
   offload means "start the router", not "the backend is broken".
   (b) Address the `auto` alias, not a concrete model. The router owns candidate selection and
-  failover; putting a provider/model id in audit-tools recreates the duplicate configuration this
-  boundary exists to remove. Ask the router's own `/v1/models` for the live roster rather than
-  trusting any written list, this one included.
-  (b2) **A dead model NAME passes the reach probe and fails only at work time.**
-  `resolveAmbientSources` proves an `openai-compatible` lane by ENDPOINT liveness (`/v1/models`,
-  `/health`), which a running router answers regardless of whether the declared `model` resolves. So
-  a `sources-declared.json` naming a retired model resolves green, is admitted as a CapacityPool,
-  and 400s on every packet. Bit 2026-08-08. Probe the declared MODEL with a
-  real `/v1/chat/completions` round-trip after any router upgrade — endpoint-alive is not lane-alive.
+  failover. Ask the router's own `/v1/models` for the live roster rather than trusting any written
+  list, this one included.
+  A listed model may still fail at work time, so probe it with a real `/v1/chat/completions`
+  round-trip after a router upgrade; endpoint-alive is not model-alive.
   (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
   (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:
@@ -240,8 +174,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `git status` is the only signal. Instruction files (`CLAUDE.md`, `AGENTS*.md`) are escalate-only and
   the code anchor is re-verified against HEAD before any write (`docs/nightly-routine.md` → *Safety*),
   but that is the routine's own contract, not a gate — no hook compares a tracked doc against its
-  committed version, and the only mechanical pin on `CLAUDE.md` is the one file-lock sentence in
-  `tests/audit/file-lock-doc-sync.test.ts`. Bit once (2026-07-10) under the old branch-snapshot-keyed
+  committed version. Bit once (2026-07-10) under the old branch-snapshot-keyed
   doc-review auto-apply, which was replaced 2026-07-23 by the subject-keyed durable decisions ledger
   (`253e3851`); the reconcile-against-HEAD tool fix that used to be tracked under *Open bugs* shipped
   with it.
@@ -294,34 +227,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `MAX_FINALIZE_STEPS` (10) next-step calls. Full investigation record: memory
   `audit-no-redundant-reextraction-verified`.
 
-- **Codex CLI can burn a long wall-clock on large read-heavy audit packets.** Observed 2026-07-04: 2
-  concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning. The
-  *hand-routing* remedy is superseded — packet sizing is mechanical now: `packetFilter.ts` re-partitions
-  any packet over its assigned tier's budget (`resolveDispatchTier` escalates on `estimated_tokens ≥ 9000`),
-  warns `oversized_packet` on whatever is left, and every worker launch carries a declared wall
-  (`sessionConfig.timeout_ms` → `rollingAuditDispatch.ts` → `spawnLoggedCommand`). Do NOT hand-route around
-  codex or drop it from the executor pool — it is a standing default worker
-  ([[free-nim-pool-first-default-worker]]). If a codex-specific read-heavy weakness bites again, express it
-  as a declared per-pool timeout or tier cut point, never as host discretion (CLAUDE.md *Auditor-agnostic
-  robustness*).
-
-- **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktrees; accepted work is cherry-picked onto `remediation/<runId>` (`remediationBranchName`, `src/remediate/steps/dispatch/worktreeLifecycle.ts`) and the MAIN checkout is switched to that branch and left there (`ensureRemediationBranchCheckedOut`). By DEFAULT the branch is never auto-merged — the base branch is left untouched for review — so any doc or code fix applied inside a remediate run never reaches main unless explicitly merged. Effect: a review pass that reads main (e.g. the nightly docs leg) still sees the unfixed prose and legitimately re-raises the finding. The nightly decisions ledger *can* silence it permanently (subject-keyed, `scripts/nightly/items.mjs` + `answer.mjs`), but settling is the wrong move here — the fix exists, it just isn't on main. **Opt-in fix (B5, shipped):** select the `merge-to-base` closing action at the confirm step — close checks out the recorded base and `--no-ff` merges `remediation/<runId>` into it, aborting the merge and restoring the remediation branch on conflict so the base is left exactly as it was (`src/remediate/phases/close.ts`). **Caveat — merge-to-base can silently no-op:** the target is read from the `remediation-base-branch.json` sidecar, which is written ONLY when the branch is FIRST created. A run launched from a detached HEAD, or one that REUSES a `remediation/<runId>` branch left by a prior run, has no recorded base; the action then returns `skipped` ("merge manually") rather than guessing a target. So check the closing result — and after any run that touches docs/code you want on main, `git branch --no-merged main --list 'remediation/*'` and merge the survivors by hand before the next review pass.
-
-- **Wall-clock peak-concurrency tests are latency-fragile.** The rolling-driver integration tests assert
-  `peak == N` by dispatching N nodes with a short `setTimeout` and reading the max simultaneous in-flight
-  count. Any change that adds per-dispatch latency on the dispatch path (e.g. the reservation-ledger's
-  reserve-before-dispatch file-lock) can push admission past the delay window so peak reads `< N` on a slow
-  FS (Windows), a green-on-Linux / red-on-Windows or intermittent failure. When you touch the dispatch path,
-  expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
-  ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
-  (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.) Same class:
-  `tests/shared/rollingDispatch.test.ts` "re-dispatches immediately on result arrival" passes in
-  isolation but intermittently reads `2` for `3` under full-suite load — it is sensitive to ambient
-  scheduler/FS load, not just dispatch-path latency. `tests/shared/nightly-routine.test.ts` spins up
-  real HTTP servers (the interactive-review contract), which adds transient load that nudges it over
-  its window; the durable fix is to widen that test's delay well past worst-case, not to thin the
-  server tests (CI's 4-way shard already lowers the per-shard load).
-
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
   Run any subset through the GATE, never vitest directly: `node scripts/shared/run-vitest-gate.mjs <path...>`.
   Every arg is forwarded to `vitest run`, so a single file, several files, a glob, `--shard`, `--retry`
@@ -368,7 +273,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   skip `ConvertTo-Json` entirely. `-Filter` is wildcard-only, never regex — a regex pattern either errors on path
   syntax or silently matches ZERO (`-Filter 'shared.*mjs'` → 0 files, `-Filter 'profile*mjs'` → 2); filter with
   `Where-Object Name -match '<re>'` (bare `Where-Object -match` is invalid — it demands `-Property`/`-Value`).
-  [[submit-packet-json-array-trap]]
 
 - **Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`,
   knip or vitest — so it fails the gate loudly, not silently.** Both smokes run inside `verify:checks`
@@ -395,11 +299,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   practice at HEAD: `vi.spyOn` on built-ins, prototypes and relative source-module namespaces,
   `vi.mock("node:child_process")` (an explicitly sanctioned exception in INV-WH,
   `tests/shared/shared-tests-invariants.test.mjs`) and `vi.useFakeTimers({ toFake: [...] })` are all in
-  live use. Injectable-deps seams remain the right tool where the seam is IO or a step boundary
-  (`WorkerRunDeps` in `src/audit/cli/workerRunCommand.ts`; `createWriteStream`/`spawn` options on
-  `spawnLoggedCommand`) — but they are no longer a blanket rule: their original rationale, the retired
-  `node --import tsx/esm --test` runner that could not mock modules, is gone (the stale justification is
-  still in the `WorkerRunDeps` doc comment).
+  live use. Injectable-deps seams remain the right tool where the seam is IO or a step boundary,
+  but they are no longer a blanket rule: their original rationale was a retired test runner that
+  could not mock modules.
 
 - **Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/
   module_decomposition, not just a targeted one.** A narrow Explore before contract authoring is the top
@@ -413,17 +315,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   NON-overlapping files), never an uncoordinated fan-out; and never hand-edit the same files while a
   background agent is live on them.
 
-- **No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.** Host-side attempts to
-  unblock a stuck audit (pending tasks that won't clear) do NOT work and actively corrupt gitignored
-  run-state: marking `status:complete` in `audit_tasks.json` is ignored; writing
-  `partial_completion_terminal.stranded_ids` is overwritten; appending results with unique idempotency keys
-  clears the obligation but cascades stale `planning_artifacts`. The only clean recovery is the tool-owned
-  affordance — `audit-code force-synthesis` stamps an `operator_forced` partial-completion terminal over the
-  pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
-  `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
-  coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
-  `buildOperatorForcedTerminal` in shared; e2e in
-  `tests/audit/audit-code-completion-force-synthesis.test.ts`.)
+- **Do not hand-edit a wedged audit run — use `audit-code force-synthesis`.** Manual changes to
+  gitignored task or planning artifacts are overwritten or create false staleness. The tool-owned
+  command in `src/audit/cli/forceSynthesisCommand.ts` runs synthesis from evidence already accepted
+  by the ledger; it does not invent completion, and uncovered tasks remain visible as uncovered.
 
 - **A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).** `dist/`, `.claude/*` and `.audit-tools/*/*` are gitignored, so `rg` and `git grep` — the project's default search tools — provably cannot see a worktree's or a build tree's output. `grep -r` and PowerShell `Select-String -Recurse` honour no ignore file, so they hit `dist/**` and report deleted code as still referenced. Verified twice by probe. When checking whether a symbol is truly dead, use the ignore-aware tool; a `grep -r` hit inside `dist/` is the compiled copy of the very code you deleted, not a caller.
 
@@ -436,7 +331,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   ([[five-copies-of-a-guard-hid-two-bugs]]).
 
 - **The Grep tool's content output can mangle comment markers with a BACKSLASH.** It rendered
-  `apiPool.ts`'s JSDoc openers and `//` line comments as `\**` / `\ ` (observed 2026-07-29) — a
+  JSDoc openers and `//` line comments as `\**` / `\ ` (observed 2026-07-29) — a
   harness display artifact that reads exactly like file corruption. Verify with a Read of the same
   lines before diagnosing corruption or "fixing" the file.
 
@@ -496,30 +391,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
   and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
 
-- **The four `audit-code-completion-*` files flake TOGETHER under full-suite load, and the symptom
-  reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, `-ingest-dir` and
-  `-force-synthesis` all failed in one full run with `next-step did not reach present_report within
+- **The `audit-code-completion-*` files can flake together under full-suite load, and the symptom
+  reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, and `-ingest-dir`
+  failed in one full run with `next-step did not reach present_report within
   10 calls` and `expected only blocked/present_report while finalizing, got design_review_parallel`.
   All four passed **alone**, and a second full run on the **identical tree** was green — 597 files,
   0 failed. They are not in `scripts/shared/test-flake-baseline.json`, so nothing tells you this.
   The symptom is a *call-count* limit, not a timeout, which is why it does not look load-related:
   under contention a step can come back `blocked` (or re-enter an obligation after a staleness
   cascade) and burn one of the 10 allowed calls. Before treating this cluster as a regression: run
-  the four alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
+  the current completion files alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
   is the bar — a single alone-pass is not, because these are the slowest four files in the suite
   (155-165s each in-suite) and spin real audit runs through real subprocesses.
-
-- **`tests/shared/quota-state.test.ts` INV-QD-15 flakes on Windows with `EPERM … rename`, and it is a
-  TEST hermeticity bug, not a code regression (2026-08-09).** Seen in a full run: `Failed to write
-  …/quota-state.json: EPERM: operation not permitted, rename '…tmp' -> 'quota-state.json'` out of
-  `writeFileAtomic` (`src/shared/io/json.ts:98`), plus an unhandled `QuotaStateUnavailableError`
-  reporting a torn read from a *different* temp dir. Passed **alone twice**, 34/34. The test
-  deliberately races a lock-free reader against in-flight writes, and on Windows a reader holding the
-  target open makes the atomic `rename` fail `EPERM` — the very interleaving the test induces. Not in
-  `scripts/shared/test-flake-baseline.json`, so nothing tells you. Standing rule already covers the
-  triage (`EBUSY`/`EPERM` on Windows = suspect flake first); what this entry adds is that the fix
-  belongs in the **test's** isolation, not in `writeFileAtomic` — do not "harden" the production
-  atomic write in response to it.
 
 - **In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit
   (2026-08-09).** Same failure as the nested `claude -p` entry above, but with no subprocess and no
@@ -564,18 +447,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   run overwrites them on completion, which is the intended lifecycle. Check with
   `git ls-files .audit-tools/` before moving anything under that path.
   [[gitignore-deliverable-tracking]]
-
-- **The operator's declared offload sources live in `~/.audit-code/sources-declared.json` — NOT in the
-  repo, and not under `~/.audit-tools/` (2026-08-09).** A previous lap searched `src/`, the repo
-  `session-config.json`, the environment and `~/.audit-tools/` and concluded the declaration was
-  unfindable; the state dir is `.audit-code` (`AUDIT_CODE_STATE_DIR_NAME`,
-  `src/shared/io/stateDir.ts`), reached via `resolveAuditCodeStateDir` and read as
-  `SOURCE_DECLARATION_FILENAME` in `src/shared/providers/auditorSources.ts`. Grep for
-  `SOURCE_DECLARATION_FILENAME` rather than probing ports. Any stale entry there is announced on every
-  invocation as `declared source "<id>" not resolved: …failed the liveness probe` and otherwise
-  silently costs the run its offload lane while it looks configured — so a dead entry is removed, not
-  left to warn. (The four stale entries pointing at the retired proxy port were removed
-  2026-08-09; `$env:AUDIT_TOOLS_STATE_DIR` overrides the location.)
 
 - **A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).**
   Running a refutation lane as `codex exec '<prompt>' < /dev/null 2>&1 | tail -120` in the background
@@ -673,5 +544,3 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   entry goes.
 
 ## Doc-set hygiene (enforced)
-
-

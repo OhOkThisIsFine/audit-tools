@@ -24,7 +24,7 @@ Each kind of knowledge has exactly one home. Duplication across homes is drift w
 | Home | Holds | Explicitly NOT |
 |---|---|---|
 | **`CLAUDE.md`** (+ `AGENTS.md`) | Durable policy, conventions, standing decisions, durable how-to. The instruction layer. | Current state; file-by-file status. |
-| **design / concept docs** (`spec/` holds the design/research specs — `*-design.md`, cross-provider-quota; `docs/` holds living guides like `glossary-ids.md`) | Timeless architecture: invariants, seams, contracts, the *why*. The model the code implements. | Changelogs; "this run"; dated plans; progress. |
+| **design / concept docs** (`spec/` holds the design/research specs — workflow designs and normative contracts; `docs/` holds living guides like `glossary-ids.md`) | Timeless architecture: invariants, seams, contracts, the *why*. The model the code implements. | Changelogs; "this run"; dated plans; progress. |
 | **`docs/backlog.md`** | A router + generated seek index into the split backlog files — open work, durable traps, future directions live in `docs/backlog/{open-bugs,forward-tracks,deferred,durable-traps}.md`. | A status log. Remove an entry once it ships — record the durable contract/rationale in a concept doc, `CLAUDE.md`, or memory, never "where the code is today." |
 | **`docs/HANDOFF.md`** | The single rolling cross-machine handoff: current published state + the immediate next step only. Its roadmap lists only entries explicitly pinned (`▶`) in the backlog, not a full sequencing view. | A changelog (what already shipped, narrated); per-item specs duplicated from `backlog.md`; a full sequencing view of everything open. |
 | **project memory** | Cross-session durable facts/preferences/traps and their rationale. | — |

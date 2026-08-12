@@ -41,7 +41,6 @@ import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
-import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import {
   loadDesignReviewSnapshots,
   type DesignReviewSnapshotBundle,
@@ -67,6 +66,7 @@ import {
 } from "audit-tools/shared";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../types/charterRegister.js";
 import { buildToolingManifest } from "./toolingManifest.js";
+import { canonicalizeAffinityArtifactValue } from "../../shared/affinityArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // Schema-version guard (ARC-dd468422)
@@ -136,11 +136,6 @@ type ArtifactPayloadMap = {
  * Audit artifacts accumulate phase-by-phase as the orchestrator advances.
  * Missing keys mean the corresponding artifact has not been produced yet.
  *
- * `active_dispatch` is loaded specially (like `tooling_manifest`): it lives at
- * the artifacts root rather than as a standard pruned artifact, and carries the
- * in-flight dispatch phase plus any budget-deferred task ids the completion
- * obligation must exclude.
- *
  * `agent_reflections` is the parsed view of the worker-APPENDED
  * `agent-feedback.jsonl` (opt-in meta-audit feedback). Workers own that file;
  * the orchestrator only ever reads it, so it is deliberately NOT an
@@ -149,11 +144,10 @@ type ArtifactPayloadMap = {
  * delete a file the orchestrator does not own).
  */
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
-  active_dispatch?: ActiveDispatchState;
   agent_reflections?: AgentReflection[];
   /**
    * The design-review pass snapshots (B2 parity port), keyed by pass. Loaded
-   * specially like `active_dispatch` — they live under
+   * specially — they live under
    * `design-review-snapshots/` rather than as standard pruned artifacts — so the
    * synchronous `deriveAuditState` can key each pass's staleness on the semantic
    * projection of the structural inputs it reviewed. Absent until first review.
@@ -161,7 +155,7 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
   design_review_snapshots?: DesignReviewSnapshotBundle;
   /**
    * Per-file graph-edge cache (C2 incremental graph-build). Loaded specially like
-   * `active_dispatch` — a single JSON file at the artifacts root, not an
+   * a single JSON file at the artifacts root, not an
    * `ARTIFACT_DEFINITIONS` entry — because it is an internal, self-describing
    * incremental-reuse cache, not a deliverable or a staleness-DAG node. The
    * structure executor reads it as the prior cache and returns a refreshed one.
@@ -333,18 +327,8 @@ export async function loadArtifactBundle(
 
   bundle.tooling_manifest = await buildToolingManifest();
 
-  // active-dispatch.json is written by prepare-dispatch at the artifacts root
-  // (not a standard ARTIFACT_DEFINITIONS entry). Load it so the completion
-  // obligation can exclude budget-deferred tasks. Absent on a fresh run.
-  const activeDispatch = await readOptionalJsonFile<ActiveDispatchState>(
-    join(root, "active-dispatch.json"),
-  );
-  if (activeDispatch !== undefined) {
-    bundle.active_dispatch = activeDispatch;
-  }
-
-  // Design-review snapshots (B2 parity port): loaded specially like
-  // active-dispatch so deriveAuditState can key each pass's staleness on the
+  // Design-review snapshots (B2 parity port): loaded specially so
+  // deriveAuditState can key each pass's staleness on the
   // semantic projection of the structural inputs it reviewed. Absent on a fresh
   // run / before the first design review completes.
   const designReviewSnapshots = await loadDesignReviewSnapshots(root);
@@ -352,7 +336,7 @@ export async function loadArtifactBundle(
     bundle.design_review_snapshots = designReviewSnapshots;
   }
 
-  // Per-file graph-edge cache (C2): loaded specially like active-dispatch so the
+  // Per-file graph-edge cache (C2): loaded specially so the
   // structure executor can reuse unchanged files' contributions. Absent on a fresh
   // run / before the first structure build.
   const graphEdgeCache = await loadGraphEdgeCache(root);
@@ -408,7 +392,11 @@ export async function writeCoreArtifacts(
     const value = bundleRecord[key];
     const path = join(root, definition.fileName);
     if (value !== undefined) {
-      await definition.write(path, value as never);
+      const canonicalValue = canonicalizeAffinityArtifactValue(
+        definition.fileName,
+        value,
+      );
+      await definition.write(path, canonicalValue as never);
     } else if (options.prune) {
       // The bundle is authoritative. An executor that clears an artifact to
       // `undefined` (to force a downstream rebuild — e.g. planning/ingestion

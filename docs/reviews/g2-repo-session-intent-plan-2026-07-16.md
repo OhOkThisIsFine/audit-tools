@@ -1,6 +1,6 @@
 # G2 — split the persisted type into `RepoSessionIntent` (plan)
 
-> Loop-core commit. Design of record: [`spec/unified-dispatch-worker-model.md`](../../spec/unified-dispatch-worker-model.md)
+> Loop-core commit. Design of record: `spec/unified-dispatch-worker-model.md`
 > → "Greenfield endpoint" + Decomposition G2. Owner steer (2026-07-16): **ideal code, backwards-compat
 > doesn't matter** → the full atomic split, no compatibility shim, no broken intermediate. Builds on G1
 > (`e7b593ac`, the single `--auditor <json>` `AuditorDescriptor`). Green-at-every-commit + independent

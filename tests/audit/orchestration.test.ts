@@ -17,7 +17,6 @@ import type {
   UnitManifest,
 } from "../../src/audit/types.js";
 import type { AnalyzerSetting } from "audit-tools/shared";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { decideNextStep, PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 const { EXECUTOR_REGISTRY } = await import("../../src/audit/orchestrator/executors.js");
@@ -35,7 +34,7 @@ const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
 );
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
-) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+) => buildAuditReportModelRaw(params);
 
 function createRepoManifest(): RepoManifest {
   return {
@@ -225,7 +224,7 @@ test("decideNextStep covers representative priority states", () => {
     withArtifactMetadata(createDecisionBundle()),
   );
   expect(agentDecision.selected_obligation).toBe("audit_tasks_completed");
-  expect(agentDecision.selected_executor).toBe("rolling_dispatch_executor");
+  expect(agentDecision.selected_executor).toBe("semantic_review_executor");
 
   const synthesisDecision = decideNextStep(
     withArtifactMetadata(
@@ -368,18 +367,18 @@ test("advanceAudit emits a structured run log threading obligation → executor 
   });
 });
 
-test("advanceAudit pauses on rolling_dispatch_executor handoff after planning artifacts exist", async () => {
+test("advanceAudit pauses on semantic_review_executor handoff after planning artifacts exist", async () => {
   await withTempDir("audit-code-orchestration-", async (root) => {
     await writeFixtureRepo(root);
 
     const { planning } = await advanceFixtureToPlanning(root);
     const handoff = await advanceAudit(planning.updated_bundle);
 
-    expect(handoff.selected_executor).toBe("rolling_dispatch_executor");
+    expect(handoff.selected_executor).toBe("semantic_review_executor");
     expect(handoff.selected_obligation).toBe("audit_tasks_completed");
     expect(handoff.progress_made).toBe(false);
     expect(handoff.next_likely_step).toBe("audit_tasks_completed");
-    expect(handoff.progress_summary).toMatch(/not yet dispatched through advance-audit/i);
+    expect(handoff.progress_summary).toMatch(/requires its bound host step/i);
   });
 });
 
@@ -424,7 +423,6 @@ test("advanceAudit renders a final audit report after synthesis", async () => {
 
     const synthesis = await advanceAudit(ingest.updated_bundle, {
       preferredExecutor: "synthesis_executor",
-      workPartition: TEST_WORK_PARTITION,
     });
 
     expect(synthesis.selected_executor).toBe("synthesis_executor");

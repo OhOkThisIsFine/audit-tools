@@ -1,0 +1,12 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "remediation-contract-tests",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "before-remediation-contract-tests-first-test-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": true,
+  "owned_overlaps": [],
+  "manifest_sha256": "30aaf9b42650df973bf4edd2b54e0e6a8981bd5287b1d27ca3bed3f7771c37a9"
+}

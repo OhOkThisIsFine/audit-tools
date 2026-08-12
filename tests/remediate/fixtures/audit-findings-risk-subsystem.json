@@ -1,5 +1,14 @@
 {
-  "schema_version": "audit-code-findings/v1alpha1",
+  "contract_version": "audit-tools/audit-findings/v1alpha1",
+  "summary": {
+    "finding_count": 1,
+    "work_block_count": 1,
+    "severity_breakdown": { "high": 1 },
+    "audited_file_count": 1,
+    "excluded_file_count": 0,
+    "runtime_validation_status_breakdown": {},
+    "grounding_status_breakdown": { "grounded": 1 }
+  },
   "findings": [
     {
       "id": "RS-001",
@@ -13,5 +22,33 @@
       "evidence": ["src/shared/quota/reservationLedger.ts:1 cited evidence"],
       "grounding": { "status": "grounded" }
     }
-  ]
+  ],
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "RS-001",
+        "file_paths": ["src/shared/quota/reservationLedger.ts"],
+        "unit_ids": [],
+        "tags": ["correctness"]
+      }
+    ],
+    "pair_scores": [],
+    "eligible_candidates": [],
+    "merge_trace": [],
+    "merge_decisions": [],
+    "components": [["RS-001"]]
+  },
+  "work_blocks": [
+    {
+      "id": "B-001",
+      "finding_ids": ["RS-001"],
+      "unit_ids": [],
+      "owned_files": ["src/shared/quota/reservationLedger.ts"],
+      "role": "implementation",
+      "max_severity": "high",
+      "rationale": "Isolated correctness finding in a risk-sensitive subsystem.",
+      "depends_on": []
+    }
+  ],
+  "work_block_seams": []
 }

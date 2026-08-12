@@ -1,5 +1,5 @@
 /**
- * INV-remediate-pipeline-01..10: contract invariants for the remediate-pipeline module
+ * INV-remediate-pipeline-01..08: contract invariants for the remediation contract pipeline
  *
  * INV-01: One bounded step per next-step invocation — decideNextStep returns exactly one step
  * INV-02: parallel_safe derives from depends_on.length === 0 in promoteImplementationDagToExtractedPlan
@@ -9,8 +9,6 @@
  * INV-06: Cyclic depends_on is detected before dispatch (detectCyclicSeamObligations)
  * INV-07: confirm_resume_ack.json 'restart'/'merge' choice re-presents until acted on (does not loop forever)
  * INV-08: Phase order single-sourced — CONTRACT_PIPELINE_PHASE_ORDER matches PHASE_TO_ARTIFACT keys
- * INV-09: Implement worker prompts list merge-implement-results and next-step in allowed_commands, NOT next-step alone
- * INV-10: mergeImplementResults transitions to 'triage' (not back to 'implementing') when no pending items remain
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
@@ -33,13 +31,6 @@ import { intakePaths } from "../../src/remediate/intake.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import {
-  mergeImplementResults,
-  prepareImplementDispatch,
-} from "../../src/remediate/steps/dispatch.js";
-import {
-  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-} from "../../src/remediate/steps/types.js";
-import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
   CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
@@ -56,16 +47,25 @@ import {
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-remediate-pipeline-inv");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
-const REPO_DIR = TEST_DIR;
 // The N-B3 citation gate enumerates the working tree via `git ls-files`, so the
 // repo root must be a real git tree (the transient TEST_DIR has no tracked files
 // → git ls-files returns empty → the gate fails closed). Point at the audit-tools
 // repo root; the fixture DAG cites a real tracked path (src/remediate/intake.ts).
 const GIT_REPO_ROOT = join(__dirname, "..", "..");
+
+function git(...args: string[]): void {
+  const result = spawnSyncHidden("git", args, {
+    cwd: TEST_DIR,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+}
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 
@@ -272,17 +272,20 @@ async function promptOf(step: { prompt_path: string }): Promise<string> {
   return readFile(step.prompt_path, "utf8");
 }
 
-let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(ARTIFACTS_DIR, { recursive: true });
-  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
+  await writeFile(join(TEST_DIR, "package.json"), "{}", "utf8");
+  await writeFile(join(TEST_DIR, ".gitignore"), ".audit-tools/\n", "utf8");
+  git("init");
+  git("config", "user.email", "test@example.invalid");
+  git("config", "user.name", "Test");
+  git("add", "package.json", ".gitignore");
+  git("commit", "-m", "fixture");
 });
 
 afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
-  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
-  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
 });
 
 // ---------------------------------------------------------------------------
@@ -769,250 +772,5 @@ describe("INV-remediate-pipeline-08: phase order is single-sourced — phase nam
       expect(seen.has(phase)).toBe(false);
       seen.add(phase);
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-09: Implement worker prompts include merge and next-step in allowed_commands
-// (workers get merge-implement-results and next-step; NOT next-step-as-sole-command)
-// ---------------------------------------------------------------------------
-
-describe("INV-remediate-pipeline-09: dispatch prompts are cwd-explicit; implement worker prompts do not advertise next-step", () => {
-  it("implement worker prompt (prompt_path) is cwd-explicit — contains 'Repository root:'", async () => {
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: "PLAN-1",
-        findings: [
-          {
-            id: "F-001",
-            title: "Fix A",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix A.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["ev1"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await saveState(state);
-
-    const plan = await prepareImplementDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "RUN-test",
-    );
-
-    expect(plan.items.length).toBeGreaterThan(0);
-    const promptContent = await readFile(plan.items[0].prompt_path, "utf8");
-    // Worker prompt must be cwd-explicit
-    expect(promptContent).toContain("Repository root:");
-    // Worker prompt must NOT call next-step (it's a host-only command)
-    // Workers only write their result JSON and stop — no next-step instruction
-    expect(promptContent).not.toMatch(/remediate-code next-step\b/);
-  });
-
-  it("implement worker prompt instructs the worker to write the result JSON and stop (no host-only commands)", async () => {
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: "PLAN-1",
-        findings: [
-          {
-            id: "F-002",
-            title: "Fix B",
-            category: "correctness",
-            severity: "medium",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix B.",
-            affected_files: [{ path: "src/b.ts" }],
-            evidence: ["ev2"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: [] },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-002": { finding_id: "F-002", status: "pending", block_id: "B-002" },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await saveState(state);
-
-    const plan = await prepareImplementDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "RUN-test2",
-    );
-
-    expect(plan.items.length).toBeGreaterThan(0);
-    const promptContent = await readFile(plan.items[0].prompt_path, "utf8");
-    // Worker must be told to write the result path and stop
-    expect(promptContent).toMatch(/result_path|result\.json|Stop after writing/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-10: mergeImplementResults transitions to 'triage' when no pending items remain
-// (bug: was "implementing" both branches — now "triage" when moreToImplement=false)
-// ---------------------------------------------------------------------------
-
-describe("INV-remediate-pipeline-10: mergeImplementResults transitions to triage when no pending items remain", () => {
-  it("state.status becomes 'triage' after all items are resolved", async () => {
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: "PLAN-1",
-        findings: [
-          {
-            id: "F-001",
-            title: "Fix A",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix A.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["ev1"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await saveState(state);
-
-    const runId = "RUN-inv10";
-    const plan = await prepareImplementDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-    expect(plan.items.length).toBeGreaterThan(0);
-
-    // Write a resolved worker result
-    const resultPath = plan.items[0].result_path;
-    const result = {
-      contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-      phase: "implement",
-      item_results: [
-        { finding_id: "F-001", status: "resolved", evidence: ["Tests pass."] },
-      ],
-    };
-    await mkdir(dirname(resultPath), { recursive: true });
-    await writeFile(resultPath, JSON.stringify(result), "utf8");
-
-    const merged = await mergeImplementResults(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-
-    // No pending items remain — status must be 'triage' (not 'implementing')
-    expect(merged.status).toBe("triage");
-    expect(merged.items!["F-001"].status).toBe("resolved");
-  });
-
-  it("state.status stays 'implementing' when pending items remain", async () => {
-    const state: RemediationState = {
-      status: "implementing",
-      plan: {
-        plan_id: "PLAN-1",
-        findings: [
-          {
-            id: "F-001",
-            title: "Fix A",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix A.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["ev1"],
-          },
-          {
-            id: "F-002",
-            title: "Fix B",
-            category: "correctness",
-            severity: "medium",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix B.",
-            affected_files: [{ path: "src/b.ts" }],
-            evidence: ["ev2"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: [] },
-          // B-002 depends on B-001 so it won't be dispatched in first wave
-          {
-            block_id: "B-002",
-            items: ["F-002"],
-            parallel_safe: false,
-            dependencies: ["B-001"],
-            touched_files: [],
-          },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
-        "F-002": { finding_id: "F-002", status: "pending", block_id: "B-002" },
-      },
-      closing_plan: { action: "none" },
-    } as RemediationState;
-    await saveState(state);
-
-    const runId = "RUN-inv10b";
-    const plan = await prepareImplementDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-    // Only B-001 should be dispatched (B-002 has unmet dependency)
-    expect(plan.items).toHaveLength(1);
-    expect(plan.items[0].block_id).toBe("B-001");
-
-    // Resolve B-001
-    const resultPath = plan.items[0].result_path;
-    await mkdir(dirname(resultPath), { recursive: true });
-    await writeFile(
-      resultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          { finding_id: "F-001", status: "resolved", evidence: ["Done."] },
-        ],
-      }),
-      "utf8",
-    );
-
-    const merged = await mergeImplementResults(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-
-    // F-002 still pending — status must remain 'implementing'
-    expect(merged.status).toBe("implementing");
   });
 });

@@ -72,17 +72,6 @@ const TERMINAL_KINDS = new Set([
 ]);
 
 const MAX_PAUSES = 8;
-const TEST_AUDITOR_ARGS = [
-  "--auditor",
-  JSON.stringify({
-    self: {
-      provider: "worker-command",
-      context_tokens: 200_000,
-      output_tokens: 8_000,
-    },
-  }),
-];
-
 test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withFloorOnlyRepo(async (root, env) => {
     const artifactsDir = join(root, ".audit-tools/audit");
@@ -94,7 +83,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
 
     for (let i = 0; i < MAX_PAUSES; i++) {
       const step = JSON.parse(
-        (await runWrapper(["next-step", ...TEST_AUDITOR_ARGS], { cwd: root, env })).stdout,
+        (await runWrapper(["next-step"], { cwd: root, env })).stdout,
       );
       if (i === 0) firstKind = step.step_kind;
 

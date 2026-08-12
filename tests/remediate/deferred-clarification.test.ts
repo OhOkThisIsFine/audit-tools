@@ -1,20 +1,12 @@
-// Deferred clarification round: a worker question waits for the END of the
-// implement phase instead of freezing the run the moment it is merged.
+// Deferred clarification round: an implementation question waits for the END
+// of the implement phase instead of freezing dependency-state progression.
 //
-// Two properties, plus the discriminator that makes them safe together:
-//  (a) a `needs_clarification` item no longer halts sibling progress — the merge
-//      routes back to `implementing` while any work remains, and the very next
-//      next-step dispatches the sibling instead of asking the operator;
-//  (b) a DEPENDENT of a `needs_clarification` item is NOT marked `blocked` by the
-//      dead-end sweep — "awaiting an answer" must never be recorded as "upstream
-//      failed". The sweep's discriminator is `dependencyAwaitingClarification`.
-//
-// `quota_paused` is a SEPARATE mid-phase halt (partial_completion_terminal) and is
-// untouched by any of this.
+// A DEPENDENT of a `needs_clarification` item is NOT marked `blocked` by the
+// dead-end sweep — "awaiting an answer" must never be recorded as "upstream
+// failed". The sweep's discriminator is `dependencyAwaitingClarification`.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -22,13 +14,8 @@ import type {
   RemediationBlock,
   RemediationItemState,
 } from "../../src/remediate/state/types.js";
-import { mergeImplementResults } from "../../src/remediate/steps/dispatch.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { dependencyAwaitingClarification } from "../../src/remediate/steps/stepUtils.js";
-import {
-  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-} from "../../src/remediate/steps/types.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 // ---------------------------------------------------------------------------
@@ -151,129 +138,10 @@ describe("dependencyAwaitingClarification: awaiting-an-answer vs upstream-failed
 });
 
 // ===========================================================================
-// (a) a needs_clarification item does not halt sibling progress
+// A dependent of a needs_clarification item is not dead-ended
 // ===========================================================================
 
-describe("(a) a worker question does not freeze its siblings", () => {
-  const harness = createNextStepHarness(".test-deferred-clarification-siblings");
-  const { REPO_DIR, ARTIFACTS_DIR } = harness;
-  const runId = "PLAN-DC";
-
-  beforeEach(async () => {
-    await harness.resetTestRepo();
-  });
-  afterEach(async () => {
-    await harness.cleanupTestRepo();
-  });
-
-  /** Merge a worker result that reports `needs_clarification` for F1 only. */
-  async function mergeQuestionForF1(): Promise<RemediationState> {
-    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
-    await mkdir(resultDir, { recursive: true });
-    const resultPath = join(resultDir, "implement-B1.result.json");
-    await writeFile(
-      join(resultDir, "dispatch-plan.json"),
-      JSON.stringify({
-        contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-        phase: "implement",
-        run_id: runId,
-        repo_root: REPO_DIR,
-        artifacts_dir: ARTIFACTS_DIR,
-        items: [
-          {
-            task_id: "implement-B1",
-            block_id: "B1",
-            prompt_path: join(resultDir, "implement-B1.md"),
-            result_path: resultPath,
-          },
-        ],
-      }),
-    );
-    await writeFile(
-      resultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: "F1",
-            status: "needs_clarification",
-            clarification_question: "How far should the boundary refactor reach?",
-          },
-        ],
-      }),
-    );
-    return mergeImplementResults(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-  }
-
-  it("the merge keeps the run implementing while an independent sibling is pending", async () => {
-    // B1 (question) and B2 (independent, still pending, never dispatched).
-    const st = stateWith([block("B1", ["F1"]), block("B2", ["F2"])], {
-      F1: item("F1", "B1", "pending"),
-      F2: item("F2", "B2", "pending"),
-    });
-    await new StateStore(ARTIFACTS_DIR).saveState(st);
-
-    const merged = await mergeQuestionForF1();
-
-    // The question is recorded and the item paused...
-    expect(merged.items?.F1.status).toBe("needs_clarification");
-    expect(merged.clarifications?.[0]).toMatchObject({ finding_id: "F1" });
-    // ...but the run is NOT frozen: the sibling's remaining work outranks it.
-    expect(merged.status).toBe("implementing");
-    expect(merged.items?.F2.status).toBe("pending");
-  });
-
-  it("the next step dispatches the sibling instead of asking the operator", async () => {
-    const st = stateWith([block("B1", ["F1"]), block("B2", ["F2"])], {
-      F1: item("F1", "B1", "pending"),
-      F2: item("F2", "B2", "pending"),
-    });
-    await new StateStore(ARTIFACTS_DIR).saveState(st);
-    await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
-
-    await mergeQuestionForF1();
-
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: false,
-    });
-
-    expect(step.step_kind).toBe("implement_rolling_sequential");
-    const plan = JSON.parse(
-      await readFile(step.artifact_paths!.dispatch_plan as string, "utf8"),
-    );
-    expect(plan.items.map((i: { block_id: string }) => i.block_id)).toEqual(["B2"]);
-  });
-
-  it("the deferred question IS asked once the implement frontier drains", async () => {
-    // Same shape, but the sibling already finished: nothing is left to dispatch,
-    // so the batched clarification round fires at the phase boundary.
-    const st = stateWith([block("B1", ["F1"]), block("B2", ["F2"])], {
-      F1: item("F1", "B1", "pending"),
-      F2: item("F2", "B2", "resolved"),
-    });
-    await new StateStore(ARTIFACTS_DIR).saveState(st);
-    await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
-
-    const merged = await mergeQuestionForF1();
-    expect(merged.status).toBe("waiting_for_clarification");
-
-    const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("collect_clarifications");
-  });
-});
-
-// ===========================================================================
-// (b) a dependent of a needs_clarification item is not dead-ended
-// ===========================================================================
-
-describe("(b) the dead-end sweep does not blame an unanswered question", () => {
+describe("the dead-end sweep does not blame an unanswered question", () => {
   const harness = createNextStepHarness(".test-deferred-clarification-dependent");
   const { REPO_DIR, ARTIFACTS_DIR } = harness;
 
@@ -366,17 +234,12 @@ describe("(b) the dead-end sweep does not blame an unanswered question", () => {
 });
 
 // ===========================================================================
-// (c) a consumed `clarified` answer retires the stale question result
-// (accept/reverify cluster defect 6): the worker's needs_clarification result
-// file survives at the block's constant result_path, so a re-entered merge
-// re-reads it, flips the answered item BACK to needs_clarification, and
-// re-asks the operator the same question.
+// An applied answer invalidates the persisted host workload binding
 // ===========================================================================
 
-describe("(c) a consumed clarified answer retires the stale question result", () => {
-  const harness = createNextStepHarness(".test-deferred-clarification-stale");
+describe("an applied clarification answer invalidates the persisted host-handoff binding", () => {
+  const harness = createNextStepHarness(".test-clarification-handoff-binding");
   const { REPO_DIR, ARTIFACTS_DIR } = harness;
-  const runId = "PLAN-DC";
 
   beforeEach(async () => {
     await harness.resetTestRepo();
@@ -385,88 +248,64 @@ describe("(c) a consumed clarified answer retires the stale question result", ()
     await harness.cleanupTestRepo();
   });
 
-  it("archives the needs_clarification result on consume; a re-merge does not re-ask", async () => {
-    const st = stateWith([block("B1", ["F1"]), block("B2", ["F2"])], {
-      F1: item("F1", "B1", "pending"),
-      F2: item("F2", "B2", "resolved"),
+  it("strips host_handoff when a clarified answer re-opens an item", async () => {
+    // A `clarified` answer writes clarification_context onto the item, and that
+    // context is baked into the dispatch prompt — so the workload the persisted
+    // record binds to can no longer be regenerated byte-identical. A surviving
+    // record makes the next handoff prepare REFUSE (one of its trusted-binding
+    // guards throws) instead of re-emitting a fresh workload for the answered
+    // item.
+    const blocks = [block("B1", ["F1"])];
+    const st = stateWith(blocks, {
+      F1: item("F1", "B1", "needs_clarification"),
     });
+    st.status = "implementing";
+    st.clarifications = [
+      {
+        finding_id: "F1",
+        category: "scope_of_fix",
+        description: "How far should the boundary refactor reach?",
+      },
+    ];
+    st.host_handoff = {
+      contract_version: "remediation-host-handoff-record/v1alpha1",
+      // The run id is the plan id (stateRunId), so the record belongs to THIS
+      // run — the failure under test is the digest mismatch, not a foreign run.
+      run_id: "PLAN-DC",
+      baseline_commit: "a".repeat(40),
+      workload_sha256: "b".repeat(64),
+      work_item_ids: ["F1"],
+    };
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
     await harness.writeIntentCheckpoint();
-
-    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
-    await mkdir(resultDir, { recursive: true });
-    const resultPath = join(resultDir, "implement-B1.result.json");
-    await writeFile(
-      join(resultDir, "dispatch-plan.json"),
-      JSON.stringify({
-        contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-        phase: "implement",
-        run_id: runId,
-        repo_root: REPO_DIR,
-        artifacts_dir: ARTIFACTS_DIR,
-        items: [
-          {
-            task_id: "implement-B1",
-            block_id: "B1",
-            prompt_path: join(resultDir, "implement-B1.md"),
-            result_path: resultPath,
-          },
-        ],
-      }),
-    );
-    await writeFile(
-      resultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: "F1",
-            status: "needs_clarification",
-            clarification_question: "How far should the boundary refactor reach?",
-          },
-        ],
-      }),
-    );
-    const merged = await mergeImplementResults(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
-    );
-    expect(merged.status).toBe("waiting_for_clarification");
-
-    // The operator answers `clarified` — the item re-opens pending.
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify({
         resolutions: [
-          { finding_id: "F1", action: "clarified", rationale: "Reach only the module boundary." },
+          {
+            finding_id: "F1",
+            action: "clarified",
+            rationale: "Narrow the fix to the module boundary.",
+          },
         ],
       }),
       "utf8",
     );
-    // The consume persists state BEFORE the drain moves on to re-dispatching the
-    // re-opened item; the minimal harness repo cannot host that dispatch (no git
-    // worktree), which is irrelevant to the property under test.
-    await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false }).catch(
-      () => undefined,
-    );
 
-    const afterConsume = JSON.parse(
+    await decideNextStep({ root: REPO_DIR });
+
+    const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(afterConsume.items.F1.status).toBe("pending");
-    // The stale question result is ARCHIVED at consume time — absent means
-    // "worker hasn't run yet → re-dispatch from scratch", the benign branch.
-    expect(existsSync(resultPath)).toBe(false);
-
-    // A re-entered merge (crash-recovery / reverify re-finalize) must NOT
-    // resurrect the consumed question from the stale file.
-    const remerged = await mergeImplementResults(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      runId,
+    // The answer landed (and the prepare above did not throw on the stale
+    // record)...
+    expect(finalState.items.F1.status).toBe("pending");
+    expect(finalState.items.F1.clarification_context).toBe(
+      "Narrow the fix to the module boundary.",
     );
-    expect(remerged.items?.F1.status).not.toBe("needs_clarification");
-    expect(remerged.clarifications ?? []).toEqual([]);
+    // ...and any binding present now is a freshly regenerated one, never the
+    // pre-answer record.
+    expect(finalState.host_handoff?.workload_sha256).not.toBe("b".repeat(64));
   });
 });

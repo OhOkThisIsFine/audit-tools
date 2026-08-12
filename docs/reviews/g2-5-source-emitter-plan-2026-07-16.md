@@ -1,6 +1,6 @@
 # G2.5 — deterministic source resolution (Path A feeder) — plan (v2)
 
-Spec: [`spec/unified-dispatch-worker-model.md`](../../spec/unified-dispatch-worker-model.md) → Decomposition G2.5.
+Spec: `spec/unified-dispatch-worker-model.md` → Decomposition G2.5.
 Predecessors: G1 (`e7b593ac`, `--auditor` descriptor), G2 (`59116fe2`, `RepoSessionIntent` type-split).
 
 **v2 supersedes v1** after an independent adversarial review returned REWORK (all three load-bearing

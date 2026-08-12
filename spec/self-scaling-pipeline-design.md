@@ -64,12 +64,12 @@ granularity + deeper (independent) review. The pipeline tightens only where evid
 
 ## The shared risk/complexity signal
 
-One signal drives both dials. Assessed **cheaply at intake** from data available at the routing
+One signal drives both dials. Assessed **cheaply at intake** from data available at the decision
 point — affected-files count + a deterministic, configurable **path-risk pattern set** (concurrency /
-dispatch / merge / state / quota / shared-core = risky) + the run intent — and **re-assessed as the
+host-handoff / merge / state / worktree / shared-core = risky) + the run intent — and **re-assessed as the
 run produces evidence** (per escalate-on-evidence). It must NOT depend on pipeline-internal outputs
 (the lap-3 circularity: `changeClassification` consumes `finalized_module_contracts`/obligations that
-don't exist at the routing point — a routing signal cannot be a pipeline output).
+don't exist at the decision point — an intake signal cannot be a pipeline output).
 
 ## What this dissolves
 
@@ -99,5 +99,5 @@ Four mechanisms implement the two dials and their shared signal:
 - Every change still passes the whole-repo green gate (build + check + tests) before it lands — the
   dials scale *design scrutiny + ceremony*, never the final verification.
 - Nothing reaches zero adversarial scrutiny (light-floor).
-- The routing/complexity signal is computed only from data available when it's needed (no
+- The risk/complexity signal is computed only from data available when it's needed (no
   pipeline-output circularity); unevaluable ⇒ fail toward more scrutiny, never less.

@@ -17,7 +17,7 @@ type ValidationOutput = {
   issue_count: number;
   issues: ValidationIssue[];
   session_config_present: boolean;
-  resolved_provider: string | null;
+  session_intent: Record<string, unknown>;
   artifact_issue_count: number;
   session_config_issue_count: number;
 };
@@ -211,14 +211,15 @@ test("audit-code validate exits zero when no validation issues exist", async () 
     expect(result.code).toBe(0);
     expect(parsed.issue_count).toBe(0);
     expect(parsed.session_config_present).toBe(false);
-    // TST-c0432a78-3: do not pin the provider name — auto-resolution picks the
-    // contextually appropriate fallback; verify only that a name is returned.
-    expect(typeof parsed.resolved_provider === "string" && parsed.resolved_provider.length > 0, "resolved_provider must be a non-empty string").toBeTruthy();
+    expect(parsed.session_intent).toEqual({
+      review_mode: "attended",
+      observability: "standard",
+    });
     expect(parsed.issues).toEqual([]);
   });
 });
 
-test("audit-code validate exits non-zero when session-config has provider issues", async () => {
+test("audit-code validate rejects analyzer policy from strict session intent", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -226,38 +227,18 @@ test("audit-code validate exits non-zero when session-config has provider issues
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
-        {
-          provider: "subprocess-template",
-          subprocess_template: {
-            command_template: [],
-            env: {
-              AUDIT_TOKEN: 42,
-            },
-          },
-        },
+        { analyzers: { typescript: "skip" } },
         null,
         2,
       ),
     );
 
     const result = await runValidate(root);
-    const parsed = parseJsonOutput(result);
 
     expect(result.code).not.toBe(0);
-    expect(parsed.session_config_present).toBe(true);
-    expect(parsed.resolved_provider).toBe(null);
-    expect(parsed.artifact_issue_count).toBe(0);
-    expect(parsed.session_config_issue_count).toBe(parsed.issue_count);
-    expect(parsed.issues.some(
-        (issue) =>
-          issue.path ===
-            "session_config.subprocess_template.command_template" &&
-          /must not be empty/i.test(issue.message),
-      )).toBeTruthy();
-    expect(parsed.issues.some(
-        (issue) =>
-          issue.path === "session_config.subprocess_template.env.AUDIT_TOKEN" &&
-          /must be strings/i.test(issue.message),
-      )).toBeTruthy();
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/session-config\.json/i);
+    expect(result.stderr).toMatch(/analyzers/i);
+    expect(result.stderr).toMatch(/unrecognized/i);
   });
 });

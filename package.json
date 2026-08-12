@@ -3,7 +3,7 @@
   "version": "0.39.15",
   "private": false,
   "license": "ISC",
-  "description": "Portable hybrid code auditing + remediation orchestrators for arbitrary repositories.",
+  "description": "Provider-neutral code auditing and remediation workflows for arbitrary repositories.",
   "type": "module",
   "bin": {
     "audit-code": "audit-code.mjs",
@@ -39,7 +39,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "prebuild": "node scripts/shared/guard-no-suite-running.mjs",
-    "build": "tsc -p tsconfig.json && node scripts/shared/copy-data-assets.mjs",
+    "build": "node scripts/shared/clean-dist.mjs && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "check:tests": "tsc -p tsconfig.test.json",
     "nightly:inbox": "node scripts/nightly/render-inbox.mjs",
@@ -69,7 +69,6 @@
     "smoke:linked-remediate-code": "node scripts/remediate/smoke-linked-remediate-code.mjs",
     "smoke:packaged-remediate-code": "node scripts/remediate/smoke-packaged-remediate-code.mjs",
     "update-languages": "node scripts/audit/update-languages.mjs",
-    "update-models": "node scripts/shared/update-models.mjs",
     "generate-schemas": "node --import tsx/esm scripts/audit/generate-schemas.mjs",
     "fixtures:auditor-contract": "node scripts/remediate/generate-auditor-contract-fixture.mjs",
     "release:patch:publish": "node scripts/release-and-publish.mjs patch",
@@ -98,7 +97,6 @@
   "dependencies": {
     "commander": "^13.0.0",
     "smol-toml": "^1.6.1",
-    "undici": "^7.28.0",
     "yaml": "^2.9.0",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.24.6"

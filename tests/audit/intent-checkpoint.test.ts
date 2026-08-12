@@ -7,7 +7,6 @@ import { MANDATORY_LENSES } from "../../src/audit/orchestrator/lensSelection.js"
 import { validateArtifactBundle } from "../../src/audit/validation/artifacts.js";
 import { applyIntentExclusionsToCoverage } from "../../src/audit/orchestrator/scope.js";
 import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.js";
-import { buildPacketPrompt } from "../../src/audit/cli/dispatch.js";
 import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { ARTIFACT_DEFINITIONS } from "../../src/audit/io/artifacts.js";
@@ -17,7 +16,6 @@ import type { ObligationState } from "../../src/audit/types/auditState.js";
 import type { CoverageMatrix, CoverageFileRecord } from "../../src/audit/types.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
 import type { RenderableAuditReport } from "../../src/audit/reporting/synthesis.js";
-import type { ReviewPacket } from "../../src/audit/types/reviewPlanning.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 
 function obligationState(bundle: ArtifactBundle, id: string): ObligationState | undefined {
@@ -428,45 +426,6 @@ await test("renderAuditReportMarkdown surfaces excluded scope when the checkpoin
 await test("renderAuditReportMarkdown omits the excluded section without exclusions", () => {
   const md = renderAuditReportMarkdown(emptyRenderableReport(), {});
   expect(md).not.toMatch(/Excluded \/ Out-of-Scope/);
-});
-
-function minimalPacket(): ReviewPacket {
-  return {
-    packet_id: "pkt-1",
-    task_ids: ["t1"],
-    unit_ids: ["u1"],
-    pass_ids: ["pass:security"],
-    lenses: ["security"],
-    estimated_tokens: 100,
-    file_paths: ["src/a.ts"],
-    file_line_counts: { "src/a.ts": 10 },
-    total_lines: 10,
-    priority: "medium",
-    quality: {
-      cohesion_score: 1,
-      internal_edge_count: 0,
-      boundary_edge_count: 0,
-      unexplained_file_count: 0,
-    },
-    rationale: "test packet",
-  };
-}
-
-await test("buildPacketPrompt never threads free_form_intent into the worker prompt (INV-S04)", () => {
-  // free_form_intent is interpreted into lens/priority signals at planning time
-  // (planningExecutors.interpretFreeFormIntent); it is never pasted into a worker
-  // prompt. The renderer takes no intent parameter, so no "## Audit intent"
-  // section can ever appear.
-  const prompt = buildPacketPrompt({
-    packet: minimalPacket(),
-    packetTasks: [],
-    fileList: "- src/a.ts",
-    largeFileSection: [],
-    taskSections: ["### t1"],
-    resultPath: "/artifacts/runs/run-1/task-results/inline-result.json",
-    repoRoot: "/repo",
-  });
-  expect(prompt).not.toMatch(/## Audit intent/);
 });
 
 // ── AU-5: observability lens rationale (evidence-grounded) ─────────────────────

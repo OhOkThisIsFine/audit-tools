@@ -1,7 +1,7 @@
 # G1 — collapse the `--host-*` flag-bag into one `--auditor <json>` (execution plan + recon)
 
 First code commit of the greenfield unified-dispatch rework
-([`spec/unified-dispatch-worker-model.md`](../../spec/unified-dispatch-worker-model.md) → "Greenfield
+(`spec/unified-dispatch-worker-model.md` → "Greenfield
 endpoint" + Decomposition; synthesis
 [`docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md`](dispatch-inventory-greenfield-design-2026-07-16.md)).
 Loop-core → green-at-every-commit + independent review + attestation. This doc captures the crystallized

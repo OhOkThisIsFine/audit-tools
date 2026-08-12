@@ -427,7 +427,7 @@ export function buildFileAnchorSummary(params: {
       "single assigned file",
       "single review packet",
       "mechanically extracted symbols, routes, graph edges, keywords, and analyzer signals",
-      "backend-owned submit-packet result write path",
+      "host-owned bound result artifact",
     ],
     anchors: boundedAnchors,
     omitted_anchor_count: Math.max(0, sorted.length - boundedAnchors.length),

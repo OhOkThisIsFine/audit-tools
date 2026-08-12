@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runTracked, type RunTrackedResult } from "../tooling/exec.js";
-import type { AnalyzerSetting } from "../types/sessionConfig.js";
+import type { AnalyzerSetting } from "../analyzerPolicy.js";
 import {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,

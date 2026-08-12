@@ -55,5 +55,5 @@ test("the generator's --check mode fails when the generated file is stale", asyn
   // a different list and confirming it does not match what is on disk.
   const onDisk = await readFile(join(repoRoot, ".claude", "hooks", "loop-core-patterns.mjs"), "utf8");
   expect(renderModule([...LOOP_CORE_PATTERNS])).toBe(onDisk);
-  expect(renderModule(["src/shared/quota/"])).not.toBe(onDisk);
+  expect(renderModule(["src/shared/not-loop-core/"])).not.toBe(onDisk);
 });

@@ -69,17 +69,10 @@ const TEST_DIR = scratchDir(".test-dc3");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 
-// quota disabled in session config → scheduleWave takes the deterministic
-// host-cap path (cap = parallel_workers, capped to module count) with no quota
-// state on disk: the cap is reproducible without touching the global quota dir.
 const STEP_OPTIONS = {
   root: TEST_DIR,
   artifactsDir: ARTIFACTS_DIR,
   runId: "DC3-TEST",
-  sessionConfig: {
-    parallel_workers: 2,
-    quota: { default_context_tokens: 200_000, reserved_output_tokens: 8_000 },
-  } as any,
 };
 
 async function writeRaw(
@@ -223,7 +216,7 @@ describe("isParallelModulePhase", () => {
   });
 });
 
-describe("DC-3 module_contract_drafting — per-module wave fan-out", () => {
+describe("DC-3 module_contract_drafting — provider-neutral per-module workload", () => {
   beforeEach(async () => {
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
@@ -242,29 +235,11 @@ describe("DC-3 module_contract_drafting — per-module wave fan-out", () => {
     // Distinct shard paths (the fan-out is per module, not one shared file).
     const paths = THREE_MODULE_NAMES.map((n) => shardPathFromPrompt(prompt, n));
     expect(new Set(paths).size).toBe(THREE_MODULE_NAMES.length);
-    // Explicitly a parallel wave, not the single aggregated artifact step.
-    expect(prompt).toMatch(/ONE sub-agent PER MODULE/);
+    // Explicitly a complete bounded workload, not the single aggregate step or
+    // a tool-owned concurrency schedule.
+    expect(prompt).toMatch(/one bounded item per module/i);
+    expect(prompt).toMatch(/host owns how they are grouped or executed/i);
     expect(prompt).toMatch(/do NOT write that file yourself/i);
-  });
-
-  it("inv-2: the wave is concurrency-capped by the shared scheduler (parallel_workers=2)", async () => {
-    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
-    const prompt = await promptOf(step!);
-    // scheduleWave caps the wave at parallel_workers (2), below the 3 modules.
-    expect(prompt).toMatch(/waves of at most \*\*2\*\* concurrent agents/);
-  });
-
-  it("inv-2: the cap collapses to the module count when host concurrency is higher", async () => {
-    const step = await buildNextContractPipelineStep({
-      ...STEP_OPTIONS,
-      sessionConfig: {
-        parallel_workers: 10,
-        quota: { default_context_tokens: 200_000, reserved_output_tokens: 8_000 },
-      } as any,
-    });
-    const prompt = await promptOf(step!);
-    // max_concurrent never exceeds itemCount (3 modules).
-    expect(prompt).toMatch(/waves of at most \*\*3\*\* concurrent agents/);
   });
 
   it("fail-1: an incomplete shard set never promotes a partial aggregate; the wave re-emits", async () => {
@@ -277,10 +252,10 @@ describe("DC-3 module_contract_drafting — per-module wave fan-out", () => {
     const next = await buildNextContractPipelineStep(STEP_OPTIONS);
     // No aggregated artifact was written from a partial set.
     expect(contractArtifactExists(ARTIFACTS_DIR, "module_contracts")).toBe(false);
-    // The same per-module wave is re-emitted (still drafting).
+    // The same complete per-module workload is re-emitted (still drafting).
     expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("module_contract_drafting");
     const nextPrompt = await promptOf(next!);
-    expect(nextPrompt).toMatch(/ONE sub-agent PER MODULE/);
+    expect(nextPrompt).toMatch(/one bounded item per module/i);
   });
 
   it("inv-3/inv-4: a COMPLETE shard set merges into a validator-clean aggregate", async () => {
@@ -515,7 +490,7 @@ describe("DC-3 source partition (inv-5)", () => {
     const prompt = await promptOf(step!);
     // The role-title prompt (single agent), not the per-module fan-out.
     expect(prompt).toMatch(/Per-Module Contract Drafting/);
-    expect(prompt).not.toMatch(/ONE sub-agent PER MODULE/);
+    expect(prompt).not.toMatch(/one bounded item per module/i);
     // No module-waves directory is created for the degenerate single-module case.
     expect(existsSync(join(contractPipelineDir(ARTIFACTS_DIR), "module-waves"))).toBe(
       false,

@@ -14,10 +14,16 @@ import type {
   AuditFindingsSummary,
   Finding,
   FindingSeverity,
+  WorkBlock,
 } from "../types/finding.js";
 import { AUDIT_FINDINGS_CONTRACT_VERSION } from "../validation/findingsReport.js";
 import { renderFindingBlockLines } from "./findingDisplay.js";
 import { countBy } from "../countBy.js";
+import { buildContentCoherenceTrace } from "../decompose/contentCoherence.js";
+import {
+  ESTIMATED_ITEM_OVERHEAD_TOKENS,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+} from "../tokens.js";
 
 const SEVERITY_KEYS: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -50,9 +56,50 @@ function lensBreakdown(findings: readonly Finding[]): Record<string, number> {
 export function buildAuditFindingsDeliverable(
   findings: readonly Finding[],
 ): AuditFindingsReport {
+  const coherenceTrace = buildContentCoherenceTrace({
+    items: findings.map((finding) => ({
+      id: finding.id,
+      file_paths: finding.affected_files.map((file) => file.path),
+      unit_ids: [],
+      tags: [finding.lens],
+    })),
+    relationships: [],
+  });
+  const findingById = new Map(findings.map((finding) => [finding.id, finding]));
+  const blocks: WorkBlock[] = coherenceTrace.components.map((ids, index) => {
+    const members = ids.map((id) => findingById.get(id)!);
+    const maxSeverity = members.reduce<FindingSeverity>(
+      (highest, finding) =>
+        SEVERITY_KEYS.indexOf(finding.severity) < SEVERITY_KEYS.indexOf(highest)
+          ? finding.severity
+          : highest,
+      "info",
+    );
+    return {
+      id: `block-${index + 1}`,
+      finding_ids: [...ids],
+      unit_ids: [],
+      owned_files: [
+        ...new Set(
+          members.flatMap((finding) =>
+            finding.affected_files.map((file) => file.path.replace(/\\/gu, "/")),
+          ),
+        ),
+      ].sort(),
+      role: members.some((finding) => finding.systemic === true)
+        ? "coordination"
+        : "implementation",
+      max_severity: maxSeverity,
+      rationale: `Canonical coherence component with ${members.length} finding(s).`,
+      depends_on: [],
+      token_estimate:
+        ESTIMATED_PROMPT_OVERHEAD_TOKENS +
+        members.length * ESTIMATED_ITEM_OVERHEAD_TOKENS,
+    };
+  });
   const summary: AuditFindingsSummary = {
     finding_count: findings.length,
-    work_block_count: 0,
+    work_block_count: blocks.length,
     severity_breakdown: severityBreakdown(findings),
     audited_file_count: 0,
     excluded_file_count: 0,
@@ -63,7 +110,8 @@ export function buildAuditFindingsDeliverable(
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     summary,
     findings: [...findings],
-    work_blocks: [],
+    coherence_trace: coherenceTrace,
+    work_blocks: blocks,
     work_block_seams: [],
   };
 }

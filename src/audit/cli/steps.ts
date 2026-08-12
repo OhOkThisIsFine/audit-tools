@@ -6,8 +6,7 @@ import {
   StepStatusSchema,
   AccessDeclarationSchema,
 } from "audit-tools/shared";
-import type { StepStatus } from "audit-tools/shared";
-import type { AccessDeclaration } from "../types/workerSession.js";
+import type { AccessDeclaration, StepStatus } from "audit-tools/shared";
 
 export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
 

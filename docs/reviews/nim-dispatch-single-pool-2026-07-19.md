@@ -96,7 +96,7 @@ Asked to front codex + agy quota with LiteLLM too. **That specific shape cannot 
 independent reasons — one architectural, one a standing owner decision.**
 
 1. **CLI agents cannot be fronted by an HTTP proxy.** codex and agy are *kind-2 CLI agentic* workers
-   ([`spec/unified-dispatch-worker-model.md`](../../spec/unified-dispatch-worker-model.md)): each is
+   (`spec/unified-dispatch-worker-model.md`): each is
    itself a harness with its own model provider, own config, own tool loop, spawned as a subprocess and
    never redirected over a wire. LiteLLM multiplexes HTTP model APIs; there is no endpoint to point it
    at. Previously verified, not assumed.

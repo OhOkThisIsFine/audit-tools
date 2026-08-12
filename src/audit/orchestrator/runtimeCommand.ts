@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
-import { quoteForShellInterpreterCmd, stripClaudeCodeEnv } from "audit-tools/shared";
+import {
+  quoteForShellInterpreterCmd,
+  stripAuditToolsControlEnv,
+} from "audit-tools/shared";
 
 // Deterministic runtime-validation command execution: resolve a command to a
 // platform-correct spawn invocation (Windows package-manager shims need a
@@ -10,8 +13,8 @@ import { quoteForShellInterpreterCmd, stripClaudeCodeEnv } from "audit-tools/sha
 // The cmd.exe quoting for the package-manager batch path reuses the canonical
 // exec.ts helpers so the safe-character set stays unified.
 
-// CLAUDECODE and CLAUDE_CODE_* stripping is now owned by shared.stripClaudeCodeEnv
-// (OBL-SEAM-ACL-02 / atomic-replace: runtimeValidationEnv deleted, stripClaudeCodeEnv used).
+// Wrapper-only control-variable stripping is owned by the shared execution
+// substrate so runtime validation never inherits driver lifecycle authority.
 // This strips the host-signaling env vars so a runtime-validation command sees a
 // clean environment — a suite that branches on CLAUDECODE would otherwise be graded
 // against the host's interactive-session state, marking healthy code "not_confirmed".
@@ -38,7 +41,7 @@ export async function runCommand(
   return await new Promise((resolve) => {
     const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd,
-      env: stripClaudeCodeEnv(),
+      env: stripAuditToolsControlEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

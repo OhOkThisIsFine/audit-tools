@@ -176,15 +176,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["syntax_resolved"],
   },
   {
-    // Legacy host-delegation placeholder: no longer owns audit_tasks_completed
-    // (superseded by rolling_dispatch_executor). No obligation_ids; retained only
-    // so in-flight runs that still reference "agent" in a persisted artifact resolve.
-    id: "agent",
-    kind: "host_delegation",
-    obligation_ids: [],
-  },
-  {
-    id: "rolling_dispatch_executor",
+    id: "semantic_review_executor",
     kind: "host_delegation",
     obligation_ids: ["audit_tasks_completed"],
   },

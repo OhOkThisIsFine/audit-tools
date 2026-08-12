@@ -132,11 +132,11 @@ test("io-hash-single-source/3a: AccessDeclaration is declared only in shared", (
 
 test("io-hash-single-source/3b: orchestrators import AccessDeclaration from shared, not a local copy", () => {
   const remediateTypes = read(join(REMEDIATE_SRC, "steps", "types.ts"));
-  const auditWorkerSession = read(join(AUDIT_SRC, "types", "workerSession.ts"));
+  const auditSteps = read(join(AUDIT_SRC, "cli", "steps.ts"));
 
   for (const [label, src] of [
     ["remediate-code/src/steps/types.ts", remediateTypes],
-    ["audit-code/src/types/workerSession.ts", auditWorkerSession],
+    ["audit-code/src/cli/steps.ts", auditSteps],
   ]) {
     expect(/AccessDeclaration[^]*from\s+["']audit-tools\/shared["']/.test(src), `${label} must import AccessDeclaration from audit-tools/shared`).toBeTruthy();
   }

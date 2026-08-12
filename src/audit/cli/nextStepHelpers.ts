@@ -6,7 +6,7 @@
  * concern.
  */
 
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   advance,
@@ -14,6 +14,8 @@ import {
   isFileMissingError,
   isJsonParseError,
   readJsonFile,
+  persistAnalyzerConsent,
+  persistAnalyzerSettings,
   writeJsonFile,
   type ObligationDef,
   type ObligationOutcome,
@@ -22,9 +24,7 @@ import type {
   AnalyzerSetting,
   CriticalFlowFallbackResult,
   GraphEdge,
-  SessionConfig,
   SynthesisNarrative,
-  WorkPartitionPolicy,
 } from "audit-tools/shared";
 import {
   type ArtifactBundle,
@@ -56,7 +56,6 @@ import type {
   DesignAssessment,
   RejectedDesignReviewSubmission,
 } from "../types/designAssessment.js";
-import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import {
   captureDesignReviewSnapshot,
@@ -85,166 +84,16 @@ import {
 } from "../orchestrator/hostInputPause.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
-import {
-  persistAnalyzerSettings,
-  persistAnalyzerConsent,
-} from "../supervisor/sessionConfig.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
-import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
-import { clearDispatchFiles } from "../io/runArtifacts.js";
-import { readActiveDispatch, buildAuditDispatchExclusionFromPause } from "./dispatch/pausePersist.js";
 import { runAuditStep } from "./auditStep.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
   ensureSemanticReviewRun,
-  materializeReviewRun,
   loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
-import { mergeAndIngest } from "./mergeAndIngestCommand.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
-import {
-  driveRollingAuditDispatch,
-  resolveAuditRollingEngineEnabled,
-} from "./rollingAuditDispatch.js";
-import {
-  buildAuditSourcePools,
-  isInProcessAuditPool,
-  auditNodeClaimRegistry,
-  auditHybridSettledPath,
-} from "./hybridDispatch.js";
-import {
-  planHybridDispatch,
-  readSettledPools,
-  addSettledPool,
-  buildSelfSpawnExclusion,
-  captureZeroCapacityFriction,
-} from "audit-tools/shared";
-import { resolveHostDispatchCapability } from "./args.js";
-
-/**
- * Skip the design-review enrichment when the host quota wall has persisted past the
- * fan-out livelock bound (item C, Increment 2). Stamps BOTH review passes satisfied
- * with whatever findings already exist (empty if none) and captures their snapshots
- * so `passIsStale` stays false — the skip STICKS rather than re-firing the obligation
- * every pass. Mirrors the ingest-path stamp (contract_reviewed / conceptual_reviewed
- * + snapshot), the give-up analogue of the packet path's partial-synthesis terminal.
- */
-export async function stampDesignReviewSkipped(
-  artifactsDir: string,
-  bundle: ArtifactBundle,
-): Promise<void> {
-  const path = join(artifactsDir, "design_assessment.json");
-  const reviewedAt = new Date().toISOString();
-  const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
-  // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
-  // it closes was never reviewed, and the stamp must say so. Per-pass, because
-  // the skip can fire when only ONE pass is outstanding — a pass a real
-  // submission already satisfied must NOT be retro-stamped unreviewed.
-  const contractGenuine =
-    existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
-  const conceptualGenuine =
-    existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
-  const assessment: DesignAssessment = {
-    ...(existing ?? { generated_at: reviewedAt, findings: [] }),
-    findings: existing?.findings ?? [],
-    contract_findings: existing?.contract_findings ?? [],
-    conceptual_findings: existing?.conceptual_findings ?? [],
-    contract_reviewed: true,
-    conceptual_reviewed: true,
-    ...(contractGenuine ? {} : { contract_auto_completed: true }),
-    ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
-  };
-  await writeJsonFile(path, assessment);
-  // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
-  // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
-  // null for an absent design_assessment, but the file we just wrote projects to []
-  // — snapshotting the input bundle would record `null` and re-stale against the
-  // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
-  // assessment makes the skip stick in a single cycle even when it created the file.
-  const snapshotBundle = { ...bundle, design_assessment: assessment };
-  await captureDesignReviewSnapshot(
-    artifactsDir,
-    "contract",
-    assessment.contract_findings ?? [],
-    snapshotBundle,
-    reviewedAt,
-  );
-  await captureDesignReviewSnapshot(
-    artifactsDir,
-    "conceptual",
-    assessment.conceptual_findings ?? [],
-    snapshotBundle,
-    reviewedAt,
-  );
-}
-
-/**
- * Skip the systemic-challenge loop when the host quota wall has persisted past the
- * fan-out livelock bound (item C, Increment 2). Marks the register `converged` so the
- * loop-until-dry obligation is satisfied and the run advances — the give-up analogue
- * for the systemic enrichment layer.
- */
-export async function stampSystemicChallengeSkipped(
-  artifactsDir: string,
-  bundle: ArtifactBundle,
-): Promise<void> {
-  const path = join(artifactsDir, "systemic_challenge.json");
-  const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
-  const register: SystemicChallengeRegister = existing
-    ? { ...existing, converged: true }
-    : {
-        generated_at: new Date().toISOString(),
-        target: "systemic_challenge",
-        ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
-        rounds: [],
-        converged: true,
-        findings: [],
-        validation_issues: [],
-      };
-  await writeJsonFile(path, register);
-}
-
-// ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
-
-/** Injectable clock — tests pass no-ops so the retry loop is instant and deterministic. */
-export interface DriveNoProgressRetryDeps {
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
-}
-
-/**
- * Re-drive an in-process rolling dispatch up to `maxRetries` times with exponential
- * backoff WHILE `isNoProgress` holds. A fully-unproductive pass — every review packet
- * errored at the provider so nothing ingested, nothing stranded, no pause — otherwise
- * trips the no-progress guard and HALTS the run; a transient provider overload (a
- * burst of fast 5xx/errors) should self-heal instead. Bounded (terminates on
- * persistent failure) and paced, so a genuinely stuck pass still falls through to the
- * blocked handoff. Re-driving is exactly what the whole next-step loop does across
- * invocations — the still-pending tasks re-dispatch — collapsed into one step so an
- * autonomous loop that treats `blocked` as terminal doesn't halt on a blip.
- *
- * `maxTotalMs` bounds the added wall-time: retries stop once the cumulative elapsed
- * time reaches it. Set to the dispatch timeout so an all-TIMEOUT pass (where the first
- * drive alone already consumes ~one timeout window) spawns no expensive extra passes —
- * the retry stays targeted at fast-failing passes, which is where it self-heals.
- */
-export async function driveWithNoProgressRetry<T>(
-  drive: () => Promise<T>,
-  isNoProgress: (result: T) => boolean,
-  opts: { maxRetries: number; baseBackoffMs: number; maxTotalMs?: number; deps?: DriveNoProgressRetryDeps },
-): Promise<T> {
-  const sleep = opts.deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const now = opts.deps?.now ?? (() => Date.now());
-  const start = now();
-  let result = await drive();
-  for (let attempt = 1; attempt <= opts.maxRetries && isNoProgress(result); attempt += 1) {
-    if (opts.maxTotalMs != null && now() - start >= opts.maxTotalMs) break;
-    await sleep(opts.baseBackoffMs * 2 ** (attempt - 1));
-    result = await drive();
-  }
-  return result;
-}
+import { ingestAuditHostResults } from "./dispatch/hostHandoff.js";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -301,25 +150,6 @@ export type NextStepParams = {
    */
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
-  /**
-   * Active session config. Threaded so the semantic-review dispatch obligation can
-   * route to the in-process rolling driver (A8(a)) when the rolling engine is
-   * enabled AND an explicit backend provider is configured.
-   */
-  sessionConfig?: SessionConfig;
-  /** Current invocation's resolved partition capacity; transient and never persisted. */
-  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
-  /**
-   * Defect-1: whether an attended conversation host is driving this invocation and can
-   * fan out subagents (the already-resolved `resolveHostDispatchCapability` value from
-   * the CLI, folding the explicit `--host-can-dispatch-subagents` flag). When TRUE
-   * (default, conversation-first), a configured in-process backend is DEMOTED to a
-   * source pool so the host + backend + any NIM source fan out concurrently instead of
-   * the backend monopolizing the frontier. When FALSE (declared headless), the backend
-   * self-drives the whole frontier. Unset here falls back to the sessionConfig field /
-   * env / true via `resolveHostDispatchCapability` in the fold.
-   */
-  hostCanDispatch?: boolean;
 };
 
 export type TerminalStepResult =
@@ -335,7 +165,6 @@ export type TerminalStepResult =
  */
 export type NextStepResult =
   | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null; inProcessMadeProgress?: boolean }
-  | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
@@ -441,7 +270,6 @@ export async function buildTerminalStep(
       reportRendered && state.status !== "complete"
         ? `Audit report already rendered; ending run. ${blockedReason}`
         : blockedReason,
-    providerName: WORKER_COMMAND_PROVIDER_NAME,
   });
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
@@ -510,7 +338,7 @@ export async function handleAnalyzerConsentBranch(
       }
     }
     if (Object.keys(decisions).length > 0) {
-      await persistAnalyzerConsent(params.artifactsDir, decisions);
+      await persistAnalyzerConsent(params.root, decisions);
       if (params.externalAcquisition) {
         params.externalAcquisition.analyzerConsent = {
           ...(params.externalAcquisition.analyzerConsent ?? {}),
@@ -586,10 +414,7 @@ export async function handleGraphEnrichmentBranch(
         }
       }
       if (Object.keys(settings).length > 0) {
-        const merged = await persistAnalyzerSettings(
-          params.artifactsDir,
-          settings,
-        );
+        const merged = await persistAnalyzerSettings(params.root, settings);
         analyzersRef.value = merged.analyzers;
       } else {
         // All entries in analyzer-decisions.json failed the recognized-value
@@ -685,7 +510,6 @@ export async function handleGraphEnrichmentBranch(
 
 type BranchActionResult =
   | { action: "continue" }
-  | { action: "return"; result: { kind: "design_review"; state: AuditState; bundle: ArtifactBundle } }
   | { action: "return"; result: { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle } }
   | { action: "return"; result: { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle } }
   | { action: "return"; result: { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle } };
@@ -1050,8 +874,6 @@ export async function handleDesignReviewBranch(
     if (existing) {
       existing.review_findings = groundDesignFindings(legacyResult.value, bundle.repo_manifest);
       existing.reviewed = true;
-      delete existing.contract_auto_completed;
-      delete existing.conceptual_auto_completed;
       existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
         (r) => r.pass !== "legacy",
       );
@@ -1083,7 +905,6 @@ export async function handleDesignReviewBranch(
   } else if (contractResult.status === "ok" && existing) {
     existing.contract_findings = groundDesignFindings(contractResult.value, bundle.repo_manifest);
     existing.contract_reviewed = true;
-    delete existing.contract_auto_completed;
     existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
       (r) => r.pass !== "contract",
     );
@@ -1095,7 +916,6 @@ export async function handleDesignReviewBranch(
   } else if (conceptualResult.status === "ok" && existing) {
     existing.conceptual_findings = groundDesignFindings(conceptualResult.value, bundle.repo_manifest);
     existing.conceptual_reviewed = true;
-    delete existing.conceptual_auto_completed;
     existing.rejected_submissions = (existing.rejected_submissions ?? []).filter(
       (r) => r.pass !== "conceptual",
     );
@@ -1766,7 +1586,7 @@ export const HOST_GATE_KINDS: readonly HostGateKind[] = [
  * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig" | "workPartition">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -1790,8 +1610,6 @@ export async function executeAndRecord(
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
       since: params.since,
-      sessionConfig: params.sessionConfig,
-      workPartition: params.workPartition,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -2058,9 +1876,6 @@ async function runDeterministicExecutor(
     ctx.lastSummaryRef.value,
   );
   ctx.lastSummaryRef.value = result.progress_summary;
-  if (!isHostDelegationExecutor(result.selected_executor ?? "")) {
-    await clearDispatchFiles(ctx.params.artifactsDir);
-  }
   if (!result.progress_made) {
     return blockedFromResult(result);
   }
@@ -2329,7 +2144,7 @@ export function buildAuditObligations(
     deterministic("planning_artifacts"),
     {
       // The audit-task dispatch obligation maps to the host-delegation
-      // rolling_dispatch_executor (no deterministic runner) → semantic review.
+      // semantic_review_executor (no deterministic runner) → host review.
       id: "audit_tasks_completed",
       derive: deriveObligationState("audit_tasks_completed"),
       execute: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
@@ -2377,7 +2192,7 @@ async function runDesignReviewObligation(
 
 /**
  * Host-delegation dispatch obligation (`audit_tasks_completed` →
- * rolling_dispatch_executor, no deterministic runner): materialize the semantic
+ * semantic_review_executor, no deterministic runner): materialize the semantic
  * review run and emit it. Guards on the executor actually being host-delegation,
  * mirroring the hand loop's `isHostDelegationExecutor` branch; a missing/non-
  * delegation executor emits the same blocked step the no-executor branch did.
@@ -2392,339 +2207,54 @@ async function runHostDelegationObligation(
     return emitNoExecutorBlocked(bundle, ctx, decision);
   }
   if (!isHostDelegationExecutor(decision.selected_executor)) {
-    // Not host-delegation and no deterministic graph_enrichment/design-review
-    // handler claimed it: fall back to the deterministic executor path (which
-    // emits blocked when the runner is absent / makes no progress).
     return runDeterministicExecutor(bundle, ctx);
   }
 
-  // H2+H4 collapse: ONE fan-out over the eligible pool set. The configured primary
-  // in-process backend is ALWAYS folded in as a source pool (no demote flag, plan
-  // D3/D4); the attended conversation host is the coverage-driven COMPLEMENT, never
-  // a coordinator claimant (plan D6). Headless degenerates to "the eligible set
-  // contains no attended host" — the engine drives the WHOLE frontier; attended
-  // splits the frontier across the source pools and the host reviews the complement
-  // (host + backend + NIM concurrent).
-  const sessionConfig = ctx.params.sessionConfig;
-  const hostCanDispatch = resolveHostDispatchCapability({
-    explicit: ctx.params.hostCanDispatch,
-    sessionConfig: sessionConfig ?? ({} as SessionConfig),
-  });
-  const engineEnabled = resolveAuditRollingEngineEnabled({ sessionConfig });
-  const hybridCfg = sessionConfig ?? ({} as SessionConfig);
-  // An attended host is the review dispatcher. Provider/model policy, ordering,
-  // failover, and concurrency belong to the host; audit-tools must
-  // not auto-resolve a second provider (for example Codex) and compete with it.
-  // Keep source-pool discovery only for a genuinely headless invocation, where no
-  // host exists to launch the review packets.
-  let auditSourcePools: Awaited<ReturnType<typeof buildAuditSourcePools>>["pools"] = [];
-  if (!hostCanDispatch) {
-    // Build dispatch exclusion from any persisted paused state's dead providers.
-    // When a prior pass paused on provider_unavailable outcomes, exclude those dead
-    // providers here so re-discovery folds in alternatives instead of re-offering them.
-    let auditExcludedBackends = buildSelfSpawnExclusion();
-    const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
-    if (currentRun) {
-      const pausedState = await readActiveDispatch(ctx.params.artifactsDir, currentRun.run_id);
-      auditExcludedBackends = buildAuditDispatchExclusionFromPause(pausedState?.paused_state);
-    }
-
-    const sourceBuild = await buildAuditSourcePools(hybridCfg, {
-      excludedBackends: auditExcludedBackends,
-      capabilityRanks: null,
-    });
-    auditSourcePools = sourceBuild.pools;
-    // Loud, not silent: a headless run with every source removed has no way to
-    // make progress, so retain the mechanical self-spawn diagnostic.
-    if (sourceBuild.zeroedByExclusion) {
-      await captureZeroCapacityFriction(
-        ctx.params.artifactsDir,
-        "source-pool-admission",
-        sourceBuild.zeroedByExclusion,
-        "audit-code",
-      );
-    }
-  }
-
-  // Headless whole-frontier drive — the old in-process monopoly branch, now a
-  // degeneracy of the one fan-out (no attended host in the eligible set): the engine
-  // reviews every pending task across the source pools itself, then `transition`s
-  // once the results are ingested so the fold re-derives state (the
-  // obligation-engine analog of the hand loop's `continue`).
-  if (engineEnabled && !hostCanDispatch && auditSourcePools.length > 0) {
-    const { activeReviewRun, pendingTasks: enrichedPendingTasks } = await materializeReviewRun({
-      root: ctx.params.root,
-      artifactsDir: ctx.params.artifactsDir,
-      bundle,
-      obligationId: decision.selected_obligation,
-      selfCliPath: ctx.params.selfCliPath,
-      timeoutMs: ctx.params.timeoutMs,
-    });
-    // D1: a transient all-errored pass (nothing ingested/stranded, not paused) is
-    // retried with backoff before we honour the no-progress guard, so a burst of
-    // provider 5xx/timeouts self-heals instead of halting the autonomous loop.
-    const driven = await driveWithNoProgressRetry(
-      () =>
-        driveRollingAuditDispatch({
+  // First fold every strictly-bound result that still belongs to the pending
+  // set. Filtering against bundle truth makes crash recovery idempotent: an
+  // accepted ledger written before core ingestion is retried, while results
+  // already reflected in coverage are not replayed.
+  const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
+  if (currentRun) {
+    let acceptedResults: Awaited<
+      ReturnType<typeof ingestAuditHostResults>
+    >["accepted_results"] = [];
+    try {
+      acceptedResults = (
+        await ingestAuditHostResults({
           root: ctx.params.root,
           artifactsDir: ctx.params.artifactsDir,
-          activeReviewRun,
-          sessionConfig: sessionConfig!,
-          timeoutMs: ctx.params.timeoutMs,
-          // The whole pending frontier, driven against the eligible source-pool
-          // set — the same overrides the attended split uses, so headless is the
-          // degenerate "everything is the in-process partition" case. The
-          // HINT-ENRICHED set materialize built (file_line_counts), never the raw
-          // frontier — packet sizing + worker total_lines depend on the hints
-          // (review h2c3 F6).
-          tasksOverride: enrichedPendingTasks,
-          poolsOverride: auditSourcePools,
-        }),
-      (d) => d.status !== "paused" && !d.ingest && d.stranded_ids.length === 0,
-      // Bound total added wall-time to one dispatch-timeout window: an all-timeout
-      // pass (first drive ≈ timeoutMs) then spawns no extra passes; only a fast-failing
-      // pass, where the retry actually helps, gets re-driven.
-      { maxRetries: 2, baseBackoffMs: 500, maxTotalMs: ctx.params.timeoutMs },
+          runId: currentRun.run_id,
+        })
+      ).accepted_results;
+    } catch (error) {
+      // No handoff exists on the first visit, or prepare was interrupted before
+      // all binding artifacts landed. Re-preparing below restores it exactly.
+      if (!isFileMissingError(error)) throw error;
+    }
+
+    const pendingIds = new Set(
+      buildPendingAuditTasks(bundle).map((task) => task.task_id),
     );
-    await clearDispatchFiles(ctx.params.artifactsDir);
-    // Resumable pause (DC-4): the pool exhausted after spill and the run is paused
-    // on a `waiting_for_provider` state, persisted on the active-dispatch artifact.
-    // Emit a resumable blocked handoff — re-invoking `next-step` re-discovers
-    // capacity and `advancePausedState` resumes or, after the pause limit, promotes
-    // to a partial-completion terminal. This is NOT a no-progress spin: the paused
-    // state advances each pass toward resume-or-livelock.
-    if (driven.status === "paused") {
-      const paused = driven.paused_state;
-      const pauseCount = paused?.lifecycle.pause_count ?? 0;
-      // Build the base message about the pause.
-      let reason =
-        `In-process rolling dispatch paused waiting for provider capacity: ` +
-        `${driven.stranded_ids.length} review packet(s) are stranded on an exhausted ` +
-        `provider pool (provider '${sessionConfig?.provider}', pause ${pauseCount + 1}). `;
-      // If dead providers were recorded, name them and suggest re-detection.
-      if (paused?.dead_providers && paused.dead_providers.length > 0) {
-        const providerList = paused.dead_providers
-          .map((d) => `provider ${d.provider_name} (pool ${d.pool_id})`)
-          .join(", ");
-        reason +=
-          `Dead provider(s): ${providerList} died at spawn — check installation/PATH. `;
-      }
-      reason +=
-        "The run is resumable — re-run next-step once provider capacity returns; " +
-        "it will resume automatically and re-detect providers, or yield to synthesis on partial coverage after the pause limit.";
-      return {
-        kind: "emit",
-        step: {
-          kind: "blocked",
-          state,
-          bundle,
-          reason,
-        },
-      };
-    }
-    // Convergence guard: a pass that ingested NO new results and stranded nothing
-    // made no net progress, and re-dispatching the same unchanged state would loop
-    // to the maxTransitions backstop. Emit the block rather than spin. Progress
-    // (ingest ran, or a strand terminal was recorded) `transition`s so the fold
-    // re-derives normally. Two distinct no-progress causes, honestly named:
-    // pending-tasks-unavailable (peer-claimed / unfit — the completion-livelock
-    // fix) vs provider-errored-on-every-packet.
-    if (!driven.ingest && driven.stranded_ids.length === 0) {
-      const reason =
-        driven.status === "no_progress" && driven.no_progress_cause === "pending_tasks_unavailable"
-          ? `In-process rolling dispatch found ${driven.pending_task_count ?? "several"} pending review ` +
-            "task(s) but could plan none this round: every one is either claimed by a live peer run " +
-            "(that run's results will arrive via the shared ledger; a failed run's claims release at its " +
-            "drive end, or expire with the 20-minute lease) or fits no eligible pool. Stopping to avoid " +
-            "a no-progress loop — re-run next-step to retry once the peer finishes or capacity returns."
-          : `In-process rolling dispatch produced no results for ${driven.packet_count} ` +
-            `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet, and a ` +
-            "bounded auto-retry did not recover); stopping to avoid a no-progress loop. " +
-            "Recovery: once the backend is healthy, re-run next-step to re-dispatch; or hand the review " +
-            "results in directly with `audit-code ingest-results --results <file>` (or drop AuditResult[] " +
-            "files into the run's task-results/ dir, matched by task_id).";
-      return {
-        kind: "emit",
-        step: {
-          kind: "blocked",
-          state,
-          bundle,
-          reason,
-        },
-      };
-    }
-    return {
-      kind: "transition",
-      state: await loadArtifactBundle(ctx.params.artifactsDir),
-    };
-  }
-
-  // A-8 hybrid: when the rolling engine is enabled AND a backend (NIM) pool is
-  // configured alongside the conversation host, split the pending review tasks via the
-  // SAME shared coordinator remediate drives — review the NIM partition IN-PROCESS this
-  // cycle (claimed, exactly-one-claimant), then materialize the host review over the
-  // COMPLEMENT so the two never review the same task (coverage folds both by task_id).
-  // When NIM covers the whole frontier, transition to the fold; otherwise fall through
-  // to the host-review emit below over the freshly-ingested coverage. Inert when no NIM
-  // pool is confirmed (the existing host-review path is unchanged).
-  let reviewBundle = bundle;
-  let reviewState = state;
-  // D2: did the in-process (NIM) partition ingest results this pass? Carried to the
-  // host-complement pause so a productive pass resets the wall-pass livelock counter.
-  let inProcessMadeProgress = false;
-  if (engineEnabled && auditSourcePools.length > 0) {
-    const pending = buildPendingAuditTasks(bundle);
-    if (pending.length > 0) {
-      // DC-4: read the cross-cycle settled-pool set; a NIM pool exhausted on a prior
-      // cycle is excluded from this split, so its stranded tasks route to the host.
-      const settledPath = auditHybridSettledPath(ctx.params.artifactsDir);
-      const settled = await readSettledPools(settledPath);
-      const partition = await planHybridDispatch({
-        // REAL per-task estimates (unified-routing step G): the coordinator's claim
-        // walk is context-fit-aware (nodeContextFits), and with step A every pool
-        // carries a real window — a flat estimate made that gate blind (everything
-        // "fits" 2000 tokens), so oversized tasks were claimed onto small pools and
-        // died at dispatch. The planning-time frozen estimate is the same number the
-        // packer sums; flat 2000 remains only as the no-estimate fallback.
-        frontier: pending.map((t) => ({
-          id: t.task_id,
-          estimatedTokens: t.token_estimate ?? 2000,
-        })),
-        // Audit passes ONLY the NIM pool(s): the coordinator bounds NIM to its capacity
-        // and claims those tasks; the rest stay pending for the batch host review.
-        pools: auditSourcePools,
-        sessionConfig: hybridCfg,
-        claimRegistry: auditNodeClaimRegistry(ctx.params.artifactsDir),
-        readSettled: () => settled,
-        onSettle: async (id) => {
-          settled.add(id);
-          await addSettledPool(settledPath, id);
-        },
-        isInProcess: isInProcessAuditPool,
+    const pendingAccepted = acceptedResults.filter((result) =>
+      pendingIds.has(result.task_id),
+    );
+    if (pendingAccepted.length > 0) {
+      const ingested = await runAuditStep({
+        root: ctx.params.root,
+        artifactsDir: ctx.params.artifactsDir,
+        preferredExecutor: "result_ingestion_executor",
+        auditResultsData: [...pendingAccepted],
       });
-      if (partition.inProcess.length > 0) {
-        const nimIds = new Set(partition.inProcess.map((a) => a.nodeId));
-        const nimTasks = pending.filter((t) => nimIds.has(t.task_id));
-        const complement = pending.filter((t) => !nimIds.has(t.task_id));
-        // Materialize the in-process review run over the NIM PARTITION — its
-        // `pending-audit-tasks.json` is what `driveRollingAuditDispatch`'s mergeAndIngest
-        // reads to know which results to fold, so it MUST list the NIM tasks (else the
-        // NIM results are reviewed but never ingested). The host then reviews the
-        // coverage-driven complement below: once these NIM tasks are ingested+covered,
-        // `buildPendingAuditTasks` excludes them, so `ensureSemanticReviewRun` re-derives
-        // exactly the complement. (`complement` is computed only for the skip-host guard.)
-        const { activeReviewRun, pendingTasks: enrichedNimTasks } = await materializeReviewRun({
-          root: ctx.params.root,
-          artifactsDir: ctx.params.artifactsDir,
-          bundle,
-          obligationId: decision.selected_obligation,
-          selfCliPath: ctx.params.selfCliPath,
-          timeoutMs: ctx.params.timeoutMs,
-          tasksOverride: nimTasks,
-          // This in-process run is EPHEMERAL — it must not own the host-facing dispatch
-          // pointer, or `ensureSemanticReviewRun` below would reuse this NIM partition's
-          // task set instead of re-deriving the full coverage-driven host complement.
-          updateDispatch: false,
-        });
-        // Review the NIM partition in-process into the SAME run's task-results/ +
-        // ingest — driving the HINT-ENRICHED set materialize built (review h2c3 F6).
-        const driven = await driveRollingAuditDispatch({
-          root: ctx.params.root,
-          artifactsDir: ctx.params.artifactsDir,
-          activeReviewRun,
-          sessionConfig: hybridCfg,
-          timeoutMs: ctx.params.timeoutMs,
-          tasksOverride: enrichedNimTasks,
-          poolsOverride: auditSourcePools,
-        });
-        // Progress = the NIM partition ingested AND accepted ≥1 result this pass (real
-        // coverage), not merely that an ingest ran — a pass that folded only FAILED
-        // results (or an idempotent replay) advanced no coverage and must still count
-        // toward the livelock so a persistently-failing partition can't stall forever.
-        const acceptedCount = driven.ingest?.summary?.["accepted_count"];
-        inProcessMadeProgress =
-          driven.ingest != null &&
-          typeof acceptedCount === "number" &&
-          acceptedCount > 0;
-        // Terminal accept for each in-process task → free its coordinator claim.
-        for (const a of partition.inProcess) {
-          await partition.coordinator.release(a);
-        }
-        // DC-4 (per-pool, reason-aware — unified-routing step D): settle ONLY the pools
-        // the engine permanently excluded (credit_exhausted / model_unavailable / a
-        // no-reset rate limit), so their stranded tasks fall back to the batch host
-        // review while every OTHER pool stays dispatchable next cycle. The old reaction
-        // — ANY non-complete drive settles ALL source pools — is what collapsed a
-        // healthy 3-pool frontier onto the walled host in the 2026-07-17 dogfood (two
-        // of three settled pools had no failure of their own). On THIS (engine-backed)
-        // path, transients (timeout, per-packet 413) never settle, and a RESET-BEARING
-        // 429 pauses reversibly inside the engine rather than exhausting — narrower
-        // than remediate's no-memory cross-cycle predicate (`isPoolSettlingOutcome`),
-        // by design; see that predicate's docstring for the divergence rationale. A
-        // non-complete pass with nothing exhausted counts against the host-complement
-        // livelock via inProcessMadeProgress.
-        if (driven.exhausted_pool_ids.length > 0) {
-          const sourcePoolIds = new Set(auditSourcePools.map((pool) => pool.id));
-          for (const poolId of driven.exhausted_pool_ids) {
-            if (sourcePoolIds.has(poolId)) {
-              await partition.coordinator.settlePool(poolId);
-            }
-          }
-        }
-        if (complement.length === 0) {
-          // NIM reviewed the whole frontier — nothing left for the host this obligation.
-          await clearDispatchFiles(ctx.params.artifactsDir);
-          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
-        }
-        // Reload so the host-review emits over coverage that now reflects the NIM results
-        // (and never writes the stale pre-NIM bundle back over them).
-        reviewBundle = await loadArtifactBundle(ctx.params.artifactsDir);
-        reviewState = deriveAuditState(reviewBundle);
-      }
-    }
-  }
-
-  // HOST-PATH SALVAGE (dogfood 2026-07-30 defect 3): host-driven workers that die
-  // (session limit, kill) leave their landed result files in the current run's
-  // task-results/ with no drive-end to reconcile them — the engine path has a
-  // salvage fold, but the host path used to need a MANUAL merge-and-ingest before
-  // those results counted and their tasks stopped re-dispatching. Fold them in
-  // here, before (re)materializing the review run, so a dead worker's completed
-  // work shrinks the pending set and its task claims clear at classification.
-  // Best-effort: merge's own replay marker makes a repeat call idempotent, and a
-  // salvage failure must never block the review step itself.
-  {
-    const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
-    if (currentRun) {
-      const taskResultsDir = join(
-        ctx.params.artifactsDir, "runs", currentRun.run_id, "task-results",
-      );
-      const hasResultFiles = await readdir(taskResultsDir).then(
-        (files) => files.some((f) => f.endsWith(".json")),
-        () => false,
-      );
-      if (hasResultFiles) {
-        try {
-          await mergeAndIngest({
-            runId: currentRun.run_id,
-            artifactsDir: ctx.params.artifactsDir,
-          });
-          reviewBundle = await loadArtifactBundle(ctx.params.artifactsDir);
-          reviewState = deriveAuditState(reviewBundle);
-        } catch (err) {
-          process.stderr.write(
-            `[audit-code] nextStep: host-path result salvage skipped (${err instanceof Error ? err.message : String(err)})\n`,
-          );
-        }
-      }
+      return { kind: "transition", state: ingested.updated_bundle };
     }
   }
 
   const review = await ensureSemanticReviewRun({
     root: ctx.params.root,
     artifactsDir: ctx.params.artifactsDir,
-    bundle: reviewBundle,
-    state: reviewState,
+    bundle,
+    state,
     obligationId: decision.selected_obligation,
     selfCliPath: ctx.params.selfCliPath,
     timeoutMs: ctx.params.timeoutMs,
@@ -2734,7 +2264,6 @@ async function runHostDelegationObligation(
     step: {
       kind: "semantic_review",
       selectedExecutor: decision.selected_executor,
-      inProcessMadeProgress,
       ...review,
     },
   };
@@ -2754,7 +2283,6 @@ async function emitNoExecutorBlocked(
     bundle,
     audit_state: state,
     progress_summary: reason,
-    providerName: WORKER_COMMAND_PROVIDER_NAME,
   });
   return { kind: "emit", step: { kind: "blocked", state, bundle, reason } };
 }
@@ -2907,7 +2435,6 @@ export async function runDeterministicForNextStep(
       bundle,
       audit_state: state,
       progress_summary: decision.reason,
-      providerName: WORKER_COMMAND_PROVIDER_NAME,
     });
     // Evaluate friction triage BEFORE promotion, then promote only once triage
     // is satisfied (see promoteIfFrictionSatisfied). Promoting while triage is

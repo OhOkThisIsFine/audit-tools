@@ -9,11 +9,7 @@ const repoRoot = join(here, "..", "..");
 
 // ── Committed remediate host assets in scope ──────────────────────────────────
 //
-// Source/canonical body (single source of truth for the handshake flag set):
-const CANONICAL_BODY_PATH = join(repoRoot, "skills", "remediate-code", "remediate-code.prompt.md");
-
-// BODY-EMBEDDING assets: each inlines the canonical prompt body, so every
-// handshake flag in the body must appear in each of them.
+// BODY-EMBEDDING assets: each inlines the canonical prompt body.
 const BODY_EMBEDDING_ASSETS: Array<{ name: string; path: string }> = [
   { name: ".github/prompts/remediate-code.prompt.md", path: join(repoRoot, ".github", "prompts", "remediate-code.prompt.md") },
   { name: ".github/agents/remediator.agent.md", path: join(repoRoot, ".github", "agents", "remediator.agent.md") },
@@ -55,16 +51,6 @@ function normalizeCRLF(text: string): string {
   return text.replace(/\r\n/g, "\n");
 }
 
-// Derive the full handshake flag set from the canonical body so a future dropped
-// flag fails the guard (no hardcoded partial flag literal). Currently yields six,
-// including --host-model-id.
-function deriveHandshakeFlags(): string[] {
-  const body = readFileSync(CANONICAL_BODY_PATH, "utf8");
-  const matches = body.match(/--host-[a-z-]+/g) ?? [];
-  const flags = Array.from(new Set(matches)).sort();
-  return flags;
-}
-
 describe("INV-remediate-assets: remediate host asset drift guard", () => {
   it("INV-remediate-assets-06: every committed remediate asset is present (missing fails loudly)", () => {
     for (const { name, path } of ALL_ASSET_PATHS) {
@@ -74,18 +60,11 @@ describe("INV-remediate-assets: remediate host asset drift guard", () => {
     }
   });
 
-  it("INV-remediate-assets-01: body-derived handshake flags appear in every body-embedding asset + next-step", () => {
-    const flags = deriveHandshakeFlags();
-    // Sanity: the body currently defines six flags incl. --host-model-id.
-    expect(flags.length, `canonical body must define the handshake flag set; got ${JSON.stringify(flags)}`).toBeGreaterThanOrEqual(6);
-    expect(flags.includes("--host-model-id"), "canonical body must still carry --host-model-id").toBe(true);
-
+  it("INV-remediate-assets-01: every asset uses the provider-neutral next-step entrypoint", () => {
     for (const { name, path } of BODY_EMBEDDING_ASSETS) {
       const content = readFileSync(path, "utf8");
-      for (const flag of flags) {
-        expect(content.includes(flag), `${name} must carry body-derived handshake flag '${flag}' (INV-remediate-assets-01)`).toBe(true);
-      }
       expect(content.includes(NEXT_STEP_INVOCATION), `${name} must reference '${NEXT_STEP_INVOCATION}' (INV-remediate-assets-01)`).toBe(true);
+      expect(content).not.toMatch(/--host-[a-z-]+/g);
     }
 
     // The bare skills/remediate-code/SKILL.md is asserted only for the next-step invocation.
@@ -106,13 +85,10 @@ describe("INV-remediate-assets: remediate host asset drift guard", () => {
     }
   });
 
-  it("INV-remediate-assets-04: every body-embedding asset carries the identical body-derived flag set + a next-step reference", () => {
-    const flags = deriveHandshakeFlags();
-    for (const { name, path } of BODY_EMBEDDING_ASSETS) {
+  it("INV-remediate-assets-04: no committed asset reintroduces retired host handshake flags", () => {
+    for (const { name, path } of ALL_ASSET_PATHS) {
       const content = readFileSync(path, "utf8");
-      const present = flags.filter((flag) => content.includes(flag));
-      expect(present, `${name} must carry the identical body-derived flag set (INV-remediate-assets-04)`).toEqual(flags);
-      expect(content.includes(NEXT_STEP_INVOCATION), `${name} must reference '${NEXT_STEP_INVOCATION}' (INV-remediate-assets-04)`).toBe(true);
+      expect(content, `${name} must not contain retired --host-* flags`).not.toMatch(/--host-[a-z-]+/g);
     }
   });
 

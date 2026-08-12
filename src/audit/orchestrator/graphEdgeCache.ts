@@ -6,7 +6,7 @@
  * and a per-file `content_key`), so reuse validity is decided entirely by comparing
  * those against the fresh build — no `artifact_metadata` baseline is needed. Loaded
  * specially in `loadArtifactBundle` and written specially in `writeCoreArtifacts`
- * (the same pattern as `active_dispatch` / `design_review_snapshots`), so it never
+ * (the same pattern as `design_review_snapshots`), so it never
  * needs an `ARTIFACT_DEFINITIONS` entry or a dependency-map row.
  */
 import { join } from "node:path";

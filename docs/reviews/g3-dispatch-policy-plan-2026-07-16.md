@@ -1,6 +1,6 @@
 # G3 plan — the confirmed pool: policy vs reach
 
-Dated plan record. Durable design lives in [`spec/unified-dispatch-worker-model.md`](../../spec/unified-dispatch-worker-model.md)
+Dated plan record. Durable design lived in `spec/unified-dispatch-worker-model.md`
 → Decomposition G3. One-off; not a timeless concept.
 
 > **Four drafts, four refutations. Do not re-plan from a superseded draft.**

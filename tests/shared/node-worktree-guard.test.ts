@@ -10,7 +10,7 @@ import {
   assertCliCommandAllowedFromCwd,
   assertNotNodeWorktreeCwd,
 } from "../../src/shared/index.js";
-import { stripClaudeCodeEnv } from "../../src/shared/tooling/exec.js";
+import { stripAuditToolsControlEnv } from "../../src/shared/tooling/exec.js";
 
 function fixtureRepo(): string {
   return mkdtempSync(join(tmpdir(), "nwg-"));
@@ -50,7 +50,7 @@ describe("nodeWorktreeAncestor — tool-worktree path detection", () => {
 });
 
 describe("assertCliCommandAllowedFromCwd — deny-by-default CLI guard", () => {
-  const workerSafe = new Set(["submit-packet", "validate"]);
+  const workerSafe = new Set(["validate"]);
   const wtOf = (repo: string) => join(repo, ".audit-tools", "worktrees", "remediate-b1-r1");
 
   it("refuses a driver lifecycle command from a node-worktree cwd, naming the worktree", () => {
@@ -76,11 +76,11 @@ describe("assertCliCommandAllowedFromCwd — deny-by-default CLI guard", () => {
     ).toThrow(/refusing to run/);
   });
 
-  it("allows a worker-safe command from the same worktree cwd", () => {
+  it("allows an explicitly worker-safe command from the same worktree cwd", () => {
     expect(() =>
       assertCliCommandAllowedFromCwd({
-        cliName: "audit-code",
-        commandName: "submit-packet",
+        cliName: "remediate-code",
+        commandName: "validate",
         workerSafeCommands: workerSafe,
         cwd: wtOf(fixtureRepo()),
       }),
@@ -132,8 +132,8 @@ describe("caller-cwd env propagation pins (wrapper cannot import the TS module)"
     expect(wrapper).toContain(`${AUDIT_TOOLS_CALLER_CWD_ENV}: process.cwd()`);
   });
 
-  it("stripClaudeCodeEnv scrubs the stamp so provider-spawned workers never inherit it", () => {
-    const out = stripClaudeCodeEnv({
+  it("stripAuditToolsControlEnv scrubs the stamp so child commands never inherit it", () => {
+    const out = stripAuditToolsControlEnv({
       [AUDIT_TOOLS_CALLER_CWD_ENV]: "C:/somewhere",
       KEEP_ME: "yes",
     });
@@ -142,7 +142,7 @@ describe("caller-cwd env propagation pins (wrapper cannot import the TS module)"
   });
 });
 
-describe("CLI wiring — spawned dist backends refuse from node-worktree context", () => {
+describe("CLI wiring — spawned dist commands refuse from node-worktree context", () => {
   // Spawn-based: each child owns its env/cwd, so no process-global mutation
   // leaks into parallel test files. Requires a built dist (npm test builds).
   const remediateDist = fileURLToPath(new URL("../../dist/remediate/index.js", import.meta.url));
@@ -175,21 +175,6 @@ describe("CLI wiring — spawned dist backends refuse from node-worktree context
     });
     expect(run.status).not.toBe(0);
     expect(`${run.stderr}\n${run.stdout}`).toMatch(/refusing to run `audit-code status`/);
-  });
-
-  it("audit-code worker-safe submit-packet is NOT refused from a worktree context", () => {
-    const repo = fixtureRepo();
-    const wt = join(repo, ".audit-tools", "worktrees", "review-run1");
-    mkdirSync(wt, { recursive: true });
-    const run = spawnSyncHidden(process.execPath, [auditDist, "submit-packet"], {
-      cwd: wt,
-      encoding: "utf8",
-      env: { ...process.env, [AUDIT_TOOLS_CALLER_CWD_ENV]: wt },
-      input: "",
-      windowsHide: true,
-    });
-    // It will fail on missing flags/payload — but never with the guard refusal.
-    expect(`${run.stderr}\n${run.stdout}`).not.toMatch(/refusing to run/);
   });
 
   it("StateStore writers refuse from a worktree cwd (non-CLI invocation shape)", () => {

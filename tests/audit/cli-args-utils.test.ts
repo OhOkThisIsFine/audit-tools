@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, sep } from "node:path";
 
 const {
-  resolveHostDispatchCapability,
   optionalBooleanEnv,
   getArtifactsDir,
   getRootDir,
@@ -19,67 +18,6 @@ const ARGS_SOURCE_PATH = resolve(
   "cli",
   "args.ts",
 );
-
-// ---------------------------------------------------------------------------
-// resolveHostDispatchCapability
-// ---------------------------------------------------------------------------
-
-test("resolveHostDispatchCapability: explicit=true wins over sessionConfig false and env false", () => {
-  expect(resolveHostDispatchCapability({
-      explicit: true,
-      sessionConfig: ({ host_can_dispatch_subagents: false }),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "false" },
-    })).toBe(true);
-});
-
-test("resolveHostDispatchCapability: explicit=false wins over sessionConfig true and env true", () => {
-  expect(resolveHostDispatchCapability({
-      explicit: false,
-      sessionConfig: ({ host_can_dispatch_subagents: true }),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    })).toBe(false);
-});
-
-test("resolveHostDispatchCapability: sessionConfig false wins when explicit is undefined", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({ host_can_dispatch_subagents: false }),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    })).toBe(false);
-});
-
-test("resolveHostDispatchCapability: sessionConfig true wins when explicit is undefined", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({ host_can_dispatch_subagents: true }),
-    })).toBe(true);
-});
-
-test("resolveHostDispatchCapability: env AUDIT_CODE_HOST_CAN_DISPATCH=false used when explicit and sessionConfig both absent", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({}),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "false" },
-    })).toBe(false);
-});
-
-test("resolveHostDispatchCapability: env AUDIT_CODE_HOST_CAN_DISPATCH=true used when explicit and sessionConfig both absent", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({}),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    })).toBe(true);
-});
-
-test("resolveHostDispatchCapability: defaults to true when all inputs absent", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({}),
-      env: {},
-    })).toBe(true);
-});
-
-test("resolveHostDispatchCapability: garbage env var value falls back to default true", () => {
-  expect(resolveHostDispatchCapability({
-      sessionConfig: ({}),
-      env: { AUDIT_CODE_HOST_CAN_DISPATCH: "yes" },
-    })).toBe(true);
-});
 
 // ---------------------------------------------------------------------------
 // optionalBooleanEnv

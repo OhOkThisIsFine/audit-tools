@@ -12,7 +12,7 @@ import {
   withTempDir,
   tmpLockPath,
 } from "./fileLockTestSupport.mjs";
-import { acquireLock, releaseLock, FileLockTimeoutError } from "../../src/shared/quota/fileLock.js";
+import { acquireLock, releaseLock, FileLockTimeoutError } from "../../src/shared/io/fileLock.js";
 
 test("STALE_LOCK_MS is exported and unchanged (30s)", () => {
   expect(STALE_LOCK_MS).toBe(30_000);

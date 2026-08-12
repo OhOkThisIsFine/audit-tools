@@ -72,14 +72,14 @@ test("ingest-results rejects a value-less --results alongside --batch-results (C
   }
 });
 
-test("CLI numeric options prefer argv, then session config, then documented defaults", () => {
-  const sessionConfig = {
-    timeout_ms: 9_000,
-  };
-
-  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"], sessionConfig)).toBe(1200);
-  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "oops"], sessionConfig)).toBe(9_000);
-  expect(cliTestUtils.getTimeoutMs(["node", "cli"], {})).toBe(cliTestUtils.defaults.timeoutMs);
+test("CLI timeout reads argv and otherwise uses the documented default", () => {
+  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"])).toBe(1200);
+  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "oops"])).toBe(
+    cliTestUtils.defaults.timeoutMs,
+  );
+  expect(cliTestUtils.getTimeoutMs(["node", "cli"])).toBe(
+    cliTestUtils.defaults.timeoutMs,
+  );
 });
 
 test("CLI helper utilities count lines deterministically", async () => {
@@ -291,9 +291,7 @@ test("each extracted command module exports the expected function (ARC-3579b443)
   const { join: pathJoin } = await import("node:path");
   const distDir = pathJoin(repoRoot, "dist", "audit", "cli");
   const cases = [
-    ["advanceAuditCommand.js", "cmdAdvanceAudit"],
-    ["prepareDispatchCommand.js", "cmdPrepareDispatch"],
-    ["validateResultCommand.js", "cmdValidateResult"],
+    ["nextStepCommand.js", "cmdNextStep"],
     ["importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
     ["intakeCommand.js", "cmdIntake"],
     ["planCommand.js", "cmdPlan"],
@@ -304,9 +302,11 @@ test("each extracted command module exports the expected function (ARC-3579b443)
     ["validateResultsCommand.js", "cmdValidateResults"],
     ["requeueCommand.js", "cmdRequeue"],
     ["synthesizeCommand.js", "cmdSynthesize"],
+    ["forceSynthesisCommand.js", "cmdForceSynthesis"],
+    ["resynthesizeCommand.js", "cmdResynthesize"],
     ["cleanupCommand.js", "cmdCleanup"],
-    ["quotaCommand.js", "cmdQuota"],
-    ["dispatchStatusCommand.js", "cmdDispatchStatus"],
+    ["statusCommand.js", "cmdStatus"],
+    ["scoreAuditCommand.js", "cmdScoreAudit"],
     ["sampleRunCommand.js", "runSample"],
   ];
   for (const [file, exportName] of cases) {

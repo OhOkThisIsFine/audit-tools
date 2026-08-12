@@ -57,7 +57,7 @@ async function persistFallbackState(
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, bundle);
   await writeFile(
-    join(artifactsDir, "session-config.json"),
+    join(artifactsDir, "analyzer-policy.json"),
     JSON.stringify(
       {
         analyzers: {
@@ -74,10 +74,6 @@ async function persistFallbackState(
   );
 }
 
-// Post-G2 the backend provider identity rides the per-invocation --auditor
-// descriptor rather than the persisted session-config.json (which now rejects it).
-const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
-
 test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-"));
   const root = join(tempDir, "repo");
@@ -89,7 +85,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // First next-step pauses on the critical-flow fallback host gate.
     const paused: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
+        ["next-step"],
         { cwd: root },
       )).stdout,
     );
@@ -127,7 +123,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // satisfied (the run advances past the gate, never re-asking).
     const advanced: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
+        ["next-step"],
         { cwd: root },
       )).stdout,
     );
@@ -160,7 +156,7 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
 
     const step: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
+        ["next-step"],
         { cwd: root },
       )).stdout,
     );

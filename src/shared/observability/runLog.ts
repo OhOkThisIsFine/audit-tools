@@ -16,8 +16,6 @@ export type RunLogEventKind =
   | "artifact_write"
   | "scope"
   | "outcome"
-  | "provider_launch"
-  | "provider_done"
   | "step"
   | "state"
   | "error";
@@ -30,7 +28,6 @@ export interface RunLogEvent {
   /** Event kind drawn from the stable {@link RunLogEventKind} vocabulary. */
   kind: RunLogEventKind;
   artifact?: string;
-  provider?: string;
   tokens_est?: number;
   duration_ms?: number;
   note?: string;

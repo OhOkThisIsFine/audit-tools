@@ -66,12 +66,14 @@ const KNOWN_FILENAMES = new Set([
 /**
  * Files whose writes are managed OUTSIDE named executor return values:
  *   - tooling_manifest.json  → written by the environment probe / advanceAudit
+ *   - intent_checkpoint.json → written by the conversation host at confirmation
  *   - agent-feedback.jsonl   → appended by workers, never by an executor
  * Both appear as keys in ARTIFACT_DEPENDENTS_MAP but must not be required
  * to appear in any executor's artifacts_written.
  */
 const LIFECYCLE_WRITTEN_FILES = new Set([
   "tooling_manifest.json",
+  "intent_checkpoint.json",
   AGENT_FEEDBACK_FILENAME,
 ]);
 

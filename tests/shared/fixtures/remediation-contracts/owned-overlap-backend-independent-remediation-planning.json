@@ -1,0 +1,12 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "backend-independent-remediation-planning",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "before-backend-independent-remediation-planning-first-test-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": true,
+  "owned_overlaps": [],
+  "manifest_sha256": "30fcdc69ef03c38461b5aa113d157fb97b331cdcf9a6f3eee24f0c9ef72887a8"
+}

@@ -5,8 +5,7 @@
  * shared `renderHostAsset` helper (`audit-tools/shared`). These functions are
  * thin wrappers that pass the canonical body through with the right `kind` and
  * `toolName`; they do NOT re-author per-host loader prose. That makes it
- * impossible for a host asset to drift out of sync with the canonical body — to
- * silently drop the next-step capability handshake (including `--host-models`) or
+ * impossible for a host asset to drift out of sync with the canonical body or
  * to embed a wrong in-repo entrypoint. A no-drift guard test enforces this.
  */
 

@@ -555,7 +555,7 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
     // Object-wrapped, not a bare array — the PowerShell/json_object-mode
     // single-element-array-collapses-to-object shape (memory:
-    // submit-packet-json-array-trap) generalized to a whole-array wrap.
+    // result-json-array trap) generalized to a whole-array wrap.
     await writeFile(
       contractPath,
       JSON.stringify({ findings: [{ id: "DR-001", title: "contract finding" }] }),

@@ -23,13 +23,12 @@ dependencies (staleness edges) per artifact, see
 executor produces which artifact and its obligation id, see
 [`executor-catalog.md`](executor-catalog.md) — also not duplicated here.
 
-Three artifacts participate in orchestrator state but are **not**
-`ARTIFACT_DEFINITIONS` entries (loaded/written specially, not staleness-DAG
-nodes): `active-dispatch.json` (in-flight dispatch state), design-review
-snapshots (per-pass semantic projections), and the per-file graph-edge cache
-(C2 incremental graph-build reuse). `agent-feedback.jsonl` is also outside the
-registry — worker-appended, orchestrator-read-only — but *does* participate in
-the staleness DAG (see dependency-map.md).
+Design-review snapshots (per-pass semantic projections), the per-file graph-edge
+cache (incremental graph-build reuse), and run-scoped host workload/binding/
+accepted-result ledgers participate in orchestrator state but are not
+`ARTIFACT_DEFINITIONS` entries. `agent-feedback.jsonl` is also outside the
+registry—host-appended and orchestrator-read-only—but does participate in the
+staleness DAG (see dependency-map.md).
 
 ## Artifacts by phase
 
@@ -91,9 +90,14 @@ audit-code into an implementation pipeline.
 | `audit_results.jsonl` | **NDJSON** | Ingested `AuditResult` records, one per line — not a `.json` array. |
 | `audit_tasks.json` | JSON | Task specifications for external (host-delegated) audit execution. |
 | `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
-| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; partitioned just-in-time at dispatch, never persisted back. |
+| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed when forming complete host work items. |
 | `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
-| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses), used to bias later packet composition toward continuity. Raw counters only; the ranking that consumes them is derived JIT at dispatch. |
+| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses), used to bias later host-work composition toward continuity. |
+
+Run-scoped host handoff adds `host-workload.json`, `host-result-map.json`,
+`host-task-bindings.json`, host result files, and the accepted-results ledger.
+Their tool-owned bindings and content hashes are the authority for ingestion;
+file presence alone is not acceptance.
 
 ### Reporting
 

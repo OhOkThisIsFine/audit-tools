@@ -291,11 +291,11 @@ export const INSTALL_HOST_DEFINITIONS = {
       });
       await collect(checks, 'antigravity_guide', async () => {
         const content = await readFile(assetPaths.antigravityPlanningGuidePath, 'utf8');
-        if (!content.includes('--host-models') || !content.includes('next-step')) {
-          throw new Error('Antigravity guide must embed the canonical loader body (next-step capability handshake including --host-models).');
+        if (!content.includes('next-step')) {
+          throw new Error('Antigravity guide must embed the canonical loader body and its next-step workflow.');
         }
         return {
-          summary: 'Antigravity planning guide embeds the canonical loader body with the capability handshake.',
+          summary: 'Antigravity planning guide embeds the canonical loader body and next-step workflow.',
           path: assetPaths.antigravityPlanningGuidePath,
         };
       });
@@ -662,9 +662,8 @@ export async function installBootstrap(argv, options = {}) {
   );
   results.push(await writeGeneratedJson(installManifestPath, installManifest));
 
-  // No session-config seeding: `provider` is per-auditor dispatch inventory and
-  // cannot be persisted on session-config.json (G2); the config is created
-  // empty on demand.
+  // No session-intent seeding: an absent file intentionally resolves to the
+  // approved defaults, and installing host assets must not create run state.
 
   const payload = {
     host,

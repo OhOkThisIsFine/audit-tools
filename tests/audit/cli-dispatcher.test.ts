@@ -11,9 +11,7 @@ const { runCli } = await import(distCliUrl);
 // All command names that the switch statement in cli.ts must handle.
 const KNOWN_COMMANDS = [
   "sample-run",
-  "advance-audit",
   "next-step",
-  "worker-run",
   "import-external-analyzer",
   "intake",
   "plan",
@@ -24,15 +22,11 @@ const KNOWN_COMMANDS = [
   "validate-results",
   "requeue",
   "synthesize",
+  "force-synthesis",
   "resynthesize",
   "cleanup",
-  "prepare-dispatch",
-  "merge-and-ingest",
-  "submit-packet",
-  "validate-result",
-  "quota",
   "status",
-  "dispatch-status",
+  "score-audit",
 ];
 
 // ── unknown command sets exitCode=1 and lists valid commands ──────────────────
@@ -65,9 +59,6 @@ test("unknown command error lists all known commands", async () => {
 // Verify each command module is importable and exports the expected function.
 // This ensures no extracted module was accidentally left as a stub or removed.
 const cmdModuleMap = [
-  ["advanceAuditCommand.js", "cmdAdvanceAudit"],
-  ["prepareDispatchCommand.js", "cmdPrepareDispatch"],
-  ["validateResultCommand.js", "cmdValidateResult"],
   ["importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
   ["intakeCommand.js", "cmdIntake"],
   ["planCommand.js", "cmdPlan"],
@@ -78,15 +69,12 @@ const cmdModuleMap = [
   ["validateResultsCommand.js", "cmdValidateResults"],
   ["requeueCommand.js", "cmdRequeue"],
   ["synthesizeCommand.js", "cmdSynthesize"],
+  ["forceSynthesisCommand.js", "cmdForceSynthesis"],
   ["resynthesizeCommand.js", "cmdResynthesize"],
   ["cleanupCommand.js", "cmdCleanup"],
-  ["quotaCommand.js", "cmdQuota"],
-  ["dispatchStatusCommand.js", "cmdDispatchStatus"],
+  ["scoreAuditCommand.js", "cmdScoreAudit"],
   ["sampleRunCommand.js", "runSample"],
   ["nextStepCommand.js", "cmdNextStep"],
-  ["workerRunCommand.js", "cmdWorkerRun"],
-  ["submitPacketCommand.js", "cmdSubmitPacket"],
-  ["mergeAndIngestCommand.js", "cmdMergeAndIngest"],
   ["statusCommand.js", "cmdStatus"],
 ];
 

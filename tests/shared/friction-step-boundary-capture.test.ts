@@ -46,7 +46,7 @@ test("stepBoundaryEventId is deterministic (stable across calls → de-dup works
   expect(stepBoundaryEventId("no_change_merge", "run-1", "node-7")).toBe(stepBoundaryEventId("no_change_merge", "run-1", "node-7"));
 });
 
-// ── CE-005: every backend fact routes through the one chokepoint ───────────────
+// ── CE-005: every workflow fact routes through the one chokepoint ──────────────
 
 test("captureStepBoundaryFriction routes a named fact through the sink", async () => {
   const dir = await mkdtemp(join(tmpdir(), "friction-sb-"));
@@ -106,7 +106,7 @@ test("captureStepBoundaryFriction is best-effort: a bad dir is swallowed, never 
 
 // ── per-event reconciliation: chokepoint feeds decideFrictionTriage ─────────────
 
-test("backend facts captured through the chokepoint surface as per-event pending subjects", async () => {
+test("workflow facts captured through the chokepoint surface as per-event pending subjects", async () => {
   const dir = await mkdtemp(join(tmpdir(), "friction-sb-"));
   try {
     await captureStepBoundaryFriction(dir, "run-1", { eventType: "phase_reemit", discriminator: "d1", note: "a" }, "remediate-code");
@@ -135,7 +135,7 @@ test("backend facts captured through the chokepoint surface as per-event pending
   }
 });
 
-test("zero backend events still blocks until ≥1 open observation (no false-green)", async () => {
+test("zero workflow events still blocks until ≥1 open observation (no false-green)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "friction-sb-"));
   try {
     const decision = await decideFrictionTriage(dir, "run-1", "remediate-code");

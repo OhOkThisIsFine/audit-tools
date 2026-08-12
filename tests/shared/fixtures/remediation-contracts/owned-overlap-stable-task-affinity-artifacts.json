@@ -1,0 +1,12 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "stable-task-affinity-artifacts",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "before-stable-task-affinity-artifacts-first-test-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": true,
+  "owned_overlaps": [],
+  "manifest_sha256": "438b6506e83c1634e41703aed02db90fa223080509c866d02dab11fce936bd88"
+}

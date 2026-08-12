@@ -4,7 +4,6 @@
  */
 
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import type { CapacityPool } from "../../src/shared/quota/capacity.js";
 import type { RepoManifest } from "../../src/audit/types.js";
 
 export interface FixtureFile {
@@ -35,18 +34,4 @@ export function manifest(files: FixtureFile[]): RepoManifest {
  */
 export function edgeBundle(edges: GraphEdge[], extra: Partial<GraphBundle> = {}): GraphBundle {
   return { graphs: { imports: edges, calls: [], references: [], routes: [] }, ...extra };
-}
-
-/**
- * Build a quota snapshot fixture for testing quota/capacity logic.
- */
-export function snapshot(pct: number): NonNullable<CapacityPool["quotaSourceSnapshot"]> {
-  return {
-    remaining_pct: pct,
-    reset_at: null,
-    requests_remaining: null,
-    tokens_remaining: null,
-    captured_at: new Date(0).toISOString(),
-    source: "test",
-  };
 }

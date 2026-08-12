@@ -49,11 +49,11 @@ function inProject(p) {
 // The tool's own dispatch plan already creates and names the node's worktree.
 // Adding the Agent tool's OWN `isolation: "worktree"` spawns a SECOND, unrelated
 // worktree; the subagent edits source there instead of the tool-designated tree,
-// and `accept-node`'s cherry-pick then sees no diff.
+// so result ingestion sees no change in the bound checkout.
 if (toolName === 'Agent') {
   const prompt = String(input?.prompt ?? '');
   const dispatchShaped =
-    /\b(remediate-code|audit-code|accept-node|merge-implement-results|merge-and-ingest)\b/i.test(prompt) ||
+    /\b(remediate-code|audit-code)\b/i.test(prompt) ||
     // `(?!\.?js)` — "Implement Node.js streams" is ordinary work, not a
     // dispatch node.
     /\b(implement|dispatch)\s+node\b(?!\.?js)/i.test(prompt) ||
@@ -62,7 +62,7 @@ if (toolName === 'Agent') {
     block(
       'tool-input guard: never pass `isolation: "worktree"` when dispatching an audit-code / remediate-code ' +
         'node.\nThe tool\'s dispatch plan ALREADY created and named the node\'s worktree. A second, unrelated ' +
-        'worktree means the subagent edits source in the wrong tree and `accept-node`\'s cherry-pick sees no diff.\n' +
+        'worktree means the subagent edits source in the wrong tree and bound result ingestion sees no change.\n' +
         '  fix: drop `isolation` and give the agent the workdir the dispatch plan names.',
     );
   }

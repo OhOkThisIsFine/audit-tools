@@ -18,8 +18,7 @@
  *  - `structured_changed` — the STRUCTURED normal form moved: deterministically
  *    CHANGED, no judge (an LLM must never arbitrate a numeric/list delta).
  *  - `prose_judgment_pending` — structured equal, prose moved: the bounded host
- *    judge owns the verdict (conversation flow emits the judge step; pure
- *    headless resolves as CHANGED, fail-safe).
+ *    judge owns the verdict and the obligation remains pending until it arrives.
  *
  * A judge submission names the pair it judged (`judged_pair` normal-form
  * hashes); consumption re-derives the live pair and DISCARDS a stale verdict
@@ -115,10 +114,8 @@ function currentEntryRevision(bundle: ArtifactBundle): number {
 
 /**
  * Resolve the obligation. `verdict` is the consumed judge submission when one
- * arrived this step; absent, every arm resolves deterministically — including
- * `prose_judgment_pending` → CHANGED, which is only reachable verdict-less in
- * the pure-headless drain (the conversation flow emits the judge step instead)
- * and is the fail-safe direction there.
+ * arrived this step. Prose-only changes require that bound host judgment;
+ * deterministic arms never fabricate one.
  */
 export function runIntentEquivalenceResolve(
   bundle: ArtifactBundle,
@@ -196,8 +193,8 @@ export function runIntentEquivalenceResolve(
 
   // prose_judgment_pending
   if (!verdict) {
-    return resolveChanged(
-      "prose differs and no host judge is available (headless fail-safe)",
+    throw new Error(
+      "Intent-equivalence prose judgment is pending; a bound host verdict is required.",
     );
   }
   if (

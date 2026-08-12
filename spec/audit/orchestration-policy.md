@@ -83,11 +83,9 @@ The orchestrator may mark completion only when:
 - no required requeue remains
 - no mandatory runtime validation obligation is unresolved in a way that blocks completion
 
-Completion is **not** strictly all-or-nothing: there is one sanctioned partial-completion valve, for a
-run that cannot make progress after bounded retries. It is defined in
-[`audit-goals.md`](audit-goals.md) → *Completion* and implemented by `recordPartialCompletionTerminal`
-(`src/audit/cli/dispatch/pausePersist.ts`). A partial completion is recorded as such, never reported as
-a clean finish.
+Completion is all-or-nothing for auditable scope. Host review that has not
+returned a valid bound result remains pending or blocked; it never becomes a
+clean or partial finish through an execution-capacity heuristic.
 
 ## State machine
 
@@ -109,11 +107,9 @@ of named obligations is the `PRIORITY` chain in
 ### Obligation-satisfaction rules
 
 - Excluded files must not create obligations.
-- `audit_tasks_completed` is satisfied when no pending audit task remains *after*
-  budget-deferred and partial-completion-stranded task ids are excluded. A run
-  that strands work under an empty-pool/livelock terminal therefore satisfies the
-  obligation without that coverage — deliberately, so the pipeline proceeds to
-  synthesis on partial coverage instead of stalling forever.
+- `audit_tasks_completed` is satisfied only when every planned review task has a
+  valid ingested host result (or a user-authorized scope change removed the
+  obligation before work was emitted).
 - `runtime_validation_current` is satisfied when either no deterministic runtime
   validation was planned, or all planned runtime tasks are resolved.
 - `synthesis_current` is satisfied only when `audit-report.md` is current.

@@ -28,7 +28,7 @@ const ALL_TEST_DIRS = ["audit", "shared", "remediate"].map((area) =>
 // silently use the last compiled dist/, meaning it can pass on stale code.
 // Known violators were validate-command.test.ts, cli-dispatcher.test.ts,
 // audit-code-wrapper.test.ts, review-packets.test.ts, and
-// dispatch-quota-constants.test.ts (fixed: now imports from src/).
+// review-packet-sizing.test.ts (fixed: now imports from src/).
 // This test scans all .test.mjs/.test.ts files and fails if a top-level dist import
 // is found in files that are not known legacy CLI-integration tests (which
 // intentionally exercise the compiled entrypoint).
@@ -168,27 +168,6 @@ test("INV-audit-tests-06: test helper modules are valid ESM (no require() or __d
     }
   }
   expect(violations, `These helper files contain CommonJS constructs, which break in ESM .mjs files:\n  ${violations.join("\n  ")}`).toEqual([]);
-});
-
-// ── INV-audit-tests-07: no test source imports a locally-duplicated copy ──────
-// of a production function. Tests must exercise the production code, not a local
-// copy with a matching signature. TST-edfe6e13 found that worker-run-command.test.ts
-// duplicated `partitionIssues` locally. We guard this by asserting the test file
-// has no function definition named the same as a known production function.
-//
-// This is a structural source check, not a behavioral test — the key invariant is
-// that the test file's `partitionIssues` local function is GONE (tests exercise
-// production code via the injected dep seam, not a shadow copy).
-
-test("INV-audit-tests-07: worker-run-command.test.ts does not define a local partitionIssues", () => {
-  const src = readFileSync(
-    join(TESTS_DIR, "worker-run-command.test.ts"),
-    "utf8",
-  );
-  // The function was a local duplicate — it must no longer exist in the test file.
-  expect(!src.includes("function partitionIssues"), "worker-run-command.test.ts must not define a local partitionIssues() — " +
-      "the test must exercise the production partition logic via the workerRunCommand dep seam, " +
-      "not a shadow copy that can drift from production behavior.").toBeTruthy();
 });
 
 // ── FND-REL-0838abd9: example files used by schema-contracts tests must exist ─

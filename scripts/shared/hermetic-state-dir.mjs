@@ -2,8 +2,8 @@
 // tests/helpers/state-dir-setup.mjs (vitest setupFiles can't cover standalone
 // node programs). Importing this module points AUDIT_CODE_STATE_DIR at a fresh
 // temp dir before any CLI child is spawned, so no smoke outcome can depend on
-// the box's live ~/.audit-code / ~/.remediate-code (declaration, populate
-// cache, quota ledger, reservations). Single-sourced resolution lives in
+// the box's live ~/.audit-code / ~/.remediate-code configuration and runtime
+// files. Single-sourced resolution lives in
 // src/shared/io/stateDir.ts; every smoke child inherits process.env.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

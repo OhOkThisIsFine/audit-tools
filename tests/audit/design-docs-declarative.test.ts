@@ -24,7 +24,10 @@ const DESIGN_DOCS = ["audit-workflow-design.md", "remediation-workflow-design.md
 // case-sensitively: the uppercase status marker is banned, but the ordinary word
 // "done" (e.g. "work already done") is fine.
 const BANNED = [
-  /\bcurrently\b/i,
+  // Runtime predicates such as "currently eligible DAG node" are declarative
+  // state-machine language, not project-status prose. Ban only implementation-
+  // status uses of "currently".
+  /\bcurrently\b[^.\n]*\b(?:broken|unwired|missing|unsupported|unimplemented|incomplete)\b/i,
   /\bunwired\b/i,
   /\bnot yet\b/i,
   /\btoday\b/i,

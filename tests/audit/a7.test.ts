@@ -17,9 +17,7 @@
  *  4. release-gate wiring: `verify:release` invokes `verify:hosts` ahead of the
  *     publish smoke steps.
  *
- * Plus a GATED Codex headless live-dispatch e2e (skips cleanly unless
- * RUN_CODEX_E2E=1), mirroring the NIM e2e gate — the things CI cannot reach
- * (Antigravity / OpenCode GUI dispatch) live in spec/host-validation.md.
+ * GUI-only host validation remains outside this deterministic gate.
  */
 
 import { test, expect } from "vitest";

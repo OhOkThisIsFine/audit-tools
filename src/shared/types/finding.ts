@@ -12,6 +12,7 @@
 
 import { z } from "zod";
 import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
+import { ContentCoherenceTraceSchema } from "../decompose/contentCoherence.js";
 
 /** Canonical finding severity vocabulary (most-severe-first). */
 export const FindingSeveritySchema = z.enum([
@@ -179,6 +180,8 @@ export const WorkBlockSchema = z.object({
   max_severity: FindingSeveritySchema,
   rationale: z.string(),
   depends_on: z.array(z.string()),
+  /** Advisory deterministic content estimate; never a membership or fit claim. */
+  token_estimate: z.number().int().nonnegative().optional(),
 });
 export type WorkBlock = z.infer<typeof WorkBlockSchema>;
 
@@ -209,9 +212,9 @@ export const FindingThemeSchema = z.object({
 export type FindingTheme = z.infer<typeof FindingThemeSchema>;
 
 /**
- * The optional LLM synthesis-narrative payload (Phase 6). Produced by a single
- * cached host/provider pass over the deterministic findings and merged into
- * `audit-findings.json`. Omitted entirely when no provider is available.
+ * The optional synthesis-narrative payload (Phase 6). Produced from one host
+ * review of the deterministic findings and merged into `audit-findings.json`.
+ * Omitted when no validated narrative result was supplied.
  */
 export const SynthesisNarrativeSchema = z.object({
   themes: z.array(FindingThemeSchema),
@@ -276,40 +279,77 @@ export const AuditFindingsSummarySchema = z.object({
    * dropped from the admitted set. Absent when no finding carried a verdict.
    */
   grounding_status_breakdown: z.record(z.string(), z.number()).optional(),
-  /**
-   * Units/tasks stranded by a partial-completion terminal (empty-pool or
-   * livelock guard). Distinct from `budget_deferred_task_count` (planned
-   * deferrals) — these units could not be dispatched because the provider pool
-   * was exhausted before dispatch completed. Present only when a
-   * `partial_completion_terminal` was set on the active-dispatch artifact.
-   */
-  stranded_unit_count: z.number().optional(),
 });
 export type AuditFindingsSummary = z.infer<typeof AuditFindingsSummarySchema>;
 
 /**
  * The canonical `audit-findings.json` contract. Deterministic fields are always
  * present; narrative fields (themes/executive_summary/top_risks) are added by
- * the optional Phase 6 synthesis-narrative pass and omitted without a provider.
+ * the optional Phase 6 synthesis-narrative pass and omitted without a validated result.
  */
-export const AuditFindingsReportSchema = z.object({
-  contract_version: z.string(),
-  summary: AuditFindingsSummarySchema,
-  findings: z.array(FindingSchema),
-  work_blocks: z.array(WorkBlockSchema),
-  work_block_seams: z.array(WorkBlockSeamSchema),
-  /**
-   * Findings a tool-executable anchor REFUTED (S7 tier-2 disproof). Recorded here
-   * but kept OUT of `findings`/`work_blocks` so a disproven claim never merges as
-   * actionable fact — quarantine, not delete. Absent when nothing was refuted.
-   */
-  quarantined_findings: z.array(FindingSchema).optional(),
-  /** Paths excluded from the audit per the intent checkpoint, with reasons. */
-  excluded_scope: z
-    .array(z.object({ path: z.string(), reason: z.string() }))
-    .optional(),
-  themes: z.array(FindingThemeSchema).optional(),
-  executive_summary: z.string().optional(),
-  top_risks: z.array(z.string()).optional(),
-});
+export const AuditFindingsReportSchema = z
+  .object({
+    contract_version: z.string(),
+    summary: AuditFindingsSummarySchema,
+    findings: z.array(FindingSchema),
+    coherence_trace: ContentCoherenceTraceSchema,
+    work_blocks: z.array(WorkBlockSchema),
+    work_block_seams: z.array(WorkBlockSeamSchema),
+    /**
+     * Findings a tool-executable anchor REFUTED (S7 tier-2 disproof). Recorded here
+     * but kept OUT of `findings`/`work_blocks` so a disproven claim never merges as
+     * actionable fact — quarantine, not delete. Absent when nothing was refuted.
+     */
+    quarantined_findings: z.array(FindingSchema).optional(),
+    /** Paths excluded from the audit per the intent checkpoint, with reasons. */
+    excluded_scope: z
+      .array(z.object({ path: z.string(), reason: z.string() }))
+      .optional(),
+    themes: z.array(FindingThemeSchema).optional(),
+    executive_summary: z.string().optional(),
+    top_risks: z.array(z.string()).optional(),
+  })
+  .superRefine((report, context) => {
+    const components = report.coherence_trace.components;
+    if (components.length !== report.work_blocks.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["work_blocks"],
+        message:
+          "work_blocks must project exactly one block per coherence component.",
+      });
+      return;
+    }
+    for (let index = 0; index < components.length; index += 1) {
+      const component = components[index] ?? [];
+      const findingIds = report.work_blocks[index]?.finding_ids ?? [];
+      if (
+        component.length !== findingIds.length ||
+        component.some((id, memberIndex) => id !== findingIds[memberIndex])
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["work_blocks", index, "finding_ids"],
+          message:
+            "finding_ids must exactly match the corresponding canonical coherence component.",
+        });
+      }
+    }
+    const findingIds = report.findings.map((finding) => finding.id).sort();
+    const tracedIds = components.flat().sort();
+    const normalizedIds = report.coherence_trace.normalized_items
+      .map((item) => item.id)
+      .sort();
+    const sameIds = (left: string[], right: string[]): boolean =>
+      left.length === right.length &&
+      left.every((id, index) => id === right[index]);
+    if (!sameIds(findingIds, tracedIds) || !sameIds(findingIds, normalizedIds)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["coherence_trace", "components"],
+        message:
+          "coherence trace must cover every approved finding exactly once.",
+      });
+    }
+  });
 export type AuditFindingsReport = z.infer<typeof AuditFindingsReportSchema>;

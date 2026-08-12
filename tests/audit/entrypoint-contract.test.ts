@@ -33,10 +33,13 @@ test('product docs consistently present /audit-code as the canonical surface', a
   expect(readme.toLowerCase().includes('slash-command')).toBeTruthy();
   // The CLI is documented as a backend/fallback, not the primary product surface.
   expect(readme.toLowerCase().includes('backend') && readme.toLowerCase().includes('fallback')).toBeTruthy();
-  expect(productDirection.toLowerCase().includes('repo-local fallback')).toBeTruthy();
-  expect(skill.includes('conversational product surface first')).toBeTruthy();
-  expect(skill.includes('explicit user authorization to fan out')).toBeTruthy();
-  expect(skill.includes('probe alternate')).toBeTruthy();
+  const productDirectionLower = productDirection.toLowerCase();
+  expect(productDirectionLower.includes('backend infrastructure')).toBeTruthy();
+  expect(productDirectionLower.includes('repo-local') && productDirectionLower.includes('fallback')).toBeTruthy();
+  const skillLower = skill.toLowerCase();
+  expect(skillLower.includes('canonical entrypoint') && skill.includes('/audit-code')).toBeTruthy();
+  expect(skillLower.includes("host's native subagent facilities")).toBeTruthy();
+  expect(skillLower.includes('do not invent a smaller task') && skillLower.includes('alternate execution path')).toBeTruthy();
   // The prompt must document both invocation commands and the two stable
   // behavioral instructions (follow only the returned step; stop when told),
   // matched on durable keywords instead of whole sentences.

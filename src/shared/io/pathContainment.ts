@@ -4,9 +4,8 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
  * Root-containment guard — the single source for "does this path stay inside
  * that root".
  *
- * This check was reimplemented five times (audit dispatch paths, the TypeScript
- * analyzer's include mapping, graph extraction, the openai-compatible provider's
- * apply step, remediate's worktree seeding). Four spelled the same
+ * This check was reimplemented across audit artifact paths, analyzer include
+ * mapping, graph extraction, and remediation worktree seeding. Most copies spelled the same
  * `rel.startsWith("..") || isAbsolute(rel)` pair by hand and the fifth omitted
  * the `isAbsolute` half — which is the case that matters on win32, where
  * `relative()` returns an ABSOLUTE path when the two sides sit on different
@@ -24,8 +23,7 @@ export interface WithinRootOptions {
   /**
    * Whether the root itself (`rel === ""`) counts as contained. Default `true`
    * — a root-relative "" resolves to the root, which is inside it. Pass `false`
-   * where the caller wants a FILE strictly under the root (the provider's
-   * apply step: writing "the repo" is never a legal model-supplied target).
+   * where the caller wants a FILE strictly under the root.
    */
   allowRoot?: boolean;
 }

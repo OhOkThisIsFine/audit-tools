@@ -3,7 +3,7 @@
 Realizes the owner direction (2026-07-17): collapse dispatch to **one routing decision** and delete the
 mode distinctions layered on top of it. Supersedes the `proxy_transport`-trigger build (premise refuted —
 [`host-fanout-premise-refuted-2026-07-17.md`](host-fanout-premise-refuted-2026-07-17.md)). Durable concept
-home: [`spec/dispatch-quota.md`](../../spec/dispatch-quota.md) + memory
+home at the time: `spec/dispatch-quota.md` + memory
 [[relax-dispatch-source-forcing]]. This doc is the concrete build design + sequencing (dated record).
 
 ## The one decision

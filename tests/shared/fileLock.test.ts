@@ -16,7 +16,7 @@ import {
   withFileLock,
   FileLockTimeoutError,
   isTransientPermissionContention,
-} from "../../src/shared/quota/fileLock.js";
+} from "../../src/shared/io/fileLock.js";
 import { RunLogger } from "../../src/shared/observability/runLog.js";
 
 // A back-dated mtime guaranteed to read as stale: any time older than the

@@ -240,8 +240,8 @@ export async function writeStepContract<
 
 /**
  * Run `body` under the terminal-exit backstop both next-step CLIs share
- * (backlog: abnormal-exit no-step-contract). If `body` throws — a quota wall,
- * the engine's maxTransitions cycle abort, a mis-shaped-submission parse crash,
+ * (backlog: abnormal-exit no-step-contract). If `body` throws — the engine's
+ * maxTransitions cycle abort, a mis-shaped-submission parse crash,
  * an IO failure — write a blocked step contract naming the cause via
  * `writeBlockedStep`, then rethrow the ORIGINAL error so the caller's exit
  * semantics (stderr report + nonzero exit) are unchanged. This guarantees the
@@ -294,7 +294,7 @@ export function renderBlockedStepPrompt(tool: string, reason: string): string {
  * orchestrator's draw supplies only its genuine per-mode inputs: the contract
  * version and its run-id convention (audit: `null`; remediate: a minted id).
  * The step JSON always carries `progress.summary` naming the cause — a
- * headless consumer sees only this contract, never the prompt file — and the
+ * contract-only consumer may never read the prompt file — and the
  * prompt is the shared `renderBlockedStepPrompt`.
  */
 export async function writeBlockedStepContract(params: {

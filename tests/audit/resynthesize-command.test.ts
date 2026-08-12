@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { buildContentCoherenceTrace } from "../../src/shared/decompose/contentCoherence.js";
 
 const { runCli } = await import("../../src/audit/cli.js");
 const {
@@ -13,6 +14,30 @@ const {
 } = await import("../../src/audit/reporting/synthesis.js");
 
 function makeReport(overrides: Partial<AuditFindingsReport> = {}): AuditFindingsReport {
+  const findings: AuditFindingsReport["findings"] = [
+    {
+      id: "F-001",
+      title: "Injection risk",
+      category: "security",
+      severity: "high",
+      confidence: "high",
+      lens: "security",
+      summary: "User input is unsanitized.",
+      affected_files: [{ path: "src/api.ts" }],
+      evidence: ["line 42"],
+    },
+    {
+      id: "F-002",
+      title: "Missing test",
+      category: "tests",
+      severity: "medium",
+      confidence: "medium",
+      lens: "tests",
+      summary: "No tests for core path.",
+      affected_files: [{ path: "src/core.ts" }],
+      evidence: [],
+    },
+  ];
   return {
     contract_version: "audit-tools/audit-findings/v0",
     summary: {
@@ -24,41 +49,27 @@ function makeReport(overrides: Partial<AuditFindingsReport> = {}): AuditFindings
       excluded_file_count: 2,
       runtime_validation_status_breakdown: { pass: 1 },
     },
-    findings: [
-      {
-        id: "F-001",
-        title: "Injection risk",
-        category: "security",
-        severity: "high",
-        confidence: "high",
-        lens: "security",
-        summary: "User input is unsanitized.",
-        affected_files: [{ path: "src/api.ts" }],
-        evidence: ["line 42"],
-      },
-      {
-        id: "F-002",
-        title: "Missing test",
-        category: "tests",
-        severity: "medium",
-        confidence: "medium",
-        lens: "tests",
-        summary: "No tests for core path.",
-        affected_files: [{ path: "src/core.ts" }],
-        evidence: [],
-      },
-    ],
+    findings,
+    coherence_trace: buildContentCoherenceTrace({
+      items: findings.map((finding) => ({
+        id: finding.id,
+        file_paths: finding.affected_files.map((file) => file.path),
+        unit_ids: ["unit-core"],
+        tags: [finding.lens],
+      })),
+    }),
     work_block_seams: [],
     work_blocks: [
       {
         id: "B-001",
         finding_ids: ["F-001", "F-002"],
-        unit_ids: [],
-        owned_files: [],
+        unit_ids: ["unit-core"],
+        owned_files: ["src/api.ts", "src/core.ts"],
         role: "implementation",
         depends_on: [],
         max_severity: "high",
         rationale: "security",
+        token_estimate: 2_100,
       },
     ],
     ...overrides,

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { discoverProjectCommands } from "./testCommand.js";
-import { resolveExecArgv, stripClaudeCodeEnv } from "./exec.js";
+import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
 
 /**
  * The project-test admission gate (CP-NODE-4 obligation 3 / seam_adjustments[2]).
@@ -88,7 +88,7 @@ export function isAdmittedProjectTestCommand(command: string[], root: string): b
  * Run the repository's discovered test command under the gate. Refuses
  * anything discovery did not emit for `root` (never spawns a refused
  * command); for an admitted command, spawns argv-only (never a shell) with
- * the host-signalling env stripped (`stripClaudeCodeEnv`), platform-resolved
+ * wrapper-only control env stripped (`stripAuditToolsControlEnv`), platform-resolved
  * via the shared `resolveExecArgv`, under suite-sized timeout/capture bounds,
  * killing a hung suite (SIGTERM→SIGKILL) and truncating — never silently
  * dropping — output beyond the capture cap.
@@ -120,7 +120,7 @@ export function runAdmittedProjectTestCommand(
     const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
     const child = spawn(resolvedCommand, resolvedArgs, {
       cwd: root,
-      env: stripClaudeCodeEnv(),
+      env: stripAuditToolsControlEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

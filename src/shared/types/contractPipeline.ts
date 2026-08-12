@@ -70,11 +70,23 @@ export type {
 } from "./contractPipeline/obligations.js";
 
 export { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION } from "./contractPipeline/implementation.js";
-export type {
-  ImplementationDAGNode,
-  ImplementationDAGEdge,
-  ImplementationDAG,
+import type {
+  ImplementationDAGNode as BaseImplementationDAGNode,
+  ImplementationDAG as BaseImplementationDAG,
 } from "./contractPipeline/implementation.js";
+export type { ImplementationDAGEdge } from "./contractPipeline/implementation.js";
+
+/**
+ * Audit-origin trace carried by Path-A DAG nodes. These ids retain canonical
+ * report membership through planning; the DAG node id remains trace metadata.
+ */
+export type ImplementationDAGNode = BaseImplementationDAGNode & {
+  source_finding_ids?: string[];
+};
+
+export type ImplementationDAG = Omit<BaseImplementationDAG, "nodes"> & {
+  nodes: ImplementationDAGNode[];
+};
 
 export {
   CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,

@@ -209,8 +209,8 @@ test("postinstall hardens auditor agent bash wildcard to ask and seeds no extern
     expect(first.agent?.auditor?.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
     expect(first.agent?.auditor?.permission?.bash?.["rm *"]).toBe("deny");
     expect(first.agent?.auditor?.permission?.bash?.["audit-code next-step*"]).toBe("allow");
-    expect(first.agent?.auditor?.permission?.bash?.["audit-code submit-packet*"]).toBe("allow");
-    expect(first.agent?.auditor?.permission?.bash?.["audit-code merge-and-ingest*"]).toBe("allow");
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code submit-packet*"]).toBeUndefined();
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code merge-and-ingest*"]).toBeUndefined();
 
     // Re-running is idempotent for both scopes (no duplicate or mutated rules).
     await runPostinstall(homeDir);

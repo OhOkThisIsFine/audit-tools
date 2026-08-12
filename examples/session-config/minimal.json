@@ -1,4 +1,4 @@
 {
-  "ui_mode": "visible",
-  "timeout_ms": 1800000
+  "review_mode": "attended",
+  "observability": "standard"
 }

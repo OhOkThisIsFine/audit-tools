@@ -131,9 +131,9 @@ export function quoteForCmd(arg: string): string {
 
 /**
  * Quote a single argv token for embedding inside a shell command line that is
- * rendered as one string (e.g. a subprocess-template entry): `cmd.exe`
+ * rendered as one string: `cmd.exe`
  * double-quote doubling on Windows, POSIX single-quote escaping elsewhere.
- * Shared by the subprocess-template provider in both orchestrators.
+ * Shared by command-rendering consumers in both orchestrators.
  */
 export function shellQuote(
   arg: string,
@@ -299,20 +299,19 @@ function toText(value: string | Buffer | null | undefined): string {
 }
 
 /**
- * Strip `CLAUDECODE` and any key matching `/^CLAUDE_CODE/` from an env object.
- * Always operates on an explicit copy so the original is never mutated.
- * When `base` is undefined, falls back to `process.env`.
+ * Strip audit-tools' wrapper-only control variables from a child environment.
+ * Always operates on an explicit copy so the original is never mutated. When
+ * `base` is undefined, falls back to `process.env`.
  */
-export function stripClaudeCodeEnv(
+export function stripAuditToolsControlEnv(
   base?: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const src = base ?? process.env;
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(src)) {
-    if (k === "CLAUDECODE" || /^CLAUDE_CODE/u.test(k)) continue;
     // The wrapper-propagated caller-cwd stamp (node-worktree guard) is scoped
-    // to ONE wrapper→backend hop: a dispatched worker inheriting the driver's
-    // stamp would read the driver's location as its own and bypass the guard.
+    // to one wrapper→CLI hop. A child inheriting the caller's stamp would read
+    // the parent's location as its own and bypass the guard.
     if (k === "AUDIT_TOOLS_CALLER_CWD") continue;
     out[k] = v;
   }
@@ -341,7 +340,7 @@ export function runTracked(
   const start = Date.now();
   const result = spawnSync(resolved[0], resolved.slice(1), {
     cwd: options.cwd,
-    env: stripClaudeCodeEnv(options.env),
+    env: stripAuditToolsControlEnv(options.env),
     encoding: options.encoding ?? "utf8",
     timeout: options.timeout,
     input: options.input,

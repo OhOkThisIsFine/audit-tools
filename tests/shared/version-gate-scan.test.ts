@@ -15,6 +15,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { join, resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "check-version-gates.mjs");
@@ -26,10 +29,31 @@ const {
   resolveConstant,
   typeNameIsUnique,
   enclosingCallee,
+  collectSources,
 } = await import(SCRIPT);
 
 const sourcesOf = (entries: Record<string, string>) => new Map(Object.entries(entries));
 const names = (records: any[]) => records.map((r) => r.decl.name).sort();
+
+describe("version-gate source collection", () => {
+  it("skips a tracked TypeScript file deleted from the working tree", () => {
+    const root = mkdtempSync(join(tmpdir(), "version-gate-deletion-"));
+    const git = (...args: string[]) =>
+      spawnSyncHidden("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+    try {
+      expect(git("init", "-q").status).toBe(0);
+      expect(git("config", "user.email", "test@example.com").status).toBe(0);
+      expect(git("config", "user.name", "Test").status).toBe(0);
+      writeFileSync(join(root, "retired.ts"), "export const retired = true;\n", "utf8");
+      expect(git("add", "retired.ts").status).toBe(0);
+      expect(git("commit", "--no-gpg-sign", "-q", "-m", "fixture").status).toBe(0);
+      rmSync(join(root, "retired.ts"));
+      expect(collectSources(root)).toEqual(new Map());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 /** A module that stamps a version on write and casts on read — the defect. */
 const UNCHECKED_MODULE = `

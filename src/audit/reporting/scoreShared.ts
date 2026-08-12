@@ -1,4 +1,4 @@
-// Shared pure primitives for the two scoring oracles (score-audit, score-tokens).
+// Shared pure primitives for audit scoring.
 // The pair had byte-copied `ratio` and the `pct` render closure, and had two
 // structurally identical gate predicates that differ ONLY in direction — a
 // difference that is deliberate and load-bearing, so it is expressed as a

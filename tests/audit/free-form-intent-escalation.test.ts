@@ -23,7 +23,6 @@ const {
   unresolvedConstraintClauses,
 } = await import("../../src/audit/orchestrator/intentInterpreter.js");
 const { interpretFreeFormIntent, runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
-const { runIntentCheckpointAutoComplete } = await import("../../src/audit/orchestrator/intentCheckpointExecutor.js");
 const { renderConfirmIntentPrompt } = await import("../../src/audit/cli/confirmIntentStep.js");
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -228,25 +227,6 @@ await test("an empty host_answer does NOT resolve the blocking clause", () => {
     ],
   });
   expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("missing");
-});
-
-// ── Headless fallback: escalate (record), never silently drop, and converge ──
-
-await test("headless auto-complete records unencodable clauses instead of dropping them", () => {
-  const bundle = bundleWithCheckpoint({ free_form_intent: UNENCODABLE });
-  const run = runIntentCheckpointAutoComplete(bundle, "/repo");
-  if (!run.updated.intent_checkpoint) throw new Error("Expected updated intent checkpoint");
-  const recorded = run.updated.intent_checkpoint.constraint_clauses ?? [];
-  expect(recorded.length, "the unencodable clause must be recorded").toBe(1);
-  if (!recorded[0]) throw new Error("Expected recorded constraint clause");
-  expect(recorded[0].host_answer && recorded[0].host_answer.length > 0).toBeTruthy();
-});
-
-await test("headless auto-complete leaves an already-current checkpoint unchanged", () => {
-  const bundle = bundleWithCheckpoint({ free_form_intent: ENCODABLE });
-  const run = runIntentCheckpointAutoComplete(bundle, "/repo");
-  expect(run.artifacts_written).toEqual([]);
-  expect(run.updated.intent_checkpoint).toBe(bundle.intent_checkpoint);
 });
 
 // ── 4. Single interpreter authority guard ───────────────────────────────────

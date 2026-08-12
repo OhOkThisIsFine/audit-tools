@@ -48,8 +48,8 @@ export const RemediationBlockSchema = z
     /**
      * 0-based foundations→consumers phase ordinal (auto-phasing, T3). Derived
      * mechanically at promotion from the persisted phase cut (the module a block's
-     * obligations belong to). The rolling scheduler treats it as a hard barrier: a
-     * block never dispatches until every lower-ordinal block is verified-complete,
+     * obligations belong to). The host handoff treats it as a hard barrier: a
+     * block is never emitted until every lower-ordinal block is verified-complete,
      * giving a per-phase whole-repo green checkpoint. Optional — absent (or all
      * blocks sharing one ordinal) means a single phase, i.e. no barrier.
      */
@@ -62,6 +62,11 @@ export const RemediationBlockSchema = z
      * boolean — no WriteRegion / WriteAnchor / anchor apparatus lives on the block.
      */
     cofile_parallel_safe: z.boolean().optional(),
+    /**
+     * Deterministic advisory size derived from this block's unique physical
+     * files. It is metadata for the host, never a backend-fit claim.
+     */
+    token_estimate: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;
@@ -85,6 +90,27 @@ export const RemediationPlanSchema = z
   })
   .strict();
 export type RemediationPlan = z.infer<typeof RemediationPlanSchema>;
+
+/**
+ * Tool-owned binding for one emitted host workload. The host may write result
+ * files, but it must not be able to rewrite the workload and then make the
+ * rewritten prompt/baseline self-consistent. Persisting this digest in the
+ * normal remediation state gives ingestion an independent value to verify.
+ */
+export const RemediationHostHandoffRecordSchema = z
+  .object({
+    contract_version: z.literal(
+      "remediation-host-handoff-record/v1alpha1",
+    ),
+    run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
+    baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
+    workload_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    work_item_ids: z.array(z.string()).min(1),
+  })
+  .strict();
+export type RemediationHostHandoffRecord = z.infer<
+  typeof RemediationHostHandoffRecordSchema
+>;
 
 /**
  * Canonical names of the bounded remediation steps. Defined as named constants
@@ -335,6 +361,8 @@ export interface RemediationItemState {
   item_spec?: ItemSpec;
   last_successful_step?: string;
   failure_reason?: string;
+  /** Prompt-bound evidence supplied for a verified no-change host outcome. */
+  host_result_evidence?: string[];
   /**
    * Item C — close-gate mechanical re-verify verdict for an analyzer-born
    * finding (set by `verifyAnalyzerLeads`; copied into the outcomes contract).
@@ -355,26 +383,10 @@ export interface RemediationItemState {
    */
   failure_context?: string;
   /**
-   * Times this item was sent back for rework due to infrastructure failures
-   * (quota, rate-limit, EPERM, timeout, tool crash, provider error). Split from
-   * `rework_count` so the two failure classes can have independent retry budgets.
-   */
-  infra_rework_count?: number;
-  /**
    * Times a worker returned a block result that did NOT cover this still-pending
    * finding — i.e. silently omitted its `item_results` entry (E2). Bounds the
    * incomplete-coverage re-dispatch so the run converges (blocks the finding once
    * the cap is hit) instead of re-dispatching the same worker indefinitely.
    */
   incomplete_coverage_attempts?: number;
-  /**
-   * Times this item's block was planned but refused admission for a TRANSIENT
-   * reason (budget/cap/uncalibrated — conditions that change between waves), so
-   * the merge left it PENDING for the next grant instead of terminal-blocking it.
-   * Bounds the transient class (anti-cascade retry spec): once the cap is hit
-   * the item blocks with a named reason, so a misclassified reason can never
-   * livelock the run. Structural refusals (`no_capable_pool`) never touch this —
-   * they block (or pause the wave) immediately.
-   */
-  undispatched_attempts?: number;
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Regenerate the ordered ROADMAP section of `docs/HANDOFF.md` from the split
-// backlog (`docs/backlog/*.md`).
+// Regenerate the generated sections of `docs/HANDOFF.md`:
+//   1. live nightly decisions from `.audit-tools/nightly/open-items.json`; and
+//   2. the ordered ROADMAP from the split backlog (`docs/backlog/*.md`).
 //
 // WHY THIS EXISTS. `docs/HANDOFF.md` is the ordered roadmap — its own header,
 // `docs/documentation-philosophy.md` and `docs/doc-review-guidelines.md` all say
@@ -43,6 +44,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  OPEN_ITEMS_RELPATH,
+  partitionBySettled,
+  readDecisions,
+} from "../nightly/items.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 import { splitBacklogEntries } from "./backlog-entry-grammar.mjs";
 
@@ -53,6 +59,15 @@ const handoffPath = join(repoRoot, "docs", "HANDOFF.md");
 export const BEGIN_MARKER =
   "<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->";
 export const END_MARKER = "<!-- END GENERATED ROADMAP -->";
+export const LIVE_STATUS_BEGIN_MARKER =
+  "<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->";
+export const LIVE_STATUS_END_MARKER = "<!-- END GENERATED LIVE STATUS -->";
+const GENERATED_MARKERS = [
+  BEGIN_MARKER,
+  END_MARKER,
+  LIVE_STATUS_BEGIN_MARKER,
+  LIVE_STATUS_END_MARKER,
+];
 
 /** A bold title starting with this is hoisted to the top of the roadmap. */
 export const PIN_MARKER = "▶";
@@ -90,6 +105,113 @@ export const ROADMAP_SOURCES = [
 ];
 
 const collapse = (s) => s.replace(/\s+/g, " ").trim();
+const NIGHTLY_ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const escapeHtmlComments = (s) =>
+  s.replaceAll("<!--", "&lt;!--").replaceAll("-->", "--&gt;");
+
+/**
+ * Read the unanswered persisted queue. Decisions are folded here because an
+ * answer removes an item from the owner's queue immediately; waiting for the
+ * next nightly run to rewrite open-items.json would leave HANDOFF falsely red.
+ *
+ * This uses the same presentation-time premise filtering as the inbox/session
+ * surface, so HANDOFF never points at an item those surfaces have auto-closed.
+ * The pre-commit gate derives the current probe-source paths from this same
+ * persisted queue and runs parity when one changes.
+ */
+export function readOpenNightlyItems(root) {
+  const queuePath = join(root, OPEN_ITEMS_RELPATH);
+  let state;
+  try {
+    state = JSON.parse(readFileSync(queuePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `${OPEN_ITEMS_RELPATH} is missing or invalid JSON; refusing to render an empty HANDOFF queue ` +
+        `from unreadable state (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
+  if (!state || typeof state !== "object" || !Array.isArray(state.items)) {
+    throw new Error(`${OPEN_ITEMS_RELPATH}: expected an object with an items array.`);
+  }
+  const ids = new Set();
+  const subjectKeys = new Set();
+  state.items.forEach((item, index) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.id !== "string" ||
+      item.id.trim() === "" ||
+      item.id !== item.id.trim() ||
+      !NIGHTLY_ITEM_ID.test(item.id) ||
+      typeof item.title !== "string" ||
+      item.title.trim() === "" ||
+      typeof item.subject_key !== "string" ||
+      item.subject_key.trim() === "" ||
+      item.subject_key !== item.subject_key.trim()
+    ) {
+      throw new Error(
+        `${OPEN_ITEMS_RELPATH}: items[${index}] must carry a canonical id ` +
+          `([A-Za-z0-9._-]), plus non-empty string title and subject_key fields.`,
+      );
+    }
+    const id = item.id.trim();
+    const subjectKey = item.subject_key.trim();
+    if (ids.has(id)) {
+      throw new Error(`${OPEN_ITEMS_RELPATH}: duplicate item id "${id}".`);
+    }
+    if (subjectKeys.has(subjectKey)) {
+      throw new Error(
+        `${OPEN_ITEMS_RELPATH}: duplicate subject_key "${subjectKey}" would let one decision ` +
+          `hide multiple items.`,
+      );
+    }
+    ids.add(id);
+    subjectKeys.add(subjectKey);
+  });
+  return partitionBySettled(state.items, readDecisions(root), root).open;
+}
+
+/**
+ * Render generated POINTERS into the full answering surface. Empty means only
+ * generic live-status delimiters: HANDOFF contains no visible nightly text and
+ * no nightly-specific source marker.
+ */
+export function renderNightlyQueue(items) {
+  if (!Array.isArray(items)) {
+    throw new Error("renderNightlyQueue: items must be an array");
+  }
+  if (items.length === 0) {
+    return `${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`;
+  }
+
+  const pointers = items.map((item, index) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.id !== "string" ||
+      item.id.trim() === "" ||
+      item.id !== item.id.trim() ||
+      !NIGHTLY_ITEM_ID.test(item.id) ||
+      typeof item.title !== "string" ||
+      item.title.trim() === ""
+    ) {
+      throw new Error(
+        `${OPEN_ITEMS_RELPATH}: items[${index}] must carry a canonical id ` +
+          `([A-Za-z0-9._-]) and a non-empty string title.`,
+      );
+    }
+    return `  - \`${item.id}\` — ${escapeHtmlComments(collapse(item.title))}`;
+  });
+  const count = items.length;
+  const waiting = count === 1 ? "decision is" : "decisions are";
+  return (
+    `${LIVE_STATUS_BEGIN_MARKER}\n\n` +
+    `- **${count} nightly ${waiting} waiting.** Answer in ` +
+    `[\`nightly-inbox.md\`](nightly-inbox.md); settled items disappear from this generated block.\n` +
+    `${pointers.join("\n")}\n\n` +
+    `${LIVE_STATUS_END_MARKER}`
+  );
+}
 
 /**
  * Pull the bold lead-in title out of an entry body. Entries in this backlog are
@@ -252,17 +374,93 @@ export function renderRoadmap(groups) {
   );
 }
 
-/** Replace the delimited block in HANDOFF, leaving every hand-written line byte-identical. */
-export function spliceRoadmap(handoffText, block) {
-  const begin = handoffText.indexOf(BEGIN_MARKER);
-  const end = handoffText.indexOf(END_MARKER);
-  if (begin === -1 || end === -1 || end < begin) {
+/** Replace one delimited block in HANDOFF, leaving all other bytes untouched. */
+function spliceGeneratedBlock(handoffText, block, beginMarker, endMarker, label) {
+  const blockBegin = block.indexOf(beginMarker);
+  const blockEnd = block.indexOf(endMarker);
+  if (
+    blockBegin !== 0 ||
+    blockEnd === -1 ||
+    blockEnd + endMarker.length !== block.length ||
+    block.indexOf(beginMarker, beginMarker.length) !== -1 ||
+    block.indexOf(endMarker, blockEnd + endMarker.length) !== -1
+  ) {
     throw new Error(
-      `docs/HANDOFF.md is missing the generated-roadmap markers (or they are out of order).\n` +
-        `Restore this pair around the ordered list:\n  ${BEGIN_MARKER}\n  ${END_MARKER}`,
+      `replacement generated-${label} block must contain exactly one outer marker pair; ` +
+        `refusing marker-shaped generated content.`,
     );
   }
-  return handoffText.slice(0, begin) + block + handoffText.slice(end + END_MARKER.length);
+  for (const marker of GENERATED_MARKERS) {
+    if (marker !== beginMarker && marker !== endMarker && block.includes(marker)) {
+      throw new Error(
+        `replacement generated-${label} block contains a marker owned by another generated slot; ` +
+          `refusing marker-shaped generated content.`,
+      );
+    }
+  }
+  const begin = handoffText.indexOf(beginMarker);
+  const end = handoffText.indexOf(endMarker);
+  if (begin === -1 || end === -1 || end < begin) {
+    throw new Error(
+      `docs/HANDOFF.md is missing the generated-${label} markers (or they are out of order).\n` +
+        `Restore this pair around the generated block:\n  ${beginMarker}\n  ${endMarker}`,
+    );
+  }
+  const anotherBegin = handoffText.indexOf(beginMarker, begin + beginMarker.length);
+  const anotherEnd = handoffText.indexOf(endMarker, end + endMarker.length);
+  if (anotherBegin !== -1 || anotherEnd !== -1) {
+    throw new Error(
+      `docs/HANDOFF.md contains multiple generated-${label} markers; refusing to choose one block.`,
+    );
+  }
+  return handoffText.slice(0, begin) + block + handoffText.slice(end + endMarker.length);
+}
+
+/** Replace the live-status slot without touching the hand-written Live state. */
+export function spliceLiveStatus(handoffText, block) {
+  return spliceGeneratedBlock(
+    handoffText,
+    block,
+    LIVE_STATUS_BEGIN_MARKER,
+    LIVE_STATUS_END_MARKER,
+    "live-status",
+  );
+}
+
+/** Replace the roadmap slot without touching the hand-written HANDOFF text. */
+export function spliceRoadmap(handoffText, block) {
+  return spliceGeneratedBlock(handoffText, block, BEGIN_MARKER, END_MARKER, "roadmap");
+}
+
+/** Assert that the two generated slots occur once each and never nest/overlap. */
+export function assertGeneratedTopology(handoffText) {
+  const pairs = [
+    [LIVE_STATUS_BEGIN_MARKER, LIVE_STATUS_END_MARKER, "live-status"],
+    [BEGIN_MARKER, END_MARKER, "roadmap"],
+  ];
+  const ranges = pairs.map(([beginMarker, endMarker, label]) => {
+    const begin = handoffText.indexOf(beginMarker);
+    const end = handoffText.indexOf(endMarker);
+    if (
+      begin === -1 ||
+      end < begin ||
+      handoffText.indexOf(beginMarker, begin + beginMarker.length) !== -1 ||
+      handoffText.indexOf(endMarker, end + endMarker.length) !== -1
+    ) {
+      throw new Error(
+        `docs/HANDOFF.md must contain exactly one ordered generated-${label} marker pair.`,
+      );
+    }
+    return { begin, end: end + endMarker.length, label };
+  });
+  const [first, second] = ranges.sort((a, b) => a.begin - b.begin);
+  if (first.end > second.begin) {
+    throw new Error(
+      `docs/HANDOFF.md generated slots overlap (${first.label} contains ${second.label}); ` +
+        `restore two disjoint blocks.`,
+    );
+  }
+  return handoffText;
 }
 
 function readSources() {
@@ -271,22 +469,32 @@ function readSources() {
 }
 
 function main() {
-  const block = renderRoadmap(collectRoadmap(readSources()));
+  const nightlyItems = readOpenNightlyItems(repoRoot);
+  const liveStatusBlock = renderNightlyQueue(nightlyItems);
+  const roadmapBlock = renderRoadmap(collectRoadmap(readSources()));
   const current = readFileSync(handoffPath, "utf8");
-  const rendered = spliceRoadmap(current, block);
+  const rendered = assertGeneratedTopology(
+    spliceRoadmap(
+      spliceLiveStatus(current, liveStatusBlock),
+      roadmapBlock,
+    ),
+  );
 
   if (process.argv.includes("--check")) {
     if (current !== rendered) {
       process.stderr.write(
-        `\ndocs/HANDOFF.md's generated roadmap is STALE — it no longer matches docs/backlog/.\n` +
-          `The roadmap is the sequencing view of the backlog; a stale copy is a second, drifting\n` +
-          `home for the same items, which is exactly what generating it removes.\n` +
+        `\ndocs/HANDOFF.md's generated state is STALE — it no longer matches the nightly queue,\n` +
+          `decision ledger, and/or docs/backlog/. A stale generated block is a second, drifting\n` +
+          `home for state that already has an authoritative source.\n` +
           `Fix: node scripts/shared/generate-handoff-roadmap.mjs\n\n`,
       );
       process.exit(1);
     }
-    const count = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
-    process.stdout.write(`✓ handoff-roadmap: docs/HANDOFF.md matches the backlog (${count} pointer(s))\n`);
+    const roadmapCount = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
+    process.stdout.write(
+      `✓ handoff-roadmap: generated HANDOFF state matches its sources ` +
+        `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s))\n`,
+    );
     process.exit(0);
   }
 

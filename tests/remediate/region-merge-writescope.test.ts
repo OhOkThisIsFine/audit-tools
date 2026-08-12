@@ -1,11 +1,7 @@
-// A4 — region merge + write-scope: hunk-aware overlap detection.
+// A4 — git hunk extraction and parsing.
 //
 // gitHunksForBranch parses `git diff HEAD...<branch>` into per-hunk new-side
-// line ranges (fail-closed like gitEditedFilesForBranch). detectOverlappingEdits
-// spares same-file blocks whose ACTUAL hunk ranges are disjoint, still flags
-// blocks whose hunks overlap, and fails closed (flags) when hunk info is
-// unavailable. The cherry-pick in mergeWorktree stays the sole merge authority —
-// no hand-rolled hunk apply is introduced (asserted structurally below).
+// line ranges (fail-closed like gitEditedFilesForBranch).
 
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -13,12 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import {
-  detectOverlappingEdits,
   gitHunksForBranch,
   parseUnifiedDiffHunks,
-  type BlockEditedFiles,
-  type GitBranchHunk,
-  type GitBranchHunks,
 } from "../../src/remediate/steps/dispatch.js";
 
 // --- temp git repo helpers -------------------------------------------------
@@ -56,11 +48,6 @@ function commit(root: string, message: string): void {
 // A file with `count` numbered lines.
 function numberedLines(count: number): string {
   return Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
-}
-
-// Convenience: available-hunks value from a plain list.
-function hunks(list: GitBranchHunk[]): GitBranchHunks {
-  return { available: true, hunks: list };
 }
 
 // --- gitHunksForBranch: real repo parse ------------------------------------
@@ -149,80 +136,5 @@ describe("parseUnifiedDiffHunks", () => {
     expect(result.available).toBe(false);
     if (result.available) return;
     expect(result.reason).toBe("probe_failed");
-  });
-});
-
-// --- detectOverlappingEdits: hunk-aware ------------------------------------
-
-describe("detectOverlappingEdits (hunk-aware)", () => {
-  it("does NOT flag same-file blocks with DISJOINT hunk ranges", () => {
-    const edited: BlockEditedFiles[] = [
-      {
-        block_id: "B1",
-        files: new Set(["src/shared.ts"]),
-        hunks: hunks([{ file: "src/shared.ts", startLine: 1, lineCount: 5 }]),
-      },
-      {
-        block_id: "B2",
-        files: new Set(["src/shared.ts"]),
-        hunks: hunks([{ file: "src/shared.ts", startLine: 40, lineCount: 5 }]),
-      },
-    ];
-    expect(detectOverlappingEdits(edited)).toHaveLength(0);
-  });
-
-  it("DOES flag same-file blocks with OVERLAPPING hunk ranges", () => {
-    const edited: BlockEditedFiles[] = [
-      {
-        block_id: "B1",
-        files: new Set(["src/shared.ts"]),
-        hunks: hunks([{ file: "src/shared.ts", startLine: 10, lineCount: 5 }]),
-      },
-      {
-        block_id: "B2",
-        files: new Set(["src/shared.ts"]),
-        hunks: hunks([{ file: "src/shared.ts", startLine: 12, lineCount: 5 }]),
-      },
-    ];
-    const overlaps = detectOverlappingEdits(edited);
-    expect(overlaps).toHaveLength(1);
-    expect(overlaps[0].path).toBe("src/shared.ts");
-    expect(overlaps[0].block_ids).toEqual(["B1", "B2"]);
-  });
-
-  it("fails closed (flags) when hunk info is UNAVAILABLE for a same-file pairing", () => {
-    const edited: BlockEditedFiles[] = [
-      {
-        block_id: "B1",
-        files: new Set(["src/shared.ts"]),
-        hunks: { available: false, reason: "probe_failed", error: "boom" },
-      },
-      {
-        block_id: "B2",
-        files: new Set(["src/shared.ts"]),
-        hunks: hunks([{ file: "src/shared.ts", startLine: 40, lineCount: 5 }]),
-      },
-    ];
-    const overlaps = detectOverlappingEdits(edited);
-    expect(overlaps).toHaveLength(1);
-    expect(overlaps[0].block_ids).toEqual(["B1", "B2"]);
-  });
-
-  it("fails closed (flags) when hunks are entirely absent (legacy call shape)", () => {
-    const edited: BlockEditedFiles[] = [
-      { block_id: "B1", files: new Set(["src/shared.ts"]) },
-      { block_id: "B2", files: new Set(["src/shared.ts"]) },
-    ];
-    const overlaps = detectOverlappingEdits(edited);
-    expect(overlaps).toHaveLength(1);
-    expect(overlaps[0].block_ids).toEqual(["B1", "B2"]);
-  });
-
-  it("still reports no overlap for disjoint FILES regardless of hunks", () => {
-    const edited: BlockEditedFiles[] = [
-      { block_id: "B1", files: new Set(["src/a.ts"]) },
-      { block_id: "B2", files: new Set(["src/b.ts"]) },
-    ];
-    expect(detectOverlappingEdits(edited)).toHaveLength(0);
   });
 });

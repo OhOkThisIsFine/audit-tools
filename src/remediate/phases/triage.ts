@@ -1,12 +1,13 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
-import { verifyNodeInWorktree, implementResultPath } from "../steps/dispatch.js";
+import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
 
 interface TriageResolution {
   /**
@@ -50,20 +51,9 @@ function markTerminal(item: { started_at?: string; completed_at?: string }): voi
   item.completed_at = now;
 }
 
-// Caps on silent auto-retries (when the user approved at preview). Split by
-// failure class so transient infra failures get more headroom than deterministic
-// contract/test failures. After the cap, fall through to a real triage prompt.
-const MAX_AUTO_RETRIES_CONTRACT = 2;
-const MAX_AUTO_RETRIES_INFRA = 5;
-
-/** Keywords that identify infra failures (quota, rate-limit, EPERM, provider crash). */
-const INFRA_FAILURE_RE =
-  /\b(quota|rate.?limit|EPERM|timeout|tool.?crash|provider.?error)\b/i;
-
-function classifyFailure(failureReason: string | undefined): "infra" | "contract" {
-  if (failureReason && INFRA_FAILURE_RE.test(failureReason)) return "infra";
-  return "contract";
-}
+// Cap silent retries after the review gate. The host owns execution and transport,
+// so audit-tools applies one content-agnostic retry budget to every blocked item.
+const MAX_AUTO_RETRIES = 2;
 
 function buildFailureContext(
   failureReason: string | undefined,
@@ -81,12 +71,10 @@ function retryBlockedItem(
     started_at?: string;
     completed_at?: string;
     rework_count?: number;
-    infra_rework_count?: number;
     failure_context?: string;
     failure_reason?: string;
     last_successful_step?: string;
   },
-  failureClass: "infra" | "contract",
 ): void {
   // Capture failure context before resetting state so the re-dispatched
   // prompt carries what failed and avoids an identical retry.
@@ -94,11 +82,7 @@ function retryBlockedItem(
   // "pending" maps to the implement dispatch in the orchestrator.
   item.status = "pending";
   markRetry(item);
-  if (failureClass === "infra") {
-    item.infra_rework_count = (item.infra_rework_count ?? 0) + 1;
-  } else {
-    item.rework_count = (item.rework_count ?? 0) + 1;
-  }
+  item.rework_count = (item.rework_count ?? 0) + 1;
 }
 
 /**
@@ -130,23 +114,6 @@ function reverifyBlockedItemAgainstTree(
       ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
       : undefined) ??
     state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
-  // No-worker guard (2026-07-06): a passing tree verify only proves this node's
-  // work was DONE if an implement worker actually RAN and left a result. When the
-  // provider produced nothing (e.g. `worker-command` no-op) the merge marks the
-  // node blocked with no result file; a GENERIC `build && check` targeted_command
-  // then passes on ANY green tree and would FALSE-resolve an un-implemented node.
-  // This is distinct from the deliverable-existence guard below — an edit-node's
-  // touched paths PRE-EXIST, so that guard can't catch a never-implemented edit;
-  // only the missing worker result can. No result on disk ⇒ "no worker ran" ⇒
-  // unsatisfied (route to retry / re-dispatch), never `resolved_no_change`.
-  const runId = state.plan?.plan_id;
-  if (
-    runId &&
-    block?.block_id &&
-    !existsSync(implementResultPath(options.artifactsDir, runId, block.block_id))
-  ) {
-    return "unsatisfied";
-  }
   // Deliverable-existence guard (2026-07-03): a node cannot be "already satisfied" if
   // its declared deliverables aren't in the tree. A passing `targeted_command` may be
   // satisfied by a SIBLING's work while THIS node's file was never created — proven
@@ -159,9 +126,16 @@ function reverifyBlockedItemAgainstTree(
   }
   const commands = block?.targeted_commands;
   if (!commands || commands.length === 0) return "indeterminate";
-  return verifyNodeInWorktree(options.root, commands).passed
-    ? "satisfied"
-    : "unsatisfied";
+  for (const command of commands) {
+    const result = spawnSync(command, {
+      cwd: options.root,
+      encoding: "utf8",
+      shell: true,
+      windowsHide: true,
+    });
+    if (result.error || result.status !== 0) return "unsatisfied";
+  }
+  return "satisfied";
 }
 
 async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Promise<void> {
@@ -187,10 +161,15 @@ async function archiveImplementResultsForRetries(
   }
 
   for (const blockId of blockIds) {
-    // Resolved through the same owner the writer uses — this rebuilt both the
-    // filename AND the run-dir layout, so a drift here silently left a stale
-    // result in place to be read as current.
-    await archiveIfPresent(implementResultPath(options.artifactsDir, runId, blockId), "stale");
+    await archiveIfPresent(
+      remediationHostResultFilePath({
+        root: options.root,
+        artifactsDir: options.artifactsDir,
+        runId,
+        workItemId: blockId,
+      }),
+      "stale",
+    );
   }
 }
 
@@ -274,8 +253,7 @@ export async function runTriagePhase(
             res.action === "retry" ||
             (res.action === undefined && rationaleAsksForRetry(res.rationale));
           if (shouldRetry) {
-            const failureClass = classifyFailure(item.failure_reason);
-            retryBlockedItem(item, failureClass);
+            retryBlockedItem(item);
             retryFindingIds.add(res.finding_id);
             requiresRetry = true;
             triageOutcome.push({ finding_id: res.finding_id, action: "retried" });
@@ -325,9 +303,8 @@ export async function runTriagePhase(
       }
     } else {
       // No triage resolution yet: auto-retry each blocked item within its
-      // per-failure-class retry budget before escalating to human triage. The run
-      // was approved at the review gate, so transient/contract failures retry
-      // autonomously; only budget-exhausted items fall through to a human prompt.
+      // retry budget before escalating to human triage. The run was approved at
+      // the review gate; only budget-exhausted items fall through to a human prompt.
       let autoRetried = false;
       for (const item of blockedItems) {
         // Re-verify against the CURRENT tree BEFORE retrying (takes precedence
@@ -348,28 +325,22 @@ export async function runTriagePhase(
           continue;
         }
         // Stop auto-retrying an item that has already been retried the cap
-        // number of times for its failure class — leaves it `blocked` so the
+        // number of times — leaves it `blocked` so the
         // fall-through below routes the run to a human triage prompt.
-        const failureClass = classifyFailure(item.failure_reason);
-        const cap =
-          failureClass === "infra" ? MAX_AUTO_RETRIES_INFRA : MAX_AUTO_RETRIES_CONTRACT;
-        const usedCount =
-          failureClass === "infra"
-            ? (item.infra_rework_count ?? 0)
-            : (item.rework_count ?? 0);
-        if (usedCount >= cap) {
+        const usedCount = item.rework_count ?? 0;
+        if (usedCount >= MAX_AUTO_RETRIES) {
           // OBS-df30208a: surface cap exhaustion. Without this the operator
           // cannot distinguish an item that auto-retried from one that fell
           // through to human triage because its retry budget is spent.
           console.error(
-            `[triage] ${item.finding_id}: ${failureClass} retry budget exhausted (${usedCount}/${cap}) — routing to human triage.`,
+            `[triage] ${item.finding_id}: retry budget exhausted (${usedCount}/${MAX_AUTO_RETRIES}) — routing to human triage.`,
           );
           continue;
         }
         console.log(
-          `[triage] ${item.finding_id}: auto-retrying (${failureClass} failure, attempt ${usedCount + 1}/${cap}).`,
+          `[triage] ${item.finding_id}: auto-retrying (attempt ${usedCount + 1}/${MAX_AUTO_RETRIES}).`,
         );
-        retryBlockedItem(item, failureClass);
+        retryBlockedItem(item);
         autoRetried = true;
       }
       if (autoRetried) {

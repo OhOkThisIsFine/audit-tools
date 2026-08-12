@@ -5,15 +5,6 @@ import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { splitFrontmatter, writeGeneratedFile, objectValue } from "./utils/hostAssets.js";
 import { decideNextStep } from "./steps/nextStep.js";
-import {
-  mergeImplementResults,
-  prepareImplementDispatch,
-} from "./steps/dispatch.js";
-import {
-  advanceHostRolling,
-  reverifyQuarantinedNode,
-  StrayWorktreeRejection,
-} from "./steps/rollingSession.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
@@ -32,11 +23,6 @@ import type { ValidationIssue } from "audit-tools/shared";
 import {
   applyGuidanceFile,
   assertCliCommandAllowedFromCwd,
-  setQuotaStateDir,
-  resolveStateDir,
-  parseHostModelRoster,
-  assertHostProviderName,
-  type ProviderName,
   remediationArtifactsDir,
   resolveRepoRoot,
   mergeOpenCodeAgentPermissionRule,
@@ -71,16 +57,6 @@ try {
 } catch {
   // No opencode config available — proceed with empty permissions.
 }
-/**
- * Commander parser for `--host-provider`: constrain the value to a known
- * ProviderName so a typo fails LOUDLY at parse time (the identity is a
- * quota-attribution key — a silently-wrong value would mis-charge fan-out).
- */
-function parseHostProviderOption(value: string): ProviderName {
-  assertHostProviderName(value);
-  return value;
-}
-
 const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};
 const OPENCODE_REMEDIATE_EDIT_PERMISSION: Record<string, string> =
   _remediatorPermission.edit ?? {};
@@ -147,43 +123,6 @@ program
     "--guidance-file <path>",
     "Single-step bootstrap: write this file's contents to intake/conversation-start.md (sole, idempotent writer) before deciding the step",
   )
-  // True boolean (no <value>): a bare flag resolves true and never swallows the
-  // next token. The paired --no- form (and the =false form, normalized below)
-  // resolves false; absence stays undefined so the tristate reaches
-  // resolveHostDispatchCapability intact.
-  .option(
-    "--host-can-dispatch-subagents",
-    "Whether the current host can dispatch callable subagents",
-  )
-  .option(
-    "--no-host-can-dispatch-subagents",
-    "Declare that the current host cannot dispatch callable subagents",
-  )
-  .option(
-    "--host-max-concurrent <n>",
-    "Maximum number of subagents the host can run concurrently",
-  )
-  .option(
-    "--host-context-tokens <n>",
-    "Context window of the model the host's dispatch subagents run on",
-  )
-  .option(
-    "--host-output-tokens <n>",
-    "Output-token cap of the model the host's dispatch subagents run on",
-  )
-  .option(
-    "--host-models <json>",
-    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens, model_id?}]",
-  )
-  .option(
-    "--host-model-id <id>",
-    "Opaque model identity used only to key quota learning (provider/<id>)",
-  )
-  .option(
-    "--host-provider <name>",
-    "Override the auto-detected conversation-host provider that dispatch fan-out is charged to (default: detected from the run's own session env)",
-    parseHostProviderOption,
-  )
   .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
@@ -216,21 +155,6 @@ program
             artifactsDir,
             input: options.input,
             guidanceFileSupplied: Boolean(options.guidanceFile),
-            hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-            hostMaxConcurrent: options.hostMaxConcurrent
-              ? parseInt(options.hostMaxConcurrent, 10) || undefined
-              : undefined,
-            hostContextTokens: options.hostContextTokens
-              ? parseInt(options.hostContextTokens, 10) || undefined
-              : undefined,
-            hostOutputTokens: options.hostOutputTokens
-              ? parseInt(options.hostOutputTokens, 10) || undefined
-              : undefined,
-            hostModels: options.hostModels
-              ? parseHostModelRoster(options.hostModels)
-              : undefined,
-            hostModelId: options.hostModelId || undefined,
-            hostProvider: options.hostProvider as ProviderName | undefined,
             finalizeClosing: options.finalizeClosing === true,
             forceReplan: options.forceReplan === true,
           }),
@@ -240,123 +164,6 @@ program
         writeBlockedStep({ root: resolve(options.root), artifactsDir, reason }),
     );
     console.log(JSON.stringify(step, null, 2));
-  });
-
-program
-  .command("prepare-implement-dispatch")
-  .description("Prepare bounded implementation prompts for documented work")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    const plan = await withBackendLogsOnStderr(() =>
-      prepareImplementDispatch(
-        {
-          root: resolve(options.root),
-          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-        },
-        options.runId,
-      ),
-    );
-    console.log(JSON.stringify(plan, null, 2));
-  });
-
-program
-  .command("merge-implement-results")
-  .description("Validate and merge implementation worker results")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    const state = await mergeImplementResults(
-      {
-        root: resolve(options.root),
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-      },
-      options.runId,
-    );
-    console.log(JSON.stringify({ status: "ok", state_status: state.status }, null, 2));
-  });
-
-program
-  .command("accept-node")
-  .description(
-    "Host-subagent rolling callback: accept a finished node (commit/verify/merge) and get the next node to dispatch",
-  )
-  .requiredOption("--id <blockId>", "Block id of the node that just finished")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    let directive;
-    try {
-      directive = await withBackendLogsOnStderr(() =>
-        advanceHostRolling({
-          root: resolve(options.root),
-          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-          runId: options.runId,
-          blockId: options.id,
-        }),
-      );
-    } catch (err) {
-      // A stray-worktree rejection is terminal for the node but NOT for the wave:
-      // the session is already persisted with that node counted, so the remaining
-      // nodes still have a completion state to read. Print the diagnostic loudly on
-      // stderr and exit non-zero (the rejection stays a hard failure), but still
-      // emit the directive on stdout — otherwise a one-node grant rejects with no
-      // directive at all and the host stalls with nothing to act on.
-      if (err instanceof StrayWorktreeRejection) {
-        console.error(err.message);
-        const { kind, ...rest } = err.directive;
-        console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
-        process.exitCode = 1;
-        return;
-      }
-      throw err;
-    }
-    const { kind, ...rest } = directive;
-    console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
-  });
-
-program
-  .command("reverify-node")
-  .description(
-    "Re-drive a quarantined implement node: replay its preserved commit through the tool's verify/scope/merge gate and land it on green (recovery after a fixed verify cause)",
-  )
-  .requiredOption("--id <blockId>", "Block id of the quarantined node")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    const result = await withBackendLogsOnStderr(() =>
-      reverifyQuarantinedNode(
-        {
-          root: resolve(options.root),
-          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-        },
-        options.runId,
-        options.id,
-      ),
-    );
-    console.log(JSON.stringify(result, null, 2));
-    // Non-zero exit when nothing landed, so a scripted retry can branch on it.
-    process.exit(result.status === "reverified" ? 0 : 1);
   });
 
 // The four installer verbs are intercepted by the remediate-code bin BEFORE the
@@ -586,21 +393,12 @@ program
 // instead of re-deriving option semantics.
 export { program };
 
-/**
- * Parse argv through the program after normalizing the `=value` form of the
- * tristate `--host-can-dispatch-subagents` boolean into commander's bare /
- * negatable forms. Commander treats `--flag=value` on a value-less boolean as an
- * unknown option, so `--host-can-dispatch-subagents=true|false` is rewritten to
- * the bare flag / `--no-` flag here. This keeps the flag a true boolean (a bare
- * flag never swallows the next token) while still accepting the `=false` spelling.
- */
 export function parseProgram(argv: string[]): void {
-  program.parse(normalizeBooleanFlagArgv(argv, "--host-can-dispatch-subagents"));
+  program.parse(argv);
 }
 
 // Only parse argv when run directly; skip when imported as a module (e.g. in tests).
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  setQuotaStateDir(resolveStateDir(".remediate-code"));
   parseProgram(process.argv);
 }
 

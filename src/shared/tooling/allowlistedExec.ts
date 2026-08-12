@@ -21,7 +21,7 @@
  *
  * SAFETY of the runner: commands run only via `runAllowlistedReadOnlyCommand`,
  * which spawns argv-only (never a shell), under a timeout, with the
- * host-signalling env stripped (`stripClaudeCodeEnv`), platform-resolved via the
+ * wrapper-only control env stripped (`stripAuditToolsControlEnv`), platform-resolved via the
  * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The runner ENFORCES
  * `isAllowedAnchorCommand` on itself, unconditionally, before ever spawning
  * (invariants[2]) — a caller-side pre-check (e.g. `anchorGrounding.ts`) is now
@@ -29,7 +29,7 @@
  * every call site remembering to gate first.
  */
 import { spawn } from "node:child_process";
-import { resolveExecArgv, stripClaudeCodeEnv } from "./exec.js";
+import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
 
 /** Default per-anchor wall-clock budget; a slower command is killed and inconclusive. */
 export const ALLOWLISTED_EXEC_TIMEOUT_MS = 60_000;
@@ -333,7 +333,7 @@ export type AllowlistedExecRunner = (
 /**
  * Spawn an allowlisted read-only command argv-only (never a shell), capturing
  * combined stdout+stderr (bounded). Strips the host-signalling env
- * (`stripClaudeCodeEnv`), resolves the platform-correct argv via the shared
+ * (`stripAuditToolsControlEnv`), resolves the platform-correct argv via the shared
  * `resolveExecArgv`, and kills a command that exceeds `timeoutMs`
  * (SIGTERM→SIGKILL). The single runner both orchestrators use for the grounding
  * anchor pass.
@@ -370,7 +370,7 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
     const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
     const child = spawn(resolvedCommand, resolvedArgs, {
       cwd,
-      env: stripClaudeCodeEnv(),
+      env: stripAuditToolsControlEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

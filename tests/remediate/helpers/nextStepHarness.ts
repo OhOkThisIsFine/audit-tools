@@ -113,44 +113,6 @@ export function makePlanningState(
   };
 }
 
-/** The planning state advanced to `implementing` with item_specs attached. */
-export function makeImplementingState(
-  overrides: Partial<RemediationState> = {},
-): RemediationState {
-  return makePlanningState({
-    status: "implementing",
-    items: {
-      "F-001": {
-        finding_id: "F-001",
-        status: "pending",
-        block_id: "B-001",
-        item_spec: {
-          finding_id: "F-001",
-          concrete_change: "fix a",
-          no_change: false,
-          touched_files: ["src/a.ts"],
-          tests_to_write: [],
-          not_applicable_steps: [],
-        },
-      },
-      "F-002": {
-        finding_id: "F-002",
-        status: "pending",
-        block_id: "B-002",
-        item_spec: {
-          finding_id: "F-002",
-          concrete_change: "fix b",
-          no_change: false,
-          touched_files: ["src/b.ts"],
-          tests_to_write: [],
-          not_applicable_steps: [],
-        },
-      },
-    },
-    ...overrides,
-  });
-}
-
 /** Directory-bound helpers + path constants for one next-step test file. */
 export interface NextStepHarness {
   TEST_DIR: string;
@@ -193,6 +155,12 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
   async function resetTestRepo(): Promise<void> {
     await rm(TEST_DIR, { recursive: true, force: true });
     await mkdir(ARTIFACTS_DIR, { recursive: true });
+    const git = (...args: string[]) =>
+      spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("commit", "--allow-empty", "--no-gpg-sign", "-q", "-m", "fixture baseline");
   }
 
   async function cleanupTestRepo(): Promise<void> {

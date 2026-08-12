@@ -42,38 +42,16 @@ export type {
 } from "./types/runLedger.js";
 export { RUN_LEDGER_STATUSES } from "./types/runLedger.js";
 export type {
-  RowKind,
-  OpaqueModelId,
-  AttributionTriple,
-  Draw,
-  VerdictStage,
-  VerdictDetail,
-  AttributionProvenance,
-  DispatchAttemptOutcome,
-  DispatchAttemptRow,
-  FindingVerdictRow,
-  DetailClassification,
-  ReachPopulation,
-  VerdictStagePopulation,
-  VerdictPopulation,
-  ReachAggregate,
-  VerdictAggregate,
-  DispatchEffectivenessAggregates,
-} from "./types/attributionContract.js";
+  ExecutionRecordOutcome,
+  ExecutorReportedStatement,
+  ExecutionRecordV1Alpha1,
+} from "./types/executionRecord.js";
 export {
-  DRAWS,
-  VERDICT_STAGES,
-  VERDICT_DETAILS,
-  STAGE_OWNERSHIP,
-  AttributionProvenanceSchema,
-  AttributionTripleSchema,
-  DispatchAttemptRowSchema,
-  FindingVerdictRowSchema,
-  asOpaqueModelId,
-  isLegalDetail,
-  classifyDetail,
-  deriveAggregates,
-} from "./types/attributionContract.js";
+  EXECUTION_RECORD_CONTRACT_VERSION,
+  ExecutionRecordOutcomeSchema,
+  ExecutorReportedStatementSchema,
+  ExecutionRecordV1Alpha1Schema,
+} from "./types/executionRecord.js";
 export type {
   GraphEdge,
   RouteEdge,
@@ -277,67 +255,38 @@ export {
   detectRepoConventions,
   formatRepoConventions,
 } from "./tooling/repoConventions.js";
-export type {
-  StepStatus,
-  DispatchModelTier,
-  DispatchModelHint,
-} from "./types/stepContract.js";
+export type { StepStatus } from "./types/stepContract.js";
+export { StepStatusSchema } from "./types/stepContract.js";
 export {
-  StepStatusSchema,
-  DispatchModelTierSchema,
-} from "./types/stepContract.js";
+  SESSION_INTENT_RELATIVE_PATH,
+  SessionIntentV1Schema,
+  loadSessionIntent,
+} from "./sessionConfig.js";
 export type {
-  ProviderName,
-  ResolvedProviderName,
-  HostProviderName,
-  SessionUiMode,
-  SubprocessTemplateConfig,
-  ClaudeCodeConfig,
-  ClaudeWorkerConfig,
-  CodexConfig,
-  OpenCodeConfig,
-  OpenAiCompatibleConfig,
-  DispatchableSource,
-  DispatchableTransport,
-  VSCodeTaskConfig,
-  AntigravityConfig,
-  AgyConfig,
-  BlockQuotaConfig,
-  QuotaModelLimits,
-  QuotaConfig,
-  ObservabilityConfig,
-  SynthesisConfig,
-  GraphConfig,
-  DispatchRoutingTiers,
-  DispatchConfig,
-  DesignReviewConfig,
+  SessionIntentV1,
+  SessionIntentLoadResult,
+} from "./sessionConfig.js";
+export {
+  ANALYZER_POLICY_RELATIVE_PATH,
+  AnalyzerConsentDecisionSchema,
+  AnalyzerPolicySchema,
+  getAnalyzerPolicyPath,
+  loadAnalyzerPolicy,
+  persistAnalyzerSettings,
+  persistAnalyzerConsent,
+} from "./analyzerPolicy.js";
+export type {
+  AnalyzerConsentDecision,
+  AnalyzerPolicy,
   AnalyzerSetting,
-  SessionConfig,
-  RepoSessionIntent,
-  RepoDispatchConfig,
-  DispatchInventoryField,
-} from "./types/sessionConfig.js";
+} from "./analyzerPolicy.js";
 export {
-  PROVIDER_NAMES,
-  SESSION_UI_MODES,
-  PROVIDER_SECTION_KEYS,
-  DISPATCHABLE_TRANSPORTS,
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
-  resolveHostDispatchCapability,
-  resolveAutonomousMode,
-  resolveRollingEngineFlag,
-  assertHostProviderName,
-  DISPATCH_INVENTORY_FIELDS,
-} from "./types/sessionConfig.js";
-export { resolveSessionConfig } from "./config/resolveSessionConfig.js";
-export type { ResolveSessionConfigOptions } from "./config/resolveSessionConfig.js";
+} from "./analyzerPolicy.js";
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
-
-export type { AuditorSelf, AuditorDescriptor } from "./types/auditorDescriptor.js";
-export { ambientAuditorDescriptor } from "./types/auditorDescriptor.js";
 
 // OpenCode permission deployment helpers (global scope vs. agent scope)
 export {
@@ -391,13 +340,11 @@ export {
 
 // Tokens
 export {
-  BLOCK_SAFETY_MARGIN,
   BYTES_PER_TOKEN,
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   estimateTokensFromBytes,
-  resolveContextBudget,
 } from "./tokens.js";
 
 // Generic reducers: single-sourced "count items by key" (4 prior
@@ -413,15 +360,31 @@ export { countBy } from "./countBy.js";
 // would be an unconsumed export under the knip dead-code gate.
 export { chunkByBudget } from "./chunkByBudget.js";
 
-// Shared overlap-tolerant work decomposition (audit draw + remediation draw).
+// One provider-neutral content-coherence membership core. Audit packets and
+// findings work blocks are projections over this exact trace.
 export type {
-  WorkPartitionItem,
-  WorkPartitionPolicy,
-  WorkPartitionGroup,
-  WorkPartitionSeam,
-  WorkPartitionResult,
-} from "./decompose/workPartition.js";
-export { partitionWorkItems } from "./decompose/workPartition.js";
+  ContentCoherenceEvidence,
+  ContentCoherenceItem,
+  ContentCoherenceRelationshipKind,
+  ContentCoherenceRelationship,
+  ContentCoherenceInput,
+  NormalizedContentCoherenceItem,
+  ContentCoherencePairScore,
+  ContentCoherenceCandidate,
+  ContentCoherenceMergeTraceEntry,
+  ContentCoherenceTrace,
+} from "./decompose/contentCoherence.js";
+export {
+  CONTENT_COHERENCE_SCORES,
+  CONTENT_COHERENCE_THRESHOLD,
+  ContentCoherenceEvidenceSchema,
+  NormalizedContentCoherenceItemSchema,
+  ContentCoherencePairScoreSchema,
+  ContentCoherenceCandidateSchema,
+  ContentCoherenceMergeTraceEntrySchema,
+  ContentCoherenceTraceSchema,
+  buildContentCoherenceTrace,
+} from "./decompose/contentCoherence.js";
 
 // Concurrency: bounded, order-preserving parallel map
 export { mapWithConcurrency } from "./concurrency.js";
@@ -480,7 +443,6 @@ export type {
   ResultContentDiscriminatorInput,
   IdempotencyKeyInput,
   ContentKeyInput,
-  AttemptKeyInput,
 } from "./contentKey.js";
 export {
   buildTaskContentSignature,
@@ -491,7 +453,6 @@ export {
   identityKey,
   idempotencyKey,
   contentKey,
-  buildAttemptKey,
   newInstanceId,
 } from "./contentKey.js";
 
@@ -523,7 +484,7 @@ export {
   coerceJsonObjectArg,
   platformCommand,
   quoteForShellInterpreterCmd,
-  stripClaudeCodeEnv,
+  stripAuditToolsControlEnv,
 } from "./tooling/exec.js";
 
 // Tooling: allowlisted read-only command runner + default-deny arg allowlist
@@ -648,6 +609,16 @@ export {
   SKIP_WRITE,
   LOCKED_JSON_STORE_TIMEOUT_MS,
 } from "./io/lockedJsonStore.js";
+export type { Clock, LockOptions } from "./io/fileLock.js";
+export {
+  acquireLock,
+  releaseLock,
+  withFileLock,
+  FileLockTimeoutError,
+  STALE_LOCK_MS,
+  isTransientPermissionContention,
+} from "./io/fileLock.js";
+export { canonicalizeFilePath } from "./io/pathIdentity.js";
 
 // IO: canonical `.audit-tools/` path layout (single source for both CLIs)
 export {
@@ -670,18 +641,6 @@ export {
   REMEDIATION_REPORT_FILENAME,
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
-
-// Dispatch: the prep head both rolling dispatchers share — provider resolution
-// for a scheduler-chosen slot, and the three launch sidecar names.
-export {
-  resolveDispatchProvider,
-  dispatchSidecarNames,
-  dispatchSidecarPathsForResult,
-} from "./dispatch/providerDispatchPrep.js";
-export type {
-  ProviderDispatchPrepParams,
-  FreshSessionProviderFactory,
-} from "./dispatch/providerDispatchPrep.js";
 
 // IO: filesystem-safe artifact naming for a model-authored id, plus the
 // recognizer for the exact format it produces (kept together so they can't drift).
@@ -733,32 +692,19 @@ export type {
 } from "./friction/captureFrictionEvent.js";
 export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 
-// CE-005 — the single shared backend-observed step-boundary chokepoint. EVERY
-// backend-observed friction fact (the five named, the intent-gate fact, any quota
-// escalation) routes through `captureStepBoundaryFriction` with a CE-006
+// CE-005 — the single shared mechanically observed step-boundary chokepoint.
+// Every workflow friction fact routes through `captureStepBoundaryFriction` with a CE-006
 // structured percent-encoded collision-free event id. Consumed by both
 // orchestrators so the fact list is structural/extensible, not a per-orchestrator
 // snapshot a new fact can silently bypass.
 export type {
   StepBoundaryEventType,
   StepBoundaryFriction,
-  CostDriftInfo,
-  CreditExhaustionInfo,
-  QuotaUnclassifiedInfo,
-  ModelUnavailableInfo,
-  PacketTooLargeInfo,
 } from "./friction/stepBoundaryCapture.js";
 export {
   captureStepBoundaryFriction,
   stepBoundaryEventId,
-  captureCostDriftFriction,
-  captureCreditExhaustionFriction,
-  captureQuotaUnclassifiedFriction,
-  captureModelUnavailableFriction,
-  capturePacketTooLargeFriction,
-  captureZeroCapacityFriction,
 } from "./friction/stepBoundaryCapture.js";
-export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
 
 // O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition
 // vocabulary (keep|discard|annotate), blocking semantics, and the close-out
@@ -790,43 +736,6 @@ export {
   appendFrictionUnderLock,
   recordFrictionDisposition,
 } from "./friction/triage.js";
-
-// O3 emit-validate-repair seam: the single-sourced cheapest-first monotonic
-// repair pipeline (deterministic coercion -> bounded errors-only LLM patch ->
-// re-dispatch), one canonical validator re-run after each stage. Everything-
-// agnostic: contract id, validator, coercion, and patcher are all caller-supplied.
-export type {
-  RepairValidationError,
-  RepairValidationResult,
-  RepairCoercion,
-  RepairCoercionResult,
-  RepairPatcher,
-  RepairContract,
-  RepairStatus,
-  RepairStage,
-  RepairRedispatch,
-  RepairOutcome,
-  RunEmitValidateRepairOptions,
-} from "./repair/index.js";
-export { runEmitValidateRepair } from "./repair/index.js";
-
-// F4 dispatch-broker seam (lands first): the single gated F3<->F4 / O3<->F4
-// chokepoint. Every seam consumer dispatches ONLY through the broker — quota
-// read, deterministic-local estimate, refuse-over-budget, and the raw-result
-// await-completion handoff are single-sourced so the two halves can't drift.
-export type {
-  BrokeredDispatchSlot,
-  BrokerAdmission,
-  BrokeredDispatchDecision,
-  BrokeredCompletion,
-  BrokerDispatchInput,
-  BrokeredRepairDispatch,
-} from "./repair/index.js";
-export {
-  createBrokeredRepairDispatch,
-  estimateSlotTokens,
-  classifyCapableHost,
-} from "./repair/index.js";
 
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
@@ -867,16 +776,6 @@ export {
   writeBlockedStepContract,
 } from "./io/stepContractWriter.js";
 
-// Per-run token-usage ledger (the RECORDING half of score-tokens). Single-sourced
-// here so audit + remediate write the identical path + record shape.
-export type { TokenUsageLedgerLine } from "./io/tokenUsageLedger.js";
-export {
-  TOKEN_USAGE_LEDGER_FILENAME,
-  tokenUsageRunDir,
-  tokenUsageLedgerPath,
-  appendTokenUsageLine,
-} from "./io/tokenUsageLedger.js";
-
 // Validation
 export type { ValidationSeverity, ValidationIssue } from "./validation/basic.js";
 export {
@@ -891,17 +790,11 @@ export {
 export {
   AUDIT_FINDINGS_CONTRACT_VERSION,
   validateAuditFindingsReport,
+  projectApprovedFindings,
+  projectAuditFindingsReportSubset,
   isValidAuditFindingsReport,
   claimsAuditFindingsContract,
 } from "./validation/findingsReport.js";
-export {
-  validateSessionConfig,
-  validateRepoSessionIntent,
-  readValidatedRepoSessionIntent,
-  isBareExecutableName,
-  isDirectExecutablePath,
-  isSupportedConfiguredCommand,
-} from "./validation/sessionConfig.js";
 
 // Validation: finding grounding primitives (quote-and-verify + path normalizer;
 // single source for both orchestrators — drift-plan E3 + P7). INV-GND-02: a
@@ -927,343 +820,6 @@ export {
   groundDesignFindings,
 } from "./validation/designFindingGrounding.js";
 
-// Provider types
-export type {
-  WorkerProgress,
-  LaunchFreshSessionInput,
-  LaunchFreshSessionResult,
-  ProviderRateLimits,
-  FreshSessionProvider,
-  OutputConstraintMode,
-  OutputConstraintCapability,
-} from "./providers/types.js";
-
-// Provider constants
-export {
-  WORKER_COMMAND_PROVIDER_NAME,
-  CODEX_PROVIDER_NAME,
-  ANTIGRAVITY_PROVIDER_NAME,
-} from "./providers/constants.js";
-
-// Provider command runner (single source of truth for both orchestrators)
-export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
-export { createReviewSnapshot, removeReviewSnapshot } from "./providers/reviewSnapshot.js";
-export type { ReviewSnapshotResult } from "./providers/reviewSnapshot.js";
-export type { SpawnLoggedCommandOptions } from "./providers/spawnLoggedCommand.js";
-
-// Provider launch helpers (shared so both orchestrators stay in lockstep)
-export type {
-  WorkerTaskTimeout,
-  WorkerTaskWithCommand,
-} from "./providers/workerTaskLaunch.js";
-export {
-  resolveWorkerTaskTimeoutMs,
-  applyWorkerTaskLaunchSettings,
-} from "./providers/workerTaskLaunch.js";
-export { resolveOpenCodeSpawnCommand, resolveWindowsShimSpawnCommand } from "./providers/opencodeLaunch.js";
-
-// Shared structured provider launch/done diagnostics (single source so the
-// claude-code / opencode providers emit byte-identical stderr records).
-export {
-  emitProviderLaunchDiagnostic,
-  emitProviderDoneDiagnostic,
-} from "./providers/providerDiagnostics.js";
-
-// Provider-keyed strategy lookup primitive (unknown key → generic fallback).
-// Single-sources the quota error-parser + audit header-extractor factories.
-export { makeProviderKeyedFactory } from "./providers/providerKeyedFactory.js";
-
-// Shared provider classes. claude-code / opencode are now single-sourced here:
-// the principled default (prompt via stdin + launch/done diagnostics) is shared,
-// and the only per-orchestrator delta is the claude-code skip-permissions
-// default and the nested-session guard message (drift-plan E4). Each
-// orchestrator's providers/index.ts injects these via the factory deps.
-export { SubprocessTemplateProvider } from "./providers/subprocessTemplateProvider.js";
-export {
-  WorkerCommandProvider,
-  MISSING_WORKER_COMMAND_MESSAGE,
-} from "./providers/workerCommandProvider.js";
-export { CodexProvider } from "./providers/codexProvider.js";
-export {
-  OpenAiCompatibleProvider,
-  OPENAI_COMPATIBLE_PROVIDER_NAME,
-  parseJsonLoose,
-} from "./providers/openAiCompatibleProvider.js";
-export type { OpenAiCompatibleProviderDeps } from "./providers/openAiCompatibleProvider.js";
-export type { ClaudeCodeProviderOptions } from "./providers/claudeCodeProvider.js";
-export {
-  ClaudeCodeProvider,
-  CLAUDE_CODE_PROVIDER_NAME,
-  buildActiveClaudeCodeSessionMessage,
-} from "./providers/claudeCodeProvider.js";
-export type { ClaudeWorkerProviderOptions } from "./providers/claudeWorkerProvider.js";
-export {
-  ClaudeWorkerProvider,
-  CLAUDE_WORKER_PROVIDER_NAME,
-  CLAUDE_WORKER_DUMMY_API_KEY,
-  claudeWorkerTrustProjectKey,
-} from "./providers/claudeWorkerProvider.js";
-export {
-  OpenCodeProvider,
-  OPENCODE_PROVIDER_NAME,
-  createOpenCodeProvider,
-} from "./providers/opencodeProvider.js";
-export type {
-  OrchestratorDescriptor,
-  OrchestratorProviderBindings,
-} from "./providers/orchestratorBindings.js";
-export {
-  buildOrchestratorProviderBindings,
-  buildOrchestratorProviderModule,
-} from "./providers/orchestratorBindings.js";
-export {
-  AgyProvider,
-  AGY_PROVIDER_NAME,
-  buildActiveAgySessionMessage,
-} from "./providers/agyProvider.js";
-export type { AgyProviderOptions } from "./providers/agyProvider.js";
-
-// Provider auto-resolution + factory (single source of truth for both orchestrators)
-export type {
-  AutoProviderContext,
-  FreshSessionProviderDeps,
-  ProviderConstructionFailureKind,
-  ProviderLaunchOutcomeEnvelope,
-} from "./providers/providerFactory.js";
-export {
-  resolveFreshSessionProviderName,
-  createFreshSessionProvider,
-  hasConfiguredOpenAiCompatible,
-  discoverOutputConstraintCapability,
-  getAutoProviderContext,
-  chooseAutoProvider,
-  ProviderConstructionError,
-} from "./providers/providerFactory.js";
-
-export {
-  commandExists,
-  isSelfSpawnBlocked,
-  resolveConversationHostProvider,
-  resolveHostProviderName,
-  resolveHostDispatchProviderName,
-  setCommandExistsForTesting,
-} from "./providers/providerPathGuard.js";
-
-// Quota
-export type {
-  LimitSource,
-  LimitConfidence,
-  HostConcurrencyLimitSource,
-  HostConcurrencyLimit,
-  ResolvedLimits,
-  QuotaStateEntry,
-  QuotaState,
-  WaveBindingCap,
-  WaveSchedule,
-  QuotaBindingWindow,
-  BackoffState,
-  ObservedWaveOutcome,
-} from "./quota/types.js";
-export {
-  LimitSourceSchema,
-  LimitConfidenceSchema,
-  HostConcurrencyLimitSourceSchema,
-  HostConcurrencyLimitSchema,
-  ResolvedLimitsSchema,
-  WaveBindingCapSchema,
-  BackoffStateSchema,
-} from "./quota/types.js";
-export type {
-  QuotaSource,
-  QuotaUsageSnapshot,
-  QuotaWindow,
-  QuotaProbeResult,
-  QuotaProbeStatus,
-  QuotaWindowScope,
-  WindowSlopeKey,
-} from "./quota/quotaSource.js";
-export {
-  QuotaUsageSnapshotSchema,
-  QuotaWindowSchema,
-  probeQuotaSource,
-  // Exported alongside the slope-map helpers below: those REQUIRE a WindowSlopeKey,
-  // and this is the only way to construct one. Omitting it would leave an
-  // out-of-area caller able to reach the map but not to key it correctly.
-  windowSlopeKey,
-} from "./quota/quotaSource.js";
-export {
-  resolveLimits,
-  hostClassFor,
-  resolveHostModel,
-} from "./quota/limits.js";
-export type {
-  ProviderType,
-  LimitResolutionResult,
-  ResolveLimitsOptions,
-  ResolveHostModelOptions,
-} from "./quota/limits.js";
-export { resolveModelStatics, resetModelStaticsCache } from "./quota/modelStatics.js";
-export type { ModelStatics } from "./quota/modelStatics.js";
-export {
-  setQuotaStateDir,
-  getQuotaStatePath,
-  readQuotaState,
-  readQuotaStateOrDegrade,
-  emptyQuotaState,
-  QuotaStateUnavailableError,
-  writeQuotaState,
-  recordWaveOutcome,
-  foldTokensPerPctObservation,
-  recordTokensPerPctObservation,
-  quotaSnapshotWindowPctMap,
-  foldSlopeObservationFromPctMaps,
-  foldSlopeObservationFromSnapshots,
-  MIN_SLOPE_DELTA_PERCENT,
-  computeBackoffCooldownMs,
-  BASE_COOLDOWN_MS,
-  MAX_COOLDOWN_MS,
-} from "./quota/state.js";
-export type { QuotaWindowPctReading } from "./quota/state.js";
-export {
-  detectRateLimitError,
-  detectRateLimitFromChannel,
-  computeCooldownUntil,
-  DEFAULT_COOLDOWN_MS,
-  detectCreditExhaustionError,
-  detectCreditExhaustionFromChannel,
-  detectQuotaSuspicious,
-} from "./quota/errorParsing.js";
-export type { WorkerOutputChannel } from "./quota/errorParsing.js";
-export type { CreditExhaustionDetectionResult } from "./quota/errorParsing.js";
-export {
-  HostSessionQuotaSource,
-  HOST_SESSION_QUOTA_SOURCE_NAME,
-  DEFAULT_MAX_CONSECUTIVE_RE_LIMITS,
-} from "./quota/hostSessionQuotaSource.js";
-export type {
-  NowFn,
-  HostSessionEscalation,
-  HostSessionLimitEvent,
-  HostSessionQuotaSourceOptions,
-} from "./quota/hostSessionQuotaSource.js";
-// Shared claude-code stderr JSON-line scan (single source for the claude-code
-// error parser + audit header extractor).
-export { collectClaudeCodeJsonLines } from "./quota/claudeCodeJsonLines.js";
-export {
-  detectHostActiveSubagentLimit,
-  resolveHostActiveSubagentLimit,
-  buildHostLimitBindings,
-} from "./quota/hostLimits.js";
-export type { ReadCodexMaxThreads } from "./quota/hostLimits.js";
-export {
-  readCodexConfiguredMaxThreads,
-} from "./quota/codexHostConfig.js";
-export type { RateLimitDetectionResult } from "./quota/errorParsing.js";
-export {
-  acquireLock,
-  releaseLock,
-  withFileLock,
-  FileLockTimeoutError,
-  STALE_LOCK_MS,
-} from "./quota/fileLock.js";
-export type { ClaimRecord, ClaimResult } from "./quota/claimRegistry.js";
-export { ClaimRegistry } from "./quota/claimRegistry.js";
-export type {
-  ReservationLease,
-  AdmitDecision,
-  AdmitInput,
-} from "./quota/reservationLedger.js";
-export {
-  ReservationLedger,
-  getReservationLedgerPath,
-  createReservationLedger,
-  DISPATCH_LEASE_TTL_MS,
-} from "./quota/reservationLedger.js";
-export type {
-  OutputReservationInput,
-  PacketCost,
-} from "./quota/packetCost.js";
-export {
-  resolveOutputReservation,
-  estimatePacketCost,
-} from "./quota/packetCost.js";
-export type {
-  ClaimBackoffOptions,
-  ClaimHeartbeatOptions,
-} from "./quota/claimLease.js";
-export {
-  claimWithBackoff,
-  withClaimHeartbeat,
-  DEFAULT_CLAIM_BACKOFF_MS,
-} from "./quota/claimLease.js";
-export { runSlidingWindow } from "./quota/slidingWindow.js";
-export type { SlidingWindowResult } from "./quota/slidingWindow.js";
-export {
-  scheduleWave,
-  classifyProvider,
-  selectDispatchDriver,
-  DISPATCH_Y_DISPATCHER_MIN_ITEMS,
-  parseHostModelRoster,
-  DEFAULT_SAFETY_MARGIN,
-} from "./quota/scheduler.js";
-export {
-  quotaPoolKey,
-} from "./providers/identity.js";
-export type {
-  ScheduleWaveOptions,
-  DiscoveredRateLimitsInput,
-  HostModelRosterEntry,
-  ProviderClassification,
-  DriverMechanism,
-  DispatchDriverStrategy,
-  DispatchDriverSelection,
-  SelectDispatchDriverInput,
-} from "./quota/scheduler.js";
-export { HostModelRosterEntrySchema } from "./quota/scheduler.js";
-export { renderDispatchDriverInstruction } from "./quota/dispatchDriverPrompt.js";
-export {
-  AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS,
-  computeDispatchCapacity,
-  summarizeDispatchCapacityPools,
-  detectLivelock,
-  buildEmptyPoolTerminal,
-  buildQuotaPausedTerminal,
-  buildOperatorForcedTerminal,
-} from "./quota/capacity.js";
-export type {
-  CapacityPool,
-  PoolDispatchAllocation,
-  DispatchCapacityPoolSummary,
-  DispatchCapacity,
-  ComputeDispatchCapacityInput,
-  PartialCompletionReason,
-  PartialCompletionTerminal,
-} from "./quota/capacity.js";
-export { DispatchCapacityPoolSummarySchema } from "./quota/capacity.js";
-// Generic dispatchable-source pools — the single-sourced backend-pool shape both
-// orchestrators spill into (any non-IDE source: API endpoint or CLI), each with its
-// own endpoint/parameters/quota. Generalizes the former openai-compatible-only path.
-export type { SourcePoolBuild, ExclusionZeroing } from "./quota/apiPool.js";
-export {
-  buildSourcePools,
-  buildSourcePool,
-  sourceProviderConfig,
-  dispatchableSourceId,
-  collectDispatchableSources,
-  gatherDispatchableSources,
-  primaryInProcessSource,
-  dedupHostAndSourcePools,
-  withSourceConfig,
-  sourceByPoolId,
-  buildHostModelPool,
-  buildHostModelPools,
-} from "./quota/apiPool.js";
-
-// The host-pool ASSEMBLY core — the single `(session, auditor identity) → host CapacityPool[]`
-// entry both draws call. Replaces audit's `buildDispatchPool` preamble and remediate's
-// `buildHostPoolPreamble`, which were the same eight steps in the same order.
-export { buildHostPoolPreamble } from "./quota/hostPool.js";
-export type { HostPoolPreamble } from "./quota/hostPool.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
@@ -1327,160 +883,10 @@ export {
   detectObligationCycle,
   buildObligationLedger,
 } from "./types/obligationLedger.js";
-export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 
 // Parsing utilities
 export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";
 export { scanStringAware } from "./parsing/stringAwareScanner.js";
-export {
-  CompositeQuotaSource,
-  buildQuotaSource,
-  buildAccountScopedQuotaSource,
-} from "./quota/compositeQuotaSource.js";
-export type { BuildQuotaSourceOptions } from "./quota/compositeQuotaSource.js";
-export {
-  classifyQuotaCoverage,
-  sourceCoversProvider,
-  renderUnestablishedQuotaNudge,
-  REACTIVE_ONLY_PROVIDERS,
-  QuotaCoverageStatusSchema,
-} from "./quota/coverage.js";
-export type { QuotaCoverageStatus } from "./quota/coverage.js";
-export {
-  shouldEmitQuotaNudge,
-  quotaNudgeMarkerName,
-  renderQuotaCoverageNudge,
-} from "./quota/quotaCoverageNudge.js";
-export { renderTokenBudgetView } from "./quota/tokenBudgetView.js";
-export {
-  ClaudeOAuthQuotaSource,
-  parseProviderModelKey,
-  mapUsageToSnapshot,
-} from "./quota/claudeOAuthQuotaSource.js";
-export type { ClaudeOAuthQuotaSourceOptions } from "./quota/claudeOAuthQuotaSource.js";
-export { fetchClaudeUsage } from "./quota/claudeOAuthQuotaSource.js";
-export {
-  BaseHttpQuotaSource,
-  fetchJsonOrNull,
-  clampFraction,
-  remainingFromUsedPercent,
-} from "./quota/httpQuotaSource.js";
-export type {
-  HttpQuotaSourceOptions,
-  UsageFetchContext,
-  FetchLike,
-} from "./quota/httpQuotaSource.js";
-export { CodexQuotaSource, fetchCodexUsage, mapCodexUsage } from "./quota/codexQuotaSource.js";
-export type { CodexQuotaSourceOptions } from "./quota/codexQuotaSource.js";
-export { CopilotQuotaSource, fetchCopilotUsage, mapCopilotUsage } from "./quota/copilotQuotaSource.js";
-export type { CopilotQuotaSourceOptions } from "./quota/copilotQuotaSource.js";
-export {
-  AntigravityQuotaSource,
-  fetchAntigravityUsage,
-  mapAntigravityUsage,
-} from "./quota/antigravityQuotaSource.js";
-export type { AntigravityQuotaSourceOptions } from "./quota/antigravityQuotaSource.js";
-export { OpenCodeQuotaSource } from "./quota/openCodeQuotaSource.js";
-export type { OpenCodeQuotaSourceOptions } from "./quota/openCodeQuotaSource.js";
-export type { ErrorParser } from "./quota/errorParsers/index.js";
-export {
-  GenericErrorParser,
-  ClaudeCodeErrorParser,
-  getErrorParserForProvider,
-} from "./quota/errorParsers/index.js";
-
-// Rolling engine paused-state + livelock guard (N-S09)
-export type {
-  RollingEngineLifecycleState,
-  SettledExclusionSet,
-  AdvancePausedStateOptions,
-} from "./rolling/pausedState.js";
-export {
-  LIVELOCK_PAUSE_LIMIT,
-  filterNewProviders,
-  checkLivelockGuard,
-  advancePausedState,
-} from "./rolling/pausedState.js";
-
-// Single shared dispatch tier-rank authority (P1) — the ONE ordering of
-// DispatchModelTier, consolidating the previously-duplicated rank maps.
-export {
-  DISPATCH_TIER_RANK,
-  DISPATCH_TIER_ORDER,
-  DISPATCH_TIER_RANK_FALLBACK,
-  tierRank,
-  compareTier,
-  mostCapableTier,
-} from "./dispatch/tierRank.js";
-
-// Cost-first routing engine (real price → costRank; spec/dispatch-quota.md).
-export {
-  COST_BLEND_INPUT_WEIGHT,
-  COST_BLEND_OUTPUT_WEIGHT,
-  PRICE_BAND_BASE,
-  UNKNOWN_PRICE_BAND_BASE,
-  blendedPrice,
-  resolveModelPrice,
-  deriveCostRank,
-} from "./dispatch/costRank.js";
-export type { CostRankInput } from "./dispatch/costRank.js";
-
-// Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
-export type {
-  RollingDispatchPacket,
-  RollingDispatchResult,
-  ProviderSlot,
-  InFlightEntry,
-  RollingDispatchState,
-  RollingDispatchConfig,
-  RollingDispatchOptions,
-  RollingDispatcher,
-} from "./dispatch/rollingDispatch.js";
-export {
-  InFlightTokenTracker,
-  scorePacketComplexity,
-  selectProvider,
-  createRollingDispatcher,
-} from "./dispatch/rollingDispatch.js";
-
-// Host-path admission loop — the tool-side "grant the admitted set" primitive
-// (per-grant batches, cost-first-capable routing) that REPLACES the removed
-// `max_concurrent_agents` scalar. Both orchestrators embed DispatchAdmissionSchema
-// in their dispatch-quota contract.
-export {
-  admitBatch,
-  computeDispatchAdmission,
-  admissionPoolsFromSummaries, buildCapabilityFloorCapable, buildObservedCapabilityFloorCapable,
-  toConstraintOutcomeRecords,
-  ConstraintOutcomeRecordSchema,
-  AdmissionAttemptSchema,
-  AdmissionGrantSchema,
-  AdmissionExplainSchema,
-  DispatchAdmissionSchema,
-} from "./dispatch/admissionLoop.js";
-export type {
-  AdmissionCandidate,
-  AdmissionPool,
-  AdmissionGrant,
-  AdmissionExplain,
-  AdmissionAttempt,
-  ConstraintOutcomeRecord,
-  DispatchAdmission,
-  AdmitBatchResult,
-  AdmitBatchInput,
-} from "./dispatch/admissionLoop.js";
-// Engine decision log (legibility invariant): the in-process engine's per-packet
-// decision records + the append-only JSONL sink the drivers wire at the run dir.
-export { createDispatchDecisionLog } from "./dispatch/dispatchDecisionLog.js";
-export type {
-  EngineDecisionRecord,
-  StampedEngineDecisionRecord,
-  EngineDecisionSink,
-} from "./dispatch/dispatchDecisionLog.js";
-export { reconcileAdmissionLeasesFromQuotaFile } from "./dispatch/admissionLeaseReconcile.js";
-export { detectHostDispatchWall, renderHostWallExplanation, admissionBlockedOnBudget, classifyEmptyGrantCause } from "./dispatch/hostDispatchWall.js";
-export type { HostDispatchWall, EmptyGrantCause } from "./dispatch/hostDispatchWall.js";
-export { finalizeProviderLaunchResult } from "./dispatch/providerLaunchFinalize.js";
 export {
   pathMatchesPrefix,
   globMatches,
@@ -1501,59 +907,6 @@ export type {
   CrossLensDedupeResult,
   AbsorbOptions,
 } from "./findings/dedupe.js";
-
-// File-ownership-disjoint admission scheduling (INV-SOO) + the single-sourced path
-// identity it keys on — shared so BOTH orchestrators split a dependency level into
-// disjoint sub-waves through ONE scheduler (audit is the read-only degenerate case:
-// all read-only nodes collapse into one maximal parallel sub-wave).
-export { canonicalizeFilePath } from "./dispatch/pathIdentity.js";
-export {
-  ownershipSubWaves,
-  canonicalScopeKeys,
-} from "./dispatch/ownershipScheduler.js";
-export type { OwnershipSchedulerNode } from "./dispatch/ownershipScheduler.js";
-
-// The unified in-process rolling driver — the ONE level/sub-wave loop both
-// orchestrators drive above `createRollingDispatcher`; each keeps only its own
-// terminal/result-routing adapter (audit livelock+DC-4, remediate quota_paused merge).
-export { driveRolling, resolveLedgerBudgets } from "./dispatch/unifiedRolling.js";
-export type {
-  UnifiedRollingConfig,
-  UnifiedRollingLevelResult,
-  UnifiedRollingResult,
-} from "./dispatch/unifiedRolling.js";
-
-// Hybrid spill coordinator (A-8) — the ONE assignment layer both dispatch drivers
-// drive identically: claim-before-assign (CE-001), co-owned SettledExclusionSet,
-// proactive capacity split through the single S4 fold, and the sole pause-authorizing
-// 'all pools exhausted' terminal.
-export type {
-  FrontierNode,
-  NodeAssignment,
-  CoordinatorTerminalStatus,
-  HybridSpillCoordinatorOptions,
-} from "./dispatch/coordinator.js";
-export { HybridSpillCoordinator } from "./dispatch/coordinator.js";
-// The ONE hybrid split layer both orchestrators drive (classification injected).
-export { planHybridDispatch } from "./dispatch/hybridDispatch.js";
-export type { HybridDispatchPartition, HybridDispatchInput } from "./dispatch/hybridDispatch.js";
-// Cross-cycle settled-pool store (DC-4): a spilled-then-exhausted pool the coordinator
-// excludes from future splits so stranded work falls back to the host pool.
-export { readSettledPools, addSettledPool, isPoolSettlingOutcome } from "./dispatch/settledPools.js";
-export { isInProcessWorkerProvider, isHeadlessPrimaryProvider } from "./providers/inProcessWorkers.js";
-export { DISPATCH_QUOTA_CONTRACT_VERSION, DispatchQuotaContractSchema, assembleDispatchQuota } from "./dispatch/dispatchQuotaContract.js";
-export type { DispatchQuotaContract } from "./dispatch/dispatchQuotaContract.js";
-
-// Versioned seam contracts (N-X06) — pinned interface types + version constants
-export type {
-  RollingDispatchEnginePacket,
-  RollingDispatchEngineResult,
-  RollingDispatchEngineContract,
-} from "./types/rollingDispatch.js";
-export { ROLLING_DISPATCH_ENGINE_VERSION } from "./types/rollingDispatch.js";
-
-export type { DispatchExclusionPattern, DispatchExclusion, ExcludableBackend } from "./providers/dispatchExclusion.js";
-export { buildSelfSpawnExclusion, buildDeadProviderExclusion, composeDispatchExclusions } from "./providers/dispatchExclusion.js";
 
 export type {
   EncodedClause,

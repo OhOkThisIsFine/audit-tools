@@ -9,11 +9,21 @@
  *  - the offer prompt is tool-rendered with purpose + safety + mechanism.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pendingAnalyzerConsent } from "../../src/audit/orchestrator/hostInputPause.js";
-import { persistAnalyzerConsent } from "../../src/audit/supervisor/sessionConfig.js";
+import {
+  getAnalyzerPolicyPath,
+  loadAnalyzerPolicy,
+  persistAnalyzerConsent,
+} from "../../src/shared/analyzerPolicy.js";
 import { renderAnalyzerConsentPrompt } from "../../src/audit/cli/prompts.js";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/shared/analyzers/candidates.js";
 
@@ -94,15 +104,43 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
 });
 
 describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
-  it("merges decisions into session-config.json analyzer_consent", async () => {
-    const artifactsDir = tempDir("consent-cfg-");
-    await persistAnalyzerConsent(artifactsDir, { eslint: "granted" });
-    await persistAnalyzerConsent(artifactsDir, { knip: "declined" });
+  it("merges decisions into analyzer-policy.json without changing session intent", async () => {
+    const root = tempDir("consent-cfg-");
+    const auditDir = join(root, ".audit-tools", "audit");
+    const sessionConfigPath = join(auditDir, "session-config.json");
+    const sessionConfigBytes = '{"review_mode":"autonomous"}\n';
+    mkdirSync(auditDir, { recursive: true });
+    writeFileSync(sessionConfigPath, sessionConfigBytes, "utf8");
+
+    await persistAnalyzerConsent(root, { eslint: "granted" });
+    await persistAnalyzerConsent(root, { knip: "declined" });
     const cfg = JSON.parse(
-      readFileSync(join(artifactsDir, "session-config.json"), "utf8"),
-    ) as { analyzer_consent?: Record<string, string>; external_acquisition?: unknown };
+      readFileSync(getAnalyzerPolicyPath(root), "utf8"),
+    ) as {
+      analyzer_consent?: Record<string, string>;
+      external_acquisition?: unknown;
+    };
     expect(cfg.analyzer_consent).toEqual({ eslint: "granted", knip: "declined" });
     expect(JSON.stringify(cfg)).not.toContain("consent_token");
+    expect(readFileSync(sessionConfigPath, "utf8")).toBe(sessionConfigBytes);
+  });
+
+  it("rejects a persisted consent token as an unknown policy capability", async () => {
+    const root = tempDir("consent-token-cfg-");
+    const policyPath = getAnalyzerPolicyPath(root);
+    mkdirSync(dirname(policyPath), { recursive: true });
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        analyzer_consent: { eslint: "granted" },
+        external_acquisition: { consent_token: "must-not-persist" },
+      }),
+      "utf8",
+    );
+
+    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(
+      /analyzer-policy\.json/i,
+    );
   });
 });
 

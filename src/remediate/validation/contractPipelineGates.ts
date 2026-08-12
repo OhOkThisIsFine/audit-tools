@@ -18,7 +18,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type ValidationIssue,
-  type DispatchModelTier,
   type Finding,
   isRecord,
   pushValidationIssue,
@@ -421,8 +420,7 @@ export function validateImplementationDAGIntegrity(
 // The gates below enforce the auditor-agnostic robustness invariants for the
 // contract-obligations module. Each is a pure, deterministic function that
 // returns ValidationIssue[] (errors block promotion — fail-closed). None of
-// them inspect a model identity: tier derivation is by relative complexity rank
-// only (no-hardcoded-models invariant).
+// them inspect or select a model identity.
 //
 //   OBL-CO-01 validatePairedObligations    — every testable obligation is
 //             covered by a test spec that asserts BOTH the satisfied path and a
@@ -436,7 +434,6 @@ export function validateImplementationDAGIntegrity(
 //   OBL-CO-12 validateReconciliationDerivation — INV-CO-12 fail-closed
 //             derivation gate: every reconciled seam mismatch is derived into
 //             the finalized module contracts.
-//   deriveNodeModelTier                    — relative complexity → relative rank.
 
 const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
 
@@ -1031,90 +1028,6 @@ function corpusContainsAgreedInterface(corpus: string, agreed: string): boolean 
   // a mostly-absent interface fails. ceil keeps 1–2-token interfaces strict.
   const required = Math.max(1, Math.ceil(tokens.length * 0.6));
   return present >= required;
-}
-
-// ── Node model-tier derivation (relative rank, never a model name) ─────────────
-
-export interface NodeComplexitySignals {
-  /** Number of upstream dependencies (depends_on length). */
-  dependencyCount: number;
-  /** Number of obligations the node satisfies + verifies. */
-  obligationCount: number;
-  /** Number of files in the node's declared write scope. */
-  fileScopeSize: number;
-  /** Number of accepted counterexamples the node addresses. */
-  counterexampleCount: number;
-  /** True when the node's lens is a high-stakes lens (security/correctness/etc.). */
-  highStakesLens: boolean;
-}
-
-/**
- * Lenses whose defects carry the highest blast radius. A node on one of these
- * lenses is nudged one rank up. This is a property of the *lens*, never of any
- * model — it never selects a model identity.
- */
-const HIGH_STAKES_LENSES = new Set([
-  "security",
-  "correctness",
-  "data_integrity",
-  "reliability",
-]);
-
-/**
- * Derive a *relative* model tier ("small" | "standard" | "deep") for an
- * implementation DAG node from its complexity signals.
- *
- * INV (no-hardcoded-models): the return value is a RELATIVE rank from the shared
- * DispatchModelTier union. This function NEVER references a model name, context
- * window, or per-model limit — the concrete model behind each rank is discovered
- * at the dispatch handshake. Complexity, not identity, decides the rank.
- *
- * Scoring (monotonic in every signal):
- *   +1 per upstream dependency (deep coordination)
- *   +1 per obligation beyond the first (breadth of contract)
- *   +1 per file beyond the first two (write-scope breadth)
- *   +2 per accepted counterexample addressed (adversarial difficulty)
- *   +2 when the node targets a high-stakes lens
- *
- *   score >= 6 → "deep"   (top relative rank)
- *   score >= 3 → "standard" (middle)
- *   else       → "small"  (cheapest)
- */
-export function deriveNodeModelTier(signals: NodeComplexitySignals): DispatchModelTier {
-  let score = 0;
-  score += Math.max(0, signals.dependencyCount);
-  score += Math.max(0, signals.obligationCount - 1);
-  score += Math.max(0, signals.fileScopeSize - 2);
-  score += 2 * Math.max(0, signals.counterexampleCount);
-  if (signals.highStakesLens) score += 2;
-
-  if (score >= 6) return "deep";
-  if (score >= 3) return "standard";
-  return "small";
-}
-
-/**
- * Extract complexity signals from a raw implementation-DAG node payload, then
- * derive its relative tier. Tolerant of partial/unknown node shapes.
- */
-export function deriveNodeModelTierFromNode(nodePayload: unknown): DispatchModelTier {
-  const node = isRecord(nodePayload) ? nodePayload : {};
-  const lenLike = (v: unknown): number => (Array.isArray(v) ? v.length : 0);
-  const satisfies = lenLike(node.satisfies_obligations);
-  const verifies = lenLike(node.verification_obligation_ids);
-  const fileScope = Math.max(
-    lenLike(node.output_files),
-    lenLike(node.files_likely_touched),
-    lenLike(node.affected_files),
-  );
-  const lens = typeof node.lens === "string" ? node.lens : "";
-  return deriveNodeModelTier({
-    dependencyCount: lenLike(node.depends_on),
-    obligationCount: satisfies + verifies,
-    fileScopeSize: fileScope,
-    counterexampleCount: lenLike(node.addresses_counterexamples),
-    highStakesLens: HIGH_STAKES_LENSES.has(lens),
-  });
 }
 
 // ── M-B3: source-grounded citation gate (repo-tree knownPaths) ────────────────

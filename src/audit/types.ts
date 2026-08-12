@@ -168,8 +168,8 @@ export const AuditTaskSchema = z.object({
   /**
    * Frozen, provider-neutral audit-risk score in [0,1] (likelihood × stakes of
    * latent defects). Seeded deterministically from priority/lens/tags and
-   * refined/frozen by the estimate-review step. Drives just-in-time risk-mass
-   * packetization and model-tier routing; never a model/provider decision.
+   * refined/frozen by the estimate-review step. Drives task prioritization and
+   * coherent review grouping; never an execution-selection decision.
    */
   risk_estimate: z.number().optional(),
   tags: z.array(z.string()).optional(),
@@ -247,24 +247,5 @@ export const AuditResultSchema = z.object({
   // base lineage so a superseded result's stale findings never reach synthesis.
   emit_source: z.enum(["base", "deepening", "steward", "redispatch"]).optional(),
   attempt: z.number().int().min(1).optional(),
-  /**
-   * Optional actual token spend for the dispatch that produced this result,
-   * split (not a single total) because the quota model learns
-   * `output_per_input` and `tokens_per_pct` slopes separately (state.ts). The
-   * worker subagent itself cannot know this (only its parent harness sees the
-   * usage after the dispatch completes), so this is populated by the HOST —
-   * conversation-first dispatch (`renderRollingDispatchPrompt`) instructs the
-   * host to stamp it from the harness-reported usage of each subagent
-   * dispatch before running merge-and-ingest. Absent for any worker/provider
-   * that doesn't report usage; the result still validates and ingests, it
-   * just doesn't feed a `recordTokensPerPctObservation` sample.
-   */
-  token_usage: z
-    .object({
-      input_tokens: z.number(),
-      output_tokens: z.number(),
-    })
-    .strict()
-    .optional(),
 });
 export type AuditResult = z.infer<typeof AuditResultSchema>;

@@ -8,7 +8,7 @@
 // backwards-compatible aggregate.
 // ---------------------------------------------------------------------------
 
-// --- common (paths, git primitives, git-diff resolution, token estimation, conventions cache) ---
+// --- common (paths, git primitives, git-diff resolution) ---
 export type {
   DispatchOptions,
   GitEditedFiles,
@@ -25,70 +25,10 @@ export {
   gitBranchExists,
   parseUnifiedDiffHunks,
   writeScopeViolations,
-  detectRepoConventionsCache,
 } from "./dispatch/common.js";
 
-// --- DAG-node field accessors ---
+// --- DAG-node metadata overlay shape ---
 export type { DagNodeFields } from "./dispatch/dagNodeFields.js";
-
-// --- wave scheduling / quota ---
-export type { HostConcurrencyLimit } from "audit-tools/shared";
-export {
-  resolveHostActiveSubagentLimit,
-  detectHostConcurrencyFromEnv,
-  normalizeSlotTokens,
-  scheduleWave,
-  buildConfirmedPools,
-  buildDispatchQuota,
-} from "./dispatch/waveScheduling.js";
-export type {
-  ScheduleWaveInput,
-  WaveScheduleResult,
-} from "./dispatch/waveScheduling.js";
-
-// --- worktree lifecycle ---
-export type { WorktreeVerifyResult } from "./dispatch/worktreeLifecycle.js";
-export {
-  createWorktree,
-  seedUntrackedDeclaredPaths,
-  removeWorktree,
-  resetNodeWorktreeAndBranch,
-  verifyNodeInWorktree,
-  mergeWorktree,
-  dirtyMainTreeCollisions,
-  rebaseBranchOntoHead,
-  worktreePath,
-  remediationBranchName,
-  baseBranchLockPath,
-  worktreeNodeLockPath,
-  quarantineRef,
-  quarantineFailedNodeCommit,
-  quarantineCommitByOid,
-  quarantineUncommittedWorktreeEdits,
-  clearQuarantinedCommit,
-  listQuarantinedCommits,
-  remediationBaseBranchPath,
-  readRemediationBaseBranch,
-  ensureRemediationBranchCheckedOut,
-  commitWorktree,
-  ensureWorktreeNodeModules,
-} from "./dispatch/worktreeLifecycle.js";
-
-// --- accept-node lifecycle ---
-export type {
-  NodeWorkerOutcome,
-  AcceptNodeWorktreeParams,
-  AcceptNodeWorktreeResult,
-  WorktreeNodeWorker,
-  NodeWorktreeExecution,
-} from "./dispatch/acceptNode.js";
-export {
-  acceptNodeWorktree,
-  nodeAcceptOutcomePath,
-  recordNodeAcceptOutcome,
-  loadNodeAcceptOutcome,
-  executeNodeInWorktree,
-} from "./dispatch/acceptNode.js";
 
 // --- verify commands ---
 export {
@@ -106,40 +46,36 @@ export {
   targetedCommandsForBlock,
 } from "./dispatch/verifyCommands.js";
 
-// --- implement prompt / model hint / test index / infra detection ---
+// --- implement prompt / test index / infra detection ---
 export type { TestFileEntry } from "./dispatch/implementPrompt.js";
 export {
-  buildImplementModelHint,
-  implementResultPath,
   isInfraModifyingBlock,
   buildTestFileIndex,
   collectReferencingTests,
 } from "./dispatch/implementPrompt.js";
 
-// --- write-scope + merge-seam ---
-export type {
-  WriteScopeDecision,
-  NodeDispositionStatus,
-  NodeDisposition,
-  BlockEditedFiles,
-  OverlappingEdit,
-} from "./dispatch/writeScope.js";
+// --- write-scope corroboration ---
+export type { WriteScopeDecision } from "./dispatch/writeScope.js";
 export {
   enforceWriteScope,
-  blockScopesFromPlan,
-  declaredPathsFromPlan,
   adjudicateWriteScope,
   enforceAcceptWriteScope,
-  collapseItemResults,
-  buildNodeDisposition,
-  attributeSiblingRed,
-  detectOverlappingEdits,
 } from "./dispatch/writeScope.js";
 
-// --- marshalling (prepare / merge / readers) ---
+// --- planning-pipeline handoff reader ---
+export { readExtractedPlanIfPresent } from "./dispatch/marshal.js";
+
+// --- provider-neutral host workload / result-ingestion boundary ---
+export type {
+  CurrentRemediationHostState,
+  PreparedRemediationHostHandoff,
+  RemediationHostIngestSummary,
+  RemediationHostWorkItem,
+  RemediationHostWorkload,
+  UnsupportedRetiredRemediationState,
+} from "./dispatch/hostHandoff.js";
 export {
-  prepareImplementDispatch,
-  mergeImplementResults,
-  readExtractedPlanIfPresent,
-  readDispatchPlan,
-} from "./dispatch/marshal.js";
+  ingestRemediationHostResults,
+  prepareRemediationHostHandoff,
+  remediationHostResultFilePath,
+} from "./dispatch/hostHandoff.js";

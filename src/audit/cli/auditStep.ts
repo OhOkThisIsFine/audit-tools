@@ -1,33 +1,24 @@
-import { rename } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import {
   artifactTreeLockPath,
-  nodeClaimsPath,
   readJsonFile,
   RunLogger,
   withFileLock,
-  withFsRetry,
-  ClaimRegistry,
-  claimWithBackoff,
-  withClaimHeartbeat,
   CharterSubmissionSchema,
   CharterDeltaSubmissionSchema,
   ClarificationAnswersSubmissionSchema,
   SystemicChallengeSubmissionSchema,
-  type SessionConfig,
-  type WorkPartitionPolicy,
 } from "audit-tools/shared";
 import {
   loadArtifactBundle,
   writeCoreArtifacts,
 } from "../io/artifacts.js";
 import { advanceAudit } from "../orchestrator/advance.js";
+import { decideNextStep } from "../orchestrator/nextStep.js";
+import { deriveAuditState } from "../orchestrator/state.js";
 import type { AdvanceAuditResult } from "../orchestrator/advanceTypes.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { EXECUTOR_RUNNERS } from "../orchestrator/executorRunners.js";
-import { deriveAuditState } from "../orchestrator/state.js";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
-import { decideNextStep } from "../orchestrator/nextStep.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
 import { partitionOrphanedAuditResults } from "../orchestrator/resultIngestion.js";
@@ -44,33 +35,18 @@ import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 
-async function maybeArchiveLegacyPendingResults(
-  auditResultsPath: string | undefined,
-): Promise<string | undefined> {
-  if (!auditResultsPath || basename(auditResultsPath) !== "worker_results_pending.json") {
-    return undefined;
-  }
-
-  const archivedPath = join(
-    dirname(auditResultsPath),
-    `worker_results_submitted_${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
-  );
-  try {
-    await withFsRetry(() => rename(auditResultsPath, archivedPath));
-    return archivedPath;
-  } catch (error) {
-    process.stderr.write(
-      `[audit-results cleanup] failed to archive ${auditResultsPath}: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    return undefined;
-  }
-}
-
 export interface RunAuditStepOptions {
   root: string;
   artifactsDir: string;
   preferredExecutor?: string;
   auditResultsPath?: string;
+  /**
+   * Already-validated host-handoff results. This is the in-process counterpart
+   * to `auditResultsPath`: the zero-adapter host boundary validates and binds
+   * each untrusted result before handing the normalized AuditResult objects to
+   * the ordinary result-ingestion executor.
+   */
+  auditResultsData?: AuditResult[];
   runtimeUpdatesPath?: string;
   /** Provide a file path OR an already-parsed object; path is only read when the object is absent. */
   externalAnalyzerPath?: string;
@@ -93,69 +69,6 @@ export interface RunAuditStepOptions {
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
   runLog?: boolean;
-  /** Effective per-auditor dispatch inventory for semantic review. */
-  sessionConfig?: SessionConfig;
-  /** Current invocation's resolved partition capacity; transient and never persisted. */
-  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
-}
-
-// The single cross-process mutex node for BUNDLE MUTATION (multi-agent
-// cooperative runs, spec/multi-ide-concurrent-runs-design.md). A deterministic
-// bundle-mutating executor is claimed here so exactly one peer runs it while
-// others cooperative-wait; the claim is heartbeated so it survives an executor
-// that outruns the file-lock's stale window. Audit's obligation frontier is
-// singular, so one bundle mutation at a time is the correct invariant — the
-// per-task parallelism is separate (task-pool claiming, slice 2).
-const BUNDLE_MUTATION_NODE = "bundle-mutation";
-// Heartbeat well inside STALE_LOCK_MS (30s) so a live long executor is never
-// reclaimed; the executor's awaits (subprocess spawns, IO) free the event loop
-// for the timer to fire.
-const CLAIM_HEARTBEAT_MS = 10_000;
-
-interface StepClassification {
-  bundle: ArtifactBundle;
-  selectedExecutor: string | null;
-  selectedObligation: string | null;
-  /** True iff the current step runs a deterministic bundle-mutating runner. */
-  needsClaim: boolean;
-}
-
-// Deterministically classify the current step WITHOUT executing it — mirrors the
-// executor/obligation selection advanceAudit does — so we can decide whether this
-// invocation needs the exclusive bundle-mutation claim (a runner-backed step) or
-// is the cheap host-delegation/no-op path.
-function classifyStep(
-  bundle: ArtifactBundle,
-  options: RunAuditStepOptions,
-): StepClassification {
-  const decision = decideNextStep(bundle);
-  const forcedExecutor = options.preferredExecutor ?? null;
-  const selectedExecutor = forcedExecutor ?? decision.selected_executor;
-  const selectedObligation = forcedExecutor
-    ? `forced:${forcedExecutor}`
-    : decision.selected_obligation;
-  const needsClaim = Boolean(
-    selectedExecutor && EXECUTOR_RUNNERS[selectedExecutor],
-  );
-  return { bundle, selectedExecutor, selectedObligation, needsClaim };
-}
-
-function nonPersistingResult(
-  bundle: ArtifactBundle,
-  classification: StepClassification,
-  progressSummary: string,
-): AdvanceAuditResult {
-  const state = deriveAuditState(bundle);
-  return {
-    audit_state: state,
-    selected_obligation: classification.selectedObligation,
-    selected_executor: classification.selectedExecutor,
-    progress_made: false,
-    artifacts_written: [],
-    progress_summary: progressSummary,
-    next_likely_step: classification.selectedObligation,
-    updated_bundle: bundle,
-  };
 }
 
 export async function runAuditStep(
@@ -165,105 +78,15 @@ export async function runAuditStep(
     enabled: options.runLog ?? true,
   });
   const lockPath = artifactTreeLockPath(options.artifactsDir);
-  const registry = new ClaimRegistry(nodeClaimsPath(options.artifactsDir));
-
-  // Probe (short lock) whether this step needs the exclusive bundle-mutation
-  // claim. The host-delegation handoff / complete / no-runner cases keep the
-  // original short-lock read-modify-write — they don't hold across a long
-  // executor, so the file lock alone is sufficient and they do not exclusively
-  // own the bundle (audit_tasks pooling is slice 2).
-  const probe = await withFileLock(
+  // Deterministic bundle mutation is one heartbeat-protected critical section.
+  // Host semantic review never runs here: it is emitted as a workload and this
+  // lock only covers local artifact derivation and result ingestion.
+  return await withFileLock(
     lockPath,
-    async () => classifyStep(await loadArtifactBundle(options.artifactsDir), options),
+    () => runAuditStepLocked(options, runLogger),
     undefined,
     runLogger,
   );
-  if (!probe.needsClaim) {
-    return withFileLock(
-      lockPath,
-      () => runAuditStepLocked(options, runLogger),
-      undefined,
-      runLogger,
-    );
-  }
-
-  // Bundle-mutating deterministic runner: claim the mutex (OD1 bounded backoff),
-  // execute UNLOCKED under a heartbeat, then persist under a short lock with a
-  // merge-time ownership re-validation (OD3 airtight gate).
-  const claim = await claimWithBackoff(registry, BUNDLE_MUTATION_NODE, {
-    poolId: `obligation:${probe.selectedObligation ?? "unknown"}`,
-  });
-  if (!claim.acquired) {
-    return nonPersistingResult(
-      probe.bundle,
-      probe,
-      `Another agent is currently working the audit (obligation '${probe.selectedObligation ?? "?"}', ` +
-        `held by ${claim.heldBy.slice(0, 12)}…). No other work is claimable right now — retry shortly.`,
-    );
-  }
-  const ownerToken = claim.ownerToken;
-  try {
-    // Re-load fresh UNDER the claim and re-classify: if the obligation advanced
-    // to a no-runner / complete step while we waited for the claim, fall through
-    // to the cheap short-lock path; otherwise execute the current runner step.
-    const fresh = await withFileLock(
-      lockPath,
-      async () => classifyStep(await loadArtifactBundle(options.artifactsDir), options),
-      undefined,
-      runLogger,
-    );
-    if (!fresh.needsClaim) {
-      return await withFileLock(
-        lockPath,
-        () => runAuditStepLocked(options, runLogger),
-        undefined,
-        runLogger,
-      );
-    }
-
-    const result = await withClaimHeartbeat(
-      registry,
-      BUNDLE_MUTATION_NODE,
-      ownerToken,
-      { intervalMs: CLAIM_HEARTBEAT_MS },
-      () => executeAdvance(options, fresh.bundle, runLogger),
-    );
-
-    const persisted = await withFileLock(
-      lockPath,
-      async () => {
-        // OD3 layer 2: refuse the merge if a peer reclaimed our (stale) lease
-        // while we executed. A superseded peer must never land a result.
-        if (!(await registry.heartbeat(BUNDLE_MUTATION_NODE, ownerToken))) {
-          return false;
-        }
-        await writeCoreArtifacts(options.artifactsDir, result.updated_bundle, {
-          prune: true,
-        });
-        return true;
-      },
-      undefined,
-      runLogger,
-    );
-    if (!persisted) {
-      return nonPersistingResult(
-        fresh.bundle,
-        fresh,
-        `This agent's claim on the audit was revoked by a peer (stale-lease reclaim) mid-step; ` +
-          `result discarded without persisting — retry shortly.`,
-      );
-    }
-
-    const archivedPendingResults = await maybeArchiveLegacyPendingResults(
-      options.auditResultsPath,
-    );
-    if (archivedPendingResults) {
-      result.progress_summary += ` Archived legacy staging file to ${archivedPendingResults}.`;
-    }
-    return result;
-  } finally {
-    await registry.release(BUNDLE_MUTATION_NODE, ownerToken);
-  }
 }
 
 async function runAuditStepLocked(
@@ -279,13 +102,6 @@ async function runAuditStepLocked(
   await writeCoreArtifacts(options.artifactsDir, result.updated_bundle, {
     prune: true,
   });
-  const archivedPendingResults = await maybeArchiveLegacyPendingResults(
-    options.auditResultsPath,
-  );
-  if (archivedPendingResults) {
-    result.progress_summary +=
-      ` Archived legacy staging file to ${archivedPendingResults}.`;
-  }
   return result;
 }
 
@@ -309,9 +125,14 @@ async function executeAdvance(
       `Invalid audit results path '${options.auditResultsPath}'. This looks like a CLI flag rather than a file path.`,
     );
   }
-  let auditResults = options.auditResultsPath
-    ? await readJsonFile<unknown>(options.auditResultsPath)
-    : undefined;
+  if (options.auditResultsPath !== undefined && options.auditResultsData !== undefined) {
+    throw new Error("Provide either auditResultsPath or auditResultsData, not both.");
+  }
+  let auditResults: unknown =
+    options.auditResultsData ??
+    (options.auditResultsPath
+      ? await readJsonFile<unknown>(options.auditResultsPath)
+      : undefined);
   if (auditResults !== undefined) {
     // Partition results whose task_id is no longer in the active manifest — e.g.
     // selective-deepening tasks pruned by a later re-plan. Only the RETAINED
@@ -424,8 +245,6 @@ async function executeAdvance(
     externalAcquisition: options.externalAcquisition,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
-    sessionConfig: options.sessionConfig,
-    workPartition: options.workPartition,
     runLogger,
   });
 
@@ -438,30 +257,27 @@ export async function ingestBatchAuditResults(options: {
   batchDir: string;
 }) {
   const batchFiles = await listBatchResultFiles(options.batchDir);
-  const artifactsWritten = new Set<string>();
-  const progressSummaries: string[] = [];
-  let lastStep:
-    | Awaited<ReturnType<typeof runAuditStep>>
-    | null = null;
-  let anyProgress = false;
-
-  for (const batchFile of batchFiles) {
-    const step = await runAuditStep({
-      root: options.root,
-      artifactsDir: options.artifactsDir,
-      preferredExecutor: "result_ingestion_executor",
-      auditResultsPath: batchFile,
-    });
-    lastStep = step;
-    anyProgress ||= step.progress_made;
-    for (const artifact of step.artifacts_written) {
-      artifactsWritten.add(artifact);
-    }
-    progressSummaries.push(`${basename(batchFile)}: ${step.progress_summary}`);
-  }
+  // A batch directory is one host submission boundary. Ingest every canonical
+  // file atomically so partial files cannot trigger selective-deepening/requeue
+  // derivation between siblings and manufacture new pending review tasks before
+  // the rest of the same batch is visible.
+  const payloads = await Promise.all(
+    batchFiles.map((batchFile) => readJsonFile<unknown>(batchFile)),
+  );
+  const auditResultsData = payloads.flatMap((payload) =>
+    Array.isArray(payload) ? payload : [payload],
+  ) as AuditResult[];
+  const step = batchFiles.length > 0
+    ? await runAuditStep({
+        root: options.root,
+        artifactsDir: options.artifactsDir,
+        preferredExecutor: "result_ingestion_executor",
+        auditResultsData,
+      })
+    : null;
 
   const bundle =
-    lastStep?.updated_bundle ??
+    step?.updated_bundle ??
     (await loadArtifactBundle(options.artifactsDir));
   const state = deriveAuditState(bundle);
   const decision = decideNextStep(bundle);
@@ -471,15 +287,15 @@ export async function ingestBatchAuditResults(options: {
     bundle,
     audit_state: state,
     selected_obligation:
-      lastStep?.selected_obligation ?? decision.selected_obligation,
+      step?.selected_obligation ?? decision.selected_obligation,
     selected_executor:
-      lastStep?.selected_executor ?? "result_ingestion_executor",
-    progress_made: anyProgress,
-    artifacts_written: Array.from(artifactsWritten),
+      step?.selected_executor ?? "result_ingestion_executor",
+    progress_made: step?.progress_made ?? false,
+    artifacts_written: step?.artifacts_written ?? [],
     progress_summary:
       `Imported ${batchFiles.length} batch result file${batchFiles.length === 1 ? "" : "s"} from ${options.batchDir}.` +
-      (progressSummaries.length > 0
-        ? `\n${progressSummaries.join("\n")}`
+      (step
+        ? `\n${batchFiles.map((file) => basename(file)).join(", ")}: ${step.progress_summary}`
         : ""),
     next_likely_step:
       state.status === "complete" ? null : decision.selected_obligation,

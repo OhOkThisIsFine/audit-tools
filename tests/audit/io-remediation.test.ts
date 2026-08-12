@@ -29,13 +29,12 @@ import {
 import { buildToolingManifest } from "../../src/audit/io/toolingManifest.js";
 import {
   buildRunId,
-  clearDispatchFiles,
   ensureSupervisorDirs,
   getRunPaths,
-  writeWorkerTaskFiles,
+  writeReviewRunFiles,
 } from "../../src/audit/io/runArtifacts.js";
+import type { ActiveReviewRun } from "../../src/audit/supervisor/operatorHandoff.js";
 import type { ToolingManifest } from "../../src/audit/types/toolingManifest.js";
-import type { WorkerTask } from "../../src/audit/types/workerSession.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
 import { withTempDir } from "./helpers/withTempDir.mjs";
@@ -245,7 +244,7 @@ test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e
   });
 });
 
-test("run artifact helpers produce parseable run ids and clean only dispatch files", async () => {
+test("run artifact helpers persist only provider-neutral review identity and canonical pending tasks", async () => {
   await withTempDir("audit-code-run-artifacts-", async (tempDir: string) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
     const fixedNow = new Date("2026-04-22T15:16:17.089Z");
@@ -257,21 +256,24 @@ test("run artifact helpers produce parseable run ids and clean only dispatch fil
 
     await ensureSupervisorDirs(artifactsDir);
 
-    const task: WorkerTask = {
-      contract_version: "audit-code-worker/v1alpha1",
+    const run: ActiveReviewRun = {
+      contract_version: "audit-review-run/v1alpha1",
       run_id: runId,
-      repo_root: "C:\\repo",
-      artifacts_dir: artifactsDir,
-      obligation_id: "flow:auth/entry",
-      preferred_executor: "agent",
-      result_path: paths.resultPath,
-      worker_command: ["node", "dist/index.js", "worker-run"],
-      audit_results_path: join(paths.runDir, "run-results.json"),
-      worker_command_mode: "deferred",
-      timeout_ms: 5000,
-      max_retries: 1,
+      review_run_path: paths.reviewRunPath,
+      pending_audit_tasks_path: paths.pendingTasksPath,
+      host_workload_path: paths.hostWorkloadPath,
+      host_result_map_path: paths.hostResultMapPath,
     };
     const pendingTasks: AuditTask[] = [
+      {
+        task_id: "audit-2",
+        unit_id: "unit-2",
+        pass_id: "pass-2",
+        lens: "correctness",
+        file_paths: ["src/z.ts", "src/other.ts"],
+        file_line_counts: { "src/z.ts": 5, "src/other.ts": 8 },
+        rationale: "second fixture",
+      },
       {
         task_id: "audit-1",
         unit_id: "unit-1",
@@ -281,92 +283,47 @@ test("run artifact helpers produce parseable run ids and clean only dispatch fil
         file_line_counts: { "src/index.ts": 12 },
         rationale: "fixture",
       },
-      {
-        task_id: "audit-2",
-        unit_id: "unit-2",
-        pass_id: "pass-2",
-        lens: "correctness",
-        file_paths: ["src/other.ts"],
-        file_line_counts: { "src/other.ts": 8 },
-        rationale: "second fixture",
-      },
     ];
 
-    await writeWorkerTaskFiles(
-      task,
-      "# Prompt\n",
-      paths,
-      artifactsDir,
-      pendingTasks,
-    );
+    await writeReviewRunFiles(artifactsDir, run, pendingTasks);
 
-    expect(JSON.parse(await readFile(paths.taskPath, "utf8"))).toEqual(task);
-    expect(await readFile(paths.promptPath, "utf8")).toBe("# Prompt\n");
-    expect(JSON.parse(await readFile(paths.statusPath, "utf8"))).toEqual({ run_id: runId, status: "dispatched" });
+    expect(JSON.parse(await readFile(paths.reviewRunPath, "utf8"))).toEqual(run);
     expect(JSON.parse(
-        await readFile(join(artifactsDir, "dispatch", "current-tasks.json"), "utf8"),
-      )).toEqual(pendingTasks);
+      await readFile(join(artifactsDir, "dispatch", "current-review-run.json"), "utf8"),
+    )).toEqual(run);
+
+    const canonicalTasks = [
+      pendingTasks[1],
+      {
+        ...pendingTasks[0],
+        file_paths: ["src/other.ts", "src/z.ts"],
+      },
+    ];
+    expect(JSON.parse(await readFile(paths.pendingTasksPath, "utf8"))).toEqual(canonicalTasks);
     expect(JSON.parse(
-        await readFile(join(artifactsDir, "dispatch", "current-single-task.json"), "utf8"),
-      )).toEqual(pendingTasks[0]);
-    const singleTaskPrompt = await readFile(
-      join(artifactsDir, "dispatch", "current-single-task-prompt.md"),
-      "utf8",
-    );
-    expect(singleTaskPrompt).toMatch(/task_id: audit-1/);
-    expect(singleTaskPrompt).toMatch(/worker_command:/);
-    expect(singleTaskPrompt).not.toMatch(/audit-2/);
-    expect((await readFile(join(artifactsDir, "dispatch", "audit-result.schema.json"), "utf8")).includes(
-        "\"$schema\"",
-      )).toBeTruthy();
-    expect((await readFile(join(artifactsDir, "dispatch", "audit-results.schema.json"), "utf8")).includes(
-        "\"Audit Results\"",
-      )).toBeTruthy();
-    expect((await readFile(join(artifactsDir, "dispatch", "finding.schema.json"), "utf8")).includes(
-        "\"Audit Finding\"",
-      )).toBeTruthy();
+      await readFile(join(artifactsDir, "dispatch", "current-tasks.json"), "utf8"),
+    )).toEqual(canonicalTasks);
 
-    await clearDispatchFiles(artifactsDir);
-
-    expect(existsSync(join(artifactsDir, "dispatch", "current-task.json"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "current-prompt.md"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "current-tasks.json"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "current-single-task.json"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "current-single-task-prompt.md"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "audit-result.schema.json"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "audit-results.schema.json"))).toBe(false);
-    expect(existsSync(join(artifactsDir, "dispatch", "finding.schema.json"))).toBe(false);
-    expect(existsSync(paths.taskPath)).toBe(true);
-    expect(existsSync(paths.promptPath)).toBe(true);
-    expect(existsSync(paths.statusPath)).toBe(true);
+    expect(Object.keys(run).sort()).toEqual([
+      "contract_version",
+      "host_result_map_path",
+      "host_workload_path",
+      "pending_audit_tasks_path",
+      "review_run_path",
+      "run_id",
+    ]);
+    expect(existsSync(paths.hostWorkloadPath)).toBe(false);
+    expect(existsSync(paths.hostResultMapPath)).toBe(false);
   });
 });
 
-test("clearDispatchFiles is a no-op when the dispatch directory does not exist", async () => {
-  await withTempDir("audit-code-clear-dispatch-missing-", async (tempDir: string) => {
-    const artifactsDir = join(tempDir, ".audit-tools/audit");
-
-    await mkdir(artifactsDir, { recursive: true });
-    expect(existsSync(join(artifactsDir, "dispatch")), "dispatch directory should not exist before clearDispatchFiles").toBe(false);
-
-    // clearDispatchFiles must resolve without throwing even though dispatch/ is absent.
-    await assert.doesNotReject(
-      clearDispatchFiles(artifactsDir),
-      "clearDispatchFiles must not throw when dispatch directory does not exist",
-    );
-
-    // The directory must not be created as a side-effect.
-    expect(existsSync(join(artifactsDir, "dispatch")), "clearDispatchFiles must not create the dispatch directory").toBe(false);
-  });
-});
-
-test("io/artifacts has no import from cli/dispatch (ARC-13a4083a)", async () => {
+test("io/artifacts remains independent from cli dispatch", async () => {
   const { readFile: readFileFs } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
   const { dirname, join: pathJoin } = await import("node:path");
   const __dir = dirname(fileURLToPath(import.meta.url));
   const src = await readFileFs(pathJoin(__dir, "../../src/audit/io/artifacts.ts"), "utf8");
-  expect(!src.includes("../cli/dispatch"), "io/artifacts.ts must not import from ../cli/dispatch (circular dependency); use ../types/activeDispatch instead").toBeTruthy();
+  expect(!src.includes("../cli/dispatch"), "io/artifacts.ts must not import from ../cli/dispatch").toBeTruthy();
 });
 
 test("readPackageVersion logs to stderr on JSON parse error and returns null (OBS-9335faf6)", async () => {
@@ -443,30 +400,6 @@ test("ARTIFACT_DEFINITIONS each have a non-null phase field from the 5 valid aud
   for (const phase of validPhases) {
     expect(presentPhases.has(phase), `phase '${phase}' has no artifact definitions`).toBeTruthy();
   }
-});
-
-test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState after ARC-13a4083a refactor", async () => {
-  const { loadArtifactBundle: load } = await import("../../src/audit/io/artifacts.js");
-  await withTempDir("arc-13a4083a-", async (dir: string) => {
-    // No active-dispatch.json → active_dispatch should be absent
-    const bundle = await load(dir);
-    expect(!("active_dispatch" in bundle), "active_dispatch absent when file missing").toBeTruthy();
-
-    // With a valid active-dispatch.json, the field should be populated
-    const { writeFile: wf } = await import("node:fs/promises");
-    const activeDispatch = {
-      run_id: "test-run",
-      created_at: new Date().toISOString(),
-      packet_count: 1,
-      task_count: 1,
-      status: "active",
-    };
-    await wf(join(dir, "active-dispatch.json"), JSON.stringify(activeDispatch));
-    const bundle2 = await load(dir);
-    expect("active_dispatch" in bundle2, "active_dispatch populated when file present").toBeTruthy();
-    expect(bundle2.active_dispatch?.run_id).toBe("test-run");
-    expect(bundle2.active_dispatch?.status).toBe("active");
-  });
 });
 
 test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched intent_checkpoint schema_version (ARC-dd468422)", async () => {

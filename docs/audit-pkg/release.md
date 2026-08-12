@@ -69,25 +69,14 @@ temp `$HOME` and re-runs each host's own `verify()` handler from the same
 publish.
 
 This checklist covers only what CI **cannot** reach: actually invoking
-`/audit-code` inside a GUI host and confirming a real dispatch round-trips. A GUI
+`/audit-code` inside a GUI host and confirming a host handoff round-trips. A GUI
 host can change its asset format or command-rendering out from under us; the
 no-drift guard does not see that, so a human runs these rows at release. A failed
 row becomes a backlog item.
 
-Codex and `agy` are headless CLIs, so they are correctly absent from the GUI-host
-table below. The `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix live e2e (and
-its `runInProcessAuditDispatch` driver) was **retired with the dispatch
-inversion**: the attended host owns concrete provider/model routing now, so
-audit-tools no longer selects or instantiates those backends for host review and
-the per-backend live round-trip it exercised is no longer this package's seam.
-
-Coverage gap, stated so it is not mistaken for coverage: **no headless backend has
-live-dispatch e2e coverage** — worker-side dispatch through a configured source
-(openai-compatible / codex / agy / `claude-worker`) is verified by unit tests over
-local stubs only (e.g. `tests/shared/claude-worker-provider.test.ts` is a
-local-mock-HTTP-server unit test of transport/argv/env, and
-`tests/remediate/hybrid-decision-point-pools.test.ts` drives a local stub
-endpoint), never by a gate against a live backend.
+Concrete semantic execution is outside the package boundary, so release
+validation covers workload emission and result ingestion rather than a matrix
+of execution backends.
 
 ### How to run a row
 
@@ -98,8 +87,9 @@ For each GUI host below:
    repository in the host.
 2. **Command appears** — confirm the host registers/offers `/audit-code` (slash
    command, skill, or agent, per the host's setup kind).
-3. **One live dispatch** — invoke `/audit-code` and let it run one bounded audit
-   step (a single `audit-code next-step` round-trip).
+3. **One live handoff** — invoke `/audit-code` and let it run one bounded audit
+   step (a single `audit-code next-step` round-trip). If semantic work is
+   reached, complete one emitted host work item.
 4. **Result lands** — confirm the step's result artifact is written under
    `.audit-tools/audit/` (e.g. `steps/current-step.json` advances and the
    expected artifact for that step appears).
@@ -110,7 +100,7 @@ They are a timeless template, like `docs/end-of-sprint-report-template.md`.
 
 ### Checklist (one row per GUI host)
 
-| Host | Surface deployed | 1. Install + open | 2. `/audit-code` visible | 3. One live dispatch | 4. Result lands under `.audit-tools/audit/` |
+| Host | Surface deployed | 1. Install + open | 2. `/audit-code` visible | 3. One live handoff | 4. Result lands under `.audit-tools/audit/` |
 |---|---|---|---|---|---|
 | Antigravity | `.agent/skills/audit-code/SKILL.md` skill, `.gemini/commands/audit-code.toml` slash command, planning guide, AGENTS instructions | ☐ | ☐ | ☐ | ☐ |
 | OpenCode | global `/audit-code` command (npm-installed) + generated `opencode.json` project permissions | ☐ | ☐ | ☐ | ☐ |
@@ -128,10 +118,9 @@ the audit gate: it deploys every remediate host surface into an isolated temp
 `$HOME` and re-runs each host's `verify()` handler from the same
 `INSTALL_HOST_DEFINITIONS` table. As with audit, that gate catches *our* drift but
 cannot invoke `/remediate-code` inside a live GUI host — a human runs the rows
-below at release, same GUI-host set. Codex / `agy` are headless CLIs and are
-automated the same way (correctly absent from this table).
+below at release, using the same GUI-host set.
 
-| Host | Surface deployed | 1. Install + open | 2. `/remediate-code` visible | 3. One live dispatch | 4. Result lands under `.audit-tools/remediation/` |
+| Host | Surface deployed | 1. Install + open | 2. `/remediate-code` visible | 3. One live handoff | 4. Result lands under `.audit-tools/remediation/` |
 |---|---|---|---|---|---|
 | Antigravity | `.agent/skills/remediate-code/SKILL.md` skill, `.gemini/commands/remediate-code.toml` slash command, planning guide, AGENTS instructions | ☐ | ☐ | ☐ | ☐ |
 | OpenCode | global `/remediate-code` command (npm-installed) + generated `opencode.json` project permissions | ☐ | ☐ | ☐ | ☐ |

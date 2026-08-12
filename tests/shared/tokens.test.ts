@@ -1,7 +1,6 @@
 import { test, expect } from "vitest";
 import {
   estimateTokensFromBytes,
-  resolveContextBudget,
   BYTES_PER_TOKEN,
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
@@ -43,25 +42,4 @@ test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite"
   }
   expect(estimateTokensFromBytes(BYTES_PER_TOKEN)).toBe(1);
   expect(estimateTokensFromBytes(BYTES_PER_TOKEN * 10)).toBe(10);
-});
-
-test("resolveContextBudget requires a real context window and output reservation", () => {
-  const explicit = resolveContextBudget({
-    contextTokens: 100_000,
-    reservedOutputTokens: 4_000,
-    safetyMargin: 0.5,
-  });
-  expect(explicit).toBe(Math.floor((100_000 - 4_000) * 0.5));
-
-  expect(resolveContextBudget({})).toBeNull();
-  expect(resolveContextBudget({ contextTokens: 100_000 })).toBeNull();
-  expect(resolveContextBudget({ reservedOutputTokens: 4_000 })).toBeNull();
-});
-
-test("resolveContextBudget floors at 0 — a reserved output ≥ context never goes negative", () => {
-  // A malformed/degenerate window (output meets or exceeds context) yields no
-  // usable input budget; the pool fails CLOSED (0) rather than propagating a
-  // negative budget. Guards the remediate path where no config validator runs.
-  expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 8_000 })).toBe(0);
-  expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 4_000 })).toBe(0);
 });

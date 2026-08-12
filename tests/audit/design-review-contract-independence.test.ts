@@ -36,10 +36,6 @@ interface DesignReviewStep {
   };
 }
 
-// Post-G2 the backend provider identity rides the per-invocation --auditor
-// descriptor rather than the persisted session-config.json.
-const AUDITOR_ARG = JSON.stringify({ self: { provider: "worker-command" } });
-
 /** OS-agnostic tail match — the step contract forward-slashes host-facing paths. */
 function endsWithPath(candidate: string, tail: string): boolean {
   return String(candidate).replace(/\\/g, "/").endsWith(tail);
@@ -78,7 +74,7 @@ async function persistDesignReviewState(
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, bundle);
   await writeFile(
-    join(artifactsDir, "session-config.json"),
+    join(artifactsDir, "analyzer-policy.json"),
     JSON.stringify(
       {
         analyzers: {
@@ -106,7 +102,7 @@ test(
       await writeFixtureRepo(root);
       await persistDesignReviewState(root, artifactsDir, { conceptualDone: true });
 
-      await cmdNextStep(["--root", root, "--auditor", AUDITOR_ARG]);
+      await cmdNextStep(["--root", root]);
       const step: DesignReviewStep = JSON.parse(
         await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
       );
@@ -169,7 +165,7 @@ test(
       await writeFixtureRepo(root);
       await persistDesignReviewState(root, artifactsDir, { conceptualDone: false });
 
-      await cmdNextStep(["--root", root, "--auditor", AUDITOR_ARG]);
+      await cmdNextStep(["--root", root]);
       const step: DesignReviewStep = JSON.parse(
         await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
       );

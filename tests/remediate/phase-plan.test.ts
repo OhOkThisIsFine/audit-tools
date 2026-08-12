@@ -486,7 +486,7 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     expect(dependent?.dependencies).toContain("B-001");
   });
 
-  it("normalizeExtractedPlan path: splitBlocksByContextBudget splits an oversized block (MNT-1905694f)", async () => {
+  it("normalizeExtractedPlan path: preserves coherence and reports size without backend fitting", async () => {
     // Two large files, one per finding. The findings must touch DIFFERENT files
     // so groupFindingsByFileOverlap puts them in separate file-overlap groups —
     // the splitter only divides a block at group boundaries, never within a group
@@ -497,7 +497,7 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     await writeFile(join(PIPELINE_TEST_DIR, bigFileA), bigContent, "utf8");
     await writeFile(join(PIPELINE_TEST_DIR, bigFileB), bigContent, "utf8");
 
-    // Write a small session-config.json to force a tiny context budget.
+    // A retired backend-sizing config must not reshape canonical membership.
     const sessionConfig = {
       block_quota: { context_tokens: 100, reserved_output_tokens: 10 },
     };
@@ -523,12 +523,10 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
 
     const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
 
-    // With an absurdly tiny budget, the single block must be split into multiple.
-    expect(result.blocks.length).toBeGreaterThan(1);
-    // Sub-blocks should follow the '<original>-NN' suffix pattern.
-    for (const block of result.blocks) {
-      expect(block.block_id).toMatch(/^B-001-\d+$/);
-    }
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]?.block_id).toBe("B-001");
+    expect(result.blocks[0]?.items).toEqual(["F-A", "F-B"]);
+    expect(result.blocks[0]?.token_estimate).toBeGreaterThan(100);
   });
 
   it("normalizeExtractedPlan path: snapshotAffectedFileHashes records baseline so integrity is clean (MNT-1905694f)", async () => {

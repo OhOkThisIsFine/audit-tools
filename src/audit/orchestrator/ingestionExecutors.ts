@@ -30,6 +30,11 @@ import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import { buildSelectiveDeepeningTasks } from "./selectiveDeepening.js";
 import type { ExecutorRunResult } from "./executorResult.js";
+import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
+import {
+  canonicalizeAuditTasks,
+  compareCodeUnits,
+} from "../../shared/affinityArtifacts.js";
 
 function lineIndexFromTasks(tasks: AuditTask[] | undefined): Record<string, number> {
   return Object.fromEntries(
@@ -62,11 +67,17 @@ function appendSelectiveDeepeningTasks(params: {
     return { bundle: params.bundle, taskCount: 0, artifacts: [] };
   }
 
-  const auditTasks = [...params.bundle.audit_tasks, ...selectiveDeepeningTasks];
+  const auditTasks = canonicalizeAuditTasks([
+    ...params.bundle.audit_tasks,
+    ...selectiveDeepeningTasks,
+  ]);
   return {
     bundle: {
       ...params.bundle,
       audit_tasks: auditTasks,
+      task_affinity_graph: buildTaskAffinityGraph(auditTasks, {
+        graphBundle: params.bundle.graph_bundle,
+      }),
       audit_plan_metrics: buildAuditPlanMetrics(auditTasks, {
         graphBundle: params.bundle.graph_bundle,
         lineIndex,
@@ -74,7 +85,11 @@ function appendSelectiveDeepeningTasks(params: {
       }),
     },
     taskCount: selectiveDeepeningTasks.length,
-    artifacts: ["audit_tasks.json", "audit_plan_metrics.json"],
+    artifacts: [
+      "audit_tasks.json",
+      "audit_plan_metrics.json",
+      "task_affinity_graph.json",
+    ],
   };
 }
 
@@ -149,8 +164,9 @@ export function runResultIngestionExecutor(
   // `redispatch` attempt so it carries a DISTINCT idempotency_key — otherwise the
   // append below would no-op on the signature-stable base key and silently drop
   // the fresh findings.
+  const canonicalLiveTasks = canonicalizeAuditTasks(bundle.audit_tasks ?? []);
   const liveTasksByTaskId = new Map(
-    (bundle.audit_tasks ?? []).map((task) => [task.task_id, task]),
+    canonicalLiveTasks.map((task) => [task.task_id, task]),
   );
   const ingestedResults = rekeyDriftedResults(
     results,
@@ -163,10 +179,11 @@ export function runResultIngestionExecutor(
   // coordinate (base vs. deepening/steward/redispatch) all persist. Never a naive
   // concat.
   const mergedResults = appendResultsToLedger(bundle.audit_results, ingestedResults);
-  const completedAuditTasks = updateAuditTaskStatuses(
-    bundle.audit_tasks,
-    mergedResults,
-  );
+  const completedAuditTasks = bundle.audit_tasks
+    ? canonicalizeAuditTasks(
+        updateAuditTaskStatuses(canonicalLiveTasks, mergedResults) ?? [],
+      )
+    : undefined;
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
     coverage_matrix: updatedCoverageMatrix,
@@ -175,13 +192,18 @@ export function runResultIngestionExecutor(
     runtime_validation_report: runtimeValidationReport,
     audit_results: mergedResults,
     audit_tasks: completedAuditTasks,
+    task_affinity_graph: completedAuditTasks
+      ? buildTaskAffinityGraph(completedAuditTasks, {
+          graphBundle: bundle.graph_bundle,
+        })
+      : bundle.task_affinity_graph,
     audit_report: undefined,
   };
   const selectiveDeepening = applySelectiveDeepening({
     baseBundle: baseUpdatedBundle,
     results: mergedResults,
     runtimeValidationReport,
-    excludeArtifacts: ["audit_tasks.json"],
+    excludeArtifacts: ["audit_tasks.json", "task_affinity_graph.json"],
   });
   const requeuePayload = buildRequeuePayload(
     updatedCoverageMatrix,
@@ -209,7 +231,10 @@ export function runResultIngestionExecutor(
           .map((p) => [p, lineIndex[p]]),
       ),
     }));
-  const allDispatchTasks = [...deepenedTasks, ...pendingRequeueTasks];
+  const allReviewTasks = canonicalizeAuditTasks([
+    ...deepenedTasks,
+    ...pendingRequeueTasks,
+  ]);
   // Record half of the staleness gate: refresh the per-result content-key
   // baselines for the just-ingested results (under their CURRENT, possibly
   // re-keyed, lineage) against live task content. A re-dispatched result thus
@@ -232,6 +257,10 @@ export function runResultIngestionExecutor(
   const accessMemory = deriveAccessMemory(mergedResults);
   const finalBundle: ArtifactBundle = {
     ...selectiveDeepening.bundle,
+    audit_tasks: allReviewTasks,
+    task_affinity_graph: buildTaskAffinityGraph(allReviewTasks, {
+      graphBundle: selectiveDeepening.bundle.graph_bundle,
+    }),
     requeue_tasks: requeuePayload.tasks,
     access_memory: accessMemory,
     ...(priorMetadata
@@ -242,7 +271,7 @@ export function runResultIngestionExecutor(
           },
         }
       : {}),
-    audit_plan_metrics: buildAuditPlanMetrics(allDispatchTasks, {
+    audit_plan_metrics: buildAuditPlanMetrics(allReviewTasks, {
       graphBundle: selectiveDeepening.bundle.graph_bundle,
       lineIndex,
       sizeIndex,
@@ -259,6 +288,7 @@ export function runResultIngestionExecutor(
       "audit_results.jsonl",
       "audit_tasks.json",
       "audit_plan_metrics.json",
+      "task_affinity_graph.json",
       "requeue_tasks.json",
       "access_memory.json",
     ],
@@ -322,7 +352,9 @@ export async function runRuntimeValidationExecutor(
   }
 
   const runtimeValidationReport: RuntimeValidationReport = {
-    results: [...byTaskId.values()].sort((a, b) => a.task_id.localeCompare(b.task_id)),
+    results: [...byTaskId.values()].sort((a, b) =>
+      compareCodeUnits(a.task_id, b.task_id),
+    ),
   };
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
@@ -403,6 +435,7 @@ export function runExternalAnalyzerImportExecutor(
       runtime_validation_tasks: undefined,
       runtime_validation_report: undefined,
       audit_tasks: undefined,
+      task_affinity_graph: undefined,
       audit_plan_metrics: undefined,
       requeue_tasks: undefined,
       audit_report: undefined,

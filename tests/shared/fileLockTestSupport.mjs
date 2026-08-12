@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-export { STALE_LOCK_MS } from "../../src/shared/quota/fileLock.ts";
+export { STALE_LOCK_MS } from "../../src/shared/io/fileLock.ts";
 
 /**
  * Controllable monotonic clock matching the fileLock {@link Clock} seam:

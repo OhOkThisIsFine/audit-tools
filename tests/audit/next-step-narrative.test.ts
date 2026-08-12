@@ -38,23 +38,6 @@ interface FrictionRecord {
   category_attestations?: Array<{ category: string; note: string }>;
 }
 
-// Post-G2 the backend provider identity rides the per-invocation --auditor
-// descriptor rather than the persisted session-config.json (which now rejects it).
-const AUDITOR_ARGS = [
-  "--auditor",
-  JSON.stringify({
-    self: {
-      provider: "worker-command",
-      context_tokens: 200_000,
-      output_tokens: 8_000,
-    },
-  }),
-];
-const TEST_WORK_PARTITION = {
-  capacityTokens: 192_000,
-  availableParallelism: null,
-};
-
 /** Drive the deterministic pipeline in-process up to (and including) synthesis,
  * leaving synthesis_narrative_current as the only outstanding obligation, and
  * persist the resulting bundle so the next-step CLI resumes from that state. */
@@ -69,7 +52,6 @@ async function persistSynthesisReadyState(
   });
   const synthesis = await advanceAudit(ingest.updated_bundle, {
     preferredExecutor: "synthesis_executor",
-    workPartition: TEST_WORK_PARTITION,
   });
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, synthesis.updated_bundle);
@@ -119,15 +101,11 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     // This fixture has no local `typescript`; skip the optional analyzer so the
     // resume does not pause on the graph-enrichment install prompt.
     await writeFile(
-      join(artifactsDir, "session-config.json"),
+      join(artifactsDir, "analyzer-policy.json"),
       JSON.stringify(
         {
           analyzers: { typescript: "skip" },
           analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
-          block_quota: {
-            context_tokens: 200_000,
-            reserved_output_tokens: 8_000,
-          },
         },
         null,
         2,
@@ -135,7 +113,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     );
 
     // First next-step lands on the narrative pause.
-    const paused: WrapperStep = JSON.parse((await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout);
+    const paused: WrapperStep = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
     expect(paused.step_kind).toBe("synthesis_narrative");
     expect(paused.status).toBe("ready");
     if (!paused.artifact_paths) {
@@ -197,7 +175,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
 
     // Second next-step ingests the narrative; subsequent calls clear the
     // friction-triage pause and complete.
-    const done = await nextStepToComplete(root, AUDITOR_ARGS);
+    const done = await nextStepToComplete(root);
     expect(done.step_kind).toBe("present_report");
     expect(done.status).toBe("complete");
 
@@ -219,45 +197,6 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
     expect(report).toMatch(/## Themes/);
     expect(report).toMatch(/### T-1 — Authentication observability gaps/);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test.concurrent("next-step omits the narrative when synthesis.narrative is disabled", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-off-"));
-  const root = join(tempDir, "repo");
-  const artifactsDir = join(root, ".audit-tools/audit");
-  try {
-    await writeFixtureRepo(root);
-    await persistSynthesisReadyState(root, artifactsDir);
-    await writeFile(
-      join(artifactsDir, "session-config.json"),
-      JSON.stringify(
-        {
-          synthesis: { narrative: false },
-          analyzers: { typescript: "skip" },
-          analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
-          block_quota: {
-            context_tokens: 200_000,
-            reserved_output_tokens: 8_000,
-          },
-        },
-        null,
-        2,
-      ) + "\n",
-    );
-
-    const done = await nextStepToComplete(root, AUDITOR_ARGS);
-    expect(done.step_kind).toBe("present_report");
-    expect(done.status).toBe("complete");
-
-    const findings: FindingDocument = JSON.parse(
-      await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"),
-    );
-    expect(findings.themes).toBe(undefined);
-    const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
-    expect(report).not.toMatch(/## Themes/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

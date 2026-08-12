@@ -50,6 +50,14 @@ const ALLOWLIST = new Map<string, string>([
       "different tree than the per-repo artifact root this guard protects",
   ],
   [
+    "src/shared/analyzerPolicy.ts",
+    "canonical analyzer-policy artifact and lock relative-path definitions",
+  ],
+  [
+    "src/shared/sessionConfig.ts",
+    "canonical repository session-intent relative-path definition",
+  ],
+  [
     "src/audit/extractors/fsIntake.ts",
     "intake exclusion dirname list — matches/skips directory NAMES during repo " +
       "walk, does not construct artifact paths",
@@ -75,18 +83,6 @@ const ALLOWLIST = new Map<string, string>([
     "src/remediate/index.ts",
     "commander default SENTINEL '.audit-tools/remediation' — equality-compared " +
       "then routed through the shared helper, not joined",
-  ],
-  [
-    "src/audit/providers/index.ts",
-    "descriptor's repo-relative session-config path, quoted in the " +
-      "nested-session guard MESSAGE shown to the host — display text, not " +
-      "path construction",
-  ],
-  [
-    "src/remediate/providers/index.ts",
-    "descriptor's repo-relative session-config path, quoted in the " +
-      "nested-session guard MESSAGE shown to the host — display text, not " +
-      "path construction",
   ],
   [
     "wrapper/audit-code-wrapper-lib.mjs",

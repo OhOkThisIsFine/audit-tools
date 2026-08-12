@@ -117,11 +117,12 @@ export const DOC_MANIFEST = [
     type: "handoff (sequencing view)",
     files: ["docs/HANDOFF.md"],
     check:
-      "The ordered roadmap of everything open + current state (sanctioned per the philosophy's HANDOFF row): " +
-      "each open item appears once, in suggested order, with a pointer to its `backlog.md` detail. Flag " +
-      "**changelog creep** (narrated already-shipped work) and **per-item specs duplicated from `backlog.md`**; " +
-      "verify each item vs code; a done item → clear it, with proof. NOT immediate-next-only.",
-    autoApply: "yes",
+      "Current published state + immediate next only (sanctioned per the philosophy's HANDOFF row). " +
+      "The roadmap block is generated from `▶`-pinned backlog entries; the live nightly block is generated " +
+      "from the persisted queue + decision ledger and must render no visible nightly text when the queue is empty. " +
+      "Never hand-edit either generated block. Flag **changelog creep** and per-item specs duplicated from their " +
+      "authoritative backlog/queue source; verify hand-written current state against code and clear stale state with proof.",
+    autoApply: "hand-written state → yes; generated blocks → generator only",
   },
   {
     type: "design / concept (`spec/`)",
@@ -246,8 +247,8 @@ export const DOC_MANIFEST = [
     type: "package READMEs (non-`docs/`)",
     files: ["src/audit/README.md", "src/audit/adapters/README.md", "examples/README.md"],
     check:
-      "Claims vs code; do documented commands/paths/providers still resolve (e.g. the provider list must " +
-      "match `PROVIDER_NAMES`).",
+      "Claims vs code; do documented commands, paths, provider-neutral host-workload contracts, and result-ingestion " +
+      "boundaries still resolve. These docs must not reintroduce a provider registry, execution adapter, or quota surface.",
     autoApply: "factual-stale → yes",
   },
 ];

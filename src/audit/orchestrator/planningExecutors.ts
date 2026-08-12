@@ -36,6 +36,7 @@ import {
 import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AuditTask, Lens } from "../types.js";
+import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
@@ -262,8 +263,8 @@ export async function runPlanningExecutor(
     flowCoverage,
     externalAnalyzerResults,
   );
-  // Fold pending requeue tasks into the dispatch task list so mandatory coverage
-  // gaps produce actual dispatch packets. Dedupe is COVERAGE-based
+  // Fold pending requeue tasks into the review set so mandatory coverage gaps
+  // produce host work items. Dedupe is COVERAGE-based
   // (`selectUncoveredRequeueTasks`): a requeue task whose (path × lens) an
   // existing audit task already covers is a duplicate of planned work (the fresh
   // -plan requeue payload mirrors the whole pending set under different ids), so
@@ -283,11 +284,9 @@ export async function runPlanningExecutor(
         .map((p) => [p, lineIndex[p]]),
     ),
   }));
-  // Freeze provider-neutral estimates on every dispatch task: a byte-based
-  // token estimate and a deterministic risk seed. These persist on the task and
-  // become the authoritative inputs to just-in-time dispatch packetization /
-  // routing (the estimate-review step may later refine them). See
-  // spec/audit-workflow-design.md.
+  // Freeze local estimates on every review task: a byte-based token estimate and
+  // a deterministic risk seed. These persist as descriptive host-workload
+  // metadata; the estimate-review step may later refine them.
   const freezeEstimates = (task: AuditTask): AuditTask => ({
     ...task,
     token_estimate:
@@ -296,18 +295,17 @@ export async function runPlanningExecutor(
     risk_estimate: task.risk_estimate ?? computeRiskEstimate(task),
   });
   const enrichedAuditTasks = taggedAuditTasks.map(freezeEstimates);
-  const allDispatchTasks = [
+  const allReviewTasks = canonicalizeAuditTasks([
     ...enrichedAuditTasks,
     ...pendingRequeueTasks.map(freezeEstimates),
-  ];
+  ]);
 
-  // Provider-neutral task-affinity graph (Phase A of the plan/dispatch seam):
-  // frozen task nodes + soft weighted affinity edges. Dispatch partitions this
-  // just-in-time; see spec/audit-workflow-design.md.
-  const taskAffinityGraph = buildTaskAffinityGraph(allDispatchTasks, {
+  // Persist frozen task nodes and their soft affinity edges; the host workload
+  // later projects canonical coherence groups from this graph.
+  const taskAffinityGraph = buildTaskAffinityGraph(allReviewTasks, {
     graphBundle: bundle.graph_bundle,
   });
-  const auditPlanMetrics = buildAuditPlanMetrics(allDispatchTasks, {
+  const auditPlanMetrics = buildAuditPlanMetrics(allReviewTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex: resolvedSizeIndex,
@@ -326,12 +324,11 @@ export async function runPlanningExecutor(
       flow_coverage: flowCoverage,
       runtime_validation_tasks: runtimeValidationTasks,
       runtime_validation_report: runtimeValidationReport,
-      // INV-PLAN-PERSIST-COMPLETE: the PERSISTED dispatch set is the whole
-      // merged list — dispatch derives its pending set from audit_tasks
-      // (buildPendingAuditTasks), so an unpersisted merged task would be a
-      // phantom the affinity graph / metrics describe but no packet ever
-      // reviews. Estimates on every entry are frozen (INV-PLAN-FROZEN-ESTIMATES).
-      audit_tasks: allDispatchTasks,
+      // INV-PLAN-PERSIST-COMPLETE: the persisted review set is the whole merged
+      // list. An omitted task would be a phantom described by the affinity graph
+      // and metrics but absent from the emitted workload. Estimates on every
+      // entry are frozen (INV-PLAN-FROZEN-ESTIMATES).
+      audit_tasks: allReviewTasks,
       audit_plan_metrics: auditPlanMetrics,
       task_affinity_graph: taskAffinityGraph,
       requeue_tasks: requeuePayload.tasks,
@@ -353,7 +350,7 @@ export async function runPlanningExecutor(
       "requeue_tasks.json",
     ],
     progress_summary:
-      `Built planning artifacts; generated ${taggedAuditTasks.length} review tasks (packets partition just-in-time at dispatch) and ${requeuePayload.task_count} requeue tasks.` +
+      `Built planning artifacts; generated ${taggedAuditTasks.length} review tasks and ${requeuePayload.task_count} requeue tasks.` +
       scopeSummary +
       (skippedTrivialPaths.length > 0
         ? ` Skipped ${skippedTrivialPaths.length} trivial path${skippedTrivialPaths.length === 1 ? "" : "s"} from semantic review.`

@@ -46,25 +46,38 @@ const OPENCODE_REMEDIATE_BASH_PERMISSION = {
   "remediate-code": "allow",
   "remediate-code ensure*": "allow",
   "remediate-code next-step*": "allow",
-  "remediate-code prepare-document-dispatch*": "allow",
-  "remediate-code merge-document-results*": "allow",
-  "remediate-code prepare-implement-dispatch*": "allow",
-  "remediate-code merge-implement-results*": "allow",
-  "remediate-code validate-artifacts*": "allow",
+  "remediate-code validate*": "allow",
   "*remediate-code.mjs": "allow",
   "*remediate-code.mjs* ensure*": "allow",
   "*remediate-code.mjs* next-step*": "allow",
-  "*remediate-code.mjs* prepare-document-dispatch*": "allow",
-  "*remediate-code.mjs* merge-document-results*": "allow",
-  "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
-  "*remediate-code.mjs* merge-implement-results*": "allow",
-  "*remediate-code.mjs* validate-artifacts*": "allow",
+  "*remediate-code.mjs* validate*": "allow",
   "git status*": "allow",
   "git diff*": "allow",
   "grep *": "allow",
   "Select-String *": "allow",
   "rm *": "deny",
 };
+
+const RETIRED_REMEDIATE_CODE_BASH_RULES = [
+  "remediate-code prepare-document-dispatch*",
+  "remediate-code merge-document-results*",
+  "remediate-code prepare-implement-dispatch*",
+  "remediate-code merge-implement-results*",
+  "remediate-code accept-node*",
+  "*remediate-code.mjs* prepare-document-dispatch*",
+  "*remediate-code.mjs* merge-document-results*",
+  "*remediate-code.mjs* prepare-implement-dispatch*",
+  "*remediate-code.mjs* merge-implement-results*",
+  "*remediate-code.mjs* accept-node*",
+];
+
+function withoutRetiredRemediateCodeBashRules(rule) {
+  const cleaned = { ...objectValue(rule) };
+  for (const retired of RETIRED_REMEDIATE_CODE_BASH_RULES) {
+    delete cleaned[retired];
+  }
+  return cleaned;
+}
 
 // The scoped OpenCode permission merge helpers are single-sourced in
 // audit-tools/shared (global top-level scope vs. remediator agent scope).
@@ -95,6 +108,7 @@ function renderOpenCodeAgentPermissionConfig(existing) {
   const { mergeOpenCodeAgentPermissionRule, withoutOpenCodeWildcard } =
     sharedOpenCodePermissions;
   const existingPermission = objectValue(existing);
+  const existingBash = withoutRetiredRemediateCodeBashRules(existingPermission.bash);
   return {
     ...existingPermission,
     read: "allow",
@@ -106,7 +120,7 @@ function renderOpenCodeAgentPermissionConfig(existing) {
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      withoutManagedBroadBashWildcard(existingPermission.bash),
+      withoutManagedBroadBashWildcard(existingBash),
       OPENCODE_REMEDIATE_BASH_PERMISSION,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),
@@ -125,6 +139,7 @@ function renderOpenCodeGlobalPermissionConfig(existing) {
     withoutOpenCodeWildcard,
   } = sharedOpenCodePermissions;
   const existingPermission = objectValue(existing);
+  const existingBash = withoutRetiredRemediateCodeBashRules(existingPermission.bash);
   const merged = {
     ...existingPermission,
     read: "allow",
@@ -136,7 +151,7 @@ function renderOpenCodeGlobalPermissionConfig(existing) {
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeGlobalPermissionRule(
-      existingPermission.bash,
+      existingBash,
       OPENCODE_REMEDIATE_BASH_PERMISSION,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),

@@ -6,13 +6,14 @@ import {
   LOCKED_JSON_STORE_TIMEOUT_MS,
   assertNotNodeWorktreeCwd,
 } from "audit-tools/shared";
-import type { PartialCompletionTerminal } from "audit-tools/shared";
 import {
   RemediationPlan,
   RemediationItemState,
   ClarificationRequest,
   ClosingPlan,
   CoverageLedger,
+  RemediationHostHandoffRecord,
+  RemediationHostHandoffRecordSchema,
 } from "./types.js";
 import { validateRemediationBlock } from "../validation/remediationState.js";
 
@@ -34,48 +35,26 @@ export interface RemediationState {
   step_count?: number;
   plan_coverage?: CoverageLedger;
   /**
-   * Set when the dispatch engine fires a partial-completion terminal (empty pool
-   * or livelock guard). When present, `decideNextStep` treats stranded
-   * documented/pending items as `blocked` and routes the run to close rather
-   * than looping forever on undispatchable work (INV-X06 / OBL-S09).
-   */
-  partial_completion_terminal?: PartialCompletionTerminal;
-  /**
    * Reason the run was routed to close without all items reaching a terminal
    * status. Set by the triage phase on `halt` so the close phase can stamp
    * a `user_halted` marker in the partial report.
    */
   closing_context?: "user_halted";
   /**
-   * Persisted host-capability handshake. Opaque to the state store: stored and
-   * round-tripped verbatim, never interpreted here (validateState only gates
-   * `status`). The dispatch-build site merges the explicitly-supplied host
-   * options into this so a later call that omits a flag reuses the persisted
-   * value rather than re-flooring it (C1). Fields: can-dispatch-subagents,
-   * max-concurrent, context/output token windows, and the model roster / id.
-   */
-  host_capabilities?: HostCapabilities;
-  /**
    * Union of repo-relative paths every ACCEPTED node has actually cherry-picked
    * into the main tree this run (ground truth, path-sorted, de-duplicated).
-   * Populated incrementally by `mergeImplementResultsIntoState`
-   * (src/remediate/steps/dispatch/marshal.ts) from each node's
-   * `AcceptNodeWorktreeResult.editedFiles` (captured pre-merge from the node's
-   * own branch diff in `acceptNodeWorktree` — never the worker's self-report).
+   * Populated from accepted host results. Each entry is validated against the
+   * prompt-bound write scope before it can advance item state.
    *
    * This is the close phase's staging manifest (`collectStagingFiles` in
    * `src/remediate/phases/close.ts`): the invariant "remediation close must
    * never commit files the run didn't touch" is enforced by staging exactly
    * `applied_edit_surface ∩ currently-dirty`, never a repo-wide sweep.
    *
-   * Absent (or missing entries) for any block landed through a dispatch mode
-   * that never runs the isolated-worktree accept lifecycle — e.g. the
-   * conversation-first hand-driven flow (`remediate-code merge-implement-results`,
-   * a first-class dispatch mode, not legacy: the host edits directly in the main
-   * tree with no per-node worktree/commit to diff). The close phase's manifest
-   * resolution additionally unions in each `resolved` item's declared
-   * `item_spec.touched_files` / finding `affected_files` as a fallback for
-   * exactly the items no accepted node's `editedFiles` covers.
+   * The close phase additionally unions in each resolved item's declared
+   * `item_spec.touched_files` / finding `affected_files` as a conservative
+   * fallback for current states created before host-result ingestion recorded
+   * this surface.
    */
   applied_edit_surface?: string[];
   /**
@@ -90,27 +69,20 @@ export interface RemediationState {
    * excluded from the DECLARED (fallback) manifest sources
    * (`item_spec.touched_files` / finding `affected_files` — plan-time
    * declarations/write-grants, not verified diffs). Ground-truth entries
-   * (`applied_edit_surface`, from actual worktree cherry-picks) are NEVER
-   * excluded by this snapshot — git already proved the run landed those paths.
+   * (`applied_edit_surface`) are also excluded from closing-stage staging: a
+   * landed commit proves attribution of the commit, not ownership of any
+   * still-dirty pre-run content at that path.
    *
    * Absent on states created before this field existed: treated as empty — no
    * exclusions, preserving prior behavior for in-flight runs.
    */
   run_start_dirty?: string[];
-}
-
-/**
- * Opaque persisted host-capability handshake (C1). Every field optional — only
- * the explicitly-supplied fields of a given call are persisted, so an omitted
- * field never clobbers a previously-stored value.
- */
-export interface HostCapabilities {
-  can_dispatch_subagents?: boolean;
-  max_concurrent?: number;
-  context_tokens?: number;
-  output_tokens?: number;
-  model_id?: string;
-  models?: unknown;
+  /**
+   * Independent digest binding for the currently emitted host workload.
+   * Cleared once that workload has no pending items. Production result
+   * ingestion requires this record before it trusts any host-written file.
+   */
+  host_handoff?: RemediationHostHandoffRecord;
 }
 
 /** Known status values for RemediationState — used for schema validation on load. */
@@ -221,6 +193,20 @@ function validateState(value: unknown): string[] {
     const closingPlan = obj["closing_plan"];
     if (!closingPlan || typeof closingPlan !== "object" || Array.isArray(closingPlan)) {
       errors.push(`status "closing" requires a persisted closing_plan`);
+    }
+  }
+  if (obj["host_handoff"] !== undefined) {
+    const parsed = RemediationHostHandoffRecordSchema.safeParse(
+      obj["host_handoff"],
+    );
+    if (!parsed.success) {
+      errors.push(
+        `host_handoff failed schema validation: ${parsed.error.issues
+          .map((issue) => `${issue.path.join(".") || "host_handoff"}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    } else if (status !== "implementing") {
+      errors.push('host_handoff is only valid while status is "implementing"');
     }
   }
   return errors;

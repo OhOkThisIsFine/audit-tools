@@ -37,14 +37,13 @@
 import { test, expect } from "vitest";
 import type { AuditResult, Finding } from "../../src/audit/types.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { runResultIngestionExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
 const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
   results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results, { workPartition: TEST_WORK_PARTITION });
+) => runSynthesisExecutorRaw(bundle, results);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -304,20 +304,8 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
   });
 });
 
-// ── INV-remediate-tests-05 ─────────────────────────────────────────────────
-
-describe("INV-remediate-tests-05: quota-scheduler.test.ts covers dispatch.ts scheduleWave", () => {
-  it("quota-scheduler.test.ts imports scheduleWave from dispatch.js", () => {
-    const src = readTestFile("quota-scheduler.test.ts");
-    expect(src).toMatch(/from.*steps\/dispatch\.js/);
-  });
-
-  it("quota-scheduler.test.ts has a describe block explicitly for dispatch.ts scheduleWave", () => {
-    const src = readTestFile("quota-scheduler.test.ts");
-    // The INV-remediate-tests-05 comment ensures both shared + dispatch are tested
-    expect(src).toContain("dispatch.ts scheduleWave");
-  });
-});
+// INV-remediate-tests-05 retired with the tool-owned quota scheduler. Host
+// execution policy is outside the remediation contract.
 
 // INV-remediate-tests-06 retired (A6): the schema-contracts.test.ts structural
 // drift-guard it policed is gone — every contract is single-sourced as a zod
@@ -359,31 +347,9 @@ describe("INV-remediate-tests-07: validation.test.ts covers all contract-pipelin
 // ── INV-remediate-tests-10 ─────────────────────────────────────────────────
 
 describe("INV-remediate-tests-10: no cross-file duplicate test bodies for same behaviour", () => {
-  // Specific known single-owner invariants documented in step-utils.test.ts:
-  // specIndicatesNoChange → spec-no-change.test.ts only
+  // Specific known single-owner invariant documented in step-utils.test.ts:
   // classifyFindingRisk → classify-finding-risk.test.ts only
   // These must not have duplicate test describe blocks in other files.
-
-  it("specIndicatesNoChange is only directly tested in spec-no-change.test.ts", () => {
-    const THIS_FILE = "remediate-tests-invariants.test.ts";
-    const violations: string[] = [];
-    for (const file of listTestFiles()) {
-      if (file === "spec-no-change.test.ts") continue;
-      if (file === THIS_FILE) continue; // skip self — invariant text mentions the name
-      const src = readTestFile(file);
-      // Acceptable: a comment reference (e.g. step-utils.test.ts has a comment)
-      // Violation: an actual import and usage in assertions
-      const lines = src.split("\n").filter((l) => !l.trim().startsWith("//"));
-      const joined = lines.join("\n");
-      if (
-        /import.*specIndicatesNoChange/.test(joined) &&
-        /expect.*specIndicatesNoChange/.test(joined)
-      ) {
-        violations.push(file);
-      }
-    }
-    expect(violations).toEqual([]);
-  });
 
   it("classifyFindingRisk is only directly tested in classify-finding-risk.test.ts", () => {
     const THIS_FILE = "remediate-tests-invariants.test.ts";

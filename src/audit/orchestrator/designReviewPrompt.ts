@@ -3,7 +3,6 @@ import type { Finding } from "../types.js";
 import type { CharterRegister } from "../types/charterRegister.js";
 import {
   charterReviewDisposition,
-  renderIndependentReviewMandate,
 } from "audit-tools/shared";
 import {
   deriveUnitScopeDisposition,
@@ -191,18 +190,6 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
 export interface DesignReviewOptions {
   max_units?: number;
   conceptual_depth?: "shallow" | "deep";
-}
-
-/**
- * Render the independent-reviewer directive shared by the audit-side adversarial
- * review prompts. LANE-CLASS-conditional, never capability-conditional (design
- * resolution 2, gate-resolved 2026-08-05): one capability-neutral text carries
- * both the mandate and the explicitly-degraded no-subagent fallback — the
- * shared `renderIndependentReviewMandate`, single-sourced with the remediate
- * contract pipeline's adversarial phases.
- */
-export function renderIndependentReviewerDirective(): string[] {
-  return [renderIndependentReviewMandate().trim(), ""];
 }
 
 /**
@@ -622,59 +609,5 @@ export function renderConceptualJudgePrompt(
     ...conceptualOutputFormat(
       "Write the merged, ranked JSON object to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
     ),
-  ].join("\n");
-}
-
-/**
- * Combined fallback prompt for non-dispatch paths: both contract-assessment and
- * conceptual-design-critique sections in a single agent turn.
- */
-export function renderDesignReviewPrompt(
-  bundle: ArtifactBundle,
-  options: DesignReviewOptions = {},
-): string {
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
-
-  return [
-    "# Project design review",
-    "",
-    "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative observations in two distinct modes: contract assessment for inferred or existing project contracts, and conceptual design critique for broader architecture ideas that static analysis cannot produce.",
-    "",
-    renderSharedStructuralContext(bundle, maxUnits),
-    ...renderIndependentReviewerDirective(),
-    "## What to assess",
-    "",
-    `Focus on the ${maxUnits} highest-risk units listed above; you need not read the entire repository, though you may follow any thread that demands more context. Produce findings about:`,
-    "",
-    "### Contract assessment",
-    "",
-    "- Infer existing contracts from the repository artifacts and code you inspect: invariants, trust boundaries, preconditions, postconditions, data lifecycle obligations, and critical-flow guarantees.",
-    "- Attack those inferred contracts with concrete counterexamples. Report evidenced gaps where the code appears to rely on an invariant or boundary that is missing, unenforced, unclear, or uncovered for a critical flow.",
-    "- Use contract-assessment categories such as inferred_contract_gap, trust_boundary_gap, invariant_counterexample, and critical_invariant_coverage_gap when those best describe the finding.",
-    "- Stay observational: do not invent a new contract DSL, write a remediation plan, remediate code, or turn the audit into an implementation pipeline.",
-    "",
-    "### Conceptual design critique",
-    "",
-    "Ask general, first-principles questions (not a checklist) — read the project's own docs, then roam the real code:",
-    "- **Is the fundamental approach the right one?** What would a clean-sheet redesign do differently, and why?",
-    "- **What core assumption does the design rest on, and is it sound?** What breaks if it is wrong?",
-    "- **Where is the deepest structural risk** — the place the *shape* of the system will hurt most as it grows or changes hands?",
-    "- **Does the structure match the problem,** or do abstractions and boundaries cut across it?",
-    "- **What is the design optimizing for, and is that the right trade-off?** What is missing that it will eventually need?",
-    "",
-    "## Output format",
-    "",
-    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
-    "",
-    ...findingsEnvelopeExample(
-      "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap, tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",
-    ),
-    "",
-    "Write the JSON object to the design review results path provided below. Use finding IDs starting with DR-001.",
-    "",
-    "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
-    "",
   ].join("\n");
 }

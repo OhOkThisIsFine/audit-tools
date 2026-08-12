@@ -1,0 +1,228 @@
+{
+  "contract_version": "zero-adapter-remediation-dependencies/v1",
+  "immutable": true,
+  "foundation_module": "remediation-contract-tests",
+  "nodes": [
+    {
+      "id": "attribution-contract-retirement",
+      "block_id": "CP-BLOCK-attribution-contract-retirement",
+      "depends_on": [
+        "audit-zero-adapter-boundary",
+        "backend-independent-remediation-planning",
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "remediation-zero-adapter-boundary",
+        "shared-content-coherence",
+        "stable-task-affinity-artifacts"
+      ],
+      "invariant_count": 9,
+      "failure_mode_count": 4
+    },
+    {
+      "id": "audit-zero-adapter-boundary",
+      "block_id": "CP-BLOCK-audit-zero-adapter-boundary",
+      "depends_on": [
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "shared-content-coherence",
+        "stable-task-affinity-artifacts"
+      ],
+      "invariant_count": 11,
+      "failure_mode_count": 5
+    },
+    {
+      "id": "backend-independent-remediation-planning",
+      "block_id": "CP-BLOCK-backend-independent-remediation-planning",
+      "depends_on": [
+        "remediation-contract-tests",
+        "shared-content-coherence"
+      ],
+      "invariant_count": 8,
+      "failure_mode_count": 4
+    },
+    {
+      "id": "canonical-session-intent",
+      "block_id": "CP-BLOCK-canonical-session-intent",
+      "depends_on": [
+        "remediation-contract-tests"
+      ],
+      "invariant_count": 8,
+      "failure_mode_count": 4
+    },
+    {
+      "id": "remediation-contract-tests",
+      "block_id": "CP-BLOCK-remediation-contract-tests",
+      "depends_on": [],
+      "invariant_count": 9,
+      "failure_mode_count": 5
+    },
+    {
+      "id": "remediation-zero-adapter-boundary",
+      "block_id": "CP-BLOCK-remediation-zero-adapter-boundary",
+      "depends_on": [
+        "backend-independent-remediation-planning",
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "shared-content-coherence"
+      ],
+      "invariant_count": 10,
+      "failure_mode_count": 5
+    },
+    {
+      "id": "shared-content-coherence",
+      "block_id": "CP-BLOCK-shared-content-coherence",
+      "depends_on": [
+        "remediation-contract-tests",
+        "stable-task-affinity-artifacts"
+      ],
+      "invariant_count": 10,
+      "failure_mode_count": 4
+    },
+    {
+      "id": "stable-task-affinity-artifacts",
+      "block_id": "CP-BLOCK-stable-task-affinity-artifacts",
+      "depends_on": [
+        "remediation-contract-tests"
+      ],
+      "invariant_count": 9,
+      "failure_mode_count": 4
+    }
+  ],
+  "edges": [
+    {
+      "from": "audit-zero-adapter-boundary",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "backend-independent-remediation-planning",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "backend-independent-remediation-planning",
+      "to": "remediation-zero-adapter-boundary"
+    },
+    {
+      "from": "canonical-session-intent",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "canonical-session-intent",
+      "to": "audit-zero-adapter-boundary"
+    },
+    {
+      "from": "canonical-session-intent",
+      "to": "remediation-zero-adapter-boundary"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "audit-zero-adapter-boundary"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "backend-independent-remediation-planning"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "canonical-session-intent"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "remediation-zero-adapter-boundary"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "shared-content-coherence"
+    },
+    {
+      "from": "remediation-contract-tests",
+      "to": "stable-task-affinity-artifacts"
+    },
+    {
+      "from": "remediation-zero-adapter-boundary",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "shared-content-coherence",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "shared-content-coherence",
+      "to": "audit-zero-adapter-boundary"
+    },
+    {
+      "from": "shared-content-coherence",
+      "to": "backend-independent-remediation-planning"
+    },
+    {
+      "from": "shared-content-coherence",
+      "to": "remediation-zero-adapter-boundary"
+    },
+    {
+      "from": "stable-task-affinity-artifacts",
+      "to": "attribution-contract-retirement"
+    },
+    {
+      "from": "stable-task-affinity-artifacts",
+      "to": "audit-zero-adapter-boundary"
+    },
+    {
+      "from": "stable-task-affinity-artifacts",
+      "to": "shared-content-coherence"
+    }
+  ],
+  "obligation_expansion": {
+    "obligation_id_patterns": {
+      "completion_sentinel": "OBL-<module>-contract",
+      "invariant": "OBL-<module>-inv-<one-based-index>",
+      "failure_mode": "OBL-<module>-fail-<one-based-index>"
+    },
+    "rules": [
+      {
+        "id": "direct-producer-inheritance",
+        "applies_to": "every-non-foundation-module-obligation",
+        "add_dependencies": "each-direct-producer-completion-sentinel"
+      },
+      {
+        "id": "completion-sentinel-closure",
+        "applies_to": "every-module-completion-sentinel",
+        "add_dependencies": "every-local-invariant-and-failure-mode-obligation"
+      },
+      {
+        "id": "foundation-root",
+        "applies_to": "every-foundation-module-obligation",
+        "add_dependencies": "no-producer-completion-sentinel"
+      }
+    ],
+    "special_final_gate": {
+      "obligation_id": "OBL-attribution-contract-retirement-inv-7",
+      "depends_on": [
+        "OBL-remediation-contract-tests-contract",
+        "OBL-canonical-session-intent-contract",
+        "OBL-stable-task-affinity-artifacts-contract",
+        "OBL-shared-content-coherence-contract",
+        "OBL-backend-independent-remediation-planning-contract",
+        "OBL-audit-zero-adapter-boundary-contract",
+        "OBL-remediation-zero-adapter-boundary-contract",
+        "OBL-attribution-contract-retirement-inv-1",
+        "OBL-attribution-contract-retirement-inv-2",
+        "OBL-attribution-contract-retirement-inv-3",
+        "OBL-attribution-contract-retirement-inv-4",
+        "OBL-attribution-contract-retirement-inv-5",
+        "OBL-attribution-contract-retirement-inv-6",
+        "OBL-attribution-contract-retirement-inv-8",
+        "OBL-attribution-contract-retirement-fail-1",
+        "OBL-attribution-contract-retirement-fail-2",
+        "OBL-attribution-contract-retirement-fail-3",
+        "OBL-attribution-contract-retirement-fail-4"
+      ],
+      "explicitly_excludes": [
+        "OBL-attribution-contract-retirement-contract",
+        "OBL-attribution-contract-retirement-inv-7"
+      ]
+    }
+  }
+}

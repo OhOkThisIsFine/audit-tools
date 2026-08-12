@@ -1,0 +1,61 @@
+{
+  "command": {
+    "argv": [
+      "npx",
+      "vitest",
+      "run",
+      "tests/remediate/backend-independent-planning.test.ts"
+    ],
+    "cwd": ".",
+    "normalized_environment": {
+      "CI": "1",
+      "NO_COLOR": "1",
+      "TZ": "UTC"
+    }
+  },
+  "contract_version": "zero-adapter-green-companion/v1",
+  "exit_code": 0,
+  "module_id": "backend-independent-remediation-planning",
+  "output_sha256": "c49915d4515b3a654b9da2883dd6f39b29a865148ece71557466a393be715d76",
+  "post_edit_production_scope": {
+    "entries": [
+      {
+        "path": "src/remediate/phases/plan.ts",
+        "sha256": "9f19fc218bace2862000871be355f6b7028aace91c55e73fc35f0ffc60e79807"
+      },
+      {
+        "path": "src/remediate/state/types.ts",
+        "sha256": "6469ceb95f893556cbdc7fbf335cc74f58c2bb0d4524d2e9dea42a5c6dc346ea"
+      },
+      {
+        "path": "src/remediate/steps/contractPipeline.ts",
+        "sha256": "f583547e78b0edbc0f373ad7a17fc6866a7dfb65e4d9251169b09ac29758c4f7"
+      },
+      {
+        "path": "src/remediate/utils/fileIntegrity.ts",
+        "sha256": "92d63b904a312626880d44cdf1541b358cacca2287b49ffd69abaaddc99eeca2"
+      },
+      {
+        "path": "src/shared/index.ts",
+        "sha256": "a608d9632d419ae8ad9181888502204dca61d2e01b9ea4e5abb902fe4aeec589"
+      },
+      {
+        "path": "src/shared/types/contractPipeline.ts",
+        "sha256": "606f77e2ffc330a4e5b25026a36e75993b6d566ded802b594ecb3b62f90edaf5"
+      },
+      {
+        "path": "src/shared/types/finding.ts",
+        "sha256": "e977cdc5637e01cb3bbdddefed2d153d67dd06ca5fdf5403a12190a37dae2dc4"
+      },
+      {
+        "path": "src/shared/validation/findingsReport.ts",
+        "sha256": "d5534748e11fcccab87e42389c394681629cfbffc480303b3d03a25d81932c3f"
+      }
+    ],
+    "tree_sha256": "2ff030f7a1bbc8a2ae2bbddb5929b5b1418955c9b47d8f1c4636c5ee5cd4b8ac"
+  },
+  "red_record_sha256": "d5b55cedec9575ab80721b22c1262b0812cb0cffede3a66fc5a1e1600e68d638",
+  "test_closure_sha256": "cdaf40f979cdcae12b7180a19113015e8c7bffebc88e13401665d15f3b016156",
+  "test_id": "backend-independent-remediation-planning-red-green-v1",
+  "record_sha256": "64c26bd517229f903d568d4d3568763259121a18062a16205bf4feb0f56c1d09"
+}

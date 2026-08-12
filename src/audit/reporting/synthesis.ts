@@ -6,16 +6,15 @@ import type { StructureDecomposition } from "../types/structureDecomposition.js"
 import type { CharterRegister } from "../types/charterRegister.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
-import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import type {
   AuditFindingsReport,
+  ContentCoherenceTrace,
   CriticalFlowManifest,
   Finding as SharedFinding,
   FindingTheme,
   GraphBundle,
   SynthesisNarrative,
   WorkBlockSeam,
-  WorkPartitionPolicy,
 } from "audit-tools/shared";
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
@@ -77,25 +76,12 @@ export interface AuditReportSummary {
    * assignable to this render shape; absent when no finding carried a verdict.
    */
   grounding_status_breakdown?: Record<string, number>;
-  /**
-   * Distinct count of tasks/files NOT audited because a packet budget cap
-   * (FINDING-013) deferred them — kept separate from `excluded_file_count`
-   * (non-auditable files), since a budget skip is an honest partial-coverage
-   * signal, not an exclusion. Optional so the shared `AuditFindingsSummary`
-   * (which omits it) stays assignable to this render shape; defaults to 0.
-   */
-  budget_deferred_task_count?: number;
-  /**
-   * Units/tasks stranded by a partial-completion terminal (empty-pool or
-   * livelock guard). Distinct from budget deferrals. Optional so the shared
-   * `AuditFindingsSummary` stays assignable to this render shape.
-   */
-  stranded_unit_count?: number;
 }
 
 export interface AuditReportModel {
   summary: AuditReportSummary;
   findings: Finding[];
+  coherence_trace: ContentCoherenceTrace;
   work_blocks: WorkBlock[];
   work_block_seams: WorkBlockSeam[];
   /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
@@ -136,16 +122,11 @@ function runtimeStatusBreakdown(
 function coverageSummary(coverage?: CoverageMatrix): {
   audited_file_count: number;
   excluded_file_count: number;
-  budget_deferred_task_count: number;
 } {
   const files = coverage?.files ?? [];
   return {
     audited_file_count: files.filter((file) => file.audit_status === "complete").length,
     excluded_file_count: files.filter((file) => file.audit_status === "excluded").length,
-    // Distinct from excluded: files a budget cap deferred (status set by scope).
-    budget_deferred_task_count: files.filter(
-      (file) => file.audit_status === "budget_deferred",
-    ).length,
   };
 }
 
@@ -178,12 +159,8 @@ export function buildAuditReportModel(params: {
   structureDecomposition?: StructureDecomposition;
   charterRegister?: CharterRegister;
   systemicChallenge?: SystemicChallengeRegister;
-  /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
-  activeDispatch?: ActiveDispatchState | null;
   /** Intake manifest byte sizes used to estimate remediation source context. */
   sizeIndex?: Readonly<Record<string, number>>;
-  /** Transient runtime capacity; never persisted as auditor identity/configuration. */
-  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
 }): AuditReportModel {
   // Re-key the finalized findings with globally-unique, content-addressed ids
   // before anything addresses them by id. mergeFindings emits exactly one
@@ -218,31 +195,25 @@ export function buildAuditReportModel(params: {
   // is never quarantined.
   const findings = allFindings.filter((f) => f.grounding?.status !== "refuted");
   const quarantinedRefuted = allFindings.filter((f) => f.grounding?.status === "refuted");
-  const workPartition = buildWorkBlockPartition({
+  const workBlocks = buildWorkBlockPartition({
     findings,
     unitManifest: params.unitManifest,
     graphBundle: params.graphBundle,
     criticalFlows: params.criticalFlows,
     sizeIndex: params.sizeIndex,
-    contextBudgetTokens: params.workPartition?.capacityTokens,
-    availableParallelism: params.workPartition?.availableParallelism,
   });
   const coverage = coverageSummary(params.coverageMatrix);
-  const strandedUnitCount =
-    params.activeDispatch?.partial_completion_terminal?.stranded_ids?.length ?? 0;
   // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
   // tally reflects findings dropped from the admitted set.
   const groundingBreakdown = groundingStatusBreakdown(allFindings);
   const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
-      work_block_count: workPartition.blocks.length,
+      work_block_count: workBlocks.blocks.length,
       severity_breakdown: severityBreakdown(findings),
       lens_breakdown: lensBreakdown(findings),
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
-      budget_deferred_task_count: coverage.budget_deferred_task_count,
-      ...(strandedUnitCount > 0 ? { stranded_unit_count: strandedUnitCount } : {}),
       ...(Object.keys(groundingBreakdown).length > 0
         ? { grounding_status_breakdown: groundingBreakdown }
         : {}),
@@ -252,8 +223,9 @@ export function buildAuditReportModel(params: {
       ),
     },
     findings,
-    work_blocks: workPartition.blocks,
-    work_block_seams: workPartition.seams,
+    coherence_trace: workBlocks.coherence_trace,
+    work_blocks: workBlocks.blocks,
+    work_block_seams: workBlocks.seams,
     ...(quarantinedRefuted.length > 0 ? { quarantined_findings: quarantinedRefuted } : {}),
   };
   return model;
@@ -271,6 +243,7 @@ export function buildAuditFindingsReport(
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     summary: { ...model.summary },
     findings: model.findings,
+    coherence_trace: model.coherence_trace,
     work_blocks: model.work_blocks,
     work_block_seams: model.work_block_seams,
     ...(model.quarantined_findings && model.quarantined_findings.length > 0
@@ -417,16 +390,6 @@ export function renderAuditReportMarkdown(
       : []),
     `- Fully audited files: ${report.summary.audited_file_count}`,
     `- Excluded non-auditable files: ${report.summary.excluded_file_count}`,
-    ...((report.summary.budget_deferred_task_count ?? 0) > 0
-      ? [
-          `- Not audited (budget): ${report.summary.budget_deferred_task_count} task(s) skipped by packet budget cap`,
-        ]
-      : []),
-    ...((report.summary.stranded_unit_count ?? 0) > 0
-      ? [
-          `- Not audited (provider pool exhausted): ${report.summary.stranded_unit_count} unit(s) were not audited because the provider pool was exhausted before dispatch could complete (partial coverage)`,
-        ]
-      : []),
     "",
   );
 
@@ -560,15 +523,6 @@ export function renderAuditReportMarkdown(
   if (scope && scope.mode === "delta") {
     lines.push(
       `**Delta audit since \`${scope.since}\`.** This run audited ${scope.seed_files.length} changed file(s) and ${scope.expanded_files.length} graph neighbour(s); all other auditable files were left out of scope (inherited from a prior audit where complete, otherwise excluded from this run). **A full audit is advised before release.**`,
-    );
-    if (scope.dropped_note) {
-      lines.push("", scope.dropped_note);
-    }
-  } else if (scope && scope.mode === "budget") {
-    lines.push(
-      `**Partial audit (budget cap).** This run dispatched only the top-${scope.budget?.max_files ?? "K"} packet(s); ` +
-        `${scope.deferred_packet_count ?? 0} packet(s) covering ${scope.deferred_task_ids?.length ?? 0} task(s) were deferred and NOT audited. ` +
-        `Findings above reflect only the audited subset. **A full audit is advised before release.**`,
     );
     if (scope.dropped_note) {
       lines.push("", scope.dropped_note);

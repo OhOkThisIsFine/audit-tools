@@ -1,0 +1,18 @@
+{
+  "contract_version": "zero-adapter-production-scope/v1",
+  "module_id": "audit-zero-adapter-boundary",
+  "capture_boundary": "after-designated-test-closure-freeze-before-red-run-and-production-edit",
+  "immutable": true,
+  "scope_rule": "the audit host-handoff seam: existing dispatch barrel plus the absent focused host-handoff module",
+  "absent_paths": [
+    "src/audit/cli/dispatch/hostHandoff.ts"
+  ],
+  "entries": [
+    {
+      "path": "src/audit/cli/dispatch.ts",
+      "sha256": "4ec1a45d8fe5e47e6d8c784d7fcf2ec81df0e57f0d4a0a79f4508d0caed71954"
+    }
+  ],
+  "tree_sha256": "8195c4303cea51935982f92f674239ce927e34358311327671e363a791a5f521",
+  "manifest_sha256": "1f2c05acd592d333b19cd874ea4f22d6947c4dbb0422f0101cae7600fced6c15"
+}

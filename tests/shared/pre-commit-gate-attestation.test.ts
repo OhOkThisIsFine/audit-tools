@@ -4,7 +4,7 @@
 // end-to-end. Fixture + rationale in pre-commit-gate-harness.ts (shared across
 // the pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -18,7 +18,12 @@ let repo: string;
 const g = (...args: string[]) => gIn(repo, ...args);
 const runGate = (command?: string) => runGateIn(repo, command);
 const runAttest = (args: string[]) => runAttestIn(repo, args);
-const stageLoopCoreFile = () => stageLoopCoreFileIn(repo);
+const stageLoopCoreFile = () => {
+  stageLoopCoreFileIn(repo);
+  mkdirSync(join(repo, "src", "shared", "engine"), { recursive: true });
+  writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 1;\n");
+  g("add", "-A");
+};
 
 beforeEach(() => {
   repo = initGateRepo();
@@ -134,7 +139,7 @@ describe("pre-commit gate: a chained attest+commit names its own impossibility",
       "--checked", "checked the fixture loop-core edit for accounting drift and off-by-one",
     ]);
     expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
-    writeFileSync(join(repo, "src", "shared", "quota", "x.ts"), "export const x = 2;\n");
+    writeFileSync(join(repo, "src", "shared", "engine", "x.ts"), "export const x = 2;\n");
     g("add", "-A");
     const r = runGate("node .claude/hooks/attest-loop-core-review.mjs --reviewed-by t ; git commit -m x");
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);

@@ -1,14 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  type DispatchModelHint,
-  type DispatchModelTier,
   type IntentCheckpoint,
-  type SessionConfig,
   charterReviewDisposition,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { HostFanoutUnit } from "./dispatch/hostFanoutGate.js";
 import {
   type DesignReviewOptions,
   renderConceptualReviewPrompt,
@@ -21,11 +17,6 @@ export interface ConceptualReviewSettings {
   max_units?: number;
   conceptual_depth: "shallow" | "deep";
   perspectives?: number;
-  /**
-   * Relative rank for perspective subagents (divergent ideation). Defaults to
-   * `"standard"`; the judge always routes `"deep"`.
-   */
-  perspective_tier?: DispatchModelTier;
   /**
    * True when any confirmed charter is low-confidence (Phase A conceptual spine):
    * a review depending on a low-confidence charter must "flag for human intent
@@ -41,7 +32,7 @@ export interface ConceptualReviewSettings {
    * `current-prompt.md`, which prior intent is being re-applied without re-running
    * `confirm_intent`. Present only on reuse; absent when the checkpoint carries no
    * `design_review`. Purely informational — it never alters the reuse DECISION
-   * (the resolved depth/perspectives/tier are byte-identical with or without it),
+   * (the resolved depth/perspectives are byte-identical with or without it),
    * and the lens list it renders is content-sorted so the text never churns.
    */
   reuse_notice?: string;
@@ -49,7 +40,7 @@ export interface ConceptualReviewSettings {
 
 /**
  * Render the host-visible reuse notice when a prior `intent_checkpoint.design_review`
- * drives this dispatch. Content-sorted lens list keeps the text stable (no churn),
+ * drives this workload. Content-sorted lens list keeps the text stable (no churn),
  * and every field degrades cleanly on a partial checkpoint: a missing `confirmed_at`
  * renders `unknown`, an absent/empty lens selection renders `all lenses`, and a
  * missing depth falls back to the resolved default `shallow`.
@@ -74,17 +65,13 @@ export function renderReuseNotice(
 }
 
 /**
- * Resolve the conceptual-review depth + fan-out count just before dispatch.
- * The user-confirmed `intent_checkpoint.design_review` is the source of truth;
- * `sessionConfig.design_review` is the host/session override consulted when the
- * checkpoint is silent; absent both, the default is shallow.
+ * Resolve the conceptual-review depth and perspective count from confirmed
+ * intent. Absent an explicit choice, the default is a shallow review.
  */
 export function resolveConceptualReviewSettings(
   bundle: ArtifactBundle,
-  sessionConfig: SessionConfig,
 ): ConceptualReviewSettings {
   const checkpoint = bundle.intent_checkpoint?.design_review;
-  const cfg = sessionConfig.design_review;
   // A low-confidence charter downgrades the dependent review to flag-for-human
   // (charterReviewDisposition). Charters live on the REGISTER — the checkpoint
   // carries only the ceiling as input (its never-written charter embed was
@@ -96,9 +83,9 @@ export function resolveConceptualReviewSettings(
       ),
   );
   const conceptualDepth =
-    checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow";
+    checkpoint?.conceptual_depth ?? "shallow";
   // Surface a reuse notice only when a prior checkpoint design_review drives the
-  // dispatch. The notice is purely informational — it is derived AFTER the
+  // workload. The notice is purely informational — it is derived AFTER the
   // decision fields above so it can never change them (reuse stays byte-identical).
   const reuseNotice = checkpoint
     ? renderReuseNotice(
@@ -109,10 +96,8 @@ export function resolveConceptualReviewSettings(
       )
     : undefined;
   return {
-    max_units: cfg?.max_units,
     conceptual_depth: conceptualDepth,
-    perspectives: checkpoint?.perspectives ?? cfg?.perspectives,
-    perspective_tier: cfg?.perspective_tier,
+    perspectives: checkpoint?.perspectives,
     ...(flagForHuman ? { flag_for_human: true } : {}),
     ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
   };
@@ -133,25 +118,12 @@ export interface ConceptualDispatch {
   readPaths: string[];
   /** Result files the host's subagents write. */
   writePaths: string[];
-  /**
-   * One host-fan-out unit per subagent this conceptual pass dispatches (N
-   * perspectives + judge when deep; the lone reviewer when shallow), each sized
-   * from its rendered prompt bytes — the quota gate leases the whole panel
-   * all-or-nothing against the host session before the step is emitted.
-   */
-  fanoutUnits: HostFanoutUnit[];
-  /**
-   * Relative model ranks for the deep fan-out: perspectives route `"standard"`
-   * by default (divergent ideation), the judge routes `"deep"` (it merges,
-   * dedups, and ranks across every perspective output). Absent when shallow.
-   */
-  modelHints?: { perspectives: DispatchModelHint; judge: DispatchModelHint };
 }
 
 /**
- * Write the conceptual-review prompt artifacts and return the dispatch pieces.
+ * Write the conceptual-review prompt artifacts and return the host workload.
  *
- * Shallow: one conceptual prompt file dispatched to a single subagent.
+ * Shallow: one conceptual prompt file for a single reviewer.
  * Deep: N independent perspective prompt files (real fan-out, one value system
  * each) plus an independent judge prompt that merges them — the judge writes the
  * single `conceptualResultsPath` the orchestrator ingests, so the state machine
@@ -204,31 +176,10 @@ export async function prepareConceptualDispatch(opts: {
       },
       readPaths: [conceptualPromptPath],
       writePaths: [conceptualResultsPath],
-      fanoutUnits: [
-        {
-          id: "conceptual",
-          estInputBytes: Buffer.byteLength(conceptualPromptText, "utf8"),
-        },
-      ],
     };
   }
 
   // Deep: real fan-out — N perspective subagents + an independent judge.
-  const modelHints = {
-    perspectives: {
-      tier: settings.perspective_tier ?? "standard",
-      reasons: ["conceptual_perspective_ideation"],
-    },
-    judge: {
-      tier: "deep",
-      reasons: ["conceptual_judge_synthesis"],
-    },
-  } satisfies ConceptualDispatch["modelHints"];
-  // Capability-neutral (design resolution 2): tier tags render on every host;
-  // the instruction line below tells a host without model selection to ignore
-  // them, so the artifact never branches on the capability handshake.
-  const renderTier = (hint: DispatchModelHint): string =>
-    ` [model_hint.tier: ${hint.tier}]`;
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveFiles: Array<{
@@ -236,9 +187,6 @@ export async function prepareConceptualDispatch(opts: {
     promptPath: string;
     resultsPath: string;
   }> = [];
-  // One fan-out unit per subagent, sized from its rendered prompt bytes — the
-  // quota gate leases the whole panel (perspectives + judge) all-or-nothing.
-  const fanoutUnits: HostFanoutUnit[] = [];
   for (let i = 0; i < total; i++) {
     const p = perspectives[i];
     const promptPath = join(
@@ -258,10 +206,6 @@ export async function prepareConceptualDispatch(opts: {
     );
     await writeFile(promptPath, promptText, "utf8");
     perspectiveFiles.push({ name: p.name, promptPath, resultsPath });
-    fanoutUnits.push({
-      id: `perspective-${i + 1}`,
-      estInputBytes: Buffer.byteLength(promptText, "utf8"),
-    });
   }
 
   const judgePromptPath = join(
@@ -273,14 +217,10 @@ export async function prepareConceptualDispatch(opts: {
       perspectiveFiles.map((f) => ({ name: f.name, path: f.resultsPath })),
     ) + reReviewSuffix;
   await writeFile(judgePromptPath, judgePromptText, "utf8");
-  fanoutUnits.push({
-    id: "judge",
-    estInputBytes: Buffer.byteLength(judgePromptText, "utf8"),
-  });
 
   const perspectiveLines = perspectiveFiles.map(
     (f, i) =>
-      `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\`${renderTier(modelHints.perspectives)}`,
+      `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
   );
 
   const artifactPaths: Record<string, string> = {
@@ -300,9 +240,8 @@ export async function prepareConceptualDispatch(opts: {
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
       `1. Execute these ${total} independent perspective lanes — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
       ...perspectiveLines,
-      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.${renderTier(modelHints.judge)}`,
+      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
       "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
-      "If your harness supports selecting a subagent model, map each `model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names; otherwise the tier tags are inert — ignore them.",
     ],
     artifactPaths,
     // Perspective result files must be in readPaths: the judge subagent reads
@@ -316,7 +255,5 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectiveFiles.map((f) => f.resultsPath),
       conceptualResultsPath,
     ],
-    fanoutUnits,
-    modelHints,
   };
 }

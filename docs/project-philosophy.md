@@ -52,10 +52,9 @@ wins on nuance; the brief must then be corrected, not left as a second opinion.
 - Keep tasks tightly bound and well defined, so the gap between weak and strong models shrinks.
 - Batch work into logical units of reasonable size — rigor balanced against token cost, not 100 agents
   for 100 files.
-- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: discovered at runtime or
-  abstracted behind a contract, never baked in. Detecting a repo's structure and pulling in useful tools
-  for it is how that is honored — their output is normalized into shared contracts, never forked per
-  ecosystem.
+- Keep everything IDE-, provider-, model-, OS-, shell- and language-agnostic: outside the product
+  contract or abstracted, never baked in. The host owns semantic execution; audit-tools detects repo
+  structure and normalizes analyzer output into shared contracts, never forks planning per ecosystem.
 - Auditing and remediating are not two tools — they are two cases of ONE logical core, drawn read-only or
   write-and-apply. The boundary between them is continuously being dissolved, and re-introducing it is the
   most persistent mistake made against this project; a difference between the two is a policy axis of the
@@ -132,8 +131,9 @@ case-by-case: (1) where a mechanical tool does the job as well or better → use
 LLM judgment *strongly* lifts quality → use the LLM, bounded and recorded; (3) whatever *can* be enforced
 in tooling *must* be. Rules (1)/(2) choose *who* does the work; rule (3) constrains *how* the result is
 guaranteed.
-- **LLM always in the loop.** Conversation-first ⇒ the host agent is always the provider; never gate LLM
-  review behind "if a provider exists." *(home: `CLAUDE.md` → Conventions & invariants)*
+- **LLM always in the loop.** Conversation-first ⇒ the host agent supplies every semantic judgment;
+  never gate LLM review behind an audit-tools provider probe or internal launch capability.
+  *(home: `CLAUDE.md` → Conventions & invariants)*
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; graph/language →
   language-neutral. *(home: `CLAUDE.md` → Preferences & standing decisions)*
 
@@ -141,23 +141,22 @@ guaranteed.
 
 ## A3. Enforce robustness in tooling, never host discretion
 
-Every correctness property must be guaranteed by the tool — CLI option shape, contract validator, renderer
-template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement. Any place the
-workflow only works because a capable host *remembered / noticed / reasoned / relayed / paced / picked the
-right id / verified from disk / hand-fixed a break* is a **latent failure mode** → move it into the tool.
+Every in-boundary correctness property must be guaranteed by the tool — CLI option shape, contract validator,
+renderer template, workload binding, dependency frontier, merge tolerance, write-scope enforcement. Any place
+the workflow only works because a capable host *remembered / noticed / relayed / picked the right id /
+verified from disk / hand-fixed a break* is a **latent failure mode** → move it into the tool. Backend choice,
+concurrency, retries, and transport are deliberately host-owned; audit-tools guarantees that the emitted
+workload is complete and that returned results cannot escape or forge its bindings.
 "Be careful" / "my side" is never a fix; **a needed manual flag is a bug signal.**
 *(home: `CLAUDE.md` → Conventions; memory: enforce-robustness-in-tooling-not-host-discretion)*
 
 ## A4. Everything-agnostic by default
 
-Provider/backend, host IDE/agent, **OS/platform**, model, shell, language/ecosystem — ALL runtime-discovered
-or contract-abstracted, never baked in. The named rules are *instances of one principle*, not a closed list.
-- **Model/provider/IDE agnostic:** discover model identities / windows / prices dynamically, or consume a
-  *synced, not-forked* someone-else-maintained table (e.g. `models.dev`); never a table *we* hand-maintain
-  as a primary source — that hand-maintained table is the bug (`KNOWN_MODEL_LIMITS` was retired for it).
-  Tiering routes by *relative* advertised capability, never a named-model→tier map. (Home: `CLAUDE.md` →
-  Conventions & invariants — the "never make *us* hand-maintain a model/price/limit table" bullet, whose
-  fuller statement wins on the nuance.)
+Provider/backend, host IDE/agent, **OS/platform**, model, shell, language/ecosystem — outside the product
+contract or abstracted, never baked in. The named rules are *instances of one principle*, not a closed list.
+- **Model/provider/IDE agnostic:** audit-tools owns no provider roster, model/window/price table, capability
+  tier, execution adapter, or discovery path. The host owns those facts and choices; the workload carries
+  only content-derived scope, complexity, risk, and token estimates.
 - **Language-neutral by contract:** graph edges `from`/`to`/`kind` (+optional `direction`/`confidence`/
   `reason`); new analyzers *enrich* shared artifacts, never fork planning.
 - **OS/platform-agnostic:** no platform-baked path/shell/command/line-ending assumptions in core logic;
@@ -167,11 +166,12 @@ or contract-abstracted, never baked in. The named rules are *instances of one pr
 ## A5. Conversation-first  ⚑
 
 The product IS the slash workflow inside the host conversation; the CLI is backend/fallback. Normal usage
-carries no manual `--root`/provider/model flags. **Conversation-first means the worker IS the host agent**
+carries no manual `--root`/provider/model flags. **Conversation-first means semantic workers belong to the host**
 (which already reads arbitrary files by context) — the correct framing when a robustness argument tempts
-over-caution about what the worker may read. **Conversation-first subagent dispatch is first-class**,
-co-equal with CLI/provider: a user with a subscription but no API credits gets the full experience via
-host-spawned subagents. *(home: `CLAUDE.md` → Concepts; memory: conversation-first-subagent-dispatch-first-class)*
+over-caution about what the worker may read. **Conversation-first subagent execution is first-class**:
+a user with a subscription but no API credits gets the full experience via host-spawned subagents, while
+audit-tools emits and ingests the same provider-neutral files regardless of host.
+*(home: `CLAUDE.md` → Concepts; memory: conversation-first-subagent-dispatch-first-class)*
 
 ## A6. Self-scaling pipeline, not forked paths
 
@@ -189,19 +189,19 @@ INTO judgment.
 - **Split design assessment into two named modes:** *contract assessment* (invariants/boundaries) vs.
   *conceptual design critique* (philosophy/alternatives). Bare "design assessment" is too ambiguous.
 - **Delegate adversarial phases to a separate agent** — an author marking own homework misses gaps.
-- **Dispatch = enforcement ⟂ driving ⟂ judgment:** mechanical broker (single chokepoint) → thin non-judging
-  driver → bounded judgment at named seams.
+- **Handoff = enforcement ⟂ execution ⟂ judgment:** mechanical contract builder/validator → host-owned
+  execution → bounded judgment at named seams.
 *(home: "Split design assessment" → `CLAUDE.md` → Preferences; memory:
 delegate-adversarial-phases-to-separate-agent, dispatch-enforcement-driving-judgment-separation)*
 
-## A8. How the tool decomposes & dispatches work
+## A8. How the tool decomposes & hands off work
 
 - **Remediator must decompose + boundary-enforce** — the tool mechanically breaks multi-goal scope into
   bounded parallel units + boundary tests + scheduling deps, not force the host to phase by hand.
 - **Decomposition co-locates source + its tests** — each node owns its source AND the tests pinning it
   (separate source/test nodes deadlock).
-- **Parallel dispatch over overlapping files is OPTIMISTIC, with git as the correctness authority** —
-  two nodes may edit one file; the already-serialized accept-time cherry-pick decides collisions, and a
+- **Parallel host execution over overlapping files is OPTIMISTIC, with git as the correctness authority** —
+  two nodes may edit one file; the serialized accept-time cherry-pick decides collisions, and a
   wrongly-admitted pair conflicts at rebase → quarantine → retry off updated HEAD. Pre-declared
   per-file edit-region ownership was falsified: disjointness cannot be proven at decomposition time,
   so proving it would be LLM judgment where the goal is enforcement in tooling.
@@ -210,7 +210,7 @@ parallel-dispatch-optimistic-not-anchors)*
 
 ## A9. Multi-agent cooperative runs
 
-Arbitrary agents/IDEs/providers contribute to the SAME audit/remediation (JOIN, not isolate) — symmetric
+Arbitrary host agents and IDEs may contribute to the SAME audit/remediation (JOIN, not isolate) — symmetric
 peers, no primary/secondary. Needs per-run state namespaces + task-claim locking, not single-writer state.
 *(home: `spec/multi-ide-concurrent-runs-design.md`; memory: multi-ide-concurrent-runs-design)*
 
@@ -221,17 +221,20 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
   mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist.
 - **Two-tier dependency policy.** Import vetted pure-JS libs for correctness-sensitive parsing/schema/lock
   (`smol-toml`, `yaml`); own only tiny domain bits; wrap parsers so malformed input degrades to empty.
-*(home: Own-vs-acquire → `CLAUDE.md` → Preferences (promoted), with the open live-spawn track in
-`docs/backlog/forward-tracks.md` + the F5 module contract in `spec/backlog-remediation-design.md`; Two-tier dependency
-policy → `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-acquire)*
+*(home: Own-vs-acquire → `CLAUDE.md` → Preferences (promoted), with the live contract in
+`src/shared/analyzers/acquisitionEngine.ts` and the open live-spawn track in
+`docs/backlog/forward-tracks.md`; Two-tier dependency policy → `CLAUDE.md` → Preferences;
+memory: deterministic-analyzers-own-vs-acquire)*
 
-## A11. Quota & token policy (product behavior)
+## A11. Content sizing & the host execution boundary (product behavior)
 
 - **Token estimates stay local and deterministic** — never API-call token counting; shared
-  `estimateTokensFromBytes` is the standard; learned RPM/TPM limits authoritative.
-- **Quota awareness must pace, not just observe** — don't burn the window in parallel and all hit the wall
-  at once; quota death is a retryable pause, not a failure. Red line: never IDE-GUI automation.
-*(home: `spec/dispatch-quota.md`, `spec/dispatch-quota.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
+  `estimateTokensFromBytes` is the standard. The estimate describes content size, not backend fit.
+- **audit-tools does not execute or route semantic work** — it emits complete prompt-bound workloads
+  with content-derived complexity, risk, scope, and token estimates. The host alone owns backend/model
+  selection, concurrency, retries, context-window fit, transport, and quota.
+*(home: `CLAUDE.md` → Preferences & standing decisions; `spec/audit-workflow-design.md`;
+`spec/remediation-workflow-design.md`)*
 
 ---
 
@@ -269,7 +272,7 @@ agent-owns-ship-pipeline)*
 - **Green-at-every-commit** — before any push `npm run build && npm run check` → zero errors (hook-enforced).
 - **Atomic-replace ordering invariant** — every destructive change ships as a single atomic replace (new
   mechanism + deletion in one commit); never add-then-delete across commits.
-- **Dead-code release gate = default-mode knip** (not `--production`, which false-positives on dispatch/
+- **Dead-code release gate = default-mode knip** (not `--production`, which false-positives on registry/
   alias wiring); tested-but-unwired is a periodic manual grep-zero sweep.
 - **One core, two draws — the build-side consequence of A1, not a second statement of it.** Because there
   is one logical core (A1), the default is one shared core + per-mode policy/draw, never two forks kept

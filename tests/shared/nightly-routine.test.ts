@@ -194,6 +194,22 @@ describe('premise probes — an item whose quoted code has vanished closes itsel
     expect(open).toHaveLength(0);
   });
 
+  it('does not mistake the tracked nightly queue quoting its own probe for moved source', () => {
+    const queued = item();
+    mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
+    writeFileSync(
+      join(root, '.audit-tools', 'nightly', 'open-items.json'),
+      `${JSON.stringify({ items: [queued] }, null, 2)}\n`,
+    );
+    fixtureGit(root, 'add', '.audit-tools/nightly/open-items.json');
+    fixtureGit(root, 'commit', '-qm', 'track nightly queue');
+
+    writeFileSync(join(root, PROBE_FILE), 'const REPLACEMENT = 1;\n');
+    const { open, resolved } = partitionBySettled([queued], readDecisions(root), root);
+    expect(resolved).toHaveLength(1);
+    expect(open).toHaveLength(0);
+  });
+
   it('keeps an item open while ANY probe string is still present — a partial fix mis-holds by design', () => {
     const half = item({
       premise_probes: [
@@ -238,6 +254,19 @@ describe('premise probes — an item whose quoted code has vanished closes itsel
     const bare = item();
     delete bare.premise_probes;
     expect(() => writeOpenItems(root, { items: [bare] })).toThrow(/premise_probes/);
+  });
+
+  it('a malformed sibling probe fails open and is refused at write', () => {
+    const mixed = item({
+      premise_probes: [
+        { file: PROBE_FILE, contains: 'REMOVED_BY_A_FIX' },
+        { file: PROBE_FILE, contains: undefined as unknown as string },
+      ],
+    });
+    const { open, resolved } = partitionBySettled([mixed], readDecisions(root), root);
+    expect(open).toHaveLength(1);
+    expect(resolved).toEqual([]);
+    expect(() => writeOpenItems(root, { items: [mixed] })).toThrow(/premise_probes/);
   });
 
   it('writeOpenItems refuses a probe whose string is not in the tree — the premise must be true at creation', () => {

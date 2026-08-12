@@ -4,14 +4,12 @@ import type { AdvanceAuditOptions } from "./advanceTypes.js";
 import { RunLogger, auditArtifactsDir } from "audit-tools/shared";
 import { decideAuditFrictionCloseout } from "./nextStep.js";
 import { runIntakeExecutor } from "./intakeExecutors.js";
-import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
 import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
 import {
   runStructureExecutor,
   runDesignAssessmentExecutor,
   runDocsDigestExecutor,
   runStructureDecompositionExecutor,
-  runDesignReviewAutoComplete,
 } from "./structureExecutors.js";
 import { runPlanningExecutor } from "./planningExecutors.js";
 import {
@@ -74,8 +72,8 @@ function requireRoot(root: string | undefined, executorName: string): string {
  * switch arm used to do. Slice 2b reuses these same runners inside the obligation
  * `execute` closures that drive the `advance` fold.
  *
- * Executors absent here are the host-delegation *dispatch* points (`agent`,
- * `rolling_dispatch_executor`): routed through host delegation before reaching
+ * Executors absent here are host-delegation points (including
+ * `semantic_review_executor`): routed through the host before reaching
  * `advanceAudit`, they produce a no-progress handoff (the "no runner" branch)
  * rather than a deterministic run.
  */
@@ -86,16 +84,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       requireRoot(options.root, "intake_executor"),
       options.artifactsDir,
     ),
-  intent_checkpoint_executor: async (bundle, { options }) =>
-    runIntentCheckpointAutoComplete(
-      bundle,
-      requireRoot(options.root, "intent_checkpoint_executor"),
-      options.since,
-    ),
-  // DD-9: with a consumed judge verdict → commit it; verdict-less, every arm
-  // resolves deterministically (prose-pending → CHANGED, only reachable
-  // verdict-less in the pure-headless drain — the conversation flow emits the
-  // judge step instead of routing here).
+  // DD-9: deterministic arms resolve directly; prose-only change requires the
+  // consumed, pair-bound host verdict.
   intent_equivalence_executor: async (bundle, { options }) =>
     runIntentEquivalenceResolve(bundle, options.intentEquivalenceVerdict),
   // root is intentionally optional: present → buildGraphBundleFromFs, absent →
@@ -131,12 +121,6 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     runCharterClarificationExecutor(bundle, options.clarificationAnswers),
   systemic_challenge_executor: async (bundle, { options }) =>
     runSystemicChallengeExecutor(bundle, options.systemicChallenge),
-  design_review_contract: async (bundle) =>
-    runDesignReviewAutoComplete(bundle, "contract"),
-  design_review_conceptual: async (bundle) =>
-    runDesignReviewAutoComplete(bundle, "conceptual"),
-  // Legacy: auto-complete both passes.
-  design_review: async (bundle) => runDesignReviewAutoComplete(bundle, "both"),
   planning_executor: async (bundle, { options, log, correlationId, obligation }) => {
     const root = requireRoot(options.root, "planning_executor");
     const plannedScope = resolveAuditScope({ root, since: options.since, bundle });
@@ -171,12 +155,10 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   synthesis_executor: async (bundle, { options }) =>
     runSynthesisExecutor(bundle, options.auditResults, {
       sizeIndex: options.sizeIndex,
-      workPartition: options.workPartition,
     }),
   synthesis_narrative_executor: async (bundle, { options }) =>
     runSynthesisNarrativeExecutor(bundle, options.narrativeResults, {
       sizeIndex: options.sizeIndex,
-      workPartition: options.workPartition,
     }),
   runtime_validation_update_executor: async (bundle, { options }) => {
     if (!options.runtimeValidationUpdates) {

@@ -1,0 +1,11 @@
+{
+  "analyzers": {
+    "eslint": "repo",
+    "knip": "auto",
+    "semgrep": "skip"
+  },
+  "analyzer_consent": {
+    "eslint": "granted",
+    "semgrep": "declined"
+  }
+}

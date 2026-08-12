@@ -1,0 +1,20 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "audit-zero-adapter-boundary",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "before-audit-zero-adapter-boundary-first-production-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": false,
+  "owned_overlaps": [
+    {
+      "path": "src/audit/cli/dispatch.ts",
+      "head_sha256": "1a33e4b9e8546c4eef3975f9258bcfa18e0efb2f76b1c399f2f7d2f32eb160fe",
+      "pre_edit_worktree_sha256": "4ec1a45d8fe5e47e6d8c784d7fcf2ec81df0e57f0d4a0a79f4508d0caed71954",
+      "pre_edit_patch_sha256": "514149aa86dee92521d5289aa3efa05a3ebd86549b156570333bfd031df38eb9",
+      "authorized_mutation": "add only the audit host-handoff type/value re-export; preserve every pre-existing worktree hunk"
+    }
+  ],
+  "manifest_sha256": "ac53a8e67db53bb43621e28538f3f4b37393b234b6357bced0bdd6be9afaf2f5"
+}

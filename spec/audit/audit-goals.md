@@ -131,14 +131,9 @@ The audit is complete only when all of the following hold:
 - no blocking condition remains active
 
 The audit is not complete if any work remains inside auditable scope, even if it
-is low priority — with one sanctioned exception: a bounded livelock-safety valve.
-When the rolling dispatcher cannot make progress on the remaining frontier after a
-bounded number of pause/resume cycles (a persistent provider wall or an irreducible
-strand), it may stamp a `partial_completion_terminal` and transition to a completed
-status on partial coverage rather than looping forever. This is safe precisely
-because the audit is read-only; it is a deliberate, recorded terminal
-(`recordPartialCompletionTerminal`), never a silent partial-success. Outside that
-valve, no partial-success status is introduced.
+is low priority. Semantic work waiting on the host remains an explicit pending
+workload with named work-item ids; missing or invalid results cannot be converted
+into partial success.
 
 ## Final output and cleanup
 
@@ -147,13 +142,13 @@ valve, no partial-success status is introduced.
 - The report must be deterministic and work-block-first.
 - Root-cause clustering is not part of the mandatory deterministic core: the
   retained deterministic report is work-block-first and does not cluster by root
-  cause. The optional LLM synthesis-narrative provider may add an *additive* themes
+  cause. The optional host-authored synthesis narrative may add an *additive* themes
   layer (carrying a root-cause field) on top of the deterministic report when
   configured; it never replaces, gates, or is required by the deterministic output.
 - On completion, `promoteFinalAuditReport` copies the final report/findings to the repo root and
   then deletes the now-superseded working artifacts dir — so cleanup IS part of the completion
   transition, folded into promotion rather than routed through `cleanupStaleArtifactsDir`. A
   separate mechanism, `cleanupStaleArtifactsDir` (the `cleanup` CLI command and the pre-run sweep
-  in `advance-audit`), clears a *stale* artifacts dir left by a prior `complete`/`not_started` run
+  before a fresh run), clears a *stale* artifacts dir left by a prior `complete`/`not_started` run
   before a fresh run starts; it explicitly skips deletion while a run is `active`/`blocked`, so an
   in-progress or blocked run's artifacts are never swept mid-flight.

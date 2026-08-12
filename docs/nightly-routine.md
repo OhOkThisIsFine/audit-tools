@@ -218,7 +218,8 @@ shape:
   `absent` genuinely absent) — `writeOpenItems()` refuses the batch otherwise —
   and **every probe target must be a git-TRACKED source file**: a gitignored
   runtime artifact or a record file (docs/backlog, docs/reviews, HANDOFF, the
-  inbox, .claude) carries no evidence and is refused at write.
+  inbox, `.audit-tools/nightly`, .claude) carries no evidence and is refused at
+  write.
   **One door exists, for a question ABOUT a record.** A leg-2 escalation asks
   what a backlog entry should *become* — its premise is prose in `docs/backlog`
   and there is frequently no code side at all, so the record-path refusal made

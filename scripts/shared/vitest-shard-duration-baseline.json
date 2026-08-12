@@ -86,7 +86,7 @@
     "tests/audit/dispatch-helpers.test.ts": 903,
     "tests/audit/dispatch-owner-tokens.test.ts": 25532,
     "tests/audit/dispatch-prompt.test.ts": 665,
-    "tests/audit/dispatch-quota-constants.test.ts": 645,
+    "tests/audit/review-packet-sizing.test.ts": 645,
     "tests/audit/dispatch-scripts.test.ts": 8021,
     "tests/audit/dispatch-validate.test.ts": 743,
     "tests/audit/dispatch.test.ts": 727,

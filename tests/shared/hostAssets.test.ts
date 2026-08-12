@@ -5,16 +5,15 @@ import { renderHostAsset, type HostAssetKind } from "../../src/shared/hostAssets
 const KINDS: HostAssetKind[] = ["vscode-agent", "codex-recipe", "antigravity-guide", "gemini-toml"];
 
 // A canonical body that exercises the format-only wrappers: it carries the
-// next-step continuation guidance with the capability flags, a backslash, and a
+// next-step continuation guidance, a backslash, and a
 // double-quote (which only the TOML kind must escape).
 const CANONICAL_BODY = [
   "# `/tool` Loader",
   "",
-  'Report `--host-models` on every `next-step` call. Use C:\\path and say "hi".',
+  'Use C:\\path and say "hi".',
   "",
   "When a step prompt tells you to continue, run `tool next-step` again with",
-  "the same capability flags (`--host-max-active-subagents`, `--host-models`,",
-  "`--host-context-tokens`, `--host-output-tokens`) and follow only the newly",
+  "and follow only the newly",
   "returned `prompt_path`.",
 ].join("\n");
 
@@ -26,11 +25,11 @@ test("renderHostAsset embeds the canonical body for every kind", () => {
   }
 });
 
-test("renderHostAsset carries --host-models in the continuation guidance for every kind", () => {
+test("renderHostAsset carries provider-neutral continuation guidance for every kind", () => {
   for (const kind of KINDS) {
     const out = renderHostAsset(kind, { promptBody: CANONICAL_BODY, toolName: "tool" });
-    const continuation = out.match(/again with[\s\S]*?(`--host-models`)[\s\S]*?prompt_path/);
-    expect(continuation, `${kind} continuation section must list --host-models`).toBeTruthy();
+    expect(out).toMatch(/run `tool next-step` again[\s\S]*?prompt_path/);
+    expect(out).not.toMatch(/--host-(?:models|context-tokens|output-tokens|max-active-subagents)/);
   }
 });
 
@@ -77,4 +76,3 @@ test("renderHostAsset throws on an unknown kind", () => {
     /Unknown host asset kind/,
   );
 });
-

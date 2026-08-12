@@ -56,7 +56,6 @@ export const CONSTITUTIONAL_DOC_PATHS: readonly string[] = [
   "spec/audit/entrypoint-contract.md",
   "spec/audit/executor-catalog.md",
   "spec/audit/orchestration-policy.md",
-  "spec/dispatch-quota.md",
   "spec/remediate/remediation-goals.md",
 ];
 

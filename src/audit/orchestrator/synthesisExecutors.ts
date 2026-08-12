@@ -9,18 +9,16 @@ import {
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
-import type { WorkPartitionPolicy } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 
-interface SynthesisCapacityOptions {
+interface SynthesisOptions {
   sizeIndex?: Readonly<Record<string, number>>;
-  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
 }
 
 function buildBaseFindingsReport(
   bundle: ArtifactBundle,
   results: AuditResult[],
-  options: SynthesisCapacityOptions = {},
+  options: SynthesisOptions = {},
 ) {
   const report = buildAuditFindingsReport(
     buildAuditReportModel({
@@ -36,9 +34,7 @@ function buildBaseFindingsReport(
       structureDecomposition: bundle.structure_decomposition,
       charterRegister: bundle.charter_register,
       systemicChallenge: bundle.systemic_challenge,
-      activeDispatch: bundle.active_dispatch,
       sizeIndex: options.sizeIndex,
-      workPartition: options.workPartition,
     }),
   );
   // Record the host-confirmed exclusions in the machine contract so omissions
@@ -52,7 +48,7 @@ function buildBaseFindingsReport(
 export function runSynthesisExecutor(
   bundle: ArtifactBundle,
   results?: AuditResult[],
-  options: SynthesisCapacityOptions = {},
+  options: SynthesisOptions = {},
 ): ExecutorRunResult {
   const finalResults = results ?? bundle.audit_results ?? [];
   // Emit the canonical machine contract and render the human report from it.
@@ -82,7 +78,7 @@ export function runSynthesisExecutor(
 }
 
 /**
- * Resolve the optional synthesis-narrative obligation. When a host/provider
+ * Resolve the optional synthesis-narrative obligation. When a host-authored
  * narrative is supplied it is merged into the canonical findings report and the
  * human report is re-rendered with themes/executive-summary/top-risks; without
  * one the narrative is recorded as omitted and the deterministic report stands.
@@ -90,7 +86,7 @@ export function runSynthesisExecutor(
 export function runSynthesisNarrativeExecutor(
   bundle: ArtifactBundle,
   narrative?: SynthesisNarrative,
-  options: SynthesisCapacityOptions = {},
+  options: SynthesisOptions = {},
 ): ExecutorRunResult {
   const baseReport =
     bundle.audit_findings ??

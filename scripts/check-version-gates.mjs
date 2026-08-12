@@ -61,7 +61,15 @@ export function collectSources(root = process.cwd()) {
   for (const rel of listed.split(/\r?\n/)) {
     const path = rel.trim();
     if (!path.endsWith(".ts")) continue;
-    sources.set(path, readFileSync(`${root}/${path}`, "utf8"));
+    try {
+      sources.set(path, readFileSync(`${root}/${path}`, "utf8"));
+    } catch (error) {
+      // `git ls-files` is the index census. An unstaged deletion in an atomic
+      // retirement has no working-tree source to scan; skip only that exact
+      // state while preserving every other IO failure.
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+      throw error;
+    }
   }
   return sources;
 }

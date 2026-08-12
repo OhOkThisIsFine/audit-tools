@@ -29,13 +29,8 @@ export const OPENCODE_AUDIT_EDIT_PERMISSION = {
 const AUDIT_CODE_ALLOWED_SUBCOMMANDS = [
   'ensure*',
   'next-step*',
-  'prepare-dispatch*',
-  'submit-packet*',
-  'merge-and-ingest*',
   'validate*',
 ];
-// Extra subcommands that only make sense via the dev wrapper (not the global bin).
-const AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS = ['worker-run*'];
 // Subcommands denied for every invocation form.
 const AUDIT_CODE_DENIED_SUBCOMMANDS = ['synthesize*', 'cleanup*', 'requeue*', 'ingest-results*'];
 
@@ -57,9 +52,6 @@ function buildAuditBashPermissions() {
     perm[`*audit-code.mjs* ${sub}`] = 'allow';
   }
   perm['*audit-code.mjs'] = 'allow';
-  for (const sub of AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS) {
-    perm[`*audit-code.mjs* ${sub}`] = 'allow';
-  }
   perm['git status*'] = 'allow';
   perm['git diff*'] = 'allow';
   perm['grep *'] = 'allow';
@@ -69,6 +61,24 @@ function buildAuditBashPermissions() {
 }
 
 export const OPENCODE_AUDIT_BASH_PERMISSION = buildAuditBashPermissions();
+
+const RETIRED_AUDIT_CODE_BASH_RULES = [
+  'audit-code prepare-dispatch*',
+  'audit-code submit-packet*',
+  'audit-code merge-and-ingest*',
+  '*audit-code.mjs* prepare-dispatch*',
+  '*audit-code.mjs* submit-packet*',
+  '*audit-code.mjs* merge-and-ingest*',
+  '*audit-code.mjs* worker-run*',
+];
+
+function withoutRetiredAuditCodeBashRules(rule) {
+  const cleaned = { ...objectValue(rule) };
+  for (const retired of RETIRED_AUDIT_CODE_BASH_RULES) {
+    delete cleaned[retired];
+  }
+  return cleaned;
+}
 
 export function renderOpenCodePermissionConfig() {
   return {
@@ -151,14 +161,8 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
     'audit-code',
     'audit-code ensure*',
     'audit-code next-step*',
-    'audit-code prepare-dispatch*',
-    'audit-code submit-packet*',
-    'audit-code merge-and-ingest*',
     '*audit-code.mjs',
     '*audit-code.mjs* next-step*',
-    '*audit-code.mjs* submit-packet*',
-    '*audit-code.mjs* merge-and-ingest*',
-    '*audit-code.mjs* worker-run*',
   ]) {
     if (bash[pattern] !== 'allow') {
       throw new Error(`OpenCode ${label}.bash must allow ${pattern}. Run "audit-code install --host opencode".`);
@@ -197,6 +201,7 @@ function withoutManagedBroadBashWildcard(rule) {
 
 function mergePermissionBlock(existingPermission, generatedPermission) {
   const existing = objectValue(existingPermission);
+  const existingBash = withoutRetiredAuditCodeBashRules(existing.bash);
   const merged = {
     ...generatedPermission,
     ...existing,
@@ -209,7 +214,7 @@ function mergePermissionBlock(existingPermission, generatedPermission) {
       withoutOpenCodeWildcard(OPENCODE_AUDIT_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      withoutManagedBroadBashWildcard(existing.bash),
+      withoutManagedBroadBashWildcard(existingBash),
       generatedPermission.bash,
       withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
     ),
@@ -267,7 +272,7 @@ export function buildMergedOpenCodeProjectConfig(existing, root) {
   // union does not manage are preserved (non-clobber).
   const topPermission = mergePermissionBlock(existing.permission, generated.permission);
   topPermission.bash = composeOpenCodeBashCeiling(
-    objectValue(existing.permission).bash,
+    withoutRetiredAuditCodeBashRules(objectValue(existing.permission).bash),
     collectAgentBashRuleSets(mergedAgent),
   );
   return {

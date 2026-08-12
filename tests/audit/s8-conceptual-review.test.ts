@@ -6,7 +6,7 @@ import { test, expect } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { Finding, FindingGrounding } from "../../src/shared/types/finding.js";
 
-const { renderConceptualReviewPrompt, renderConceptualJudgePrompt, renderDesignReviewPrompt } =
+const { renderConceptualReviewPrompt, renderConceptualJudgePrompt } =
   await import("../../src/audit/orchestrator/designReviewPrompt.js");
 const {
   groundDesignFindings,
@@ -63,12 +63,6 @@ test("conceptual prompt asks general first-principles questions and says orient-
   expect(p).toMatch(/architecture_pattern/);
   expect(p).toMatch(/missing_capability/);
   expect(p).not.toMatch(/inferred_contract_gap/);
-});
-
-test("combined fallback prompt also uses first-principles framing", () => {
-  const p = renderDesignReviewPrompt(minimalBundle());
-  expect(p).toMatch(/fundamental approach/i);
-  expect(p).not.toMatch(/Tool and library opportunities/);
 });
 
 // ── fix 3: a judging judge that flags what was missed ──

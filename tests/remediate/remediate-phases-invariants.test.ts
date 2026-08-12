@@ -4,7 +4,7 @@
  * INV-remediate-phases-02: mergeBlocksSharingFiles never merges serialized (dep-ordered) blocks
  * INV-remediate-phases-03: splitBlocksByContextBudget rewrites ALL dep references when a dep is split
  * INV-remediate-phases-04: buildCoverageLedger — every source finding has exactly one disposition
- * INV-remediate-phases-05: runTriagePhase auto-retry cap is per-failure-class (infra vs contract)
+ * INV-remediate-phases-05: runTriagePhase uses a unified auto-retry cap
  * INV-remediate-phases-06: runClosePhase preview gate blocks unconfirmed closing actions
  * INV-remediate-phases-07: collectStagingFiles excludes .audit-tools/ and .env* patterns
  * INV-remediate-phases-08: groundExtractedFindings repair hook is called exactly once for all-phantom findings
@@ -343,12 +343,12 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
 });
 
 // ---------------------------------------------------------------------------
-// INV-remediate-phases-05: auto-retry cap is per failure class
+// INV-remediate-phases-05: auto-retry cap is content-agnostic
 // ---------------------------------------------------------------------------
 
-describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure class", () => {
+describe("runTriagePhase — INV-remediate-phases-05: unified auto-retry cap", () => {
   const TEST_DIR = scratchDir(".test-phases-inv-05");
-  const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
+  const BASE_OPTIONS = { root: dirname(TEST_DIR), artifactsDir: TEST_DIR };
 
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -359,29 +359,7 @@ describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("infra failure below infra cap (5) is auto-retried even when contract cap (2) is exhausted", async () => {
-    const state = makeState({
-      status: "triage",
-      items: {
-        F1: {
-          finding_id: "F1",
-          status: "blocked",
-          failure_reason: "quota exceeded — rate limit hit",
-          block_id: "B1",
-          rework_count: 2,        // contract cap exhausted
-          infra_rework_count: 3,  // below infra cap (5)
-        },
-      },
-    });
-    const next = await runTriagePhase(state, BASE_OPTIONS);
-    // Auto-retried because infra cap not yet reached
-    expect(next.status).toBe("implementing");
-    expect(state.items!.F1.infra_rework_count).toBe(4);
-    // rework_count must not be incremented for an infra failure
-    expect(state.items!.F1.rework_count).toBe(2);
-  });
-
-  it("contract failure at contract cap (2) routes to human triage even with infra cap remaining", async () => {
+  it("a failure at the unified cap routes to human triage", async () => {
     const state = makeState({
       status: "triage",
       items: {
@@ -390,31 +368,12 @@ describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure
           status: "blocked",
           failure_reason: "test assertion failed — wrong output",
           block_id: "B1",
-          rework_count: 2,       // contract cap exhausted
-          infra_rework_count: 0, // infra cap has headroom but failure is contract
+          rework_count: 2,
         },
       },
     });
     const next = await runTriagePhase(state, BASE_OPTIONS);
-    // Contract cap exhausted → wait for human
-    expect(next.status).toBe("waiting_for_triage");
-    expect(state.items!.F1.status).toBe("blocked");
-  });
-
-  it("infra failure at infra cap (5) routes to human triage", async () => {
-    const state = makeState({
-      status: "triage",
-      items: {
-        F1: {
-          finding_id: "F1",
-          status: "blocked",
-          failure_reason: "provider error — timeout exceeded",
-          block_id: "B1",
-          infra_rework_count: 5, // at infra cap
-        },
-      },
-    });
-    const next = await runTriagePhase(state, BASE_OPTIONS);
+    // Unified cap exhausted → wait for human.
     expect(next.status).toBe("waiting_for_triage");
     expect(state.items!.F1.status).toBe("blocked");
   });
@@ -620,7 +579,7 @@ describe("groundExtractedFindings — INV-remediate-phases-08: repair hook calle
 
 describe("runTriagePhase — INV-remediate-phases-09: explicit action:retry is authoritative", () => {
   const TEST_DIR = scratchDir(".test-phases-inv-09");
-  const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
+  const BASE_OPTIONS = { root: dirname(TEST_DIR), artifactsDir: TEST_DIR };
 
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });

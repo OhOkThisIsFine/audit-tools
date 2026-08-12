@@ -2,15 +2,14 @@
 //
 // One test group per finding cluster, POSITIVE/NEGATIVE-prefixed assertions per
 // the test_validator_plan style. Written FIRST (red on the unfixed tree), then
-// the fixes turn them green. New symbols the fixes introduce (rollbackBaseToOid,
-// closingActionCompleted, buildVerificationReport export, isResolutionForRequest,
+// the fixes turn them green. New symbols the fixes introduce
+// (closingActionCompleted, buildVerificationReport export, isResolutionForRequest,
 // cleanupTempBranchesAndArtifacts export) are reached via dynamic import so each
 // cluster reds granularly instead of the whole file dying on a missing static
 // import.
 //
 // Covered clusters:
 //   COR-8c497987   verifyCommands.ts  — per-invocation build-free validation
-//   COR-0ad18f1a/-2 ownershipRegistry — inFlightClaims + root round-trip
 //   DAT-017d52ff   store.ts           — status-conditional state completeness
 //   COR-46fff0ec   plan.ts            — split preserves verification + phase metadata
 //   COR-87f78167/-2 triage.ts         — post-resolution still-blocked guard + closing_plan
@@ -18,8 +17,6 @@
 //   OBS-89a57cbd/-2 close.ts          — final-state persist failure is surfaced
 //   COR-0b906e37/-2 reviewGate.ts     — resolution/request plan_id correlation
 //   COR-227a02ae   nextStep.ts        — decision replay honours approved_ids
-//   COR-5f8fb354   nextStep.ts        — session-config autonomous_mode reaches the gate
-//   COR-586b493e   acceptNode.ts      — verified base rollback (rollbackBaseToOid)
 //   CDC-402 pin    stepWriter          — current-step writes route through the shared writer
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -27,10 +24,8 @@ import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSyncHidden } from "../helpers/spawn.mjs";
 
 import { isBuildFreeVerifyCommand } from "../../src/remediate/steps/dispatch/verifyCommands.js";
-import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { splitBlocksByContextBudget } from "../../src/remediate/phases/plan.js";
@@ -50,14 +45,6 @@ import type { Finding, RemediationBlock } from "../../src/remediate/state/types.
 // Scratch off the repo tree (the worktree may itself live under .audit-tools —
 // tests must never root fixtures inside the tree the shared paths guard scans).
 const SCRATCH = join(tmpdir(), "audit-tools-tests", ".cp-node-1-regressions");
-
-function git(cwd: string, ...args: string[]): string {
-  const r = spawnSyncHidden("git", args, { cwd, encoding: "utf8", shell: false });
-  if (r.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${r.stderr ?? r.error?.message}`);
-  }
-  return (r.stdout ?? "").toString().trim();
-}
 
 function mkFinding(id: string, path: string, overrides: Partial<Finding> = {}): Finding {
   return {
@@ -123,53 +110,6 @@ describe("COR-8c497987 isBuildFreeVerifyCommand judges each invocation, not the 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COR-0ad18f1a / COR-70a46faa — OwnershipRegistry restart survival
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("COR-0ad18f1a/COR-70a46faa OwnershipRegistry serialize/fromJson round-trip", () => {
-  it("NEGATIVE→POSITIVE: in-flight scheduling claims survive a serialize/fromJson restart", () => {
-    const reg = new OwnershipRegistry();
-    reg.initialize([
-      { node_id: "N1", write_paths: ["src/a.ts"] },
-      { node_id: "N2", write_paths: ["src/b.ts"] },
-    ]);
-    reg.claimInFlight("N1", ["src/a.ts"]);
-    const restored = OwnershipRegistry.fromJson(
-      reg.serialize(),
-      new Set(["N1", "N2"]),
-    );
-    // INV-SOO-01: after a restart the in-flight writer claim must still be held,
-    // or a foreign same-file node is admitted boundary-ungated.
-    expect(restored.inFlightOwner("src/a.ts")).toBe("N1");
-    expect(restored.isFileOwnershipDisjoint("N2", ["src/a.ts"])).toBe(false);
-  });
-
-  it("POSITIVE: stale in-flight claims (node no longer in the DAG) are purged on restore", () => {
-    const reg = new OwnershipRegistry();
-    reg.initialize([{ node_id: "GONE", write_paths: ["src/a.ts"] }]);
-    reg.claimInFlight("GONE", ["src/a.ts"]);
-    const restored = OwnershipRegistry.fromJson(reg.serialize(), new Set(["N1"]));
-    expect(restored.inFlightOwner("src/a.ts")).toBeUndefined();
-  });
-
-  it("NEGATIVE→POSITIVE: the canonicalization root survives the round-trip (INV-SOO-09)", () => {
-    const root = join(SCRATCH, "reg-root");
-    const reg = new OwnershipRegistry(undefined, root);
-    reg.initialize([{ node_id: "N1", write_paths: ["src/a.ts"] }]);
-    reg.claimInFlight("N1", ["src/a.ts"]);
-    const json = reg.serialize() as { root?: string };
-    expect(json.root).toBe(root);
-    const restored = OwnershipRegistry.fromJson(
-      reg.serialize(),
-      new Set(["N1"]),
-    );
-    // A differently-spelled same file must still collide after the restore —
-    // only possible when the canonicalization root was restored too.
-    expect(restored.inFlightOwner(join(root, "src", "a.ts"))).toBe("N1");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // DAT-017d52ff — INV-RSM-STATE-COMPLETE: status-conditional load validation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -217,7 +157,7 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     // checked only that `plan.blocks` is an array, so a block with no declared
     // surface loaded clean and every reader normalized the omission away with
     // `?? []` — i.e. a producer bug presenting as "collides with nothing" to the
-    // file-ownership-disjoint scheduler. Two validators for one object,
+    // host workload's declared edit surface. Two validators for one object,
     // disagreeing, with the weaker one on the load path.
     const store = await writeRawState("store-block-no-touched-files", {
       status: "implementing",
@@ -481,9 +421,7 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
     const completed = close.closingActionCompleted as (r: unknown) => boolean;
     expect(completed({ status: "success", action: "commit", commands: [] })).toBe(true);
     expect(completed({ status: "skipped", action: "none", commands: [] })).toBe(true);
-    // A skipped NON-none close did not complete — e.g. merge-to-base with no
-    // recorded base leaves the run unmerged.
-    expect(completed({ status: "skipped", action: "merge-to-base", commands: [] })).toBe(false);
+    expect(completed({ status: "skipped", action: "publish", commands: [] })).toBe(false);
     expect(completed({ status: "failed", action: "commit", commands: [] })).toBe(false);
   });
 
@@ -508,12 +446,12 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
           { block_id: "B-1", items: ["F-A"], parallel_safe: true, touched_files: [] },
         ],
         project_type: "unknown",
-        candidate_closing_actions: ["merge-to-base"],
+        candidate_closing_actions: ["publish"],
       },
       items: {
         "F-A": { finding_id: "F-A", status: "resolved", block_id: "B-1" },
       },
-      closing_plan: { action: "merge-to-base" },
+      closing_plan: { action: "publish" },
     } as RemediationState;
     const artifactsDir = join(SCRATCH, "verif-report");
     const report = build(
@@ -521,7 +459,7 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
       { root: SCRATCH, artifactsDir },
       {
         contract_version: "remediate-code-closing-result/v1alpha1",
-        action: "merge-to-base",
+        action: "publish",
         status: "skipped",
         commands: [],
       },
@@ -767,83 +705,6 @@ describe("COR-227a02ae review-gate replay honours the recorded approved_ids", ()
       findings: Array<{ id: string }>;
     };
     expect(approved.findings.map((f) => f.id)).toEqual(["F-001"]);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COR-5f8fb354 — session-config autonomous_mode reaches the review gate
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("COR-5f8fb354 the review gate resolves autonomy from the persisted session config", () => {
-  const h = createNextStepHarness(".cp-node-1-autonomy");
-
-  afterAll(async () => {
-    await h.cleanupTestRepo();
-  });
-
-  it("NEGATIVE: with session-config autonomous_mode=true the gate must not halt for a human", async () => {
-    await h.resetTestRepo();
-    await h.writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
-    await writeFile(
-      join(h.REPO_DIR, "session-config.json"),
-      JSON.stringify({ autonomous_mode: true }),
-      "utf8",
-    );
-    const step = await decideNextStep({ root: h.REPO_DIR });
-    // The unattended gate never halts: it records an autonomous decision and
-    // proceeds (leftovers re-emitted, not durably rejected).
-    expect(step.step_kind).not.toBe("collect_review_approval");
-    expect(existsSync(join(h.ARTIFACTS_DIR, "review_decision.json"))).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COR-586b493e — verified base rollback (rollbackBaseToOid)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("COR-586b493e rollbackBaseToOid verifies the reset instead of firing blind", () => {
-  it("NEGATIVE→POSITIVE: rollbackBaseToOid exists, resets to the target OID, and verifies HEAD", async () => {
-    const acceptNode = (await import(
-      "../../src/remediate/steps/dispatch/acceptNode.js"
-    )) as Record<string, unknown>;
-    expect(typeof acceptNode.rollbackBaseToOid).toBe("function");
-    const rollback = acceptNode.rollbackBaseToOid as (
-      root: string,
-      baseOid: string,
-      filesToClean?: Iterable<string>,
-    ) => { ok: boolean; detail?: string };
-
-    const repo = join(SCRATCH, "rollback-repo");
-    await mkdir(repo, { recursive: true });
-    git(repo, "init", "-b", "main");
-    git(repo, "config", "user.email", "test@example.com");
-    git(repo, "config", "user.name", "test");
-    await writeFile(join(repo, "f.txt"), "one\n", "utf8");
-    git(repo, "add", "-A");
-    git(repo, "commit", "-m", "first");
-    const firstOid = git(repo, "rev-parse", "HEAD");
-    await writeFile(join(repo, "f.txt"), "two\n", "utf8");
-    git(repo, "add", "-A");
-    git(repo, "commit", "-m", "second");
-
-    const ok = rollback(repo, firstOid, ["f.txt"]);
-    expect(ok.ok).toBe(true);
-    expect(git(repo, "rev-parse", "HEAD")).toBe(firstOid);
-  });
-
-  it("NEGATIVE: a rollback to an unreachable OID reports failure loudly", async () => {
-    const acceptNode = (await import(
-      "../../src/remediate/steps/dispatch/acceptNode.js"
-    )) as Record<string, unknown>;
-    const rollback = acceptNode.rollbackBaseToOid as (
-      root: string,
-      baseOid: string,
-      filesToClean?: Iterable<string>,
-    ) => { ok: boolean; detail?: string };
-    const repo = join(SCRATCH, "rollback-repo"); // reuse the repo above
-    const res = rollback(repo, "0123456789abcdef0123456789abcdef01234567");
-    expect(res.ok).toBe(false);
-    expect(res.detail).toBeTruthy();
   });
 });
 

@@ -1,6 +1,6 @@
-// Single source of truth for the "loop-core" path set — the dispatch / admission /
-// quota / rolling-engine / orchestrator-step substrate whose changes carry the
-// highest blast radius. Two independent tool-enforcement mechanisms consume it:
+// Single source of truth for the "loop-core" path set — the persisted workflow,
+// host-handoff, verification, and orchestrator-step substrate whose changes carry
+// the highest blast radius. Two independent tool-enforcement mechanisms consume it:
 //
 //   • the per-node merged-base GUARD (`acceptNode.ts`) runs the cross-cutting
 //     invariant suite when a remediate node's edits touch loop-core paths, and
@@ -26,25 +26,17 @@
 export const LOOP_CORE_PATTERNS: readonly string[] = [
   // Path-sorted (JS default string order) so the serialized order is stable and
   // the hook-parity comparison is deterministic. Groups, for the reader:
-  //   • audit orchestrator step machine + its dispatch drivers
-  //   • remediate step machine + its dispatch drivers + risk/pipeline core
-  //   • shared dispatch / admission / rolling / quota / engine substrate
+  //   • audit orchestrator step machine + host-handoff boundary
+  //   • remediate step machine + host-handoff/landing + risk/pipeline core
+  //   • shared obligation engine
   "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
-  "src/audit/cli/dispatchAttempted.ts",
-  "src/audit/cli/mergeAndIngestCommand.ts",
-  "src/audit/cli/ownerTokens.ts",
-  "src/audit/cli/rollingAuditDispatch.ts",
   "src/audit/orchestrator/",
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/nextStep.ts",
-  "src/remediate/steps/rollingSession.ts",
-  "src/shared/dispatch/",
   "src/shared/engine/",
-  "src/shared/quota/",
-  "src/shared/rolling/",
 ];
 
 /** Normalize a repo-relative path to forward slashes, no leading "./". */

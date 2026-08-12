@@ -4,12 +4,10 @@
 // plumbing, temp-repo fixture, and the dispatch/merge/install fixtures the
 // split files share.
 import { expect } from "vitest";
-import assert from "node:assert/strict";
 import {
   mkdtemp,
   rm,
   mkdir,
-  stat,
   writeFile,
   readFile,
 } from "node:fs/promises";
@@ -17,31 +15,11 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
-import { walkStepsUntilTerminal } from "./step-driver.js";
-import { AuditCodeResponseSchema } from "../../../src/audit/contracts/wrapperResponse.js";
-
-// Post-G2 the backend provider identity rides the per-invocation --auditor
-// descriptor rather than the persisted session-config.json (which now rejects it).
-export const AUDITOR_ARGS = [
-  "--auditor",
-  JSON.stringify({
-    self: {
-      provider: "worker-command",
-      context_tokens: 200_000,
-      output_tokens: 8_000,
-    },
-  }),
-];
 
 // Loose shapes for the JSON the wrapper prints / writes. Only the fields the
 // assertions read through a callback are named — everything else stays open via
 // the index signature, so these describe the contract without pinning a shape
 // the artifacts do not actually guarantee.
-export interface TaskRecord {
-  task_id: string;
-  [key: string]: any;
-}
-
 export interface HostEntry {
   host: string;
   [key: string]: any;
@@ -68,13 +46,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..", "..", "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
 const packageJsonPath = join(repoRoot, "package.json");
-
-export function assertMatchesResponseSchema(value: unknown, label: string): void {
-  const result = AuditCodeResponseSchema.safeParse(value);
-  expect(result.success, `${label} should satisfy AuditCodeResponseSchema: ${
-      result.success ? "" : JSON.stringify(result.error.issues)
-    }`).toBeTruthy();
-}
 
 export const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
@@ -234,8 +205,8 @@ export function assertOpenCodeAuditPermissions(config: any): void {
   expect(config.permission?.bash?.["audit-code cleanup*"]).toBe("deny");
   expect(config.permission?.bash?.["audit-code requeue*"]).toBe("deny");
   expect(config.permission?.bash?.["audit-code ingest-results*"]).toBe("deny");
-  expect(config.permission?.bash?.["*audit-code.mjs* submit-packet*"]).toBe("allow");
-  expect(config.permission?.bash?.["*audit-code.mjs* worker-run*"]).toBe("allow");
+  expect(config.permission?.bash?.["*audit-code.mjs* submit-packet*"]).toBeUndefined();
+  expect(config.permission?.bash?.["*audit-code.mjs* worker-run*"]).toBeUndefined();
   expect(config.permission?.bash?.["*audit-code.mjs* synthesize*"]).toBe("deny");
   expect(config.permission?.bash?.["Select-String *"]).toBe("allow");
   expect(config.agent?.auditor?.permission?.read).toBe("allow");
@@ -246,7 +217,7 @@ export function assertOpenCodeAuditPermissions(config: any): void {
   expect(config.agent?.auditor?.permission?.external_directory?.["*"]).not.toBe("allow");
   expect(config.agent?.auditor?.permission?.edit?.[".audit-tools/**"]).toBe("allow");
   expect(config.agent?.auditor?.permission?.bash?.["audit-code next-step*"]).toBe("allow");
-  expect(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"]).toBe("allow");
+  expect(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"]).toBeUndefined();
   expect(config.agent?.auditor?.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
 }
 
@@ -312,125 +283,6 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
-  }
-}
-
-export function validAuditResultForTask(task: any, overrides: Record<string, unknown> = {}) {
-  return {
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    pass_id: task.pass_id,
-    lens: task.lens,
-    file_coverage: task.file_paths.map((path: string) => ({
-      path,
-      total_lines: task.file_line_counts?.[path] ?? 0,
-    })),
-    findings: [],
-    reviewed_clean: true,
-    ...overrides,
-  };
-}
-
-// Drive `next-step` past the host pause steps that precede review dispatch by
-// answering each pause headlessly (skip analyzer installs, confirm the default
-// scope, submit empty design-review findings). Returns the first
-// dispatch-ready step (dispatch_review).
-// Same walk as completion-harness's `advanceToDispatchReady`, differing only in
-// transport: this one drives the wrapper as a spawned CLI rather than in-process.
-export async function startDispatchRun(root: string): Promise<any> {
-  return walkStepsUntilTerminal({
-    root,
-    transport: async () =>
-      JSON.parse(
-        (await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout,
-      ),
-    terminalKinds: new Set(["dispatch_review"]),
-    label: "startDispatchRun",
-  });
-}
-
-async function setupDispatchFixture(root: string) {
-  const step = await startDispatchRun(root);
-  const runId = step.run_id;
-  const artifactsDir = step.artifacts_dir;
-
-  expect(runId).toBeTruthy();
-  expect(artifactsDir).toBeTruthy();
-
-  await runWrapper(
-    [
-      "prepare-dispatch",
-      "--run-id",
-      runId,
-      "--artifacts-dir",
-      artifactsDir,
-      ...AUDITOR_ARGS,
-    ],
-    { cwd: root },
-  );
-
-  const runDir = join(artifactsDir, "runs", runId);
-  const tasks: TaskRecord[] = JSON.parse(
-    await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
-  );
-  const taskById = new Map<string, TaskRecord>(
-    tasks.map((task) => [task.task_id, task]),
-  );
-  const plan = JSON.parse(
-    await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
-  );
-  const resultMap = JSON.parse(
-    await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
-  );
-
-  return { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap };
-}
-
-export async function setupMergeFixture(root: string) {
-  return setupDispatchFixture(root);
-}
-
-export async function submitAllPackets(
-  root: string,
-  runId: string,
-  artifactsDir: string,
-  plan: any,
-  resultMap: any,
-  taskById: Map<string, TaskRecord>,
-): Promise<void> {
-  for (const packet of plan) {
-    const packetResults = resultMap.entries
-      .filter((item: any) => item.packet_id === packet.packet_id)
-      .map((entry: any) => validAuditResultForTask(taskById.get(entry.task_id)));
-    await runWrapper(
-      ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
-      { cwd: root, input: JSON.stringify(packetResults) },
-    );
-  }
-}
-
-export async function setupSubmitPacketFixture(root: string) {
-  const { runId, artifactsDir, tasks, taskById, plan, resultMap } =
-    await setupDispatchFixture(root);
-
-  const packet = plan.find(
-    (candidate: any) =>
-      resultMap.entries.filter((entry: any) => entry.packet_id === candidate.packet_id)
-        .length >= 2,
-  );
-  expect(packet, "expected a dispatch packet with at least two tasks").toBeTruthy();
-  const entries = resultMap.entries.filter(
-    (entry: any) => entry.packet_id === packet.packet_id,
-  );
-  const packetTasks = entries.map((entry: any) => taskById.get(entry.task_id));
-  expect(packetTasks.every(Boolean), "expected task metadata for every packet entry").toBe(true);
-
-  return { runId, artifactsDir, packet, entries, packetTasks, tasks };
-}
-
-export async function assertPacketResultFilesMissing(entries: any[]): Promise<void> {
-  for (const entry of entries) {
-    await assert.rejects(() => stat(entry.result_path));
   }
 }
 

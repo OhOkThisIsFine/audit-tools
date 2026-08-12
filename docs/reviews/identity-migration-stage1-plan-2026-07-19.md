@@ -1,7 +1,7 @@
 # Backend-identity migration — stage 1 plan and classification (2026-07-19)
 
 Dated plan artifact for stage 1 of the migration in `docs/backlog.md` → *Forward tracks*
-("Backend-identity axes"). Design of record: [`spec/backend-identity-axes.md`](../../spec/backend-identity-axes.md).
+("Backend-identity axes"). Design of record at the time: `spec/backend-identity-axes.md`.
 Durable direction lives in the spec + backlog; this is a one-off record of what stage 1 touches
 and what was verified before touching it.
 

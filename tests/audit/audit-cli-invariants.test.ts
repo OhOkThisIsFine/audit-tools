@@ -22,25 +22,15 @@ import type {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 
-// ── INV-audit-cli-01: buildManualReviewBlocker provider routing ───────────────
-// worker-command is the headless path that CANNOT dispatch sub-agents; all
-// other (LLM) providers CAN. The messages must be assigned accordingly
-// (COR-dc621e7a fix).
+// ── INV-audit-cli-01: provider-neutral semantic-review handoff ───────────────
 
 const { buildManualReviewBlocker } = await import("../../src/audit/cli/envelope.js");
 
-test("INV-audit-cli-01: worker-command → blocked/manual message", () => {
-  const msg = buildManualReviewBlocker("worker-command");
-  expect(msg, "worker-command must get the manual-waiting message, not LLM fan-out").toMatch(/waiting for manual audit results/);
-  expect(msg, "worker-command must NOT get the LLM fan-out message").not.toMatch(/Ready for LLM semantic review/);
-});
-
-test("INV-audit-cli-01: LLM providers → fan-out message", () => {
-  for (const provider of ["claude-code", "codex", "opencode", "antigravity", "agy"]) {
-    const msg = buildManualReviewBlocker(provider);
-    expect(msg, `${provider} must get the LLM fan-out message`).toMatch(/Ready for LLM semantic review/);
-    expect(msg, `${provider} must NOT get the manual-waiting message`).not.toMatch(/waiting for manual audit results/);
-  }
+test("INV-audit-cli-01: semantic review names host-owned bound work", () => {
+  const msg = buildManualReviewBlocker();
+  expect(msg).toMatch(/host execution/i);
+  expect(msg).toMatch(/bound work items/i);
+  expect(msg).not.toMatch(/provider|worker.command|quota/i);
 });
 
 // ── INV-audit-cli-02: null guard on handleGraphEnrichmentBranch analyzer-decisions ──
@@ -167,7 +157,7 @@ function minimalHandoff(): AuditCodeHandoff {
     operator_handoff_markdown: "/repo/.audit-tools/audit/operator-handoff.md",
     session_config: "/repo/.audit-tools/audit/session-config.json",
     run_ledger: "/repo/.audit-tools/audit/run-ledger.json",
-    current_task: null,
+    current_review_run: null,
     current_prompt: null,
     current_tasks: null,
     audit_tasks: null,
@@ -178,12 +168,10 @@ function minimalHandoff(): AuditCodeHandoff {
     status: "active",
     repo_root: "/repo",
     artifacts_dir: "/repo/.audit-tools/audit",
-    provider: null,
     summary: "test",
     pending_obligations: [],
     suggested_inputs: [],
     suggested_commands: [],
-    interactive_provider_hint: null,
     artifact_paths: artifactPaths,
   };
 }
@@ -209,17 +197,14 @@ test("INV-audit-cli-06: buildEnvelope includes contract_version in output", () =
   expect(envelope.progress_made).toBe(true);
 });
 
-// ── INV-audit-cli-07: isLlmDispatchExecutor classifies dispatch executors ──────
-// 'agent' and 'rolling_dispatch_executor' are LLM dispatch executors that require
-// host delegation; local/headless executors are not. null → no executor selected.
+// ── INV-audit-cli-07: semantic review is always host-executed ────────────────
 
-const { isLlmDispatchExecutor } = await import("../../src/audit/cli/envelope.js");
+const { isSemanticReviewExecutor } = await import("../../src/audit/cli/envelope.js");
 
-test("INV-audit-cli-07: agent and rolling_dispatch_executor are LLM dispatch executors", () => {
-  expect(isLlmDispatchExecutor("agent"), "'agent' is a dispatch executor").toBeTruthy();
-  expect(isLlmDispatchExecutor("rolling_dispatch_executor"), "'rolling_dispatch_executor' is a dispatch executor").toBeTruthy();
-  expect(!isLlmDispatchExecutor("worker-command"), "'worker-command' is not a dispatch executor").toBeTruthy();
-  expect(!isLlmDispatchExecutor(null), "null is not a dispatch executor").toBeTruthy();
+test("INV-audit-cli-07: only semantic_review_executor identifies the review frontier", () => {
+  expect(isSemanticReviewExecutor("semantic_review_executor")).toBe(true);
+  expect(isSemanticReviewExecutor("design_review_contract")).toBe(false);
+  expect(isSemanticReviewExecutor(null)).toBe(false);
 });
 
 // ── INV-audit-cli-08: NextStepParams carries no token-wrap option (COR-0ae3577b) ──
@@ -261,7 +246,7 @@ test("INV-audit-cli-09: ExternalAnalyzerResults null-guard contract is documente
 });
 
 // ── INV-audit-cli-11: dispatchStatusCommand re-throws non-missing IO errors (COR-6e84f23c) ─
-// The bare catch in dispatch-status used to swallow all readFile errors, misreporting
+// A former status-path bare catch swallowed all readFile errors, misreporting
 // permission/IO failures as "missing results". Fixed: only ENOENT is treated as missing;
 // other errors are re-thrown. Verified structurally: isFileMissingError is used in the catch.
 

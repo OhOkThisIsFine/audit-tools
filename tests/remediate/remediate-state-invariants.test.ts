@@ -1,14 +1,12 @@
 /**
  * INV-remediate-state-06: blockingIntakeQuestions semantics
  * INV-remediate-state-07: isAuditFindingsReport contract_version validation
- * INV-remediate-state-09: OwnershipRegistry.initialize restores claims on resume
  * INV-remediate-state-10: fileIntegrity TOCTOU-safe hashing + ENOENT vs io_errors
  * INV-remediate-state-11: Finding carry-forward identity strips plan-time bookkeeping
  */
 import { describe, it, expect } from "vitest";
 import { blockingIntakeQuestions } from "../../src/remediate/intake.js";
 import { isAuditFindingsReport } from "../../src/remediate/phases/plan.js";
-import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
 import { hashFile, hashFileSync } from "../../src/remediate/utils/fileIntegrity.js";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -133,45 +131,6 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
         findings: "not-an-array",
       }),
     ).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-remediate-state-09: OwnershipRegistry.initialize on resumed run
-// ---------------------------------------------------------------------------
-
-describe("OwnershipRegistry.initialize — INV-remediate-state-09: does not clear active in-flight claims on resume", () => {
-  it("fromJson restores in-flight claims for nodes still in the DAG", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-    ]);
-    registry.claimAmendment("NODE-A", "src/shared.ts");
-
-    const json = registry.serialize();
-    // Restore simulating a resumed run — NODE-A is still in the current DAG.
-    const restored = OwnershipRegistry.fromJson(json, new Set(["NODE-A"]));
-
-    // In-flight claim for NODE-A must be preserved.
-    expect(restored.amendmentClaimant("src/shared.ts")).toBe("NODE-A");
-    expect(restored.getScope("NODE-A")).toContain("src/shared.ts");
-  });
-
-  it("fromJson purges claims only for nodes absent from the current DAG", () => {
-    const registry = new OwnershipRegistry();
-    registry.initialize([
-      { node_id: "NODE-A", write_paths: ["src/a.ts"] },
-      { node_id: "NODE-B", write_paths: ["src/b.ts"] },
-    ]);
-    registry.claimAmendment("NODE-A", "src/x.ts");
-    registry.claimAmendment("NODE-B", "src/y.ts");
-
-    const json = registry.serialize();
-    // NODE-A is gone from DAG; NODE-B is still live.
-    const restored = OwnershipRegistry.fromJson(json, new Set(["NODE-B"]));
-
-    expect(restored.amendmentClaimant("src/x.ts")).toBeUndefined(); // purged
-    expect(restored.amendmentClaimant("src/y.ts")).toBe("NODE-B");  // preserved
   });
 });
 

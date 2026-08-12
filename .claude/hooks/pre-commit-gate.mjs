@@ -62,6 +62,10 @@ import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
 // file there is silently dropped from commits until someone adds the allowlist
 // line. `npm run check:constitutional-doc-paths` fails the build on drift.
 import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
+import {
+  OPEN_ITEMS_RELPATH,
+  PREMISE_GREP_PATHSPECS,
+} from "../../scripts/nightly/items.mjs";
 
 // Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
 // from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a
@@ -637,21 +641,86 @@ function runGate(committedPaths) {
     }
   }
 
-  // 2b-ii. HANDOFF roadmap ↔ backlog parity — whenever the STAGED set touches
-  // `docs/HANDOFF.md` or any `docs/backlog/*.md`. HANDOFF's ordered roadmap is
-  // GENERATED from the backlog (`scripts/shared/generate-handoff-roadmap.mjs`);
-  // the two used to carry the same open items as full specs, which is how they
-  // drifted, and how ~107 lines of changelog narration regrew in HANDOFF one lap
-  // after being cut. Both directions of edit can stale it, so both trigger.
+  // 2b-ii. HANDOFF generated-state parity — whenever the STAGED set touches
+  // HANDOFF, a backlog source, the persisted nightly queue, its decision
+  // ledger, a current premise-probe source, or the code that projects those
+  // sources. The roadmap used to duplicate full backlog specs, while the
+  // nightly status used to be a hand-written snapshot that said EMPTY after
+  // five new items existed. Every authoritative input must therefore trigger
+  // parity.
   //
   // Wired HERE as well as in `verify:checks` deliberately: the pre-commit hook
   // does NOT run `verify:checks`, so a gate wired only there first fails in
   // RELEASE CI and burns a tag — the class that burned v0.34.17.
-  const pinsRoadmap = (p) => {
+  const nightlyProbeSources = new Set();
+  const nightlyPositiveProbeNeedles = new Set();
+  try {
+    const queue = JSON.parse(
+      readFileSync(join(root, OPEN_ITEMS_RELPATH), 'utf8'),
+    );
+    for (const item of Array.isArray(queue?.items) ? queue.items : []) {
+      for (const probe of Array.isArray(item?.premise_probes) ? item.premise_probes : []) {
+        if (typeof probe?.file === 'string' && probe.file.trim() !== '') {
+          nightlyProbeSources.add(probe.file.replace(/\\/g, '/').replace(/^\.\//, ''));
+        }
+        if (typeof probe?.contains === 'string' && probe.contains.trim() !== '') {
+          // Positive probes use repo-wide git-grep for rename/move protection,
+          // so a moved copy outside probe.file can change the verdict too. Use
+          // the evaluator's same longest-line needle for staged pickaxe reach.
+          const needle = probe.contains
+            .split('\n')
+            .map((line) => line.trim())
+            .sort((a, b) => b.length - a.length)[0];
+          if (needle) nightlyPositiveProbeNeedles.add(needle);
+        }
+      }
+    }
+  } catch {
+    // Missing/malformed queue state is handled by the parity check when its own
+    // path is staged. A repo with no queue (including hook fixture repos) has no
+    // probe-source dependency to derive.
+  }
+  let nightlyDirectProbeDependencyChanged = false;
+  for (const source of nightlyProbeSources) {
+    const diff = git(['diff', '--cached', '--quiet', '--no-renames', '--', source]);
+    if (diff.status === 1 || !diff.ok) {
+      nightlyDirectProbeDependencyChanged = true;
+      break;
+    }
+  }
+  let nightlyMovedProbeDependencyChanged = false;
+  for (const needle of nightlyPositiveProbeNeedles) {
+    const diff = git([
+      'diff',
+      '--cached',
+      '--name-only',
+      '--no-renames',
+      `-S${needle}`,
+      '--',
+      ...PREMISE_GREP_PATHSPECS,
+    ]);
+    if (!diff.ok || diff.stdout.trim() !== '') {
+      // A pickaxe failure cannot prove the dependency is unchanged; running
+      // the parity check is the safe, cheap fallback.
+      nightlyMovedProbeDependencyChanged = true;
+      break;
+    }
+  }
+  const pinsHandoffState = (p) => {
     const n = p.replace(/\\/g, '/');
-    return n === 'docs/HANDOFF.md' || /^docs\/backlog\/[^/]+\.md$/.test(n);
+    return (
+      n === 'docs/HANDOFF.md' ||
+      n === '.audit-tools/nightly/open-items.json' ||
+      n === '.claude/nightly-decisions.json' ||
+      n === 'scripts/shared/generate-handoff-roadmap.mjs' ||
+      n === 'scripts/nightly/items.mjs' ||
+      nightlyProbeSources.has(n) ||
+      nightlyDirectProbeDependencyChanged ||
+      nightlyMovedProbeDependencyChanged ||
+      /^docs\/backlog\/[^/]+\.md$/.test(n)
+    );
   };
-  if (staged.some(pinsRoadmap)) {
+  if (staged.some(pinsHandoffState)) {
     try {
       execSync('npm run check:handoff-roadmap', {
         cwd: root,
@@ -665,12 +734,12 @@ function runGate(committedPaths) {
       return {
         blocked: true,
         message:
-          `pre-commit gate: HANDOFF roadmap check FAILED — commit blocked. docs/HANDOFF.md's generated ` +
-          `roadmap no longer matches docs/backlog/, so the two are once again separate homes for the same ` +
-          `open items.\n` +
+          `pre-commit gate: HANDOFF roadmap check FAILED — commit blocked. One or both generated blocks ` +
+          `no longer match the nightly queue + decision ledger and docs/backlog/, so HANDOFF is once ` +
+          `again a separate, stale home for the same state.\n` +
           `Fix: node scripts/shared/generate-handoff-roadmap.mjs — then re-stage docs/HANDOFF.md.\n` +
-          `Do NOT hand-edit inside the BEGIN/END GENERATED ROADMAP markers; the entry text lives in the ` +
-          `backlog and nowhere else.\n${tail}`,
+          `Do NOT hand-edit inside either generated block; queue detail lives in docs/nightly-inbox.md ` +
+          `and roadmap entry text lives in the backlog.\n${tail}`,
       };
     }
   }

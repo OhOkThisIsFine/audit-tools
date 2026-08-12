@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger, executeClosingAction } from "../../src/remediate/phases/close.js";
-import { remediationBaseBranchPath } from "../../src/remediate/steps/dispatch.js";
+import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger } from "../../src/remediate/phases/close.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
-import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -536,74 +535,6 @@ describe("runClosePhase", () => {
     });
   });
 
-  describe("B5: merge-to-base closing action", () => {
-    function currentBranch(): string {
-      return execSync("git rev-parse --abbrev-ref HEAD", { cwd: REPO_DIR })
-        .toString()
-        .trim();
-    }
-    function setupRemediationBranch(): { base: string } {
-      const base = currentBranch();
-      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
-      writeFileSync(join(REPO_DIR, "fix.txt"), "remediation work");
-      execSync("git add . && git commit -m fix", { cwd: REPO_DIR });
-      return { base };
-    }
-
-    it("clean run: --no-ff merges into the recorded base and leaves HEAD on base", () => {
-      const { base } = setupRemediationBranch();
-      writeFileSync(remediationBaseBranchPath(TEST_DIR), JSON.stringify({ base_branch: base }));
-      // End-of-run state: checked out on the remediation branch.
-      const result = executeClosingAction(
-        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
-        BASE_OPTIONS,
-      );
-      expect(result.status).toBe("success");
-      expect(currentBranch()).toBe(base);
-      // The fix landed on base as one revertable merge commit.
-      expect(existsSync(join(REPO_DIR, "fix.txt"))).toBe(true);
-      const merges = execSync("git log --merges --oneline", { cwd: REPO_DIR }).toString().trim();
-      expect(merges).toContain("Merge remediation run P1");
-    });
-
-    it("no recorded base: skips, leaves everything untouched, tells host to merge manually", () => {
-      setupRemediationBranch();
-      // No sidecar written.
-      const result = executeClosingAction(
-        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
-        BASE_OPTIONS,
-      );
-      expect(result.status).toBe("skipped");
-      expect(currentBranch()).toBe("remediation/P1");
-      expect(result.commands[0]?.stderr).toContain("manually");
-    });
-
-    it("conflict: aborts, restores the remediation branch, base left exactly as it was", () => {
-      const base = currentBranch();
-      // Diverge: base and remediation both edit the same line.
-      writeFileSync(join(REPO_DIR, "shared.txt"), "orig");
-      execSync("git add . && git commit -m orig", { cwd: REPO_DIR });
-      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
-      writeFileSync(join(REPO_DIR, "shared.txt"), "remediation");
-      execSync("git add . && git commit -m rem", { cwd: REPO_DIR });
-      execSync(`git checkout ${base}`, { cwd: REPO_DIR });
-      writeFileSync(join(REPO_DIR, "shared.txt"), "base-moved");
-      execSync("git add . && git commit -m base", { cwd: REPO_DIR });
-      execSync("git checkout remediation/P1", { cwd: REPO_DIR });
-      writeFileSync(remediationBaseBranchPath(TEST_DIR), JSON.stringify({ base_branch: base }));
-
-      const result = executeClosingAction(
-        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
-        BASE_OPTIONS,
-      );
-      expect(result.status).toBe("failed");
-      // Restored onto the remediation branch; base's content is unchanged.
-      expect(currentBranch()).toBe("remediation/P1");
-      execSync(`git checkout ${base}`, { cwd: REPO_DIR });
-      expect(readFileSync(join(REPO_DIR, "shared.txt")).toString()).toBe("base-moved");
-    });
-  });
-
   it("aggregates worker reflections from agent-feedback.jsonl into a Process Feedback section", async () => {
     await writeFileAsync(
       join(TEST_DIR, "agent-feedback.jsonl"),
@@ -713,6 +644,7 @@ describe("runClosePhase", () => {
 
       const state = makeState({
         closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["changed.ts"],
         plan: {
           plan_id: "P1",
           findings: [
@@ -792,11 +724,10 @@ describe("runClosePhase", () => {
       expect(report).toContain("`unrelated-dirt.txt`");
     });
 
-    // Finding 1 (adversarial review): declared surface is a plan-time DECLARATION,
-    // not a verified diff. A resolved item declaring a file the run never actually
-    // edited, where that file was ALREADY dirty at run start, must NOT be staged —
-    // the run_start_dirty snapshot excludes it from the fallback manifest.
-    it("declared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it", async () => {
+    // Finding 1 (adversarial review): item_spec is only a plan-time declaration,
+    // not a verified diff. Only the corroborated host-result edit surface may be
+    // staged, and run-start dirt remains excluded even when an item declares it.
+    it("stages the accepted edit surface but leaves a run-start-dirty declared file untouched", async () => {
       // Pre-existing user WIP, dirty since before the run started.
       writeFileSync(join(REPO_DIR, "pre-existing-wip.ts"), "user WIP, never touched by the run");
       // The run's genuine hand-applied edit.
@@ -804,6 +735,7 @@ describe("runClosePhase", () => {
 
       const state = makeState({
         closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["hand-edited.ts"],
         // Captured at plan-join time (handlePendingExtractedPlan), before any remediation edit.
         run_start_dirty: ["pre-existing-wip.ts"],
         items: {
@@ -837,13 +769,14 @@ describe("runClosePhase", () => {
       expect(jsonReport.closing_result.leftover_files).toContain("pre-existing-wip.ts");
     });
 
-    it("run_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged", async () => {
+    it("run_start_dirty excludes landed-path entries from later staging so pre-run WIP is never swept in", async () => {
       writeFileSync(join(REPO_DIR, "contested.ts"), "// tool-merged edit on a file the user also had dirty");
 
       const state = makeState({
         closing_plan: { action: "commit", pre_authorized: true },
         run_start_dirty: ["contested.ts"],
-        // applied_edit_surface = git proved the run cherry-picked this path.
+        // The landed commit proves attribution, not ownership of the still-dirty
+        // pre-run content that closing would otherwise sweep into another commit.
         applied_edit_surface: ["contested.ts"],
         items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
       });
@@ -852,7 +785,7 @@ describe("runClosePhase", () => {
       expect(next.status).toBe("complete");
 
       const committed = committedFilesInLastCommit();
-      expect(committed).toContain("contested.ts");
+      expect(committed).not.toContain("contested.ts");
     });
 
     it("TOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true", async () => {
@@ -887,40 +820,7 @@ describe("runClosePhase", () => {
       expect(status).toContain("surprise-dirt.txt");
     });
 
-    it("fallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files", async () => {
-      writeFileSync(join(REPO_DIR, "hand-edited.ts"), "// edited directly by the host, no worktree accept");
-      writeFileSync(join(REPO_DIR, "unrelated.txt"), "pre-existing dirt");
-
-      const state = makeState({
-        closing_plan: { action: "commit", pre_authorized: true },
-        // No applied_edit_surface: this run never went through the isolated-
-        // worktree accept lifecycle (e.g. `remediate-code merge-implement-results`,
-        // the conversation-first hand-driven flow).
-        items: {
-          F1: {
-            finding_id: "F1",
-            status: "resolved",
-            block_id: "B1",
-            item_spec: {
-              finding_id: "F1",
-              concrete_change: "fix",
-              touched_files: ["hand-edited.ts"],
-              tests_to_write: [],
-              not_applicable_steps: [],
-            },
-          },
-        },
-      });
-
-      const next = await runClosePhase(state, BASE_OPTIONS);
-      expect(next.status).toBe("complete");
-
-      const committed = committedFilesInLastCommit();
-      expect(committed).toContain("hand-edited.ts");
-      expect(committed).not.toContain("unrelated.txt");
-    });
-
-    it("no manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover", async () => {
+    it("no accepted edit surface stages nothing — all dirty files are leftover", async () => {
       writeFileSync(join(REPO_DIR, "unrelated.txt"), "pre-existing dirt");
       const state = makeState({
         closing_plan: { action: "commit", pre_authorized: true },
@@ -1226,35 +1126,6 @@ describe("runClosePhase", () => {
 
       const { existsSync } = await import("node:fs");
       // Artifacts dir preserved (combined test failed).
-      expect(existsSync(TEST_DIR)).toBe(true);
-    });
-
-    // CP-NODE-4: a skipped NON-none close (e.g. merge-to-base with no recorded
-    // base) did NOT genuinely complete — the run never landed. fullyGreen must be
-    // false so the (gitignored, unrecoverable) artifacts dir is preserved, not
-    // deleted as if the run succeeded.
-    it("preserves artifacts directory when merge-to-base is skipped (no recorded base)", async () => {
-      // Put HEAD on the remediation branch with a committed fix, but write NO
-      // base-branch sidecar → executeClosingAction returns status 'skipped'.
-      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
-      writeFileSync(join(REPO_DIR, "fix.txt"), "remediation work");
-      execSync("git add . && git commit -m fix", { cwd: REPO_DIR });
-
-      const state = makeState({
-        closing_plan: { action: "merge-to-base", pre_authorized: true },
-        items: {
-          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
-        },
-      });
-
-      const next = await runClosePhase(state, BASE_OPTIONS);
-      expect(next.status).toBe("complete");
-
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("skipped");
-      // Artifacts dir preserved: the skipped merge means the run is NOT green.
       expect(existsSync(TEST_DIR)).toBe(true);
     });
 

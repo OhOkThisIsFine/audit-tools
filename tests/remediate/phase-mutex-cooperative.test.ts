@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { ClaimRegistry, nodeClaimsPath } from "audit-tools/shared";
+import { withFileLock } from "../../src/shared/io/fileLock.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import { createNextStepHarness, makePlanningState } from "./helpers/nextStepHarness.js";
 
@@ -30,11 +31,23 @@ describe("cooperative phase mutex", () => {
     await establishPlanningRun();
 
     // A peer holds the repo-level remediation phase mutex live.
-    const peerRegistry = new ClaimRegistry(nodeClaimsPath(ARTIFACTS_DIR));
-    const held = await peerRegistry.claim("phase:main", "peer");
-    expect(held.acquired).toBe(true);
+    let signalAcquired!: () => void;
+    let releasePeer!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      signalAcquired = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releasePeer = resolve;
+    });
+    const held = withFileLock(join(ARTIFACTS_DIR, "phase.lock"), async () => {
+      signalAcquired();
+      await release;
+    });
+    await acquired;
 
     const step = await decideNextStep({ root: REPO_DIR });
+    releasePeer();
+    await held;
 
     expect(step.step_kind).toBe("phase_busy");
     expect(step.status).toBe("ready");

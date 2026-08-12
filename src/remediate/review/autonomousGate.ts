@@ -1,6 +1,6 @@
 // Autonomous (unattended) review-approval gate.
 //
-// When SessionConfig.autonomous_mode is set, the review-approval gate must
+// When canonical session intent selects `review_mode: "autonomous"`, the gate must
 // produce a review_decision.json WITHOUT halting for a human. This module owns
 // the deterministic, fail-closed selection rule that decides which findings may
 // be auto-approved in that mode.

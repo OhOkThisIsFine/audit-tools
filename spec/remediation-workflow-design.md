@@ -7,8 +7,8 @@ check), and this document is never edited to record what has or hasn't shipped o
 to narrate past defects.
 
 Companion to [`audit-workflow-design.md`](audit-workflow-design.md) — the two
-share principles (rolling dispatch, bounded admission, prompt caching,
-structured output, roundtrip minimization). Genuinely shared infrastructure lives
+share principles (complete host workloads, bound untrusted results, prompt
+caching, structured output, roundtrip minimization). Shared infrastructure lives
 in `audit-tools/shared` and is listed under *Cross-tool alignment* in both.
 
 ---
@@ -37,23 +37,24 @@ intake + validation          [deterministic; validates input at manifest time]
       → assessment                     [contract assessment: invariants/boundaries/obligations]
       → critic → judge → repair        [bounded]
       → implementation DAG             [metadata-enriched promotion]
-  → rolling_dispatch         [quota-routed, worktree-isolated, per-node
-                              verification, ingestion folded in]
+  → host_implementation_handoff [dependency-safe provider-neutral work items;
+                                  commit/test evidence validation]
   → triage                   [context-carrying retries]
   → close                    [evidence-backed verification report]
 ```
 
 Onto CLAUDE.md's five-state machine (`pending → planning → implementing → closing → complete`):
-everything through the `contract_pipeline` phases is **planning**, `rolling_dispatch` is **implementing**,
+everything through the `contract_pipeline` phases is **planning**, `host_implementation_handoff` is **implementing**,
 and `close` is **closing** (`pending`/`complete` bookend the run).
 
 ---
 
-## Dispatch boundary
+## Host execution boundary
 
-Audit and remediation consume provider-neutral source intents. The external broker
-owns concrete provider/model ordering and failover. Both tools retain only packet
-estimation, context/capability fit, quota headroom, concurrency, and self-spawn safety.
+Audit and remediation emit complete provider-neutral workloads. The host owns
+all concrete execution, parallelism, and working-context choices. audit-tools
+retains dependency/phase safety, deterministic metadata, prompt and baseline
+bindings, strict result ingestion, commit/test corroboration, and closeout.
 
 ---
 
@@ -228,13 +229,13 @@ ContextBundle) first, module-specific payload last.
 ### Metadata-enriched DAG promotion
 
 DAG promotion carries real metadata, never placeholder values — downstream risk
-classification, dispatch allowlists, and `checkAffectedFileIntegrity` all depend
+classification, host workload scope, and `checkAffectedFileIntegrity` all depend
 on it:
 
 - `affected_files` ← `deriveNodeFiles(node)`: the node's declared `output_files`
   (write scope) first, else `files_likely_touched`, else the owning module
   contract's file scope — flowing through the whole chain (contract → DAG
-  node → finding → dispatch access).
+  node → finding → host write scope).
 - `lens` / `severity` ← derived from obligation kinds and contract content (an
   `invariant` obligation on a trust boundary is a higher tier than a structural
   cleanup); Path A nodes inherit their source finding's lens/severity.
@@ -249,10 +250,9 @@ on it:
 
 With contracts, obligations, file scope, and test specs established upstream,
 there is no separate document phase: document is a thin deterministic translation
-(DAG node + contracts → dispatch prompt), and the only worker type is
-implementers executing DAG nodes. Dispatch is a single rolling loop (below) with
-no document/implement two-phase state machine and no separate document
-dispatch/merge commands.
+(DAG node + contracts → implementation prompt), and the only semantic work type
+is implementers executing DAG nodes. There is one host-handoff contract, with no
+document/implement two-phase state machine or separate merge command family.
 
 ---
 
@@ -294,48 +294,36 @@ bulk-dispositioned invisibly. The gate operates before that collapse.
 
 ---
 
-## Dispatch — rolling, worktree-isolated, contract-verified
+## Host implementation handoff — dependency-safe and evidence-verified
 
-Adopts the audit design's rolling model (no pre-computed wave size; quota is the
-only throttle; per-packet admission across eligible pools; ingestion
-folded into the same logical turn) with remediation-specific additions.
+The backend emits every currently eligible DAG node in one
+`remediation-host-workload/v1alpha1` artifact. Eligibility is deterministic: a
+node is emitted only after every dependency and lower phase is verified complete.
+Each work item contains its obligations, declared write scope, complete prompt,
+prompt digest, baseline commit, workload digest, and repository-contained result
+path. Complexity, risk, and token estimates are advisory metadata only.
 
-**Rolling loop.** A DAG node is dispatchable when its `depends_on` nodes are
-*verified-complete* (not merely merged). As each result lands: verify, merge,
-update quota estimates, re-check newly-unblocked nodes, dispatch into freed
-capacity. One clarification or failure affects only its own node.
+The host chooses whether to use subagents, branches, or worktrees and whether to
+parallelize mutually eligible items. audit-tools does not create workers, select
+backends, route models, schedule waves, meter quota, or retry execution.
 
-**Worktree isolation.** Workers execute in per-node git worktrees, handed
-worktree-rooted paths. A failed or crashed worker's tree is discarded; the main
-tree is never dirtied by partial edits. Parallel nodes **may overlap in files** —
-the seam is the typed contract, not file disjointness; real conflicts surface as
-explicit merge conflicts and are handled openly rather than prevented by a
-disjointness heuristic.
+**Bound result ingestion.** Host-written results are untrusted. Before accepting
+an item, the backend checks run/work-item/prompt/workload/baseline bindings,
+changed-file scope, the reported commit against the real repository, and test
+evidence against production-observed state. Fabricated commit or test claims,
+stale baselines, path escapes, missing results, and unsupported legacy state are
+reported explicitly and do not advance the item. Accepted replay is idempotent.
 
-**Per-node verification before merge.** Targeted tests run in the worktree;
-contract assertions check that declared outputs match actual outputs. A node that
-fails verification never touches the main tree and re-enters triage with the
-specific assertion/test failure as context.
+**Worktree and integration safety.** A host may isolate risky work in a worktree,
+but completion is judged against the bound repository state. Dependencies are
+not released until their prerequisites' landed commits and verification evidence
+are corroborated. Cross-node failures re-block only the implicated items and
+carry the failing evidence into the next host work item.
 
-**Post-merge re-verification (multi-node attribution).** After merging any node —
-especially one overlapping an already-merged sibling — the MERGED surface's
-targeted tests + contract assertions re-run before any dependent dispatches. On
-failure, the cause is attributed to the owning module contract AND the set of
-merged nodes that touched the implicated surface (bisect when ambiguous), and only
-that implicated subset rolls back. "Never dirties main" is evaluated against the
-realized merged tree, not merely node-against-base. Merge of node N triggers
-precondition checks for N's dependents: a merged surface that doesn't match N's
-declared contract is a triage signal raised *before* any dependent dispatches.
-Dependent prompts are rendered at dispatch time (post-merge), never pre-rendered
-against a future tree state.
-
-**Ownership-gated `affected_files` amendment.** A worker discovering a necessary
-edit outside its declared contract scope may extend write-scope only into unowned
-files (in no other node's contract scope and not edited by a live parallel
-sibling); an owned/contended file routes back through the deterministic seam
-detect+resolve protocol. Amendment-claim registration is atomic so two siblings
-cannot both claim the same unowned file. Verification and close blast-radius
-attribution re-scope to the amended set.
+**Scope amendment.** Work outside a declared scope requires a new tool-owned
+workload binding; a result cannot make its own widened scope self-consistent.
+Contended or cross-contract edits return to seam reconciliation rather than
+being accepted as an incidental side effect.
 
 **Cyclic-seam resolution.** When the no-circular-interface gate detects a genuine
 mutual interface dependency, resolution routes to a sanctioned cycle-break: a
@@ -344,11 +332,9 @@ authority owning the co-defined primitive's interface (an explicit, recorded,
 primitive-scoped exception). The re-decomposition loop is bounded; on exhaustion
 it routes to a user decision then close — a defined terminal, never an open spin.
 
-**Infra-modifying node verification.** Nodes editing the dispatch/merge/
-orchestration engine the run itself executes are verified against the LIVE
-execution surface (rebuild + exercise the new engine, not only the stale global
-bin or an isolated worktree), with a defined rollback if a republished change
-breaks the dispatcher; sequenced atomic-replace to stay runnable at every commit.
+**Workflow-modifying node verification.** Nodes editing the handoff, ingestion,
+or orchestration engine are verified against the live built surface, not only a
+stale installed bin or isolated worktree.
 
 **Token estimation** uses the shared `estimateTokensFromBytes`: node estimates
 from contract scope file sizes + spec length + pulled-in test files.
@@ -365,17 +351,15 @@ grants) scoped to the node's package.
   `rationaleAsksForRetry` breaks ties only when `action` is absent. Settled user
   decisions are never reinterpreted later (close does not re-open `ignored`
   items).
-- **Retries carry failure context.** A retried node's new prompt includes what
+- **Retries carry failure context.** A re-emitted node's new prompt includes what
   failed last time (the contract assertion, the test output tail, the precondition
-  violation) — never an identical re-dispatch. Per-node verification makes this
+  violation) — never an identical blind retry. Per-node verification makes this
   context specific rather than an opaque "worker reported blocked".
 - **`halt` routes through close.** Halt sets `closing` so a partial report is
   produced for work already done; the report marks the run user-halted.
-- **Retry budget by failure class.** Environment/infra failures (worktree setup,
-  provider quota, tool crash) retry cheaply on a separate budget
-  (`MAX_AUTO_RETRIES_INFRA`); contract/test failures use the tighter
-  `MAX_AUTO_RETRIES_CONTRACT`-capped path — two distinct constants, not one
-  shared budget.
+- **Execution failure stays host-owned.** A host may retry an environmental
+  failure, but audit-tools records only valid bound results or an explicit
+  unresolved item; it does not infer backend failure classes.
 - **Report the resolution outcome.** After consuming a triage resolution, the next
   step's prompt summarizes what was retried/ignored/unblocked.
 
@@ -403,8 +387,8 @@ grants) scoped to the node's package.
 - **User-ignored items don't fail the run.** Intentional `ignored` /
   `inappropriate` choices are excluded from `overall_status` and reported in their
   own section.
-- **Artifacts survive until explicit cleanup.** The artifacts directory (dispatch
-  plans, specs, intermediate results) is preserved for diagnosing a failed closing
+- **Artifacts survive until explicit cleanup.** The artifacts directory (host
+  workloads, specs, intermediate results) is preserved for diagnosing a failed closing
   action or e2e run; cleanup is offered when the report is presented and runs
   automatically only after a fully-green close.
 
@@ -412,19 +396,9 @@ grants) scoped to the node's package.
 
 ## Cross-tool alignment (shared with the auditor)
 
-- **Shared admission math; per-orchestrator pause lifecycle.** The dispatch *admission
-  decision* — quota tracking, per-packet provider selection, capacity re-check on result
-  arrival — is single-sourced in `audit-tools/shared` (`computeDispatchAdmission`), and both
-  tools drive it with different packet types. The *pause lifecycle* wrapped around that
-  decision is per-orchestrator: the audit side owns the `waiting_for_provider` resumable
-  paused state, remediation owns its own analogous `quota_paused` mechanism. Both expose a
-  consumer-neutral terminal: when every eligible pool empties mid-run and the livelock guard
-  trips, remediation routes the stranded subtree through close with a partial report (audit
-  synthesizes on partial coverage). Re-discovery surfaces only genuinely-new providers and
-  never re-offers an already-settled pool. (Unifying the full pause-lifecycle shell across
-  both tools — beyond the shared admission math — is tracked as open work in `docs/backlog.md`.)
-- **Provider routing is external.** Remediation consumes the same provider-neutral
-  broker pool intents as audit; no confirmation artifact crosses the seam.
+- **Shared host-handoff guarantees.** Both tools emit complete provider-neutral
+  work, bind prompts and result paths before execution, validate returned records
+  as untrusted input, and make accepted replay idempotent.
 - **`free_form_intent` interpretation parity.** Interpret-don't-thread is the rule
   in both tools; the interpretation logic (intent → priority/lens weighting) is a
   shared concern.
@@ -435,10 +409,9 @@ grants) scoped to the node's package.
 - **Audit findings as contract-pipeline seed (Path A).** The auditor's findings
   contract stays rich enough to seed goal normalization: stable IDs, affected
   files with line evidence, lens/severity, theme links.
-- **Pinned shared seam contracts.** The three shared APIs (rolling dispatch
-  engine, provider-neutral source resolution, `free_form_intent` interpreter) are
-  pinned/versioned and validated through one real consumer end-to-end before full
-  fan-out.
+- **Pinned shared seam contracts.** Session intent, affinity/coherence
+  artifacts, provider-agnostic execution records, and the `free_form_intent`
+  interpreter are pinned/versioned and validated through real consumers.
 
 ---
 

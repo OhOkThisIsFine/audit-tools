@@ -1,2 +1,1 @@
-export const DEFAULT_WORKER_TIMEOUT_MS = 300_000;
 export const FAILURE_OUTPUT_TAIL_CHARS = 3_000;

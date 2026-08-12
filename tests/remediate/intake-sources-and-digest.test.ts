@@ -10,7 +10,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AuditFindingsReport } from "audit-tools/shared";
+import {
+  buildAuditFindingsDeliverable,
+  type AuditFindingsReport,
+} from "audit-tools/shared";
 import {
   computeContentHash,
   buildFindingsDigest,
@@ -60,7 +63,7 @@ describe("computeContentHash", () => {
 
 // ── buildFindingsDigest ───────────────────────────────────────────────────────
 
-function makeReport(findingCount: number, overrides: Partial<AuditFindingsReport> = {}): AuditFindingsReport {
+function makeReport(findingCount: number): AuditFindingsReport {
   const severities = ["critical", "high", "medium", "low", "info"] as const;
   const lenses = ["correctness", "security", "reliability"] as const;
   const findings = Array.from({ length: findingCount }, (_, i) => ({
@@ -74,21 +77,7 @@ function makeReport(findingCount: number, overrides: Partial<AuditFindingsReport
     affected_files: [{ path: `src/module-${i % 3}/file.ts` }],
   }));
 
-  return {
-    contract_version: "audit-tools/audit-findings/v1alpha1",
-    summary: {
-      finding_count: findingCount,
-      work_block_count: 0,
-      severity_breakdown: {},
-      audited_file_count: 1,
-      excluded_file_count: 0,
-      runtime_validation_status_breakdown: {},
-    },
-    findings,
-    work_blocks: [],
-    work_block_seams: [],
-    ...overrides,
-  };
+  return buildAuditFindingsDeliverable(findings);
 }
 
 // ── buildDocumentSourceManifest — first-wins union dedup (B4 / CP-NODE-4) ──────
@@ -197,22 +186,12 @@ describe("buildFindingsDigest", () => {
   });
 
   it("work_block_map reflects report work_blocks", () => {
-    const report = makeReport(2, {
-      work_blocks: [
-        {
-          id: "WB-001",
-          finding_ids: ["F-001", "F-002"],
-          unit_ids: [],
-          owned_files: [],
-          role: "implementation",
-          max_severity: "high",
-          rationale: "r",
-          depends_on: [],
-        },
-      ],
-    });
+    const report = makeReport(2);
     const digest = buildFindingsDigest(report);
-    expect(digest.work_block_map["WB-001"]).toEqual(["F-001", "F-002"]);
+    expect(digest.work_block_map).toEqual({
+      "block-1": ["F-001"],
+      "block-2": ["F-002"],
+    });
   });
 
   it("handles empty findings array", () => {

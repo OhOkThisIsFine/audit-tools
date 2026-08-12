@@ -2,7 +2,6 @@ import type { Finding, ItemSpec, RemediationBlock } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
 import {
   isInProgressStatus,
-  isTerminalStatus,
   isVerifiedCompleteStatus,
 } from "../state/itemStatus.js";
 
@@ -14,44 +13,16 @@ export interface FindingClassification {
   reason: string;
 }
 
-export const NO_CHANGE_RE = /\b(already correct|no.?op|no change|nothing to (change|do|fix)|code is correct)\b/i;
-
 /**
- * A block is ready to implement only once every dependency block is fully
- * resolved (all of its items terminal). Host-dispatched workers edit the main
- * tree, so a dependent dispatched before its prerequisite would build on stale
- * code — dependency-ordered blocks must land in separate waves. A `blocked`
- * dependency item is NOT terminal here, so a failed prerequisite correctly
- * leaves its dependents un-ready (they are marked blocked downstream).
- */
-export function dependenciesSatisfied(
-  block: RemediationBlock,
-  state: RemediationState,
-): boolean {
-  for (const depId of block.dependencies ?? []) {
-    const depBlock = state.plan?.blocks.find((b) => b.block_id === depId);
-    if (!depBlock) continue; // unknown dependency: don't wait on it forever
-    for (const findingId of depBlock.items) {
-      const status = state.items?.[findingId]?.status;
-      if (!status || !isTerminalStatus(status)) return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Rolling-scheduler eligibility (INV-RS-01): a node/block is eligible to dispatch
- * iff EVERY dependency block reached a VERIFIED-COMPLETE disposition — every dep
- * item is `resolved` / `resolved_no_change`. This is strictly stronger than
- * {@link dependenciesSatisfied}, which treats any terminal status (including a
- * user SKIP) as satisfied. Under the rolling scheduler a SKIP
- * (`ignored` / `deemed_inappropriate`) or a `blocked` dependency NEVER satisfies
- * the edge, so a dependent of a skipped/blocked prerequisite stays ineligible and
- * is later marked blocked rather than dispatched against a missing upstream
- * surface.
+ * Host-handoff eligibility (INV-RS-01): a block is eligible only when EVERY
+ * dependency reached a VERIFIED-COMPLETE disposition — every dependency item is
+ * `resolved` / `resolved_no_change`. A SKIP (`ignored` /
+ * `deemed_inappropriate`) or `blocked` dependency never satisfies the edge, so
+ * its dependent stays outside the emitted host workload and is later marked
+ * blocked rather than applied against a missing upstream surface.
  *
- * An unknown dependency id is not waited on forever (mirrors
- * `dependenciesSatisfied`): a dangling edge cannot strand the whole DAG.
+ * An unknown dependency id is not waited on forever: a dangling edge cannot
+ * strand the whole DAG.
  */
 export function dependencyVerifiedComplete(
   block: RemediationBlock,
@@ -73,7 +44,7 @@ export function dependencyVerifiedComplete(
  * merely AWAITING A CLARIFICATION ANSWER, rather than to one that genuinely
  * failed. This is the discriminator the dead-end sweep needs.
  *
- * {@link dependencyVerifiedComplete} answers only "may this node dispatch NOW",
+ * {@link dependencyVerifiedComplete} answers only "may this block be handed off now",
  * and a `needs_clarification` prerequisite fails it exactly the way a skipped or
  * blocked one does. Conflating them is safe only while an unanswered question
  * freezes the entire run. Once the question is DEFERRED to the end of the
@@ -127,44 +98,8 @@ export function dependencyAwaitingClarification(
 }
 
 /**
- * Decide whether an item spec represents a no-op (no source changes planned).
- *
- * The structured `no_change` flag is authoritative when the worker set it
- * explicitly: an explicit `false` must win even when `concrete_change` happens
- * to mention a no-change phrase about a sub-part (e.g. "no change is required in
- * constants.ts" inside a finding that does change other files). The heuristic
- * regex over the free-text spec is only a fallback for when `no_change` is
- * unspecified.
+ * Determine whether free-form triage rationale requests another attempt.
  */
-export function specIndicatesNoChange(
-  spec: { no_change?: boolean; concrete_change?: string } | undefined,
-): boolean {
-  if (spec?.no_change === true) return true;
-  if (spec?.no_change === false) return false;
-  return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
-}
-
-/**
- * A line of worker evidence that proves behavior with an EXECUTABLE assertion —
- * a test/build/check command or a test-result count — rather than prose.
- */
-export const EXECUTABLE_EVIDENCE_RE =
-  /\b(?:npm|npx|pnpm|yarn|vitest|tsc|node)\b[^\n]*\b(?:test|run|check|build|--test|--import)\b|\b\d+\s+(?:pass(?:ed)?|fail(?:ed)?|tests?)\b|\btests?\s+pass(?:ed|ing)?\b|\b\d+\s*\/\s*\d+\s+(?:pass|green)\b/i;
-
-/**
- * Whether worker evidence carries an executable verification signal (see
- * EXECUTABLE_EVIDENCE_RE) rather than prose only. A "verified-already-satisfied"
- * (no-change) closure must prove the behavior with an executable assertion; prose
- * claiming "already correct" is not sufficient proof and must route to triage
- * rather than silently closing the obligation.
- */
-export function hasExecutableEvidence(
-  evidence: readonly string[] | undefined,
-): boolean {
-  if (!evidence || evidence.length === 0) return false;
-  return evidence.some((line) => EXECUTABLE_EVIDENCE_RE.test(line));
-}
-
 export function rationaleAsksForRetry(rationale: string | undefined): boolean {
   if (!rationale) return false;
   return /\b(deferred?|retry|rerun|requeue|later|dedicated pass|follow-?up|after .*lands?|depends on|blocked)\b/i.test(

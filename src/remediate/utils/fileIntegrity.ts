@@ -1,8 +1,9 @@
 import { hashContent, checkFileIntegrityRecords } from "audit-tools/shared";
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join, isAbsolute, relative, sep } from "node:path";
+import { join, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   existsSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -203,14 +204,84 @@ export async function checkAffectedFileIntegrity(
   };
 }
 
+function isOutsideRoot(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
+function planningBaselineError(
+  affectedPath: string,
+  reason: string,
+  cause?: unknown,
+): Error {
+  return new Error(
+    `Cannot snapshot planning baseline for "${affectedPath}": ${reason}`,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+/**
+ * Strict plan-time baseline policy. Only readable regular files lexically and
+ * physically contained by the repository root may become trusted baselines.
+ * A genuinely absent path is deterministic future work and
+ * contributes no baseline; every other unsafe or unreadable path is refused
+ * loudly.
+ */
+function hashPlanningBaselineSync(
+  root: string,
+  affectedPath: string,
+): string | undefined {
+  if (isAbsolute(affectedPath)) {
+    throw planningBaselineError(affectedPath, "absolute paths are not allowed");
+  }
+
+  const absoluteRoot = resolve(root);
+  const absolutePath = resolve(absoluteRoot, affectedPath);
+  if (isOutsideRoot(absoluteRoot, absolutePath)) {
+    throw planningBaselineError(affectedPath, "path escapes the repository root");
+  }
+
+  let pathStat;
+  try {
+    pathStat = statSync(absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw planningBaselineError(affectedPath, "path metadata is unreadable", error);
+  }
+  if (!pathStat.isFile()) {
+    throw planningBaselineError(
+      affectedPath,
+      "existing path is not a regular file",
+    );
+  }
+
+  try {
+    const physicalRoot = realpathSync(absoluteRoot);
+    const physicalPath = realpathSync(absolutePath);
+    if (isOutsideRoot(physicalRoot, physicalPath)) {
+      throw planningBaselineError(
+        affectedPath,
+        "resolved path escapes the repository root",
+      );
+    }
+    return hashContent(readFileSync(physicalPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if (error instanceof Error && error.message.includes(`"${affectedPath}"`)) {
+      throw error;
+    }
+    throw planningBaselineError(affectedPath, "path content is unreadable", error);
+  }
+}
+
 export function snapshotAffectedFileHashes(
   root: string,
   findings: Finding[],
 ): void {
   for (const finding of findings) {
     for (const af of finding.affected_files) {
-      if (af.hash_at_plan_time) continue;
-      af.hash_at_plan_time = hashAffectedPathSync(root, af.path);
+      const hash = hashPlanningBaselineSync(root, af.path);
+      if (!af.hash_at_plan_time) af.hash_at_plan_time = hash;
     }
   }
 }

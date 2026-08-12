@@ -10,7 +10,7 @@ import {
   withTempRepo,
   advanceToDispatchReady,
   buildSyntheticResults,
-  disableNarrative,
+  seedEmptyNarrative,
   callIngestResults,
   nextStepUntilPresentReport,
 } from "./helpers/completion-harness.js";
@@ -31,7 +31,7 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
       resultsPath,
       JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
     );
-    await disableNarrative(artifactsDir);
+    await seedEmptyNarrative(artifactsDir);
 
     const ingested = await callIngestResults([
       "--root",

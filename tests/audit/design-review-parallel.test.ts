@@ -3,7 +3,6 @@
  *   - deriveAuditState obligation derivation
  *   - renderContractReviewPrompt / renderConceptualReviewPrompt
  *   - renderSharedStructuralContext shared prefix
- *   - runDesignReviewAutoComplete per-pass behavior
  *   - PRIORITY chain ordering
  */
 import { test, expect } from "vitest";
@@ -16,7 +15,6 @@ const {
   renderConceptualReviewPrompt,
   renderSharedStructuralContext,
 } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
-const { runDesignReviewAutoComplete } = await import("../../src/audit/orchestrator/structureExecutors.js");
 const { PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 
 // ── Minimal bundle factory ────────────────────────────────────────────────────
@@ -132,66 +130,6 @@ test("renderSharedStructuralContext: contract and conceptual prompts both start 
   // Both prompts should contain the shared context verbatim
   expect(contractPrompt.includes(sharedCtx), "contract prompt should include the shared structural context").toBeTruthy();
   expect(conceptualPrompt.includes(sharedCtx), "conceptual prompt should include the shared structural context").toBeTruthy();
-});
-
-// ── runDesignReviewAutoComplete per-pass ──────────────────────────────────────
-
-test("runDesignReviewAutoComplete (contract pass): sets contract_reviewed=true, conceptual stays false", () => {
-  const bundle = minimalBundle({ contract_reviewed: false, conceptual_reviewed: false });
-  const result = runDesignReviewAutoComplete(bundle, "contract");
-  const da = result.updated.design_assessment;
-  requireDefined(da, "design assessment");
-  expect(da.contract_reviewed).toBe(true);
-  expect(!da.conceptual_reviewed, "conceptual_reviewed should not be set").toBeTruthy();
-  expect(Array.isArray(da.contract_findings)).toBeTruthy();
-});
-
-test("runDesignReviewAutoComplete (conceptual pass): sets conceptual_reviewed=true, contract stays false", () => {
-  const bundle = minimalBundle({ contract_reviewed: false, conceptual_reviewed: false });
-  const result = runDesignReviewAutoComplete(bundle, "conceptual");
-  const da = result.updated.design_assessment;
-  requireDefined(da, "design assessment");
-  expect(da.conceptual_reviewed).toBe(true);
-  expect(!da.contract_reviewed, "contract_reviewed should not be set").toBeTruthy();
-  expect(Array.isArray(da.conceptual_findings)).toBeTruthy();
-});
-
-// An auto-completed pass is UNREVIEWED, not clean — the stamp distinguishes it
-// from a genuinely-reviewed empty finding set downstream.
-test("runDesignReviewAutoComplete stamps the auto_completed flag per pass", () => {
-  const contractOnly = runDesignReviewAutoComplete(
-    minimalBundle({ contract_reviewed: false, conceptual_reviewed: false }),
-    "contract",
-  ).updated.design_assessment;
-  requireDefined(contractOnly, "design assessment");
-  expect(contractOnly.contract_auto_completed).toBe(true);
-  expect(contractOnly.conceptual_auto_completed).toBeUndefined();
-
-  const both = runDesignReviewAutoComplete(minimalBundle(), "both").updated
-    .design_assessment;
-  requireDefined(both, "design assessment");
-  expect(both.contract_auto_completed).toBe(true);
-  expect(both.conceptual_auto_completed).toBe(true);
-});
-
-test("runDesignReviewAutoComplete (both): sets contract_reviewed and conceptual_reviewed to true with empty findings arrays", () => {
-  const bundle = minimalBundle();
-  const result = runDesignReviewAutoComplete(bundle, "both");
-  const da = result.updated.design_assessment;
-  requireDefined(da, "design assessment");
-  expect(da.contract_reviewed).toBe(true);
-  expect(da.conceptual_reviewed).toBe(true);
-  expect(Array.isArray(da.contract_findings)).toBeTruthy();
-  expect(Array.isArray(da.conceptual_findings)).toBeTruthy();
-});
-
-test("runDesignReviewAutoComplete (default = both): sets both flags", () => {
-  const bundle = minimalBundle();
-  const result = runDesignReviewAutoComplete(bundle);
-  const da = result.updated.design_assessment;
-  requireDefined(da, "design assessment");
-  expect(da.contract_reviewed).toBe(true);
-  expect(da.conceptual_reviewed).toBe(true);
 });
 
 // ── PRIORITY chain ordering ───────────────────────────────────────────────────

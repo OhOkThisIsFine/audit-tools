@@ -1,6 +1,5 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { ExecutorRunResult } from "./executorResult.js";
-import type { IntentCheckpoint, FileDispositionStatus } from "audit-tools/shared";
+import type { FileDispositionStatus } from "audit-tools/shared";
 import type { Lens } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { DocsDigestEntry } from "../types/docsDigest.js";
@@ -14,7 +13,6 @@ import {
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
 import { isMandatoryLens } from "./lensSelection.js";
-import { unresolvedConstraintClauses } from "./intentInterpreter.js";
 import { LENSES } from "audit-tools/shared";
 
 /**
@@ -69,7 +67,7 @@ export interface LensProposition {
 
 /**
  * Deterministic pre-digest of the audit scope, shown to the host in the
- * `confirm_intent` step and used to seed the headless auto-complete checkpoint.
+ * `confirm_intent` step.
  * Everything here is computed deterministically from the intake artifacts; the
  * host uses it to confirm the discovered scope and add any exclusions the
  * disposition pass missed (the scope-pollution case).
@@ -104,7 +102,7 @@ export interface ScopePreDigest {
   /**
    * Render-ready docs digest (change 3): the repo's STATED purpose, extracted
    * deterministically from the doc universe (`docs_digest.json`). Empty when the
-   * digest artifact is absent (older bundles, headless pre-digest) or the repo
+   * digest artifact is absent or the repo
    * has no prose docs — the render omits the section then.
    */
   docs_digest: DocsDigestEntry[];
@@ -439,78 +437,5 @@ export function computeScopePreDigest(
     disposition_override_proposals,
     lens_propositions,
     docs_digest: bundle.docs_digest?.docs ?? [],
-  };
-}
-
-/**
- * Headless deterministic fallback for the intent checkpoint — the analog of
- * `runDesignReviewAutoComplete`. The conversation-first flow instead emits a
- * `confirm_intent` host step (see `cli/confirmIntentStep.ts`); this runs only
- * when `advanceAudit` is driven headlessly with no host to confirm scope,
- * writing a default full-scope checkpoint so the pipeline can proceed.
- *
- * Idempotent over an existing checkpoint: an already-written checkpoint (e.g. a
- * host-confirmed one with `free_form_intent`) is preserved, not clobbered. If
- * such a checkpoint carries unencodable clauses, headless mode cannot pose a
- * blocking question, so each unresolved clause is recorded as a
- * `constraint_clauses` entry with an explicit headless default answer — the
- * directive is escalated into the contract (never silently dropped) and the
- * `intent_checkpoint_current` gate converges instead of looping.
- */
-export function runIntentCheckpointAutoComplete(
-  bundle: ArtifactBundle,
-  root: string,
-  since?: string,
-): ExecutorRunResult {
-  const existing = bundle.intent_checkpoint;
-  if (existing) {
-    const unresolved = unresolvedConstraintClauses(existing);
-    if (unresolved.length === 0) {
-      // Already current — nothing to do; do not overwrite a confirmed checkpoint.
-      return {
-        updated: bundle,
-        artifacts_written: [],
-        progress_summary:
-          "Scope/intent checkpoint already present and current; left unchanged (headless).",
-      };
-    }
-    // Record each unresolved unencodable clause as a host-answered constraint so
-    // it survives into planning rather than being silently dropped headlessly.
-    // Keyed on clause identity (CE-004) so each distinct clause is resolved on
-    // its own, never collapsed with another that renders to the same question.
-    const recorded = unresolved.map((c) => ({
-      clause_id: c.clause_id,
-      text: c.text,
-      checkpoint_question: c.checkpoint_question,
-      host_answer:
-        "Headless auto-resolution: no host available to clarify; clause recorded as a planning constraint with no extra weighting.",
-    }));
-    const intent: IntentCheckpoint = {
-      ...existing,
-      constraint_clauses: [...(existing.constraint_clauses ?? []), ...recorded],
-    };
-    return {
-      updated: { ...bundle, intent_checkpoint: intent },
-      artifacts_written: ["intent_checkpoint.json"],
-      progress_summary: `Auto-resolved ${recorded.length} unencodable free_form_intent clause(s) into recorded constraints (headless); none dropped.`,
-    };
-  }
-
-  const preDigest = computeScopePreDigest(bundle, root, since);
-  const intent: IntentCheckpoint = {
-    schema_version: "intent-checkpoint/v1",
-    confirmed_at: new Date().toISOString(),
-    confirmed_by: "host",
-    scope_summary: `Root: ${root}${preDigest.since ? ` (since ${preDigest.since})` : ""}, files in scope: ${preDigest.files_in_scope}`,
-    intent_summary:
-      preDigest.mode === "delta"
-        ? `delta-audit since ${preDigest.since}`
-        : "full-audit",
-  };
-
-  return {
-    updated: { ...bundle, intent_checkpoint: intent },
-    artifacts_written: ["intent_checkpoint.json"],
-    progress_summary: `Auto-completed scope/intent checkpoint (headless): ${intent.scope_summary} (${intent.intent_summary}).`,
   };
 }

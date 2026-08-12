@@ -1,18 +1,10 @@
-// Canonical token-budget arithmetic shared by both orchestrators.
+// Canonical local token-estimation arithmetic shared by both orchestrators.
 //
 // Before Phase 0 each package carried its own copy of a per-line token
 // estimator (auditor `reviewPackets.ts`, remediator `plan.ts`). This module is
 // the single source of truth for:
 //   - the byte- and line-based token estimators,
-//   - the safety-margin policy used when sizing work blocks.
-//
-// Model context/output windows are never hardcoded here. They come from explicit
-// operator policy, the current dispatch-time capability handshake, or the synced
-// models.dev snapshot. Unknown stays unknown; callers must pause/fail closed.
-
-// Fraction of the usable window (context − reserved output) a single work block
-// or review packet is allowed to occupy. Leaves headroom for the host prompt.
-export const BLOCK_SAFETY_MARGIN = 0.7;
+//   - fixed prompt/item overhead used for advisory work metadata.
 
 // Heuristic byte→token ratio for source code and English prose. Roughly four
 // bytes per token; deliberately coarse — callers size budgets, not bills.
@@ -35,34 +27,4 @@ export const ESTIMATED_ITEM_OVERHEAD_TOKENS = 600;
 export function estimateTokensFromBytes(bytes: number): number {
   if (!Number.isFinite(bytes) || bytes <= 0) return 0;
   return Math.ceil(bytes / BYTES_PER_TOKEN);
-}
-
-/**
- * Usable context budget for a single work block: (context − reserved output)
- * scaled by the safety margin. Callers pass the discovered/configured window;
- * absent either value, sizing is unresolved rather than guessed.
- */
-export function resolveContextBudget(input: {
-  contextTokens?: number | null;
-  reservedOutputTokens?: number | null;
-  safetyMargin?: number;
-}): number | null {
-  const contextTokens = input.contextTokens;
-  const outputTokens = input.reservedOutputTokens;
-  if (
-    typeof contextTokens !== "number" ||
-    !Number.isFinite(contextTokens) ||
-    contextTokens <= 0 ||
-    typeof outputTokens !== "number" ||
-    !Number.isFinite(outputTokens) ||
-    outputTokens <= 0
-  ) {
-    return null;
-  }
-  const margin = input.safetyMargin ?? BLOCK_SAFETY_MARGIN;
-  // Floor at 0: a window whose reserved output meets or exceeds its context
-  // (a malformed operator quota, or a too-small endpoint) yields no usable input
-  // budget — the pool then fails CLOSED (refuses slots) rather than propagating a
-  // negative budget. Holds regardless of which orchestrator or validator ran.
-  return Math.max(0, Math.floor((contextTokens - outputTokens) * margin));
 }

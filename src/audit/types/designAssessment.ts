@@ -36,15 +36,6 @@ export interface DesignAssessment {
   contract_reviewed?: boolean;
   /** True when the conceptual review pass has been completed */
   conceptual_reviewed?: boolean;
-  /**
-   * The contract pass was closed by a headless auto-complete / quota-wall skip
-   * WITHOUT a review — its empty findings mean UNREVIEWED, never clean. Cleared
-   * when a real submission is ingested (a genuine review supersedes the stamp).
-   */
-  contract_auto_completed?: boolean;
-  /** Conceptual-pass sibling of {@link contract_auto_completed}. */
-  conceptual_auto_completed?: boolean;
   /** Malformed submissions quarantined instead of merged, pending a valid resubmission. */
   rejected_submissions?: RejectedDesignReviewSubmission[];
 }
-

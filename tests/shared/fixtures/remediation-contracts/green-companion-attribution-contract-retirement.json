@@ -1,0 +1,45 @@
+{
+  "command": {
+    "argv": [
+      "npx",
+      "vitest",
+      "run",
+      "tests/shared/provider-attribution-retirement.test.ts"
+    ],
+    "cwd": ".",
+    "normalized_environment": {
+      "CI": "1",
+      "NO_COLOR": "1",
+      "TZ": "UTC"
+    }
+  },
+  "contract_version": "zero-adapter-green-companion/v1",
+  "exit_code": 0,
+  "module_id": "attribution-contract-retirement",
+  "output_sha256": "112ead30957db6e57f684293afaf90885a52075aa6b46c2acc2e58bddfb6a7dd",
+  "post_edit_production_scope": {
+    "entries": [
+      {
+        "path": "src/shared/contentKey.ts",
+        "sha256": "4c2b2e3ebdef555e6f2424178eb035bc7628b0b47e5d2cddf534422b54a8e40f"
+      },
+      {
+        "path": "src/shared/index.ts",
+        "sha256": "9486216ee9576813fd4adf1e7895d0c3f31919ba64b7579bf725de31126be79c"
+      },
+      {
+        "path": "src/shared/types/executionRecord.ts",
+        "sha256": "b53d0d0caf70ed087a8b06efa874f08802023b3dd8a97fe206d64a2d5e61e834"
+      },
+      {
+        "path": "src/shared/types/stepContract.ts",
+        "sha256": "1a4a2699021900a4acc32a349f7c36b23bc07008637bbdabb1cd6f6bfca08635"
+      }
+    ],
+    "tree_sha256": "5366ebf8f2032c3de206dc9daf19095437ecfe3a41d20bab0db6ebad0bdead82"
+  },
+  "record_sha256": "aeaa10b0f8915b9f430e6d9e3b3041b6ed4eef1f49f71433a8fbb3be683dd142",
+  "red_record_sha256": "3b5c625446afd09d38b57667c6441580eb610df42f32a2acedcb7b07045ac323",
+  "test_closure_sha256": "a75a4e11f1758ca505af4af9100b63444e1d7a151363107c1c3fdb38eb008f44",
+  "test_id": "attribution-contract-retirement-red-green-v1"
+}

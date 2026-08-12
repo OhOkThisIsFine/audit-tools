@@ -1,0 +1,12 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "remediation-zero-adapter-boundary",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "after-remediation-zero-adapter-boundary-designated-test-before-production-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": true,
+  "owned_overlaps": [],
+  "manifest_sha256": "1310eccf4787c118150961a3e0ea72c33ccdf254a1d5dc58ee434755331cbaeb"
+}

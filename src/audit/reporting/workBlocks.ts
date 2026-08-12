@@ -6,303 +6,368 @@ import type {
   WorkBlockSeam,
 } from "audit-tools/shared";
 import {
+  ESTIMATED_ITEM_OVERHEAD_TOKENS,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   estimateTokensFromBytes,
-  partitionWorkItems,
 } from "audit-tools/shared";
+import {
+  buildContentCoherenceTrace,
+  type ContentCoherenceRelationship,
+  type ContentCoherenceTrace,
+} from "../../shared/decompose/contentCoherence.js";
 import { severityRank } from "./findingRanks.js";
 
-// WorkBlock is the canonical report-block contract owned by audit-tools/shared.
 export type { WorkBlock } from "audit-tools/shared";
 
-function buildFileUnitMap(unitManifest?: UnitManifest): Map<string, string> {
-  const map = new Map<string, string>();
+export interface WorkBlockPartitionInput {
+  findings: Finding[];
+  unitManifest?: UnitManifest;
+  graphBundle?: GraphBundle;
+  criticalFlows?: CriticalFlowManifest;
+  sizeIndex?: Readonly<Record<string, number>>;
+  [presentationInput: string]: unknown;
+}
+
+export interface WorkBlockPartition {
+  coherence_trace: ContentCoherenceTrace;
+  blocks: WorkBlock[];
+  seams: WorkBlockSeam[];
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/gu, "/");
+}
+
+function stableStrings(values: Iterable<string>): string[] {
+  return [...new Set([...values])].sort(compareCodeUnits);
+}
+
+function canonicalSizeIndex(
+  sizeIndex?: Readonly<Record<string, number>>,
+): Map<string, number> {
+  const normalized = new Map<string, number>();
+  for (const [path, bytes] of Object.entries(sizeIndex ?? {}).sort(([left], [right]) =>
+    compareCodeUnits(left, right),
+  )) {
+    const key = normalizePath(path);
+    const finiteBytes = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+    normalized.set(key, Math.max(normalized.get(key) ?? 0, finiteBytes));
+  }
+  return normalized;
+}
+
+function advisoryTokenEstimate(
+  findingCount: number,
+  files: readonly string[],
+  sizes: ReadonlyMap<string, number>,
+): number {
+  const physicalBytes = files.reduce(
+    (sum, path) => sum + (sizes.get(normalizePath(path)) ?? 0),
+    0,
+  );
+  return (
+    ESTIMATED_PROMPT_OVERHEAD_TOKENS +
+    findingCount * ESTIMATED_ITEM_OVERHEAD_TOKENS +
+    estimateTokensFromBytes(physicalBytes)
+  );
+}
+
+function buildFileUnitMap(
+  unitManifest?: UnitManifest,
+): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
   for (const unit of unitManifest?.units ?? []) {
     for (const path of unit.files) {
-      if (!map.has(path)) {
-        map.set(path, unit.unit_id);
-      }
+      const normalized = normalizePath(path);
+      const unitIds = map.get(normalized) ?? new Set<string>();
+      unitIds.add(unit.unit_id);
+      map.set(normalized, unitIds);
     }
   }
   return map;
 }
 
-function normalizeOwnedUnits(
+function unitsForFinding(
   finding: Finding,
-  fileUnitMap: Map<string, string>,
+  fileUnitMap: ReadonlyMap<string, Set<string>>,
 ): string[] {
-  const unitIds = new Set<string>();
-  for (const file of finding.affected_files) {
-    const mapped = fileUnitMap.get(file.path);
-    unitIds.add(mapped ?? `file:${file.path}`);
-  }
-  return [...unitIds].sort();
+  return stableStrings(
+    finding.affected_files.flatMap((file) => [
+      ...(fileUnitMap.get(normalizePath(file.path)) ?? []),
+    ]),
+  );
 }
 
-function computeDependencies(params: {
-  blocks: WorkBlock[];
+function findingFileSet(finding: Finding): Set<string> {
+  return new Set(finding.affected_files.map((file) => normalizePath(file.path)));
+}
+
+function pairRelationship(
+  left: string,
+  right: string,
+  kind: string,
+): ContentCoherenceRelationship {
+  return compareCodeUnits(left, right) <= 0
+    ? { left, right, kind }
+    : { left: right, right: left, kind };
+}
+
+function relationshipsForFindings(params: {
+  findings: readonly Finding[];
+  graphBundle?: GraphBundle;
+  criticalFlows?: CriticalFlowManifest;
+}): ContentCoherenceRelationship[] {
+  const fileSets = new Map(
+    params.findings.map((finding) => [finding.id, findingFileSet(finding)]),
+  );
+  const byFile = new Map<string, string[]>();
+  for (const finding of params.findings) {
+    for (const path of fileSets.get(finding.id) ?? []) {
+      const ids = byFile.get(path) ?? [];
+      ids.push(finding.id);
+      byFile.set(path, ids);
+    }
+  }
+  for (const ids of byFile.values()) ids.sort(compareCodeUnits);
+
+  const deduped = new Map<string, ContentCoherenceRelationship>();
+  const add = (left: string, right: string, kind: string): void => {
+    if (left === right) return;
+    const relation = pairRelationship(left, right, kind);
+    deduped.set(
+      `${relation.left}\u0000${relation.right}\u0000${relation.kind}`,
+      relation,
+    );
+  };
+
+  const graphEdges = [
+    ...(params.graphBundle?.graphs.imports ?? []),
+    ...(params.graphBundle?.graphs.calls ?? []),
+    ...(params.graphBundle?.graphs.references ?? []),
+  ];
+  for (const edge of graphEdges) {
+    const fromIds = byFile.get(normalizePath(edge.from)) ?? [];
+    const toIds = byFile.get(normalizePath(edge.to)) ?? [];
+    for (const fromId of fromIds) {
+      for (const toId of toIds) add(fromId, toId, "call_adjacent");
+    }
+  }
+
+  for (const flow of params.criticalFlows?.flows ?? []) {
+    const flowFiles = new Set(
+      [...flow.entrypoints, ...flow.paths].map(normalizePath),
+    );
+    const members = params.findings
+      .filter((finding) =>
+        [...(fileSets.get(finding.id) ?? [])].some((path) =>
+          flowFiles.has(path),
+        ),
+      )
+      .map((finding) => finding.id)
+      .sort(compareCodeUnits);
+    for (let leftIndex = 0; leftIndex < members.length; leftIndex += 1) {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < members.length;
+        rightIndex += 1
+      ) {
+        add(members[leftIndex]!, members[rightIndex]!, "same_flow");
+      }
+    }
+  }
+
+  return [...deduped.values()].sort((left, right) => {
+    const leftKey = `${left.left}\u0000${left.right}\u0000${left.kind}`;
+    const rightKey = `${right.left}\u0000${right.right}\u0000${right.kind}`;
+    return compareCodeUnits(leftKey, rightKey);
+  });
+}
+
+function blockDependencies(params: {
+  blocks: readonly WorkBlock[];
   graphBundle?: GraphBundle;
   criticalFlows?: CriticalFlowManifest;
 }): WorkBlock[] {
   const blocksByFile = new Map<string, string[]>();
   for (const block of params.blocks) {
-    if (block.role === "coordination") continue;
     for (const path of block.owned_files) {
-      const owners = blocksByFile.get(path) ?? [];
-      owners.push(block.id);
-      blocksByFile.set(path, owners);
+      const normalized = normalizePath(path);
+      const blockIds = blocksByFile.get(normalized) ?? [];
+      blockIds.push(block.id);
+      blocksByFile.set(normalized, blockIds);
     }
   }
+  for (const ids of blocksByFile.values()) ids.sort(compareCodeUnits);
 
   const candidates = new Set<string>();
   const addCandidate = (from: string, to: string): void => {
     if (from !== to) candidates.add(`${from}\u0000${to}`);
   };
-
-  const filesByBlock = new Map(
-    params.blocks.map((block) => [block.id, new Set(block.owned_files)]),
-  );
-  const graphEdges = [
+  for (const edge of [
     ...(params.graphBundle?.graphs.imports ?? []),
     ...(params.graphBundle?.graphs.calls ?? []),
-  ];
-  for (const edge of graphEdges) {
-    const fromBlocks = blocksByFile.get(edge.from) ?? [];
-    const toBlocks = blocksByFile.get(edge.to) ?? [];
-    for (const fromBlock of fromBlocks) {
-      for (const toBlock of toBlocks) {
-        if (fromBlock === toBlock) continue;
-        // When both blocks cover both endpoints this edge is overlap evidence,
-        // not a trustworthy ordering signal. The explicit seam owns it.
-        if (
-          filesByBlock.get(fromBlock)?.has(edge.to) &&
-          filesByBlock.get(toBlock)?.has(edge.from)
-        ) {
-          continue;
-        }
-        addCandidate(fromBlock, toBlock);
+    ...(params.graphBundle?.graphs.references ?? []),
+  ]) {
+    for (const from of blocksByFile.get(normalizePath(edge.from)) ?? []) {
+      for (const to of blocksByFile.get(normalizePath(edge.to)) ?? []) {
+        addCandidate(from, to);
       }
     }
   }
-
   for (const flow of params.criticalFlows?.flows ?? []) {
     const ordered: string[] = [];
     const seen = new Set<string>();
-    for (const path of flow.paths) {
-      for (const blockId of blocksByFile.get(path) ?? []) {
-        if (!seen.has(blockId)) {
-          seen.add(blockId);
-          ordered.push(blockId);
-        }
+    for (const path of [...flow.entrypoints, ...flow.paths]) {
+      for (const blockId of blocksByFile.get(normalizePath(path)) ?? []) {
+        if (seen.has(blockId)) continue;
+        seen.add(blockId);
+        ordered.push(blockId);
       }
     }
-    for (let index = 1; index < ordered.length; index++) {
+    for (let index = 1; index < ordered.length; index += 1) {
       addCandidate(ordered[index - 1]!, ordered[index]!);
     }
   }
 
-  // Add dependencies in stable order and skip any edge that would close a
-  // cycle. WorkBlock.depends_on is a scheduling DAG, while cyclic coupling is
-  // represented by overlap/seam metadata instead of an unusable dependency loop.
-  const dependsOn = new Map<string, Set<string>>();
-  for (const block of params.blocks) {
-    dependsOn.set(block.id, new Set<string>());
-  }
-  const reaches = (from: string, to: string): boolean => {
-    const seen = new Set<string>();
-    const stack = [from];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (current === to) return true;
-      if (seen.has(current)) continue;
-      seen.add(current);
-      stack.push(...(dependsOn.get(current) ?? []));
+  const dependencies = new Map(
+    params.blocks.map((block) => [block.id, new Set<string>()]),
+  );
+  const reaches = (from: string, target: string): boolean => {
+    const pending = [from];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === target) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...(dependencies.get(current) ?? []));
     }
     return false;
   };
-  for (const candidate of [...candidates].sort((a, b) => a.localeCompare(b))) {
+  for (const candidate of [...candidates].sort(compareCodeUnits)) {
     const [from, to] = candidate.split("\u0000") as [string, string];
-    if (!reaches(to, from)) dependsOn.get(from)?.add(to);
+    if (!reaches(to, from)) dependencies.get(from)?.add(to);
   }
-
   return params.blocks.map((block) => ({
     ...block,
-    depends_on: [...(dependsOn.get(block.id) ?? [])].sort(),
+    depends_on: [...(dependencies.get(block.id) ?? [])].sort(compareCodeUnits),
   }));
 }
 
-function semanticTagsForFinding(finding: Finding): string[] {
-  const titleTokens = finding.title
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 4)
-    .slice(0, 6)
-    .map((token) => `title:${token}`);
-  return [
-    `lens:${finding.lens}`,
-    `category:${finding.category.toLowerCase()}`,
-    ...titleTokens,
-  ];
+function deriveSeams(blocks: readonly WorkBlock[]): WorkBlockSeam[] {
+  const seams: WorkBlockSeam[] = [];
+  for (let leftIndex = 0; leftIndex < blocks.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < blocks.length;
+      rightIndex += 1
+    ) {
+      const left = blocks[leftIndex]!;
+      const right = blocks[rightIndex]!;
+      const rightFiles = new Set(right.owned_files);
+      const rightUnits = new Set(right.unit_ids);
+      const sharedFiles = left.owned_files.filter((path) => rightFiles.has(path));
+      const sharedUnits = left.unit_ids.filter((unitId) => rightUnits.has(unitId));
+      if (sharedFiles.length === 0 && sharedUnits.length === 0) continue;
+      const systemic =
+        left.role === "coordination" || right.role === "coordination";
+      const kind = systemic
+        ? "systemic_coordination"
+        : sharedFiles.length > 0
+          ? "predicted_write_conflict"
+          : "shared_context";
+      seams.push({
+        id: `seam-${seams.length + 1}`,
+        block_ids: [left.id, right.id],
+        kind,
+        shared_files: sharedFiles,
+        shared_unit_ids: sharedUnits,
+        requires_preparation: systemic || sharedFiles.length > 0,
+        rationale: systemic
+          ? "A coordination component shares remediation context with another component."
+          : sharedFiles.length > 0
+            ? "Components cite the same predicted write path."
+            : "Components share unit context without a predicted write overlap.",
+      });
+    }
+  }
+  return seams;
 }
 
-export interface WorkBlockPartition {
-  blocks: WorkBlock[];
-  seams: WorkBlockSeam[];
-}
-
-export function buildWorkBlockPartition(params: {
-  findings: Finding[];
-  unitManifest?: UnitManifest;
-  graphBundle?: GraphBundle;
-  criticalFlows?: CriticalFlowManifest;
-  /** Runtime-resolved usable input window. Required for non-empty findings. */
-  contextBudgetTokens?: number;
-  /** Current host/provider-declared concurrency. Absent stays absent; never guessed. */
-  availableParallelism?: number | null;
-  /** Intake manifest path → size_bytes index for deterministic source-context estimates. */
-  sizeIndex?: Readonly<Record<string, number>>;
-}): WorkBlockPartition {
-  if (params.findings.length === 0) {
-    return { blocks: [], seams: [] };
-  }
-  if (
-    typeof params.contextBudgetTokens !== "number" ||
-    !Number.isFinite(params.contextBudgetTokens) ||
-    params.contextBudgetTokens <= 0
-  ) {
-    throw new Error(
-      "Cannot partition audit findings because the usable context budget is unknown. " +
-        "Provide a current auditor capability handshake or explicit block_quota limits.",
-    );
-  }
-
+/** Project findings through the shared content-coherence membership core. */
+export function buildWorkBlockPartition(
+  params: WorkBlockPartitionInput,
+): WorkBlockPartition {
   const fileUnitMap = buildFileUnitMap(params.unitManifest);
-  const findingUnits = new Map<string, string[]>();
-  for (const finding of params.findings) {
-    const ownedUnits = normalizeOwnedUnits(finding, fileUnitMap);
-    findingUnits.set(finding.id, ownedUnits);
-  }
-  const partition = partitionWorkItems(
-    params.findings.map((finding) => ({
-      id: finding.id,
-      unitIds: findingUnits.get(finding.id) ?? [],
-      files: finding.affected_files.map((file) => file.path),
-      semanticTags: semanticTagsForFinding(finding),
-      estimatedTokens: estimateTokensFromBytes(
-        Buffer.byteLength(JSON.stringify(finding), "utf8"),
-      ),
-      role: finding.systemic === true ? "coordination" as const : "implementation" as const,
-    })),
-    {
-      capacityTokens: params.contextBudgetTokens,
-      availableParallelism: params.availableParallelism,
-      fileTokenCosts: Object.fromEntries(
-        Object.entries(params.sizeIndex ?? {}).map(([path, bytes]) => [
-          path,
-          estimateTokensFromBytes(bytes),
-        ]),
-      ),
-    },
+  const unitsByFinding = new Map(
+    params.findings.map((finding) => [
+      finding.id,
+      unitsForFinding(finding, fileUnitMap),
+    ]),
   );
-  const findingById = new Map(params.findings.map((finding) => [finding.id, finding]));
-  const entries = partition.groups.map((partitionGroup, partitionIndex) => {
-    const group = partitionGroup.itemIds.map((id) => findingById.get(id)!);
-    const orderedFindings = [...group].sort((a, b) => {
-      const severityDelta = severityRank(b.severity) - severityRank(a.severity);
-      if (severityDelta !== 0) return severityDelta;
-      return a.id.localeCompare(b.id);
-    });
-    const unitIds = [
-      ...new Set(group.flatMap((finding) => findingUnits.get(finding.id) ?? [])),
-    ].sort();
-    const ownedFiles = [
-      ...new Set(
-        group.flatMap((finding) => finding.affected_files.map((file) => file.path)),
+  const coherenceTrace = buildContentCoherenceTrace({
+    items: params.findings.map((finding) => ({
+      id: finding.id,
+      file_paths: finding.affected_files.map((file) => file.path),
+      unit_ids: unitsByFinding.get(finding.id) ?? [],
+      tags: [finding.lens],
+    })),
+    relationships: relationshipsForFindings(params),
+  });
+  const findingById = new Map(
+    params.findings.map((finding) => [finding.id, finding]),
+  );
+  const sizes = canonicalSizeIndex(params.sizeIndex);
+  const blocks = coherenceTrace.components.map((findingIds, index) => {
+    const findings = findingIds.map((findingId) => findingById.get(findingId)!);
+    const coordination = findings.some((finding) => finding.systemic === true);
+    const maxSeverity = [...findings].sort(
+      (left, right) =>
+        severityRank(right.severity) - severityRank(left.severity) ||
+        compareCodeUnits(left.id, right.id),
+    )[0]!.severity;
+    const ownedFiles = stableStrings(
+      findings.flatMap((finding) =>
+        finding.affected_files.map((file) => normalizePath(file.path)),
       ),
-    ].sort();
+    );
     const block: WorkBlock = {
-      id: "",
-      finding_ids: orderedFindings.map((finding) => finding.id),
-      unit_ids: unitIds,
+      id: `block-${index + 1}`,
+      finding_ids: [...findingIds],
+      unit_ids: stableStrings(
+        findings.flatMap((finding) => unitsByFinding.get(finding.id) ?? []),
+      ),
       owned_files: ownedFiles,
-      role: partitionGroup.role,
-      max_severity: orderedFindings[0]!.severity,
-      rationale:
-        partitionGroup.role === "coordination"
-          ? "Broad/systemic scope is isolated as a coordination obligation; its affected files remain context rather than an ownership hyperedge."
-          : `Multi-objective partition: ${orderedFindings.length} finding(s), ${unitIds.length} unit(s), approximately ${partitionGroup.estimatedTokens} input token(s), with semantic/unit cohesion and explicit cross-block overlap.`,
+      role: coordination ? "coordination" : "implementation",
+      max_severity: maxSeverity,
+      rationale: coordination
+        ? `Canonical coherence component with ${findings.length} finding(s); systemic scope is presented as coordination work.`
+        : `Canonical coherence component with ${findings.length} finding(s).`,
       depends_on: [],
+      token_estimate: advisoryTokenEstimate(
+        findings.length,
+        ownedFiles,
+        sizes,
+      ),
     };
-    return { block, partitionIndex };
+    return block;
   });
-
-  entries.sort((a, b) => {
-    const roleDelta =
-      (a.block.role === "coordination" ? 0 : 1) -
-      (b.block.role === "coordination" ? 0 : 1);
-    if (roleDelta !== 0) return roleDelta;
-    const severityDelta =
-      severityRank(b.block.max_severity) - severityRank(a.block.max_severity);
-    if (severityDelta !== 0) return severityDelta;
-    const findingDelta = b.block.finding_ids.length - a.block.finding_ids.length;
-    if (findingDelta !== 0) return findingDelta;
-    return a.block.finding_ids[0]!.localeCompare(b.block.finding_ids[0]!);
+  const withDependencies = blockDependencies({
+    blocks,
+    graphBundle: params.graphBundle,
+    criticalFlows: params.criticalFlows,
   });
-
-  const blockIdByPartitionIndex = new Map<number, string>();
-  for (let index = 0; index < entries.length; index++) {
-    const id = `block-${index + 1}`;
-    entries[index]!.block.id = id;
-    blockIdByPartitionIndex.set(entries[index]!.partitionIndex, id);
-  }
-  const blocks = entries.map((entry) => entry.block);
-  const orderByBlockId = new Map(blocks.map((block, index) => [block.id, index]));
-  const seamRows = partition.seams.map((seam) => {
-    const left = blockIdByPartitionIndex.get(seam.leftGroup)!;
-    const right = blockIdByPartitionIndex.get(seam.rightGroup)!;
-    const blockIds =
-      (orderByBlockId.get(left) ?? 0) <= (orderByBlockId.get(right) ?? 0)
-        ? ([left, right] as [string, string])
-        : ([right, left] as [string, string]);
-    return { seam, blockIds };
-  });
-  seamRows.sort((a, b) => {
-    const leftDelta =
-      (orderByBlockId.get(a.blockIds[0]) ?? 0) -
-      (orderByBlockId.get(b.blockIds[0]) ?? 0);
-    if (leftDelta !== 0) return leftDelta;
-    const rightDelta =
-      (orderByBlockId.get(a.blockIds[1]) ?? 0) -
-      (orderByBlockId.get(b.blockIds[1]) ?? 0);
-    if (rightDelta !== 0) return rightDelta;
-    return a.seam.kind.localeCompare(b.seam.kind);
-  });
-  const seams: WorkBlockSeam[] = seamRows.map(({ seam, blockIds }, index) => ({
-    id: `seam-${index + 1}`,
-    block_ids: blockIds,
-    kind: seam.kind,
-    shared_files: seam.sharedFiles,
-    shared_unit_ids: seam.sharedUnitIds,
-    requires_preparation: seam.requiresPreparation,
-    rationale:
-      seam.kind === "shared_context"
-        ? "Blocks share read/context scope but no predicted write path; parallel remediation remains safe."
-        : seam.kind === "systemic_coordination"
-          ? "A systemic finding spans this boundary; prepare the shared contract before parallel implementation."
-          : "Both blocks cite the same predicted write path; prepare and pin the seam before parallel implementation.",
-  }));
-
   return {
-    blocks: computeDependencies({
-      blocks,
-      graphBundle: params.graphBundle,
-      criticalFlows: params.criticalFlows,
-    }),
-    seams,
+    coherence_trace: coherenceTrace,
+    blocks: withDependencies,
+    seams: deriveSeams(withDependencies),
   };
 }
 
-export function buildWorkBlocks(
-  params: Parameters<typeof buildWorkBlockPartition>[0],
-): WorkBlock[] {
+export function buildWorkBlocks(params: WorkBlockPartitionInput): WorkBlock[] {
   return buildWorkBlockPartition(params).blocks;
 }

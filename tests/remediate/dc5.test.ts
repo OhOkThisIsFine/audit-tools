@@ -7,9 +7,8 @@
  * positive+negative test spec whose negative is SCOPED to the changed
  * symbol/file via an anti-rot scope predicate — an unscoped repo-wide-grep
  * negative is rejected (CE-006), not merely keyword-checked. A pure ADDITION is
- * never forced to pair. The pair is enforced at BOTH test-plan derivation
- * (`validatePairedObligations`) and the `mergeImplementResults` verify gate
- * (only-one-polarity → blocked). Fixes CE-013 (render-only misclassification).
+ * never forced to pair. The pair is enforced by the shared test-plan and
+ * verification evaluation. Fixes CE-013 (render-only misclassification).
  *
  * Verifies:
  *   inv-1  deterministic classifier: touches-existing-symbol → change (+anchors);
@@ -21,19 +20,11 @@
  *          pure addition needs neither half.
  *   inv-5  scope predicate: a negative naming the changed symbol/file is scoped;
  *          an unscoped repo-wide negative is rejected even with a polarity keyword.
- *   inv-6  verify-gate helper: only-one-polarity (or unscoped negative) for a
+ *   inv-6  verification helper: only-one-polarity (or unscoped negative) for a
  *          change → block reason; a full scoped pair → null; addition → null.
- *   inv-7  the test-plan gate and the verify gate share one evaluation (parity).
- *   fail-1..6 / merge: mergeImplementResults blocks a resolved change finding
- *          whose covered obligation has only one polarity (positive-only,
- *          negative-only, unscoped-negative), and resolves it once fully paired;
- *          a pure addition resolves without a pair.
+ *   inv-7  the test-plan gate and verification helper share one evaluation.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { describe, it, expect } from "vitest";
 import {
   classifyObligationChange,
   buildBaselineSymbolCorpus,
@@ -46,20 +37,10 @@ import {
 } from "../../src/remediate/contractPipeline/changeClassification.js";
 import { deriveObligationLedger } from "../../src/remediate/contractPipeline/derive.js";
 import { validatePairedObligations } from "../../src/remediate/validation/contractPipeline.js";
-import { StateStore } from "../../src/remediate/state/store.js";
-import type { RemediationState } from "../../src/remediate/state/store.js";
-import type { Finding, RemediationBlock } from "../../src/remediate/state/types.js";
-import { mergeImplementResults } from "../../src/remediate/steps/dispatch.js";
-import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
-import {
-  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-} from "../../src/remediate/steps/types.js";
 import {
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "audit-tools/shared";
-import { scratchDir } from "../helpers/scratch.js";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
@@ -338,9 +319,9 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
   });
 });
 
-// ── inv-6 + inv-7: verify-gate helper (parity with the test-plan gate) ──────────
+// ── inv-6 + inv-7: verification helper (parity with the test-plan gate) ─────────
 
-describe("verifyPairingForFinding (mergeImplementResults verify gate)", () => {
+describe("verifyPairingForFinding", () => {
   const ledger = (obligations: unknown[]) => ({
     contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
     goal_id: "G1",
@@ -483,190 +464,5 @@ describe("assertionPolarity — identifier-token masking", () => {
     expect(
       assertionPolarity("writes src/remediate/never-null.ts and succeeds"),
     ).toBe("positive");
-  });
-});
-
-// ── fail-1..6 / merge: mergeImplementResults verify gate end-to-end ────────────
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = scratchDir(".test-dc5-merge");
-const REPO_DIR = join(TEST_DIR, "repo");
-const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
-
-function makeStoreFinding(): Finding {
-  return {
-    id: "N-store",
-    title: "Store node",
-    category: "correctness",
-    severity: "high",
-    confidence: "high",
-    lens: "correctness",
-    summary: "Change writeRecord.",
-    affected_files: [{ path: "src/store.ts" }],
-    evidence: ["e"],
-    contract_obligation_ids: ["OBL-store-01"],
-    verification_obligation_ids: [],
-  } as Finding;
-}
-
-function makeStoreNodeState(): RemediationState {
-  const finding = makeStoreFinding();
-  const block: RemediationBlock = {
-    block_id: "CP-BLOCK-N-store",
-    items: [finding.id],
-    parallel_safe: true,
-    touched_files: [],
-  };
-  return {
-    status: "implementing",
-    plan: {
-      plan_id: "PLAN-DC5",
-      findings: [finding],
-      blocks: [block],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"],
-    },
-    items: {
-      [finding.id]: {
-        finding_id: finding.id,
-        status: "pending",
-        block_id: block.block_id,
-        item_spec: {
-          finding_id: finding.id,
-          concrete_change: "change writeRecord",
-          tests_to_write: [{ name: "t", assertions: ["passes"] }],
-          not_applicable_steps: [],
-        },
-      },
-    },
-    closing_plan: { action: "none" },
-  } as unknown as RemediationState;
-}
-
-/**
- * Seed the obligation_ledger + test_validator_plan the DC-5 verify gate reads.
- * `assertions` are the covering test spec's assertions for OBL-store-01.
- */
-async function seedContractArtifacts(
-  changeKind: "change" | "addition",
-  assertions: string[],
-): Promise<void> {
-  await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
-    contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-    goal_id: "G1",
-    obligations: [
-      {
-        id: "OBL-store-01",
-        description: "writeRecord must stay consistent",
-        kind: "behavioral",
-        depends_on: [],
-        status: "pending",
-        change_classification: {
-          change_kind: changeKind,
-          touched_symbols: changeKind === "change" ? ["writerecord"] : [],
-          determined_by: changeKind === "change" ? "touches_existing_symbol" : "no_existing_symbol",
-        },
-      },
-    ],
-    created_at: CREATED_AT,
-  });
-  await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
-    contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
-    goal_id: "G1",
-    test_specs: [{ obligation_id: "OBL-store-01", name: "t", kind: "unit", assertions }],
-    created_at: CREATED_AT,
-  });
-}
-
-async function mergeResolved(): Promise<RemediationState> {
-  const runId = "PLAN-DC5";
-  const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
-  await mkdir(resultDir, { recursive: true });
-  const resultPath = join(resultDir, "implement-CP-BLOCK-N-store.result.json");
-  await writeFile(
-    join(resultDir, "dispatch-plan.json"),
-    JSON.stringify({
-      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-      phase: "implement",
-      run_id: runId,
-      repo_root: REPO_DIR,
-      artifacts_dir: ARTIFACTS_DIR,
-      items: [
-        {
-          task_id: "implement-CP-BLOCK-N-store",
-          block_id: "CP-BLOCK-N-store",
-          prompt_path: join(resultDir, "implement-CP-BLOCK-N-store.md"),
-          result_path: resultPath,
-          access: { read_paths: ["src/store.ts"], write_paths: ["src/store.ts", resultPath] },
-        },
-      ],
-    }),
-  );
-  await writeFile(
-    resultPath,
-    JSON.stringify({
-      contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-      phase: "implement",
-      item_results: [
-        { finding_id: "N-store", status: "resolved", evidence: ["check passed: vitest run -> 3 pass"] },
-      ],
-    }),
-  );
-  return mergeImplementResults({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR }, runId);
-}
-
-describe("mergeImplementResults — DC-5 verify gate (only-one-polarity → blocked)", () => {
-  beforeEach(async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await mkdir(ARTIFACTS_DIR, { recursive: true });
-  });
-  afterEach(async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-  });
-
-  it("fail-1: blocks a resolved CHANGE finding whose obligation has only a positive", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    await seedContractArtifacts("change", ["writeRecord returns the ack"]);
-    const merged = await mergeResolved();
-    expect(merged.items!["N-store"].status).toBe("blocked");
-    expect(merged.items!["N-store"].failure_reason).toContain("only one polarity");
-  });
-
-  it("fail-2: blocks a resolved CHANGE finding whose negative half is unscoped (CE-006)", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    await seedContractArtifacts("change", ["writeRecord returns ack", "throws on a duplicate anywhere in the repo"]);
-    const merged = await mergeResolved();
-    expect(merged.items!["N-store"].status).toBe("blocked");
-    expect(merged.items!["N-store"].failure_reason).toContain("CE-006");
-  });
-
-  it("fail-3: resolves a CHANGE finding once it carries a positive + scoped negative", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    await seedContractArtifacts("change", ["writeRecord returns ack", "writeRecord rejects a missing id"]);
-    const merged = await mergeResolved();
-    expect(merged.items!["N-store"].status).toBe("resolved");
-  });
-
-  it("fail-4: resolves a pure ADDITION finding without requiring a pair", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    await seedContractArtifacts("addition", ["emits a new counter"]);
-    const merged = await mergeResolved();
-    expect(merged.items!["N-store"].status).toBe("resolved");
-  });
-
-  it("fail-5: the verify gate is inert when no contract artifacts exist (audit-findings intake)", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    // No obligation_ledger / test_validator_plan written.
-    const merged = await mergeResolved();
-    expect(merged.items!["N-store"].status).toBe("resolved");
-  });
-
-  it("fail-6: a blocked finding never writes a verify-passed sidecar artifact", async () => {
-    await new StateStore(ARTIFACTS_DIR).saveState(makeStoreNodeState());
-    await seedContractArtifacts("change", ["writeRecord returns the ack"]);
-    await mergeResolved();
-    expect(
-      existsSync(join(ARTIFACTS_DIR, "result_N-store_verify_code_against_documentation.json")),
-    ).toBe(false);
   });
 });

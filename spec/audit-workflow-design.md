@@ -29,7 +29,7 @@ intake
   → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
   → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
   → planning
-  → rolling_dispatch        [bounded admission + capability/context fit; broker owns provider failover]
+  → host_review_handoff     [complete provider-neutral workload + bound result ingestion]
   → synthesis
   → synthesis_narrative     [host_delegation]
 ```
@@ -79,8 +79,8 @@ design review.
 - Both inclusions and exclusions are proposed
 - Mandatory lenses (`security`, `correctness`, `reliability`, `data_integrity`)
   cannot be excluded regardless of proposal or user input
-- Proposals account for the provider-neutral capability and context budget
-  reported by the attended host and declared source pools
+- Proposals account for repository evidence and confirmed review intent only;
+  execution capacity is not an audit-planning input
 
 **User/host produces** (structured output inline, skill writes to disk):
 - `scope_summary`, `intent_summary` (required)
@@ -208,15 +208,15 @@ Runs after the intent checkpoint so the reviewer works within confirmed scope.
 - Categories: `tool_opportunity`, `architecture_pattern`,
   `design_simplification`, `integration`, `missing_capability`
 
-**Conceptual review depth (shallow / deep).** Depth is a provider-neutral
+**Conceptual review depth (shallow / deep).** Depth is a repository-intent
 checkpoint field (`design_review.conceptual_depth: "shallow" | "deep"`, default
 shallow). Shallow runs one conceptual agent. Deep fans out a configurable count
 (`design_review.perspectives`) of independent perspective subagents — a built-in
 roster of maximally-dissimilar perspectives — plus an **independent** judge/merge
 agent (an author never marks its own work); the judge writes the single
-conceptual-findings artifact the orchestrator ingests. The perspectives and judge
-are themselves packetized JIT by the active provider, so deep review survives a
-provider switch.
+conceptual-findings artifact the orchestrator ingests. Each perspective and the
+judge is emitted as bounded host work, so execution mechanism never changes the
+artifact contract.
 
 The contract pass and the conceptual pass dispatch simultaneously as independent
 host_delegation agents (the conceptual pass expanding to its perspective fan-out
@@ -228,9 +228,9 @@ the synthesis-narrative agent alike — WRITES its result JSON directly to a res
 path (via its own Write tool), then replies with a short confirmation. Inline
 emission (the worker returns the payload for the skill to capture and write) is
 rejected because it silently drops results; the worker-writes-the-file pattern is
-the design of record, matching audit-code's packet dispatch
-(`src/audit/cli/dispatch/packetPrompt.ts`, which asserts the write-instruction
-wording via a regression test).
+the design of record, matching audit-code's host-handoff boundary
+(`src/audit/cli/dispatch/hostHandoff.ts`, which binds prompt digests and result
+paths before any result is accepted).
 
 **Prompt caching:** the shared structural context block (graph, surfaces, flows,
 risk register, file inventory) is identical for both agents. It goes first in
@@ -263,47 +263,32 @@ derived. Edges = soft, weighted **affinity** (`kind` +
 `weight`, descending: shared file → cross-lens-same-file → critical-flow (same
 flow) → same unit → call adjacency → same directory, plus an additive same-lens
 bonus), deterministically derived (LLM-tunable), never frozen — they are the
-flexibility each provider uses to cut its own packets.
-Kept distinct from `graph_bundle.json` (code structure). Packets do not exist at
-plan time, and the plan encodes no provider/model/concurrency decision — so a run
-resumes across providers/IDEs mid-flight with no replanning (this is the
-plan/dispatch seam).
+evidence used to form coherent host work items.
+Kept distinct from `graph_bundle.json` (code structure). The plan encodes no
+provider, model, routing, quota, transport, or concurrency decision, so a run
+resumes in any host without replanning.
 
 ---
 
-## Dispatch — rolling, quota + capability-routed
+## Host review handoff
 
-The rolling/admission-control model — one-at-a-time admission against a live
-per-pool budget, emergent concurrency, the shared account-keyed reservation
-ledger, and folded-in ingestion — is specified in
-[`dispatch-quota.md`](dispatch-quota.md).
-This section covers only what is unique to the audit side: how the
-task-affinity graph is partitioned into packets, how packets are risk-routed
-across model tiers, and prompt caching.
+Planning emits every eligible review item as one complete
+`audit-host-workload/v1alpha1` artifact. Work items carry stable ids, lens and
+scope, deterministic complexity/risk/token-estimate metadata, the full prompt,
+its SHA-256 binding, and a repository-contained result path. Metadata describes
+the work; it never selects an executor or asserts a fit against an execution
+window.
 
-**JIT graph partition (no plan-time packets).** Each time a provider picks up the
-run it performs a capability handshake — the models it can dispatch to right now
-(an opaque ordered roster with context/output windows + relative rank) and its
-real parallel capacity — then partitions the task-affinity graph into packets by
-greedy agglomerative merge along descending edge weight, under two
-model-parameterized **ceilings (not quotas)**: a **token ceiling** (the chosen
-model's discovered context minus overhead) and a **risk-mass ceiling** (aggregate
-node risk one agent should scrutinize at once). A coherent high-risk cluster that
-exceeds the risk-mass ceiling splits along its weakest internal edge; high-risk
-packets are never padded with low-risk filler. With a multi-rank roster: partition
-once under the largest window, then re-split any packet whose routed tier has a
-smaller window (partition-then-validate, to preserve cross-tier coherence).
+The host decides whether and how to parallelize work. audit-tools performs no
+backend discovery, routing, admission, launch, quota accounting, failover, or
+rolling scheduling.
 
-**Risk-routed tiering.** A packet's tier = its **max** node risk against relative
-cut points, mapped to a relative rank in the roster (low → cheapest available;
-high → top available). Complexity signals (isolated large file, critical flow,
-analyzer signal, lens verification, high token estimate, sensitive lens) are
-**escalators only** — they raise a tier, never lower it. No named models; degrade
-gracefully when fewer ranks are reported. An optional opaque `model_id` per roster
-entry keys per-model quota learning (`provider/<id>`) and is never a window
-authority or matched to a name table. Handshake, partition, and routing are never
-persisted as decisions — the dispatch-quota/capacity artifacts record this
-session's JIT choices, not authority.
+**Bound result ingestion.** A companion result map and tool-owned task bindings
+pin run id, work-item id, prompt digest, result path, unit/lens identity, file
+scope, and current line counts. Host-written results are untrusted until the
+strict schema, bindings, coverage, and finding invariants pass. Accepted results
+enter an append-only content-addressed ledger; exact replay is a no-op and
+different bytes under an accepted identity are refused.
 
 **Auditor structured output:** workers WRITE `AuditResult[]` directly to their
 result path with their own Write tool, then reply with a short confirmation (the
@@ -313,10 +298,9 @@ path. Workers do not execute a submit command.
 
 **Prompt caching for workers:** schema definition, general instructions, and
 repo metadata form a fixed shared prefix identical across all workers in a run.
-Per-packet content (file list, task IDs, graph context) follows. The shared
+Per-item content (file list, task IDs, graph context) follows. The shared
 prefix is cache-eligible; structure should be maintained with caching in mind
-even before explicit `cache_control` markers are available at the transport
-layer.
+even when the active host does not expose explicit cache controls.
 
 General caching principle: **shared context at the front, agent-specific
 payload at the back.** Applies to design review agents, auditor workers, and
@@ -326,16 +310,16 @@ synthesis narrative.
 
 ## Synthesis narrative (always runs)
 
-`synthesis_narrative_current` is a `host_delegation` executor. Always fires;
-never skipped unless running headless (auto-complete writes
-`status: "omitted"` so headless runs still terminate cleanly).
+`synthesis_narrative_current` is a `host_delegation` executor. It always emits
+bounded host work when narrative judgment is required; an explicit omitted
+result remains a defined terminal when the user declines that optional layer.
 
 Host agent receives the findings and produces themes, executive summary, and
 top risks, and WRITES the result to disk itself (the worker-writes-the-file
 pattern established under *Design review → Structured output*).
 
 `synthesisNarrativePrompt.ts` builds the prompt; the host_delegation wrapper
-and executor registration integrate it into the step dispatch.
+and executor registration integrate it into the persisted step workflow.
 
 ---
 
@@ -345,10 +329,10 @@ The remediation walkthrough produced a companion design
 ([`remediation-workflow-design.md`](remediation-workflow-design.md)). Items
 shared between the two tools — implement once, in `audit-tools/shared`:
 
-- **Rolling dispatch engine.** The dispatch section above and remediation's
-  rolling worktree dispatch are the same loop (quota tracking, per-packet
-  provider selection, capacity re-check on result arrival) with different
-  packet types. Build it as shared infrastructure, not twice.
+- **Host-handoff guarantees.** Both tools emit complete provider-neutral work,
+  bind prompts and result paths before execution, treat returned records as
+  untrusted, and make accepted replay idempotent. Their domain payloads differ;
+  containment, binding, and content-addressed evidence rules stay aligned.
 - **`free_form_intent` interpretation** (interpret to shape weighting/priority;
   never thread verbatim into worker prompts) is the rule in both tools; the
   interpretation logic is a shared concern.
@@ -368,21 +352,10 @@ shared between the two tools — implement once, in `audit-tools/shared`:
 
 Audit-relevant items (the remediation companion carries the full set):
 
-- **Consumer-neutral dispatch terminal.** The shared rolling engine's empty-pool
-  / no-progress-livelock terminal must not assume a `close` phase (that is
-  remediation's). The terminal is a consumer-provided hook: when the confirmed
-  pool empties mid-run and the livelock guard trips, audit marks the stranded
-  units uncovered and proceeds to **synthesis on partial coverage** — synthesis
-  is not hard-gated on full `audit_tasks_completed` once a sanctioned
-  partial-completion terminal fires. "Never an undefined or indefinite stall"
-  must hold for the audit consumer too.
-- **`waiting_for_provider` paused state (audit consumer layer).** The shared engine
-  single-sources the *admission decision* (`computeDispatchAdmission`); the audit
-  consumer wraps it in an explicit resumable `waiting_for_provider` paused state. When
-  every eligible pool empties, that state is entered; re-discovery surfaces only
-  genuinely new pools and never re-offers a settled exclusion. A no-progress
-  livelock guard bounds oscillation (N pauses without net new capacity → consumer
-  terminal). The pause-lifecycle shell is per-consumer, not itself shared.
+- **Explicit host-work terminal.** A host handoff is either pending bound
+  results, partially ingested with named remaining work-item ids, or complete.
+  Missing and invalid results remain actionable diagnostics; no backend-capacity
+  state can turn into an indefinite workflow pause.
 - **Per-clause `free_form_intent` escape hatch.** The interpreter decomposes a
   compound intent into clauses and assesses each clause's encodability
   independently; any clause it cannot encode as priority/lens/scope signals
@@ -390,7 +363,6 @@ Audit-relevant items (the remediation companion carries the full set):
   question and carried as an explicit machine-checkable constraint — even when
   sibling clauses encode cleanly. Detection keys on per-clause encodability, not
   total-encoding-failure.
-- **Pinned shared APIs.** The three shared APIs (rolling dispatch engine — the
-  shared admission decision, `computeDispatchAdmission`; provider-neutral source
-  resolution; free_form_intent interpreter) are pinned/versioned seam
-  contracts.
+- **Pinned shared APIs.** Session intent, affinity/coherence artifacts,
+  provider-agnostic execution records, and the `free_form_intent` interpreter
+  are pinned/versioned seam contracts.

@@ -6,9 +6,8 @@
  * derived from the ONE canonical loader prompt body. The bespoke per-host
  * renderers are thin format wrappers (frontmatter / header / TOML quoting) around
  * the shared body — they never re-author the loader instructions. This makes it
- * impossible for a host asset to drift out of sync with the canonical body (e.g.
- * to silently drop the `next-step` capability handshake or `--host-models`, or to
- * embed a wrong in-repo entrypoint), which is enforced by a no-drift guard test.
+ * impossible for a host asset to drift out of sync with the canonical body or
+ * embed a wrong in-repo entrypoint, which is enforced by a no-drift guard test.
  *
  * `toolName` parameterizes the slash-command / bin name so both orchestrators
  * (`audit-code` and `remediate-code`) render from this one source.
@@ -25,8 +24,7 @@ export interface RenderHostAssetOptions {
   /**
    * The canonical loader prompt body (frontmatter already stripped). This is the
    * single source every host asset embeds verbatim — it carries the `next-step`
-   * capability handshake (including `--host-models`) in both the initial and the
-   * continuation guidance, and the correct in-repo entrypoint.
+   * continuation guidance and the correct in-repo entrypoint.
    */
   promptBody: string;
   /** Slash-command / bin name, e.g. "audit-code" or "remediate-code". */
@@ -61,7 +59,7 @@ function renderFrontmatter(fields: Array<[string, string | undefined]>): string 
 /**
  * Render the VS Code custom-agent markdown file. The agent's job is to drive the
  * `/<toolName>` workflow through the next-step machine, so it embeds the canonical
- * loader body verbatim (which carries the full capability handshake) rather than
+ * loader body verbatim rather than
  * re-authoring abbreviated prose.
  */
 function renderVSCodeAgent(opts: RenderHostAssetOptions): string {
@@ -75,7 +73,7 @@ function renderVSCodeAgent(opts: RenderHostAssetOptions): string {
 /**
  * Render the Codex re-run automation recipe markdown. The recurring-task prompt
  * embeds the canonical loader body so a Codex automation drives the exact same
- * next-step handshake as every other host.
+ * next-step protocol as every other host.
  */
 function renderCodexRecipe(opts: RenderHostAssetOptions): string {
   return `# ${titleCase(opts.toolName)} automation recipe\n\nSuggested recurring task: re-run the autonomous \`/${opts.toolName}\` workflow for this repository, following the canonical loader below, and stop once the deterministic report is current.\n\n- Cadence: daily on active branches or before release cut-offs\n- Inputs: repository root\n\nUse this recipe as a starting point for a Codex automation once the local workflow is stable in your environment.\n\n${canonicalBody(opts.promptBody)}\n`;
@@ -83,7 +81,7 @@ function renderCodexRecipe(opts: RenderHostAssetOptions): string {
 
 /**
  * Render the Antigravity planning-mode guide. Embeds the canonical loader body so
- * the planning-mode conversation drives the same next-step handshake.
+ * the planning-mode conversation drives the same next-step protocol.
  */
 function renderAntigravityGuide(opts: RenderHostAssetOptions): string {
   return `# ${titleCase(opts.toolName)} planning-mode guide\n\nOpen Antigravity in Planning mode, then follow the canonical loader below. Ask Antigravity to use \`${opts.toolName} next-step\` directly, and review Antigravity artifacts before accepting major code changes or imported evidence.\n\n${canonicalBody(opts.promptBody)}\n`;
@@ -97,7 +95,7 @@ function renderAntigravityGuide(opts: RenderHostAssetOptions): string {
 function renderGeminiToml(opts: RenderHostAssetOptions): string {
   const description =
     opts.description ??
-    `Autonomous local-loop workflow — loads one backend-rendered step at a time`;
+    `Autonomous local-loop workflow — loads one generated step at a time`;
   const escapedBody = canonicalBody(opts.promptBody)
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"');

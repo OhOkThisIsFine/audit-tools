@@ -1,6 +1,6 @@
 /**
  * Machine-global state-dir resolution (src/shared/io/stateDir.ts): the single
- * path source for `~/.audit-code` / `~/.remediate-code`. Precedence contract:
+ * path source for machine-global audit/remediation state. Precedence contract:
  * explicit homeDir (per-call test injection) > AUDIT_CODE_STATE_DIR env override
  * (verbatim, no dir-name suffix) > os.homedir()/<defaultDirName>.
  */
@@ -44,20 +44,5 @@ describe("resolveStateDir", () => {
       join("/home/test", ".audit-code"),
     );
     expect(resolveAuditCodeStateDir(undefined, { [STATE_DIR_ENV_VAR]: "/x" })).toBe("/x");
-  });
-});
-
-describe("state-dir consumers honor the override", () => {
-  it("resolveSourceDeclarationPath routes through it", async () => {
-    const { resolveSourceDeclarationPath } = await import(
-      "../../src/shared/providers/auditorSources.js"
-    );
-    // The suite-level setup file (tests/helpers/state-dir-setup.mjs) always sets
-    // the override, so the no-homeDir form must land inside it — never the box's
-    // real ~/.audit-code.
-    const override = process.env.AUDIT_CODE_STATE_DIR;
-    expect(override).toBeTruthy();
-    if (!override) throw new Error("AUDIT_CODE_STATE_DIR must be set by the suite-level setup file");
-    expect(resolveSourceDeclarationPath()).toBe(join(override, "sources-declared.json"));
   });
 });

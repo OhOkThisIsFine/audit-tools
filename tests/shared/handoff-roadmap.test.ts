@@ -13,9 +13,8 @@
 //     same open item was written out as a full SPEC in HANDOFF *and* in
 //     docs/backlog/open-bugs.md, so the two drifted; a restating renderer would
 //     silently re-create it.
-//   • ORDER is derived — (source rank, position in file), with an optional `▶`
-//     pin. Nothing is dropped, so an item cannot fall out of the roadmap by
-//     being unmarked.
+//   • ORDER is derived — only explicitly pinned (`▶`) entries are emitted, in
+//     (source rank, position in file) order. Unpinned work stays in the backlog.
 //   • the hand-written parts survive — only the delimited block is replaced.
 //   • the gate FIRES AT COMMIT, not only in verify:checks. The pre-commit hook
 //     does not run verify:checks, so a check wired only there first fails in
@@ -28,13 +27,19 @@ import { join, resolve, dirname } from 'node:path';
 import {
   BEGIN_MARKER,
   END_MARKER,
+  LIVE_STATUS_BEGIN_MARKER,
+  LIVE_STATUS_END_MARKER,
   PIN_MARKER,
   ROADMAP_SOURCES,
+  assertGeneratedTopology,
   collectRoadmap,
   parseBulletEntries,
   parseTrackEntries,
+  readOpenNightlyItems,
+  renderNightlyQueue,
   renderRoadmap,
   sectionText,
+  spliceLiveStatus,
   spliceRoadmap,
 } from '../../scripts/shared/generate-handoff-roadmap.mjs';
 
@@ -190,6 +195,149 @@ describe('rendering — a pointer, never a restated spec', () => {
   });
 });
 
+describe('nightly queue — generated live state, absent when empty', () => {
+  const items = [
+    {
+      id: 'docs-1',
+      title: 'Decide whether to retire the old routing specs',
+      eli5: 'Long explanation that belongs only in the nightly inbox.',
+      question: 'Long question that must not be copied into HANDOFF.',
+    },
+    {
+      id: 'sol-2',
+      title: 'Validate nightly triage records before counting them',
+    },
+  ];
+
+  it('renders one pointer per queued item and never copies the item spec', () => {
+    const out = renderNightlyQueue(items);
+    expect(out.startsWith(LIVE_STATUS_BEGIN_MARKER)).toBe(true);
+    expect(out.endsWith(LIVE_STATUS_END_MARKER)).toBe(true);
+    expect(out).toContain('2 nightly decisions are waiting');
+    expect(out).toContain('`docs-1` — Decide whether to retire the old routing specs');
+    expect(out).toContain('`sol-2` — Validate nightly triage records before counting them');
+    expect(out).toContain('[`nightly-inbox.md`](nightly-inbox.md)');
+    expect(out).not.toContain(items[0].eli5);
+    expect(out).not.toContain(items[0].question);
+  });
+
+  it('renders no visible nightly text when the queue is empty', () => {
+    const out = renderNightlyQueue([]);
+    expect(out).toBe(`${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`);
+    expect(out).not.toMatch(/nightly|queue/i);
+  });
+
+  it('reads only unanswered persisted items; settling the last open item produces the empty render', () => {
+    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-'));
+    try {
+      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
+      writeFileSync(
+        join(root, '.audit-tools', 'nightly', 'open-items.json'),
+        JSON.stringify({
+          items: [
+            { ...items[0], subject_key: 'settled-key' },
+            { ...items[1], subject_key: 'wontfix-key' },
+            { id: 'ask-3', title: 'Clarify the remaining question', subject_key: 'question-key' },
+          ],
+        }),
+        'utf8',
+      );
+      mkdirSync(join(root, '.claude'), { recursive: true });
+      const decisionsPath = join(root, '.claude', 'nightly-decisions.json');
+      writeFileSync(
+        decisionsPath,
+        JSON.stringify({
+          'settled-key': { disposition: 'settled' },
+          'wontfix-key': { disposition: 'wontfix' },
+          'question-key': { disposition: 'question' },
+        }),
+        'utf8',
+      );
+      expect(readOpenNightlyItems(root).map((item) => item.id)).toEqual(['ask-3']);
+
+      writeFileSync(
+        decisionsPath,
+        JSON.stringify({
+          'settled-key': { disposition: 'settled' },
+          'wontfix-key': { disposition: 'wontfix' },
+          'question-key': { disposition: 'settled' },
+        }),
+        'utf8',
+      );
+      expect(renderNightlyQueue(readOpenNightlyItems(root))).toBe(
+        `${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['a missing file', null, /missing or invalid JSON/],
+    ['invalid JSON', '{', /missing or invalid JSON/],
+    ['a missing items field', '{}', /expected an object with an items array/],
+    ['a non-array items field', '{"items":{}}', /expected an object with an items array/],
+    [
+      'a malformed raw item',
+      JSON.stringify({ items: [{ id: 'x', title: 't', subject_key: '' }] }),
+      /canonical id/,
+    ],
+  ] as Array<[string, string | null, RegExp]>)('refuses %s instead of falsely rendering it as empty', (_name, body, error) => {
+    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-invalid-'));
+    try {
+      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
+      if (body !== null) {
+        writeFileSync(join(root, '.audit-tools', 'nightly', 'open-items.json'), body, 'utf8');
+      }
+      expect(() => readOpenNightlyItems(root)).toThrow(error);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('splices only the generic live-status slot', () => {
+    const handoff = `# HANDOFF\n\nabove\n\n${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}\n\nbelow\n`;
+    const block = renderNightlyQueue(items);
+    expect(spliceLiveStatus(handoff, block)).toBe(`# HANDOFF\n\nabove\n\n${block}\n\nbelow\n`);
+    expect(spliceLiveStatus(spliceLiveStatus(handoff, block), block)).toBe(
+      `# HANDOFF\n\nabove\n\n${block}\n\nbelow\n`,
+    );
+
+    const empty = renderNightlyQueue([]);
+    const cleared = spliceLiveStatus(handoff, empty);
+    expect(cleared).toBe(`# HANDOFF\n\nabove\n\n${empty}\n\nbelow\n`);
+    expect(cleared).not.toContain('OLD');
+  });
+
+  it('refuses duplicate live-status slots rather than leaving a stale copy behind', () => {
+    const slot = `${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}`;
+    expect(() => spliceLiveStatus(`${slot}\n${slot}\n`, renderNightlyQueue(items))).toThrow(
+      /multiple generated-live-status markers/,
+    );
+  });
+
+  it('escapes marker-shaped queue content before it can wedge the next regeneration', () => {
+    const handoff = `${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}`;
+    const injected = renderNightlyQueue([
+      { id: 'docs-1', title: `unsafe ${LIVE_STATUS_END_MARKER}` },
+    ]);
+    expect(injected).toContain('&lt;!-- END GENERATED LIVE STATUS --&gt;');
+    expect(injected.split(LIVE_STATUS_END_MARKER)).toHaveLength(2);
+    expect(() => spliceLiveStatus(handoff, injected)).not.toThrow();
+  });
+
+  it('refuses cross-slot marker injection and nested generated slots', () => {
+    const handoff = `${BEGIN_MARKER}\nOLD\n${END_MARKER}`;
+    const injectedRoadmap = `${BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}\n${END_MARKER}`;
+    expect(() => spliceRoadmap(handoff, injectedRoadmap)).toThrow(/marker owned by another/);
+
+    const nested =
+      `${BEGIN_MARKER}\n${LIVE_STATUS_BEGIN_MARKER}\n` +
+      `${LIVE_STATUS_END_MARKER}\n${END_MARKER}`;
+    expect(() => assertGeneratedTopology(nested)).toThrow(/generated slots overlap/);
+  });
+});
+
 describe('splicing — only the delimited block is touched', () => {
   const handoff = `# HANDOFF\n\nhand-written above\n\n${BEGIN_MARKER}\nOLD\n${END_MARKER}\n\nhand-written below\n`;
 
@@ -212,6 +360,16 @@ describe('splicing — only the delimited block is touched', () => {
 });
 
 describe('the live tree', () => {
+  it('an empty nightly queue leaves no hand-written nightly text anywhere in HANDOFF', () => {
+    const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
+    const emptyProjection = spliceRoadmap(
+      spliceLiveStatus(onDisk, renderNightlyQueue([])),
+      `${BEGIN_MARKER}\n${END_MARKER}`,
+    );
+    const visibleHandwrittenText = emptyProjection.replace(/<!--[\s\S]*?-->/gu, '');
+    expect(visibleHandwrittenText).not.toMatch(/\bnightly\b/iu);
+  });
+
   it('docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one', () => {
     const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
     const sources = new Map(
@@ -220,22 +378,36 @@ describe('the live tree', () => {
         readFileSync(join(REPO_ROOT, 'docs', 'backlog', f), 'utf8'),
       ]),
     );
-    const fresh = spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(sources)));
+    const fresh = spliceRoadmap(
+      spliceLiveStatus(onDisk, renderNightlyQueue(readOpenNightlyItems(REPO_ROOT))),
+      renderRoadmap(collectRoadmap(sources)),
+    );
     expect(fresh).toBe(onDisk);
 
     // The check must be able to FAIL, or it is decoration. The mutation has to touch
     // something that REACHES the block: now that only pinned entries are emitted,
     // removing an arbitrary backlog entry changes nothing and the control would be
-    // inert — silently passing forever. So un-pin a pinned entry instead.
+    // inert — silently passing forever. Toggle one entry's pin in either direction;
+    // an empty live roadmap is a valid state and must not weaken this control.
     const pinnedFile = ROADMAP_SOURCES.map((s) => s.file).find((f) =>
       sources.get(f)!.includes(`- **${PIN_MARKER}`),
     );
-    expect(
-      pinnedFile,
-      'the live backlog must pin at least one entry, or this drift control cannot fire',
-    ).toBeDefined();
     const drifted = new Map(sources);
-    drifted.set(pinnedFile!, sources.get(pinnedFile!)!.replaceAll(`- **${PIN_MARKER}`, '- **'));
+    if (pinnedFile) {
+      drifted.set(pinnedFile, sources.get(pinnedFile)!.replace(`- **${PIN_MARKER}`, '- **'));
+    } else {
+      const unpinnedFile = ROADMAP_SOURCES.map((s) => s.file).find((f) =>
+        sources.get(f)!.includes('- **'),
+      );
+      expect(
+        unpinnedFile,
+        'the live backlog must contain an entry whose pin the drift control can toggle',
+      ).toBeDefined();
+      drifted.set(
+        unpinnedFile!,
+        sources.get(unpinnedFile!)!.replace('- **', `- **${PIN_MARKER}`),
+      );
+    }
     expect(spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(drifted)))).not.toBe(onDisk);
   });
 
@@ -318,6 +490,12 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     );
     writeFile('README.md', '# fixture\n');
     writeFile('.gitignore', '.claude/\nnode_modules/\n');
+    writeFile(
+      '.audit-tools/nightly/open-items.json',
+      JSON.stringify({ items: [{ premise_probes: [{ file: 'src/probed.ts', contains: 'old' }] }] }),
+    );
+    writeFile('src/probed.ts', 'export const value = "named location moved";\n');
+    writeFile('src/moved.ts', 'export const movedValue = "old";\n');
     git(['add', '-A']);
     git(['commit', '-m', 'base']);
   });
@@ -357,6 +535,62 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
     expect(stderr).toMatch(/HANDOFF roadmap check FAILED/);
+    reset();
+  });
+
+  it('BLOCKS a commit that edits the nightly queue (the queue can stale HANDOFF live state)', () => {
+    writeFile('.audit-tools/nightly/open-items.json', JSON.stringify({ items: [] }));
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    reset();
+  });
+
+  it('BLOCKS a commit that settles a nightly decision (the visible queue can become empty)', () => {
+    writeFile('.claude/nightly-decisions.json', '{}\n');
+    git(['add', '-f', '.claude/nightly-decisions.json']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    reset();
+  });
+
+  it.each([
+    'scripts/shared/generate-handoff-roadmap.mjs',
+    'scripts/nightly/items.mjs',
+  ])('BLOCKS a commit that edits HANDOFF projection code: %s', (rel) => {
+    writeFile(rel, '// changed projection semantics\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    reset();
+  });
+
+  it('BLOCKS a commit that changes a current nightly premise-probe source', () => {
+    writeFile('src/probed.ts', 'export const value = "new";\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    reset();
+  });
+
+  it('BLOCKS a rename of a current nightly premise-probe source', () => {
+    git(['mv', 'src/probed.ts', 'src/renamed.ts']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    reset();
+  });
+
+  it('BLOCKS removal of a positive probe fragment from a different tracked source', () => {
+    writeFile('src/moved.ts', 'export const movedValue = "gone";\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
     reset();
   });
 

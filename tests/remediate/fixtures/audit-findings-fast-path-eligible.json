@@ -34,12 +34,49 @@
       "grounding": { "status": "grounded" }
     }
   ],
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "FP-001",
+        "file_paths": ["src/fastpath/alpha.ts"],
+        "unit_ids": [],
+        "tags": ["correctness"]
+      },
+      {
+        "id": "FP-002",
+        "file_paths": ["src/fastpath/beta.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      }
+    ],
+    "pair_scores": [
+      {
+        "left": "FP-001",
+        "right": "FP-002",
+        "evidence": {
+          "call_import_reference_adjacency": false,
+          "same_directory": true,
+          "shared_critical_flow": false,
+          "shared_file": false,
+          "shared_semantic_tag_or_same_lens": false,
+          "shared_unit": false
+        },
+        "score": 10,
+        "eligible": false
+      }
+    ],
+    "eligible_candidates": [],
+    "merge_trace": [],
+    "merge_decisions": [],
+    "components": [["FP-001"], ["FP-002"]]
+  },
   "work_blocks": [
     {
       "id": "B-001",
       "finding_ids": ["FP-001"],
       "unit_ids": [],
       "owned_files": ["src/fastpath/alpha.ts"],
+      "role": "implementation",
       "max_severity": "high",
       "rationale": "Isolated correctness finding.",
       "depends_on": []
@@ -49,9 +86,11 @@
       "finding_ids": ["FP-002"],
       "unit_ids": [],
       "owned_files": ["src/fastpath/beta.ts"],
+      "role": "implementation",
       "max_severity": "medium",
       "rationale": "Isolated security finding.",
       "depends_on": []
     }
-  ]
+  ],
+  "work_block_seams": []
 }

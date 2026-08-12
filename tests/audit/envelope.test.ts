@@ -4,21 +4,11 @@ import type { AuditState } from "../../src/audit/types/auditState.js";
 const { buildManualReviewBlocker, buildBlockedAuditState } =
   await import("../../src/audit/cli/envelope.js");
 
-// ── buildManualReviewBlocker ────────────────────────────────────────────────
-// worker-command = headless/local provider that CANNOT dispatch sub-agents →
-// blocked, waiting for manual results. LLM providers (codex, claude-code, etc.)
-// CAN dispatch → "Ready for LLM semantic review" fan-out message (COR-dc621e7a).
-
-test("buildManualReviewBlocker returns blocked message for worker-command (cannot dispatch)", () => {
-  expect(buildManualReviewBlocker("worker-command")).toBe("Audit blocked: waiting for manual audit results or interactive provider configuration.");
-});
-
-test("buildManualReviewBlocker returns fan-out instructions for LLM providers", () => {
-  for (const provider of ["codex", "claude-code", "opencode"]) {
-    const result = buildManualReviewBlocker(provider);
-    expect(result, `${provider}: expected fan-out message`).toMatch(/Ready for LLM semantic review/);
-    expect(result, `${provider}: expected fan-out packets mention`).toMatch(/fan out packets/);
-  }
+test("buildManualReviewBlocker returns provider-neutral host handoff guidance", () => {
+  const result = buildManualReviewBlocker();
+  expect(result).toMatch(/host execution/);
+  expect(result).toMatch(/bound work items/);
+  expect(result).toMatch(/next-step/);
 });
 
 // ── buildBlockedAuditState ──────────────────────────────────────────────────

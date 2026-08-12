@@ -2,7 +2,6 @@ import { test, expect } from "vitest";
 import { FindingSchema, type Finding } from "audit-tools/shared";
 import { AuditResultSchema, type AuditResult } from "../../src/audit/types.js";
 import type { RenderableAuditReport } from "../../src/audit/reporting/synthesis.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { mergeFindings } = await import("../../src/audit/reporting/mergeFindings.js");
 const {
@@ -11,7 +10,7 @@ const {
 } = await import("../../src/audit/reporting/synthesis.js");
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
-) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+) => buildAuditReportModelRaw(params);
 
 test("mergeFindings deduplicates duplicate findings and aggregates runtime plus analyzer evidence", () => {
   const merged = mergeFindings(

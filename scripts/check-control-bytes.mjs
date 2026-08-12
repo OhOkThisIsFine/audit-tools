@@ -25,8 +25,20 @@ const tracked = git(['ls-files'])
   .filter((p) => p && SOURCE_EXT.test(p));
 
 const violations = [];
+let scanned = 0;
 for (const file of tracked) {
-  const buf = readFileSync(file);
+  let buf;
+  try {
+    buf = readFileSync(file);
+  } catch (error) {
+    // `git ls-files` describes the index. During an atomic retirement the
+    // working tree can legitimately contain unstaged deletions, which are not
+    // source bytes this gate can inspect. Skip only that exact race/state;
+    // permission and other IO failures must still fail the gate.
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') continue;
+    throw error;
+  }
+  scanned += 1;
   for (let i = 0; i < buf.length; i++) {
     const b = buf[i];
     if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) {
@@ -43,4 +55,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`check-control-bytes: ${tracked.length} tracked source files clean`);
+console.log(`check-control-bytes: ${scanned} present tracked source files clean`);

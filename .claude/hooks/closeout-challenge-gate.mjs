@@ -2,7 +2,7 @@
 // The "are you sure that was all taken care of?" challenge, automated.
 //
 // Asking that question by hand at the end of a sprint reliably surfaces real
-// gaps — an unpushed commit, a HANDOFF that no longer matches the backlog, a
+// gaps — an unpushed commit, stale generated HANDOFF state, a
 // memory file that never reached the index. The owner should not have to be the
 // one who remembers to ask (enforce-in-tooling, never host discretion), so this
 // blocks the stop once and asks it, WITH the mechanical evidence attached: a bare
@@ -111,8 +111,8 @@ if (unpushed) {
   );
 }
 
-// HANDOFF is generated from the backlog; a mismatch means the roadmap the next
-// agent reads is not the backlog it points at.
+// HANDOFF contains generated views of the nightly queue and backlog. A mismatch
+// means the live state or roadmap the next agent reads is stale.
 try {
   // Absence is not a mismatch: a checkout without the generator (or a different
   // repo entirely) must not be reported as a stale HANDOFF.
@@ -128,7 +128,8 @@ try {
     : { status: 0 };
   if (r.status !== 0) {
     findings.push(
-      'docs/HANDOFF.md no longer matches the backlog (generate-handoff-roadmap --check failed). ' +
+      'docs/HANDOFF.md no longer matches its generated sources ' +
+        '(nightly queue/decisions and backlog; generate-handoff-roadmap --check failed). ' +
         'Regenerate it before handing off.',
     );
   }

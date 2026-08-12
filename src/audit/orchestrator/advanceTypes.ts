@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult, SessionConfig, WorkPartitionPolicy } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { IntentEquivalenceVerdictSubmission } from "./intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
@@ -32,7 +32,7 @@ export interface AdvanceAuditOptions {
   runtimeValidationUpdates?: RuntimeValidationReport;
   /** Single imported tool payload (one file = one tool); the import executor upserts it into the bundle's per-tool array. */
   externalAnalyzerResults?: ExternalAnalyzerResults;
-  /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
+  /** Host-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;
   /** Host-supplied critical-flow fallback enrichment; persisted by critical_flow_fallback_executor (the structure phase then merges it). */
   criticalFlowFallbackResults?: CriticalFlowFallbackResult;
@@ -68,10 +68,6 @@ export interface AdvanceAuditOptions {
   since?: string;
   preferredExecutor?: string;
   runLogger?: RunLogger;
-  /** Effective per-auditor dispatch inventory for semantic-review execution. */
-  sessionConfig?: SessionConfig;
-  /** Current invocation's resolved partition capacity; transient and never persisted. */
-  workPartition?: Pick<WorkPartitionPolicy, "capacityTokens" | "availableParallelism">;
   /**
    * INTERNAL — the liveness heartbeat `advanceAudit` creates for its own call;
    * `runSingleAdvanceStep` labels each beat with the selected obligation.

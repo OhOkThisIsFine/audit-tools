@@ -157,14 +157,6 @@ test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir (doc
   expect(true, "sampleRunCommand uses argv only for --artifacts-dir; all other sample data is derived from constants").toBeTruthy();
 });
 
-// ── COR-70b138b4: quotaCommand sessionConfig error → RETIRED (was fail-open) ──
-// This slot used to assert that cmdQuota catches loadSessionConfig failures and
-// continues on an empty (permissive) default, "appropriate for a display command".
-// That was the bug: the preview then described a pool built from a config the real
-// run would refuse, and its sibling `prepare-dispatch` sized dispatch against it.
-// Both entry points now fail closed and share ONE driver resolution — asserted for
-// real (not by a tautology) in tests/audit/dispatch-entrypoint-parity.test.mjs.
-
 // ── COR-2cf46bf7: ensureSemanticReviewRun writeJsonFile(pendingTasksPath) ─────
 // Both writes serve distinct purposes:
 //   1. writeWorkerTaskFiles(…, pendingTasks) → dispatch/current-tasks.json (dispatch pointer)

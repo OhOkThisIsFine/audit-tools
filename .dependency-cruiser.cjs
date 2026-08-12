@@ -14,7 +14,7 @@
 // Deliberately NOT a rule here: orphan/unreachable-module detection. The
 // tested-but-unwired class is a periodic MANUAL audit by standing decision
 // (knip --production + grep, see CLAUDE.md "Dead-code release gate") — a
-// reachability rule cannot trace the dispatch-table / string-keyed wiring this
+// reachability rule cannot trace registry tables / string-keyed wiring this
 // codebase uses and would false-positive the same way `knip --production` does.
 module.exports = {
   options: {
@@ -35,10 +35,9 @@ module.exports = {
       comment:
         "Circular imports make module initialization order load-bearing and " +
         "resist extraction. The src graph has zero cycles of ANY kind — runtime " +
-        "or type-only; any new one is a regression. The three type-only cycles " +
-        "that existed at adoption (quota/limits<->scheduler, remediate " +
-        "state/itemStatus<->types, contractPipeline " +
-        "artifactStore<->semanticProjection) were each broken by moving the " +
+        "or type-only; any new one is a regression. Type-only cycles found at " +
+        "adoption were broken by moving each shared declaration DOWN into a " +
+        "module below both sides. The " +
         "shared declaration DOWN into a module below both sides, so the " +
         "viaOnly type-only exemption is gone: a type-only cycle is a real " +
         "design defect (it says two modules each own part of the other's " +

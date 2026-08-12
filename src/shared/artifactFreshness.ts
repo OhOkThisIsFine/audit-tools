@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 // Single-sourced in src/shared/stableStringify.ts (INV-CK-2) — there is exactly
 // one serializer.
 import { stableStringify } from "./stableStringify.js";
+import {
+  canonicalizeAffinityArtifactValue,
+  compareCodeUnits,
+} from "./affinityArtifacts.js";
 
 // Non-semantic top-level fields stripped before hashing, per artifact. These
 // are provenance (wall-clock stamps, run ids), NOT content: two rebuilds with
@@ -81,18 +85,23 @@ function canonicalizeNarrativeArrays(
         if (theme && typeof theme === "object" && Array.isArray(theme.finding_ids)) {
           return {
             ...theme,
-            finding_ids: [...(theme.finding_ids as string[])].sort(),
+            finding_ids: [...(theme.finding_ids as string[])].sort(
+              compareCodeUnits,
+            ),
           };
         }
         return theme;
       })
       .sort((a, b) =>
-        String(a?.theme_id ?? "").localeCompare(String(b?.theme_id ?? "")),
+        compareCodeUnits(
+          String(a?.theme_id ?? ""),
+          String(b?.theme_id ?? ""),
+        ),
       );
   }
 
   if (Array.isArray(out.top_risks)) {
-    out.top_risks = [...(out.top_risks as string[])].sort();
+    out.top_risks = [...(out.top_risks as string[])].sort(compareCodeUnits);
   }
 
   return out;
@@ -124,6 +133,13 @@ export function hashArtifactValue(
   value: unknown,
 ): string {
   return createHash("sha256")
-    .update(stableStringify(normalizeForMetadataHash(artifactName, value)))
+    .update(
+      stableStringify(
+        canonicalizeAffinityArtifactValue(
+          artifactName,
+          normalizeForMetadataHash(artifactName, value),
+        ),
+      ),
+    )
     .digest("hex");
 }

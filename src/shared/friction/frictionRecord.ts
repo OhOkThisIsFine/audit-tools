@@ -8,7 +8,7 @@ import {
   sanitizeRunId,
 } from "../io/frictionCapture.js";
 import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
-import { withFileLock } from "../quota/fileLock.js";
+import { withFileLock } from "../io/fileLock.js";
 
 /**
  * The shared per-run friction RECORD substrate (CE-004 / CE-010, the O1

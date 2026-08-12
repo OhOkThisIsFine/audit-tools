@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 import type { AuditFindingsReport, Finding } from "../../src/shared/types/finding.js";
+import { buildAuditFindingsDeliverable } from "../../src/shared/reporting/auditDeliverable.js";
 
 const { renderSynthesisNarrativePrompt } = await import("../../src/audit/reporting/synthesisNarrativePrompt.js");
 
@@ -21,22 +22,15 @@ function makeFinding(i: number, overrides: Partial<Finding> = {}): Finding {
   };
 }
 
-function makeReport(findings: Finding[], workBlockCount = 1): AuditFindingsReport {
+function makeReport(findings: Finding[], workBlockCount?: number): AuditFindingsReport {
+  const report = buildAuditFindingsDeliverable(findings);
+  if (workBlockCount === undefined) return report;
   return {
-    contract_version: "audit-findings/v1alpha1",
+    ...report,
     summary: {
-      finding_count: findings.length,
+      ...report.summary,
       work_block_count: workBlockCount,
-      // Required by AuditFindingsSummary but not exercised by this prompt-rendering
-      // suite (fixture drift widening — the real contract has no defaults here).
-      severity_breakdown: {},
-      audited_file_count: 0,
-      excluded_file_count: 0,
-      runtime_validation_status_breakdown: {},
     },
-    findings,
-    work_blocks: [],
-    work_block_seams: [],
   };
 }
 

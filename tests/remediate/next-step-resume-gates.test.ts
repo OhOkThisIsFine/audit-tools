@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { decideNextStep, resolveHostDispatchCapability } from "../../src/remediate/steps/nextStep.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -324,45 +324,4 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
       "a successful join keeps the extracted plan; its absence means the recovery path discarded it",
     ).toBe(true);
   }
-});
-
-describe("resolveHostDispatchCapability", () => {
-  it("returns the explicit flag when provided", () => {
-    expect(resolveHostDispatchCapability({ hostCanDispatchSubagents: true })).toBe(true);
-    expect(resolveHostDispatchCapability({ hostCanDispatchSubagents: false })).toBe(false);
-  });
-
-  it("reads session config when flag is undefined", () => {
-    expect(
-      resolveHostDispatchCapability({
-        sessionConfig: { host_can_dispatch_subagents: true },
-      }),
-    ).toBe(true);
-  });
-
-  it("reads REMEDIATE_HOST_CAN_DISPATCH env var as fallback", () => {
-    expect(
-      resolveHostDispatchCapability({
-        env: { REMEDIATE_HOST_CAN_DISPATCH: "true" } as any,
-      }),
-    ).toBe(true);
-    expect(
-      resolveHostDispatchCapability({
-        env: { REMEDIATE_HOST_CAN_DISPATCH: "false" } as any,
-      }),
-    ).toBe(false);
-  });
-
-  it("defaults to true when nothing is configured (conversation-first parallel dispatch)", () => {
-    expect(resolveHostDispatchCapability({ env: {} as any })).toBe(true);
-  });
-
-  it("CLI flag overrides session config", () => {
-    expect(
-      resolveHostDispatchCapability({
-        hostCanDispatchSubagents: false,
-        sessionConfig: { host_can_dispatch_subagents: true },
-      }),
-    ).toBe(false);
-  });
 });

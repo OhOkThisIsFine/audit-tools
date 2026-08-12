@@ -43,7 +43,7 @@ compute. Everything in the right column should move to deterministic code.
 | contract_assessment | the satisfied/violated/uncertain verdicts | obligation enumeration, coverage symmetry |
 | counterexample | the counterexamples | nothing (pure judgment) |
 | judge_report | the rulings + repair target | classification enumeration, schema |
-| **implementation_dag** | node *descriptions* + verify commands | **node/edge skeleton derivable** (node per obligation/CE, edges from `depends_on`, tier via `deriveNodeModelTier`) |
+| **implementation_dag** | node *descriptions* + verify commands | **node/edge skeleton derivable** (one node per finalized module, obligation/counterexample coverage, and `depends_on` from the module dependency graph) |
 
 The four pure-judgment artifacts (critique, counterexample, judge, and the *content* of
 module_contracts) stay LLM. Everything else is mostly or fully mechanical.
@@ -54,13 +54,16 @@ Ordered by (impact × determinism-feasibility). Each names the plug-in point.
 
 ### S1 — Derive the derivable artifacts in code *(highest leverage)*
 `obligation_ledger`, `test_validator_plan`, and the `implementation_dag` skeleton are generated
-**deterministically**, not authored. The mapping logic exists as the *inverse* of
-`validatePairedObligations` / `validateDesignSpecGates` Gate 3 / `validateImplementationDAGIntegrity`
-/ `deriveNodeModelTier`, so the deriver and the validator share one source and cannot drift.
+**deterministically**, not authored. The live derivation functions are
+`deriveObligationLedger`, `buildTestValidatorPlanScaffold`, and
+`buildImplementationDagScaffold`; the corresponding validation gates include
+`validatePairedObligations`, `validateDesignSpecGates` Gate 3, and
+`validateImplementationDAGIntegrity`. Runtime depth/granularity is derived separately from the
+content-based intake risk signal, never from a model or provider tier.
 - **Plug-in:** in `buildNextContractPipelineStep`, gate the dispatch for these phases — instead of
   emitting an LLM phase, compute the artifact and `writeContractArtifact(...)` (mirror the
-  `cyclic_seam_resolution` no-cycles write), then recurse. Deriver = pure function in
-  `contractPipeline/derive.ts`; the template is `deriveNodeModelTier` in
+  `cyclic_seam_resolution` no-cycles write), then recurse. The pure derivation functions live in
+  `contractPipeline/derive.ts`; their structural validation lives in
   `validation/contractPipelineGates.ts`.
 - **Effect:** removes the three largest hand-authored artifacts; weak *and* strong models skip
   them; they can never disagree with the validators. Where judgment remains (assertion text, node
@@ -91,7 +94,7 @@ the wrong direction**, so it is deliberately not built:
 The tool emits a **pre-filled skeleton**
 built from the already-ingested upstream payloads — structure, IDs, and cross-references populated,
 only judgment slots blank — and gives the worker a **write-time validator** (the same
-`CONTRACT_PIPELINE_VALIDATORS` the backend runs at ingest) to run before it emits.
+`CONTRACT_PIPELINE_VALIDATORS` the tool runs at ingestion) to run before it emits.
 - **Plug-in:** `renderContractPipelinePrompt` (emit a scaffold from `readContractArtifact` of each
   required input, instead of the generic `outputSchema` template); add a `validate-artifact` CLI
   subcommand wrapping the existing validator registry; reference it in the prompt's task section.
@@ -106,12 +109,13 @@ caused the recurring "Unknown finding_id" merge trap, and the derived obligation
 (`OBLIGATION_PREFIX`/`moduleSlug`/`obligationId`). Consolidating `goal_id` / module ID minting
 (still disambiguated ad hoc via `mintUniqueId`, `src/shared/ids.ts`) under the same authority is
 still open.
-- **Plug-in:** new `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
+- **Plug-in:** `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
   `obligation_ledger` derivation, `promoteImplementationDagToExtractedPlan`'s `CP-BLOCK-` prefix)
-  and the consumers (`buildBlockAliasMap`/`collapseItemResults`/`mergeImplementResults`).
+  and bind the resulting block/finding ids at the live host boundary
+  (`ingestRemediationHostResults` in `src/remediate/steps/dispatch/hostHandoff.ts`).
 - **Effect:** **eliminates** the tolerant-remap seam and the recurring merge trap at the root,
-  instead of mitigating it. (The tolerant merge stays as defence-in-depth, but stops being load-
-  bearing.)
+  instead of mitigating it. A host result advances state only when its exact persisted work-item
+  binding still matches.
 
 ### S5 — Move structural checks before the adversarial phases (cheap deterministic floor)
 A fuller **structural linter** (ID integrity, dangling refs, empty required arrays, coverage
@@ -152,15 +156,16 @@ Tier the grounding by claim type:
 - **Behavior claims ("throws" / "test fails" / "no cycle" / "unused") → executable anchor.** The
   finding ships a command the tool runs (the grep, the failing test, `madge`); the confirmed bit is
   the **tool's run**, not the model's assertion — exactly what disproved the three flags above.
-  Bounded/sandboxed/timeout. Deterministic-tool findings (semgrep/eslint/npm-audit via
-  `src/audit/adapters/`) are already grounded this way — generalize it to model-authored findings.
+  Bounded/sandboxed/timeout. Deterministic analyzer findings normalized through
+  `src/shared/analyzers/` and `src/audit/extractors/analyzers/` are already grounded this way —
+  generalize it to host-authored findings.
 - **Judgment/synthesis (severity, prioritization, "is this important") → not deterministically
   checkable.** Be honest: no anchor proves a taste call. Safeguard = the adversarial cross-check
   already in the pipeline (independent refuter + judge) **plus traceability**: every synthesis claim
   must trace to grounded tier-1/2 findings, so judgment can't invent its own facts.
 - **Implementation:** the span requirement is in `schemas/audit_result.schema.json`; quote-verify
   grounding (`verifyFindingGrounding`, `src/audit/validation/quoteGrounding.ts`) is enforced at
-  ingest by `src/audit/cli/mergeAndIngestCommand.ts` for every audit finding, and the equivalent
+  ingest by `ingestAuditHostResults` in `src/audit/cli/dispatch/hostHandoff.ts` for every audit finding, and the equivalent
   design-review grounding (`groundDesignFinding`, `src/shared/validation/designFindingGrounding.ts`)
   is enforced at ingest by `nextStepHelpers.ts` for design findings. Executable anchors reuse the
   runtime-validation path (`runtime_validation_report.json`). `src/audit/orchestrator/fileAnchors.ts`
@@ -240,8 +245,8 @@ S2 is deliberately not pursued (see its section).
 ## 5. Non-negotiables (carry the project's invariants)
 
 - Derivers and validators share one source of truth (no parallel logic).
-- Model-agnostic throughout: tiers stay relative ranks; never a model name (`deriveNodeModelTier`
-  is the template).
+- Host-neutral throughout: no model or provider identity enters the artifact contract; content-derived
+  token, complexity, and risk estimates are advisory workload metadata only.
 - A deterministic deriver must be a *pure function* of its declared upstream artifact(s) (testable
   in isolation; feeds the hash/staleness DAG cleanly).
 - "Green implies correct" still holds: scaffolding/derivation reduce surface area but every

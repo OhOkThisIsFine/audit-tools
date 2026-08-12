@@ -16,6 +16,38 @@ import { join, resolve } from 'node:path';
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const SHELL_GUARD = join(REPO_ROOT, '.claude', 'hooks', 'shell-trap-guard.mjs');
 const INPUT_GUARD = join(REPO_ROOT, '.claude', 'hooks', 'tool-input-guard.mjs');
+const CONTROL_BYTE_CHECK = join(REPO_ROOT, 'scripts', 'check-control-bytes.mjs');
+
+describe('check-control-bytes: index entries deleted from the working tree', () => {
+  it('skips a tracked file whose unstaged deletion is part of the current atomic change', () => {
+    const root = mkdtempSync(join(tmpdir(), 'control-byte-deletion-'));
+    const git = (...args: string[]) =>
+      spawnSyncHidden('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+    try {
+      expect(git('init', '-q').status).toBe(0);
+      expect(git('config', 'user.email', 'test@example.com').status).toBe(0);
+      expect(git('config', 'user.name', 'Test').status).toBe(0);
+      writeFileSync(join(root, 'retired.ts'), 'export const retired = true;\n', 'utf8');
+      expect(git('add', 'retired.ts').status).toBe(0);
+      expect(git('commit', '--no-gpg-sign', '-q', '-m', 'fixture').status).toBe(0);
+      rmSync(join(root, 'retired.ts'));
+
+      const result = spawnSyncHidden(process.execPath, [CONTROL_BYTE_CHECK], {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      expect(result.status, `${result.stdout ?? ''}${result.stderr ?? ''}`).toBe(0);
+      expect(result.stdout).toMatch(/0 present tracked source files clean/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 /**
  * Every guard bypass, scrubbed from the inherited environment before a hook runs.
@@ -540,7 +572,7 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
     };
     const { code, stderr } = runHook(INPUT_GUARD, payload);
     expect(code).toBe(2);
-    expect(stderr).toMatch(/cherry-pick sees no diff/);
+    expect(stderr).toMatch(/bound result ingestion sees no change/);
   });
 
   it('allows isolation:"worktree" for ordinary parallel work', () => {

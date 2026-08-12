@@ -12,6 +12,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import {
+  buildAuditFindingsDeliverable,
+  type Finding,
+} from "audit-tools/shared";
 
 const harness = createNextStepHarness(".test-next-step-review-gate");
 const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake, acknowledgeResume } = harness;
@@ -21,9 +25,7 @@ const CONCRETE_ID = "SEC-fix-001";
 
 /** Two-finding audit report: one architecture (strategic), one security (concrete). */
 function auditReport(): string {
-  return JSON.stringify({
-    contract_version: "audit-code-findings/v1alpha1",
-    findings: [
+  const findings: Finding[] = [
       {
         id: STRATEGIC_ID,
         title: "Module boundaries leak persistence concerns",
@@ -32,7 +34,11 @@ function auditReport(): string {
         confidence: "medium",
         lens: "architecture",
         summary: "The store layer reaches across module seams.",
-        affected_files: [{ path: "src/store.ts" }, { path: "src/db.ts" }],
+        affected_files: [
+          { path: "src/store.ts" },
+          { path: "src/db.ts" },
+          { path: "src/shared-boundary.ts" },
+        ],
         evidence: ["src/store.ts:1 evidence"],
       },
       {
@@ -43,12 +49,14 @@ function auditReport(): string {
         confidence: "high",
         lens: "security",
         summary: "User email flows into the query unescaped.",
-        affected_files: [{ path: "src/auth/login.ts" }],
+        affected_files: [
+          { path: "src/auth/login.ts" },
+          { path: "src/shared-boundary.ts" },
+        ],
         evidence: ["src/auth/login.ts:42 evidence"],
       },
-    ],
-    work_blocks: [],
-  });
+    ];
+  return JSON.stringify(buildAuditFindingsDeliverable(findings));
 }
 
 // A non-default-candidate path: bare `next-step` then resumes the persisted
@@ -188,6 +196,26 @@ describe("review-approval gate: disapproval is recorded and excluded", () => {
     expect(seed.findings_summary.map((f: { id: string }) => f.id)).toEqual([CONCRETE_ID]);
     const approved = JSON.parse(await readFile(approvedFindingsPath, "utf8"));
     expect(approved.findings.map((f: { id: string }) => f.id)).toEqual([CONCRETE_ID]);
+    // The filtered source remains a canonical report. The original shared-file
+    // component is pruned in place (not recomputed), and all derived block and
+    // summary metadata describes only the approved survivor.
+    expect(approved.coherence_trace.components).toEqual([[CONCRETE_ID]]);
+    expect(approved.coherence_trace.normalized_items.map((item: { id: string }) => item.id))
+      .toEqual([CONCRETE_ID]);
+    expect(approved.work_blocks).toHaveLength(1);
+    expect(approved.work_blocks[0]).toMatchObject({
+      finding_ids: [CONCRETE_ID],
+      owned_files: ["src/auth/login.ts", "src/shared-boundary.ts"],
+      role: "implementation",
+      max_severity: "high",
+    });
+    expect(approved.work_block_seams).toEqual([]);
+    expect(approved.summary).toMatchObject({
+      finding_count: 1,
+      work_block_count: 1,
+      severity_breakdown: { high: 1, medium: 0 },
+      lens_breakdown: { architecture: 0, security: 1 },
+    });
   });
 
   it("disapproving a whole tier records every finding in it", async () => {
@@ -291,16 +319,14 @@ describe("Path-A coverage is built over the original findings", () => {
     // satisfied and never fires — A3 slice 2b removed the handler recursion that
     // used to re-run the pre-intake gates against the freshly-built implementing
     // state and spuriously halt here.) The assertions below are about the
-    // plan_coverage written during plan build, which precedes dispatch; run with a
-    // non-dispatching host so the implement frontier renders the worktree-free
-    // sequential step rather than the rolling worktree path (REPO_DIR is not its
-    // own git repo).
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
+    // plan_coverage written during plan build, which precedes the provider-neutral
+    // host handoff.
+    const step = await decideNextStep({ root: REPO_DIR });
     // Teeth for A3 slice 2b: the fold reaches the implement dispatch in ONE call.
     // If a handler still recursed into decideNextStepLoop (re-running the pre-intake
     // gates), `confirm_resume` would re-fire against the freshly-built implementing
     // state (there is no resume-ack here) and halt with a confirm_resume step.
-    expect(step.step_kind).toBe("implement_rolling_sequential");
+    expect(step.step_kind).toBe("dispatch_implement");
 
     const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
     const cov = state.plan_coverage;
@@ -559,7 +585,7 @@ describe("review-approval gate: skip conditions", () => {
   it("an empty-findings report skips the gate entirely", async () => {
     await writeFile(
       auditPath,
-      JSON.stringify({ contract_version: "audit-code-findings/v1alpha1", findings: [], work_blocks: [] }),
+      JSON.stringify(buildAuditFindingsDeliverable([])),
       "utf8",
     );
     await writeReadyStructuredAuditIntake(auditPath);

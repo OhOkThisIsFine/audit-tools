@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { SessionConfig, RepoSessionIntent } from "audit-tools/shared";
 import {
-  resolveSessionConfig,
+  loadAnalyzerPolicy,
+  loadSessionIntent,
   applyGuidanceFile,
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
@@ -16,7 +16,6 @@ import {
   edgeReasoningContentHash,
 } from "../orchestrator/edgeReasoning.js";
 import {
-  renderDesignReviewPrompt,
   renderContractReviewPrompt,
 } from "../orchestrator/designReviewPrompt.js";
 import {
@@ -43,36 +42,28 @@ import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.j
 import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
-import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { ensureSupervisorDirs } from "../io/runArtifacts.js";
 import {
   persistConfigErrorHandoff,
 } from "./reviewRun.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
-import type { HostFanoutFamily, HostFanoutUnit } from "./dispatch/hostFanoutGate.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
   nextStepCommand,
-  persistAuditorHandshake,
   renderAnalyzerConsentPrompt,
   renderAnalyzerInstallPrompt,
   renderEdgeReasoningDispatchPrompt,
   renderPresentReportPrompt,
 } from "./prompts.js";
-import type { AuditorDescriptor } from "audit-tools/shared";
 import {
   getArtifactsDir,
   getFlag,
-  getAuditorDescriptor,
-  getHostProvider,
   getRootDir,
   getTimeoutMs,
-  resolveHostDispatchCapability,
   warnIfNotGitRepo,
 } from "./args.js";
-import { resolveCurrentWorkPartitionRuntime } from "./workPartitionRuntime.js";
 
 // Import the helpers used locally, then re-export the full helper surface so
 // existing imports remain valid (an `export … from` clause creates no local
@@ -99,33 +90,10 @@ export {
 } from "./nextStepHelpers.js";
 
 /**
- * Host-owned fan-out hand-off. The helper remains at the call sites so the
- * obligation shape stays stable, but execution policy belongs to the host; audit-tools never meters, leases, caps, or pauses these panels.
- */
-async function gateHostFanoutOrPause(params: {
-  root: string;
-  artifactsDir: string;
-  sessionConfig: SessionConfig;
-  hostDescriptor: AuditorDescriptor;
-  continueCommand: string;
-  family: HostFanoutFamily;
-  units: HostFanoutUnit[];
-  bundle: ArtifactBundle;
-}): Promise<boolean> {
-  // Host/relay own this fan-out. audit-tools must not meter, lease, cap, or pause
-  // a host-owned design/systemic panel; returning false lets the existing caller
-  // emit its normal host prompt. Keep the helper boundary for persisted runs and
-  // low-level tests, but make the conversation path a pure hand-off.
-  void params;
-  return false;
-
-}
-
-/**
  * The dispatch pieces for the adversarial contract-review pass. Mirrors
  * `ConceptualDispatch` — the two passes contribute the same kinds of pieces to
  * whichever branch emits them (packet + results in `artifactPaths`, the access
- * grants, and one fan-out unit for the quota gate).
+ * grants).
  */
 interface ContractDispatch {
   /** Host-facing line describing how to run the contract pass. */
@@ -133,7 +101,6 @@ interface ContractDispatch {
   artifactPaths: Record<string, string>;
   readPaths: string[];
   writePaths: string[];
-  fanoutUnit: HostFanoutUnit;
 }
 
 /**
@@ -239,10 +206,6 @@ async function prepareContractDispatch(opts: {
     },
     readPaths: [promptPath],
     writePaths: [resultsPath],
-    fanoutUnit: {
-      id: "contract",
-      estInputBytes: Buffer.byteLength(promptText, "utf8"),
-    },
   };
 }
 
@@ -251,7 +214,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   warnIfNotGitRepo(root);
   const artifactsDir = getArtifactsDir(argv);
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): ANY throw
-  // out of the body — a quota-wall abort, the engine's `exceeded maxTransitions`
+    // out of the body — a host-handoff abort, the engine's `exceeded maxTransitions`
   // cycle throw, a mis-shaped-submission parse crash — writes a blocked step
   // naming the cause before propagating, so a consumer can never read the
   // PREVIOUS current-step.json as a live instruction after a fatal exit. Exit
@@ -289,28 +252,13 @@ async function cmdNextStepBody(
     applyGuidanceFile(artifactsDir, guidanceFile);
   }
 
-  // G1: the whole driver handshake arrives as ONE `--auditor <json>` descriptor;
-  // the flat locals below are derived from `descriptor.self` (minimal downstream
-  // churn — renderSemanticReviewStep / gate still take the individual fields).
-  const auditorDescriptor = getAuditorDescriptor(argv);
-  const auditorSelf = auditorDescriptor?.self ?? {};
-  const hostCanDispatchSubagents = auditorSelf.can_dispatch_subagents;
-  const hostCanRestrictSubagentTools = auditorSelf.can_restrict_subagent_tools ?? false;
-  const hostCanSelectSubagentModel = auditorSelf.can_select_subagent_model ?? false;
-  const hostMaxActiveSubagents = auditorSelf.max_active_subagents ?? null;
-  const hostContextTokens = auditorSelf.context_tokens ?? null;
-  const hostOutputTokens = auditorSelf.output_tokens ?? null;
-  const hostModelRoster = auditorSelf.roster ?? null;
-  const hostModelId = auditorSelf.model_id ?? null;
-  const hostSources = auditorDescriptor?.sources;
-  // G2: the driver's provider identity rides `descriptor.self.provider`; the standalone
-  // `--host-provider` flag (retained) overrides it. Folded onto the forward descriptor
-  // below and applied by `resolveSessionConfig` — no disk persistence (`persistHostProvider`
-  // retired: the provider is per-auditor capability, never written back to the repo config).
-  const hostProvider = getHostProvider(argv) ?? auditorSelf.provider ?? null;
-  let intent: RepoSessionIntent;
+  let analyzerPolicy: Awaited<ReturnType<typeof loadAnalyzerPolicy>>;
   try {
-    intent = await loadSessionConfig(artifactsDir);
+    // The canonical session artifact contains intent only. Loading it here is
+    // deliberately validation-only: review_mode and observability describe the
+    // host session, but cannot grant audit-tools execution or routing authority.
+    await loadSessionIntent(root);
+    analyzerPolicy = await loadAnalyzerPolicy(root);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     await persistConfigErrorHandoff({
@@ -319,7 +267,7 @@ async function cmdNextStepBody(
       progressSummary: reason,
     });
     // Shared blocked-step assembly: the step JSON says WHY on its own via
-    // progress.summary — a headless consumer (release smoke, CI) sees only this
+    // progress.summary — an automated consumer (release smoke, CI) sees only this
     // contract, not the prompt file.
     const step = await writeBlockedStepContract({
       tool: "audit-code",
@@ -336,90 +284,25 @@ async function cmdNextStepBody(
     return;
   }
 
-  const hostCanDispatch = resolveHostDispatchCapability({
-    explicit: hostCanDispatchSubagents,
-    sessionConfig: intent,
-  });
-
-  // The current driver's RESOLVED descriptor, built once from this invocation's
-  // `--auditor` handshake (+ the retained `--host-provider` override). It RIDES every
-  // continue-command this step emits so a bare re-invocation preserves the driver's
-  // capability + provider + reachable sources instead of falling back to the stored
-  // config — the founding-bug robustness fix (a *different* driver entering through its
-  // own loader overrides with its own `--auditor`).
-  const hostDescriptor: AuditorDescriptor = {
-    self: {
-      // Provider + host/IDE launch blocks: the driver's identity + own launch transport.
-      ...(hostProvider != null ? { provider: hostProvider } : {}),
-      ...(auditorSelf.claude_code ? { claude_code: auditorSelf.claude_code } : {}),
-      ...(auditorSelf.vscode_task ? { vscode_task: auditorSelf.vscode_task } : {}),
-      ...(auditorSelf.antigravity ? { antigravity: auditorSelf.antigravity } : {}),
-      // The RESOLVED capability rides forward (not the raw handshake bit), so a
-      // bare resume preserves it — the founding-bug robustness fix.
-      can_dispatch_subagents: hostCanDispatch,
-      // restrict/select default false; carry only when true so the descriptor stays
-      // minimal and round-trips to the same resolved value (absence ⇒ false).
-      ...(hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
-      ...(hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
-      ...(hostMaxActiveSubagents != null ? { max_active_subagents: hostMaxActiveSubagents } : {}),
-      ...(hostContextTokens != null ? { context_tokens: hostContextTokens } : {}),
-      ...(hostOutputTokens != null ? { output_tokens: hostOutputTokens } : {}),
-      ...(hostModelRoster != null ? { roster: hostModelRoster } : {}),
-      ...(hostModelId != null ? { model_id: hostModelId } : {}),
-    },
-    ...(hostSources !== undefined ? { sources: hostSources } : {}),
-  };
-
-  // au-1 (2026-08-05 friction): persist the resolved handshake once (write-if-
-  // changed) so every continue-command below references it as `--auditor @<file>`
-  // instead of re-echoing the full JSON into every step prompt.
-  persistAuditorHandshake(artifactsDir, hostDescriptor);
-
-  // G2: the EFFECTIVE dispatch config every dispatch/provider consumer reads — the
-  // per-auditor descriptor (`self.provider` + launch blocks + `sources[]`) resolved over
-  // the repo INTENT (`resolveSessionConfig`, spec/unified-dispatch-worker-model.md). The
-  // repo intent carries NO dispatch fields, so the backend/launch set comes wholly from
-  // the descriptor — never inherited across auditors. Intent fields (synthesis/analyzers/
-  // graph/quota/…) are preserved identically; only the DISPATCH consumers switch to the
-  // effective config. Persistence is untouched — the store reads/writes intent only, so an
-  // in-memory resolve can never write dispatch inventory back into the repo config.
-  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
-  const workPartition = resolveCurrentWorkPartitionRuntime(
-    effectiveConfig,
-    hostDescriptor.self,
-  ) ?? undefined;
-
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
-    timeoutMs: getTimeoutMs(argv, intent),
-    narrativeEnabled: intent.synthesis?.narrative !== false,
-    analyzers: intent.analyzers,
-    graphLlmEdgeReasoning: intent.graph?.llm_edge_reasoning,
+    timeoutMs: getTimeoutMs(argv),
+    narrativeEnabled: true,
+    analyzers: analyzerPolicy.analyzers,
     // Slice D: enable external-analyzer acquisition on the real CLI path (default-on;
     // session config can opt out). The executor builds its own global-`fetch`
     // adapter when no fetcher is injected. The unit/integration suite never reaches
     // here, so acquisition stays a hermetic no-op in tests.
     externalAcquisition: {
-      enabled: intent.external_acquisition?.enabled !== false,
-      consentToken: intent.external_acquisition?.consent_token,
-      analyzers: intent.analyzers,
+      enabled: true,
+      analyzers: analyzerPolicy.analyzers,
       // Item B: recorded consent decisions ride into admission (granted admits
       // without a token) and into the consent fold's pending computation.
-      analyzerConsent: intent.analyzer_consent,
+      analyzerConsent: analyzerPolicy.analyzer_consent,
     },
     since: getFlag(argv, "--since"),
-    // G2: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
-    // / planHybridDispatch / resolveHostDispatchProviderName) key off this, so they
-    // see the per-auditor descriptor's resolved backends, not the repo config. Intent
-    // reads folded in here are identical either way (resolve preserves every intent field).
-    sessionConfig: effectiveConfig,
-    workPartition,
-    // The resolved attended/headless discriminator (H2+H4 collapse): attended ⇒ the
-    // host reviews the coverage-driven complement of the one fan-out; headless ⇒ no
-    // attended host in the eligible set, the engine drives the whole frontier.
-    hostCanDispatch,
   });
 
   if (result.kind === "complete") {
@@ -435,7 +318,7 @@ async function cmdNextStepBody(
       // executable continuation command — never leave the host to reconstruct
       // the invocation from prose.
       allowedCommands: frictionPending
-        ? [nextStepCommand(root, artifactsDir, hostDescriptor)]
+        ? [nextStepCommand(root, artifactsDir)]
         : [],
       stopCondition: frictionPending
         ? "Complete friction triage (write open_observations and any dispositions), then call next-step again."
@@ -468,77 +351,14 @@ async function cmdNextStepBody(
     return;
   }
 
-  if (result.kind === "design_review") {
-    // Legacy combined fallback (only fires when selected_executor === "design_review" which
-    // no longer exists in EXECUTOR_REGISTRY; kept for safety in case an old artifact references it).
-    const designReviewResultsPath = join(
-      artifactsDir,
-      "incoming",
-      "design-review-findings.json",
-    );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    const prompt = renderDesignReviewPrompt(result.bundle, {
-      max_units: intent.design_review?.max_units,
-    });
-    const legacyRejectionNotice = renderDesignReviewRejectionNotice(result.bundle, ["legacy"]);
-    const fullPrompt = [
-      prompt,
-      "## Results path",
-      "",
-      `Write the JSON object ({ "findings": [ ... ] }) to:`,
-      "",
-      `  ${designReviewResultsPath}`,
-      "",
-      `Then run: ${continueCommand}`,
-      "",
-      ...(legacyRejectionNotice ? ["", legacyRejectionNotice] : []),
-    ].join("\n");
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "design_review",
-        units: [
-          { id: "design_review", estInputBytes: Buffer.byteLength(fullPrompt, "utf8") },
-        ],
-      })
-    ) {
-      return;
-    }
-    const step = await writeCurrentStep({
-      artifactsDir,
-      stepKind: "design_review",
-      status: "ready",
-      runId: null,
-      allowedCommands: [continueCommand],
-      stopCondition:
-        "Write design review findings to the results path, then run next-step.",
-      repoRoot: root,
-      artifactPaths: {
-        design_review_results: designReviewResultsPath,
-      },
-      prompt: fullPrompt,
-    });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
-
   if (result.kind === "design_review_parallel") {
     // Both passes are unsatisfied — dispatch the contract pass and the
     // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
     // or deep (N independent perspective subagents + an independent judge),
     // resolved JIT from the user-confirmed checkpoint / session config.
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
 
-    const conceptualSettings = resolveConceptualReviewSettings(
-      result.bundle,
-      intent,
-    );
+    const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const contract = await prepareContractDispatch({
       artifactsDir,
       bundle: result.bundle,
@@ -563,23 +383,6 @@ async function cmdNextStepBody(
       `  ${continueCommand}`,
       "",
     ].join("\n");
-
-    // The parallel step dispatches BOTH panels (contract + conceptual) in one host
-    // turn, so the gate leases them together and pauses if EITHER can't be granted.
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "design_review",
-        units: [contract.fanoutUnit, ...conceptual.fanoutUnits],
-      })
-    ) {
-      return;
-    }
 
     const step = await writeCurrentStep({
       artifactsDir,
@@ -610,11 +413,11 @@ async function cmdNextStepBody(
     // done, i.e. late in a run the host itself drove, which is precisely when
     // rendering the adversarial review into the host's own prompt would have it
     // grade its own work (see prepareContractDispatch).
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const contract = await prepareContractDispatch({
       artifactsDir,
       bundle: result.bundle,
-      maxUnits: intent.design_review?.max_units,
+      maxUnits: resolveConceptualReviewSettings(result.bundle).max_units,
     });
 
     const dispatchPrompt = [
@@ -628,20 +431,6 @@ async function cmdNextStepBody(
       "",
     ].join("\n");
 
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "design_review",
-        units: [contract.fanoutUnit],
-      })
-    ) {
-      return;
-    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "design_review_contract",
@@ -667,11 +456,8 @@ async function cmdNextStepBody(
     // independent perspective subagents + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
-    const conceptualSettings = resolveConceptualReviewSettings(
-      result.bundle,
-      intent,
-    );
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const conceptual = await prepareConceptualPass(
       artifactsDir,
       result.bundle,
@@ -688,21 +474,6 @@ async function cmdNextStepBody(
       `  ${continueCommand}`,
       "",
     ].join("\n");
-
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "design_review",
-        units: conceptual.fanoutUnits,
-      })
-    ) {
-      return;
-    }
 
     const step = await writeCurrentStep({
       artifactsDir,
@@ -734,7 +505,7 @@ async function cmdNextStepBody(
     // the artifacts, not a merge instruction); the tool merges the per-kind
     // submissions and gates + routes them at ingest. Only reached at a deep+
     // ceiling (shallow omits deterministically without a host turn).
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
     const kinds = charterExtractionKindsForCeiling(ceiling);
     // Channel purity is a property of the INPUT (design resolution 4): each
@@ -777,26 +548,6 @@ async function cmdNextStepBody(
       artifactsDir,
       lanes: laneSpecs,
     });
-    const pendingIds = new Set(fanout.pendingLanes.map((lane) => lane.id));
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "charter_extraction",
-        units: laneSpecs
-          .filter((spec) => pendingIds.has(spec.id))
-          .map((spec) => ({
-            id: spec.id,
-            estInputBytes: Buffer.byteLength(spec.promptText, "utf8"),
-          })),
-      })
-    ) {
-      return;
-    }
     const completedLanes = fanout.lanes.filter((lane) => lane.resultExists);
     const step = await writeCurrentStep({
       artifactsDir,
@@ -819,7 +570,6 @@ async function cmdNextStepBody(
             promptPath: lane.promptPath,
             resultPath: lane.resultPath,
           })),
-          concurrencyHint: hostMaxActiveSubagents,
         }),
         "",
         ...(completedLanes.length > 0
@@ -855,7 +605,7 @@ async function cmdNextStepBody(
     // gates them at ingest. Only reached at a deep+ ceiling whose extraction pass
     // produced ≥1 subsystem (charter_register.deltas_pending).
     // Always-materialized (design resolution 2): the miner prompt is a lane FILE.
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const submissionPath = join(artifactsDir, "incoming", "charter-delta.json");
     const lanePrompt = renderCharterDeltaPrompt(result.bundle, { submissionPath });
     const fanout = await materializeFanoutLanes({
@@ -870,25 +620,6 @@ async function cmdNextStepBody(
         },
       ],
     });
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "charter_delta",
-        units: [
-          {
-            id: "charter_delta",
-            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
-          },
-        ],
-      })
-    ) {
-      return;
-    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "charter_delta",
@@ -942,7 +673,7 @@ async function cmdNextStepBody(
     // questions leave-open). Only reached at a deep+ ceiling with attention > 0 and
     // ≥1 open interactive question.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const answersPath = join(artifactsDir, "incoming", "charter-clarification.json");
     const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
     const step = await writeCurrentStep({
@@ -977,7 +708,7 @@ async function cmdNextStepBody(
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
     // the round's improvement findings (true-lens) back, and the executor folds them
     // + decides convergence. An empty submission converges the loop.
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const submissionPath = join(artifactsDir, "incoming", "systemic-challenge.json");
     const metrics =
       result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
@@ -1001,25 +732,6 @@ async function cmdNextStepBody(
         },
       ],
     });
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "systemic_challenge",
-        units: [
-          {
-            id: "adversary",
-            estInputBytes: Buffer.byteLength(adversaryPrompt, "utf8"),
-          },
-        ],
-      })
-    ) {
-      return;
-    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "systemic_challenge",
@@ -1069,7 +781,7 @@ async function cmdNextStepBody(
 
   if (result.kind === "confirm_intent") {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const preDigest = computeScopePreDigest(
       result.bundle,
       root,
@@ -1106,7 +818,7 @@ async function cmdNextStepBody(
       "analyzer-consent-decisions.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "analyzer_consent",
@@ -1136,7 +848,7 @@ async function cmdNextStepBody(
       "analyzer-decisions.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "analyzer_install",
@@ -1166,7 +878,7 @@ async function cmdNextStepBody(
       "incoming",
       "edge-reasoning.json",
     );
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = buildEdgeReasoningPrompt(result.candidates);
     const contentHash = edgeReasoningContentHash(result.candidates);
     // A prior malformed submission was quarantined (not silently destroyed) —
@@ -1228,7 +940,7 @@ async function cmdNextStepBody(
       "intent-equivalence-verdict.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const status = deriveIntentEquivalenceStatus(result.bundle);
     const pending =
       status.kind === "prose_judgment_pending" ? status : undefined;
@@ -1310,7 +1022,7 @@ async function cmdNextStepBody(
       "incoming",
       "critical-flow-fallback.json",
     );
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = result.bundle.critical_flows
       ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows)
       : "# Critical-flow fallback\n\nNo critical_flows manifest is available; write an empty flows array.";
@@ -1337,25 +1049,6 @@ async function cmdNextStepBody(
         },
       ],
     });
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "critical_flow_fallback",
-        units: [
-          {
-            id: "critical_flow_fallback",
-            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
-          },
-        ],
-      })
-    ) {
-      return;
-    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "critical_flow_fallback",
@@ -1402,7 +1095,7 @@ async function cmdNextStepBody(
       "incoming",
       "synthesis-narrative.json",
     );
-    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = result.bundle.audit_findings
       ? renderSynthesisNarrativePrompt(result.bundle.audit_findings)
       : "# Synthesis narrative\n\nNo findings report is available; write an empty themes array.";
@@ -1430,25 +1123,6 @@ async function cmdNextStepBody(
         },
       ],
     });
-    if (
-      await gateHostFanoutOrPause({
-        root,
-        artifactsDir,
-        sessionConfig: effectiveConfig,
-        hostDescriptor,
-        continueCommand,
-        bundle: result.bundle,
-        family: "synthesis_narrative",
-        units: [
-          {
-            id: "synthesis_narrative",
-            estInputBytes: Buffer.byteLength(lanePrompt, "utf8"),
-          },
-        ],
-      })
-    ) {
-      return;
-    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "synthesis_narrative",
@@ -1493,19 +1167,8 @@ async function cmdNextStepBody(
     root,
     artifactsDir,
     activeReviewRun: result.activeReviewRun,
-    hostMaxActiveSubagents,
-    hostContextTokens,
-    hostOutputTokens,
-    hostModelRoster,
-    hostModelId,
     selectedExecutor: result.selectedExecutor,
     inProcessMadeProgress: result.inProcessMadeProgress,
-    // G2: the RESOLVED descriptor. renderSemanticReviewStep loads the repo INTENT from
-    // disk (fail-closed re-validated) and resolves THIS descriptor over it for its
-    // host-review dispatch — and rides it on the continue-command it emits so a bare
-    // resume preserves the driver's provider + sources.
-    descriptor: hostDescriptor,
   });
   console.log(JSON.stringify(step, null, 2));
 }
-

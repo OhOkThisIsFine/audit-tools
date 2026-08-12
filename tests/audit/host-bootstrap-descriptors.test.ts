@@ -163,42 +163,31 @@ test("AgentReflection severity enum includes 'critical' (INV-audit-infra-10)", a
   }
 });
 
-// ── INV-repo-assets-01/03/04: loader asset parity — handshake flags in all three assets ─
+// ── INV-repo-assets-01/03/04: provider-neutral loader parity ────────────────
 
-test("INV-repo-assets-01: SKILL.md source carries next-step invocation with capability handshake flags", () => {
+test("INV-repo-assets-01: SKILL.md carries the next-step host-work contract", () => {
   const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
   const skill = readFileSync(skillPath, "utf8");
-  const REQUIRED_FLAGS = [
-    "--auditor",
-    "roster",
-    "context_tokens",
-    "output_tokens",
-  ];
-  for (const flag of REQUIRED_FLAGS) {
-    expect(skill.includes(flag), `SKILL.md must carry capability handshake flag '${flag}' (INV-repo-assets-01)`).toBeTruthy();
-  }
   expect(skill.includes("audit-code next-step"), "SKILL.md must include an 'audit-code next-step' invocation (INV-repo-assets-01)").toBeTruthy();
+  expect(skill.includes("provider-neutral workload")).toBeTruthy();
 });
 
-test("INV-repo-assets-03: SKILL.md contains no hardcoded model names or tier-map tables", () => {
+test("INV-repo-assets-03: SKILL.md contains no backend configuration surface", () => {
   const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
   const skill = readFileSync(skillPath, "utf8");
-  // Relative rank labels ("small"/"standard"/"deep") are fine; concrete model names are not.
   const FORBIDDEN_PATTERNS = [
-    /claude-[a-z0-9]/i,
-    /gpt-[0-9]/i,
-    /gemini-[a-z]/i,
-    /sonnet|opus|haiku/i,
-    /llama|mistral|codestral/i,
-    /KNOWN_MODEL_LIMITS/,
-    /CAPABILITY_TIER_MAP/,
+    /--auditor/i,
+    /context_tokens/i,
+    /output_tokens/i,
+    /max_active_subagents/i,
+    /can_dispatch_subagents/i,
   ];
   for (const pattern of FORBIDDEN_PATTERNS) {
-    expect(!pattern.test(skill), `SKILL.md must not contain hardcoded model identity '${pattern}' (INV-repo-assets-03)`).toBeTruthy();
+    expect(!pattern.test(skill), `SKILL.md must not contain retired backend configuration '${pattern}'`).toBeTruthy();
   }
 });
 
-test("INV-repo-assets-04: all three loader assets carry the same capability handshake flag set", () => {
+test("INV-repo-assets-04: all loader assets carry next-step and omit backend flags", () => {
   // Canonical source assets — these are what get installed into host environments.
   // Single-package repo: all committed host assets live at the repo root.
   const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
@@ -209,22 +198,9 @@ test("INV-repo-assets-04: all three loader assets carry the same capability hand
   const prompt = readFileSync(promptPath, "utf8");
   const toml = readFileSync(tomlPath, "utf8");
 
-  const HANDSHAKE_FLAGS = [
-    "--auditor",
-    "roster",
-    "context_tokens",
-    "output_tokens",
-  ];
-
-  for (const flag of HANDSHAKE_FLAGS) {
-    expect(skill.includes(flag), `SKILL.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
-    expect(prompt.includes(flag), `audit-code.prompt.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
-    expect(toml.includes(flag), `audit-code.toml must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
-  }
-
-  // All three must reference the next-step command.
   for (const [name, content] of [["SKILL.md", skill], ["prompt.md", prompt], ["toml", toml]]) {
     expect(content.includes("next-step"), `${name} must include 'next-step' invocation (INV-repo-assets-04 parity)`).toBeTruthy();
+    expect(content).not.toMatch(/--auditor|context_tokens|output_tokens/iu);
   }
 });
 

@@ -1,198 +1,84 @@
-import { test, expect } from "vitest";
-import type { AuditTask } from "../../src/audit/types.js";
+import { expect, test } from "vitest";
 
-const { partitionTaskGraph } = await import("../../src/audit/orchestrator/partitionTaskGraph.js");
-const { buildTaskAffinityGraph } = await import("../../src/audit/orchestrator/taskAffinityGraph.js");
+import {
+  buildTaskCoherencePartition,
+} from "../../src/audit/orchestrator/partitionTaskGraph.js";
+import type { TaskAffinityGraph } from "../../src/audit/orchestrator/taskAffinityGraph.js";
 
-const task = (over: Partial<AuditTask>): AuditTask => ({
-  task_id: "t",
-  unit_id: "u",
-  pass_id: "p",
-  lens: "correctness",
-  file_paths: ["a.ts"],
-  rationale: "r",
-  token_estimate: 100,
-  risk_estimate: 0.4,
-  ...over,
-});
+const GRAPH: TaskAffinityGraph = {
+  schema_version: "task-affinity-graph/v1",
+  nodes: [
+    {
+      task_id: "c",
+      unit_id: "u2",
+      lens: "security",
+      file_paths: ["src/c.ts"],
+      token_estimate: 30,
+      risk_estimate: 0.3,
+    },
+    {
+      task_id: "a",
+      unit_id: "u1",
+      lens: "security",
+      file_paths: ["src/a.ts"],
+      token_estimate: 10,
+      risk_estimate: 0.1,
+    },
+    {
+      task_id: "b",
+      unit_id: "u1",
+      lens: "reliability",
+      file_paths: ["src/b.ts"],
+      token_estimate: 20,
+      risk_estimate: 0.2,
+    },
+  ],
+  edges: [
+    {
+      from: "a",
+      to: "b",
+      kind: "same_unit",
+      weight: 0.001,
+      reason: "same_unit,same_dir",
+    },
+  ],
+};
 
-// Three tasks all sharing one unit + file (strongly coupled).
-const COUPLED = buildTaskAffinityGraph([
-  task({ task_id: "t1", unit_id: "u1", lens: "security", file_paths: ["a.ts"], token_estimate: 100, risk_estimate: 0.3 }),
-  task({ task_id: "t2", unit_id: "u1", lens: "correctness", file_paths: ["a.ts"], token_estimate: 100, risk_estimate: 0.3 }),
-  task({ task_id: "t3", unit_id: "u1", lens: "reliability", file_paths: ["a.ts"], token_estimate: 100, risk_estimate: 0.3 }),
-]);
-
-test("a generous token+risk budget merges coupled tasks into one packet", () => {
-  const packets = partitionTaskGraph(COUPLED, {
-    contextTokenBudget: 100000,
-    riskMassBudget: 100,
-  });
-  expect(packets.length).toBe(1);
-  expect(packets[0].task_ids).toEqual(["t1", "t2", "t3"]);
-  expect(packets[0].token_estimate).toBe(300);
-  expect(Math.abs(packets[0].risk_mass - 0.9) < 1e-9).toBeTruthy();
-  expect(Math.abs(packets[0].routing_risk - 0.3) < 1e-9).toBeTruthy();
-});
-
-test("a token ceiling caps packet size (ceiling, not quota)", () => {
-  // budget fits 2 tasks (200) but not 3 (300).
-  const packets = partitionTaskGraph(COUPLED, {
-    contextTokenBudget: 250,
-    riskMassBudget: 100,
-  });
-  // one packet of 2, one of 1 (no atomic task is split)
-  expect(packets.length).toBe(2);
-  expect(packets.every((p) => p.token_estimate <= 250)).toBeTruthy();
-});
-
-test("a risk-mass ceiling caps aggregate risk per packet", () => {
-  // risk budget allows 2 tasks (0.6) but not 3 (0.9), even though tokens fit.
-  const packets = partitionTaskGraph(COUPLED, {
-    contextTokenBudget: 100000,
-    riskMassBudget: 0.65,
-  });
-  expect(packets.length).toBe(2);
-  expect(packets.every((p) => p.risk_mass <= 0.65 + 1e-9)).toBeTruthy();
-});
-
-test("an atomic task exceeding the token ceiling becomes its own over_budget packet", () => {
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "big", token_estimate: 999999, risk_estimate: 0.9 }),
+test("task partition projects canonical coherence components", () => {
+  const result = buildTaskCoherencePartition(GRAPH);
+  expect(result.coherence_trace.components).toEqual([["a", "b"], ["c"]]);
+  expect(result.packets.map((packet) => packet.task_ids)).toEqual([
+    ["a", "b"],
+    ["c"],
   ]);
-  const packets = partitionTaskGraph(graph, {
-    contextTokenBudget: 1000,
-    riskMassBudget: 100,
+  expect(result.packets[0]).toMatchObject({
+    packet_id: "packet-1",
+    token_estimate: 30,
+    risk_mass: 0.3,
+    risk_score: 0.2,
   });
-  expect(packets.length).toBe(1);
-  expect(packets[0].over_budget).toBe(true);
 });
 
-test("routing_risk is the max member risk; packets sort highest-risk first", () => {
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "lowrisk", unit_id: "ua", file_paths: ["x/a.ts"], risk_estimate: 0.1 }),
-    task({ task_id: "hirisk", unit_id: "ub", file_paths: ["y/b.ts"], risk_estimate: 0.9 }),
-  ]);
-  // disjoint → two packets
-  const packets = partitionTaskGraph(graph, {
-    contextTokenBudget: 100000,
-    riskMassBudget: 100,
-  });
-  expect(packets.length).toBe(2);
-  expect(packets[0].task_ids[0]).toBe("hirisk"); // highest routing risk first
-  expect(packets[0].routing_risk).toBe(0.9);
+test("numeric weights and extra runtime arguments cannot change membership", () => {
+  const changedWeight: TaskAffinityGraph = {
+    ...GRAPH,
+    edges: GRAPH.edges.map((edge) => ({ ...edge, weight: 1 })),
+  };
+  expect(buildTaskCoherencePartition(changedWeight, { arbitrary: "runtime metadata" })).toEqual(
+    buildTaskCoherencePartition(GRAPH),
+  );
 });
 
-test("partition is deterministic for the same graph + budgets", () => {
-  const opts = { contextTokenBudget: 250, riskMassBudget: 100 };
-  const a = partitionTaskGraph(COUPLED, opts);
-  const b = partitionTaskGraph(COUPLED, opts);
-  expect(a).toEqual(b);
-});
-
-// ── TST-63d9e3e4: over_budget single-node overhead boundary ──────────────────
-
-test("TST-63d9e3e4: single-node at exactly (contextTokenBudget + overhead - 1) is NOT over_budget", () => {
-  // tokenEstimate + overhead = budget - 1 + 1 = budget → NOT over budget
-  // Condition: list.length === 1 && tokenEstimate + overhead > contextTokenBudget
-  // At tokenEstimate + overhead == budget: budget > budget is false → not over_budget
-  const overhead = 500;
-  const budget = 1000;
-  const tokenEstimate = budget - overhead - 1; // 499: 499 + 500 = 999 < 1000 → not over
-
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "boundary-below", token_estimate: tokenEstimate, risk_estimate: 0.1 }),
-  ]);
-  const packets = partitionTaskGraph(graph, {
-    contextTokenBudget: budget,
-    riskMassBudget: 100,
-    promptOverheadTokens: overhead,
-  });
-  expect(packets.length).toBe(1);
-  expect(packets[0].over_budget, "one token below ceiling should NOT be over_budget").toBe(undefined);
-});
-
-test("TST-63d9e3e4: single-node at exactly (contextTokenBudget + overhead) is over_budget", () => {
-  // tokenEstimate + overhead > contextTokenBudget when tokenEstimate = budget - overhead + 1
-  const overhead = 500;
-  const budget = 1000;
-  const tokenEstimate = budget - overhead + 1; // 501: 501 + 500 = 1001 > 1000 → over_budget
-
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "boundary-above", token_estimate: tokenEstimate, risk_estimate: 0.1 }),
-  ]);
-  const packets = partitionTaskGraph(graph, {
-    contextTokenBudget: budget,
-    riskMassBudget: 100,
-    promptOverheadTokens: overhead,
-  });
-  expect(packets.length).toBe(1);
-  expect(packets[0].over_budget, "one token above ceiling should be over_budget").toBe(true);
-});
-
-test("TST-63d9e3e4: overhead defaults to 0 when promptOverheadTokens is undefined", () => {
-  // Without overhead: condition is tokenEstimate > contextTokenBudget
-  const budget = 1000;
-
-  const atBudget = buildTaskAffinityGraph([
-    task({ task_id: "at-budget", token_estimate: budget, risk_estimate: 0.1 }),
-  ]);
-  const notOver = partitionTaskGraph(atBudget, { contextTokenBudget: budget, riskMassBudget: 100 });
-  expect(notOver[0].over_budget, "at exactly budget (no overhead) is NOT over_budget").toBe(undefined);
-
-  const overBudget = buildTaskAffinityGraph([
-    task({ task_id: "over-budget", token_estimate: budget + 1, risk_estimate: 0.1 }),
-  ]);
-  const isOver = partitionTaskGraph(overBudget, { contextTokenBudget: budget, riskMassBudget: 100 });
-  expect(isOver[0].over_budget, "one token above budget (no overhead) IS over_budget").toBe(true);
-});
-
-test("TST-63d9e3e4: two-node packet exceeding budget is NOT flagged as over_budget (only single-node check)", () => {
-  // The condition `list.length === 1 && ...` means multi-node packets are never flagged,
-  // even if their combined tokens exceed the ceiling. This tests the documented boundary.
-  // Two nodes: 600 + 600 = 1200 > 1000 budget — but they can't merge either (would exceed).
-  // They end up as separate packets of 600 each, both under budget individually.
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "two-a", unit_id: "ua", file_paths: ["src/a.ts"], token_estimate: 600, risk_estimate: 0.1 }),
-    task({ task_id: "two-b", unit_id: "ub", file_paths: ["src/b.ts"], token_estimate: 600, risk_estimate: 0.1 }),
-  ]);
-  // No edges → two separate packets; neither is over_budget
-  const packets = partitionTaskGraph(graph, { contextTokenBudget: 1000, riskMassBudget: 100 });
-  expect(packets.length).toBe(2);
-  for (const p of packets) {
-    expect(p.over_budget, "disjoint two-node packets with 600 tokens each are not over_budget").toBe(undefined);
-  }
-});
-
-// Meta-review 2026-07-30b(a): with only the context ceiling as merge budget, a
-// task set that fits in a large model context collapses into ONE packet (97
-// tasks / 655k tokens observed live) and head-of-line-blocks the frontier. The
-// soft targetPacketTokens is the planner's split budget, applied to merging.
-test("targetPacketTokens caps merging below a huge context ceiling", () => {
-  const one = partitionTaskGraph(COUPLED, {
-    contextTokenBudget: 1_000_000,
-    riskMassBudget: 100,
-  });
-  expect(one.length, "without a target, context is the only merge ceiling").toBe(1);
-
-  const split = partitionTaskGraph(COUPLED, {
-    contextTokenBudget: 1_000_000,
-    riskMassBudget: 100,
-    targetPacketTokens: 250,
-  });
-  expect(split.length).toBe(2);
-  expect(split.every((p) => p.token_estimate <= 250)).toBeTruthy();
-});
-
-test("a lone task over the soft target but under context is NOT over_budget", () => {
-  const graph = buildTaskAffinityGraph([
-    task({ task_id: "big", token_estimate: 500 }),
-  ]);
-  const packets = partitionTaskGraph(graph, {
-    contextTokenBudget: 1_000_000,
-    riskMassBudget: 100,
-    targetPacketTokens: 250,
-  });
-  expect(packets.length).toBe(1);
-  expect(packets[0].over_budget, "over_budget stays measured against CONTEXT").toBeUndefined();
+test("permuted graph arrays yield byte-stable projected packets", () => {
+  const reversed: TaskAffinityGraph = {
+    ...GRAPH,
+    nodes: [...GRAPH.nodes].reverse().map((node) => ({
+      ...node,
+      file_paths: [...node.file_paths].reverse(),
+    })),
+    edges: [...GRAPH.edges].reverse(),
+  };
+  expect(JSON.stringify(buildTaskCoherencePartition(reversed))).toBe(
+    JSON.stringify(buildTaskCoherencePartition(GRAPH)),
+  );
 });

@@ -16,13 +16,13 @@ export type CleanupResult = {
 
 // Remove a stale artifacts directory before starting a fresh run: if the prior
 // run completed or never started, its artifacts are safe to clear. A missing
-// state file means there is nothing to clean. Shared by advance-audit (clears
-// before a fresh debug advance) and the cleanup command.
+// state file means there is nothing to clean. Shared by programmatic callers
+// and the cleanup command.
 //
 // With options:
 //   force=true  — delete even when status is active/blocked or state file is missing.
 //   dryRun=true — skip the actual rm call and return action='dry-run'.
-// Both default to false; the no-args call from advance-audit is unchanged.
+// Both default to false.
 export async function cleanupStaleArtifactsDir(
   artifactsDir: string,
   options: CleanupOptions = {},
@@ -52,7 +52,7 @@ export async function cleanupStaleArtifactsDir(
       return { action: "skipped", status, reason };
     }
     // unknown (missing state file) — no-op by default; caller decides how to
-    // surface this (advance-audit ignores it; cleanup command sets exitCode=1)
+    // surface this (the cleanup command sets exitCode=1)
     return { action: "skipped", status: "unknown" };
   }
 

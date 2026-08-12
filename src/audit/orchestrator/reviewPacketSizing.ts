@@ -9,7 +9,6 @@ import {
 // extracted from reviewPackets.ts. Estimates derive from manifest byte counts
 // (recorded at intake) with a line-count fallback for manually built tasks.
 
-export const DEFAULT_MAX_TASKS_PER_PACKET = 0;
 const DEFAULT_TARGET_PACKET_LINES = 8000;
 // ESTIMATED_TOKENS_PER_LINE and ESTIMATED_PROMPT_OVERHEAD_TOKENS are single-sourced
 // from audit-tools/shared; ESTIMATED_TOKENS_PER_LINE is re-exported so reviewPackets.ts

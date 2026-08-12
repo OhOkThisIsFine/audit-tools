@@ -29,11 +29,7 @@ Two executors carry `obligation_ids: []` and are never selected by the priority
 scan — they run only via an explicit `preferredExecutor` override:
 `runtime_validation_update_executor` (imported runtime-validation evidence) and
 `external_analyzer_import_executor` (imported normalized external-analyzer
-results). One executor, `agent`, is a legacy `host_delegation` placeholder with
-`obligation_ids: []` — retained only so in-flight runs that still reference
-`"agent"` in a persisted artifact resolve; it no longer owns
-`audit_tasks_completed` (superseded by `rolling_dispatch_executor`). One
-executor, `friction_capture_executor`, is retained for schema compatibility but
+results). `friction_capture_executor` is retained for schema compatibility but
 is currently **unreachable** — its obligation (`friction_capture_current`) is
 not in `deriveAuditState`'s priority chain, so the engine never selects it; the
 actual friction triage fires from the `present_report` terminal step
@@ -75,7 +71,7 @@ actual friction triage fires from the `present_report` terminal step
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
 | `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
-| `rolling_dispatch_executor` | host_delegation | `audit_tasks_completed` | consumes `audit_tasks.json`; drives host-subagent or in-process dispatch until results are produced |
+| `semantic_review_executor` | host_delegation | `audit_tasks_completed` | emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
 | `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests into `audit_results.jsonl` and refreshes the downstream planning/coverage artifacts |
 | `runtime_validation_executor` | deterministic | `runtime_validation_current` | produces the initial runtime-validation report (+ adds tasks/metrics when selective deepening applies) |
@@ -88,11 +84,10 @@ actual friction triage fires from the `present_report` terminal step
 | `synthesis_executor` | deterministic | `synthesis_current` | co-produces the machine contract + its human render |
 | `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | optional LLM narrative pass (+ re-renders the contract/report with the enriched narrative) |
 
-### Legacy / unreachable
+### Unreachable
 
 | Executor | Kind | Obligation | Note |
 |---|---|---|---|
-| `agent` | host_delegation | *(none)* | Legacy placeholder for `audit_tasks_completed`, superseded by `rolling_dispatch_executor`. Retained only for persisted-artifact compatibility. |
 | `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — never produced by `deriveAuditState`'s obligation scan (its id sits in `PRIORITY` only to satisfy the executor-registry-coverage invariant). Friction triage actually fires from the `present_report` terminal step. |
 
 ## Bounded-step expectations

@@ -1,27 +1,11 @@
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
-  renderHostScratchNote,
-  hostScratchDir,
-  renderQuotaCoverageNudge,
-  renderTokenBudgetView,
   buildFrictionTriageBlock,
   type FrictionTriageDecision,
-  type AuditorDescriptor,
 } from "audit-tools/shared";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
 
-/**
- * Token prefix the host should use to re-invoke the backend in generated
- * continuation commands. Defaults to the `audit-code` bin (correct for an
- * installed global). The wrapper sets `AUDIT_CODE_INVOCATION` to e.g.
- * `["node","<path>/audit-code.mjs"]` when it runs from a source checkout, so a
- * dogfooded monorepo run keeps generated commands pinned to local code instead
- * of silently falling back to a globally-installed `audit-code`.
- */
 function cliInvocationTokens(): string[] {
   const raw = process.env.AUDIT_CODE_INVOCATION;
   if (raw) {
@@ -30,86 +14,19 @@ function cliInvocationTokens(): string[] {
       if (
         Array.isArray(parsed) &&
         parsed.length > 0 &&
-        parsed.every((t) => typeof t === "string" && t.length > 0)
+        parsed.every(
+          (token) => typeof token === "string" && token.length > 0,
+        )
       ) {
-        return parsed as string[];
+        return parsed;
       }
     } catch {
-      // malformed override — fall back to the default bin
+      // Malformed overrides fall back to the installed bin.
     }
   }
   return ["audit-code"];
 }
 
-/**
- * Render an {@link AuditorDescriptor} back to the single re-parseable `--auditor
- * <json>` transport (G1 collapsed the former `--host-*` flag bag; G2 folded the
- * provider identity + launch blocks onto `self` and resliced dispatch backends to
- * `sources[]`). Returns `[]` when the descriptor is undefined OR carries nothing —
- * no declared `self` field, no sources, no id/timestamp — so a host with no
- * handshake emits a bare continue-command exactly as before. Otherwise the whole
- * descriptor is JSON-serialized (`JSON.stringify` drops `undefined` self fields).
- */
-/** Whether a descriptor carries anything worth transporting on a continue-command. */
-export function auditorDescriptorHasContent(
-  descriptor: AuditorDescriptor | undefined,
-): descriptor is AuditorDescriptor {
-  if (!descriptor) return false;
-  const selfHasField =
-    !!descriptor.self &&
-    Object.values(descriptor.self).some((value) => value !== undefined);
-  return (
-    selfHasField ||
-    (descriptor.sources != null && descriptor.sources.length > 0) ||
-    descriptor.auditor_id != null ||
-    descriptor.resolved_at != null
-  );
-}
-
-/** The once-per-run persisted handshake file the continue-commands reference. */
-export function auditorHandshakePath(artifactsDir: string): string {
-  return join(artifactsDir, "auditor-handshake.json");
-}
-
-/**
- * Persist the resolved handshake write-if-changed, so every continue-command can
- * carry `--auditor @<file>` instead of re-echoing the full JSON in every step
- * prompt (2026-08-05 friction: the handshake was re-embedded verbatim in each
- * step). `args.ts` already parses the `@<path>` transport; write-if-changed
- * keeps a resumed run's file byte-stable.
- */
-export function persistAuditorHandshake(
-  artifactsDir: string,
-  descriptor: AuditorDescriptor | undefined,
-): void {
-  if (!auditorDescriptorHasContent(descriptor)) return;
-  const path = auditorHandshakePath(artifactsDir);
-  const next = JSON.stringify(descriptor, null, 2) + "\n";
-  try {
-    if (existsSync(path) && readFileSync(path, "utf8") === next) return;
-  } catch {
-    // unreadable existing file → rewrite below
-  }
-  writeFileSync(path, next);
-}
-
-export function renderAuditorDescriptor(
-  descriptor: AuditorDescriptor | undefined,
-  handshakeFilePath?: string,
-): string[] {
-  if (!auditorDescriptorHasContent(descriptor)) return [];
-  if (handshakeFilePath && existsSync(handshakeFilePath)) {
-    return ["--auditor", `@${handshakeFilePath}`];
-  }
-  return ["--auditor", JSON.stringify(descriptor)];
-}
-
-/**
- * Item B — the ONE batched analyzer-consent offer (tool-rendered, never host
- * improvisation): per candidate — what it detects, its safety profile (exactly
- * why it is not in the default set), and the exact accept mechanism. The
- * operator's decisions persist in session config; a per-run token never does.
- */
 export function renderAnalyzerConsentPrompt(params: {
   pending: Array<{
     id: string;
@@ -126,26 +43,34 @@ export function renderAnalyzerConsentPrompt(params: {
   continueCommand: string;
 }): string {
   const rows = params.pending
-    .map((c) => {
+    .map((candidate) => {
       const why: string[] = [];
-      if (c.safetyProfile.config_execution === "executable") {
+      if (candidate.safetyProfile.config_execution === "executable") {
         why.push("its config can execute repo code");
       }
-      if (c.safetyProfile.network_egress) why.push("it makes network requests");
-      if (c.safetyProfile.version_pinning !== "pinned") {
-        why.push(`its version is ${c.safetyProfile.version_pinning}`);
+      if (candidate.safetyProfile.network_egress) {
+        why.push("it makes network requests");
       }
-      const whyLine = why.length > 0 ? why.join("; ") : "it is heavier than the default set";
+      if (candidate.safetyProfile.version_pinning !== "pinned") {
+        why.push(
+          `its version is ${candidate.safetyProfile.version_pinning}`,
+        );
+      }
       return [
-        `### \`${c.id}\` (${c.runner}: \`${c.spec}\`)`,
-        ``,
-        `- Detects: ${c.purpose ?? "(no purpose recorded)"}`,
-        `- Consent-gated because ${whyLine}.`,
+        `### \`${candidate.id}\` (${candidate.runner}: \`${candidate.spec}\`)`,
+        "",
+        `- Detects: ${candidate.purpose ?? "(no purpose recorded)"}`,
+        `- Consent-gated because ${why.join("; ") || "it is heavier than the default set"}.`,
       ].join("\n");
     })
     .join("\n\n");
   const example = JSON.stringify(
-    Object.fromEntries(params.pending.map((c, i) => [c.id, i === 0 ? "granted" : "declined"])),
+    Object.fromEntries(
+      params.pending.map((candidate, index) => [
+        candidate.id,
+        index === 0 ? "granted" : "declined",
+      ]),
+    ),
     null,
     2,
   );
@@ -176,11 +101,7 @@ Then continue:
 `;
 }
 
-export function nextStepCommand(
-  root: string,
-  artifactsDir: string,
-  auditorDescriptor?: AuditorDescriptor,
-): string {
+export function nextStepCommand(root: string, artifactsDir: string): string {
   return renderCommand([
     ...cliInvocationTokens(),
     "next-step",
@@ -188,150 +109,8 @@ export function nextStepCommand(
     root,
     "--artifacts-dir",
     artifactsDir,
-    ...renderAuditorDescriptor(auditorDescriptor, auditorHandshakePath(artifactsDir)),
   ]);
 }
-
-export function mergeAndIngestCommand(
-  artifactsDir: string,
-  runId: string,
-): string {
-  return renderCommand([
-    ...cliInvocationTokens(),
-    "merge-and-ingest",
-    "--artifacts-dir",
-    artifactsDir,
-    "--run-id",
-    runId,
-  ]);
-}
-
-/**
- * Build the dispatch data lines (plan/quota reading instructions) shared
- * between the dispatch-review and rolling-dispatch prompts.
- */
-function buildDispatchDataLines(
-  dispatchPlanPath: string,
-  dispatchQuotaPath: string | null,
-  sessionLimitNote: string,
-  driverInstruction?: string,
-): string[] {
-  return dispatchQuotaPath
-    ? [
-        "Read these generated files:",
-        "",
-        `  Dispatch plan:  ${dispatchPlanPath}`,
-        `  Dispatch quota: ${dispatchQuotaPath}`,
-        "",
-        "The tool has already ADMITTED the set of packets that fit the live budget this pass: dispatch EXACTLY the entries whose `packet_id` is in `admission.granted_packet_ids` (in the quota data) — no more, no fewer. That granted set IS the amount of work to run now; there is no separate concurrency number to read or guess. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
-        "",
-        "If `admission.declared_cap` is non-null, it is a hard environment in-flight limit (e.g. a nested-agent host's cap): keep at most that many granted subagents running at once, refilling from the granted set as each completes. Otherwise run the granted set as your host allows. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
-        "",
-        "When every granted packet's result is captured, run merge-and-ingest, then run next-step: the tool reconciles the grant and admits the next affordable set (any packets not granted this pass are deferred, not dropped).",
-        // S-BROKER-WIRING: the tool-chosen driver (delegate the rolling loop to a
-        // dispatcher subagent vs. drive it from the top host). Single-sourced via
-        // renderDispatchDriverInstruction so audit + remediate can't drift.
-        ...(driverInstruction ? ["", driverInstruction] : []),
-        "",
-        sessionLimitNote,
-      ]
-    : [
-        "Read this generated dispatch plan:",
-        "",
-        `  ${dispatchPlanPath}`,
-        "",
-        "Launch one subagent for each entry in the plan.",
-      ];
-}
-
-export function renderDispatchReviewPrompt(params: {
-  root: string;
-  artifactsDir: string;
-  activeReviewRun: ActiveReviewRun;
-  dispatchPlanPath: string;
-  dispatchQuotaPath: string | null;
-  driverInstruction?: string;
-  /** The current driver's handshake, re-emitted onto the continue-command. */
-  hostDescriptor?: AuditorDescriptor;
-}): string {
-  const mergeCommand = mergeAndIngestCommand(
-    params.artifactsDir,
-    params.activeReviewRun.run_id,
-  );
-  const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
-  // Capability-neutral (design resolution 2): the same prompt renders on every
-  // host — hints are phrased "if your harness supports…", so a host without the
-  // facility ignores them instead of receiving a different artifact.
-  const modelLine = CAPABILITY_NEUTRAL_MODEL_HINT_LINE;
-  const toolsLine = CAPABILITY_NEUTRAL_TOOL_RESTRICTION_LINE;
-
-  const dispatchDataLines = buildDispatchDataLines(
-    params.dispatchPlanPath,
-    params.dispatchQuotaPath,
-    'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
-    params.driverInstruction,
-  );
-
-  const quotaCoverageNudge = renderQuotaCoverageNudge(
-    params.dispatchQuotaPath,
-    params.artifactsDir,
-  );
-  const tokenBudgetView = renderTokenBudgetView(params.dispatchQuotaPath);
-
-  return [
-    "# audit-code dispatch review",
-    "",
-    ...dispatchDataLines,
-    "",
-    ...(quotaCoverageNudge ? [quotaCoverageNudge, ""] : []),
-    ...(tokenBudgetView ? [tokenBudgetView, ""] : []),
-    DISPATCH_PROMPT_HANDOFF_NOTE,
-    "",
-    renderHostScratchNote(
-      hostScratchDir(params.artifactsDir, params.activeReviewRun.run_id),
-    ),
-    "",
-    "Execute every entry in the dispatch plan: dispatch one subagent per entry if a subagent facility exists, else read and follow each entry's `prompt_path` sequentially yourself. The same packet files and result contract apply either way.",
-    "",
-    "Subagent prompt shape:",
-    "",
-    '  Read and follow the audit instructions in: <entry.prompt_path>',
-    "",
-    modelLine,
-    toolsLine,
-    "",
-    "Each packet's executor must submit through the submit command printed in its packet prompt and stop after successful submission.",
-    "",
-    "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths`, `write_paths`, and `forbidden_patterns`. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` and `entry.access.write_paths` for each subagent. Do not grant broad workspace or task-results directory write access. Workers should not access files outside their declared paths.",
-    "",
-    "**After all packets complete:**",
-    "",
-    "Run exactly:",
-    "",
-    `  ${mergeCommand}`,
-    "",
-    "If merge-and-ingest fails, stop and report the exact command and error output. Do not manually merge results or edit audit state.",
-    "",
-    "If merge-and-ingest succeeds, run:",
-    "",
-    `  ${continueCommand}`,
-    "",
-    "Read and follow only the new step prompt path returned by that command.",
-    "",
-  ].join("\n");
-}
-
-/**
- * Capability-neutral hint lines (design resolution 2, 2026-08-05): identical
- * text on every host — "if your harness supports…" phrasing lets a host without
- * the facility skip the hint instead of receiving a different artifact, so the
- * rendered step never branches on the capability handshake.
- */
-export const CAPABILITY_NEUTRAL_MODEL_HINT_LINE =
-  "If your harness supports selecting a subagent model, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names; otherwise `model_hint` is inert plan metadata — ignore it.";
-
-export const CAPABILITY_NEUTRAL_TOOL_RESTRICTION_LINE =
-  "If your harness supports per-subagent tool restriction, restrict review subagents to read/search plus the packet submit command named in their prompt (no source edit/write tools); otherwise proceed without restrictions and do not ask the user about them.";
 
 export function renderEdgeReasoningDispatchPrompt(params: {
   promptPath: string;
@@ -341,128 +120,23 @@ export function renderEdgeReasoningDispatchPrompt(params: {
   candidateCount: number;
 }): string {
   return [
-    "# audit-code edge reasoning (subagent dispatch)",
+    "# audit-code edge reasoning (host workload)",
     "",
     `The dependency graph has ${params.candidateCount} low-confidence edge(s) whose`,
-    "machine-generated `reason` text can be clarified. This is a single, bounded,",
-    "optional pass: it only rewrites the `reason` string of those edges — it never",
-    "adds, removes, re-targets, or re-weights an edge.",
-    "",
-    "Execute the ONE lane prompt file below: dispatch one subagent to read and follow it if a subagent facility exists, else read and follow it yourself. The same file and result path apply either way.",
+    "machine-generated `reason` text can be clarified. This is one bounded host task:",
+    "it only rewrites edge reasons and never changes topology or weights.",
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
-    `  Prompt path: ${params.promptPath}`,
+    `Prompt path: ${params.promptPath}`,
+    `Result path: ${params.resultsPath}`,
+    `Cache key: ${params.contentHash}`,
     "",
-    "Subagent prompt shape:",
+    "Execute the prompt with the host facilities available in this conversation and write",
+    "the exact JSON result to the result path. If a cached result has the same key, it may",
+    "be reused. The host owns every execution choice.",
     "",
-    "  Read and follow the edge-reasoning instructions in: <prompt path above>",
-    "",
-    'The executor must write its JSON result ({"rewrites":[...]}) to:',
-    "",
-    `  ${params.resultsPath}`,
-    "",
-    `Cache key (edge-set content hash): ${params.contentHash}.`,
-    "If you hold a cached result for this exact key from a previous run, you may write",
-    "it to the results path directly instead of dispatching a subagent.",
-    "",
-    "**File access pre-approval:** if your host supports per-subagent file access",
-    `restrictions, allow the subagent to read ${params.promptPath} and write ${params.resultsPath}.`,
-    "",
-    "After the subagent writes the result, run exactly:",
-    "",
-    `  ${params.continueCommand}`,
-    "",
-    "Read and follow only the new step prompt returned by that command.",
-    "",
-  ].join("\n");
-}
-
-/**
- * Host prompt for the rolling dispatch step.
- * Each worker writes its own AuditResult[] to `entry.result_path` (an inline
- * return is a fallback the host captures). Ingestion is folded into the same
- * logical turn: after all packets complete the host runs merge-and-ingest once,
- * then next-step.
- */
-export function renderRollingDispatchPrompt(params: {
-  root: string;
-  artifactsDir: string;
-  runId: string;
-  dispatchPlanPath: string;
-  dispatchQuotaPath: string | null;
-  driverInstruction?: string;
-  /** The current driver's handshake, re-emitted onto the continue-command. */
-  hostDescriptor?: AuditorDescriptor;
-}): string {
-  const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
-  const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
-
-  // Capability-neutral (design resolution 2): identical text on every host.
-  const modelLine = CAPABILITY_NEUTRAL_MODEL_HINT_LINE;
-  const toolsLine =
-    "If your harness supports per-subagent tool restriction, restrict review subagents to read/search tools plus a Write tool scoped to their own `entry.result_path` (they write exactly that one results file and run no shell commands; no source edit tools); otherwise proceed without restrictions and do not ask the user about them.";
-
-  const dispatchDataLines = buildDispatchDataLines(
-    params.dispatchPlanPath,
-    params.dispatchQuotaPath,
-    'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
-    params.driverInstruction,
-  );
-
-  return [
-    "# audit-code rolling dispatch",
-    "",
-    ...dispatchDataLines,
-    "",
-    "Execute every entry in the dispatch plan: dispatch one subagent per entry if a subagent facility exists, else read and follow each entry's `prompt_path` sequentially yourself. The same packet files and result contract apply either way.",
-    "",
-    DISPATCH_PROMPT_HANDOFF_NOTE,
-    "",
-    renderHostScratchNote(hostScratchDir(params.artifactsDir, params.runId)),
-    "",
-    "## Result capture (no submit-packet command)",
-    "",
-    "Pass `entry.prompt_path` to each subagent as its instruction verbatim — the",
-    "prompt is self-contained (scope, file grants, output schema, and its",
-    "`result_path`). Do not restate it in your dispatch message.",
-    "Each worker writes its own AuditResult[] JSON array to its assigned",
-    "`entry.result_path` and replies with a one-line confirmation; keeping the",
-    "worker payloads out of this conversation is what lets a large fan-out scale.",
-    "Fallback: if a worker returns the AuditResult[] inline instead of writing it,",
-    "extract the JSON array from its reply and write it to `entry.result_path`",
-    "yourself. Do NOT run submit-packet or any shell command to record results.",
-    "",
-    "**Record token usage (enables quota calibration):** a dispatched subagent",
-    "cannot see its own harness-measured token spend — only you (the dispatching",
-    "host) see it, in the usage/cost figures your own subagent-dispatch tool",
-    "reports once that subagent's turn completes. When your host surfaces that",
-    "figure, add it to EVERY result object the corresponding subagent wrote to",
-    "its `entry.result_path`, as `token_usage: { input_tokens, output_tokens }`",
-    "(re-read the file, add the field to each array entry, write it back). This",
-    "is optional — omitting it never blocks a result from being accepted — but",
-    "it is what lets the tool learn your real quota headroom instead of staying",
-    "capped at a conservative cold-start batch. Skip it if your host reports no",
-    "per-dispatch usage figure.",
-    "",
-    modelLine,
-    toolsLine,
-    "",
-    "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for reading and grant write access to that subagent's `entry.result_path` (the one file it writes). Do not grant broader workspace or task-results directory write access.",
-    "",
-    "**After all packets complete:**",
-    "",
-    "Run exactly:",
-    "",
-    `  ${mergeCommand}`,
-    "",
-    "If merge-and-ingest fails, stop and report the exact command and error output.",
-    "",
-    "If merge-and-ingest succeeds, run:",
-    "",
-    `  ${continueCommand}`,
-    "",
-    "Read and follow only the new step prompt path returned by that command.",
+    `Then run: ${params.continueCommand}`,
     "",
   ].join("\n");
 }
@@ -499,43 +173,27 @@ export function renderAnalyzerInstallPrompt(params: {
   decisionsPath: string;
   continueCommand: string;
 }): string {
-  const analyzerLines = params.unresolved.flatMap((entry) => [
-    `- **${entry.id}** — needs \`${entry.dependency ?? entry.id}\`; ${entry.supportedCount} in-scope file(s) would be analyzed.`,
-  ]);
+  const analyzerLines = params.unresolved.map(
+    (entry) =>
+      `- **${entry.id}** — needs \`${entry.dependency ?? entry.id}\`; ${entry.supportedCount} in-scope file(s) would be analyzed.`,
+  );
   const exampleObject = `{ ${params.unresolved
     .map((entry) => `"${entry.id}": "ephemeral"`)
     .join(", ")} }`;
-
   return [
     "# audit-code analyzer install",
     "",
-    "The deterministic regex graph is built. These optional language analyzers can",
-    "produce a richer graph (real module resolution, inheritance, and a call graph),",
-    "but their compiler dependency is not installed in the audited repo:",
+    "Optional language analyzers can enrich the deterministic graph.",
     "",
     ...analyzerLines,
     "",
-    "Choose how to resolve each one and write a JSON object of `{ \"<analyzer-id>\": <setting> }`",
-    "to the decisions path below. Valid settings:",
+    "Choose `ephemeral`, `permanent`, or `skip` for each analyzer and write the",
+    "JSON object below. These choices persist in the provider-neutral analyzer policy.",
     "",
-    "- `ephemeral` — install into a shared, version-keyed cache (never touches this project); compile once, reuse across audits.",
-    "- `permanent` — same as `ephemeral` but a durable opt-in recorded in session config.",
-    "- `skip` — do not run this analyzer; keep the regex floor.",
-    "",
-    "Default if you are unsure or cannot install: choose `skip`. The audit proceeds either way.",
-    "",
-    "## Decisions path",
-    "",
-    "Write your choices to:",
-    "",
-    `  ${params.decisionsPath}`,
-    "",
+    `Decisions path: ${params.decisionsPath}`,
     `Example: ${exampleObject}`,
     "",
     `Then run: ${params.continueCommand}`,
     "",
-    "Read and follow only the new step prompt returned by that command.",
-    "",
   ].join("\n");
 }
-

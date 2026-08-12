@@ -13,13 +13,12 @@ import {
   type Finding,
 } from "audit-tools/shared";
 import type { AuditResult } from "../../src/audit/types.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { buildAuditReportModel: buildAuditReportModelRaw, buildAuditFindingsReport, renderAuditReportMarkdown } =
   await import("../../src/audit/reporting/synthesis.js");
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
-) => buildAuditReportModelRaw({ ...params, workPartition: TEST_WORK_PARTITION });
+) => buildAuditReportModelRaw(params);
 
 function assertMatchesAuditFindings(value: unknown, label: string): void {
   const result = AuditFindingsReportSchema.safeParse(value);

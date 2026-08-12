@@ -48,7 +48,7 @@ export function expectObligationEndpoint(expect, obligationId, endpoint) {
 }
 
 /**
- * Inject the host-delegated markers the headless fixture skips between intake and
+ * Inject the host-delegated markers the scripted fixture skips between intake and
  * structure: the auto-fix, syntax-resolution and external-analyzer-acquisition
  * artifacts (each normally produced by a host-delegation step). Satisfies
  * `auto_fixes_applied`, `syntax_resolved` and `external_analyzers_current` in one
@@ -72,10 +72,44 @@ function injectPreStructureMarkers(bundle) {
   };
 }
 
+/** Host-confirmed checkpoint used by the scripted fixture at the real pause. */
+function injectConfirmedIntentCheckpoint(bundle) {
+  return {
+    ...bundle,
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-04-22T00:00:00Z",
+      confirmed_by: "host",
+      scope_summary: "test scope",
+      intent_summary: "full-audit",
+    },
+  };
+}
+
+/**
+ * Record a completed host design-review pass. The explicit empty findings array
+ * is the bound host result; the reviewed flag alone must never manufacture a
+ * semantic verdict.
+ */
+function injectDesignReviewPass(bundle, pass) {
+  const assessment = bundle.design_assessment;
+  if (!assessment) {
+    throw new Error(`Cannot inject ${pass} design review without design_assessment.`);
+  }
+  return {
+    ...bundle,
+    design_assessment: {
+      ...assessment,
+      [`${pass}_findings`]: [],
+      [`${pass}_reviewed`]: true,
+    },
+  };
+}
+
 /**
  * The deterministic fixture drive, expressed as an ORDERED stage list keyed by
  * the obligation each stage brings the bundle up to (`upTo`). This is the single
- * source of "how to advance a headless fixture bundle through phase N" — adding a
+ * source of "how to advance a scripted fixture bundle through phase N" — adding a
  * new PRIORITY phase is a one-line insert here, not an edit to every test that
  * seeds an advanced bundle. Each `run(bundle, root)` returns the next bundle.
  *
@@ -127,18 +161,24 @@ const FIXTURE_STAGES = [
   // Change 3 docs digest: rootless (degrades to an empty digest), keeping the
   // fixture offline-hermetic like the structure stages above.
   { upTo: "docs_digest_current", run: forcedStep("docs_digest_executor") },
-  { upTo: "intent_checkpoint_current", run: forcedStep("intent_checkpoint_executor", { withRoot: true }) },
+  // Host-delegation boundaries have no in-process auto-completion runner. The
+  // scripted fixture supplies the same confirmed artifact a real host writes,
+  // then lets the deterministic equivalence-baseline arm bind it.
+  { upTo: "intent_checkpoint_current", run: async (b) => injectConfirmedIntentCheckpoint(b) },
+  { upTo: "intent_equivalence_current", run: forcedStep("intent_equivalence_executor") },
   { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
   // Phase C.2 independent delta-miner. host_delegation like charter_extraction: at
   // the default shallow ceiling the extraction pass omits (no deltas_pending), so a
-  // forced single step settles the register headlessly.
+  // forced single step settles the register without an emitted host turn.
   { upTo: "charter_delta_current", run: forcedStep("charter_delta_executor") },
-  { upTo: "design_review_contract_completed", run: forcedStep("design_review_contract") },
-  { upTo: "design_review_conceptual_completed", run: forcedStep("design_review_conceptual") },
+  // These are mandatory semantic host passes. Inject explicit bound empty
+  // submissions instead of reviving the retired unattended auto-completion.
+  { upTo: "design_review_contract_completed", run: async (b) => injectDesignReviewPass(b, "contract") },
+  { upTo: "design_review_conceptual_completed", run: async (b) => injectDesignReviewPass(b, "conceptual") },
   // Phase D charter-clarification triangulation loop + Phase E systemic challenge
   // loop. Both host_delegation (like the design-review passes / charter_extraction):
   // at the default shallow ceiling each runner omits deterministically in one
-  // advance, so a forced single step satisfies the obligation headlessly.
+  // advance, so a forced single step satisfies the obligation deterministically.
   { upTo: "charter_clarification_current", run: forcedStep("charter_clarification_executor") },
   { upTo: "systemic_challenge_current", run: forcedStep("systemic_challenge_executor") },
 ];

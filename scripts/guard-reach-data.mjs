@@ -260,7 +260,7 @@ export const REACH = [
       'check:dup',
     ],
     uncovered:
-      'release-and-publish, update-models, update-languages, triage-backlog, rebaseline-flakes and ' +
+      'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them; no ' +
       'typecheck over scripts/ (deliberate; check:lint is an untyped floor)',
   },
@@ -362,14 +362,40 @@ export const REACH = [
   {
     area: 'nightly determinations ledger',
     files: ['.claude/nightly-decisions.json'],
-    guardedBy: 'declared-gap',
+    guardedBy: [
+      'check:handoff-roadmap',
+      'pre-commit-gate',
+      'closeout-challenge-gate',
+    ],
     note:
-      'read/written by scripts/nightly/answer.mjs, surfaced by the nightly-surface hook; no build gate ' +
-      'validates it',
+      'read/written by scripts/nightly/answer.mjs and surfaced by the nightly-surface hook; HANDOFF ' +
+      'parity now reads it in verify:checks, at commit when the ledger changes, and at closeout. ' +
+      'UNCOVERED HALF: canonical readDecisions remains fail-soft, so parity guards the rendered view ' +
+      'but does not schema-validate a malformed ledger.',
+  },
+  {
+    area: 'nightly open queue projection',
+    files: ['.audit-tools/nightly/open-items.json'],
+    guardedBy: [
+      'check:handoff-roadmap',
+      'pre-commit-gate',
+      'closeout-challenge-gate',
+    ],
+    note:
+      'authoritative persisted queue; strictly read by the generated HANDOFF parity check, with queue ' +
+      'and decision edits triggering the same check before commit; current premise-probe source paths ' +
+      'are derived from the queue, and positive probe needles use staged git-pickaxe reach so moved ' +
+      'copies can trigger parity too',
   },
   {
     area: 'promoted deliverables',
-    files: ['.audit-tools/**'],
+    files: [
+      '.audit-tools/audit-findings.json',
+      '.audit-tools/audit-report.md',
+      '.audit-tools/remediation-outcomes.json',
+      '.audit-tools/remediation-report.md',
+      '.audit-tools/nightly/proposals/**',
+    ],
     guardedBy: 'declared-gap',
     note: 'run outputs promoted for reference (tracked deliberately); products, not sources',
   },

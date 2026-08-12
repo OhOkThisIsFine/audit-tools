@@ -1,0 +1,12 @@
+{
+  "contract_version": "zero-adapter-owned-overlap/v1",
+  "module_id": "canonical-session-intent",
+  "baseline_id": "pre-foundation-3f123b9b4be8-c995df669aff",
+  "baseline_manifest_sha256": "9263dc78f042cbd2d4aefaf3e0cad68ce78223cf3217fd31d5fa8f552480eb68",
+  "capture_boundary": "before-canonical-session-intent-first-test-edit",
+  "immutable": true,
+  "finalized": true,
+  "explicitly_empty": true,
+  "owned_overlaps": [],
+  "manifest_sha256": "d285f195f3aed69db08509d256ac9ed1ce505322a1c33721c6326eedc9aab77f"
+}

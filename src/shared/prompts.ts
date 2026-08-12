@@ -2,14 +2,13 @@
  * Parts of a cacheable prompt: a static shared prefix (identical across all
  * agents in a wave) and a per-agent payload (varies per invocation).
  *
- * Anthropic's prompt-caching mechanism requires the cacheable portion to appear
- * at the start of the prompt and remain byte-identical across calls. Only the
- * trailing per-agent payload should vary.
+ * Keeping the shared portion at the start and byte-identical across calls lets
+ * hosts reuse that context efficiently. Only the trailing task payload varies.
  */
 export interface CacheablePromptParts {
   /** Static context shared across all agents in a wave (design spec, codebase
    *  summary, repo conventions, etc.). Must be identical across calls for
-   *  caching to apply. */
+   *  reuse to apply. */
   sharedPrefix: string;
   /** Per-invocation task-specific payload that varies between agents. */
   perAgentPayload: string;
@@ -17,8 +16,7 @@ export interface CacheablePromptParts {
 
 /**
  * Assemble a prompt that places the cacheable shared prefix first, followed by
- * the per-agent payload. This ordering is required for Anthropic's prompt-caching
- * mechanism: the static portion must appear at the start and remain identical
+ * the per-agent payload. The static portion remains at the start and identical
  * across all agents in a wave; only the trailing payload varies.
  *
  * - If `sharedPrefix` is non-empty, the result is `sharedPrefix + "\n\n" + perAgentPayload`.
@@ -80,7 +78,7 @@ This is an adversarial review lane: its value comes from a reviewer who is **not
 /**
  * Capability-neutral fan-out execution instruction (design resolution 2,
  * 2026-08-05): every fan-out step materializes its lane prompt files and hands
- * the host ONE instruction that reads identically on every IDE/provider —
+ * the host ONE instruction that reads identically in every environment —
  * subagents when a facility exists, sequential self-execution when not. Only
  * the concurrency hint is capability-sensitive. Lane prompt files are
  * ADVANCE-FREE (no continue-command inside them); the step prompt owns the

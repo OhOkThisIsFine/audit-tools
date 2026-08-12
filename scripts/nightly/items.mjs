@@ -251,14 +251,16 @@ function gitLines(root, args, { okStatuses = [0] } = {}) {
 // do with whether the defect was fixed. It must abstain instead.
 //
 // The RECORD channels are the same error one step earlier: a backlog entry, a
-// dated review, HANDOFF or the inbox QUOTES the code it is about, so a probe
-// aimed at one is probing the record, not the premise. They are already
-// excluded from the rename-protection search below for exactly this reason.
+// dated review, HANDOFF, inbox, or persisted nightly queue QUOTES the code it
+// is about, so a probe aimed at one is probing the record, not the premise.
+// They are excluded from the rename-protection search below for exactly this
+// reason.
 const RECORD_PATH_PREFIXES = [
   'docs/backlog',
   'docs/reviews',
   'docs/HANDOFF.md',
   'docs/nightly-inbox.md',
+  '.audit-tools/nightly',
   '.claude',
 ];
 
@@ -272,6 +274,18 @@ export function isRecordPath(file) {
 // admitted only for a declared non-auto-closing item ('record_present'). Both
 // mean "the premise is true at HEAD"; neither is ever a closing verdict.
 const PASSING_CONTAINS_STATES = new Set(['present', 'record_present']);
+
+// The repo-wide move/rename search domain. Exported because the pre-commit
+// HANDOFF parity trigger must use the identical domain when deciding whether a
+// staged pickaxe change can alter a presentation-time probe verdict.
+export const PREMISE_GREP_PATHSPECS = [
+  ':!.audit-tools/nightly',
+  ':!docs/backlog',
+  ':!docs/nightly-inbox.md',
+  ':!docs/reviews',
+  ':!docs/HANDOFF.md',
+  ':!.claude',
+];
 
 // `git ls-files --error-unmatch` exits non-zero for an untracked path, so the
 // okStatuses:[0] default already maps "untracked" to null. A git failure is
@@ -366,8 +380,7 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
   // entry and no item could ever close.
   const elsewhere = gitLines(
     root,
-    ['grep', '-l', '-F', '-e', needle, '--',
-      ':!docs/backlog', ':!docs/nightly-inbox.md', ':!docs/reviews', ':!docs/HANDOFF.md', ':!.claude'],
+    ['grep', '-l', '-F', '-e', needle, '--', ...PREMISE_GREP_PATHSPECS],
     { okStatuses: [0, 1] },
   );
   if (elsewhere !== null && elsewhere.length > 0) {
@@ -421,6 +434,12 @@ export function evaluateProbes(root, item, options = {}) {
       (wellFormedString(p.contains) !== wellFormedString(p.absent)) &&
       (wellFormedString(p.contains) || wellFormedString(p.absent)),
   );
+  // One malformed sibling must not be silently dropped. Otherwise the valid
+  // subset can all resolve and close the item even though an omitted probe may
+  // still describe a live premise. Persisted legacy corruption therefore
+  // degrades to unprobed/open; the write path sees zero accepted probes and
+  // refuses the item before it reaches the queue.
+  if (probes.length !== raw.length) return { status: 'unprobed', probes: [] };
   if (probes.length === 0) return { status: 'unprobed', probes: [] };
 
   const evaluated = probes.map((p) => ({
@@ -502,7 +521,8 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `writeOpenItems: item "${item?.id ?? '(no id)'}" declares auto_close:false but carries ` +
             `${offending.length} probe(s) that are not a positive {file, contains} probe on a ` +
             `record path (${detail}). The flag exists only for a question ABOUT a record ` +
-            `(docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, .claude). ` +
+            `(docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, ` +
+            `.audit-tools/nightly, .claude). ` +
             `An item with a code side must auto-close off that side — drop the flag and probe ` +
             `the tracked source file instead.`,
         );
@@ -519,7 +539,8 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe whose TARGET carries ` +
             `no evidence (${detail}). A gitignored runtime artifact under ".audit-tools/", a build ` +
             `output, or a record file (docs/backlog, docs/reviews, docs/HANDOFF.md, ` +
-            `docs/nightly-inbox.md, .claude) says nothing about whether the defect is fixed. ` +
+            `docs/nightly-inbox.md, .audit-tools/nightly, .claude) says nothing about whether ` +
+            `the defect is fixed. ` +
             `Quote a fragment from the tracked SOURCE file the fix would touch.`,
         );
       }
@@ -572,6 +593,8 @@ export function nightsBetween(fromDate, toDate) {
 // (the code the item is about no longer exists, so there is nothing to ask).
 // Returns every bucket so a caller can REPORT what it suppressed rather than
 // silently swallowing it: `{ open, settled, resolved }`.
+const TERMINAL_DECISION_DISPOSITIONS = new Set(['settled', 'wontfix']);
+
 export function partitionBySettled(items, decisions, root) {
   const open = [];
   const settled = [];
@@ -581,8 +604,9 @@ export function partitionBySettled(items, decisions, root) {
     // A `question` disposition is the owner asking something BACK, not an
     // answer — the item stays open. Recording those as settled is how two of
     // the eighteen determinations on 2026-07-28 became unaskable while
-    // carrying no executable answer.
-    if (decision && decision.disposition !== 'question') {
+    // carrying no executable answer. Unknown/malformed dispositions likewise
+    // fail OPEN: only the two recorded terminal states may suppress a question.
+    if (TERMINAL_DECISION_DISPOSITIONS.has(decision?.disposition)) {
       settled.push(item);
     } else if (root && evaluateProbes(root, item).status === 'resolved') {
       // Presentation-time premise check: probe-less legacy items come back

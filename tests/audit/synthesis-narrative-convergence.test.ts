@@ -25,6 +25,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditFindingsReport, FindingTheme, SynthesisNarrative } from "audit-tools/shared";
+import { buildAuditFindingsDeliverable } from "../../src/shared/reporting/auditDeliverable.js";
 
 const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { computeArtifactStateSignature } = await import("../../src/audit/orchestrator/artifactMetadata.js");
@@ -46,41 +47,28 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 /** A minimal but valid AuditFindingsReport with a couple of findings. */
 function baseFindingsReport(): AuditFindingsReport {
-  return {
-    contract_version: "audit-findings/v1alpha1",
-    summary: {
-      finding_count: 2,
-      work_block_count: 0,
-      severity_breakdown: { high: 1, medium: 1 },
-      audited_file_count: 1,
-      excluded_file_count: 0,
-      runtime_validation_status_breakdown: {},
+  return buildAuditFindingsDeliverable([
+    {
+      id: "F-1",
+      title: "Weak token check",
+      category: "General",
+      severity: "high",
+      confidence: "high",
+      lens: "security",
+      affected_files: [{ path: "src/a.ts", line_start: 1 }],
+      summary: "x",
     },
-    findings: [
-      {
-        id: "F-1",
-        title: "Weak token check",
-        category: "General",
-        severity: "high",
-        confidence: "high",
-        lens: "security",
-        affected_files: [{ path: "src/a.ts", line_start: 1 }],
-        summary: "x",
-      },
-      {
-        id: "F-2",
-        title: "Unbounded loop",
-        category: "General",
-        severity: "medium",
-        confidence: "medium",
-        lens: "performance",
-        affected_files: [{ path: "src/b.ts", line_start: 2 }],
-        summary: "y",
-      },
-    ],
-    work_blocks: [],
-    work_block_seams: [],
-  };
+    {
+      id: "F-2",
+      title: "Unbounded loop",
+      category: "General",
+      severity: "medium",
+      confidence: "medium",
+      lens: "performance",
+      affected_files: [{ path: "src/b.ts", line_start: 2 }],
+      summary: "y",
+    },
+  ]);
 }
 
 /** Two themes + two top-risks, supplied in a given order. */

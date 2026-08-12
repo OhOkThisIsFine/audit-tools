@@ -1,0 +1,512 @@
+{
+  "contract_version": "zero-adapter-provider-neutral-fixtures/v1",
+  "immutable": true,
+  "spy_contract": {
+    "mode": "throw-on-call",
+    "required_call_count": 0,
+    "forbidden_actions": [
+      {
+        "id": "backend_window_lookup",
+        "error_code": "forbidden-backend-window-lookup"
+      },
+      {
+        "id": "legacy_config_probe",
+        "error_code": "forbidden-legacy-config-probe"
+      },
+      {
+        "id": "network_access",
+        "error_code": "forbidden-network-access"
+      },
+      {
+        "id": "provider_launch",
+        "error_code": "forbidden-provider-launch"
+      },
+      {
+        "id": "provider_resolution",
+        "error_code": "forbidden-provider-resolution"
+      },
+      {
+        "id": "quota_admission",
+        "error_code": "forbidden-quota-admission"
+      }
+    ]
+  },
+  "forbidden_payload_key_fragments": [
+    "api_key",
+    "backend",
+    "command_template",
+    "endpoint",
+    "headless",
+    "lease",
+    "model",
+    "pool",
+    "provider",
+    "quota",
+    "routing",
+    "spawn",
+    "transport",
+    "worker_command"
+  ],
+  "fixtures": [
+    {
+      "id": "attribution-free-result",
+      "contract_ids": [
+        "attribution-contract-retirement"
+      ],
+      "positive_event": "provider-agnostic-execution-record-accepted",
+      "payload": {
+        "contract_version": "execution-record/v1alpha1",
+        "record_id": "execution-001",
+        "work_item_id": "remediation-item-001",
+        "outcome": "accepted",
+        "executor_reported": {
+          "label": "external-host",
+          "statement": "completed outside audit-tools"
+        }
+      }
+    },
+    {
+      "id": "audit-host-workload",
+      "contract_ids": [
+        "audit-zero-adapter-boundary"
+      ],
+      "positive_event": "complete-audit-host-workload-emitted",
+      "payload": {
+        "contract_version": "audit-host-workload/v1alpha1",
+        "run_id": "audit-run-fixture",
+        "work_items": [
+          {
+            "id": "audit-task-001",
+            "lens": "security",
+            "metadata": {
+              "complexity": "deep",
+              "risk": "high",
+              "token_estimate": 2400
+            },
+            "prompt": {
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "text": "Review the assigned scope and return the bound result contract."
+            },
+            "scope": {
+              "files": [
+                "src/a.ts"
+              ],
+              "unit_ids": [
+                "unit-a"
+              ]
+            },
+            "result_path": ".audit-tools/audit/results/audit-task-001.json"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit-untrusted-result",
+      "contract_ids": [
+        "audit-zero-adapter-boundary"
+      ],
+      "positive_event": "bound-audit-result-ingested",
+      "payload": {
+        "contract_version": "audit-host-result/v1alpha1",
+        "result_id": "audit-result-001",
+        "run_id": "audit-run-fixture",
+        "work_item_id": "audit-task-001",
+        "prompt_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "file_coverage": [
+          {
+            "path": "src/a.ts",
+            "reviewed_lines": 20,
+            "total_lines": 20
+          }
+        ],
+        "findings": []
+      }
+    },
+    {
+      "id": "backend-independent-plan",
+      "contract_ids": [
+        "backend-independent-remediation-planning"
+      ],
+      "positive_event": "complete-backend-independent-plan-built",
+      "payload": {
+        "contract_version": "remediation-plan-fixture/v1",
+        "groups": [
+          {
+            "block_id": "block-a",
+            "finding_ids": [
+              "finding-a",
+              "finding-b"
+            ],
+            "token_estimate": 1900
+          },
+          {
+            "block_id": "block-b",
+            "finding_ids": [
+              "finding-c"
+            ],
+            "token_estimate": 700
+          }
+        ],
+        "items": [
+          {
+            "affected_files": [
+              "src/a.ts"
+            ],
+            "finding_id": "finding-a"
+          },
+          {
+            "affected_files": [
+              "src/a.ts",
+              "src/b.ts"
+            ],
+            "finding_id": "finding-b"
+          },
+          {
+            "affected_files": [
+              "src/c.ts"
+            ],
+            "finding_id": "finding-c"
+          }
+        ],
+        "coverage": [
+          {
+            "finding_id": "finding-a",
+            "disposition": "planned"
+          },
+          {
+            "finding_id": "finding-b",
+            "disposition": "planned"
+          },
+          {
+            "finding_id": "finding-c",
+            "disposition": "planned"
+          }
+        ],
+        "membership_source": "shared-content-coherence/findings-projection"
+      }
+    },
+    {
+      "id": "coherence-golden-topology",
+      "contract_ids": [
+        "shared-content-coherence"
+      ],
+      "positive_event": "shared-coherence-golden-trace-produced",
+      "payload": {
+        "contract_version": "content-coherence-fixture/v1",
+        "input": {
+          "items": [
+            {
+              "id": "d",
+              "file_paths": [
+                "lib/z.ts"
+              ],
+              "unit_ids": [
+                "u3"
+              ],
+              "tags": [
+                "auth"
+              ]
+            },
+            {
+              "id": "b",
+              "file_paths": [
+                "src/x.ts"
+              ],
+              "unit_ids": [
+                "u2"
+              ],
+              "tags": [
+                "ui"
+              ]
+            },
+            {
+              "id": "e",
+              "file_paths": [
+                "api/q.ts"
+              ],
+              "unit_ids": [
+                "u4"
+              ],
+              "tags": [
+                "ops"
+              ]
+            },
+            {
+              "id": "a",
+              "file_paths": [
+                "src/x.ts"
+              ],
+              "unit_ids": [
+                "u1"
+              ],
+              "tags": [
+                "auth"
+              ]
+            },
+            {
+              "id": "c",
+              "file_paths": [
+                "src/y.ts"
+              ],
+              "unit_ids": [
+                "u1"
+              ],
+              "tags": [
+                "auth"
+              ]
+            }
+          ],
+          "relationships": [
+            {
+              "left": "e",
+              "right": "d",
+              "kind": "call_adjacent"
+            }
+          ]
+        },
+        "expected": {
+          "eligible_candidates": [
+            {
+              "left": "a",
+              "right": "c",
+              "score": 120
+            },
+            {
+              "left": "a",
+              "right": "b",
+              "score": 110
+            },
+            {
+              "left": "d",
+              "right": "e",
+              "score": 70
+            }
+          ],
+          "merge_decisions": [
+            "merge",
+            "merge",
+            "merge"
+          ],
+          "components": [
+            [
+              "a",
+              "b",
+              "c"
+            ],
+            [
+              "d",
+              "e"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "remediation-host-result",
+      "contract_ids": [
+        "remediation-zero-adapter-boundary"
+      ],
+      "positive_event": "bound-remediation-result-validated",
+      "payload": {
+        "contract_version": "remediation-host-result/v1alpha1",
+        "result_id": "remediation-result-001",
+        "work_item_id": "remediation-item-001",
+        "prompt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "changed_files": [
+          "src/a.ts",
+          "tests/a.test.ts"
+        ],
+        "commit_evidence": {
+          "before": "1111111111111111111111111111111111111111",
+          "after": "2222222222222222222222222222222222222222"
+        },
+        "test_evidence": [
+          {
+            "command": "npx vitest run tests/a.test.ts",
+            "status": "passed"
+          }
+        ],
+        "worktree_evidence": {
+          "baseline_commit": "1111111111111111111111111111111111111111",
+          "changed_files": [
+            "src/a.ts",
+            "tests/a.test.ts"
+          ]
+        },
+        "acceptance": {
+          "status": "accepted"
+        },
+        "merge": {
+          "status": "merged"
+        }
+      }
+    },
+    {
+      "id": "remediation-host-workload",
+      "contract_ids": [
+        "remediation-zero-adapter-boundary"
+      ],
+      "positive_event": "complete-remediation-frontier-emitted",
+      "payload": {
+        "contract_version": "remediation-host-workload/v1alpha1",
+        "run_id": "remediation-run-fixture",
+        "work_items": [
+          {
+            "id": "remediation-item-001",
+            "allowed_files": [
+              "src/a.ts",
+              "tests/a.test.ts"
+            ],
+            "baseline_commit": "1111111111111111111111111111111111111111",
+            "finding_ids": [
+              "finding-a"
+            ],
+            "prompt": {
+              "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "text": "Implement the bounded item and return prompt-bound evidence."
+            },
+            "required_tests": [
+              "npx vitest run tests/a.test.ts"
+            ],
+            "token_estimate": 1800
+          }
+        ]
+      }
+    },
+    {
+      "id": "session-intent-canonical",
+      "contract_ids": [
+        "canonical-session-intent"
+      ],
+      "positive_event": "shared-session-intent-defaulted",
+      "payload": {
+        "contract_version": "session-intent-fixture/v1",
+        "path": ".audit-tools/audit/session-config.json",
+        "absent_input": null,
+        "expected_absent": {
+          "status": "not_configured",
+          "intent": {
+            "observability": "standard",
+            "review_mode": "attended"
+          }
+        },
+        "configured_input": {
+          "observability": "verbose",
+          "review_mode": "autonomous"
+        },
+        "expected_configured": {
+          "status": "configured",
+          "intent": {
+            "observability": "verbose",
+            "review_mode": "autonomous"
+          }
+        },
+        "invalid_cases": [
+          {
+            "expected_error": "unknown_key",
+            "value": {
+              "unexpected": true
+            }
+          },
+          {
+            "expected_error": "invalid_value",
+            "value": {
+              "review_mode": "headless"
+            }
+          }
+        ],
+        "ignored_legacy_paths": [
+          ".audit-tools/remediation/session-config.json",
+          ".remediation-artifacts/session-config.json",
+          "session-config.json"
+        ]
+      }
+    },
+    {
+      "id": "task-affinity-permutation",
+      "contract_ids": [
+        "stable-task-affinity-artifacts"
+      ],
+      "positive_event": "canonical-affinity-bytes-produced",
+      "payload": {
+        "contract_version": "task-affinity-fixture/v1",
+        "input": {
+          "task_ids": [
+            "task-b",
+            "task-a"
+          ],
+          "nodes": [
+            {
+              "task_id": "task-b",
+              "file_paths": [
+                "src/b.ts",
+                "src/a.ts"
+              ],
+              "tags": [
+                "security",
+                "api"
+              ]
+            },
+            {
+              "task_id": "task-a",
+              "file_paths": [
+                "src/c.ts"
+              ],
+              "tags": [
+                "security",
+                "auth"
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "from": "task-b",
+              "to": "task-a",
+              "kind": "affinity",
+              "reason": "shared-tag",
+              "weight": 30
+            }
+          ]
+        },
+        "expected": {
+          "task_ids": [
+            "task-a",
+            "task-b"
+          ],
+          "nodes": [
+            {
+              "task_id": "task-a",
+              "file_paths": [
+                "src/c.ts"
+              ],
+              "tags": [
+                "auth",
+                "security"
+              ]
+            },
+            {
+              "task_id": "task-b",
+              "file_paths": [
+                "src/a.ts",
+                "src/b.ts"
+              ],
+              "tags": [
+                "api",
+                "security"
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "from": "task-a",
+              "to": "task-b",
+              "kind": "affinity",
+              "reason": "shared-tag",
+              "weight": 30
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

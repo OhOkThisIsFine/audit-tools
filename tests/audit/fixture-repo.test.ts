@@ -5,10 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { countLines } from "./helpers/countLines.mjs";
 import type { AnalyzerSetting } from "audit-tools/shared";
-import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advanceTypes.js";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
-const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
+const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
 
 // Analyzer policy that keeps graph enrichment hermetic (no analyzer subprocess /
 // dependency acquisition) even with a real root — advanceAudit drains the whole
@@ -55,14 +54,10 @@ test("committed fixture repo supports external analyzer import and deterministic
     const lineIndex = await buildFixtureLineIndex(root);
     const options = { root, lineIndex, analyzers: SKIP_ANALYZERS };
 
-    // advanceAudit now DRAINS the consecutive deterministic regen frontier within
-    // one call, stopping only at host-delegation boundaries. So the first call
-    // The first invocation drains intake → auto_fix → syntax_resolution →
-    // external_analyzer_acquisition → structure → graph_enrichment →
-    // design_assessment → structure_decomposition in one round-trip, halting at
-    // the intent_checkpoint host boundary.
-    let result = await advanceAudit({}, options);
-    let bundle = result.updated_bundle;
+    // Build the real pre-planning frontier through the shared scripted-host
+    // fixture. Direct advanceAudit calls intentionally stop at host-delegation
+    // boundaries and cannot manufacture semantic checkpoint/review artifacts.
+    let bundle = await buildAdvancedBundle(root, "planning_artifacts");
 
     // Force the external-analyzer import BEFORE planning consumes
     // external_analyzer_results. The import is a forced-only executor (no
@@ -91,26 +86,7 @@ test("committed fixture repo supports external analyzer import and deterministic
     expect(imported.selected_executor).toBe("external_analyzer_import_executor");
     bundle = imported.updated_bundle;
 
-    // Drive across the remaining host-delegation boundaries (intent_checkpoint,
-    // charter, both design-review passes) until the deterministic planning tail
-    // runs. Chain-length-agnostic: loop until planning_executor is the resolved
-    // step rather than hard-coding the intermediate host-boundary count.
-    let planning: AdvanceAuditResult | null = null;
-    for (let i = 0; i < 32; i += 1) {
-      const decision = decideNextStep(bundle);
-      if (decision.state.status === "complete") break;
-      const step = await advanceAudit(bundle, options);
-      bundle = step.updated_bundle;
-      if (step.selected_executor === "planning_executor") {
-        planning = step;
-        break;
-      }
-    }
-
-    expect(planning, "planning_executor should be reached").toBeTruthy();
-    if (planning === null) {
-      throw new Error("planning_executor should be reached");
-    }
+    const planning = await advanceAudit(bundle, options);
     expect(planning.selected_executor).toBe("planning_executor");
     if (planning.updated_bundle.audit_tasks === undefined) {
       throw new Error("expected audit_tasks on the planning result's bundle");

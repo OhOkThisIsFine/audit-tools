@@ -5,7 +5,6 @@ import type { AuditTask } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import { loadRunLedger } from "../supervisor/runLedger.js";
 import { getArtifactsDir } from "./args.js";
-import type { FailingTask } from "./mergeAndIngestCommand.js";
 import { outputJson } from "./cliHelpers.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
@@ -108,23 +107,6 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     break;
   }
 
-  // 4. Surface failed-tasks.json from the most recent run that has one
-  let failedTasks: FailingTask[] | null = null;
-  for (const runDirName of runDirs) {
-    const failedTasksPath = join(runsDir, runDirName, "failed-tasks.json");
-    try {
-      const raw = await readJsonFile<FailingTask[]>(
-        failedTasksPath,
-      );
-      if (Array.isArray(raw) && raw.length > 0) {
-        failedTasks = raw;
-        break;
-      }
-    } catch {
-      // Not present in this run dir — keep looking
-    }
-  }
-
   // Derive the started_at and elapsed time for the current last_obligation from
   // the most recent ledger entry that matches it, so operators can tell whether
   // the audit is stuck or merely running.
@@ -148,6 +130,5 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     obligations_summary: obligationStates,
     recent_runs: recentRuns,
     pending_tasks: pendingTasksSummary,
-    failed_tasks: failedTasks,
   });
 }

@@ -60,7 +60,15 @@ const TEST_DIR = scratchDir(".test-n-r06-universal-cp");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 
 const STUB_AUDIT_FINDINGS = {
-  contract_version: "audit-findings/v1alpha1",
+  contract_version: "audit-tools/audit-findings/v1alpha1",
+  summary: {
+    finding_count: 2,
+    work_block_count: 2,
+    severity_breakdown: { high: 1, medium: 1 },
+    audited_file_count: 2,
+    excluded_file_count: 0,
+    runtime_validation_status_breakdown: {},
+  },
   findings: [
     {
       id: "AUD-001",
@@ -85,15 +93,61 @@ const STUB_AUDIT_FINDINGS = {
       evidence: ["package.json:15 — lodash@3"],
     },
   ],
+  coherence_trace: {
+    normalized_items: [
+      {
+        id: "AUD-001",
+        file_paths: ["src/auth.ts"],
+        unit_ids: [],
+        tags: ["security"],
+      },
+      {
+        id: "AUD-002",
+        file_paths: ["package.json"],
+        unit_ids: [],
+        tags: ["reliability"],
+      },
+    ],
+    pair_scores: [
+      {
+        left: "AUD-001",
+        right: "AUD-002",
+        evidence: {
+          call_import_reference_adjacency: false,
+          same_directory: false,
+          shared_critical_flow: false,
+          shared_file: false,
+          shared_semantic_tag_or_same_lens: false,
+          shared_unit: false,
+        },
+        score: 0,
+        eligible: false,
+      },
+    ],
+    eligible_candidates: [],
+    merge_trace: [],
+    merge_decisions: [],
+    components: [["AUD-001"], ["AUD-002"]],
+  },
   work_blocks: [
     {
       id: "WB-001",
-      finding_ids: ["AUD-001", "AUD-002"],
-      unit_ids: ["unit-auth"],
-      owned_files: ["package.json", "src/auth.ts"],
+      finding_ids: ["AUD-001"],
+      unit_ids: [],
+      owned_files: ["src/auth.ts"],
       role: "implementation",
       max_severity: "high",
-      rationale: "test block",
+      rationale: "Isolated security finding in the authentication module.",
+      depends_on: [],
+    },
+    {
+      id: "WB-002",
+      finding_ids: ["AUD-002"],
+      unit_ids: [],
+      owned_files: ["package.json"],
+      role: "implementation",
+      max_severity: "medium",
+      rationale: "Isolated dependency reliability finding.",
       depends_on: [],
     },
   ],
@@ -370,7 +424,8 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
     expect(seed.affected_files).toContain("src/auth.ts");
     expect(seed.audit_findings_path).toBe(auditFindingsPath);
     expect(seed.work_blocks).toEqual([
-      expect.objectContaining({ id: "WB-001", finding_ids: ["AUD-001", "AUD-002"] }),
+      expect.objectContaining({ id: "WB-001", finding_ids: ["AUD-001"] }),
+      expect.objectContaining({ id: "WB-002", finding_ids: ["AUD-002"] }),
     ]);
     expect(seed.work_block_seams).toEqual([]);
   });

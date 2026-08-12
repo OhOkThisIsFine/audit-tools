@@ -139,4 +139,16 @@ describe("partitionBySettled — a counter-question is still open", () => {
     const { open } = partitionBySettled([item(k)], { [k]: { disposition: "wontfix" } });
     expect(open).toEqual([]);
   });
+
+  it.each([
+    {},
+    { disposition: "unknown" },
+    "settled",
+    null,
+  ])("a malformed decision fails OPEN instead of hiding the item: %j", (decision) => {
+    const k = subjectKey("p", "t");
+    const { open, settled } = partitionBySettled([item(k)], { [k]: decision });
+    expect(open).toHaveLength(1);
+    expect(settled).toEqual([]);
+  });
 });

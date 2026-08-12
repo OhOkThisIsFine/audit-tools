@@ -491,8 +491,7 @@ Rules for the preliminary checkpoint:
 - Copy ALL open_questions into \`pre_draft_questions\`, preserving their ids and
   blocking flags. Non-blocking questions are included as FYI context.
 - Suggest \`closing_action\` as \`"commit"\` by default (valid options:
-  \`"commit"\`, \`"merge-to-base"\` — land the run as one revertable \`--no-ff\`
-  merge into the launch branch, aborting safely on conflict — or \`"none"\`).
+  \`"commit"\` or \`"none"\`).
 - If a \`free_form_intent\` was interpreted (e.g. "prioritizing security
   findings"), record a brief explanation in \`intent_interpretation\`.
 - Leave \`filters\` empty (\`{}\`) unless the source clearly implies specific
@@ -549,4 +548,3 @@ Then run:
 \`${loaderCommand("next-step")}\`
 `;
 }
-

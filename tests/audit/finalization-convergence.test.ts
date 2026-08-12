@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advanceTypes.js";
-import { TEST_WORK_PARTITION } from "./helpers/workPartition.js";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
@@ -15,7 +14,7 @@ const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../sr
 const runSynthesisExecutor = (
   bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
   results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results, { workPartition: TEST_WORK_PARTITION });
+) => runSynthesisExecutorRaw(bundle, results);
 
 const LINE_INDEX: Record<string, number> = {
   "src/api/auth.ts": 6,
@@ -114,21 +113,58 @@ test("finalization converges through the real persist/reload loop without oscill
       }
 
       let res: AdvanceAuditResult;
-      if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
+      if (decision.selected_executor === "intent_checkpoint_executor") {
+        // Host-delegation boundaries never manufacture semantic input. Model
+        // the conversation host's canonical confirmation, then let the engine
+        // bind its intent-equivalence baseline and continue deterministically.
+        res = await advanceAudit(
+          {
+            ...bundle,
+            intent_checkpoint: {
+              schema_version: "intent-checkpoint/v1",
+              confirmed_at: "2026-04-22T00:00:00Z",
+              confirmed_by: "host",
+              scope_summary: "full fixture repository",
+              intent_summary: "complete audit",
+            },
+          },
+          { root, lineIndex: LINE_INDEX },
+        );
+      } else if (
+        decision.selected_executor === "design_review_contract" ||
+        decision.selected_executor === "design_review_conceptual"
+      ) {
+        const assessment = bundle.design_assessment;
+        if (!assessment) {
+          throw new Error("design-review handoff requires design_assessment");
+        }
+        const pass = decision.selected_executor === "design_review_contract"
+          ? "contract"
+          : "conceptual";
+        res = await advanceAudit(
+          {
+            ...bundle,
+            design_assessment: {
+              ...assessment,
+              [`${pass}_findings`]: [],
+              [`${pass}_reviewed`]: true,
+            },
+          },
+          { root, lineIndex: LINE_INDEX },
+        );
+      } else if (decision.selected_executor === "semantic_review_executor") {
         const results = resultsForPending(bundle);
-        expect(results.length > 0, "agent/rolling_dispatch_executor handoff must have pending tasks to answer").toBeTruthy();
+        expect(results.length > 0, "semantic-review handoff must have pending tasks to answer").toBeTruthy();
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
           preferredExecutor: "result_ingestion_executor",
           auditResults: results,
-          workPartition: TEST_WORK_PARTITION,
         });
       } else {
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
-          workPartition: TEST_WORK_PARTITION,
         });
       }
       // A drain that produced the report (synthesis ran) is recorded the first

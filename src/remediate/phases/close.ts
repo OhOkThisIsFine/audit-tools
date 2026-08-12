@@ -1,17 +1,8 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import {
-  remediationBranchName,
-  listQuarantinedCommits,
-  readRemediationBaseBranch,
-} from "../steps/dispatch.js";
 import { spawnSync } from "node:child_process";
 import { dirname, extname, isAbsolute, join, relative } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import {
-  dedupeDeferredVerifyCommands,
-  isWholeSuiteTestCommand,
-} from "../steps/dispatch/verifyCommands.js";
+import { readFileSync, existsSync } from "node:fs";
 import {
   AGENT_FEEDBACK_FILENAME,
   normalizeRepoPath,
@@ -62,7 +53,6 @@ import {
   isVerifiedCompleteStatus,
   statusToDisposition,
 } from "../state/itemStatus.js";
-import { reconcileAcceptOutcomes } from "../steps/dispatch/acceptReconcile.js";
 
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
@@ -411,9 +401,8 @@ export interface ClosingResult {
 /**
  * Whether a closing action genuinely COMPLETED (COR-fb656e3f): it succeeded, OR
  * it was a skipped no-op (`action === "none"` — nothing was configured to do).
- * A *skipped non-none* close did NOT complete — e.g. merge-to-base with no
- * recorded base leaves the run unmerged and returns status "skipped"; treating
- * that as green would pass the verification report and delete the (gitignored,
+ * A *skipped nonnone* close did NOT complete; treating that as green would
+ * pass the verification report and delete the (gitignored,
  * unrecoverable) artifacts dir for a run that never landed. Single-sourced here
  * so the verification trace, the report-level verdict, and the fully-green
  * cleanup gate can never drift on the classification.
@@ -462,8 +451,8 @@ function isSuccess(result: ClosingCommandResult): boolean {
 // .env* is an absolute hard-exclude: never stageable under any circumstance
 // (secrets safety net), regardless of manifest or deliverable membership.
 const ENV_EXCLUDE_PATTERN = /^\.env($|\.)/;
-// .audit-tools/ scratch (state.json, locks, per-run steps/results, quarantine
-// refs) is excluded UNLESS the exact path is one of this run's own tool
+// .audit-tools/ scratch (state.json, locks, per-run steps/results) is excluded
+// UNLESS the exact path is one of this run's own tool
 // deliverables (see `toolDeliverablePaths`) — those are eligible for staging
 // like any other manifest file.
 const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
@@ -473,50 +462,22 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
  * `collectStagingFiles` may stage (invariant: "remediation close must never
  * commit files the run didn't touch").
  *
- * Two sources, UNION'd (never priority-fallback — see below for why):
+ * `state.applied_edit_surface` is the ground truth: the union of files from each
+ *    prompt-bound host result whose landed commit, ancestry, changed-file set,
+ *    write scope, and required tests were mechanically corroborated by the
+ *    provider-neutral host handoff ingestion boundary.
  *
- * 1. `state.applied_edit_surface` — ground truth. The union of files every
- *    accepted node ACTUALLY cherry-picked into the main tree, captured
- *    pre-merge from the node's own git branch diff in `acceptNodeWorktree`
- *    (never the worker's self-report) and persisted by
- *    `mergeImplementResultsIntoState` (src/remediate/steps/dispatch/marshal.ts).
- *    Only populated by the isolated-worktree accept lifecycle (the in-process
- *    and host-subagent rolling drivers, `accept-node` / `executeNodeInWorktree`).
- *
- * 2. Each `resolved` item's DECLARED surface — `item_spec.touched_files`
- *    unioned with the finding's `affected_files` — for items whose real edit
- *    was never captured as git ground truth. This is the only option for the
- *    conversation-first hand-driven flow (`remediate-code
- *    merge-implement-results` — a FIRST-CLASS dispatch mode, not legacy: the
- *    host edits directly in the main tree with no per-node worktree/commit to
- *    diff, so `acceptNodeWorktree` never runs and `applied_edit_surface` is
- *    never populated for that block).
- *
- * Why UNION and not "prefer (1), fall back to (2) only when (1) is entirely
- * absent": a single run can mix dispatch modes across blocks (one block landed
- * via worktree-accept, a sibling landed via a conversation-first hand-applied
- * edit in the same close). Priority-fallback keyed on whether (1) is non-empty
- * would silently drop the OTHER mode's real edits from the close commit the
- * moment either mode contributed anything — under-staging the tool's own work,
- * which is exactly the failure class this manifest exists to prevent, just in
- * the opposite direction. Only items with `status === "resolved"` (a real
- * edit, never `resolved_no_change`) contribute to source (2) — a `blocked`
- * item's partial/reverted edits must never be treated as a legitimate surface.
- *
- * RUN-START-DIRTY GUARD on source (2) ONLY: declared surfaces are plan-time
- * DECLARATIONS (write-access grants) / audit evidence — never verified against
- * an actual diff. A declared file that was ALREADY dirty when the run started
+ * RUN-START-DIRTY GUARD: a file that was ALREADY dirty when the run started
  * (`state.run_start_dirty`, captured at the extracted-plan join site before any
  * remediation edit exists) cannot be the run's edit, so it is excluded here —
- * otherwise a resolved item declaring a file the run never actually touched
- * would sweep pre-existing user WIP into the closing commit (the exact
- * over-inclusion class this manifest exists to close). Ground-truth entries
- * from source (1) are NEVER excluded by the snapshot: git proved the run
- * landed those paths, and a tool-merged edit to a file the user ALSO had dirty
- * at run start is a path the tool legitimately owns. A state without
+ * otherwise closing could sweep pre-existing user WIP into a later commit. A landed commit proves
+ * which paths the commit changed; it does not prove the tool owns any
+ * still-dirty pre-run content at those paths. Excluding source (1) paths too
+ * prevents a merge attestation from sweeping the user's earlier WIP into a
+ * later closing commit. A state without
  * `run_start_dirty` (pre-field) means no exclusions.
  *
- * Both sources empty is legitimate (e.g. a run that only produced
+ * An empty surface is legitimate (e.g. a run that only produced
  * `resolved_no_change` / skipped items) and correctly yields an empty
  * manifest: nothing but tool deliverables gets staged.
  *
@@ -527,25 +488,15 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
  * normalized form is only ever a comparison key (see `collectStagingFiles`).
  */
 function resolveEditSurfaceManifest(state: RemediationState): string[] {
-  const files = new Set<string>(state.applied_edit_surface ?? []);
+  const files = new Set<string>();
   const runStartDirtyKeys = new Set(
     (state.run_start_dirty ?? []).map(normalizeRepoPath),
   );
   const addUnlessPreexistingDirt = (path: string): void => {
     if (!runStartDirtyKeys.has(normalizeRepoPath(path))) files.add(path);
   };
-  const findingsById = new Map(
-    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
-  );
-  for (const item of Object.values(state.items ?? {})) {
-    if (item.status !== "resolved") continue;
-    for (const f of item.item_spec?.touched_files ?? []) {
-      addUnlessPreexistingDirt(f);
-    }
-    const finding = findingsById.get(item.finding_id);
-    for (const affected of finding?.affected_files ?? []) {
-      addUnlessPreexistingDirt(affected.path);
-    }
+  for (const path of state.applied_edit_surface ?? []) {
+    addUnlessPreexistingDirt(path);
   }
   return [...files];
 }
@@ -814,42 +765,6 @@ export function executeClosingAction(
     run("npm", ["publish"]);
   } else if (action === "tag") {
     run("git", ["tag", "auto-remediation"]);
-  } else if (action === "merge-to-base") {
-    const runId = state.plan?.plan_id ?? "";
-    const branch = remediationBranchName(runId);
-    const base = readRemediationBaseBranch(options.artifactsDir);
-    // No recorded base (detached HEAD at launch, or a branch from a prior run):
-    // never guess a merge target — leave everything untouched and tell the host.
-    if (!base) {
-      return {
-        contract_version: "remediate-code-closing-result/v1alpha1",
-        action,
-        status: "skipped",
-        commands: [
-          {
-            command: ["git", "merge", "--no-ff", branch],
-            exit_code: 1,
-            stderr: `No recorded base branch for this run — merge \`${branch}\` into your base branch manually.`,
-          },
-        ],
-      };
-    }
-    // Check out the base and attempt a no-ff merge so the run lands as one
-    // revertable merge commit. On any conflict, abort and restore the
-    // remediation branch — the base branch is left exactly as it was.
-    if (run("git", ["checkout", base])) {
-      const merged = run("git", [
-        "merge",
-        "--no-ff",
-        branch,
-        "-m",
-        `Merge remediation run ${runId}`,
-      ]);
-      if (!merged) {
-        run("git", ["merge", "--abort"]);
-        run("git", ["checkout", branch]);
-      }
-    }
   } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
     run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
   }
@@ -906,102 +821,6 @@ function runCombinedTestSuite(
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
   return { passed: false, suite_name: suiteName, duration_ms: durationMs, output };
-}
-
-/**
- * cg-1: every DEFERRED per-node verify command recorded across the run's
- * accept-outcome sidecars (`runs/<runId>/implement/accept-outcome-*.json`),
- * enumerated by directory scan so no run-id notion has to be reconstructed
- * (the artifact dir has carried two). Lenient: unreadable/malformed sidecars
- * are skipped — a missing record must not wedge close.
- */
-export function collectDeferredVerifyCommands(artifactsDir: string): string[] {
-  const out: string[] = [];
-  const runsDir = join(artifactsDir, "runs");
-  let runIds: string[] = [];
-  try {
-    runIds = readdirSync(runsDir);
-  } catch {
-    return out;
-  }
-  for (const runId of runIds.sort()) {
-    const implementDir = join(runsDir, runId, "implement");
-    let entries: string[] = [];
-    try {
-      entries = readdirSync(implementDir);
-    } catch {
-      continue;
-    }
-    for (const entry of entries.sort()) {
-      if (!/^accept-outcome-.*\.json$/.test(entry)) continue;
-      try {
-        const parsed = JSON.parse(readFileSync(join(implementDir, entry), "utf8")) as {
-          deferred_verify_commands?: unknown;
-        };
-        const cmds = parsed.deferred_verify_commands;
-        if (Array.isArray(cmds)) {
-          out.push(...cmds.filter((c): c is string => typeof c === "string"));
-        }
-      } catch {
-        // Malformed sidecar → skip; close must not wedge on one bad record.
-      }
-    }
-  }
-  return out;
-}
-
-interface DeferredVerifyResult {
-  passed: boolean;
-  /** The deduplicated commands actually run (empty when everything was subsumed). */
-  residual: string[];
-  subsumed: string[];
-  output: string;
-}
-
-/**
- * cg-1: the close gate's tool-owned drain of the per-node DEFERRED verify
- * commands. Exact duplicates run once; commands the just-run green full-suite
- * leg covers are subsumed and skipped. Previously NOTHING consumed the
- * sidecars' `deferredVerifyCommands` — the host replayed the raw per-node
- * lists verbatim (duplicate full `tests/audit` passes; a 2h close drain).
- */
-function runDeferredVerifyResidual(
-  state: RemediationState,
-  options: OrchestratorOptions,
-  combinedSuitePassed: boolean,
-): DeferredVerifyResult {
-  const suiteCmd = Array.isArray(state.plan?.test_command)
-    ? state.plan.test_command.join(" ")
-    : state.plan?.test_command ?? "";
-  const fullSuiteCovers =
-    combinedSuitePassed && suiteCmd.length > 0 && isWholeSuiteTestCommand(suiteCmd);
-  const { residual, subsumed } = dedupeDeferredVerifyCommands(
-    collectDeferredVerifyCommands(options.artifactsDir),
-    { fullSuiteCovers },
-  );
-  if (subsumed.length > 0) {
-    console.log(
-      `Deferred verify: ${subsumed.length} command(s) subsumed by the green full-suite leg.`,
-    );
-  }
-  for (const cmd of residual) {
-    console.log(`Running deferred verify (deduplicated): ${cmd}`);
-    const result = spawnSync(cmd, {
-      cwd: options.root,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
-      windowsHide: true,
-    });
-    if (result.status !== 0) {
-      const output = (
-        (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
-      )
-        .trim()
-        .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-      return { passed: false, residual, subsumed, output: `$ ${cmd}\n${output}` };
-    }
-  }
-  return { passed: true, residual, subsumed, output: "" };
 }
 
 /**
@@ -1155,7 +974,8 @@ function collectReportEntries(
     if (isVerifiedCompleteStatus(item.status)) {
       const finding = state.plan?.findings.find((f) => f.id === item.finding_id);
       const title = finding?.title ?? "Unknown";
-      let verificationEvidence: string[] | undefined;
+      let verificationEvidence: string[] | undefined =
+        item.host_result_evidence;
 
       const verificationResultPath = join(
         options.artifactsDir,
@@ -1217,20 +1037,14 @@ function buildRemediationReportMarkdown(
   outcomesReport: RemediationOutcomesReport,
   combinedTest: CombinedTestResult,
   reflections: AgentReflection[] = [],
-  quarantined: Array<{ block: string; ref: string; commit: string }> = [],
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
-  // Code changes land on a dedicated remediation branch (the base branch is never
-  // modified); surface it so the user can review and merge. Only meaningful when a
-  // node actually committed a change — a no-change/skip-only run leaves no commits.
+  // Host results are accepted only after the claimed commit is mechanically
+  // corroborated as reachable from HEAD. A no-change/skip-only run has no
+  // changed commit to review.
   if (entries.resolved.length > 0) {
-    const branch = remediationBranchName(state.plan?.plan_id ?? "");
-    const mergedToBase =
-      closingResult.action === "merge-to-base" && closingResult.status === "success";
-    reportContent += mergedToBase
-      ? `## Review\n\nAll code changes were applied on \`${branch}\` and merged into your base branch as one \`--no-ff\` merge commit (\`Merge remediation run ${state.plan?.plan_id ?? ""}\`). Review the diff; revert the whole run with \`git revert -m 1 <merge-commit>\` if needed.\n\n`
-      : `## Review\n\nAll code changes were applied on the dedicated branch \`${branch}\` — your base branch was left untouched. Review the diff and merge \`${branch}\` into your base branch (or re-run with the \`merge-to-base\` closing action to land it automatically).\n\n`;
+    reportContent += `## Review\n\nAll code changes were accepted through the provider-neutral host handoff and corroborated as landed commits reachable from the repository HEAD. Review the resulting diff and commit history.\n\n`;
   }
 
   reportContent += `## Resolved — Changed Files\n\n`;
@@ -1355,15 +1169,6 @@ function buildRemediationReportMarkdown(
     if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
   }
 
-  if (quarantined.length > 0) {
-    const runId = state.plan?.plan_id ?? "";
-    reportContent += `\n## Preserved for Recovery\n\n`;
-    reportContent += `${quarantined.length} node(s) committed real edits but failed the tool's verify/scope/merge and were NOT landed. Their work is preserved under durable git refs (it survives worktree cleanup). Once the verify-failure cause is fixed, re-drive each node with \`remediate-code reverify-node\` — it replays the preserved commit through the real verify/scope/merge gate, lands it on green, and re-finalizes the run (flipping the item to resolved); a bare \`git cherry-pick\` is the last-resort fallback that skips the gate and leaves the run-state marked failed:\n\n`;
-    for (const q of quarantined) {
-      reportContent += `- **${q.block}**: \`remediate-code reverify-node --id ${q.block} --run-id ${runId}\`  (fallback: \`git cherry-pick ${q.commit}\`, ref: \`${q.ref}\`)\n`;
-    }
-  }
-
   // Opt-in worker reflections, aggregated into the same "Process Feedback"
   // section audit-code renders (parity). Empty → no section.
   const feedbackLines = renderProcessFeedbackSection(reflections);
@@ -1375,17 +1180,14 @@ function buildRemediationReportMarkdown(
 }
 
 /**
- * Clean up the remediator's temporary git branches and the artifact directory.
- * Branches first, artifact dir last so a crash mid-cleanup leaves a recoverable
- * state. Failures are non-fatal but recorded via structured RunLogger context
- * (OBS-003) rather than a bare console.warn.
+ * Persist the completed state and clean up the artifact directory.
  *
  * The artifacts directory is only deleted on a fully-green close (no blocked
  * items, combined + e2e tests passed, and the closing action genuinely
  * completed — succeeded, or was the `action === "none"` no-op). When the run is
  * not fully green — e2e failed, combined test failed, an item is blocked, or the
- * closing action failed OR was skipped without completing (e.g. merge-to-base
- * with no recorded base) — the artifacts directory is preserved for diagnosis.
+ * closing action failed OR was skipped without completing — the artifacts
+ * directory is preserved for diagnosis.
  */
 export async function cleanupTempBranchesAndArtifacts(
   options: OrchestratorOptions,
@@ -1395,34 +1197,6 @@ export async function cleanupTempBranchesAndArtifacts(
   closingResult: ClosingResult,
   runLogger?: RunLogger,
 ): Promise<void> {
-  try {
-    const branchResult = runTracked(["git", "branch"], {
-      cwd: options.root,
-      encoding: "utf8",
-    });
-    const branches = (branchResult.stdout?.toString() ?? "").split("\n");
-    for (const branch of branches) {
-      const b = branch.replace("*", "").trim();
-      if (b.startsWith("remediator-block-")) {
-        runTracked(["git", "branch", "-D", b], { cwd: options.root });
-      }
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    console.warn("Failed to clean up temporary git branches.", error);
-    // kind:"error" (not "outcome" — that kind is reserved for the one-line-
-    // per-finding remediation outcome emitted below; a cleanup failure is a
-    // run-level diagnostic, not a finding disposition. Mislabeling this
-    // duplicated the outcome-line count whenever this branch fired — see the
-    // matching fix a few lines down for the state-persist failure.)
-    runLogger?.event({
-      phase: "close",
-      kind: "error",
-      obligation: "closing",
-      note: `Failed to clean up temporary git branches: ${reason}`,
-    });
-  }
-
   // Write final state before deleting the artifacts directory so the completion
   // is durable even if cleanup partially fails.
   try {
@@ -1700,20 +1474,6 @@ export async function runClosePhase(
     );
   }
 
-  // 0. inv-8 accept-outcome reconciliation (CE-201) — BEFORE any force-close
-  // mapping or staging-manifest read: bind git's base-reachable tool commits,
-  // the accept sidecars, and the item statuses so a block whose landing was
-  // interrupted in either kill window (pick→record, record→state-merge) is
-  // recognized as LANDED (items resolved, files in applied_edit_surface,
-  // sidecar repaired) instead of force-closed blocked. Invariant 9's blocked
-  // mapping below stays conditional on this having run and found no landed
-  // evidence for the block.
-  await reconcileAcceptOutcomes({
-    root: options.root,
-    artifactsDir: options.artifactsDir,
-    state,
-  });
-
   // 1. Check whether closing action requires user confirmation (preview).
   // When not pre-authorized and action is confirmable, generate the file list +
   // commit message, attach them to closing_plan.closing_action_preview, and
@@ -1737,22 +1497,7 @@ export async function runClosePhase(
     );
   }
 
-  // 2b. cg-1 — tool-owned drain of the per-node DEFERRED verify commands:
-  // deduplicated union, full-suite-subsumed, each residual command run exactly
-  // once on the merged tree. A red residual re-blocks and routes to triage the
-  // same way a combined-suite red does.
-  const deferredVerify = runDeferredVerifyResidual(state, options, combinedTest.passed);
-  if (!deferredVerify.passed) {
-    console.log("Deferred verify residual failed. Transitioning back to triage.");
-    if (blockResolvedItemsOnCombinedFailure(state, deferredVerify.output)) {
-      return { ...state, status: "triage" };
-    }
-    console.warn(
-      "Deferred verify residual failed but no resolved items to re-block — completing with the failure recorded in the report.",
-    );
-  }
-
-  // 2c. Item C — mechanical re-verify of analyzer-born leads: re-run the same
+  // 2b. Item C — mechanical re-verify of analyzer-born leads: re-run the same
   // pinned analyzer per provenance-carrying resolved item and check the exact
   // content-anchored identity no longer fires. Attribution is exact, so a
   // persisting lead re-blocks only ITS item (objective evidence to triage) —
@@ -1830,12 +1575,6 @@ export async function runClosePhase(
   const feedbackText = await readOptionalTextFile(
     join(options.artifactsDir, AGENT_FEEDBACK_FILENAME),
   );
-  // Failed-but-committed nodes whose work was preserved under a durable quarantine
-  // ref (a tool-verify false-negative must never destroy a good fix) — surface them
-  // so the user can recover the work manually.
-  const quarantined = options.root
-    ? listQuarantinedCommits(options.root, state.plan?.plan_id ?? "")
-    : [];
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -1844,7 +1583,6 @@ export async function runClosePhase(
     outcomesReport,
     combinedTest,
     feedbackText ? parseReflectionsNdjson(feedbackText) : [],
-    quarantined,
   );
 
   // Enrich the coverage ledger with never-planned payloads NOW, from the live

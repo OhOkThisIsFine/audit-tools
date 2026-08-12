@@ -1,183 +1,90 @@
-import type {
-  TaskAffinityGraph,
-  TaskAffinityNode,
+import {
+  buildContentCoherenceTrace,
+  type ContentCoherenceRelationship,
+  type ContentCoherenceTrace,
+} from "../../shared/decompose/contentCoherence.js";
+import {
+  TaskAffinityGraphSchema,
+  type TaskAffinityGraph,
 } from "./taskAffinityGraph.js";
 
-// ---------------------------------------------------------------------------
-// Just-in-time graph partition (Phase B of the plan/dispatch seam).
-//
-// Takes the provider-neutral task-affinity graph and partitions it into packets
-// under TWO model-parameterized ceilings — a context-token ceiling and a
-// risk-mass ceiling — by greedy agglomerative merging along descending edge
-// weight. Both are CEILINGS, not quotas: a high-risk cluster may sit well under
-// the token ceiling and that is correct (focused review beats a padded window).
-// Because we never merge across an edge that would breach a ceiling, coherent
-// clusters split naturally at their weakest internal edge.
-//
-// This function makes NO model/provider decision — the caller supplies the
-// ceilings derived from whatever model it is dispatching to right now. See
-// spec/audit-workflow-design.md.
-// ---------------------------------------------------------------------------
-
+/** Audit projection of one canonical content-coherence component. */
 export interface GraphPacket {
   packet_id: string;
   task_ids: string[];
-  /** Sum of member content-token estimates (excludes prompt overhead). */
   token_estimate: number;
-  /** Aggregate risk (sum of member risk estimates). */
   risk_mass: number;
-  /** Max member risk — the tier this packet routes to. */
-  routing_risk: number;
-  /** True when a single atomic task alone exceeds the token ceiling. */
-  over_budget?: boolean;
+  risk_score: number;
 }
 
-export interface PartitionOptions {
-  /**
-   * Context-token ceiling for one packet (the dispatching model's window).
-   * `null` = the window is UNKNOWN (no handshake, no learned limits, no
-   * models.dev resolution): the partitioner makes no fit claim at all — no
-   * merging, one task per packet (the minimum expressible unit, the same
-   * semantics the retired single-task fallback established for handshake-less
-   * hosts), and `over_budget` is never set (there is no ceiling to exceed).
-   * Degenerate-not-refused is deliberate (change-2 constraint 2): refusing
-   * would strand the weakest hosts, and inventing a default window would be a
-   * fabricated fit claim; the caller surfaces a dispatch warning instead.
-   */
-  contextTokenBudget: number | null;
-  /** Risk-mass ceiling — max aggregate risk one agent should hold at once. */
-  riskMassBudget: number;
-  /** Per-packet prompt overhead reserved against the context ceiling. */
-  promptOverheadTokens?: number;
-  /**
-   * Soft per-packet content-token target for MERGING — the same budget the
-   * initial planner splits under. Without it the only merge ceiling is the
-   * model's whole context window, so a task set that fits in context greedily
-   * collapses into one giant packet (meta-review 2026-07-30b: the deepening
-   * re-partition packed 97 tasks / 655k tokens into a single packet and
-   * head-of-line-blocked the frontier). `over_budget` stays measured against
-   * the CONTEXT ceiling — a lone task over the soft target but under context
-   * still dispatches.
-   */
-  targetPacketTokens?: number;
+export interface TaskCoherencePartition {
+  coherence_trace: ContentCoherenceTrace;
+  packets: GraphPacket[];
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function relationshipsFromGraph(
+  graph: TaskAffinityGraph,
+): ContentCoherenceRelationship[] {
+  const deduped = new Map<string, ContentCoherenceRelationship>();
+  for (const edge of graph.edges) {
+    const pair = [edge.from, edge.to].sort(compareCodeUnits);
+    const kinds = [
+      edge.kind,
+      ...(edge.reason?.split(",").map((kind) => kind.trim()) ?? []),
+    ].filter((kind) => kind.length > 0);
+    for (const kind of new Set(kinds)) {
+      const relationship = { left: pair[0]!, right: pair[1]!, kind };
+      deduped.set(`${relationship.left}\u0000${relationship.right}\u0000${kind}`, relationship);
+    }
+  }
+  return [...deduped.values()].sort((left, right) => {
+    const leftKey = `${left.left}\u0000${left.right}\u0000${left.kind}`;
+    const rightKey = `${right.left}\u0000${right.right}\u0000${right.kind}`;
+    return compareCodeUnits(leftKey, rightKey);
+  });
 }
 
 /**
- * Provisional risk-mass ceiling used until N5 supplies real per-model values.
- * Node risk is in [0,1] (high-risk task ≈ 0.7–1.0), so ~4 lets a single agent
- * hold a handful of high-risk tasks (a coherent critical flow) before the cap
- * forces a split along the weakest internal edge. Tunable from real outcomes;
- * a stronger model warrants a higher ceiling. Exposed as the `risk_mass_budget`
- * dispatch knob.
+ * Project the persisted task-affinity graph through the shared membership core.
+ * Any additional JavaScript arguments are deliberately inert: backend sizing
+ * is not an input to semantic membership.
  */
-export const DEFAULT_RISK_MASS_BUDGET = 4;
-
-interface Cluster {
-  parent: number;
-  tokens: number;
-  risk: number;
-}
-
-function find(clusters: Cluster[], i: number): number {
-  let root = i;
-  while (clusters[root].parent !== root) root = clusters[root].parent;
-  // path compression
-  let cur = i;
-  while (clusters[cur].parent !== cur) {
-    const next = clusters[cur].parent;
-    clusters[cur].parent = root;
-    cur = next;
-  }
-  return root;
-}
-
-export function partitionTaskGraph(
-  graph: TaskAffinityGraph,
-  options: PartitionOptions,
-): GraphPacket[] {
-  const overhead = options.promptOverheadTokens ?? 0;
-  const { contextTokenBudget, riskMassBudget } = options;
-  const mergeTokenBudget =
-    contextTokenBudget === null
-      ? null
-      : options.targetPacketTokens !== undefined
-        ? Math.min(contextTokenBudget, options.targetPacketTokens)
-        : contextTokenBudget;
-  const nodes = graph.nodes;
-  const indexOf = new Map<string, number>();
-  nodes.forEach((n, i) => indexOf.set(n.task_id, i));
-
-  const clusters: Cluster[] = nodes.map((n, i) => ({
-    parent: i,
-    tokens: n.token_estimate,
-    risk: n.risk_estimate,
-  }));
-
-  // Process edges strongest-first; merge two clusters only when the merged
-  // cluster breaches neither ceiling. Deterministic tie-break by endpoints.
-  const sortedEdges = [...graph.edges].sort((a, b) => {
-    if (b.weight !== a.weight) return b.weight - a.weight;
-    if (a.from !== b.from) return a.from < b.from ? -1 : 1;
-    return a.to < b.to ? -1 : a.to > b.to ? 1 : 0;
+export function buildTaskCoherencePartition(
+  input: TaskAffinityGraph,
+  ..._ignored: readonly unknown[]
+): TaskCoherencePartition {
+  const graph = TaskAffinityGraphSchema.parse(input);
+  const coherenceTrace = buildContentCoherenceTrace({
+    items: graph.nodes.map((node) => ({
+      id: node.task_id,
+      file_paths: node.file_paths,
+      unit_ids: node.unit_id.length > 0 ? [node.unit_id] : [],
+      tags: node.lens.length > 0 ? [node.lens] : [],
+    })),
+    relationships: relationshipsFromGraph(graph),
   });
-
-  // Unknown window (mergeTokenBudget null): no merges at all — every task
-  // stays its own packet, because any merge would be an unfounded fit claim.
-  if (mergeTokenBudget !== null) {
-    for (const edge of sortedEdges) {
-      const ui = indexOf.get(edge.from);
-      const vi = indexOf.get(edge.to);
-      if (ui === undefined || vi === undefined) continue;
-      const ru = find(clusters, ui);
-      const rv = find(clusters, vi);
-      if (ru === rv) continue;
-      const combinedTokens = clusters[ru].tokens + clusters[rv].tokens;
-      const combinedRisk = clusters[ru].risk + clusters[rv].risk;
-      if (combinedTokens + overhead > mergeTokenBudget) continue;
-      if (combinedRisk > riskMassBudget) continue;
-      // union rv into ru
-      clusters[rv].parent = ru;
-      clusters[ru].tokens = combinedTokens;
-      clusters[ru].risk = combinedRisk;
-    }
-  }
-
-  // Gather members per root.
-  const members = new Map<number, TaskAffinityNode[]>();
-  nodes.forEach((node, i) => {
-    const root = find(clusters, i);
-    const list = members.get(root) ?? [];
-    list.push(node);
-    members.set(root, list);
+  const nodeById = new Map(graph.nodes.map((node) => [node.task_id, node]));
+  const packets = coherenceTrace.components.map((taskIds, index) => {
+    const nodes = taskIds.map((taskId) => nodeById.get(taskId)!);
+    const riskMass = nodes.reduce((sum, node) => sum + node.risk_estimate, 0);
+    const riskScore = nodes.reduce(
+      (highest, node) => Math.max(highest, node.risk_estimate),
+      0,
+    );
+    return {
+      packet_id: `packet-${index + 1}`,
+      task_ids: [...taskIds],
+      token_estimate: nodes.reduce(
+        (sum, node) => sum + node.token_estimate,
+        0,
+      ),
+      risk_mass: Math.round(riskMass * 1_000) / 1_000,
+      risk_score: Math.round(riskScore * 1_000) / 1_000,
+    };
   });
-
-  const packets: GraphPacket[] = [];
-  for (const list of members.values()) {
-    const taskIds = list.map((n) => n.task_id).sort();
-    const tokenEstimate = list.reduce((s, n) => s + n.token_estimate, 0);
-    const riskMass = list.reduce((s, n) => s + n.risk_estimate, 0);
-    const routingRisk = list.reduce((m, n) => Math.max(m, n.risk_estimate), 0);
-    const overBudget =
-      contextTokenBudget !== null &&
-      list.length === 1 &&
-      tokenEstimate + overhead > contextTokenBudget;
-    packets.push({
-      packet_id: "",
-      task_ids: taskIds,
-      token_estimate: tokenEstimate,
-      risk_mass: Math.round(riskMass * 1000) / 1000,
-      routing_risk: Math.round(routingRisk * 1000) / 1000,
-      ...(overBudget ? { over_budget: true } : {}),
-    });
-  }
-
-  // Stable ordering: highest-routing-risk first, then by first task id.
-  packets.sort((a, b) => {
-    if (b.routing_risk !== a.routing_risk) return b.routing_risk - a.routing_risk;
-    return a.task_ids[0] < b.task_ids[0] ? -1 : a.task_ids[0] > b.task_ids[0] ? 1 : 0;
-  });
-  packets.forEach((p, i) => {
-    p.packet_id = `packet-${i + 1}`;
-  });
-  return packets;
+  return { coherence_trace: coherenceTrace, packets };
 }

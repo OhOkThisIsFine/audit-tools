@@ -2,8 +2,7 @@
  * Contract-obligations module gates + derivation
  * (CP-BLOCK-N-contract-obligations).
  *
- * Covers the fail-closed cross-artifact gates, relative-rank model-tier
- * derivation (never a model name), downstream-only repair propagation, and the
+ * Covers the fail-closed cross-artifact gates, downstream-only repair propagation, and the
  * finding_id → {obligation_ids, node_ids} trace on the promoted extracted plan.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -16,8 +15,6 @@ import {
   validateDigestCoverage,
   validateReconciliationDerivation,
   validateFinalizedModuleSetPreserved,
-  deriveNodeModelTier,
-  deriveNodeModelTierFromNode,
 } from "../../src/remediate/validation/contractPipeline.js";
 import {
   evaluateContractObligationsPromotionGate,
@@ -597,95 +594,6 @@ describe("validateReconciliationDerivation", () => {
   });
 });
 
-// ── deriveNodeModelTier (relative rank, never a model name) ────────────────────
-
-describe("deriveNodeModelTier", () => {
-  it("returns the cheapest rank for a trivial node", () => {
-    expect(
-      deriveNodeModelTier({
-        dependencyCount: 0,
-        obligationCount: 1,
-        fileScopeSize: 1,
-        counterexampleCount: 0,
-        highStakesLens: false,
-      }),
-    ).toBe("small");
-  });
-
-  it("returns the middle rank for a moderately complex node", () => {
-    expect(
-      deriveNodeModelTier({
-        dependencyCount: 2,
-        obligationCount: 2,
-        fileScopeSize: 2,
-        counterexampleCount: 0,
-        highStakesLens: false,
-      }),
-    ).toBe("standard");
-  });
-
-  it("returns the top rank for a high-complexity node", () => {
-    expect(
-      deriveNodeModelTier({
-        dependencyCount: 3,
-        obligationCount: 3,
-        fileScopeSize: 5,
-        counterexampleCount: 1,
-        highStakesLens: true,
-      }),
-    ).toBe("deep");
-  });
-
-  it("only ever returns a relative rank, never a model name", () => {
-    const ALLOWED_RANKS = new Set(["small", "standard", "deep"]);
-    const ranks = new Set<string>();
-    for (let d = 0; d < 6; d++) {
-      for (let o = 1; o < 6; o++) {
-        ranks.add(
-          deriveNodeModelTier({
-            dependencyCount: d,
-            obligationCount: o,
-            fileScopeSize: d,
-            counterexampleCount: d % 2,
-            highStakesLens: d % 2 === 0,
-          }),
-        );
-      }
-    }
-    // Universal-membership invariant: every produced rank is one of the three
-    // relative ranks — no model name ever leaks. (Asserted as a set-difference so
-    // a stray value names itself in the failure rather than hiding in an either-or.)
-    const unexpected = [...ranks].filter((r) => !ALLOWED_RANKS.has(r));
-    expect(unexpected).toEqual([]);
-  });
-
-  it("nudges a high-stakes lens up relative to an otherwise identical node", () => {
-    const base = {
-      dependencyCount: 1,
-      obligationCount: 2,
-      fileScopeSize: 2,
-      counterexampleCount: 0,
-    };
-    const low = deriveNodeModelTier({ ...base, highStakesLens: false });
-    const high = deriveNodeModelTier({ ...base, highStakesLens: true });
-    const order = ["small", "standard", "deep"];
-    expect(order.indexOf(high)).toBeGreaterThanOrEqual(order.indexOf(low));
-  });
-
-  it("derives the tier from a raw DAG-node payload", () => {
-    const tier = deriveNodeModelTierFromNode({
-      id: "N1",
-      depends_on: ["A", "B", "C"],
-      satisfies_obligations: ["O-1", "O-2"],
-      verification_obligation_ids: ["O-3"],
-      output_files: ["a", "b", "c", "d"],
-      addresses_counterexamples: ["CE-1"],
-      lens: "security",
-    });
-    expect(tier).toBe("deep");
-  });
-});
-
 // ── Promotion gate + extracted-plan trace (integration) ───────────────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -973,7 +881,6 @@ describe("evaluateContractObligationsPromotionGate + extracted-plan trace", () =
       await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
     ) as {
       traceability: Record<string, { obligation_ids: string[]; node_ids: string[] }>;
-      findings: Array<{ id: string; model_tier: string }>;
     };
 
     expect(plan.traceability).toBeDefined();
@@ -982,11 +889,6 @@ describe("evaluateContractObligationsPromotionGate + extracted-plan trace", () =
     // N2 depends on N1, so its node_ids include the upstream node.
     expect(plan.traceability.N2.node_ids).toEqual(expect.arrayContaining(["N2", "N1"]));
 
-    // Every finding carries a relative model_tier, never a model name. Both
-    // fixture nodes score 0/1 (trivial: <=1 obligation, no file scope, no
-    // counterexamples, non-high-stakes lens), so each deterministically derives
-    // the cheapest "small" rank.
-    expect(plan.findings.map((f) => f.model_tier)).toEqual(["small", "small"]);
   });
 
   it("source_type-scoped digest coverage fails the gate for an enumerable intake with an uncovered finding", async () => {

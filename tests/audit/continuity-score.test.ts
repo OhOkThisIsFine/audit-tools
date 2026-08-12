@@ -52,10 +52,6 @@ function requireScores(
   }
 }
 
-function requireFirst<T>(values: T[]): asserts values is [T, ...T[]] {
-  if (values.length === 0) throw new Error("expected a non-empty array");
-}
-
 describe("computeContinuityScores", () => {
   test("no access-memory or empty paths → empty map (no bias)", () => {
     expect(computeContinuityScores(undefined, undefined).size).toBe(0);
@@ -161,39 +157,37 @@ describe("orderReviewPackets — canonical packet ordering (the single-sourced s
     };
   }
 
-  test("priority always dominates continuity — a high-continuity LOW packet never precedes a low-continuity HIGH packet", () => {
-    const high = packet("p-high", "high", ["src/cold.ts"]);
-    const low = packet("p-low", "low", ["src/hot.ts"]);
+  test("canonical component order is stable task identity, independent of priority and continuity", () => {
+    const laterHigh = packet("p-z", "high", ["src/cold.ts"]);
+    const earlierLow = packet("p-a", "low", ["src/hot.ts"]);
     const scores = new Map([
-      ["src/hot.ts", 0.99],
-      ["src/cold.ts", 0.01],
+      ["src/cold.ts", 0.99],
+      ["src/hot.ts", 0.01],
     ]);
-    const ordered = orderReviewPackets([low, high], scores);
-    requireFirst(ordered);
-    expect(ordered[0].packet_id).toBe("p-high");
+    expect(orderReviewPackets([laterHigh, earlierLow], scores).map((p) => p.packet_id))
+      .toEqual(["p-a", "p-z"]);
   });
 
-  test("within a priority tier, higher continuity sorts first", () => {
+  test("optional continuity scores cannot reorder canonical components", () => {
     const a = packet("p-a", "medium", ["src/cold.ts"]);
     const b = packet("p-b", "medium", ["src/hot.ts"]);
     const scores = new Map([
       ["src/hot.ts", 0.9],
       ["src/cold.ts", 0.1],
     ]);
-    const ordered = orderReviewPackets([a, b], scores);
-    requireFirst(ordered);
-    expect(ordered[0].packet_id).toBe("p-b");
+    expect(orderReviewPackets([b, a], scores).map((p) => p.packet_id))
+      .toEqual(["p-a", "p-b"]);
   });
 
-  test("no scores → priority → size → id, and reordering the input is idempotent", () => {
+  test("task count and input order cannot reorder canonical components", () => {
     const a = packet("p-a", "medium", ["src/a.ts"], 1);
-    const b = packet("p-b", "medium", ["src/b.ts"], 3); // more tasks → sorts first on size
-    expect(orderReviewPackets([a, b]).map((p) => p.packet_id)).toEqual(["p-b", "p-a"]);
-    expect(orderReviewPackets([b, a]).map((p) => p.packet_id)).toEqual(["p-b", "p-a"]);
+    const b = packet("p-b", "medium", ["src/b.ts"], 3);
+    expect(orderReviewPackets([a, b]).map((p) => p.packet_id)).toEqual(["p-a", "p-b"]);
+    expect(orderReviewPackets([b, a]).map((p) => p.packet_id)).toEqual(["p-a", "p-b"]);
   });
 });
 
-describe("continuity bias in packet ordering", () => {
+describe("continuity scores do not bias packet ordering", () => {
   function task(unit: string, file: string, lens = "correctness"): AuditTask {
     return {
       task_id: `task-${unit}`,
@@ -208,7 +202,7 @@ describe("continuity bias in packet ordering", () => {
     };
   }
 
-  test("higher-continuity packet sorts first within a priority tier; no scores → unbiased", () => {
+  test("buildReviewPackets returns the same canonical order with or without scores", () => {
     // Two independent single-file packets, same priority, no shared files/edges.
     const tasks = [task("lo", "src/lo.ts"), task("hi", "src/hi.ts")];
     const scores = new Map([
@@ -217,23 +211,9 @@ describe("continuity bias in packet ordering", () => {
     ]);
 
     const biased = buildReviewPackets(tasks, { continuityScores: scores });
-    requireFirst(biased);
-    requireFirst(biased[0].file_paths);
-    expect(biased[0].file_paths).toContain("src/hi.ts");
-
-    // Without scores the order falls back to the size/id tiebreak (deterministic),
-    // and must NOT be influenced by continuity.
     const unbiased = buildReviewPackets(tasks, {});
-    requireFirst(unbiased);
-    requireFirst(unbiased[0].file_paths);
-    const unbiasedFirst = unbiased[0].file_paths[0];
-    // Tiebreak is packet_id.localeCompare — independent of the score map.
-    expect(["src/hi.ts", "src/lo.ts"]).toContain(unbiasedFirst);
-    // The biased ordering put hi first; assert the bias actually changed nothing
-    // about composition (same set of packets, just ordered differently).
-    expect(new Set(biased.flatMap((p) => p.file_paths))).toEqual(
-      new Set(unbiased.flatMap((p) => p.file_paths)),
-    );
+    expect(biased.map((p) => p.packet_id)).toEqual(unbiased.map((p) => p.packet_id));
+    expect(biased.map((p) => p.file_paths)).toEqual(unbiased.map((p) => p.file_paths));
   });
 
   test("empty continuity scores behave identically to omitting them", () => {

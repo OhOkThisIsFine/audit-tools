@@ -126,61 +126,22 @@ test("INV-shared-tests-03: validateAuditFindingsReport is importable and validat
 });
 
 // ── INV-shared-tests-04: Lock invariant coverage is present ──────────────────
-// INV-shared-quota-06 (file lock token contract) must be covered. Regression-locking
-// this prevents the lock-token clobber guard from being silently removed.
+// The shared file-lock token contract must remain covered after quota retirement.
 
-test("INV-shared-tests-04: shared-quota-invariants.test.ts exists and covers lock token invariant (INV-shared-quota-06)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.ts");
-  expect(existsSync(filePath), "shared-quota-invariants.test.ts must exist — INV-shared-tests-04 (lock invariant coverage)").toBeTruthy();
+test("INV-shared-tests-04: fileLock.test.ts exists and covers the token-checked lock contract", () => {
+  const filePath = resolve(TESTS_DIR, "fileLock.test.ts");
+  expect(existsSync(filePath), "fileLock.test.ts must exist — INV-shared-tests-04 (lock invariant coverage)").toBeTruthy();
   const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-quota-06"), "shared-quota-invariants.test.ts must cover INV-shared-quota-06 (lock token contract) — INV-shared-tests-04").toBeTruthy();
-  // Must reference acquireLock / releaseLock.
-  expect(content.includes("acquireLock") && content.includes("releaseLock"), "INV-shared-quota-06 tests must exercise acquireLock and releaseLock — INV-shared-tests-04").toBeTruthy();
+  expect(content.includes("acquireLock") && content.includes("releaseLock"), "fileLock.test.ts must exercise acquireLock and releaseLock — INV-shared-tests-04").toBeTruthy();
 });
 
 test("INV-shared-tests-04: fileLock.ts exports acquireLock, releaseLock, withFileLock, and FileLockTimeoutError", async () => {
   const { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } =
-    await import("../../src/shared/quota/fileLock.ts");
+    await import("../../src/shared/io/fileLock.ts");
   expect(typeof acquireLock, "acquireLock must be exported — INV-shared-tests-04").toBe("function");
   expect(typeof releaseLock, "releaseLock must be exported — INV-shared-tests-04").toBe("function");
   expect(typeof withFileLock, "withFileLock must be exported — INV-shared-tests-04").toBe("function");
   expect(typeof FileLockTimeoutError, "FileLockTimeoutError must be exported as a class — INV-shared-tests-04").toBe("function");
-});
-
-// ── INV-shared-tests-05: Concurrency invariant coverage is present ────────────
-// INV-shared-quota-10 (parallel recordWaveOutcome convergence) and
-// INV-shared-quota-01 (host-limit partitioning) must both be covered.
-
-test("INV-shared-tests-05: shared-quota-invariants.test.ts covers concurrency invariants (INV-shared-quota-01 and -10)", () => {
-  const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.ts");
-  const content = readFileSync(filePath, "utf8");
-  expect(content.includes("INV-shared-quota-01"), "shared-quota-invariants.test.ts must cover INV-shared-quota-01 (host limit partitioning) — INV-shared-tests-05").toBeTruthy();
-  expect(content.includes("INV-shared-quota-10"), "shared-quota-invariants.test.ts must cover INV-shared-quota-10 (parallel recordWaveOutcome convergence) — INV-shared-tests-05").toBeTruthy();
-});
-
-test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit correctly (spot-check)", async () => {
-  // Spot-verify the concurrency invariant without relying on the full test file.
-  const { computeDispatchCapacity } = await import("../../src/shared/quota/capacity.ts");
-
-  function pool(id, limit) {
-    return {
-      id,
-      providerName: "claude-code",
-      hostModel: null,
-      hostConcurrencyLimit: { active_subagents: limit, source: "cli_flags", description: "t" },
-      quotaStateEntry: null,
-      discoveredLimits: null,
-      quotaSourceSnapshot: null,
-    };
-  }
-
-  // Two pools sharing the same limit of 2 must not produce total_slots > 2.
-  const capacity = computeDispatchCapacity({
-    pools: [pool("a", 2), pool("b", 2)],
-    sessionConfig: {},
-    pendingItemTokens: new Array(10).fill(5_000),
-  });
-  expect(capacity.total_slots <= 2, `total_slots ${capacity.total_slots} must not exceed shared host limit 2 (concurrent over-dispatch guard) — INV-shared-tests-05`).toBeTruthy();
 });
 
 // ── INV-shared-tests-06: Cycle detection invariant coverage is present ────────
@@ -230,48 +191,10 @@ test("INV-shared-tests-07: core validation symbols exported from shared index", 
   // Validation.
   expect(typeof shared.validateAuditFindingsReport, "validateAuditFindingsReport — INV-shared-tests-07").toBe("function");
   expect(typeof shared.isValidAuditFindingsReport, "isValidAuditFindingsReport — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.validateSessionConfig, "validateSessionConfig — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.SessionIntentV1Schema?.safeParse, "SessionIntentV1Schema — INV-shared-tests-07").toBe("function");
   expect(typeof shared.prefixValidationIssues, "prefixValidationIssues — INV-shared-tests-07").toBe("function");
   expect(typeof shared.requireKeys, "requireKeys — INV-shared-tests-07").toBe("function");
   expect(typeof shared.AUDIT_FINDINGS_CONTRACT_VERSION, "AUDIT_FINDINGS_CONTRACT_VERSION — INV-shared-tests-07").toBe("string");
-});
-
-test("INV-shared-tests-07: quota symbols exported from shared index", async () => {
-  const shared = await import("../../src/shared/index.ts");
-
-  // Quota state.
-  expect(typeof shared.setQuotaStateDir, "setQuotaStateDir — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.readQuotaState, "readQuotaState — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.writeQuotaState, "writeQuotaState — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.recordWaveOutcome, "recordWaveOutcome — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.readQuotaStateOrDegrade, "readQuotaStateOrDegrade — INV-shared-tests-07").toBe("function");
-  // NEGATIVE: the learned-concurrency inference is deleted, not merely unused.
-  // Concurrency is DECLARED by the provider or ABSENT — never learned from an
-  // outcome stream. Re-exporting a computeMaxSafeConcurrency would resurrect it.
-  expect(shared.computeMaxSafeConcurrency, "computeMaxSafeConcurrency must NOT exist").toBeUndefined();
-  expect(shared.computeRampUpConcurrency, "computeRampUpConcurrency must NOT exist").toBeUndefined();
-
-  // Capacity.
-  expect(typeof shared.computeDispatchCapacity, "computeDispatchCapacity — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.detectLivelock, "detectLivelock — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.buildEmptyPoolTerminal, "buildEmptyPoolTerminal — INV-shared-tests-07").toBe("function");
-
-  // Scheduler.
-  expect(typeof shared.scheduleWave, "scheduleWave — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.parseHostModelRoster, "parseHostModelRoster — INV-shared-tests-07").toBe("function");
-
-  // Lock.
-  expect(typeof shared.acquireLock, "acquireLock — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.releaseLock, "releaseLock — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.withFileLock, "withFileLock — INV-shared-tests-07").toBe("function");
-});
-
-test("INV-shared-tests-07: provider factory symbols exported from shared index", async () => {
-  const shared = await import("../../src/shared/index.ts");
-
-  expect(typeof shared.createFreshSessionProvider, "createFreshSessionProvider — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.resolveFreshSessionProviderName, "resolveFreshSessionProviderName — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.spawnLoggedCommand, "spawnLoggedCommand — INV-shared-tests-07").toBe("function");
 });
 
 test("INV-shared-tests-07: obligation ledger symbols exported from shared index", async () => {
@@ -290,15 +213,6 @@ test("INV-shared-tests-07: finding identity and lens vocabulary exported from sh
   expect(shared.VALID_LENSES instanceof Set, "VALID_LENSES must be a Set — INV-shared-tests-07").toBeTruthy();
   expect(shared.VALID_SEVERITIES instanceof Set, "VALID_SEVERITIES must be a Set — INV-shared-tests-07").toBeTruthy();
   expect(shared.VALID_CONFIDENCES instanceof Set, "VALID_CONFIDENCES must be a Set — INV-shared-tests-07").toBeTruthy();
-});
-
-test("INV-shared-tests-07: rolling dispatch symbols exported from shared index", async () => {
-  const shared = await import("../../src/shared/index.ts");
-
-  expect(typeof shared.createRollingDispatcher, "createRollingDispatcher — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.selectProvider, "selectProvider — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.InFlightTokenTracker, "InFlightTokenTracker (class) — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.ROLLING_DISPATCH_ENGINE_VERSION, "ROLLING_DISPATCH_ENGINE_VERSION — INV-shared-tests-07").toBe("string");
 });
 
 test("INV-shared-tests-07: observability and IO symbols exported from shared index", async () => {
@@ -346,9 +260,7 @@ const SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/spawn.mjs");
 // load (ERR_UNKNOWN_FILE_EXTENSION ".ts"). They use raw node:child_process with
 // `windowsHide: true` inline instead, verified by the inline-windowsHide check
 // below rather than the no-raw-import walk.
-const CHILD_EXECUTED_SPAWN_FILES = [
-  resolve(TESTS_ROOT, "audit/helpers/provider-assisted-bridge.mjs"),
-];
+const CHILD_EXECUTED_SPAWN_FILES = [];
 
 // The child_process entry points that create a subprocess (and thus a window).
 const SPAWN_CALLEES = ["spawnSync", "spawn", "execSync", "execFileSync", "execFile", "exec"];

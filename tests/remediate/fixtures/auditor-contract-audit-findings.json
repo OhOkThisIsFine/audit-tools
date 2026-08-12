@@ -12,6 +12,119 @@
     "excluded_file_count": 1,
     "runtime_validation_status_breakdown": {}
   },
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "AUD-001",
+        "file_paths": [
+          "src/api/auth.ts"
+        ],
+        "unit_ids": [
+          "src-auth"
+        ],
+        "tags": [
+          "security"
+        ]
+      },
+      {
+        "id": "AUD-002",
+        "file_paths": [
+          "src/api/auth.ts",
+          "src/lib/session.ts"
+        ],
+        "unit_ids": [
+          "src-auth"
+        ],
+        "tags": [
+          "tests"
+        ]
+      },
+      {
+        "id": "AUD-003",
+        "file_paths": [
+          "src/billing/invoice.ts"
+        ],
+        "unit_ids": [
+          "src-billing"
+        ],
+        "tags": [
+          "correctness"
+        ]
+      }
+    ],
+    "pair_scores": [
+      {
+        "left": "AUD-001",
+        "right": "AUD-002",
+        "evidence": {
+          "call_import_reference_adjacency": false,
+          "same_directory": true,
+          "shared_critical_flow": false,
+          "shared_file": true,
+          "shared_semantic_tag_or_same_lens": false,
+          "shared_unit": true
+        },
+        "score": 190,
+        "eligible": true
+      },
+      {
+        "left": "AUD-001",
+        "right": "AUD-003",
+        "evidence": {
+          "call_import_reference_adjacency": false,
+          "same_directory": false,
+          "shared_critical_flow": false,
+          "shared_file": false,
+          "shared_semantic_tag_or_same_lens": false,
+          "shared_unit": false
+        },
+        "score": 0,
+        "eligible": false
+      },
+      {
+        "left": "AUD-002",
+        "right": "AUD-003",
+        "evidence": {
+          "call_import_reference_adjacency": false,
+          "same_directory": false,
+          "shared_critical_flow": false,
+          "shared_file": false,
+          "shared_semantic_tag_or_same_lens": false,
+          "shared_unit": false
+        },
+        "score": 0,
+        "eligible": false
+      }
+    ],
+    "eligible_candidates": [
+      {
+        "left": "AUD-001",
+        "right": "AUD-002",
+        "score": 190
+      }
+    ],
+    "merge_trace": [
+      {
+        "left": "AUD-001",
+        "right": "AUD-002",
+        "score": 190,
+        "decision": "merge",
+        "root": "AUD-001"
+      }
+    ],
+    "merge_decisions": [
+      "merge"
+    ],
+    "components": [
+      [
+        "AUD-001",
+        "AUD-002"
+      ],
+      [
+        "AUD-003"
+      ]
+    ]
+  },
   "work_blocks": [
     {
       "id": "block-1",
@@ -26,6 +139,7 @@
         "src/api/auth.ts",
         "src/lib/session.ts"
       ],
+      "role": "implementation",
       "max_severity": "high",
       "depends_on": [],
       "rationale": "All findings map to the same owned unit and should be remediated together."
@@ -41,6 +155,7 @@
       "owned_files": [
         "src/billing/invoice.ts"
       ],
+      "role": "implementation",
       "max_severity": "low",
       "depends_on": [
         "block-1"
@@ -48,6 +163,7 @@
       "rationale": "Findings share owned units transitively and should remain one non-overlapping remediation block."
     }
   ],
+  "work_block_seams": [],
   "findings": [
     {
       "id": "AUD-001",

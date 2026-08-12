@@ -716,9 +716,14 @@ test("result ingestion appends selective deepening tasks to the next review plan
   );
 
   expect(run.updated.audit_tasks!.length).toBe(2);
-  expect(run.updated.audit_tasks![0].status).toBe("complete");
-  expect(run.updated.audit_tasks![1].status).toBe("pending");
-  expect(run.updated.audit_tasks![1].tags!.includes("selective_deepening")).toBeTruthy();
+  expect(
+    run.updated.audit_tasks!.find((task) => task.task_id === result.task_id)
+      ?.status,
+  ).toBe("complete");
+  const followup = run.updated.audit_tasks!.find((task) =>
+    task.tags?.includes("selective_deepening"),
+  );
+  expect(followup?.status).toBe("pending");
   expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
   expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
@@ -783,9 +788,14 @@ test("runtime validation updates append disagreement follow-ups to the next revi
   );
 
   expect(run.updated.audit_tasks!.length).toBe(2);
-  const followup = run.updated.audit_tasks![1];
-  expect(followup.tags!.includes("trigger:runtime_validation_disagreement")).toBeTruthy();
-  expect(followup.status).toBe("pending");
+  const followup = run.updated.audit_tasks!.find((task) =>
+    task.tags?.includes("trigger:runtime_validation_disagreement"),
+  );
+  expect(followup).toBeDefined();
+  expect(
+    followup?.tags?.includes("trigger:runtime_validation_disagreement"),
+  ).toBeTruthy();
+  expect(followup?.status).toBe("pending");
   expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
   expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
@@ -1972,15 +1982,18 @@ test("ingestion executor folds pending requeue tasks for uncovered files into th
   expect(requeueTask, "expected a pending requeue task for src/lib/utils.ts").toBeTruthy();
   expect(requeueTask!.status).toBe("pending");
 
-  // The requeue task must count toward the dispatch surface so JIT
-  // packetization actually covers it: refreshed metrics span the persisted
-  // tasks PLUS every pending requeue task not already tracked.
-  const trackedIds = new Set(run.updated.audit_tasks!.map((t) => t.task_id));
-  const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
-    (t) => t.status === "pending" && !trackedIds.has(t.task_id),
+  // The requeue task must be folded into the persisted dispatch surface so JIT
+  // packetization, the affinity graph, and metrics all describe one task set.
+  const foldedRequeue = run.updated.audit_tasks!.find(
+    (task) => task.task_id === requeueTask!.task_id,
   );
-  expect(foldedRequeue.some((t) => t.file_paths.includes("src/lib/utils.ts")), "utils requeue task must be part of the folded dispatch surface").toBeTruthy();
-  expect(run.updated.audit_plan_metrics!.task_count).toBe(run.updated.audit_tasks!.length + foldedRequeue.length);
+  expect(
+    foldedRequeue?.file_paths.includes("src/lib/utils.ts"),
+    "utils requeue task must be part of the folded dispatch surface",
+  ).toBeTruthy();
+  expect(run.updated.audit_plan_metrics!.task_count).toBe(
+    run.updated.audit_tasks!.length,
+  );
   expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
 });
 

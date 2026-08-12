@@ -6,7 +6,7 @@
 - `schemas/`: JSON schemas for public and internal artifacts
 - `examples/`: validated artifact examples
 - `skills/audit-code/`: canonical prompt and skill-facing instructions
-- `dispatch/`: packet-dispatch support data
+- `dispatch/`: standalone result validation and merge helpers
 - `tests/`: vitest-based test suite and regression coverage
 - `dist/`: build output (gitignored, not checked in) produced by `npm run build` / the `prepack` script;
   shipped only in the packed npm tarball
@@ -23,7 +23,7 @@ shipped-sprint archive — that history lives in git + project memory.
 npm install
 npm run check
 npm test
-npx vitest run tests/audit/next-step-core-dispatch.test.ts
+npx vitest run tests/audit/host-handoff.test.ts
 npm run verify:release
 ```
 
@@ -33,14 +33,15 @@ package-scoped workflows in a fresh clone or git worktree. Missing
 errors because dependents may resolve stale compiled `dist/` output.
 
 The test suite is intentionally contract-heavy. Update tests when changing
-schema shape, prompt contracts, dispatch behavior, installer output, or release
+schema shape, prompt contracts, host-handoff behavior, installer output, or release
 workflow semantics.
 
 ## Architecture
 
 The system separates deterministic extraction from bounded LLM judgment: intake, analysis artifacts,
-task planning, review, ingestion, and synthesis into `audit-report.md`. Provider/model ordering is an
-external broker concern, not an audit obligation.
+task planning, provider-neutral host workloads, strict result ingestion, and synthesis into
+`audit-report.md`. Backend/model selection, concurrency, retries, and transport belong to the host and
+are not audit-tools configuration.
 
 **The ordering has one home** — the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`, walked by
 `decideNextStep`. `README.md` carries the conceptual grouping with the disclaimer that `PRIORITY` is
@@ -101,8 +102,8 @@ graph resolution or generic analyzer ownership roots before adding another
 ecosystem-specific parser.
 
 Before treating a build as production-ready, verify the full review loop in one
-real host (`prepare-dispatch` → worker reviews each packet → `submit-packet` →
-`merge-and-ingest` → `validate`), then run the release gate from a clean
+real host (`next-step` emits the complete workload → the host writes each bound
+result → `next-step` ingests them → `validate`), then run the release gate from a clean
 checkout (see [`release.md`](release.md) for what `npm run verify:release`
 covers and when to run it). Keep runtime command execution covered when
 changing it — including the Windows package-manager-shim path (see the Windows

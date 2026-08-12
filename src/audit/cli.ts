@@ -1,12 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  setQuotaStateDir,
-} from "./quota/index.js";
-import {
-  assertCliCommandAllowedFromCwd,
-  resolveAuditCodeStateDir,
-} from "audit-tools/shared";
+import { assertCliCommandAllowedFromCwd } from "audit-tools/shared";
 
 import {
   DIRECT_CLI_DEFAULTS,
@@ -21,14 +15,8 @@ import {
   warnIfNotGitRepo,
 } from "./cli/args.js";
 import { cmdNextStep } from "./cli/nextStepCommand.js";
-import { cmdWorkerRun } from "./cli/workerRunCommand.js";
-import { cmdSubmitPacket } from "./cli/submitPacketCommand.js";
-import { cmdMergeAndIngest } from "./cli/mergeAndIngestCommand.js";
 import { cmdStatus } from "./cli/statusCommand.js";
 import { runSample } from "./cli/sampleRunCommand.js";
-import { cmdAdvanceAudit } from "./cli/advanceAuditCommand.js";
-import { cmdPrepareDispatch } from "./cli/prepareDispatchCommand.js";
-import { cmdValidateResult } from "./cli/validateResultCommand.js";
 import { cmdImportExternalAnalyzer } from "./cli/importExternalAnalyzerCommand.js";
 import { cmdIntake } from "./cli/intakeCommand.js";
 import { cmdPlan } from "./cli/planCommand.js";
@@ -42,10 +30,7 @@ import { cmdSynthesize } from "./cli/synthesizeCommand.js";
 import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
 import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
 import { cmdCleanup } from "./cli/cleanupCommand.js";
-import { cmdQuota } from "./cli/quotaCommand.js";
-import { cmdDispatchStatus } from "./cli/dispatchStatusCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
-import { cmdScoreTokens } from "./cli/scoreTokensCommand.js";
 
 export { runSample };
 
@@ -74,16 +59,9 @@ export const cliTestUtils = {
  * caller's true cwd arrives via AUDIT_TOOLS_CALLER_CWD (stamped by the
  * wrapper, scrubbed from provider spawns).
  */
-const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set([
-  "worker-run",
-  "submit-packet",
-  "validate-result",
-  "validate-results",
-  "validate",
-]);
+const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set();
 
 async function main(argv: string[]): Promise<void> {
-  setQuotaStateDir(resolveAuditCodeStateDir());
   const command = argv[2] ?? "sample-run";
   assertCliCommandAllowedFromCwd({
     cliName: "audit-code",
@@ -97,14 +75,8 @@ async function main(argv: string[]): Promise<void> {
     case "sample-run":
       await runSample(argv);
       return;
-    case "advance-audit":
-      await cmdAdvanceAudit(argv);
-      return;
     case "next-step":
       await cmdNextStep(argv);
-      return;
-    case "worker-run":
-      await cmdWorkerRun(argv);
       return;
     case "import-external-analyzer":
       await cmdImportExternalAnalyzer(argv);
@@ -145,37 +117,16 @@ async function main(argv: string[]): Promise<void> {
     case "cleanup":
       await cmdCleanup(argv);
       return;
-    case "prepare-dispatch":
-      await cmdPrepareDispatch(argv);
-      return;
-    case "merge-and-ingest":
-      await cmdMergeAndIngest(argv);
-      return;
-    case "submit-packet":
-      await cmdSubmitPacket(argv);
-      return;
-    case "validate-result":
-      await cmdValidateResult(argv);
-      return;
-    case "quota":
-      await cmdQuota(argv);
-      return;
     case "status":
       await cmdStatus(argv);
-      return;
-    case "dispatch-status":
-      await cmdDispatchStatus(argv);
       return;
     case "score-audit":
       await cmdScoreAudit(argv);
       return;
-    case "score-tokens":
-      await cmdScoreTokens(argv);
-      return;
     default:
       console.error(`Unknown command: ${command}`);
       console.error(
-        "Available commands: sample-run, advance-audit, next-step, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, force-synthesis, resynthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status, score-audit, score-tokens",
+        "Available commands: sample-run, next-step, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, force-synthesis, resynthesize, cleanup, status, score-audit",
       );
       process.exitCode = 1;
   }

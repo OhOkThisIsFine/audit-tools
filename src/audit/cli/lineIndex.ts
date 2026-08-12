@@ -2,6 +2,10 @@ import { resolve } from "node:path";
 import { countLines } from "./args.js";
 import type { AuditTask, RepoManifest } from "../types.js";
 import { isFileMissingError } from "audit-tools/shared";
+import {
+  canonicalizeAuditTasks,
+  compareCodeUnits,
+} from "../../shared/affinityArtifacts.js";
 
 // Line-count helpers extracted from cli.ts. Pure functions over the repo
 // manifest / task file paths — used to annotate audit tasks with per-file line
@@ -88,7 +92,7 @@ export async function buildLineIndexForPaths(
   root: string,
   paths: string[],
 ): Promise<Record<string, number>> {
-  const uniquePaths = [...new Set(paths)].sort();
+  const uniquePaths = [...new Set(paths)].sort(compareCodeUnits);
   const entries: Array<readonly [string, number]> = [];
   let failureCount = 0;
   const batchSize = LINE_COUNT_BATCH_SIZE;
@@ -129,19 +133,21 @@ export async function addFileLineCountHints(
     root,
     tasks.flatMap((task) => task.file_paths),
   );
-  return tasks.map((task) => ({
-    ...task,
-    file_line_counts: Object.fromEntries(
-      task.file_paths.map((path) => {
-        const measured = lineIndex[path];
-        // `file_line_counts` is the schema-constrained contract field
-        // (`z.number().int().min(0)` — schemas/audit_result.schema.json,
-        // src/audit/types.ts) with no "unmeasured" concept of its own: degrade
-        // explicitly to 0 HERE, at the boundary where the value leaves this
-        // diagnostic index and enters a persisted, schema-validated artifact,
-        // rather than leaking the UNMEASURED_LINE_COUNT sentinel into it.
-        return [path, isUnmeasuredLineCount(measured) ? 0 : measured] as const;
-      }),
-    ),
-  }));
+  return canonicalizeAuditTasks(
+    tasks.map((task) => ({
+      ...task,
+      file_line_counts: Object.fromEntries(
+        task.file_paths.map((path) => {
+          const measured = lineIndex[path];
+          // `file_line_counts` is the schema-constrained contract field
+          // (`z.number().int().min(0)` — schemas/audit_result.schema.json,
+          // src/audit/types.ts) with no "unmeasured" concept of its own: degrade
+          // explicitly to 0 HERE, at the boundary where the value leaves this
+          // diagnostic index and enters a persisted, schema-validated artifact,
+          // rather than leaking the UNMEASURED_LINE_COUNT sentinel into it.
+          return [path, isUnmeasuredLineCount(measured) ? 0 : measured] as const;
+        }),
+      ),
+    })),
+  );
 }

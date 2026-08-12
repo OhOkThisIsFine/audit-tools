@@ -9,7 +9,7 @@ import {
   withTempRepo,
   advanceToDispatchReady,
   buildSyntheticResults,
-  disableNarrative,
+  seedEmptyNarrative,
   callIngestResults,
   callNextStep,
 } from "./helpers/completion-harness.js";
@@ -24,7 +24,7 @@ test("next-step presents the rendered report instead of a run-limit block", { ti
     const tasks = JSON.parse(
       await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
     );
-    await disableNarrative(artifactsDir);
+    await seedEmptyNarrative(artifactsDir);
     const resultsPath = join(root, "audit_results.json");
     await writeFile(
       resultsPath,

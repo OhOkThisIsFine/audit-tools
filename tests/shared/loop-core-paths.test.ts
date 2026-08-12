@@ -2,28 +2,24 @@ import { describe, it, expect } from "vitest";
 import { LOOP_CORE_PATTERNS, isLoopCorePath } from "audit-tools/shared";
 
 describe("loopCorePaths — the single-sourced loop-core path set", () => {
-  it("matches dispatch/quota/rolling/engine shared substrate (dir prefixes)", () => {
-    expect(isLoopCorePath("src/shared/dispatch/admissionLoop.ts")).toBe(true);
-    expect(isLoopCorePath("src/shared/quota/scheduler.ts")).toBe(true);
-    expect(isLoopCorePath("src/shared/rolling/pausedState.ts")).toBe(true);
+  it("matches the shared obligation engine substrate", () => {
     expect(isLoopCorePath("src/shared/engine/obligationEngine.ts")).toBe(true);
   });
 
   it("matches audit + remediate orchestrator step machines and drivers", () => {
     expect(isLoopCorePath("src/audit/orchestrator/nextStep.ts")).toBe(true);
     expect(isLoopCorePath("src/audit/cli/dispatch.ts")).toBe(true);
-    expect(isLoopCorePath("src/audit/cli/dispatch/packetPrompt.ts")).toBe(true);
-    expect(isLoopCorePath("src/audit/cli/rollingAuditDispatch.ts")).toBe(true);
+    expect(isLoopCorePath("src/audit/cli/dispatch/hostHandoff.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/nextStep.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/dispatch/acceptNode.ts")).toBe(true);
-    expect(isLoopCorePath("src/remediate/steps/rollingSession.ts")).toBe(true);
+    expect(isLoopCorePath("src/remediate/steps/dispatch/hostHandoff.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/contractPipeline.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/riskSignal.ts")).toBe(true);
   });
 
   it("normalizes win32 backslashes and a leading ./", () => {
-    expect(isLoopCorePath("src\\shared\\quota\\state.ts")).toBe(true);
-    expect(isLoopCorePath("./src/shared/dispatch/coordinator.ts")).toBe(true);
+    expect(isLoopCorePath("src\\shared\\engine\\obligationEngine.ts")).toBe(true);
+    expect(isLoopCorePath("./src/audit/orchestrator/nextStep.ts")).toBe(true);
   });
 
   it("does NOT match ordinary non-loop-core source, tests, or docs", () => {

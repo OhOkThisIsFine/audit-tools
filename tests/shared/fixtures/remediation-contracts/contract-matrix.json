@@ -1,0 +1,687 @@
+{
+  "contract_version": "zero-adapter-remediation-contract-matrix/v1",
+  "immutable": true,
+  "foundation_module": "remediation-contract-tests",
+  "command_defaults": {
+    "cwd": ".",
+    "normalized_environment": {
+      "CI": "1",
+      "NO_COLOR": "1",
+      "TZ": "UTC"
+    }
+  },
+  "approved_defaults": {
+    "session_intent": {
+      "canonical_path": ".audit-tools/audit/session-config.json",
+      "absent_result": {
+        "status": "not_configured",
+        "intent": {
+          "review_mode": "attended",
+          "observability": "standard"
+        }
+      },
+      "configured_status": "configured",
+      "accepted_keys": [
+        "observability",
+        "review_mode"
+      ],
+      "review_mode_values": [
+        "attended",
+        "autonomous"
+      ],
+      "observability_values": [
+        "standard",
+        "verbose"
+      ],
+      "invalid_present_behavior": "path-qualified-error-without-fallback",
+      "maximum_filesystem_reads": 1
+    },
+    "remediation_planning": {
+      "membership_source": "shared-content-coherence/findings-projection",
+      "token_estimate_basis": "canonical-unique-physical-file-bytes-plus-finding-count",
+      "token_estimate_effect": "advisory-only",
+      "backend_fit": false,
+      "transport_sizing": false
+    }
+  },
+  "coherence_policy": {
+    "evidence_classes": {
+      "call_import_reference_adjacency": 70,
+      "same_directory": 10,
+      "shared_critical_flow": 60,
+      "shared_file": 100,
+      "shared_semantic_tag_or_same_lens": 30,
+      "shared_unit": 80
+    },
+    "graph_kind_aliases": {
+      "shared_file": [
+        "cross_lens_same_file",
+        "shared_file"
+      ],
+      "shared_unit": [
+        "same_unit"
+      ],
+      "call_import_reference_adjacency": [
+        "call_adjacent"
+      ],
+      "shared_critical_flow": [
+        "same_flow"
+      ],
+      "shared_semantic_tag_or_same_lens": [
+        "same_lens"
+      ],
+      "same_directory": [
+        "same_dir"
+      ]
+    },
+    "threshold": 60,
+    "pair_score_rule": "sum-each-boolean-evidence-class-at-most-once",
+    "candidate_order": [
+      "score-desc",
+      "min-item-id-code-unit-asc",
+      "max-item-id-code-unit-asc"
+    ],
+    "merge_predicate": "roots-differ",
+    "canonical_root": "lexicographically-smallest-minimum-member-id",
+    "final_member_order": "item-id-code-unit-asc",
+    "final_component_order": "minimum-member-id-code-unit-asc",
+    "consumer_role": "projection-only",
+    "capacity_or_annotation_veto": false,
+    "golden_trace": {
+      "eligible_candidates": [
+        {
+          "left": "a",
+          "right": "c",
+          "score": 120
+        },
+        {
+          "left": "a",
+          "right": "b",
+          "score": 110
+        },
+        {
+          "left": "d",
+          "right": "e",
+          "score": 70
+        }
+      ],
+      "merge_decisions": [
+        "merge",
+        "merge",
+        "merge"
+      ],
+      "components": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "d",
+          "e"
+        ]
+      ]
+    }
+  },
+  "gate_profiles": [
+    {
+      "id": "whole-repository-v1",
+      "commands": [
+        {
+          "id": "source-typecheck",
+          "argv": [
+            "npm",
+            "run",
+            "check"
+          ]
+        },
+        {
+          "id": "test-typecheck",
+          "argv": [
+            "npm",
+            "run",
+            "check:tests"
+          ]
+        },
+        {
+          "id": "lint",
+          "argv": [
+            "npm",
+            "run",
+            "check:lint"
+          ]
+        },
+        {
+          "id": "dead-code",
+          "argv": [
+            "npm",
+            "run",
+            "check:deadcode"
+          ]
+        },
+        {
+          "id": "dependency-graph",
+          "argv": [
+            "npm",
+            "run",
+            "check:depgraph"
+          ]
+        },
+        {
+          "id": "full-suite",
+          "argv": [
+            "npm",
+            "test"
+          ]
+        },
+        {
+          "id": "tarball-smoke",
+          "argv": [
+            "npm",
+            "run",
+            "pack:smoke"
+          ]
+        },
+        {
+          "id": "packaged-audit-smoke",
+          "argv": [
+            "npm",
+            "run",
+            "smoke:packaged-audit-code"
+          ]
+        },
+        {
+          "id": "packaged-remediation-smoke",
+          "argv": [
+            "npm",
+            "run",
+            "smoke:packaged-remediate-code"
+          ]
+        },
+        {
+          "id": "handoff-parity",
+          "argv": [
+            "npm",
+            "run",
+            "check:handoff-roadmap"
+          ]
+        }
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "attribution-contract-retirement",
+      "block_id": "CP-BLOCK-attribution-contract-retirement",
+      "depends_on": [
+        "audit-zero-adapter-boundary",
+        "backend-independent-remediation-planning",
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "remediation-zero-adapter-boundary",
+        "shared-content-coherence",
+        "stable-task-affinity-artifacts"
+      ],
+      "test_contract": {
+        "test_id": "attribution-contract-retirement-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/shared/provider-attribution-retirement.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/shared/provider-attribution-retirement.test.ts"
+        },
+        "expected_red_failure_signature": "contract:attribution-contract-retirement:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/shared/provider-attribution-retirement.test.ts",
+        "npm run check:deadcode",
+        "npm run build",
+        "npm run check",
+        "npm test"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "all_eight_overlap_manifests_reconciled",
+        "clean_build_and_package_absence",
+        "final_behavioral_gate_coverage",
+        "final_static_reachability_scan",
+        "integration_coordinator_closure",
+        "provider_agnostic_execution_record",
+        "retired_attribution_deep_import_absent",
+        "retired_attribution_export_absent",
+        "retired_attribution_fixture_absent",
+        "retired_attribution_generated_output_absent",
+        "retired_attribution_test_residue_absent",
+        "retired_attribution_type_absent",
+        "unrelated_shared_apis_and_bins_preserved"
+      ],
+      "forbidden_surfaces": [
+        "backend_attribution",
+        "model_attribution",
+        "provider_attribution",
+        "provider_coupled_source_attribution",
+        "retired_attribution_alias",
+        "retired_attribution_shim",
+        "stale_dist_deep_import",
+        "transport_attribution"
+      ],
+      "deletion_guard": {
+        "guard_id": "attribution-contract-retirement-retired-surface-absence",
+        "positive_replacement_guarantee": "provider_agnostic_execution_record"
+      },
+      "fixture_ids": [
+        "attribution-free-result"
+      ]
+    },
+    {
+      "id": "audit-zero-adapter-boundary",
+      "block_id": "CP-BLOCK-audit-zero-adapter-boundary",
+      "depends_on": [
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "shared-content-coherence",
+        "stable-task-affinity-artifacts"
+      ],
+      "test_contract": {
+        "test_id": "audit-zero-adapter-boundary-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/audit/host-handoff.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/audit/host-handoff.test.ts"
+        },
+        "expected_red_failure_signature": "contract:audit-zero-adapter-boundary:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/audit/host-handoff.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "canonical_affinity_and_coherence_consumed",
+        "complete_host_workload_emission",
+        "deterministic_obligations_preserved",
+        "durable_root_contained_host_artifacts",
+        "host_owned_semantic_review",
+        "idempotent_result_ingestion",
+        "not_configured_uses_approved_defaults",
+        "prompt_bound_result_validation",
+        "provider_neutral_task_metadata",
+        "shared_session_loader_once",
+        "untrusted_result_validation"
+      ],
+      "forbidden_surfaces": [
+        "backend_pool",
+        "execution_adapters",
+        "headless_launch",
+        "hybrid_routing",
+        "leases",
+        "model_hint",
+        "provider_attempt",
+        "provider_factory",
+        "provider_probe",
+        "provider_roster",
+        "quota_admission",
+        "quota_pause",
+        "rolling_dispatch",
+        "routing",
+        "source_pool",
+        "spawn_substrate",
+        "transport_config"
+      ],
+      "deletion_guard": {
+        "guard_id": "audit-zero-adapter-boundary-retired-surface-absence",
+        "positive_replacement_guarantee": "complete_host_workload_emission"
+      },
+      "fixture_ids": [
+        "audit-host-workload",
+        "audit-untrusted-result"
+      ]
+    },
+    {
+      "id": "backend-independent-remediation-planning",
+      "block_id": "CP-BLOCK-backend-independent-remediation-planning",
+      "depends_on": [
+        "remediation-contract-tests",
+        "shared-content-coherence"
+      ],
+      "test_contract": {
+        "test_id": "backend-independent-remediation-planning-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/remediate/backend-independent-planning.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/remediate/backend-independent-planning.test.ts"
+        },
+        "expected_red_failure_signature": "contract:backend-independent-remediation-planning:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/remediate/backend-independent-planning.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "affected_file_integrity",
+        "canonical_coherence_membership_preserved",
+        "complete_plan_from_coherence",
+        "deterministic_local_token_estimates",
+        "exhaustive_mutually_exclusive_coverage",
+        "provider_neutral_work_blocks",
+        "strict_structured_findings_validation",
+        "zero_backend_inputs"
+      ],
+      "forbidden_surfaces": [
+        "backend_fit_partitioning",
+        "backend_window_config",
+        "capacity_admission",
+        "context_window_input",
+        "model_fit_partitioning",
+        "provider_repartitioning",
+        "second_partition_algorithm",
+        "transport_sizing"
+      ],
+      "deletion_guard": {
+        "guard_id": "backend-independent-remediation-planning-retired-surface-absence",
+        "positive_replacement_guarantee": "complete_plan_from_coherence"
+      },
+      "fixture_ids": [
+        "backend-independent-plan"
+      ]
+    },
+    {
+      "id": "canonical-session-intent",
+      "block_id": "CP-BLOCK-canonical-session-intent",
+      "depends_on": [
+        "remediation-contract-tests"
+      ],
+      "test_contract": {
+        "test_id": "canonical-session-intent-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/shared/session-intent.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/shared/session-intent.test.ts"
+        },
+        "expected_red_failure_signature": "contract:canonical-session-intent:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/shared/session-intent.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "bounded_single_read",
+        "canonical_path_only",
+        "configured_or_not_configured_result",
+        "cwd_independent_supplied_root",
+        "invalid_present_fails_closed_path_qualified",
+        "legacy_fallback_rejection",
+        "observability_standard_default",
+        "review_intent_never_authorizes_execution",
+        "review_mode_attended_default",
+        "shared_strict_loader",
+        "unknown_key_rejection",
+        "zero_process_network_or_provider_actions"
+      ],
+      "forbidden_surfaces": [
+        "alternate_session_config_path",
+        "audit_local_session_loader",
+        "backend_window_input",
+        "legacy_session_config_fallback",
+        "model_roster_input",
+        "permissive_unknown_keys",
+        "provider_input",
+        "quota_input",
+        "remediation_local_session_loader",
+        "transport_input"
+      ],
+      "deletion_guard": {
+        "guard_id": "canonical-session-intent-retired-surface-absence",
+        "positive_replacement_guarantee": "shared_strict_loader"
+      },
+      "fixture_ids": [
+        "session-intent-canonical"
+      ]
+    },
+    {
+      "id": "remediation-zero-adapter-boundary",
+      "block_id": "CP-BLOCK-remediation-zero-adapter-boundary",
+      "depends_on": [
+        "backend-independent-remediation-planning",
+        "canonical-session-intent",
+        "remediation-contract-tests",
+        "shared-content-coherence"
+      ],
+      "test_contract": {
+        "test_id": "remediation-zero-adapter-boundary-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/remediate/host-handoff.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/remediate/host-handoff.test.ts"
+        },
+        "expected_red_failure_signature": "contract:remediation-zero-adapter-boundary:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/remediate/host-handoff.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "all_eligible_host_work_emission",
+        "commit_evidence_validation",
+        "dependency_and_phase_safety",
+        "host_owned_execution_choices",
+        "not_configured_uses_approved_defaults",
+        "prompt_binding_validation",
+        "provider_neutral_work_items",
+        "self_contained_host_handoff",
+        "strict_current_state_schema",
+        "test_evidence_validation",
+        "unsupported_retired_state_rejection",
+        "worktree_binding_validation"
+      ],
+      "forbidden_surfaces": [
+        "backend_pool",
+        "execution_adapters",
+        "headless_launch",
+        "leases",
+        "legacy_state_migration",
+        "legacy_state_recognizer",
+        "provider_factory",
+        "provider_launch",
+        "quota_admission",
+        "quota_terminal",
+        "retired_state_shim",
+        "rolling_dispatch",
+        "routing",
+        "spawn_substrate",
+        "transport_config"
+      ],
+      "deletion_guard": {
+        "guard_id": "remediation-zero-adapter-boundary-retired-surface-absence",
+        "positive_replacement_guarantee": "all_eligible_host_work_emission"
+      },
+      "fixture_ids": [
+        "remediation-host-result",
+        "remediation-host-workload"
+      ]
+    },
+    {
+      "id": "shared-content-coherence",
+      "block_id": "CP-BLOCK-shared-content-coherence",
+      "depends_on": [
+        "remediation-contract-tests",
+        "stable-task-affinity-artifacts"
+      ],
+      "test_contract": {
+        "test_id": "shared-content-coherence-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/shared/content-coherence.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/shared/content-coherence.test.ts"
+        },
+        "expected_red_failure_signature": "contract:shared-content-coherence:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/shared/content-coherence.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "annotations_aggregate_after_membership",
+        "canonical_candidate_ordering",
+        "canonical_component_membership",
+        "canonical_pair_ordering",
+        "canonical_union_ordering",
+        "consumer_projection_only",
+        "deterministic_acyclic_dependencies_and_seams",
+        "deterministic_shared_coherence_core",
+        "every_item_exactly_once",
+        "exact_six_class_score_table",
+        "golden_trace_exact",
+        "identical_audit_and_findings_core_trace",
+        "systemic_findings_remain_in_component",
+        "threshold_60"
+      ],
+      "forbidden_surfaces": [
+        "annotation_driven_membership",
+        "audit_local_coherence_algorithm",
+        "backend_window_fit_scoring",
+        "capacity_or_size_veto",
+        "consumer_regrouping",
+        "environment_or_filesystem_input",
+        "implicit_unknown_relation_weight",
+        "insertion_order_tie_break",
+        "provider_or_quota_input",
+        "remediation_local_coherence_algorithm"
+      ],
+      "deletion_guard": {
+        "guard_id": "shared-content-coherence-retired-surface-absence",
+        "positive_replacement_guarantee": "deterministic_shared_coherence_core"
+      },
+      "fixture_ids": [
+        "coherence-golden-topology"
+      ]
+    },
+    {
+      "id": "stable-task-affinity-artifacts",
+      "block_id": "CP-BLOCK-stable-task-affinity-artifacts",
+      "depends_on": [
+        "remediation-contract-tests"
+      ],
+      "test_contract": {
+        "test_id": "stable-task-affinity-artifacts-red-green-v1",
+        "focused_command": {
+          "argv": [
+            "npx",
+            "vitest",
+            "run",
+            "tests/shared/task-affinity-artifacts.test.ts"
+          ],
+          "cwd": ".",
+          "normalized_environment": {
+            "CI": "1",
+            "NO_COLOR": "1",
+            "TZ": "UTC"
+          },
+          "test_file": "tests/shared/task-affinity-artifacts.test.ts"
+        },
+        "expected_red_failure_signature": "contract:stable-task-affinity-artifacts:not-yet-satisfied"
+      },
+      "module_green_commands": [
+        "npx vitest run tests/shared/task-affinity-artifacts.test.ts",
+        "npm run check"
+      ],
+      "final_gate_profile": "whole-repository-v1",
+      "required_guarantees": [
+        "all_persistence_and_hash_callers_canonicalized",
+        "canonical_affinity_edges_full_tuple",
+        "canonical_affinity_nodes",
+        "canonical_nested_set_arrays",
+        "canonical_persisted_audit_tasks",
+        "copied_inputs",
+        "deterministic_artifact_hashes",
+        "duplicate_task_id_rejection",
+        "edge_endpoint_integrity",
+        "inert_validation_command_metadata_only",
+        "locale_independent_complete_comparators",
+        "semantic_graph_fields_preserved"
+      ],
+      "forbidden_surfaces": [
+        "caller_owned_input_mutation",
+        "command_availability_membership",
+        "executable_discovery",
+        "insertion_order_hashing",
+        "locale_dependent_sort",
+        "provider_lookup",
+        "reference_aliasing",
+        "runtime_command_launch",
+        "unsorted_affinity_artifacts",
+        "unsorted_nested_set_arrays"
+      ],
+      "deletion_guard": {
+        "guard_id": "stable-task-affinity-artifacts-retired-surface-absence",
+        "positive_replacement_guarantee": "canonical_persisted_audit_tasks"
+      },
+      "fixture_ids": [
+        "task-affinity-permutation"
+      ]
+    }
+  ]
+}

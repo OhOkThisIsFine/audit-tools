@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { spawnHidden } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
-import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
-import { nodeArtifactPathsIn } from "../../src/remediate/steps/dispatch/nodeArtifacts.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -46,24 +44,12 @@ function spawnCli(
   });
 }
 
-let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await harness.resetTestRepo();
-  await writeFile(
-    join(REPO_DIR, "session-config.json"),
-    JSON.stringify({
-      block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
-    }),
-    "utf8",
-  );
-  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
-  process.env.REMEDIATE_ROLLING_ENGINE = "false";
 });
 
 afterEach(async () => {
   await harness.cleanupTestRepo();
-  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
-  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
 });
 describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () => {
   it("ready document intake advances to one bounded contract-pipeline step", async () => {
@@ -203,17 +189,14 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await writeCompleteContractPipelineDag();
     await approveReviewGate();
 
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: true,
-    });
+    const step = await decideNextStep({ root: REPO_DIR });
     const state = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    const dispatchPlan = JSON.parse(
-      await readFile(step.artifact_paths.dispatch_plan, "utf8"),
+    const workload = JSON.parse(
+      await readFile(step.artifact_paths.host_workload, "utf8"),
     );
-    const implPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
+    const implPrompt = workload.work_items[0].prompt.text;
 
     expect(step.step_kind).toBe("dispatch_implement");
     expect(state.plan.goal_id).toBe("G1");
@@ -223,12 +206,11 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(state.plan.findings[0].verification_obligation_ids).toEqual(["O-1"]);
     expect(state.plan.findings[0].targeted_commands).toEqual(["npm test"]);
     // The obligation/goal ids and provenance-only targeted_commands stay on the
-    // finding in state (asserted above) but are worker-irrelevant decoration, so
-    // the implement prompt no longer re-inlines the Contract Pipeline
-    // Traceability section. The RUNNABLE per-node commands are emitted separately
-    // (build-free subset only; `npm test` is build-prepending → filtered out).
+    // finding in state (asserted above) and the runnable command is bound as a
+    // required host-verification command rather than routing metadata.
     expect(implPrompt).not.toContain("Contract Pipeline Traceability");
     expect(implPrompt).not.toContain("Satisfies obligations: O-1");
+    expect(workload.work_items[0].required_tests).toEqual(["npm test"]);
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(true);
   });
 
@@ -305,7 +287,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     // N-R01: first call emits confirm_auto_discovered_input gate; write ack to proceed.
     const confirm = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(confirm.step_kind).toBe("confirm_auto_discovered_input");
     await writeFile(
@@ -316,7 +297,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const first = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(first.step_kind).toBe("synthesize_intake");
     const intakeDir = join(ARTIFACTS_DIR, "intake");
@@ -346,7 +326,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const step = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
 
     // After intake, N-R06: structured_audit path enters the contract pipeline
@@ -371,7 +350,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     // N-R01: first call emits confirm_auto_discovered_input gate; write ack to proceed.
     const confirm = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(confirm.step_kind).toBe("confirm_auto_discovered_input");
     await writeFile(
@@ -382,7 +360,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const first = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(first.step_kind).toBe("synthesize_intake");
 
@@ -405,7 +382,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const gated = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(gated.step_kind).toBe("confirm_intent");
     const gatePrompt = await readFile(gated.prompt_path, "utf8");
@@ -428,7 +404,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const step = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
 
     // N-R06: structured_audit path now enters the contract pipeline after the
@@ -490,7 +465,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const first = await decideNextStep({
       root: REPO_DIR,
       input: AUDITOR_CONTRACT_FIXTURE,
-      hostCanDispatchSubagents: true,
     });
     expect(first.step_kind).toBe("synthesize_intake");
 
@@ -501,7 +475,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const step = await decideNextStep({
       root: REPO_DIR,
       input: AUDITOR_CONTRACT_FIXTURE,
-      hostCanDispatchSubagents: true,
     });
 
     // Path A now enters the contract pipeline (goal_normalization) — not dispatch_document.
@@ -567,7 +540,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     // in a single decideNextStep call (no state_transition bounce).
     const dispatchStep = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
     });
     expect(dispatchStep.step_kind).toBe("dispatch_implement");
 
@@ -590,53 +562,37 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
 
     // The dispatch includes only F-001 (F-002 is terminal).
-    const dispatchPlan = JSON.parse(
-      await readFile(dispatchStep.artifact_paths.dispatch_plan, "utf8"),
+    const workload = JSON.parse(
+      await readFile(dispatchStep.artifact_paths.host_workload, "utf8"),
     );
-    expect(dispatchPlan.items.length).toBeGreaterThan(0);
+    expect(workload.work_items.length).toBeGreaterThan(0);
   });
 
-  it("host can dispatch agents emits dispatch_implement and prepares artifacts", async () => {
+  it("emits the provider-neutral host workload and prepares bound artifacts", async () => {
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await approveReviewGate();
 
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: true,
-    });
-    const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
+    const step = await decideNextStep({ root: REPO_DIR });
+    const workload = JSON.parse(
+      await readFile(step.artifact_paths.host_workload, "utf8"),
+    );
 
     expect(step.step_kind).toBe("dispatch_implement");
-    expect(plan.contract_version).toBe("remediate-code-dispatch-plan/v1alpha1");
-    expect(plan.items).toHaveLength(2);
+    expect(workload.contract_version).toBe("remediation-host-workload/v1alpha1");
+    expect(workload.work_items).toHaveLength(2);
   });
 
-  it("omitted hostCanDispatchSubagents defaults to parallel dispatch (conversation-first)", async () => {
+  it("dispatch needs no host capability flag", async () => {
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await approveReviewGate();
-    // default-rolling routing is covered in next-step-implement-dispatch.test.ts; this pins the wave opt-out
-
     const step = await decideNextStep({ root: REPO_DIR });
 
     expect(step.step_kind).toBe("dispatch_implement");
     expect(step.step_kind).not.toBe("capability_check");
-  });
-
-  it("session config host_can_dispatch_subagents=true enables dispatch without CLI flag", async () => {
-    await saveState(makePlanningState());
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-    await approveReviewGate();
-    const configPath = join(REPO_DIR, "session-config.json");
-    await writeFile(configPath, JSON.stringify({ host_can_dispatch_subagents: true }), "utf8");
-
-    const step = await decideNextStep({ root: REPO_DIR });
-
-    expect(step.step_kind).toBe("dispatch_implement");
   });
 
   it("closing state runs close inline and returns present_report", async () => {
@@ -791,7 +747,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const step = await decideNextStep({
       root: REPO_DIR,
-      hostCanDispatchSubagents: true,
       forceReplan: true,
     });
 
@@ -961,36 +916,13 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       }),
       "utf8",
     );
-    const implementDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
-    const staleNames = nodeArtifactPathsIn(implementDir, "B-001");
-    const staleResultPath = staleNames.resultPath;
-    await mkdir(implementDir, { recursive: true });
-    await writeFile(
-      staleResultPath,
-      JSON.stringify({
-        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
-        phase: "implement",
-        item_results: [
-          {
-            finding_id: "F-001",
-            status: "blocked",
-            failure_reason: "previous attempt failed",
-          },
-        ],
-      }),
-      "utf8",
-    );
-
     // `state_transition` was retired from RemediationStepKind — transitions now
     // fold inside one decideNextStep call, so there is no bounce to drain.
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const step = await decideNextStep({ root: REPO_DIR });
 
     expect(step.step_kind).toBe("dispatch_implement");
     expect(existsSync(join(ARTIFACTS_DIR, "triage_resolution.json"))).toBe(false);
-    expect(existsSync(staleResultPath)).toBe(false);
-    const implementFiles = await readdir(implementDir);
-    expect(implementFiles.some((name) => name.startsWith(`${basename(staleNames.resultPath)}.stale-`))).toBe(true);
-    expect(implementFiles.some((name) => name === basename(staleNames.promptPath))).toBe(true);
+    expect(step.artifact_paths.host_workload).toBeTruthy();
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );

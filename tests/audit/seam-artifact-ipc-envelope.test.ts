@@ -69,6 +69,21 @@ function buildAuditorPayload(overrides: Partial<AuditFindingsReport> = {}): Audi
         evidence: ["src/foo.ts:1: example evidence"],
       },
     ],
+    coherence_trace: {
+      normalized_items: [
+        {
+          id: "SEAM-001",
+          file_paths: ["src/foo.ts"],
+          unit_ids: ["u-1"],
+          tags: ["correctness"],
+        },
+      ],
+      pair_scores: [],
+      eligible_candidates: [],
+      merge_trace: [],
+      merge_decisions: [],
+      components: [["SEAM-001"]],
+    },
     work_block_seams: [],
     work_blocks: [
       {
@@ -80,6 +95,7 @@ function buildAuditorPayload(overrides: Partial<AuditFindingsReport> = {}): Audi
         max_severity: "high",
         rationale: "Seam test block.",
         depends_on: [],
+        token_estimate: 1_500,
       },
     ],
     ...overrides,

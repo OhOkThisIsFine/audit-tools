@@ -127,8 +127,8 @@ never a reconciliation — the deltas stay the product), and the tool counts **d
 per subsystem per channel pair (the quantitative "where does the triangulation most need
 clarification" surface).
 
-- **A charter states purpose in terms of the telos, not its mechanism** — "quota/dispatch exists so N
-  cooperating auditors extract max value from finite provider budgets," *not* "it manages quota." A
+- **A charter states purpose in terms of the telos, not its mechanism** — "host handoff exists so
+  bounded semantic work can be delegated safely and resumed," *not* "it writes workload JSON." A
   charter that merely restates the code is useless as a yardstick — the delta against the impl
   collapses to zero and the review can never find under-delivery.
 - **Do not reconcile the channels.** Hold them all; the deltas generate the findings. The
@@ -175,7 +175,7 @@ on the other). Blast radius is simultaneously:
 Because clean decomposition is impossible (goals overlap; reviewing each node once cannot cover them),
 findings come from **many overlapping, differently-scoped, redundant reviews mined for
 disagreement** — a fleet across the matrix {altitude/span} × {which charter} × {adversarial role},
-cheap and independent (the cooperating-dispatch machinery is built for exactly this), converged by
+independent and bounded (the provider-neutral host workload is built for exactly this), converged by
 **loop-until-dry** (keep seeding until N rounds surface nothing new).
 
 ## Control surface — three currencies, three dials

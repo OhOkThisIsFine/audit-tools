@@ -2,53 +2,76 @@
 
 ## Versioned surfaces
 
-The public contract is schema-first. Hosts, workers, prompts, and examples
-should point at schemas and validated examples instead of duplicating fragile
-field descriptions.
+The public surface is schema-first. Important schemas live under `schemas/`,
+including audit results, tasks, findings, lenses, and runtime-validation
+updates. Hosts should consume versioned artifacts rather than infer state from
+filenames or duplicate field descriptions.
 
-Important schemas live under `schemas/`, including:
+The canonical final outputs are:
 
-- `audit_result.schema.json`
-- `audit_results.schema.json`
-- `audit_task.schema.json`
-- `finding.schema.json`
-- `lens.schema.json`
-- `runtime_validation_update.example.json` in `examples/`
+```text
+.audit-tools/audit-findings.json
+.audit-tools/audit-report.md
+```
 
-## Execution envelope (`advance-audit`)
+The JSON contract is authoritative; Markdown is its render.
 
-Each `advance-audit` debug step returns a JSON envelope with:
+## Step artifacts
 
-- `contract_version`
-- `audit_state`
-- `selected_obligation`
-- `selected_executor`
-- `progress_made`
-- `artifacts_written`
-- `progress_summary`
-- `next_likely_step`
-- `handoff`
+`audit-code next-step` advances one bounded transition and writes:
 
-On completion, the canonical outputs are `.audit-tools/audit-report.md` and
-`.audit-tools/audit-findings.json`. Intermediate artifact state is cleaned up
-when the completed report is promoted.
+```text
+<artifacts_dir>/steps/current-step.json
+<artifacts_dir>/steps/current-prompt.md
+```
+
+`current-step.json` uses `audit-code-step/v1alpha1` and names the current prompt,
+run, allowed commands, stop condition, repository root, artifact directory, and
+relevant artifact paths. The conversation loader reads only `prompt_path` and
+follows the rendered prompt.
+
+## Provider-neutral host workload
+
+When semantic review is ready, audit-tools writes a complete
+`audit-host-workload/v1alpha1` artifact. Each work item contains:
+
+- a stable id and lens
+- provider-neutral complexity, risk, and deterministic token-estimate metadata
+- the complete prompt text plus its SHA-256 binding
+- the file and unit scope
+- the repository-contained result path
+
+A companion `audit-host-result-map/v1alpha1` binds each work-item id, prompt
+digest, and result path. No backend, model, routing, quota, transport, launch
+command, or worker identity is part of either contract.
+
+The host writes `audit-host-result/v1alpha1` records. Ingestion requires exact
+top-level fields and verifies:
+
+- run id, work-item id, prompt digest, and result path against tool-owned
+  bindings
+- assigned file coverage only, with current total-line counts
+- finding and lens consistency through the normal `AuditResult` schema
+- repository containment for every artifact path
+- append-time idempotency through the accepted-results ledger
+
+Malformed, fabricated, stale, or replayed-with-different-bytes records do not
+advance the run. A byte-identical accepted replay is a no-op.
 
 ## AuditResult
 
-Workers submit `AuditResult[]` shaped by
-`schemas/audit_result.schema.json`.
+The normalized ingested form follows `schemas/audit_result.schema.json`.
+Important invariants are:
 
-Important rules:
+- `task_id`, `unit_id`, `pass_id`, and `lens` match the assigned task
+- every finding uses the assigned lens
+- `file_coverage` contains assigned files only
+- `file_coverage[].total_lines` matches current source
+- affected files are structured entries and evidence is plain text
+- verification-only tasks may return no findings with explicit verification
+  metadata
 
-- `task_id`, `unit_id`, `pass_id`, and `lens` must match the assigned task
-- every finding lens must match the assigned task lens
-- `file_coverage` is required and must include assigned files only
-- `file_coverage[].total_lines` must match the current file line count
-- finding `affected_files` entries must be objects, not strings
-- finding `evidence` must be an array of plain strings
-- lens steward tasks emit `findings: []` plus `verification` metadata
-
-Validate before ingestion:
+Validate recovery input before ingestion:
 
 ```bash
 audit-code validate-results --results /path/to/results.json
@@ -56,180 +79,31 @@ audit-code validate-results --results /path/to/results.json
 
 ## Artifact bundle
 
-The backend stores resumable artifacts under `.audit-tools/audit/`. A
-non-exhaustive sample; the complete registry-backed list lives
-in [`spec/audit/artifact-contract.md`](../../spec/audit/artifact-contract.md):
+Resumable state lives under `.audit-tools/audit/`. The registry-backed contract
+in [`artifact-contract.md`](../../spec/audit/artifact-contract.md) covers the
+complete set. Representative artifacts include repository and unit manifests,
+file disposition, graph and critical-flow data, coverage, risk, audit tasks,
+runtime validation, accepted host results, synthesis narrative, and the final
+deliverables.
 
-- `repo_manifest.json`
-- `file_disposition.json`
-- `surface_manifest.json`
-- `critical_flows.json`
-- `graph_bundle.json`
-- `unit_manifest.json`
-- `coverage_matrix.json`
-- `risk_register.json`
-- `audit_tasks.json`
-- `audit_plan_metrics.json`
-- `audit_results.jsonl`
-- `runtime_validation_tasks.json`
-- `runtime_validation_report.json`
-- `audit-findings.json`
-- `audit-report.md`
-- `synthesis-narrative.json`
-
-Consumers should treat these as versioned JSON artifacts and validate them with
-`audit-code validate` rather than inferring state from filenames alone.
-
-## Step artifacts
-
-The conversation-first `/audit-code` prompt is a loader. It runs
-`audit-code next-step` and then follows only the returned step prompt. The
-backend writes the current step contract to:
-
-- `<artifacts_dir>/steps/current-step.json`
-- `<artifacts_dir>/steps/current-prompt.md`
-
-`current-step.json` uses `contract_version: "audit-code-step/v1alpha1"` and
-includes `step_kind`, `prompt_path`, `status`, `run_id`, `allowed_commands`,
-`stop_condition`, `repo_root`, `artifacts_dir`, and relevant `artifact_paths`.
-
-When semantic review is reached, the backend renders ONE review path on every
-host: `dispatch_review`, with per-packet prompt files and the dispatch plan
-materialized on disk (always-materialized fan-out — there is no
-capability-conditional rendering and no fallback step kind). The step prompt is
-capability-neutral: dispatch one subagent per plan entry if a subagent facility
-exists, else execute each entry's `prompt_path` sequentially; identical
-artifacts either way. The `--auditor` handshake's `context_tokens` /
-`output_tokens` size the packets; when no window is resolvable (no handshake,
-no learned limits, no models.dev match) packets degrade to one task each with
-no fit claim and a `unknown_host_window` entry in `dispatch-warnings.json` —
-never a refusal. `self.can_dispatch_subagents` still routes ENGINE selection
-(hybrid vs headless in-process dispatch); it no longer changes what is
-rendered.
-
-`next-step` is the only execution loop; there is no batch entrypoint. Every
-invocation advances one bounded step and renders the actionable step contract
-directly.
-
-## Dispatch packets
-
-Packet dispatch preserves the existing `AuditTask` and `AuditResult`
-contracts. It changes the worker-facing unit of work.
-
-Packets are partitioned just-in-time at dispatch (never persisted); planning
-artifacts are shaped by:
-
-- `examples/audit_plan_metrics.example.json` (no dedicated JSON Schema exists for this artifact yet)
-
-Normal packet flow:
-
-```text
-audit-code next-step --auditor '{"self":{"can_dispatch_subagents":true}}'
-backend prepares dispatch-plan.json
-conversation launches one worker per dispatch-plan entry
-worker reads entry.prompt_path
-worker submits AuditResult[] through submit-packet
-audit-code merge-and-ingest --run-id <run_id> --artifacts-dir <artifacts_dir>
-```
-
-`audit-code prepare-dispatch --run-id <run_id> --artifacts-dir
-<artifacts_dir>` remains available for compatibility and tests, but generic
-handoff fields point users and prompts to `next-step`.
-
-Packet artifacts:
-
-- `<artifacts_dir>/runs/<run_id>/dispatch-plan.json`
-- `<artifacts_dir>/runs/<run_id>/dispatch-result-map.json`
-- `<artifacts_dir>/runs/<run_id>/task-results/*.prompt.md`
-- `<artifacts_dir>/runs/<run_id>/task-results/*.anchors.json` for isolated
-  large-file packets
-- `<artifacts_dir>/runs/<run_id>/task-results/*.json`
-- `<artifacts_dir>/runs/<run_id>/dispatch-warnings.json` when needed
-
-Workers should reply exactly:
-
-```text
-valid: <packet_id>, findings=<total finding count>
-```
+Run `audit-code validate` instead of treating file presence as proof of a valid
+state transition.
 
 ## Graph contract
 
-`graph_bundle.json` is language-neutral. Language-specific extractors may add
-metadata, but consumers should rely on shared edge concepts:
+`graph_bundle.json` is language-neutral. Edges carry `from`, `to`, `kind`, and
+optional direction, confidence, and reason. Deterministic import, entrypoint,
+test/source, and ownership evidence may drive grouping; weak affinity and
+high-fan-in edges remain explainable context unless corroborated.
 
-- `from`
-- `to`
-- `kind`
-- optional `direction`
-- optional `confidence` from 0 to 1
-- optional `reason`
-
-Packet planning should use graph edges to explain why files belong together,
-not merely to merge every connected group. Weak or high-fan-in edges should
-become context hints rather than unlimited packet expansion.
-Each edge carries a durable shape — `from`, `to`, `kind`, and optional
-`direction` / `confidence` / `reason` — and consumers reason over that contract,
-never a fixed enumeration of kinds. The authoritative, current set of edge kinds
-(import, reference, ownership, bounded-suite, test/source naming, …) is whatever
-the extractors registry emits (`src/audit/extractors/`); new analyzers enrich
-the graph by adding kinds without changing this contract.
-
-Consumers should treat graph evidence by authority:
-
-- deterministic directed edges may drive packet expansion when confidence,
-  budget, and fan-in/fan-out guards allow it
-- ownership edges may cluster small bounded groups, but should remain explainable
-  through `key_edges` and packet `quality`
-- semantic-affinity or NLP-style relationships, if added, should default to
-  low-authority context and candidate `boundary_files` unless corroborated by a
-  deterministic edge
-
-Bounded suite links are intentionally narrow: they connect small, same-directory
-contract suites such as `*.schema.json` files, `.github/workflows/*.yml`
-files, package-script-seeded `scripts/` files, TypeScript files under
-`types/` directories, or Python test-utility modules, without turning broad
-directory proximity into packet evidence.
-
-Analyzer-supplied ownership roots should use this same graph contract instead
-of requiring packet planners to understand a new language-specific artifact.
-Normalized `external_analyzer_results.json` may include `ownership_roots`;
-structure planning translates each bounded root/path membership into
-`analyzer-ownership-root-link` reference edges. Packet planning then consumes
-those edges through the same bounded `module-ownership-link` clustering path as
-project-file evidence.
-Planner metrics should make it possible to see which edge kinds changed packet
-grouping and which stayed context-only.
-
-`audit_plan_metrics.packet_quality` records that plan-level evidence through
-`merge_edge_kind_counts`, `boundary_edge_kind_counts`, and weak-packet
-diagnostics. Merge counts only include graph edges that joined distinct task
-groups in a final packet; boundary counts include concrete graph edges that
-remained adjacent context instead of internal packet evidence.
-`weakly_explained_gap_counts` summarizes the primary gap type across all weak
-packets, and `weakly_explained_file_extension_counts` summarizes the unique file
-extensions represented by those packets. `weakly_explained_packet_samples` adds
-a bounded snapshot of the weakest packet quality records, including sample file
-paths and the primary gap, so extractor work can be prioritized without scanning
-every packet first.
-
-Review packets may expose graph-derived context for workers:
-
-- `entrypoints` for route or handler context inside the packet
-- `key_edges` for the strongest internal file relationships
-- `boundary_files` for adjacent files that should only be checked when evidence
-  genuinely crosses the packet
-- `quality` metrics for cohesion, internal edges, boundary edges, and
-  unexplained files
+Planning metrics record which edges merged work and which stayed boundary
+context. New analyzers enrich the same graph contract rather than teaching the
+planner a second language-specific artifact.
 
 ## Guided recovery
 
-Failure responses should distinguish:
-
-- rerun the same command
-- import these result/update files
-- fix session config
-- retry a worker submission after schema validation errors
-- perform manual semantic review
-
-Malformed results, invalid config, stale artifacts, and provider failures
-should include field-level or action-level remediation whenever possible.
+Failures distinguish rerunning a command, importing a result/update file,
+repairing strict repository intent, retrying a schema-invalid host result, and
+performing the assigned semantic review manually. Backend-execution failures
+are not an audit-tools state: the host reports or retries them without inventing
+provider-specific fields in persisted contracts.

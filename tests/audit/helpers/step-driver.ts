@@ -1,6 +1,6 @@
 // The one step-walking driver the audit test harnesses share.
 //
-// Three harnesses independently drove the same walk — answer each headless host
+// Three harnesses independently drove the same walk — answer each scripted host
 // pause, stop at the first terminal step — and two of them
 // (`completion-harness.advanceToDispatchReady`,
 // `wrapper-harness.startDispatchRun`) had byte-identical pause bodies differing
@@ -108,7 +108,7 @@ function resolveArtifactPath(
 }
 
 /**
- * Answer one headless host pause. Returns false when the kind is not a pause
+ * Answer one scripted host pause. Returns false when the kind is not a pause
  * this driver knows how to answer, leaving the decision to the caller.
  */
 async function answerHostPause(step: any, incomingDir: string): Promise<boolean> {
@@ -199,7 +199,7 @@ async function answerHostPause(step: any, incomingDir: string): Promise<boolean>
 }
 
 /**
- * Drive `next-step` past every headless host pause and return the first step
+ * Drive `next-step` past every scripted host pause and return the first step
  * whose kind is terminal for this walk.
  *
  * Throws descriptively on an unrecognised kind rather than returning a

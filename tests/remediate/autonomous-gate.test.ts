@@ -10,7 +10,6 @@ import {
   buildAutonomousReviewDecision,
   SAFE_CHANGE_KINDS,
 } from "../../src/remediate/review/autonomousGate.js";
-import { validateSessionConfig } from "../../src/audit/validation/sessionConfig.js";
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -213,17 +212,5 @@ describe("shared audit-deliverable emitter round-trips through intake", () => {
     const pair = buildAuditDeliverablePair([]);
     expect(isValidAuditFindingsReport(pair.findings_report)).toBe(true);
     expect(pair.findings_report.findings).toEqual([]);
-  });
-});
-
-describe("validateSessionConfig — autonomous_mode flag", () => {
-  it("accepts a boolean autonomous_mode (peer of host_can_dispatch_subagents)", () => {
-    expect(validateSessionConfig({ autonomous_mode: true })).toEqual([]);
-    expect(validateSessionConfig({ autonomous_mode: false })).toEqual([]);
-  });
-
-  it("rejects a non-boolean autonomous_mode", () => {
-    const issues = validateSessionConfig({ autonomous_mode: "yes" });
-    expect(issues.some((i) => i.path === "autonomous_mode")).toBe(true);
   });
 });

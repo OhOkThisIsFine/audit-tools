@@ -2,7 +2,7 @@ import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { StateStore, type RemediationState, type HostCapabilities } from "../state/store.js";
+import { StateStore, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
   Finding,
@@ -13,9 +13,7 @@ import type {
 // IO / validation / rendering helpers
 import {
   discardOnSchemaVersionMismatch,
-  buildSelfSpawnExclusion,
   readOptionalJsonFile,
-  readValidatedRepoSessionIntent,
   stagedAndUntracked,
   writeJsonFile,
   writeTextFile,
@@ -24,52 +22,14 @@ import {
   isRecord,
   withFsRetry,
   RunLogger,
-  DISPATCH_PROMPT_HANDOFF_NOTE,
-  renderHostScratchNote,
-  hostScratchDir,
-  renderQuotaCoverageNudge,
-  renderTokenBudgetView,
   coerceJsonObjectArg,
-  // rolling engine + quota
-  driveRolling,
-  resolveLedgerBudgets,
-  setQuotaStateDir,
-  detectHostDispatchWall,
-  admissionBlockedOnBudget,
-  classifyEmptyGrantCause,
-  reconcileAdmissionLeasesFromQuotaFile,
-  buildQuotaPausedTerminal,
-  HostSessionQuotaSource,
-  quotaPoolKey,
+  headCommit,
+  projectAuditFindingsReportSubset,
   // obligation engine + intent
   interpretFreeFormIntent,
   advance,
   decideFrictionTriage,
   buildFrictionTriageBlock,
-  // dispatch planning / provider classification
-  planHybridDispatch,
-  readSettledPools,
-  addSettledPool,
-  isPoolSettlingOutcome,
-  isInProcessWorkerProvider,
-  sourceByPoolId,
-  classifyProvider,
-  selectDispatchDriver,
-  renderDispatchDriverInstruction,
-  resolveHostProviderName,
-  resolveHostDispatchProviderName,
-  resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
-  resolveAutonomousMode,
-  resolveRollingEngineFlag,
-  // friction capture
-  captureStepBoundaryFriction,
-  captureZeroCapacityFriction,
-  captureCostDriftFriction,
-  captureCreditExhaustionFriction,
-  captureQuotaUnclassifiedFriction,
-  captureModelUnavailableFriction,
-  capturePacketTooLargeFriction,
-  createDispatchDecisionLog,
   // domain constants
   LENSES,
   SEVERITIES,
@@ -78,21 +38,9 @@ import {
   type ObligationDef,
   type ObligationOutcome,
   type InterpretedIntent,
-  type SessionConfig,
-  type HostModelRosterEntry,
-  type CapacityPool,
-  type PartialCompletionTerminal,
-  type RollingDispatchResult,
-  type ProviderSlot,
-  type FrontierNode,
-  type EngineDecisionSink,
-  type ResolvedProviderName,
-  type ProviderName,
-  type QuotaBindingWindow,
-  type DispatchModelTier,
+  type SessionIntentLoadResult,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
-import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import {
   groundExtractedFindings,
@@ -102,20 +50,18 @@ import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
-  type AcceptNodeWorktreeResult,
-  mergeImplementResults,
-  prepareImplementDispatch,
   readExtractedPlanIfPresent,
-  buildConfirmedPools,
-  executeNodeInWorktree,
-  blockScopesFromPlan,
-  targetedCommandsForBlock,
-  readDispatchPlan,
 } from "./dispatch.js";
-import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
-import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
-import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
-import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";
+import {
+  ingestRemediationHostResults,
+  hostDependencyLevels,
+  prepareRemediationHostHandoff,
+  type CurrentRemediationHostState,
+} from "./dispatch/hostHandoff.js";
+import {
+  FileLockTimeoutError,
+  withFileLock,
+} from "../../shared/io/fileLock.js";
 import {
   AUDIT_FINDINGS_FILENAME,
   AUDIT_REPORT_FILENAME,
@@ -123,14 +69,13 @@ import {
   auditFindingsPath,
   auditReportPath,
   auditToolsDir,
-  nodeClaimsPath,
   promotedAuditFindingsPath,
   promotedAuditReportPath,
   remediationArtifactsDir,
 } from "../../shared/io/auditToolsPaths.js";
 import { resolveRepoRoot } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
-import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
+import type { RemediationStep } from "./types.js";
 import {
   dependencyAwaitingClarification,
   dependencyVerifiedComplete,
@@ -216,20 +161,6 @@ export interface NextStepOptions {
   root?: string;
   artifactsDir?: string;
   input?: string | string[];
-  hostCanDispatchSubagents?: boolean;
-  hostMaxConcurrent?: number;
-  hostContextTokens?: number | null;
-  hostOutputTokens?: number | null;
-  /** Ordered model roster (lowest rank first); outranks the scalar pair. */
-  hostModels?: HostModelRosterEntry[] | null;
-  /** Opaque model identity for the quota key when no model name resolves. */
-  hostModelId?: string | null;
-  /**
-   * B1: explicit conversation-host provider override (`--host-provider`). Folded
-   * onto `sessionConfig.host_provider` so the host quota-attribution key follows
-   * the ACTUAL host (auto-detected otherwise). `"auto"` is treated as unset.
-   */
-  hostProvider?: ProviderName;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   /**
@@ -242,17 +173,11 @@ export interface NextStepOptions {
    */
   guidanceFileSupplied?: boolean;
   /**
-   * Opt IN to the in-process rolling dispatch engine for the implement phase.
-   * Defaults off (proven host-fanned wave path). See `resolveRollingEngineEnabled`.
-   */
-  rollingEngine?: boolean;
-  sessionConfig?: SessionConfig | null;
-  /**
    * Skip the tool-owned final completion gate (INV-RS-10) at the all-terminal
    * transition. Production never sets this; it is a test-hermeticity affordance
    * so suites that drive an unrelated flow to completion do not spawn a real
    * build. Also honored via `REMEDIATE_SKIP_FINAL_GATE`. The gate's correctness
-   * is verified directly (rolling-scheduler.test.ts) regardless of this flag.
+   * is verified directly by the final-gate suites regardless of this flag.
    */
   skipFinalGate?: boolean;
   /**
@@ -264,186 +189,22 @@ export interface NextStepOptions {
   finalGateRunner?: GateRunner;
 }
 
-export function resolveHostDispatchCapability(options: {
-  hostCanDispatchSubagents?: boolean;
-  sessionConfig?: SessionConfig | null;
-  env?: NodeJS.ProcessEnv;
-}): boolean {
-  // Conversation-first default (single-sourced in shared): an interactive agent host
-  // (e.g. Claude Code) can dispatch callable subagents, so default to parallel wave
-  // dispatch. A host that genuinely cannot dispatch opts out via
-  // host_can_dispatch_subagents:false, REMEDIATE_HOST_CAN_DISPATCH=false, or
-  // --no-host-can-dispatch-subagents. Remediate supplies its own env var name.
-  return sharedResolveHostDispatchCapability({
-    explicit: options.hostCanDispatchSubagents,
-    sessionConfig: options.sessionConfig,
-    envVarName: "REMEDIATE_HOST_CAN_DISPATCH",
-    env: options.env,
-  });
-}
+const SESSION_INTENT_RESULT: unique symbol = Symbol("session-intent-result");
 
-/**
- * Whether the rolling dispatch engine drives the implement phase. Defaults to TRUE:
- * both rolling drivers on the shared `acceptNodeWorktree` core (per-node worktree →
- * tool-owned commit → verify → cherry-pick merge; verify-fail → triage) are now
- * validated end-to-end — the host-subagent driver via a real-subagent smoke
- * (f18138fe) and the in-process provider driver via a live-NIM run THROUGH
- * decideNextStep (2026-06-17, tests/nim-rolling-e2e.test.ts). The legacy host-fanned
- * wave (`dispatch_implement`) is retained as an explicit opt-OUT (rolling_engine:false
- * / REMEDIATE_ROLLING_ENGINE=false), not deleted. Resolution order: explicit option →
- * sessionConfig.dispatch.rolling_engine → REMEDIATE_ROLLING_ENGINE env → true.
- */
-export function resolveRollingEngineEnabled(options: {
-  rollingEngine?: boolean;
-  sessionConfig?: SessionConfig | null;
-  env?: NodeJS.ProcessEnv;
-}): boolean {
-  return resolveRollingEngineFlag({
-    explicit: options.rollingEngine,
-    sessionConfig: options.sessionConfig,
-    envVarName: "REMEDIATE_ROLLING_ENGINE",
-    env: options.env,
-  });
-}
+type InternalNextStepOptions = NextStepOptions & {
+  readonly [SESSION_INTENT_RESULT]: SessionIntentLoadResult;
+};
 
-/** The host-capability fields supplied explicitly on a single next-step call. */
-export interface ExplicitHostCapabilities {
-  can_dispatch_subagents?: boolean;
-  max_concurrent?: number;
-  context_tokens?: number | null;
-  output_tokens?: number | null;
-  model_id?: string | null;
-  models?: unknown;
-}
-
-function finiteOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-/**
- * Pure per-field host-capability resolver (C1). Each field resolves as
- * `explicit ?? persisted` — a per-field merge, never a whole-object
- * clobber that would drop fields the current call omitted. Corrupt / non-finite
- * persisted numbers degrade to undefined without throwing; missing capability
- * stays missing and is handled by the dispatch/plan refusal seam.
- *
- * Returns:
- *  - `resolved` — the merged capabilities to drive downstream dispatch sizing;
- *  - `toPersist` — a delta of ONLY the explicitly-supplied fields, so a
- *    `store.mutate` merge never clobbers omitted fields.
- */
-export function resolveHostCapabilities(
-  explicit: ExplicitHostCapabilities | undefined,
-  persisted: HostCapabilities | undefined,
-): { resolved: HostCapabilities; toPersist: HostCapabilities } {
-  const exp = explicit ?? {};
-  const per = persisted && typeof persisted === "object" ? persisted : undefined;
-  const pick = <T>(e: T | null | undefined, p: T | undefined): T | undefined =>
-    e ?? p ?? undefined;
-
-  const context_tokens =
-    finiteOrUndefined(exp.context_tokens) ??
-    finiteOrUndefined(per?.context_tokens);
-
-  const resolved: HostCapabilities = {
-    can_dispatch_subagents: pick(exp.can_dispatch_subagents, per?.can_dispatch_subagents),
-    max_concurrent: finiteOrUndefined(exp.max_concurrent) ?? finiteOrUndefined(per?.max_concurrent),
-    context_tokens,
-    output_tokens:
-      finiteOrUndefined(exp.output_tokens) ?? finiteOrUndefined(per?.output_tokens),
-    model_id: pick(exp.model_id, per?.model_id),
-    models: exp.models ?? per?.models,
-  };
-
-  // Persist ONLY the explicitly-supplied fields (the delta), never an omitted field.
-  const toPersist: HostCapabilities = {};
-  if (exp.can_dispatch_subagents !== undefined)
-    toPersist.can_dispatch_subagents = exp.can_dispatch_subagents;
-  if (finiteOrUndefined(exp.max_concurrent) !== undefined)
-    toPersist.max_concurrent = exp.max_concurrent as number;
-  if (finiteOrUndefined(exp.context_tokens) !== undefined)
-    toPersist.context_tokens = exp.context_tokens as number;
-  if (finiteOrUndefined(exp.output_tokens) !== undefined)
-    toPersist.output_tokens = exp.output_tokens as number;
-  if (exp.model_id !== undefined && exp.model_id !== null)
-    toPersist.model_id = exp.model_id;
-  if (exp.models !== undefined) toPersist.models = exp.models;
-
-  return { resolved, toPersist };
-}
-
-/**
- * Structural-refusal detection for an empty rolling frontier (defect (b) of the
- * 2026-07-22 implement-dispatch cluster). An empty frontier means EITHER
- * "everything eligible is done/contested" (fold to merge) OR "admission refused
- * every pending packet as `no_capable_pool`" (a structural fit mismatch — pause
- * honestly; merging would terminal-block every planned node on a result it was
- * never allowed to produce, and triage would re-prepare the same refusal
- * forever). Pure over the parsed dispatch-quota body so the discriminator is
- * directly testable; the caller owns lease reconciliation + the pause terminal.
- */
-export function detectStructuralRefusalPause(quota: unknown): {
-  pause: boolean;
-  refusedIds: string[];
-} {
-  const admission = isRecord(quota) && isRecord(quota.admission) ? quota.admission : undefined;
-  const explains = Array.isArray(admission?.explains)
-    ? (admission.explains as Array<{ packet_id?: string; reason?: string; admitted?: boolean }>)
-    : [];
-  const granted = Array.isArray(admission?.granted_packet_ids)
-    ? admission.granted_packet_ids.length
-    : 0;
-  const refusedIds = explains
-    .filter((e) => e.admitted !== true)
-    .map((e) => e.packet_id)
-    .filter((id): id is string => typeof id === "string");
-  return {
-    pause:
-      granted === 0 &&
-      refusedIds.length > 0 &&
-      classifyEmptyGrantCause(explains) === "no_capable_pool",
-    refusedIds,
-  };
-}
-
-/**
- * Read the admission record backing the zero-frontier structural-refusal
- * discriminator. `quotaPath` is null for an ATTENDED host (hostOwnedDispatch —
- * the host owns provider selection/pacing, so NO admission record exists); a
- * null path is the no-signal case, never a crash: no record ⇒ no structural
- * refusal ⇒ the caller folds the empty frontier straight to merge. (v0.36.1
- * zero-frontier crash, accept/reverify cluster defect 5: the call site asserted
- * `quotaPath!` and the read threw on the attended-host null.)
- */
-export async function structuralRefusalForZeroFrontier(
-  quotaPath: string | null,
-): Promise<{ pause: boolean; refusedIds: string[] }> {
-  return detectStructuralRefusalPause(
-    quotaPath ? await readOptionalJsonFile(quotaPath) : undefined,
-  );
+function sessionIntentResult(options: NextStepOptions): SessionIntentLoadResult {
+  if (!(SESSION_INTENT_RESULT in options)) {
+    throw new Error("Canonical session intent was not loaded at the next-step boundary.");
+  }
+  return (options as InternalNextStepOptions)[SESSION_INTENT_RESULT];
 }
 
 function randomRunId(prefix = "RUN"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
-
-/**
- * Host-facing note interposing a shared rebuild between rolling dependency
- * levels. The tool admits a downstream node only once its upstream node is
- * verified-complete; once that upstream edit lands, the host must rebuild the
- * shared surface before the next next-step pass so the downstream node
- * typechecks/runs against the realized output rather than stale `dist/`. The
- * rebuild is build-FREE single-flight at the package level — one central build,
- * never a per-node `npm run build` racing it (CE-001).
- */
-const SHARED_REBUILD_BETWEEN_LEVELS_NOTE = `## Shared rebuild between dependency levels
-
-These nodes were selected because their dependencies are verified-complete. When a
-node you just merged edited a shared/upstream surface a later node depends on,
-rebuild that surface ONCE — \`npm run build\`
-— before the next \`next-step\` dispatches the now-eligible downstream nodes, so they
-build against the realized upstream output. Do not run a per-node \`npm run build\`;
-the central rebuild is single-flight (one build, never one-per-node racing \`dist/\`).`;
 
 function resolveRoot(root?: string): string {
   // Anchor away from a drifted cwd — never trust bare `resolve(".")`. A run whose
@@ -604,13 +365,12 @@ export type {
   FindingClassification,
 } from "./stepUtils.js";
 export {
-  NO_CHANGE_RE,
-  dependenciesSatisfied,
   dependencyVerifiedComplete,
-  specIndicatesNoChange,
   classifyFindingRisk,
 } from "./stepUtils.js";
 export { isTerminalStatus, isVerifiedCompleteStatus };
+export { hostDependencyLevels };
+export { rollingDependencyLevels } from "./dispatch/hostHandoff.js";
 
 function documentableFindings(state: RemediationState): Finding[] {
   if (!state.plan || !state.items) return [];
@@ -620,12 +380,11 @@ function documentableFindings(state: RemediationState): Finding[] {
 }
 
 /**
- * Blocks/nodes eligible for the next rolling dispatch pass: those with pending
+ * Blocks eligible for the next host handoff: those with pending
  * work AND every dependency VERIFIED-COMPLETE (INV-RS-01 — a SKIP or blocked
- * dependency never makes a dependent eligible). This is the rolling-scheduler
- * eligibility gate; it replaced the old `dependenciesSatisfied` (any-terminal)
- * wave gate so a node whose prerequisite was skipped/blocked is held back rather
- * than dispatched against a surface that never landed.
+ * dependency never makes a dependent eligible). This dependency-frontier gate
+ * replaced the old `dependenciesSatisfied` (any-terminal) check so a block whose
+ * prerequisite was skipped/blocked is held back until its required surface lands.
  */
 function implementableBlocks(state: RemediationState): RemediationBlock[] {
   if (!state.plan || !state.items) return [];
@@ -677,134 +436,13 @@ function hasUnansweredClarification(state: RemediationState): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Rolling per-node scheduler (CP-BLOCK-N-rolling-scheduler)
-// ---------------------------------------------------------------------------
-//
-// The rolling scheduler replaced the wave-batch shim: instead of dispatching one
-// fixed-size wave per next-step and folding back through `implementing`, a node
-// becomes eligible the instant every dependency reaches a verified-complete
-// disposition (INV-RS-01). Concurrency is emergent from admission control (the
-// `dispatch-quota.json` `admission.granted_packet_ids` the tool admits against the
-// live budget — INV-S05 / INV-QD-11), never a computed wave cap.
-// A shared rebuild is interposed between dependency levels so a downstream node
-// typechecks/runs against the freshly-built upstream `audit-tools/shared`
-// surface; the rebuild is single-flight (CE-001) so the same package is never
-// built twice or concurrently within one dispatch run.
-
-/**
- * Partition pending nodes into rolling dependency LEVELS. Level 0 is every
- * pending node already eligible (deps verified-complete now); each subsequent
- * level is the pending nodes that become eligible once all earlier levels are
- * assumed verified-complete. The boundary between two levels is exactly where a
- * shared rebuild is interposed (so a later level builds against the realized
- * upstream surface). A node with a permanently-unsatisfiable edge (its
- * prerequisite is skipped/blocked, not merely pending) is NOT placed in any
- * level — it is dead-ended by `handlePlanning`.
- *
- * Pure and deterministic: level MEMBERSHIP is fixed by the dependency predicate
- * (INV-RS-01) and is independent of node order; the interposed-rebuild boundaries
- * are therefore stable across runs without an in-level numeric sort. In-level
- * admission ORDER is no longer decided here — it is owned by the file-ownership
- * scheduler (`ownershipSubWaves`, INV-SOO-04/08), which applies its own explicit
- * block_id tie-break AFTER the disjointness filter. The numeric
- * `block_id.localeCompare` admission ordering that used to live here was removed
- * atomically with that change (INV-SOO-04).
- */
-export function rollingDependencyLevels(
-  state: RemediationState,
-): RemediationBlock[][] {
-  const plan = state.plan;
-  const items = state.items;
-  if (!plan || !items) return [];
-
-  const blockById = new Map(plan.blocks.map((b) => [b.block_id, b]));
-  const pendingBlocks = plan.blocks.filter((b) =>
-    b.items.some((id) => items[id]?.status === "pending"),
-  );
-
-  // A dependency edge is "completable" only when the dep node is itself pending
-  // (will be satisfied by some level) or already verified-complete. A skipped /
-  // blocked dependency makes the dependent permanently ineligible — such nodes
-  // never enter a level (INV-RS-01).
-  const isVerifiedNow = (depBlock: RemediationBlock): boolean =>
-    depBlock.items.every((id) => isVerifiedCompleteStatus(items[id]?.status));
-  const isPending = (depBlock: RemediationBlock): boolean =>
-    depBlock.items.some((id) => items[id]?.status === "pending");
-
-  // Auto-phasing (T3): a block's foundations→consumers phase is a HARD barrier on
-  // top of its explicit dependency edges. A block at phase p may only enter a level
-  // once every block at a STRICTLY LOWER phase is VERIFIED-complete (resolved, not
-  // merely placed) — so a planning pass emits only the lowest unfinished phase, its
-  // foundations land + per-node verify, and the next pass opens the next phase. This
-  // is the end-to-end ordering guarantee (INV-PHASE-01); an explicit whole-repo
-  // suite gate at each phase boundary is the remaining T3 sliver (see backlog).
-  // Absent ordinals (single-phase / non-auto-phased plan) collapse to phase 0 → no
-  // barrier, identical to pre-auto-phasing behaviour.
-  const phaseOf = (block: RemediationBlock): number => block.phase_ordinal ?? 0;
-  const lowerPhaseBlocks = (p: number): RemediationBlock[] =>
-    plan.blocks.filter((b) => phaseOf(b) < p);
-  // The barrier is clear for phase p when every lower-phase block is verified-
-  // complete now; it can NEVER clear if a lower-phase block is skipped/blocked.
-  const phaseBarrierClear = (p: number): boolean =>
-    lowerPhaseBlocks(p).every((b) => isVerifiedNow(b));
-  const phaseBarrierUnsatisfiable = (p: number): boolean =>
-    lowerPhaseBlocks(p).some((b) => !isVerifiedNow(b) && !isPending(b));
-
-  const permanentlyIneligible = (block: RemediationBlock): boolean => {
-    for (const depId of block.dependencies ?? []) {
-      const dep = blockById.get(depId);
-      if (!dep) continue; // dangling edge never strands the DAG
-      if (!isVerifiedNow(dep) && !isPending(dep)) return true; // skipped/blocked dep
-    }
-    // A foundation a lower phase owns that can never verify-complete dead-ends every
-    // consumer above it (same strand semantics as a skipped explicit dependency).
-    if (phaseBarrierUnsatisfiable(phaseOf(block))) return true;
-    return false;
-  };
-
-  const levels: RemediationBlock[][] = [];
-  const placed = new Set<string>();
-  let remaining = pendingBlocks.filter((b) => !permanentlyIneligible(b));
-
-  while (remaining.length > 0) {
-    const ready = remaining.filter((block) =>
-      // Phase barrier first: a higher-phase block is never ready until every lower
-      // phase is verified-complete (a foundations→consumers gate the explicit
-      // dependency edges alone don't enforce across modules).
-      phaseBarrierClear(phaseOf(block)) &&
-      (block.dependencies ?? []).every((depId) => {
-        const dep = blockById.get(depId);
-        if (!dep) return true; // dangling edge
-        // Satisfied if already verified-complete, or every pending item of the
-        // dep was placed in an earlier level (so it will be verified by then).
-        if (isVerifiedNow(dep)) return true;
-        return dep.items.every(
-          (id) =>
-            isVerifiedCompleteStatus(items[id]?.status) ||
-            (items[id]?.status === "pending" && placed.has(dep.block_id)),
-        );
-      }),
-    );
-    if (ready.length === 0) {
-      // A cycle among the remaining pending nodes: no further level can form.
-      // Leave them unplaced — `handlePlanning` marks them blocked deterministically.
-      break;
-    }
-    levels.push(ready);
-    for (const block of ready) placed.add(block.block_id);
-    remaining = remaining.filter((b) => !placed.has(b.block_id));
-  }
-
-  return levels;
-}
-
+// Dependency-level partitioning is single-sourced with the host handoff boundary.
 /**
  * The phase ordinal whose UNTOUCHED entry a whole-repo test-suite gate must run
  * before, or null when no per-phase gate is due this pass (auto-phasing, T3 —
  * the integration checkpoint layered on top of the INV-PHASE-01 ordering
  * barrier). A gate is due iff:
- *   - the eligible dispatch frontier this pass (`rollingDependencyLevels`, which
+ *   - the eligible handoff frontier this pass (`hostDependencyLevels`, which
  *     already applies the phase barrier, so the frontier is a SINGLE phase) is at
  *     a phase P > 0 — i.e. a lower foundations phase precedes it (and, by the
  *     barrier, is fully VERIFIED-complete now); AND
@@ -822,7 +460,7 @@ export function phaseBoundaryToGate(state: RemediationState): number | null {
   const plan = state.plan;
   const items = state.items;
   if (!plan || !items) return null;
-  const frontier = rollingDependencyLevels(state).flat();
+  const frontier = hostDependencyLevels(state).flat();
   if (frontier.length === 0) return null;
   const phaseOf = (b: RemediationBlock): number => b.phase_ordinal ?? 0;
   const dispatchPhase = Math.min(...frontier.map(phaseOf));
@@ -833,844 +471,6 @@ export function phaseBoundaryToGate(state: RemediationState): number | null {
   return pristine ? dispatchPhase : null;
 }
 
-/** A single node's dispatch handler for the in-process rolling engine. */
-export type RollingNodeDispatcher = (
-  block: RemediationBlock,
-  slot: ProviderSlot,
-) => Promise<RollingDispatchResult<{ block_id: string }>>;
-
-export interface DriveRollingDispatchOptions {
-  /** Confirmed quota pools (scheduler-owned concurrency — no separate wave cap). */
-  confirmedPools: CapacityPool[];
-  sessionConfig: SessionConfig;
-  /** Per-node dispatch (host subagent / tool worker). Must resolve, never reject. */
-  dispatchNode: RollingNodeDispatcher;
-  /**
-   * Rebuild `audit-tools/shared` (and any upstream surface) BETWEEN dependency
-   * levels. Single-flight is enforced by the driver: this is invoked at most
-   * once per inter-level boundary and never concurrently with itself.
-   */
-  rebuildSharedBetweenLevels: () => Promise<void>;
-  /**
-   * Per-node estimated input tokens. REQUIRED — there is deliberately no default.
-   * The flat 2000 that used to stand in here made every node the same size to the
-   * fit gates, so "this node does not fit" was unreachable; a default would put
-   * that back for any caller that forgot to pass one.
-   */
-  estimateTokens: (block: RemediationBlock) => number;
-  /**
-   * A block's capability floor — its dispatch tier (F4), stamped onto the engine
-   * packet as `requiredTier` so packet→pool selection never binds the node below
-   * it. Omit/undefined ⇒ no floor for that block.
-   */
-  tierForBlock?: (block: RemediationBlock) => DispatchModelTier | undefined;
-  /** Quota state dir for `recordWaveOutcome` (defaults to leaving it unset). */
-  quotaStateDir?: string;
-  /**
-   * A block's declared write-scope, for file-ownership-disjoint admission
-   * (INV-SOO). Defaults to `block.touched_files` (the block's authoritative
-   * declared write set). An empty/unresolved scope is gated conservatively
-   * (admitted only solo) by the ownership scheduler.
-   */
-  scopeForBlock?: (block: RemediationBlock) => string[];
-  /**
-   * Per-block access-memory CONTINUITY mass (context-efficiency track, increment
-   * 2d), keyed by `block_id`. Biases file-ownership sub-wave admission toward blocks
-   * whose files earlier waves already touched — a secondary key strictly below the
-   * disjointness structure, above the `block_id` tie-break. Omit/empty ⇒ no bias
-   * (byte-identical pure `block_id` ordering). Computed by
-   * `computeBlockContinuityScores` from the harvested `access_memory.json`.
-   */
-  continuityScores?: Map<string, number>;
-  /** Repo root for canonical path identity (INV-SOO-09). Defaults to cwd. */
-  root?: string;
-  /**
-   * The retained host-session source (SAME instance fed into `buildConfirmedPools`).
-   * Wired into the dispatcher's `recordRateLimit` (write) + `isPacketEscalated`
-   * (read) hooks so a same-packet account wall accrues the bounded re-limit count
-   * and, past the bound, strands instead of livelocking. Omit to leave INV-QD-07
-   * transient re-route behaviour unchanged (no escalation).
-   */
-  hostSession?: HostSessionQuotaSource;
-  /**
-   * Reactive cost verification: invoked once per pool when a declared-free pool is
-   * first observed charging (the engine has already demoted it). Forwarded to the
-   * shared driver; the caller wires it to friction. Omit to leave demotion silent.
-   */
-  onCostDrift?: (info: {
-    poolId: string;
-    observedCostUsd: number;
-    declaredCostPerMtok: number;
-  }) => void;
-  /**
-   * Credit exhaustion (out-of-prepaid-usage-credits — no reset timer, unlike a
-   * 429): invoked once per pool when a `credit_exhausted` result lands, after
-   * the shared driver has already permanently excluded the pool from this run.
-   * Forwarded to the shared driver; the caller wires it to friction. Omit to
-   * leave the exclusion silent.
-   */
-  onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
-  /**
-   * Quota-unclassified harvest (Slice A2b, TIER 2): invoked once per pool when
-   * a `quota_unclassified` result lands, after the shared driver has already
-   * degraded conservatively (re-queued, reversible cooldown, the pool NEVER
-   * added to the permanent exclusion set). Forwarded to the shared driver; the
-   * caller wires it to friction carrying the verbatim text. Omit to leave it
-   * silent.
-   */
-  onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
-  /**
-   * Model-unavailable exclusion (HTTP 404 class): invoked once per pool when a
-   * `model_unavailable` result lands, after the shared driver has already
-   * permanently excluded the pool for the run. Forwarded to the shared driver;
-   * the caller wires it to friction. Omit to leave the exclusion silent.
-   */
-  onModelUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
-  /**
-   * Packet-too-large (HTTP 413 class, per-packet sizing fault): invoked once per
-   * (packet, pool) pair after the shared driver records the per-packet pool skip
-   * (no exclusion, no cooldown). Forwarded to the shared driver; the caller
-   * wires it to friction. Omit to leave the skip silent.
-   */
-  onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
-  /**
-   * Engine decision-record sink (legibility invariant): every per-packet engine
-   * admission decision (admit / ledger block / strand, with its constraint
-   * outcomes) is forwarded here — the caller wires `createDispatchDecisionLog`
-   * at the run dir. Omit ⇒ the engine writes the stamped records to stderr.
-   */
-  onAdmissionDecision?: EngineDecisionSink;
-}
-
-export interface DriveRollingDispatchResult {
-  /** Per-level dispatch results, in level order. */
-  levels: Array<{
-    blockIds: string[];
-    results: RollingDispatchResult<{ block_id: string }>[];
-  }>;
-  /** Number of inter-level shared rebuilds performed (== levels.length - 1 when >1 level). */
-  rebuilds: number;
-  /**
-   * The rolling engine's partial-completion terminal, if any wave stranded work
-   * (piece D `quota_paused`, or the pre-existing `empty_pool`). Aggregated across
-   * waves as the EARLIEST-reset terminal so the consumer can keep the stranded
-   * nodes pending (quota_paused) or block them (empty_pool). Absent when every
-   * packet completed.
-   */
-  terminal?: PartialCompletionTerminal;
-  /**
-   * Pools the engine PERMANENTLY excluded this drive (credit exhaustion,
-   * model-unavailable, a no-reset rate limit) — the unified driver's set passed
-   * through verbatim, so a partition-scoped caller can apply its cross-cycle
-   * settle from real per-pool evidence (H2 plan D2). Reversible pauses
-   * (reset-bearing 429, quota_unclassified cooldowns) are NOT in it, by the
-   * engine's own pause-vs-exhaust split.
-   */
-  exhaustedPoolIds: string[];
-}
-
-/**
- * Drive a rolling per-node dispatch run IN PROCESS over the precomputed
- * dependency levels, wiring onto the shared `createRollingDispatcher`
- * (quota-only throttle; transient-429 re-queue + empty-pool stranding owned by
- * the shared engine). The driver's own responsibilities are the two properties
- * the shared engine does not own:
- *   1. SHARED-REBUILD-BETWEEN-LEVELS — after a level completes, rebuild the
- *      upstream surface before the next level dispatches, so dependents
- *      typecheck/run against the realized upstream output.
- *   2. SINGLE-FLIGHT BUILD (CE-001) — the rebuild runs exactly once per
- *      inter-level boundary, never twice or concurrently.
- *
- * Within a level, concurrency is whatever the shared engine's quota headroom
- * allows over `confirmedPools` — there is no wave-size cap (INV-S05).
- */
-export async function driveRollingDispatch(
-  levels: RemediationBlock[][],
-  options: DriveRollingDispatchOptions,
-): Promise<DriveRollingDispatchResult> {
-  if (options.quotaStateDir) {
-    setQuotaStateDir(options.quotaStateDir);
-  }
-  const estimateTokens = options.estimateTokens;
-  const scopeForBlock =
-    options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files);
-  const allBlocks = levels.flat();
-  const blockById = new Map(allBlocks.map((b) => [b.block_id, b]));
-  const hostSession = options.hostSession;
-
-  // Admission control: when a metered pool reports a finite absolute budget, the shared
-  // reservation ledger leases each node's cost before dispatch, so co-located dispatch
-  // loops on one account (a second IDE, the host + its subagents) never collectively
-  // over-admit. On the claude-code host (percent-only quota, no finite ceiling) the ledger
-  // is omitted and the reactive 429 floor is the safety — no per-dispatch lock overhead.
-  const ledgerCfg = resolveLedgerBudgets({
-    pools: options.confirmedPools,
-    sessionConfig: options.sessionConfig,
-    pendingItemTokens: allBlocks.map((b) => estimateTokens(b)),
-  });
-
-  // The remediate terminal adapter over the unified shared driver. What stays here is
-  // remediate's projection: a block → its ownership node (declared write-scope, so the
-  // shared `ownershipSubWaves` serializes same-file nodes / parallelizes disjoint ones)
-  // and → its dispatch packet; the shared rebuild between dependency levels; and the
-  // host-session escalation wiring. The loop, sub-wave split, and quota_paused/empty_pool
-  // terminal merge are the unified driver's.
-  const run = await driveRolling<RemediationBlock, { block_id: string }>({
-    levels,
-    confirmedPools: options.confirmedPools,
-    sessionConfig: options.sessionConfig,
-    ...(ledgerCfg.reservationLedger
-      ? {
-          reservationLedger: ledgerCfg.reservationLedger,
-          resolvePoolConstraints: ledgerCfg.resolvePoolConstraints,
-          resolveOutputReservation: (_packet, poolId) =>
-            ledgerCfg.resolveOutputReservation(poolId),
-        }
-      : {}),
-    toNode: (b) => {
-      const continuity = options.continuityScores?.get(b.block_id) ?? 0;
-      return {
-        block_id: b.block_id,
-        write_paths: scopeForBlock(b),
-        ...(b.cofile_parallel_safe !== undefined
-          ? { cofile_parallel_safe: b.cofile_parallel_safe }
-          : {}),
-        ...(continuity > 0 ? { continuity } : {}),
-      };
-    },
-    toPacket: (b) => {
-      const requiredTier = options.tierForBlock?.(b);
-      return {
-        id: b.block_id,
-        payload: { block_id: b.block_id },
-        estimatedTokens: estimateTokens(b),
-        complexity: 0.5,
-        ...(requiredTier ? { requiredTier } : {}),
-      };
-    },
-    dispatchPacket: async (packet, slot) =>
-      options.dispatchNode(blockById.get(packet.payload.block_id)!, slot),
-    ...(options.root !== undefined ? { root: options.root } : {}),
-    ...(options.onCostDrift ? { onCostDrift: options.onCostDrift } : {}),
-    ...(options.onCreditExhausted ? { onCreditExhausted: options.onCreditExhausted } : {}),
-    ...(options.onQuotaUnclassified ? { onQuotaUnclassified: options.onQuotaUnclassified } : {}),
-    ...(options.onModelUnavailable ? { onModelUnavailable: options.onModelUnavailable } : {}),
-    ...(options.onPacketTooLarge ? { onPacketTooLarge: options.onPacketTooLarge } : {}),
-    ...(options.onAdmissionDecision ? { onAdmissionDecision: options.onAdmissionDecision } : {}),
-    // Single-flight (CE-001) is enforced by the unified driver.
-    rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
-    // Host-session escalation: feed recordLimit (write) at the rate_limited observation
-    // point and read isEscalated (strand-not-requeue). The SAME instance sized the pools,
-    // so the bounded re-limit count is account-wide.
-    ...(hostSession
-      ? {
-          recordRateLimit: (packet, result) =>
-            hostSession.recordLimit(
-              result.rateLimit?.channel ?? "error",
-              result.rateLimit?.text ?? "",
-              packet.id,
-            ),
-          isPacketEscalated: (packetId) => hostSession.isEscalated(packetId),
-        }
-      : {}),
-  });
-
-  return {
-    levels: run.levels.map((l) => ({ blockIds: l.nodeIds, results: l.results })),
-    rebuilds: run.rebuilds,
-    ...(run.terminal ? { terminal: run.terminal } : {}),
-    exhaustedPoolIds: run.exhaustedPoolIds,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// In-process rolling implement dispatch (the live-path engine wiring)
-// ---------------------------------------------------------------------------
-//
-// CE-001 anti-wedge: this is the rolling-engine path that runs ALONGSIDE the
-// proven host-fanned wave step. It is engaged ONLY when (a) the rolling engine
-// is opted in (`resolveRollingEngineEnabled`) AND (b) a programmatic per-node
-// `dispatchNode` is supplied (a subprocess/CLI provider-backed worker). The
-// conversation host fans out its own subagents and never supplies a
-// `dispatchNode`, so it always takes the host-wave fallback. The atomic removal
-// of that fallback is a DOCUMENTED REMAINING STEP, gated on a validated
-// multi-worker rolling dispatch — it is intentionally NOT forced here.
-//
-// What this path adds over the host-wave step: concurrency is derived purely
-// from quota (`createRollingDispatcher` over `buildConfirmedPools`, no wave-size
-// cap — INV-S05); dispatch is rolling (a freed slot is filled the instant a node
-// completes — `createRollingDispatcher.run`); each node runs in an ISOLATED git
-// worktree whose branch diff is the write-scope ground truth; and a node's
-// branch is merged into the main tree ONLY after its per-node verify passes
-// (verify-before-accept). Results are then merged through the same deterministic
-// `mergeImplementResults` the wave path uses (tolerant finding_id remap,
-// write-scope + lost-update gates), so the contract output is identical.
-
-/** A programmatic per-node implement worker: edits within the node's worktree, writes its result file. */
-export type ProgrammaticNodeDispatcher = (args: {
-  block: RemediationBlock;
-  slot: ProviderSlot;
-  /** The isolated worktree root the worker must edit within. */
-  worktreeRoot: string;
-  /** The absolute path the worker must write its result JSON to. */
-  resultPath: string;
-}) => Promise<RollingDispatchResult<{ block_id: string }>>;
-
-export interface DriveRollingImplementDispatchOptions {
-  root: string;
-  artifactsDir: string;
-  runId: string;
-  sessionConfig: SessionConfig | null;
-  /**
-   * Programmatic per-node dispatcher. Defaults to the live provider-backed worker
-   * (`makeProviderNodeDispatcher`: resolves the configured provider and launches it
-   * with the node's worktree-rooted prompt). Tests inject a stub to exercise the
-   * engine without spawning a real worker.
-   */
-  dispatchNode?: ProgrammaticNodeDispatcher;
-  /** Rebuild the upstream shared surface between dependency levels (single-flight). */
-  rebuildSharedBetweenLevels: () => Promise<void>;
-  /** Wave/host inputs used to size the quota-derived eligible pools. */
-  waveOptions?: {
-    hostMaxConcurrent?: number;
-    hostContextTokens?: number | null;
-    hostOutputTokens?: number | null;
-    hostModels?: HostModelRosterEntry[] | null;
-    hostModelId?: string | null;
-  };
-  /**
-   * Partition-scoped drive (H2 plan D2, mirroring audit's `tasksOverride`): drive
-   * ONLY these planned block ids — the caller's coordinator-assigned in-process
-   * partition. When set, run-level lifecycle stays with the CALLER: the engine
-   * terminal is NOT persisted onto state (a backend-only wall must never pause
-   * the whole run while the host share proceeds) and the final
-   * `mergeImplementResults` is NOT run. Full-frontier behavior (unset) is
-   * unchanged.
-   */
-  blocksOverride?: readonly string[];
-  /**
-   * Drive against these pools (the caller's coordinator set, mirroring audit's
-   * `poolsOverride`) instead of deriving `buildConfirmedPools` here.
-   */
-  poolsOverride?: CapacityPool[];
-  /**
-   * Reuse the caller's already-prepared dispatch plan instead of re-preparing here
-   * (H2 collapse — the "cleaner shape" the plan invited over a documented
-   * double-prepare). The hybrid decision point prepares ONCE (worktree-rooted
-   * prompts, host-grant admission + leases) so the coordinator split, this
-   * partition drive, and the host hand-off all read the SAME plan; an internal
-   * re-prepare here would additionally CLOBBER the host-share dispatch-quota file
-   * with this engine path's `grantLeases:false` variant, which
-   * `prepareHostRollingDispatch` then reads for the host grant. Only meaningful
-   * together with `blocksOverride` (a partition-scoped drive).
-   *
-   * Documented lease overlap: the caller's grant leased the whole granted set (the
-   * host reserve-before-dispatch contract) and the engine ALSO admits + leases
-   * per-packet for the partition it drives — a transient conservative over-count,
-   * reconciled at merge (review h2c2: prepare reconciles complete results; the
-   * merge has a supplementary sweep).
-   */
-  planOverride?: RemediationDispatchPlan;
-  /**
-   * Coordinator-held claims to ADOPT (block id → owner token). The hybrid caller's
-   * coordinator already claimed its in-process partition through the SAME
-   * `nodeClaimRegistry` this driver claims through, so self-claiming here would
-   * self-collide and skip every node as peer-owned. Adopted tokens feed the
-   * merge-time ownership gate and are released on terminal accepts exactly like
-   * self-claimed ones (token-checked, so the caller's post-drive coordinator
-   * release of an already-released node is a no-op). Mirrors
-   * `prepareHostRollingDispatch`'s pre-claimed host-partition hand-off.
-   */
-  claimOwnerTokens?: ReadonlyMap<string, string>;
-}
-
-export interface DriveRollingImplementDispatchResult {
-  /** Per-node verify + merge outcome, in dispatch order. */
-  nodes: Array<{
-    block_id: string;
-    outcome: RollingDispatchResult<{ block_id: string }>["outcome"];
-    verify_passed: boolean;
-    merged: boolean;
-    /** The pool the node actually ran on (claim-contested skips name the offered pool). */
-    pool_id: string;
-  }>;
-  /** Number of inter-level shared rebuilds performed. */
-  rebuilds: number;
-  /**
-   * The state status after the deterministic merge of all node results; for a
-   * partition-scoped drive (no merge here) the CURRENT persisted status.
-   */
-  state_status: RemediationState["status"];
-  /**
-   * Pools the engine permanently excluded this drive (see
-   * {@link DriveRollingDispatchResult.exhaustedPoolIds}) — the partition caller's
-   * cross-cycle settle evidence.
-   */
-  exhausted_pool_ids: string[];
-  /**
-   * The engine's partial-completion terminal, surfaced to the caller. On a
-   * full-frontier drive it has ALSO been persisted onto state (pre-merge); on a
-   * partition-scoped drive it is deliberately NOT persisted — the caller owns
-   * run-level lifecycle.
-   */
-  terminal?: PartialCompletionTerminal;
-}
-
-/**
- * Whether an eligible pool is one the orchestrator launches IN-PROCESS this cycle
- * (vs. the conversation host's subagent pool) — the shared
- * `isInProcessWorkerProvider` predicate (H3), same remediate policy.
- */
-function isInProcessPool(pool: { providerName: string }): boolean {
-  return isInProcessWorkerProvider(pool.providerName, { commandWorkers: true });
-}
-
-/**
- * Release a node's shared claim on a terminal accept (token-checked through the
- * registry), then drop the held token. Idempotent: a node with no held token (a
- * peer-owned skip, or a double-release) is a no-op. Single-sourced so both the
- * success and the error paths of the in-process driver free the claim identically.
- */
-async function releaseNodeClaim(
-  registry: ClaimRegistry,
-  claimTokens: Map<string, string>,
-  blockId: string,
-): Promise<void> {
-  const token = claimTokens.get(blockId);
-  if (!token) return;
-  await registry.release(blockId, token);
-  claimTokens.delete(blockId);
-}
-
-/**
- * Drive the implement phase through the in-process rolling engine. Engages the
- * shared `createRollingDispatcher` (via `driveRollingDispatch`) over
- * quota-derived `confirmedPools`, runs each node in an isolated worktree, gates
- * acceptance on a per-node verify, and finally merges through the deterministic
- * `mergeImplementResults`. Returns null when there is no eligible pending work.
- *
- * SAFETY: this never touches the main tree except through `mergeWorktree` (which
- * cherry-picks a verified branch and aborts cleanly on conflict). A node whose
- * verify fails is NOT merged; its worktree is removed and the deterministic merge
- * marks it blocked (its result file is absent / unaccounted) so the run routes it
- * to triage rather than landing an unverified change.
- */
-export async function driveRollingImplementDispatch(
-  options: DriveRollingImplementDispatchOptions,
-): Promise<DriveRollingImplementDispatchResult | null> {
-  const { root, artifactsDir, runId } = options;
-
-  // Prepare the dispatch plan (eligible verified-complete frontier) with the SAME
-  // quota-derived sizing the wave path uses. This writes per-node prompts +
-  // dispatch-plan.json + dispatch-quota.json. A partition-scoped hybrid caller
-  // supplies its already-prepared plan instead (planOverride — see its docblock).
-  const plan =
-    options.planOverride ??
-    (await prepareImplementDispatch(
-      { root, artifactsDir },
-      runId,
-      undefined,
-      {
-        hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
-        sessionConfig: options.sessionConfig,
-        hostContextTokens: options.waveOptions?.hostContextTokens,
-        hostOutputTokens: options.waveOptions?.hostOutputTokens,
-        hostModels: options.waveOptions?.hostModels,
-        hostModelId: options.waveOptions?.hostModelId,
-        // Each node runs in its own worktree, so its prompt is rooted there.
-        worktreeRootedPrompts: true,
-        // The in-process rolling engine admits + leases per-packet itself, so the
-        // dispatch-quota grant here must NOT lease (a host grant lease would
-        // double-count the same work against the shared account budget).
-        grantLeases: false,
-      },
-    ));
-  if (plan.items.length === 0) {
-    return null;
-  }
-
-  // Map each planned block id to its result path so the per-node dispatcher
-  // writes where the merge expects to read.
-  const resultPathByBlock = new Map(
-    plan.items
-      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-      .map((i) => [i.block_id, i.result_path]),
-  );
-  // Every block's declared write scope, for the accept-time write-scope gate's
-  // amendment ownership adjudication (so an amended path owned by a sibling block
-  // is a seam conflict, not a silent grant). Built once from the in-memory plan.
-  const allBlockScopes = blockScopesFromPlan(plan);
-  // Map each planned block id to its worktree-rooted prompt path so the
-  // provider-backed dispatcher launches the worker with the right prompt.
-  const promptPathByBlock = new Map(
-    plan.items
-      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-      .map((i) => [i.block_id, i.prompt_path]),
-  );
-  // Per-block granted read set (repo-relative access.read_paths) so a single-shot /
-  // no-file-access provider can inline file contents; agentic CLIs ignore it.
-  const referencedFilesByBlock = new Map(
-    plan.items
-      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-      .map((i) => [i.block_id, i.access?.read_paths ?? []]),
-  );
-  // Per-block capability floor from the plan's model hints (F4) — the same tier
-  // the contract's admission packets carry, so the engine's packet→pool
-  // selection enforces what the contract displays.
-  const tierByBlock = new Map<string, DispatchModelTier>(
-    plan.items
-      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-      .flatMap((i) => (i.model_hint ? [[i.block_id, i.model_hint.tier] as const] : [])),
-  );
-
-  // The RETAINED host-session source: threaded through pool sizing AND the
-  // dispatcher's escalation hooks so the bounded re-limit chain (recordLimit →
-  // escalate → strand → quota_escalation friction) is fed end-to-end. Its
-  // onEscalation routes to the single step-boundary friction chokepoint with this
-  // driver's artifactsDir/runId, so a bounded account-wall escalation surfaces as
-  // reviewable friction instead of only a stderr line.
-  const providerName = resolveHostProviderName(options.sessionConfig);
-  const hostSessionModelKey = quotaPoolKey(
-    providerName,
-    (options.sessionConfig as { block_quota?: { host_model?: string | null } } | undefined)
-      ?.block_quota?.host_model ??
-      options.waveOptions?.hostModelId ??
-      null,
-  );
-  const hostSession = new HostSessionQuotaSource({
-    providerModelKey: hostSessionModelKey,
-    onEscalation: (escalation) => {
-      void captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "quota_escalation",
-          discriminator: escalation.packet_id,
-          note: escalation.reason,
-          severity: "high",
-          category: "trap",
-          area: "dispatch/quota",
-        },
-        "remediate-code",
-      );
-    },
-  });
-
-  // Eligible pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
-  // A partition-scoped caller supplies its coordinator's already-built set instead.
-  const builtPools = options.poolsOverride
-    ? null
-    : await buildConfirmedPools({
-      sessionConfig: options.sessionConfig,
-      hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
-      hostContextTokens: options.waveOptions?.hostContextTokens,
-      hostOutputTokens: options.waveOptions?.hostOutputTokens,
-      hostModels: options.waveOptions?.hostModels,
-      hostModelId: options.waveOptions?.hostModelId,
-      capabilityRanks: null,
-      hostSession,
-      // Mechanical self-spawn exclusion, recomputed from this process's environment.
-      excludedBackends: buildSelfSpawnExclusion(),
-    });
-  const confirmedPools = options.poolsOverride ?? builtPools!.pools;
-  // The operator's own policy left this dispatch with no capacity at all. Loud, not
-  // silent — a `poolsOverride` caller supplied its own set, so there is no zeroing of
-  // OURS to report.
-  if (builtPools?.zeroedByExclusion) {
-    await captureZeroCapacityFriction(
-      options.artifactsDir,
-      options.runId,
-      builtPools.zeroedByExclusion,
-      "remediate-code",
-    );
-  }
-
-  // The live per-node worker: the configured provider, launched with the node's
-  // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
-  // to exercise the engine without spawning a real worker. A node on a source-backed
-  // pool launches FROM its source's config (A-8 generic dispatchable sources).
-  const dispatchNode: ProgrammaticNodeDispatcher =
-    options.dispatchNode ??
-    makeProviderNodeDispatcher({
-      root,
-      artifactsDir,
-      runId,
-      sessionConfig: options.sessionConfig,
-      promptPathByBlock,
-      referencedFilesByBlock,
-      sourceByPoolId: sourceByPoolId(confirmedPools),
-    });
-
-  // Load state to partition the eligible frontier into rolling dependency levels.
-  const state = await new StateStore(artifactsDir).loadState();
-  if (!state) return null;
-  const plannedBlockIds = new Set(resultPathByBlock.keys());
-  // Partition scope (H2): when the caller assigned this driver a coordinator
-  // partition, only those planned blocks are driven — everything else stays
-  // pending for the caller's other pools (the host share included).
-  const partitionIds =
-    options.blocksOverride !== undefined ? new Set(options.blocksOverride) : null;
-  const allLevels = rollingDependencyLevels(state);
-  // Keep only the blocks that were actually planned this dispatch (eligible now).
-  const levels = allLevels
-    .map((level) =>
-      level.filter(
-        (b) => plannedBlockIds.has(b.block_id) && (partitionIds === null || partitionIds.has(b.block_id)),
-      ),
-    )
-    .filter((level) => level.length > 0);
-  // Empty partition → an empty-but-SHAPED result, never null: `null` means "no
-  // eligible work, run the merge" to existing callers, and a partition caller
-  // following that recipe against the just-written full-frontier plan would
-  // terminal-block every undriven block (review h2c2 F1).
-  if (partitionIds !== null && levels.length === 0) {
-    return { nodes: [], rebuilds: 0, state_status: state.status, exhausted_pool_ids: [] };
-  }
-
-  const nodeOutcomes: DriveRollingImplementDispatchResult["nodes"] = [];
-
-  // The SAME file-backed claim registry the host-subagent driver claims through
-  // (`nodeClaimRegistry`, keyed only to run + artifacts dir). Claiming a node here
-  // BEFORE creating its worktree makes the in-process and host-subagent drivers
-  // mutually exclusive on a node — exactly-one-claimant across both (A-10), the
-  // cross-driver double-dispatch guard. Owner tokens are held in-memory for the
-  // life of this run: a `rate_limited` re-queue re-enters for the same block, so a
-  // node already claimed by THIS driver reuses its token rather than self-colliding.
-  const registry = nodeClaimRegistry(artifactsDir, runId);
-  // Seeded with any coordinator-held claims the caller hands off (hybrid partition
-  // drive) — an adopted node skips self-claiming and releases with the adopted token.
-  const claimTokens = new Map<string, string>(options.claimOwnerTokens ?? []);
-
-  // Per-node worktree dispatch + verify-before-accept, wrapped so the rolling
-  // engine's dispatchNode callback always RESOLVES (never rejects).
-  const dispatchNodeWithWorktree: RollingNodeDispatcher = async (block, slot) => {
-    const resultPath = resultPathByBlock.get(block.block_id)!;
-    // Claim BEFORE any worktree work (CE-001). A node THIS driver already holds (a
-    // rate_limited re-queue) reuses its token. A node a PEER driver holds is its to
-    // run — skip the worker + accept lifecycle entirely so we never double-dispatch
-    // or double-merge it; the run-level `mergeImplementResults` reconciles from the
-    // peer's accept outcome.
-    if (!claimTokens.has(block.block_id)) {
-      try {
-        const claim = await registry.claim(block.block_id, "in-process");
-        if (!claim.acquired) {
-          nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false, pool_id: slot.poolId });
-          return {
-            packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-            outcome: "success",
-          };
-        }
-        claimTokens.set(block.block_id, claim.ownerToken);
-      } catch (err) {
-        // Claim acquisition failed — return error outcome without rejecting, per
-        // contract. Release is skipped since we never acquired the claim.
-        nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false, pool_id: slot.poolId });
-        return {
-          packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-          outcome: "error",
-          error: err,
-        };
-      }
-    }
-    // The shared per-node worktree lifecycle (reset → create → link node_modules →
-    // seed → dispatch → commit/verify/write-scope/merge → record), identical to the
-    // A-8 hybrid executor and behaviourally to the host-subagent driver's
-    // `accept-node` callback. `touched_files` is the block's authoritative declared
-    // write set (the source the dispatch plan's write scope is derived from).
-    let result: RollingDispatchResult<{ block_id: string }>;
-    let accept: AcceptNodeWorktreeResult;
-    try {
-      ({ result, accept } = await executeNodeInWorktree({
-        block,
-        slot,
-        root,
-        artifactsDir,
-        runId,
-        resultPath,
-        seedPaths: block.touched_files,
-        allBlockScopes,
-        additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
-        dispatchNode,
-        // Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME lease
-        // this driver just claimed (or re-claimed on a rate_limited re-queue) above.
-        ownership: { registry, nodeId: block.block_id, ownerToken: claimTokens.get(block.block_id)! },
-      }));
-    } catch (err) {
-      // Worker execution failed — return error outcome without rejecting, per
-      // contract. Release the claim since we must free it on exception to prevent
-      // blocking peer drivers.
-      try {
-        await releaseNodeClaim(registry, claimTokens, block.block_id);
-      } catch {
-        // Swallow release failure — node outcome already records the execution
-        // error as the primary failure mode.
-      }
-      nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false, pool_id: slot.poolId });
-      return {
-        packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-        outcome: "error",
-        error: err,
-      };
-    }
-    nodeOutcomes.push({
-      block_id: block.block_id,
-      outcome: accept.outcome,
-      verify_passed: accept.verifyPassed,
-      merged: accept.merged,
-      // Real per-node pool attribution (H2 plan D2) — the slot the engine bound,
-      // so a partition caller can settle the RIGHT pool from a node's outcome.
-      pool_id: slot.poolId,
-    });
-    // Release the claim ONLY on a terminal accept. A `rate_limited`,
-    // `credit_exhausted`, `provider_unavailable`, or `quota_unclassified` worker
-    // re-queues (still owned work — keep the claim so a peer can't grab it
-    // mid-retry); success / error / timeout is terminal → free it through the
-    // shared registry (token-checked).
-    if (
-      result.outcome !== "rate_limited" &&
-      result.outcome !== "credit_exhausted" &&
-      result.outcome !== "provider_unavailable" &&
-      result.outcome !== "quota_unclassified"
-    ) {
-      await releaseNodeClaim(registry, claimTokens, block.block_id);
-    }
-    return result;
-  };
-
-  // Declared write-scope per block, from the dispatch plan — the same authority
-  // the merge-time write-scope gate reads — for file-ownership-disjoint admission
-  // (INV-SOO). A block with no plan scope falls back to its touched_files.
-  const writePathsByBlock = new Map(
-    allBlockScopes.map((s) => [s.block_id, s.write_paths]),
-  );
-  const tokensByBlock = new Map(
-    plan.items
-      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-      .map((i) => [i.block_id, i.estimated_input_tokens]),
-  );
-  // Continuity bias (context-efficiency track, increment 2d): load the harvested
-  // access-memory and reduce it to a per-block mass keyed on each block's declared
-  // source surface (`touched_files` — the clean surface the harvest attributes to,
-  // excluding the synthetic result-path in the dispatch write-scope). Absent on the
-  // first pass (no merge yet) ⇒ empty map ⇒ pure block_id sub-wave ordering.
-  const continuityScores = computeBlockContinuityScores(
-    await readRemediationAccessMemory(artifactsDir),
-    levels.flat(),
-    (block) => block.touched_files,
-  );
-  const driven = await driveRollingDispatch(levels, {
-    confirmedPools,
-    sessionConfig: options.sessionConfig ?? {},
-    dispatchNode: dispatchNodeWithWorktree,
-    rebuildSharedBetweenLevels: options.rebuildSharedBetweenLevels,
-    quotaStateDir: artifactsDir,
-    root,
-    hostSession,
-    continuityScores,
-    scopeForBlock: (block) =>
-      writePathsByBlock.get(block.block_id) ?? block.touched_files,
-    // The node's real size, read off the plan item that already carries it. No
-    // fallback: a block in the drive that is absent from the plan is a producer
-    // desync, and defaulting it would silently restore the flat estimate that
-    // made every node look identical to the fit gates.
-    estimateTokens: (block) => {
-      const estimate = tokensByBlock.get(block.block_id);
-      if (estimate === undefined) {
-        throw new Error(
-          `Block ${block.block_id} is being dispatched but carries no dispatch-plan item, ` +
-            `so its token estimate is unknown. The drive and the plan have desynced.`,
-        );
-      }
-      return estimate;
-    },
-    tierForBlock: (block) => tierByBlock.get(block.block_id),
-    // Reactive cost verification: a declared-free source pool observed charging has
-    // been demoted by the engine; surface it as reviewable friction so the operator
-    // reconciles the stale `cost_per_mtok:0` (single step-boundary chokepoint).
-    onCostDrift: (info) => {
-      captureCostDriftFriction(artifactsDir, runId, info, "remediate-code");
-    },
-    // Credit exhaustion: a pool out of prepaid usage credits (no reset timer,
-    // distinct from a rate limit) has already been permanently excluded from
-    // this run's admissible set by the engine; surface it as reviewable
-    // friction so the operator knows to top up credits.
-    onCreditExhausted: (info) => {
-      captureCreditExhaustionFriction(artifactsDir, runId, info, "remediate-code");
-    },
-    // Quota-unclassified harvest (Slice A2b): a pool death whose text was
-    // quota-suspicious but matched no precise pattern degraded conservatively
-    // (re-queued, never permanently excluded); surface the verbatim
-    // (secret-scrubbed) text as reviewable friction so the operator can
-    // classify it and improve errorParsing.ts's pattern set.
-    onQuotaUnclassified: (info) => {
-      captureQuotaUnclassifiedFriction(artifactsDir, runId, info, "remediate-code");
-    },
-    // Model-unavailable exclusion (availability analog of cost drift): the engine
-    // has already permanently excluded the 404ing pool; surface it so the operator
-    // reconciles the stale registry row (registry rows are leads, not reach).
-    onModelUnavailable: (info) => {
-      captureModelUnavailableFriction(artifactsDir, runId, info, "remediate-code");
-    },
-    // Packet-too-large (per-packet sizing fault, HTTP 413): the engine skips THIS
-    // pool for THIS packet only — no exclusion, no cooldown; surface each pair.
-    onPacketTooLarge: (info) => {
-      capturePacketTooLargeFriction(artifactsDir, runId, info, "remediate-code");
-    },
-    // Legibility (spec Resolved decision 3): every engine dispatch decision
-    // (admit / ledger block / strand, with its full constraint-outcome data)
-    // appends to this run's dispatch-explains.jsonl beside its dispatch-quota.
-    onAdmissionDecision: createDispatchDecisionLog(
-      join(artifactsDir, "runs", runId, "implement", "dispatch-explains.jsonl"),
-    ),
-  });
-
-  // Partition-scoped drive (H2): run-level lifecycle belongs to the CALLER — the
-  // engine terminal is surfaced on the result but never persisted (a backend-only
-  // wall must not pause the whole run while the host share proceeds), and the
-  // deterministic merge is the caller's, run once over ALL partitions.
-  if (partitionIds !== null) {
-    // Freshly persisted status; falls back to the pre-drive snapshot only if
-    // state.json vanished mid-drive (review h2c2 F4 — documented, not silent).
-    const current = await new StateStore(artifactsDir).loadState();
-    return {
-      nodes: nodeOutcomes,
-      rebuilds: Math.max(0, levels.length - 1),
-      state_status: (current ?? state).status,
-      exhausted_pool_ids: driven.exhaustedPoolIds,
-      ...(driven.terminal ? { terminal: driven.terminal } : {}),
-    };
-  }
-
-  // Piece D — persist the rolling engine's partial-completion terminal onto state
-  // BEFORE the merge, so the merge can SKIP-block the quota_paused stranded nodes
-  // (their worker rate-limited → no result file, but they must stay PENDING for a
-  // later step to redispatch clean — the worktrees were PRESERVED by
-  // acceptNodeWorktree). An `empty_pool` terminal does not affect the merge (its
-  // nodes are genuine failures); the `partial_terminal` obligation blocks them.
-  if (driven.terminal) {
-    const pre = await new StateStore(artifactsDir).loadState();
-    if (pre) {
-      pre.partial_completion_terminal = driven.terminal;
-      await new StateStore(artifactsDir).saveState(pre);
-    }
-  }
-
-  // Deterministic merge: same path the wave flow uses (tolerant remap, write-scope
-  // gate against each verified branch, lost-update detection). Worktrees are
-  // already removed; the merge reads each node's result file + branch diff.
-  const merged = await mergeImplementResults({ root, artifactsDir }, runId);
-
-  return {
-    nodes: nodeOutcomes,
-    rebuilds: Math.max(0, levels.length - 1),
-    state_status: merged.status,
-    exhausted_pool_ids: driven.exhaustedPoolIds,
-    ...(driven.terminal ? { terminal: driven.terminal } : {}),
-  };
-}
-
-
-// ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
 // ---------------------------------------------------------------------------
 //
@@ -1795,6 +595,7 @@ async function saveStateForPlan(
   plan: RemediationPlan,
   planCoverage?: CoverageLedger,
 ): Promise<RemediationState> {
+  const { host_handoff: _staleHostHandoff, ...carryForwardState } = existing;
   const items: Record<string, RemediationItemState> = {};
   const blockIds = blockIdsByFinding(plan);
   for (const finding of plan.findings) {
@@ -1805,7 +606,7 @@ async function saveStateForPlan(
     };
   }
   const state: RemediationState = {
-    ...existing,
+    ...carryForwardState,
     status: "planning",
     plan,
     items,
@@ -1999,6 +800,15 @@ async function presentReportStep(
   });
 }
 
+function currentHostBoundaryState(
+  state: RemediationState,
+): CurrentRemediationHostState {
+  return {
+    contract_version: "remediate-code-state/v1alpha1",
+    ...state,
+  } as CurrentRemediationHostState;
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -2006,793 +816,113 @@ async function buildImplementDispatchStep(ctx: {
   options: NextStepOptions;
   store: StateStore;
 }): Promise<RemediateOutcome> {
-  const { root, artifactsDir, state, options, store } = ctx;
-
-    // The effective config comes from the single remediate loader — always resolved
-    // against the ambient descriptor (see there for why `null` is not an option).
-    const loadedSessionConfig = await loadRemediateSessionConfig({
-      root,
-      override: options.sessionConfig,
-      artifactsFirst: true,
-    });
-    // B1: fold the `--host-provider` override onto `host_provider` so every
-    // downstream host resolver keys the fan-out to the ACTUAL conversation host.
-    // "auto" is treated as unset (fall through to env auto-detection).
-    const sessionConfigImpl =
-      options.hostProvider !== undefined && options.hostProvider !== "auto"
-        ? { ...(loadedSessionConfig ?? {}), host_provider: options.hostProvider }
-        : loadedSessionConfig;
-    const canDispatchImpl = resolveHostDispatchCapability({
-      hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-      sessionConfig: sessionConfigImpl,
-    });
-
-    // C1: merge the explicitly-supplied host-* options with the persisted
-    // handshake (per-field `explicit ?? persisted ?? floor`) and feed the
-    // resolved values into downstream dispatch sizing. PERSISTENCE of the
-    // explicit delta happens once at the decideNextStepLoop seam (before
-    // obligation selection), so by the time this branch runs the persisted
-    // handshake already includes this call's flags — this is resolution only,
-    // and the single state writer stays the seam.
-    const { resolved: resolvedHostCaps } = resolveHostCapabilities(
-      {
-        can_dispatch_subagents: options.hostCanDispatchSubagents,
-        max_concurrent: options.hostMaxConcurrent,
-        context_tokens: options.hostContextTokens,
-        output_tokens: options.hostOutputTokens,
-        model_id: options.hostModelId,
-        models: options.hostModels ?? undefined,
-      },
-      state.host_capabilities,
+  const { root, artifactsDir, state, store } = ctx;
+  const runId = stateRunId(state);
+  const boundaryState = currentHostBoundaryState(state);
+  const ingested = await ingestRemediationHostResults({
+    root,
+    artifactsDir,
+    runId,
+    state: boundaryState,
+  });
+  if (ingested === "unsupported_retired_state") {
+    throw new Error(
+      "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
     );
-    const resolvedHostMaxConcurrent = resolvedHostCaps.max_concurrent;
-    const resolvedHostContextTokens = resolvedHostCaps.context_tokens ?? null;
-    const resolvedHostOutputTokens = resolvedHostCaps.output_tokens ?? null;
-    const resolvedHostModels =
-      (resolvedHostCaps.models as HostModelRosterEntry[] | undefined) ?? null;
-    const resolvedHostModelId = resolvedHostCaps.model_id ?? null;
+  }
+  if (ingested.state_changed) {
+    const { contract_version: _contractVersion, ...persistableState } =
+      ingested.state;
+    await store.saveState(persistableState);
+    return { kind: "transition", state: persistableState };
+  }
 
-    // A8 host-subagent rolling driver: when the rolling engine is enabled AND the
-    // host can dispatch subagents, drive a FULL-ROLLING, worktree-isolated flow via
-    // the `accept-node` per-completion callback — the conversation-first co-equal of
-    // the in-process provider engine (`driveRollingImplementDispatch`), sharing the
-    // same `acceptNodeWorktree` core. Gated behind the flag so the default stays the
-    // proven host-fanned wave step until the rolling path is validated end-to-end.
-    const rollingEngineEnabled = resolveRollingEngineEnabled({
-      rollingEngine: options.rollingEngine,
-      sessionConfig: sessionConfigImpl,
-    });
-
-    const runId = stateRunId(state);
-    const waveOptsImpl = {
-      hostMaxConcurrent: resolvedHostMaxConcurrent,
-      sessionConfig: sessionConfigImpl ?? null,
-      hostContextTokens: resolvedHostContextTokens,
-      hostOutputTokens: resolvedHostOutputTokens,
-      hostModels: resolvedHostModels,
-      hostModelId: resolvedHostModelId,
-      // An attended host is the dispatch authority. Headless/in-process paths
-      // leave this false and retain the shared admission engine.
-      hostOwnedDispatch: canDispatchImpl,
-    };
-
-    // H2+H4 collapse: ONE fan-out over the eligible pool set. `buildConfirmedPools`
-    // folds the configured primary in-process backend in as a source pool
-    // UNCONDITIONALLY (no demote flag; command-shaped primaries included under
-    // remediate's policy — plan D3) and includes the conversation host as a member
-    // pool iff it can dispatch subagents. Headless is the degenerate "no host pool
-    // in the set" case: the engine drives the whole frontier itself. The same-agent
-    // case (conversation host IS the primary backend) is the shared cross-class
-    // dedup's D1 collision rule — the engine/source pool survives, so one account is
-    // never double-booked across a host pool and a folded source.
-    if (rollingEngineEnabled) {
-      // D5: the host-session quota key follows the DRIVER identity — an in-process
-      // worker primary keys to the conversation host; an explicit IDE/host provider
-      // passes through verbatim (never re-keyed to the literal claude-code, the
-      // founding-bug misattribution class [[capability-is-per-auditor-not-per-audit]]).
-      const hybridProviderName = resolveHostDispatchProviderName(sessionConfigImpl, {
-        commandWorkers: true,
-      });
-      const hybridHostSessionModelKey = quotaPoolKey(
-        hybridProviderName,
-        (sessionConfigImpl as { block_quota?: { host_model?: string | null } } | undefined)
-          ?.block_quota?.host_model ??
-          resolvedHostModelId ??
-          null,
-      );
-      const hybridHostSession = new HostSessionQuotaSource({
-        providerModelKey: hybridHostSessionModelKey,
-      });
-      const { pools: confirmedPools, zeroedByExclusion, sourcePoolIds } = await buildConfirmedPools({
-        sessionConfig: sessionConfigImpl ?? null,
-        hostMaxConcurrent: resolvedHostMaxConcurrent,
-        hostContextTokens: resolvedHostContextTokens,
-        hostOutputTokens: resolvedHostOutputTokens,
-        hostModels: resolvedHostModels,
-        hostModelId: resolvedHostModelId,
-        capabilityRanks: null,
-        hostSession: hybridHostSession,
-        // Attendance IS pool-set membership: headless ⇒ no host pool in the set.
-        hostCanDispatch: canDispatchImpl,
-        // Mechanical self-spawn exclusion uses the same resolved driver identity as quota.
-        excludedBackends: buildSelfSpawnExclusion({
-          activeHostProvider: canDispatchImpl ? hybridProviderName : null,
-        }),
-      });
-      // Loud, not silent: on the headless branch below there is no host pool to fall
-      // back to, so a policy-zeroed set means this dispatch does nothing at all.
-      if (zeroedByExclusion) {
-        await captureZeroCapacityFriction(artifactsDir, runId, zeroedByExclusion, "remediate-code");
-      }
-      // Engine-drivable backends are SOURCE pools only, by declared class — never
-      // re-derived from the provider name. The neutral worker-command host identity
-      // name-collides with the in-process worker class, so a name-only test would
-      // hand the HOST's own pool to the engine as a spawnable worker.
-      const isEngineDrivableId = (poolId: string, providerName: string): boolean =>
-        sourcePoolIds.has(poolId) && isInProcessPool({ providerName });
-      const backendPools = confirmedPools.filter((p) => isEngineDrivableId(p.id, p.providerName));
-
-      if (!canDispatchImpl) {
-        // Headless: no host pool in the eligible set — when any dispatchable
-        // backend pool is confirmed, the engine drives the FULL rolling implement
-        // dispatch itself (no blocksOverride: the driver's full path owns terminal
-        // persistence + the final merge), cwd-confined to each node's worktree,
-        // sharing the same `acceptNodeWorktree` core as the host-subagent driver.
-        // No pool at all ⇒ fall through to the sequential host step below.
-        if (backendPools.length > 0) {
-          const driven = await driveRollingImplementDispatch({
-            root,
-            artifactsDir,
-            runId,
-            sessionConfig: sessionConfigImpl ?? null,
-            // Per-node verify (targeted_commands) owns each node's build/test; an
-            // inter-level "shared surface" rebuild is a monorepo-self-remediation concern
-            // the host-driven paths handle, not a generic target-repo step → no-op here.
-            rebuildSharedBetweenLevels: async () => {},
-            waveOptions: {
-              hostMaxConcurrent: resolvedHostMaxConcurrent,
-              hostContextTokens: resolvedHostContextTokens,
-              hostOutputTokens: resolvedHostOutputTokens,
-              hostModels: resolvedHostModels,
-              hostModelId: resolvedHostModelId,
-            },
-            // The eligible pool set built above (source pools only — headless),
-            // so the drive routes across every confirmed backend pool.
-            poolsOverride: backendPools,
-          });
-          // null = no eligible pending work this pass; the engine merges internally once
-          // it has run, so only the empty-frontier case needs a merge here. Either way the
-          // implement frontier is resolved — transition on the freshly-merged state so the
-          // engine re-scans (triage / closing) without recursion.
-          if (driven === null) {
-            const merged = await mergeImplementResults({ root, artifactsDir }, runId);
-            return { kind: "transition", state: merged };
-          }
-          return { kind: "transition", state: await store.loadState() };
-        }
-      }
-
-      if (canDispatchImpl) {
-      // A-8 hybrid spill: when an in-process backend pool is ALSO confirmed (a
-      // configured NIM/openai-compatible endpoint alongside the conversation host),
-      // split the eligible frontier across BOTH pool classes via the shared
-      // HybridSpillCoordinator (single claimant, proactive capacity split) — the
-      // orchestrator runs the in-process partition THIS cycle while the host spawns
-      // subagents for its partition. Pure host-subagent dispatch falls out when no
-      // backend pool is confirmed (the coordinator has nothing to split against).
-      // The hybrid host-session source above fed `buildConfirmedPools`' pool-sizing
-      // pre-wall throttle; this branch has its own bounded rate-limited/settle
-      // mechanism below (DC-4) rather than routing through
-      // HostSessionQuotaSource.recordLimit/isEscalated.
-      let rolling: Awaited<ReturnType<typeof prepareHostRollingDispatch>>;
-      if (backendPools.length > 0) {
-        // Prepare the frontier ONCE (worktree-rooted prompts) so the coordinator
-        // split, the partition drive (via planOverride), and the host driver all
-        // read the same plan — the partition drive deliberately does NOT re-prepare
-        // (see DriveRollingImplementDispatchOptions.planOverride for the lease
-        // overlap this shape carries and why a re-prepare would clobber the
-        // host-share dispatch-quota).
-        const plan = await prepareImplementDispatch({ root, artifactsDir }, runId, undefined, {
-          ...waveOptsImpl,
-          worktreeRootedPrompts: true,
-        });
-        const frontier: FrontierNode[] = plan.items
-          .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
-          .map((i) => ({ id: i.block_id, estimatedTokens: i.estimated_input_tokens }));
-        if (frontier.length === 0) {
-          const merged = await mergeImplementResults({ root, artifactsDir }, runId);
-          return { kind: "transition", state: merged };
-        }
-        // One coordinator over the shared claim registry splits + claims each node to
-        // exactly one pool. DC-4: the settled set is cross-cycle (persisted) — a backend
-        // pool that exhausted on a prior cycle is excluded here, so its work falls to the
-        // host-subagent pool instead of re-looping on a dead backend.
-        const settledPath = nodeSettledPoolsPath(artifactsDir, runId);
-        const settled = await readSettledPools(settledPath);
-        // Hoisted so the coordinator's claim registry and the ownership gate's
-        // heartbeat probe are the SAME file-backed instance — never independently
-        // re-derived by path (the coordinator's own `claimRegistry` field is private).
-        const hybridClaimRegistry = nodeClaimRegistry(artifactsDir, runId);
-        const partition = await planHybridDispatch({
-          frontier,
-          pools: confirmedPools,
-          sessionConfig: sessionConfigImpl ?? {},
-          claimRegistry: hybridClaimRegistry,
-          readSettled: () => settled,
-          onSettle: async (id) => {
-            settled.add(id);
-            await addSettledPool(settledPath, id);
-          },
-          isInProcess: (a) => isEngineDrivableId(a.poolId, a.providerName),
-        });
-        // Drive the in-process partition through the ROLLING ENGINE (H2 plan D2 —
-        // `executeInProcessPartition`'s direct Promise.all executor is deleted; one
-        // core, one driver): each node runs on a coordinator-claimed backend pool,
-        // launched FROM that pool's source config, with the engine's full hook set
-        // live (413 → packet_too_large re-queue + friction, verbatim quota harvest,
-        // cost-drift / credit-exhaustion / model-unavailable capture) instead of the
-        // hand-replicated friction blocks this replaces. The coordinator's claims
-        // are ADOPTED (claimOwnerTokens) — same registry, no self-collision — and
-        // run-level lifecycle stays HERE: the drive is partition-scoped
-        // (blocksOverride), so a backend-only wall never persists a run terminal and
-        // the final merge remains this caller's.
-        if (partition.inProcess.length > 0) {
-          // DC-4 (review h2c3 F1): the engine's per-packet selection binds freely
-          // across `poolsOverride`, so a pool settled on a PRIOR cycle must be
-          // filtered out here — the coordinator's claim walk already excluded it,
-          // and re-offering it would re-die on the same dead pool every cycle.
-          const liveBackendPools = backendPools.filter((p) => !settled.has(p.id));
-          const driven = await driveRollingImplementDispatch({
-            root,
-            artifactsDir,
-            runId,
-            sessionConfig: sessionConfigImpl ?? null,
-            rebuildSharedBetweenLevels: async () => {},
-            waveOptions: {
-              hostMaxConcurrent: resolvedHostMaxConcurrent,
-              hostContextTokens: resolvedHostContextTokens,
-              hostOutputTokens: resolvedHostOutputTokens,
-              hostModels: resolvedHostModels,
-              hostModelId: resolvedHostModelId,
-            },
-            blocksOverride: partition.inProcess.map((a) => a.nodeId),
-            poolsOverride: liveBackendPools,
-            planOverride: plan,
-            claimOwnerTokens: new Map(
-              partition.inProcess.map((a) => [a.nodeId, a.ownerToken]),
-            ),
-          });
-          // Free any coordinator claim still held (a non-terminal outcome keeps its
-          // claim through the drive); terminal accepts already released in-driver,
-          // so this is a token-checked no-op for them.
-          for (const a of partition.inProcess) {
-            await partition.coordinator.release(a);
-          }
-          // DC-4 cross-cycle settle (D2 iii — PRESERVED across the engine
-          // migration): a backend pool whose node rate-limited, credit-exhausted,
-          // went model-unavailable, or died quota-unclassified → settle it
-          // (cross-cycle) so the next cycle routes its share to the host pool. This
-          // partition spans multiple cycles, each with a fresh in-process dispatcher
-          // (fresh in-memory exhaustedPoolIds AND pausedPoolResetAt), so the
-          // engine's reversible pause evaporates at the cycle boundary — the BROAD
-          // `isPoolSettlingOutcome` predicate (incl. reset-bearing 429 +
-          // quota_unclassified; see settledPools.ts for the divergence rationale)
-          // therefore applies over the drive's real per-node pool attribution, plus
-          // the engine's own terminal-exhaustion set. `packet_too_large` is
-          // deliberately NOT a settle trigger (step D): a 413 is a per-(node,pool)
-          // sizing fact, surfaced via the engine's onPacketTooLarge friction hook.
-          // `driven` is null only when the plan/state vanished mid-cycle (nothing was
-          // dispatched) — no outcomes ⇒ nothing to settle.
-          const settlingPoolIds = new Set(
-            (driven?.nodes ?? [])
-              .filter((n) => isPoolSettlingOutcome(n.outcome))
-              .map((n) => n.pool_id),
-          );
-          for (const poolId of driven?.exhausted_pool_ids ?? []) {
-            settlingPoolIds.add(poolId);
-          }
-          const liveBackendPoolIds = new Set(liveBackendPools.map((p) => p.id));
-          for (const poolId of settlingPoolIds) {
-            if (liveBackendPoolIds.has(poolId)) {
-              await partition.coordinator.settlePool(poolId);
-              // The settle FACT itself is reviewable friction (review h2c3 F2):
-              // the engine hooks capture the per-death evidence (verbatim 429
-              // text, credit exhaustion, 404), but reset-bearing rate limits have
-              // no engine hook, and no hook records "this pool is now settled for
-              // the run". One record per (run, pool) via the dedupe chokepoint.
-              void captureStepBoundaryFriction(
-                artifactsDir,
-                runId,
-                {
-                  eventType: "quota_escalation",
-                  discriminator: `pool-settled:${poolId}`,
-                  note: "Hybrid in-process backend pool settled for this run (rate-limited / credit-exhausted / model-unavailable / quota-unclassified); its remaining share routes to the host on later cycles.",
-                  severity: "high",
-                  category: "trap",
-                  area: "dispatch/quota",
-                },
-                "remediate-code",
-              );
-            }
-          }
-        }
-        // STRUCTURAL REFUSAL, checked before the empty-host merge below because the
-        // two are indistinguishable from the partition sizes alone. When every node
-        // fits no pool, BOTH partitions come back empty — and folding that into the
-        // "backend carried the batch" merge terminal-blocks every node on a result it
-        // was never allowed to produce, dead for the run even after the operator frees
-        // a bigger pool (`no_capable_pool` is deliberately not transient). Pause
-        // resumably instead: the nodes stay PENDING and the step names the real cause
-        // (split the node, or declare a larger `context_tokens`) rather than
-        // `buildEmptyPoolTerminal`'s "the provider pool was exhausted", which sends the
-        // operator to quota when nothing was exhausted.
-        //
-        // Deliberately triggered by "nothing was placed AND something is unplaceable",
-        // not by "everything is unplaceable": with nothing placed, merging is wrong
-        // whatever the mix, and only the unplaceable ids go into `stranded_ids`. If
-        // capacity ALSO contributed, the pause is still the safe read — `quota_paused`
-        // keeps every node PENDING, so resuming re-runs the cycle and the merely
-        // capacity-blocked nodes place themselves then. The residual is message
-        // emphasis, not lost work; the mixed frontier that places anything at all
-        // never reaches here (pinned in tests/remediate/hybrid-dispatch.test.ts).
-        if (
-          partition.unplaceable.length > 0 &&
-          partition.inProcess.length === 0 &&
-          partition.host.length === 0
-        ) {
-          const paused = await store.loadState();
-          if (paused) {
-            paused.partial_completion_terminal = buildQuotaPausedTerminal(
-              partition.unplaceable,
-              null,
-              "no_capable_pool",
-            );
-            await store.saveState(paused);
-          }
-          return { kind: "transition", state: paused };
-        }
-        // The backend carried the whole batch (or every host node was contested by a
-        // peer driver) → nothing for the host this cycle; merge what landed + transition.
-        if (partition.host.length === 0) {
-          const merged = await mergeImplementResults({ root, artifactsDir }, runId);
-          return { kind: "transition", state: merged };
-        }
-        // Hand the host partition (pre-claimed) to the host-subagent driver.
-        rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl, {
-          plan,
-          partition: partition.host.map((a) => ({ block_id: a.nodeId, ownerToken: a.ownerToken })),
-        });
-      } else {
-        rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
-      }
-      // Increment B residual (a): the hybrid host-subagent driver hit the cooldown wall
-      // (admission over-granted the throttled set). Reconcile the reserved leases (the
-      // pause skips the merge that would) and set the resumable `quota_paused` terminal
-      // so the `partial_terminal` obligation emits it this same advance; the ungranted
-      // nodes stay PENDING and re-dispatch on resume. The in-process partition (above)
-      // already ran on its own cooldown-safe pool, so its work still lands.
-      if (rolling.wall) {
-        if (rolling.quotaPath) {
-          await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
-        }
-        const paused = await store.loadState();
-        if (paused) {
-          paused.partial_completion_terminal = buildQuotaPausedTerminal(
-            rolling.wall.strandedBlockIds,
-            rolling.wall.detected.earliestResetAt,
-            rolling.wall.detected.emptyGrantCause,
-          );
-          await store.saveState(paused);
-        }
-        return { kind: "transition", state: paused };
-      }
-      // A zero-node frontier is NOT always "everything done": admission may have
-      // REFUSED every pending packet (`no_capable_pool` — a structural fit
-      // mismatch, cf. the 2026-07-22 dogfood wall where one 92.7k packet vs a 32k
-      // floor walled the whole run). Folding that case to merge terminal-blocks
-      // every planned node on a missing result it was never allowed to produce,
-      // and triage then re-prepares the same refusal forever. Detect it from the
-      // freshly-written admission record and pause honestly instead: the nodes
-      // stay PENDING, and the quota_paused step renders the fit-mismatch cause
-      // ("free a larger pool or split the node"), never "wait for a reset".
-      if (rolling.session.frontier.length === 0) {
-        const structuralRefusal = await structuralRefusalForZeroFrontier(rolling.quotaPath);
-        if (structuralRefusal.pause) {
-          if (rolling.quotaPath) {
-            await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
-          }
-          const paused = await store.loadState();
-          if (paused) {
-            paused.partial_completion_terminal = buildQuotaPausedTerminal(
-              structuralRefusal.refusedIds,
-              null,
-              "no_capable_pool",
-            );
-            await store.saveState(paused);
-          }
-          return { kind: "transition", state: paused };
-        }
-        // Everything eligible really is done/skipped — fold straight to merge
-        // rather than emitting a dispatch step with zero nodes.
-        await mergeImplementResults({ root, artifactsDir }, runId);
-        return { kind: "transition", state: await store.loadState() };
-      }
-      // S-BROKER-WIRING: pick the dispatch DRIVER (delegate the rolling loop to a
-      // dedicated dispatcher subagent vs. drive it from the top host) off the
-      // single classification + the live frontier/slot count — not host prose.
-      const hostProvider: ResolvedProviderName = resolveHostProviderName(sessionConfigImpl);
-      const driverSelection = selectDispatchDriver({
-        classification: classifyProvider(hostProvider),
-        eligibleItemCount: rolling.session.frontier.length,
-        // The granted set's size IS the instantaneous admission width — there is no
-        // separate concurrency number. The whole granted set runs at once, so the
-        // driver-selection "slots" is the granted-set size.
-        slots: rolling.session.frontier.length,
-      });
-      const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
-      const rollNext = loaderCommand("next-step");
-      const acceptCmd = loaderCommand(`accept-node --id <BLOCK_ID> --run-id ${runId}`);
-      const reverifyCmd = loaderCommand(`reverify-node --id <BLOCK_ID> --run-id ${runId}`);
-      const hostOwnedRolling = rolling.quotaPath === null;
-      const dispatchAuthorityNote = hostOwnedRolling
-        ? `The attended host owns provider selection, failover, quota, and
-concurrency. Dispatch the COMPLETE eligible set of ${rolling.session.frontier.length}
-node(s) below; audit-tools imposes no admission subset, cold-start wall, or concurrency
-cap. When they are all accepted, merge and re-invoke next-step.`
-        : `The tool admitted this set against the live budget (and any declared in-flight cap):
-dispatch EXACTLY the ${rolling.session.frontier.length} node(s) below and no more.
-Their count is the whole grant — there is no separate concurrency cap. When they are
-all accepted, merge and re-invoke next-step; the tool re-grants the pending remainder.`;
-      const nodeLines = rolling.initial
-        .map(
-          (n) =>
-            `- \`${n.block_id}\` — prompt: \`${n.prompt_path}\` — worktree (subagent cwd): \`${n.worktree_root}\``,
-        )
-        .join("\n");
-      return { kind: "emit", step: await writeCurrentStep({
-        stepKind: "dispatch_implement_rolling",
-        status: "ready",
-        runId,
-        repoRoot: root,
-        artifactsDir,
-        prompt: `
-# Dispatch Implementation Work (host-subagent rolling, worktree-isolated)
-
-Each granted node runs in its OWN git worktree (hard isolation between nodes). The
-TOOL owns commit -> verify -> merge + write-scope; you only spawn a subagent per
-node and call \`accept-node\` as each finishes.
-
- ${dispatchAuthorityNote}
-
-${renderDispatchDriverInstruction(
-  driverSelection,
-  `the ${rolling.session.frontier.length} ${hostOwnedRolling ? "eligible" : "granted"} node(s)`,
-)}
-
-Spawn ONE subagent for EACH granted node below. Give the subagent that node's
-\`prompt\`, and set its working directory to the node's **worktree** path. The
-subagent edits source files INSIDE that worktree and writes ONLY its result file.
-Do NOT let any subagent edit the main repository tree.
-
- ${hostOwnedRolling ? "Eligible" : "Granted"} nodes (worktrees already created):
-${nodeLines}
-
-As EACH subagent finishes, run (substituting the finished node's block id):
-
-\`${acceptCmd}\`
-
-It runs the commit -> verify -> merge lifecycle for that node and prints a JSON
-directive on stdout:
-- \`{"directive":"wait",...}\` — other granted nodes are still in flight; do not spawn more.
-- \`{"directive":"done",...}\` — every granted node reached a terminal accept. Then run:
-
-\`${rollMerge}\`
-
-If the directive's \`accept_failed\` array names any node, that node's accept FAILED and
-nothing landed. Do NOT re-run \`accept-node\` for it (that only re-reports the failure).
-If the node had COMMITTED work, it is preserved under a quarantine ref and the recovery
-is to fix the named cause and re-drive it with the command below; if the node never
-committed (its worker died or errored before making an edit) there is no ref, that
-command answers \`no_quarantine\`, and the merge routes its items to triage instead. The
-node's recorded diagnostic says which case it is — read it before choosing.
-
-\`${reverifyCmd}\`
-
-If the directive's \`accept_stray\` array names any node, that node committed NOTHING:
-its result claimed a resolved edit but its designated worktree held no commits, so the
-edits were made somewhere the tool cannot see (a second worktree, or the main tree).
-Its work is NOT recoverable — there is no quarantine ref, so \`reverify-node\` would
-return \`no_quarantine\`, and its worktree has already been removed. Do not run
-\`reverify-node\` for it and do not re-spawn a subagent for it in this step. The tool has
-already recorded the node as hard-failed; run the \`merge-implement-results\` command
-shown ABOVE as usual, which blocks its items and routes them to triage. \`accept-node\`
-for that node exits NON-ZERO with the diagnostic on stderr — that exit code is expected,
-and it still prints the directive on stdout, so read the directive and keep going.
-
-Then run:
-
-\`${rollNext}\`
-
-${renderQuotaCoverageNudge(rolling.quotaPath, artifactsDir)}
-
-${renderTokenBudgetView(rolling.quotaPath)}
-
-${DISPATCH_PROMPT_HANDOFF_NOTE}
-
-${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
-`,
-        allowedCommands: [acceptCmd, reverifyCmd, rollMerge, rollNext],
-        stopCondition:
-          "Stop after every node has reached a terminal accept (accept-node returns done), results merged, and next-step has been run.",
-        artifactPaths: {
-          dispatch_plan: rolling.planPath,
-          ...(rolling.quotaPath ? { dispatch_quota: rolling.quotaPath } : {}),
-        },
-      }) };
-      }
-    }
-    // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
-    // verified-complete), never a single artificially-serialized block. There is
-    // no wave-size cap — concurrency is emergent from admission control
-    // (`dispatch-quota.json` `admission.granted_packet_ids`). `prepareImplementDispatch`
-    // itself only admits verified-complete-eligible blocks
-    // (`dependencyVerifiedComplete`), so this is the rolling-eligible frontier.
-    const dispatchPlan = await prepareImplementDispatch(
-      { root, artifactsDir },
-      runId,
-      undefined,
-      waveOptsImpl,
+  const baselineCommit = headCommit(root);
+  if (!baselineCommit) {
+    throw new Error("Cannot prepare remediation host work without a repository HEAD commit.");
+  }
+  const handoff = await prepareRemediationHostHandoff({
+    root,
+    artifactsDir,
+    runId,
+    baselineCommit,
+    state: boundaryState,
+  });
+  if (handoff === "unsupported_retired_state") {
+    throw new Error(
+      "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
     );
-    // Everything eligible may already be done or skipped (e.g. every Tier 3
-    // finding excluded) — fold straight to merge rather than dispatching a wave
-    // of zero workers.
-    if (dispatchPlan.items.length === 0) {
-      await mergeImplementResults({ root, artifactsDir }, runId);
-      return { kind: "transition", state: await store.loadState() };
-    }
-    const planPath = join(artifactsDir, "runs", runId, "implement", "dispatch-plan.json");
-    const mergeCommand = loaderCommand(`merge-implement-results --run-id ${runId}`);
-    const nextCommand = loaderCommand("next-step");
-    const implQuotaPath = join(artifactsDir, "runs", runId, "implement", "dispatch-quota.json");
-
-    if (!canDispatchImpl) {
-      // A host that cannot dispatch parallel subagents runs the eligible nodes
-      // ITSELF, one at a time — but the orchestrator still emits the FULL eligible
-      // frontier (not one node per next-step). The shared rebuild between
-      // dependency levels happens naturally on the next next-step pass: this
-      // level's results are merged, and the next pass emits the now-eligible
-      // downstream level after the host rebuilds the shared surface.
-      return { kind: "emit", step: await writeCurrentStep({
-        stepKind: "implement_rolling_sequential",
-        status: "ready",
-        runId,
-        repoRoot: root,
-        artifactsDir,
-        prompt: `
-# Implement Eligible Remediation Nodes (sequential)
-
-Read the dispatch plan:
-
-\`${planPath}\`
-
-Every item in \`items\` is a node whose dependencies are all verified-complete, so
-they are safe to implement now. Work through them ONE AT A TIME, in order: for each
-item, read and follow only its \`prompt_path\`, then move to the next.
-
-${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
-
-${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
-
-After all results in this plan exist:
-
-\`${mergeCommand}\`
-
-Then run:
-
-\`${nextCommand}\`
-`,
-        allowedCommands: [mergeCommand, nextCommand],
-        stopCondition:
-          "Stop after every eligible node's result has been merged and next-step has been run.",
-        artifactPaths: {
-          dispatch_plan: planPath,
-          dispatch_quota: implQuotaPath,
-        },
-      }) };
-    }
-
-    // Increment B — host-path pause-at-wall (parallel dispatch only; the sequential
-    // host above runs every eligible node itself and is not paced by the grant). When
-    // admission granted ZERO nodes, or a cooldown is active (F1: during cooldown
-    // admission over-grants the whole frontier), the host cannot pace safely this turn.
-    // Set the quota-paused terminal so the `partial_terminal` obligation (priority ahead
-    // of `implementing`) emits the resumable `quota_paused` step this same advance; the
-    // ungranted nodes stay PENDING and re-dispatch on resume (never abandoned to partial
-    // coverage — the remediate divergence from audit's read-only bound-and-give-up).
-    if (!waveOptsImpl.hostOwnedDispatch) {
-    const implQuota = await readOptionalJsonFile<{
-      admission?: {
-        granted_packet_ids?: string[];
-        explains?: Array<{ reason?: string }>;
-      };
-      cooldown_until?: string | null;
-      capacity_pools?: Array<{
-        is_conversation_host?: boolean;
-        binding_window?: QuotaBindingWindow | null;
-      }>;
-    }>(implQuotaPath);
-    // D1 parity: the binding budget window (from the host pool's capacity summary) so an
-    // empty_grant wall derives a reset time instead of the bare `earliestResetAt: null` —
-    // but ONLY on a genuine BUDGET block, not a `cap_reached` ledger-contention wall
-    // (frees in seconds; the window reset may be days out).
-    const implBudgetBound = admissionBlockedOnBudget(implQuota?.admission?.explains ?? []);
-    const implBindingWindow = implBudgetBound
-      ? implQuota?.capacity_pools?.find((p) => p.is_conversation_host)?.binding_window ??
-        implQuota?.capacity_pools?.[0]?.binding_window ??
-        null
-      : null;
-    const implWall = detectHostDispatchWall({
-      grantedCount: implQuota?.admission?.granted_packet_ids?.length ?? 0,
-      cooldownUntil: implQuota?.cooldown_until ?? null,
-      bindingWindow: implBindingWindow,
-      // Step E parity: classify the zero-grant cause so the quota_paused terminal's
-      // reset semantics stay honest (a no_capable_pool wall has no reset to wait for).
-      explains: implQuota?.admission?.explains ?? [],
-      now: Date.now(),
+  }
+  if (
+    state.host_handoff?.workload_sha256 !==
+    handoff.handoff_record.workload_sha256
+  ) {
+    await store.saveState({
+      ...state,
+      host_handoff: handoff.handoff_record,
     });
-    if (implWall.atWall) {
-      // Release the leases the grant just reserved — pausing skips the merge that would
-      // reconcile them, so without this they leak until TTL and mis-size the resume grant.
-      await reconcileAdmissionLeasesFromQuotaFile(implQuotaPath);
-      const strandedIds = dispatchPlan.items
-        .map((item) => item.block_id)
-        .filter((id): id is string => typeof id === "string");
-      const paused = await store.loadState();
-      if (paused) {
-        paused.partial_completion_terminal = buildQuotaPausedTerminal(
-          strandedIds,
-          implWall.earliestResetAt,
-          implWall.emptyGrantCause,
-        );
-        await store.saveState(paused);
-      }
-      return { kind: "transition", state: paused };
-    }
-    }
+  }
 
-    const hostOwnedLegacy = waveOptsImpl.hostOwnedDispatch === true;
-    return { kind: "emit", step: await writeCurrentStep({
+  const resultDiagnostics =
+    ingested.issues.length === 0
+      ? ""
+      : `
+## Result status requiring attention
+
+${ingested.issues
+  .map(
+    (issue) =>
+      `- ${issue.work_item_id ? `\`${issue.work_item_id}\`: ` : ""}${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
+  )
+  .join("\n")}
+
+The workload was restored from its tool-owned digest when necessary. Repair or
+complete only the named result files; do not rewrite the workload or its
+baseline.
+`;
+
+  const nextCommand = loaderCommand("next-step");
+  return {
+    kind: "emit",
+    step: await writeCurrentStep({
       stepKind: "dispatch_implement",
       status: "ready",
       runId,
       repoRoot: root,
       artifactsDir,
       prompt: `
-# Dispatch Implementation Work (rolling)
+# Implement the Eligible Remediation Workload
 
-Read the dispatch plan${hostOwnedLegacy ? "" : " and quota JSONs"}:
+Read the generated workload at:
 
-\`${planPath}\`
-${hostOwnedLegacy ? "" : `\`${implQuotaPath}\``}
+\`${handoff.workload_path}\`
 
-Every item in \`items\` is a node whose dependencies are all VERIFIED-COMPLETE
-(INV-RS-01). ${hostOwnedLegacy
-  ? "The attended host owns provider selection, failover, quota, and concurrency. Dispatch every item in this complete eligible plan; audit-tools imposes no admission subset, cold-start wall, or concurrency cap."
-  : "The tool admitted a budget-bounded subset: dispatch EXACTLY the block ids in the quota file's `admission.granted_packet_ids` and no others — that granted set is the whole grant (there is no separate concurrency cap)."} Each item's
-\`model_hint.tier\` suggests which model to use (small/standard/deep). If your
-provider has rate limits, pace launches accordingly.
+It contains the complete, dependency-safe current frontier. Complete every work
+item and write its exact prompt-bound result contract to its \`result_path\`.
+The host owns execution choices, grouping, and concurrency; audit-tools performs
+no launch, routing, or quota decision. Do not start a later dependency level.
+${resultDiagnostics}
 
-For each ${hostOwnedLegacy ? "eligible" : "GRANTED"} item in \`items\`${hostOwnedLegacy ? "" : " (its `block_id` in `admission.granted_packet_ids`)"},
-dispatch one subagent with that item's \`prompt_path\`. Each subagent may edit source
-files needed for that bounded block and must write only its assigned \`result_path\`.
-${hostOwnedLegacy ? "After the complete plan is merged, run next-step." : "After the granted set is merged and you run next-step, the tool re-grants the pending remainder."}
-
-${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
-
-${renderQuotaCoverageNudge(hostOwnedLegacy ? null : implQuotaPath, artifactsDir)}
-
-${renderTokenBudgetView(hostOwnedLegacy ? null : implQuotaPath)}
-
-${DISPATCH_PROMPT_HANDOFF_NOTE}
-
-${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
-
-After all results exist:
-
-\`${mergeCommand}\`
-
-Then run:
+After all completed changes are merged and their result files exist, run:
 
 \`${nextCommand}\`
 `,
-      allowedCommands: [mergeCommand, nextCommand],
+      allowedCommands: [
+        ...new Set(
+          handoff.workload.work_items.flatMap((item) => item.required_tests),
+        ),
+        nextCommand,
+      ],
       stopCondition:
-        "Stop after all implementation results have been merged and next-step has been run.",
-      artifactPaths: {
-        dispatch_plan: planPath,
-        ...(hostOwnedLegacy ? {} : { dispatch_quota: implQuotaPath }),
-      },
-    }) };
+        "Stop after every emitted work item has a complete result and next-step has been run.",
+      artifactPaths: { host_workload: handoff.workload_path },
+    }),
+  };
 }
 
-/**
- * Piece D — the quota-paused resumable step. The rolling engine stranded one or
- * more nodes because every eligible provider pool hit a host session limit and is
- * paused until its stated reset. The stranded nodes stay PENDING (their worktrees
- * were preserved), so re-running next-step at/after `resetAt` redispatches them
- * clean. Emitted (not blocked) so the run is resumable, never a failure.
- */
-async function buildQuotaPausedStep(params: {
-  root: string;
-  artifactsDir: string;
-  runId: string;
-  strandedIds: string[];
-  resetAt: string | null;
-  /** WHY the grant was empty (step E) — `no_capable_pool` renders a fit-mismatch message, never "wait for the reset". */
-  emptyGrantCause?: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null;
-}): Promise<RemediationStep> {
-  const { root, artifactsDir, runId, strandedIds, resetAt, emptyGrantCause } = params;
-  const nextCommand = loaderCommand("next-step");
-  // Honest pause (step E): a no_capable_pool zero-grant is a structural fit
-  // mismatch — telling the operator to wait for a reset that will never clear it
-  // would strand the run indefinitely (D+E review F2).
-  if (emptyGrantCause === "no_capable_pool") {
-    return writeCurrentStep({
-      stepKind: "quota_paused",
-      status: "ready",
-      runId,
-      repoRoot: root,
-      artifactsDir,
-      prompt: `
-# Remediation paused — no available pool fits the work
-
-${strandedIds.length} node(s) could not be granted because they exceed the context
-window (or capability) of every pool currently available — a fit mismatch, NOT a
-quota wall, so waiting for a reset will not clear it. The nodes remain PENDING.
-
-Options: free a larger pool (un-exclude one at the provider gate, or declare one),
-or shrink the oversized nodes' scope; then run:
-
-\`${nextCommand}\`
-`,
-      allowedCommands: [nextCommand],
-      stopCondition:
-        "No available pool fits the stranded nodes — free a larger pool or shrink the work, then re-run next-step.",
-    });
-  }
-  const resetLine = resetAt
-    ? `The earliest provider reset is \`${resetAt}\`. Wait until then, then run:`
-    : `Wait for the provider session limit to reset, then run:`;
-  return writeCurrentStep({
-    stepKind: "quota_paused",
-    status: "ready",
-    runId,
-    repoRoot: root,
-    artifactsDir,
-    prompt: `
-# Remediation paused — provider session limit
-
-Every eligible provider pool hit a host session limit and is paused until its
-stated reset. ${strandedIds.length} node(s) are stranded and remain PENDING; they
-will (re-)dispatch clean on resume (any node already given a worktree keeps it;
-never-dispatched nodes simply re-derive eligibility). Nothing was blocked or
-failed; this is a resumable pause.
-
-${resetLine}
-
-\`${nextCommand}\`
-`,
-    allowedCommands: [nextCommand],
-    stopCondition:
-      "Stop and wait for the provider reset. Re-running next-step resumes the stranded nodes.",
-  });
-}
-
-// Cooperative multi-agent (slice 4): the single mutex node guarding this run's
-// in-process serial state-machine advance, and the heartbeat interval (well inside
-// STALE_LOCK_MS so a live long phase is never reclaimed).
-const REMEDIATE_PHASE_NODE = "phase:main";
-const PHASE_CLAIM_HEARTBEAT_MS = 10_000;
+// A held phase lock is reported to the host immediately. `withFileLock` still
+// owns stale-lock recovery and heartbeats for the winning process.
+const PHASE_LOCK_TIMEOUT_MS = 0;
 
 // Cooperative multi-agent (slice 4, spec/multi-ide-concurrent-runs-design.md):
 // emitted when another agent/IDE currently holds the phase mutex and is advancing
@@ -3477,7 +1607,7 @@ async function persistReviewFilterDispositions(
 async function handleReadyIntakeContractPipeline(
   root: string,
   artifactsDir: string,
-  options?: NextStepOptions,
+  options: NextStepOptions,
 ): Promise<RemediationStep | RemediationState | null> {
   // Fast path: if an extracted-plan.json already exists (pipeline complete or
   // promoted from a previous contract pipeline run), consume it directly without
@@ -3553,17 +1683,7 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
-  // The effective session config is loaded BEFORE the review gate
-  // (COR-5f8fb354): the gate's attended-vs-autonomous resolution must see the
-  // PERSISTED session-config.json (`autonomous_mode`), not only a programmatic
-  // override — resolving from the bare CLI options meant a nightly unattended
-  // run halted for a human at the review gate. The same loaded config feeds
-  // the dispatch-capability resolution further down (single load).
-  const sessionConfigForDispatch = await loadRemediateSessionConfig({
-    root,
-    override: options?.sessionConfig,
-    artifactsFirst: true,
-  });
+  const canonicalIntent = sessionIntentResult(options).intent;
 
   // Path A: run the single filter pass over the ORIGINAL findings, present the
   // SURVIVORS at the review gate (deduped / evidence-bearing / path-grounded /
@@ -3588,9 +1708,9 @@ async function handleReadyIntakeContractPipeline(
         root,
         artifactsDir,
         filter.survivors,
-        // Autonomy resolves from the PERSISTED session config (hoisted load
-        // above) → env → attended default, never from the bare CLI options.
-        resolveAutonomousMode({ sessionConfig: sessionConfigForDispatch }),
+        // Autonomous review changes the approval policy only; it never grants
+        // implementation or process-execution authority.
+        canonicalIntent.review_mode === "autonomous",
       );
       if (gate.kind === "halt") {
         return gate.step;
@@ -3689,9 +1809,10 @@ async function handleReadyIntakeContractPipeline(
       // narrower than the originals (anything filtered or declined), route the
       // seed AND the pipeline's source inputs at a filtered file so a removed
       // finding can never re-enter via the raw audit-findings.json (tool-enforced).
-      const approvedPayload = isRecord(auditFindings)
-        ? { ...auditFindings, findings: gate.approved }
-        : { findings: gate.approved };
+      const approvedPayload = projectAuditFindingsReportSubset(
+        auditFindings,
+        gate.approved,
+      );
       let seedSourcePath = auditSource.path;
       if (gate.approved.length < originals.length) {
         await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
@@ -3699,12 +1820,11 @@ async function handleReadyIntakeContractPipeline(
         await writeJsonFile(seedSourcePath, approvedPayload);
         reviewSourceSwap = { from: auditSource.path, to: seedSourcePath };
       }
-      try {
-        await writePathASeedFromFindings(artifactsDir, seedSourcePath, approvedPayload);
-      } catch {
-        // If the seed cannot be written, the pipeline still runs; the LLM
-        // phases use the source files from sourcePaths.
-      }
+      await writePathASeedFromFindings(
+        artifactsDir,
+        seedSourcePath,
+        approvedPayload,
+      );
     }
   }
 
@@ -3733,7 +1853,6 @@ async function handleReadyIntakeContractPipeline(
     artifactsDir,
     runId: randomRunId("CONTRACT"),
     sourcePaths: [...sourcePaths],
-    sessionConfig: sessionConfigForDispatch,
   });
   if (step) {
     return step;
@@ -3991,50 +2110,21 @@ async function applyPlanClarificationResolution(
     };
   }
   const now = new Date().toISOString();
+  let appliedCount = 0;
   for (const res of resolutions) {
     const item = state.items[res.finding_id];
     if (!item || isTerminalStatus(item.status)) continue;
     applyClarificationActionToItem(item, res, now);
+    appliedCount += 1;
   }
+  // An applied answer mutates item state that is baked into the dispatch
+  // prompt, so the persisted workload binding is stale the moment a resolution
+  // lands — a surviving record makes the next handoff prepare refuse its own
+  // regenerated workload (and a non-implementing status refuses the save
+  // outright). Mirrors the saveStateForPlan strip.
+  if (appliedCount > 0) delete state.host_handoff;
   if (existsSync(resolutionPath)) {
     await withFsRetry(() => rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`));
-  }
-  // Accept/reverify cluster defect 6: the worker's needs_clarification result
-  // survives at the block's CONSTANT result_path, so the very next merge
-  // (often within this same drain) re-reads it, flips the just-answered item
-  // back to needs_clarification, and re-asks the operator. Archive each
-  // clarified finding's block result at consume time — an ABSENT result file
-  // is the benign "worker hasn't run yet → re-dispatch from scratch" branch,
-  // exactly the state the answer re-opens the item into. (reject_finding /
-  // defer close their items terminally, so the stale file cannot re-open them
-  // — only `clarified` needs the retire.)
-  const clarifiedIds = new Set(
-    resolutions
-      .filter((r) => r.action !== "reject_finding" && r.action !== "defer")
-      .map((r) => r.finding_id),
-  );
-  if (clarifiedIds.size > 0) {
-    const owningBlockIds = new Set(
-      (state.plan.blocks ?? [])
-        .filter((b) => b.items.some((id) => clarifiedIds.has(id)))
-        .map((b) => b.block_id),
-    );
-    const dispatchPlan = await readDispatchPlan(
-      artifactsDir,
-      stateRunId(state),
-      "implement",
-    ).catch(() => null);
-    for (const planItem of dispatchPlan?.items ?? []) {
-      if (
-        typeof planItem.block_id === "string" &&
-        owningBlockIds.has(planItem.block_id) &&
-        existsSync(planItem.result_path)
-      ) {
-        await withFsRetry(() =>
-          rename(planItem.result_path, `${planItem.result_path}.consumed-${Date.now()}`),
-        );
-      }
-    }
   }
   const remainingPending = state.plan.findings.some(
     (f) => state.items?.[f.id]?.status === "pending",
@@ -4384,8 +2474,8 @@ async function handlePlanning(
   }
 
   // Document phase dissolved: planning transitions directly to implementing.
-  // The rolling implement dispatch reads item_spec from the plan DAG node when
-  // present, or uses finding context directly when absent.
+  // The host workload reads item_spec from the plan DAG node when present, or
+  // uses finding context directly when absent.
   const implementBlocks = implementableBlocks(state);
   if (implementBlocks.length > 0) {
     if (state.plan) {
@@ -4422,7 +2512,7 @@ async function handlePlanning(
   }
 
   // Transition directly to implementing — no separate document round.
-  // Any pending item whose node is NOT eligible for any rolling dispatch pass is
+  // Any pending item outside every attainable host dependency frontier is
   // dead-ended (INV-RS-01): a prerequisite was skipped/blocked, so its
   // verified-complete edge can never be satisfied — never dispatch a dependent
   // against an upstream surface that did not land. Mark it blocked so the run
@@ -4439,7 +2529,7 @@ async function handlePlanning(
           it.failure_reason ??
           "A dependency node did not reach a verified-complete disposition " +
           "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
-          "the rolling scheduler will not dispatch this node against an upstream " +
+          "the host handoff will not expose this node against an upstream " +
           "surface that never landed (INV-RS-01).";
       }
     }
@@ -4611,7 +2701,7 @@ async function handleAllTerminalTransition(
         obligation: state.status,
         note: `coarse_reblock action=${decision.action} count=${decision.next_count}`,
       });
-      // reattempt_all → re-open items to pending and re-run the rolling scheduler
+      // reattempt_all → re-open items to pending and re-emit the host workload
       // (NEVER the human triage prompt — CE-003 no-human-host path); terminal_blocked
       // → everything non-skip is now blocked, so close writes the partial report.
       decision.state.status =
@@ -4746,23 +2836,17 @@ export async function decideNextStep(
   ) as NextStepOptions;
   const root = resolveRoot(normalizedOptions.root);
   const artifactsDir = resolveArtifactsDir(root, normalizedOptions.artifactsDir);
-  // This read exists only to configure the run-logger. The authoritative
-  // validated load (with `.remediation-artifacts/` path precedence + operator
-  // warning surface) happens inside the loop, so suppress warnings here to avoid
-  // emitting the same warning twice per invocation. Errors still throw.
-  // Only reads `observability.run_log` (an INTENT field), so the raw intent suffices —
-  // no descriptor resolve needed here.
-  const sessionConfig =
-    normalizedOptions.sessionConfig ??
-    (await readValidatedRepoSessionIntent(join(root, "session-config.json"), {
-      onWarnings: () => {},
-    }));
+  const sessionIntent = await loadRemediateSessionConfig({ root });
+  const internalOptions: InternalNextStepOptions = {
+    ...normalizedOptions,
+    [SESSION_INTENT_RESULT]: sessionIntent,
+  };
   const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
-    enabled: sessionConfig?.observability?.run_log ?? true,
+    enabled: true,
   });
   const startedAt = Date.now();
   try {
-    const step = await decideNextStepLoop(normalizedOptions, runLogger);
+    const step = await decideNextStepLoop(internalOptions, runLogger);
     runLogger.event({
       phase: "next-step",
       kind: "step",
@@ -4891,8 +2975,7 @@ async function buildConfirmIntentStep(ctx: {
       ? `\`\`\`json\n${JSON.stringify(draft.filters, null, 2)}\n\`\`\``
       : "(none — remediating all findings)";
 
-    const closingOptions =
-      "`commit`, `merge-to-base` (land the run as one revertable `--no-ff` merge into the branch you launched from; safe — aborts and leaves the base untouched on any conflict), or `none`";
+    const closingOptions = "`commit` or `none`";
 
     prompt = `
 # Confirm Remediation Scope and Intent
@@ -5361,7 +3444,6 @@ const MAIN_PRIORITY: readonly string[] = [
   "waiting_for_clarification",
   "waiting_for_triage",
   "planning_documentable",
-  "partial_terminal",
   "deferred_clarification",
   "implementing",
   "triage",
@@ -5440,70 +3522,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         handlePlanning(root, artifactsDir, requireState(state), store),
     },
     {
-      // Partial-completion terminal consume (OBL-S09 / INV-X06): block the
-      // precisely-named stranded ids + every other non-terminal item (the
-      // no-livelock guarantee), clear the flag, then force the close transition
-      // via handleAllTerminalTransition (blocked is non-terminal, so all_terminal
-      // would not otherwise fire).
-      id: "partial_terminal",
-      derive: (state) =>
-        state != null &&
-        state.partial_completion_terminal != null &&
-        !allItemsTerminal(state)
-          ? "missing"
-          : "satisfied",
-      execute: async (state) => {
-        const s = requireState(state);
-        const terminal = s.partial_completion_terminal;
-        if (!terminal) return { kind: "transition", state: s };
-        // Piece D — quota_paused is a RETRYABLE pause, NOT a failure. The stranded
-        // nodes stay PENDING (their worktrees were preserved), nothing is blocked,
-        // and the close transition is NOT forced. EMIT a paused step (terminating
-        // this advance loop) that tells the host to re-run next-step at/after the
-        // stated reset, when the pool's session limit has cleared and the stranded
-        // nodes redispatch clean. Clearing the terminal here (before the emit) so
-        // the resuming step starts fresh; the pending nodes are the durable signal.
-        if (terminal.reason === "quota_paused") {
-          const resetAt = terminal.earliest_reset_at ?? null;
-          const emptyGrantCause = terminal.empty_grant_cause ?? null;
-          delete s.partial_completion_terminal;
-          await store.saveState(s);
-          return {
-            kind: "emit",
-            step: await buildQuotaPausedStep({
-              root,
-              artifactsDir,
-              runId: stateRunId(s),
-              strandedIds: terminal.stranded_ids ?? [],
-              resetAt,
-              emptyGrantCause,
-            }),
-          };
-        }
-        const strandedSet = new Set(terminal.stranded_ids ?? []);
-        for (const it of Object.values(s.items ?? {})) {
-          if (isTerminalStatus(it.status)) continue;
-          it.status = "blocked";
-          const stranded = strandedSet.has(it.finding_id);
-          it.failure_reason =
-            it.failure_reason ??
-            (stranded
-              ? `Stranded by partial-completion terminal (${terminal.reason}): the provider pool was exhausted before this item could be dispatched (no pool survived re-routing).`
-              : `Blocked after partial-completion terminal (${terminal.reason}): no provider pool remained to dispatch this item.`);
-        }
-        delete s.partial_completion_terminal;
-        await store.saveState(s);
-        return handleAllTerminalTransition(
-          root,
-          artifactsDir,
-          s,
-          store,
-          options,
-          runLogger,
-        );
-      },
-    },
-    {
       // Deferred clarification round. A worker question no longer freezes the run
       // at merge time; it waits HERE — at the END of the implement phase, once the
       // eligible dispatch frontier has drained — so every sibling's remaining work
@@ -5516,8 +3534,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
       // `all_terminal` / `closing` so an unanswered question can never be swept
       // past into close (triage with no blocked items routes straight to closing,
       // which would force-close the paused item as `abandoned` and lose the
-      // question). It is NOT the only mid-phase halt — `partial_terminal` still
-      // owns the quota pause, and keeps its higher slot.
+      // question).
       id: "deferred_clarification",
       derive: (state) =>
         state != null &&
@@ -5581,7 +3598,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
                 it.failure_reason ??
                 "A dependency node did not reach a verified-complete disposition " +
                 "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
-                "the rolling scheduler will not dispatch this node (INV-RS-01).";
+                "the host handoff will not expose this node (INV-RS-01).";
               changed = true;
             }
           }
@@ -5664,36 +3681,6 @@ async function decideNextStepLoop(
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
   let state = await store.loadState();
-  // C1 handshake persistence happens at THIS seam, not inside any one branch:
-  // fold explicitly-supplied --host-* capability fields into
-  // state.host_capabilities on EVERY invocation, before obligation selection.
-  // When the fold ran only inside the implement-dispatch step builder, a
-  // next-step call carrying the flags that landed on any other obligation (a
-  // triage re-drive — the 2026-07-22 dogfood wall) silently dropped them and
-  // dispatch capability stayed unknown and produced a resumable refusal.
-  if (state) {
-    const { toPersist } = resolveHostCapabilities(
-      {
-        can_dispatch_subagents: options.hostCanDispatchSubagents,
-        max_concurrent: options.hostMaxConcurrent,
-        context_tokens: options.hostContextTokens,
-        output_tokens: options.hostOutputTokens,
-        model_id: options.hostModelId,
-        models: options.hostModels ?? undefined,
-      },
-      state.host_capabilities,
-    );
-    if (Object.keys(toPersist).length > 0) {
-      const seeded = state;
-      state = await store.mutate(async (current) => ({
-        ...(current ?? seeded),
-        host_capabilities: {
-          ...(current?.host_capabilities ?? seeded.host_capabilities ?? {}),
-          ...toPersist,
-        },
-      }));
-    }
-  }
   runLogger.event({
     phase: "next-step",
     kind: "state",
@@ -5783,45 +3770,37 @@ async function decideNextStepLoop(
 
   await countStep(state);
 
-  // Cooperative multi-agent (slice 4): a single phase mutex serializes the
-  // in-process MAIN advance so two joining peers never run the same SERIAL phase
-  // (planning / triage / close) and clobber state.json. This does NOT serialize
-  // the heavy implement work — that runs out-of-process via per-node claims; the
-  // mutex only guards the quick in-process advance + dispatch-emission, during
-  // which each peer claims its own disjoint nodes. Mirrors audit's bundle-mutation
-  // mutex (slice 1). Registry is the repo-level remediation node-claims file
-  // (distinct from the per-run implement node-claims under runs/<runId>/implement).
-  const phaseRegistry = new ClaimRegistry(nodeClaimsPath(artifactsDir));
+  // One generic filesystem mutex serializes the in-process MAIN advance so two
+  // joining peers cannot run the same serial phase and clobber state.json. It is
+  // coordination only: host execution, grouping, and concurrency stay outside
+  // audit-tools.
   const phaseRunId = stateRunId(state);
-  const phaseClaim = await claimWithBackoff(phaseRegistry, REMEDIATE_PHASE_NODE, {
-    poolId: phaseRunId,
-  });
-  if (!phaseClaim.acquired) {
-    return buildPhaseBusyStep({ root, artifactsDir, runId: phaseRunId });
-  }
   try {
-    // Re-load fresh under the mutex: a peer may have advanced (and persisted)
-    // state between our initial load and winning the claim. For an established
-    // run (the multi-agent case) the pre-intake gates above were all no-ops, so
-    // the reload is simply the latest persisted state.
-    const advanceState = (await store.loadState()) ?? state;
-    const main = await withClaimHeartbeat(
-      phaseRegistry,
-      REMEDIATE_PHASE_NODE,
-      phaseClaim.ownerToken,
-      { intervalMs: PHASE_CLAIM_HEARTBEAT_MS },
-      () =>
-        advance(
-          { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+    const main = await withFileLock(
+      join(artifactsDir, "phase.lock"),
+      async () => {
+        // Re-load fresh under the mutex: a peer may have advanced and persisted
+        // state between our initial load and winning the lock.
+        const advanceState = (await store.loadState()) ?? state;
+        return {
           advanceState,
-          ctx,
-        ),
+          outcome: await advance(
+            { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+            advanceState,
+            ctx,
+          ),
+        };
+      },
+      PHASE_LOCK_TIMEOUT_MS,
     );
-    if (main.step) return main.step;
+    if (main.outcome.step) return main.outcome.step;
     // The unhandled catch-all always emits on a non-null state, so a null step
     // here is unreachable; keep an explicit fallback rather than a non-null assert.
-    return handleUnhandledState(root, artifactsDir, advanceState);
-  } finally {
-    await phaseRegistry.release(REMEDIATE_PHASE_NODE, phaseClaim.ownerToken);
+    return handleUnhandledState(root, artifactsDir, main.advanceState);
+  } catch (error) {
+    if (error instanceof FileLockTimeoutError) {
+      return buildPhaseBusyStep({ root, artifactsDir, runId: phaseRunId });
+    }
+    throw error;
   }
 }

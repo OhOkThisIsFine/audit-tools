@@ -289,8 +289,8 @@ export const INSTALL_HOST_DEFINITIONS = {
       });
       await collect(checks, 'antigravity_guide', async () => {
         const content = await readFile(assetPaths.antigravityPlanningGuidePath, 'utf8');
-        if (!content.includes('--auditor') || !content.includes('next-step')) {
-          throw new Error('Antigravity guide must embed the canonical loader body (next-step capability handshake including the --auditor descriptor).');
+        if (!content.includes('next-step') || !content.includes('host work')) {
+          throw new Error('Antigravity guide must embed the canonical next-step loader body and host-work contract.');
         }
         return {
           summary: 'Antigravity planning guide embeds the canonical loader body with the capability handshake.',
@@ -668,9 +668,7 @@ export async function installBootstrap(argv, options = {}) {
   );
   results.push(await writeGeneratedJson(installManifestPath, installManifest));
 
-  // No session-config seeding: `provider` is per-auditor dispatch inventory and
-  // cannot be persisted on session-config.json (G2); loadSessionConfig creates
-  // the empty default on demand.
+  // No session-config seeding: analyzer intent is created on demand.
 
   const payload = {
     host,

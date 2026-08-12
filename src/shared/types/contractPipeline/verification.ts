@@ -75,8 +75,6 @@ export interface AgentSeam {
   node_id: string;
   /** Role this agent plays at the seam. */
   role: SeamRole;
-  /** Advisory hint for selecting the agent backend (e.g. "claude-code"). */
-  agent_hint?: string;
   /** Artifact path the previous agent writes and this agent reads as handoff. */
   handoff_artifact: string;
   /** Artifact paths this agent must read before starting. */

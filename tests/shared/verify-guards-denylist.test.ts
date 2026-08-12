@@ -4,8 +4,9 @@
  * as an additive-safe denylist of `--exclude` globs. A HEAVY test that gets RENAMED
  * would silently fall OUT of the denylist and back INTO the per-node guard, blowing up
  * the per-node guard's cost (that guard runs in the hot accept path). This test pins the
- * denylist honest: every `--exclude` glob must still match ≥1 existing test file on disk,
- * so a rename that orphans an exclude fails loud here instead of degrading guard cost.
+ * denylist honest: every active `--exclude` glob must still match ≥1 existing test file
+ * on disk. Exact frozen entries for retired suites are tolerated only while they remain
+ * unmatched, so they cannot silently mask a newly introduced test.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -14,6 +15,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
+
+// package.json is frozen during the execution-surface retirement. These exact
+// exclusions may remain until that frozen file can be updated, but they must
+// not mask a newly introduced test with the same retired name.
+const RETIRED_EXCLUDE_GLOBS = new Set([
+  "**/*-e2e.test.*",
+  "**/next-step-implement-dispatch.test.ts",
+]);
 
 /** Recursively collect every test file under `tests/`, as repo-relative forward-slash paths. */
 function listTestFiles(): string[] {
@@ -70,7 +79,7 @@ function excludeGlobs(script: string): string[] {
   return globs;
 }
 
-describe("verify:guards denylist — every exclude glob still matches a real test file", () => {
+describe("verify:guards denylist — active excludes still match real test files", () => {
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
   const script = pkg.scripts["verify:guards"];
   const globs = excludeGlobs(script);
@@ -88,9 +97,22 @@ describe("verify:guards denylist — every exclude glob still matches a real tes
     expect(script).toMatch(/--exclude\s+"/);
   });
 
-  it.each(globs)("exclude glob %s matches at least one existing test file", (glob) => {
-    const re = globToRegExp(glob);
-    const matched = files.filter((f) => re.test(f));
-    expect(matched.length).toBeGreaterThan(0);
-  });
+  it.each(globs.filter((glob) => !RETIRED_EXCLUDE_GLOBS.has(glob)))(
+    "exclude glob %s matches at least one existing test file",
+    (glob) => {
+      const re = globToRegExp(glob);
+      const matched = files.filter((f) => re.test(f));
+      expect(matched.length).toBeGreaterThan(0);
+    },
+  );
+
+  it.each([...RETIRED_EXCLUDE_GLOBS])(
+    "retired exclude glob %s does not mask a newly introduced test",
+    (glob) => {
+      if (!globs.includes(glob)) return;
+      const re = globToRegExp(glob);
+      const matched = files.filter((f) => re.test(f));
+      expect(matched).toEqual([]);
+    },
+  );
 });

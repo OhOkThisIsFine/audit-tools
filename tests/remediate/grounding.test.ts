@@ -224,7 +224,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
     );
     await writeIntentCheckpoint();
 
-    await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
+    await decideNextStep({ root: TEST_DIR });
 
     const state = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
@@ -265,7 +265,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
     );
     await writeIntentCheckpoint();
 
-    await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
+    await decideNextStep({ root: TEST_DIR });
 
     const state = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
@@ -286,7 +286,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
     );
     await writeIntentCheckpoint();
 
-    await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
+    await decideNextStep({ root: TEST_DIR });
 
     // The corrupted-plan recovery removes the ungroundable plan so the host
     // re-extracts with the grounding-tightened prompt.

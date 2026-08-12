@@ -1,0 +1,45 @@
+{
+  "entries": [
+    {
+      "path": "src/audit/cli/dispatch.ts",
+      "sha256": "1a33e4b9e8546c4eef3975f9258bcfa18e0efb2f76b1c399f2f7d2f32eb160fe"
+    },
+    {
+      "path": "src/audit/cli/lineIndex.ts",
+      "sha256": "25ca656a01982d04adb7345bf744aa0b7570b04767371a38d8f8c1b7893e1602"
+    },
+    {
+      "path": "src/audit/io/artifacts.ts",
+      "sha256": "7f414f583af348658d9248773205dfac8c5e120b5f2aa65e20d47c1bf288ed87"
+    },
+    {
+      "path": "src/audit/io/runArtifacts.ts",
+      "sha256": "24113c7c6c5d915fd30b3f83e8fae620bf6f7511a98b8c8129f46608edc64a17"
+    },
+    {
+      "path": "src/audit/orchestrator/ingestionExecutors.ts",
+      "sha256": "89220e0dfd490fa91e1d9eb0dde78367dfadd46553b367e8e10fe088a95b431c"
+    },
+    {
+      "path": "src/audit/orchestrator/pendingTasks.ts",
+      "sha256": "48b40b78b087b63b10122a613e66ecaa2fb9543849d5d525c143f94ac7c8ab16"
+    },
+    {
+      "path": "src/audit/orchestrator/planningExecutors.ts",
+      "sha256": "49c10bc17658d158b934e2fe144b9afd5ae4072d72100b48326c8a731e5e5072"
+    },
+    {
+      "path": "src/audit/orchestrator/taskAffinityGraph.ts",
+      "sha256": "7546894b0df5927bc2787ffd4b55a10b2b079e738965ff0e43d0d5e64215a9df"
+    },
+    {
+      "path": "src/shared/artifactFreshness.ts",
+      "sha256": "628261033d516bd9bfab78e3a6e4090e53a8fdff55d1c9e00508432cfc2cf207"
+    },
+    {
+      "path": "src/shared/stableStringify.ts",
+      "sha256": "555fe49dba6706b845c16fc4fe300128207771aee4aecc3736f58457fd8e5513"
+    }
+  ],
+  "tree_sha256": "82955e11731f24da8adbe1e5e59ac403409d7c154fde0a2aeb775a9dbb46495f"
+}

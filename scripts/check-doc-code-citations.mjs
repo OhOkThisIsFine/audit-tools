@@ -53,9 +53,29 @@ function git(args) {
   });
 }
 
-/** All tracked files (forward-slashed) — the resolution universe. */
+/**
+ * All versionable files present in the working tree (forward-slashed) — the
+ * resolution universe. `git ls-files` alone includes unstaged deletions and
+ * omits newly-created source, which made a pre-stage verification both crash
+ * on retired docs and reject citations to files being added in the same change.
+ * The union below models the tree that `git add -A` would stage without
+ * mutating the index.
+ */
 function trackedFiles() {
-  return git(["ls-files", "-z"]).split("\0").filter(Boolean);
+  const deleted = new Set(
+    git(["ls-files", "-z", "--deleted"]).split("\0").filter(Boolean),
+  );
+  const present = new Set(
+    git(["ls-files", "-z"])
+    .split("\0")
+    .filter((path) => path && !deleted.has(path)),
+  );
+  for (const path of git(["ls-files", "-z", "--others", "--exclude-standard"])
+    .split("\0")
+    .filter(Boolean)) {
+    present.add(path);
+  }
+  return [...present];
 }
 
 const EXEMPT_MARKER = /<!--\s*doc-citation-exempt:.*?-->/;

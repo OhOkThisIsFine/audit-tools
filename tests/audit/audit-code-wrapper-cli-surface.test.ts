@@ -136,7 +136,7 @@ test.concurrent("audit-code wrapper prints help text", async () => {
   expect(stdout.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
   expect(stdout.includes("Primary usage (conversation-first):")).toBeTruthy();
   expect(stdout.includes("next-step advances deterministic audit state")).toBeTruthy();
-  expect(stdout.includes("advance-audit runs exactly one deterministic advance")).toBeTruthy();
+  expect(stdout.includes("advance-audit")).toBe(false);
   expect(stdout.includes("explain-task <task_id>")).toBeTruthy();
   expect(stdout.includes("ensure lazily bootstraps repo-local")).toBeTruthy();
   expect(stdout.includes("install bootstraps /audit-code")).toBeTruthy();

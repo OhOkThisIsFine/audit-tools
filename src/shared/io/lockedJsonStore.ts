@@ -1,4 +1,4 @@
-import { withFileLock, STALE_LOCK_MS } from "../quota/fileLock.js";
+import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
 import { readOptionalJsonFile, writeJsonFile } from "./json.js";
 
 // Acquire timeout for a locked JSON store, DERIVED to stay safely below shared
@@ -9,8 +9,8 @@ import { readOptionalJsonFile, writeJsonFile } from "./json.js";
 // before the acquire starts, so its stale point precedes the deadline). The
 // margin absorbs the write→acquire gap, loop overhead, and load drift.
 //
-// Single-sourced here for every locked JSON store (the audit session-config
-// mutator and the remediate StateStore both used to derive this independently).
+// Single-sourced here for every locked JSON store (the analyzer-policy store
+// and the remediate StateStore both used to derive this independently).
 const LOCK_TIMEOUT_MARGIN_MS = 10_000;
 export const LOCKED_JSON_STORE_TIMEOUT_MS = STALE_LOCK_MS - LOCK_TIMEOUT_MARGIN_MS;
 
@@ -79,7 +79,7 @@ export interface LockedJsonStore<T> {
  * A JSON file guarded by the shared {@link withFileLock}: read-under-lock →
  * domain parse/validate → atomic write, with the below-stale lock timeout
  * derived in one place. Owns only what its two real consumers share (audit
- * `session-config.json`, remediate `state.json`); domain validation and
+ * `analyzer-policy.json`, remediate `state.json`); domain validation and
  * public API shape stay with the thin adapters.
  */
 export function createLockedJsonStore<T>(

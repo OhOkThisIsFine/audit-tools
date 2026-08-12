@@ -12,9 +12,8 @@
   are in `verify:release` and pass: `npm run verify:hosts` (`scripts/audit/verify-hosts.mjs`) and
   `npm run verify:remediate-hosts`, each deploying every host in `INSTALL_HOST_ORDER`
   (codex/opencode/vscode/antigravity) into an isolated temp `$HOME` and re-running that host's own
-  `verify()` from the same `INSTALL_HOST_DEFINITIONS` table the deploy uses. Live headless dispatch is
-  the `RUN_PROVIDER_MATRIX_E2E=1` e2e, which covers `codex`/`opencode`/`openai-compatible` only — `agy`
-  and `claude-worker` still have no live-dispatch row. **Remaining (a human at a GUI host, not code):**
+  `verify()` from the same `INSTALL_HOST_DEFINITIONS` table the deploy uses. This validates command
+  installation and host assets, not execution routing. **Remaining (a human at a GUI host, not code):**
   run the release-time checklist in the *Host validation* section of [`release.md`](../audit-pkg/release.md) — three GUI rows
   (Antigravity / OpenCode / VS Code), now for BOTH `/audit-code` and `/remediate-code`. Every checkbox
   is still unticked and both Notes sections are empty, so no release has recorded a pass.
@@ -31,9 +30,9 @@
   `charter_register.json` compares per-EDGE dependency slices instead of whole upstream hashes
   (`dependencySlices.ts`); and the bounded semantic judgment itself is the DD-9 intent-equivalence
   gate — `intent_equivalence_current` in `PRIORITY`, `intentEquivalenceExecutor.ts` +
-  `intentCheckpointGate.ts`: a structured delta resolves deterministically as CHANGED (an LLM never
-  arbitrates a numeric/list delta), a prose-only delta goes to a bounded host judge, and headless
-  resolves CHANGED — fail-safe to re-derive. It was justified by live-observed churn (re-dogfood
+  `intentCheckpointGate.ts`: a structured delta resolves deterministically as CHANGED (a host never
+  arbitrates a numeric/list delta), while a prose-only delta goes to a bounded host judgment and an
+  absent judgment fails safe to CHANGED. It was justified by live-observed churn (re-dogfood
   2026-07-22) rather than by instrumentation, which is why the old "measure first or guess" framing
   no longer describes the decision that was actually made.
   **What remains:** (a) the charter family and `design_assessment.json` still key their downstreams

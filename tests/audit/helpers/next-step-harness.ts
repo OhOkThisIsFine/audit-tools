@@ -53,20 +53,9 @@ export const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
   "present_report",
 ]);
 
-export const TEST_AUDITOR_ARGS = [
-  "--auditor",
-  JSON.stringify({
-    self: {
-      provider: "worker-command",
-      context_tokens: 200_000,
-      output_tokens: 8_000,
-    },
-  }),
-];
-
 export async function advancePastDesignReview(
   root: string,
-  wrapperArgs: string[] = ["next-step", ...TEST_AUDITOR_ARGS],
+  wrapperArgs: string[] = ["next-step"],
   wrapperOpts: Record<string, unknown> = {},
 ) {
   return walkStepsUntilTerminal({

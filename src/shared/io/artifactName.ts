@@ -58,8 +58,8 @@ export function artifactNameForId(value: string, extension: string): string {
 // before ".json" (the host writes packet results as "<stem>_<digest>.inline-result.json").
 const CANONICAL_RESULT_FILENAME = /_[0-9a-f]{12}(\.[a-z0-9-]+)?\.json$/i;
 
-// True when `filename` matches the canonical result naming above. Lets
-// merge-and-ingest tell legitimate packet / prior-round results apart from
+// True when `filename` matches the canonical result naming above. Lets result
+// ingestion tell legitimate task / prior-round results apart from
 // genuinely stray files (e.g. packet-23-results.json) left in task-results/.
 export function isCanonicalResultFilename(filename: string): boolean {
   return CANONICAL_RESULT_FILENAME.test(filename);

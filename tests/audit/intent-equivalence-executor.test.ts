@@ -133,12 +133,11 @@ test("stamp arm: baseline stamped from current, revision mirrors the entry (min 
   expect(fresh.updated.artifact_metadata.intent_baseline.revision).toBe(1);
 });
 
-test("structured delta / stale gate / headless prose all resolve CHANGED (revision advances)", () => {
+test("structured delta and stale gate resolve CHANGED (revision advances)", () => {
   const cp = checkpoint();
   for (const bundle of [
     bundleWith(checkpoint({ must_not_touch: ["secrets/**"] }), baselineFor(cp)),
     bundleWith(cp, { ...baselineFor(cp), gate_version: "old:host:v0" }),
-    bundleWith(checkpoint({ intent_summary: "audit it all" }), baselineFor(cp)),
   ]) {
     const run = runIntentEquivalenceResolve(bundle);
     if (!run.updated.artifact_metadata?.intent_baseline) {
@@ -147,6 +146,15 @@ test("structured delta / stale gate / headless prose all resolve CHANGED (revisi
     expect(run.updated.artifact_metadata.intent_baseline.revision).toBe(4);
     expect(deriveIntentEquivalenceStatus(run.updated).kind).toBe("satisfied");
   }
+});
+
+test("prose-only change requires a bound host verdict", () => {
+  const cp = checkpoint();
+  const bundle = bundleWith(
+    checkpoint({ intent_summary: "audit it all" }),
+    baselineFor(cp),
+  );
+  expect(() => runIntentEquivalenceResolve(bundle)).toThrow(/host verdict is required/i);
 });
 
 test("a verdict naming a stale pair is discarded; the obligation stays pending", () => {

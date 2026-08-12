@@ -120,4 +120,33 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     const { code, out } = runChecker(repo.dir);
     expect(code, `expected green, got:\n${out}`).toBe(0);
   });
+
+  it("treats an unstaged deleted markdown file as absent instead of crashing", () => {
+    write(
+      repo.dir,
+      "docs/deleted.md",
+      "This tracked document is being retired and cites `src/thing.ts`.\n",
+    );
+    repo.git("add", "docs/deleted.md");
+    rmSync(join(repo.dir, "docs", "deleted.md"));
+
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+    expect(out).toMatch(/every one names a tracked file/);
+
+    repo.git("add", "-u", "docs/deleted.md");
+  });
+
+  it("lets a citation resolve to an untracked file being added in the same tree", () => {
+    write(repo.dir, "src/new-source.ts", "export const added = true;\n");
+    write(repo.dir, "docs/new-source.md", "See `src/new-source.ts`.\n");
+    repo.git("add", "docs/new-source.md");
+
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+
+    rmSync(join(repo.dir, "src", "new-source.ts"));
+    rmSync(join(repo.dir, "docs", "new-source.md"));
+    repo.git("add", "-u", "docs/new-source.md");
+  });
 });

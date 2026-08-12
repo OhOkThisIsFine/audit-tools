@@ -60,8 +60,18 @@ const tracked = execFileSync("git", ["ls-files", "*.md"], {
 const CITATION = /memory:\s*([^)*]+)/g;
 
 const dangling = [];
+let scanned = 0;
 for (const file of tracked) {
-  const text = readFileSync(file, "utf8");
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    // The tracked census comes from the index. A document intentionally deleted
+    // in the working tree has no citation bytes to validate; skip only ENOENT.
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+    throw error;
+  }
+  scanned += 1;
   const lines = text.split(/\r?\n/);
   for (const match of text.matchAll(CITATION)) {
     const names = match[1]
@@ -89,4 +99,4 @@ if (dangling.length > 0) {
   process.exit(1);
 }
 
-console.log(`✓ memory-citations: all citations across ${tracked.length} tracked docs resolve`);
+console.log(`✓ memory-citations: all citations across ${scanned} present tracked docs resolve`);

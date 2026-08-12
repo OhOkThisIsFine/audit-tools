@@ -56,13 +56,8 @@ export const ReviewPacketSchema = z.object({
   quality: ReviewPacketQualitySchema,
   rationale: z.string(),
   estimated_tokens: z.number(),
-  /**
-   * Max member risk (in [0,1]) from the just-in-time graph partition — the
-   * signal that routes this packet to a relative model rank. Present only on
-   * dispatch-time packets built via `buildReviewPacketsFromPartition`; the
-   * plan-time builder has no partition and leaves it unset.
-   */
-  routing_risk: z.number().optional(),
+  /** Max member risk (in [0,1]) within this coherence group. */
+  risk_score: z.number().optional(),
 });
 export type ReviewPacket = z.infer<typeof ReviewPacketSchema>;
 

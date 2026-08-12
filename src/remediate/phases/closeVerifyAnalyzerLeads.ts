@@ -1,5 +1,6 @@
 import {
   EXTERNAL_ANALYZER_CANDIDATES,
+  loadAnalyzerPolicy,
   runExternalAnalyzer,
   resolveBinaryCandidates,
   analyzerProvenanceKey,
@@ -7,10 +8,9 @@ import {
   type ExternalAnalyzerCandidate,
   type ExternalAnalyzerToolStatus,
   type AnalyzerLeadProvenance,
-  type SessionConfig,
+  type AnalyzerPolicy,
   type MechanicalVerification,
 } from "audit-tools/shared";
-import { loadRemediateSessionConfig } from "../steps/sessionConfigLoad.js";
 import type { RemediationState } from "../state/store.js";
 
 /**
@@ -26,8 +26,8 @@ import type { RemediationState } from "../state/store.js";
  * re-block ALL resolved items on red), a persisting lead re-blocks only ITS
  * item — attribution is exact.
  *
- * Admission is unchanged (`admitSpawn` over the same persisted session config
- * the audit run wrote): an analyzer that is not admitted or does not resolve
+ * Admission reads the provider-neutral analyzer policy artifact shared with the
+ * audit draw: an analyzer that is not admitted or does not resolve
  * yields per-item `skipped` verdicts with the tool status as reason — recorded,
  * never silent, and never a false `verified_mechanically`.
  */
@@ -47,7 +47,7 @@ export interface AnalyzerLeadVerifyOutcome {
 export interface AnalyzerLeadVerifyOverrides {
   candidates?: ExternalAnalyzerCandidate[];
   run?: AcquisitionRunner;
-  sessionConfig?: SessionConfig;
+  analyzerPolicy?: AnalyzerPolicy;
 }
 
 const NO_OP: AnalyzerLeadVerifyOutcome = {
@@ -78,9 +78,17 @@ export async function verifyAnalyzerLeads(params: {
   }
   if (targets.length === 0) return NO_OP;
 
-  const sessionConfig =
-    overrides?.sessionConfig ??
-    (await loadRemediateSessionConfig({ root, artifactsFirst: true }));
+  const persistedAnalyzerPolicy = await loadAnalyzerPolicy(root);
+  const analyzerPolicy: AnalyzerPolicy = {
+    analyzers: {
+      ...persistedAnalyzerPolicy.analyzers,
+      ...overrides?.analyzerPolicy?.analyzers,
+    },
+    analyzer_consent: {
+      ...persistedAnalyzerPolicy.analyzer_consent,
+      ...overrides?.analyzerPolicy?.analyzer_consent,
+    },
+  };
 
   const verdicts: Record<string, MechanicalVerification> = {};
   const statuses: ExternalAnalyzerToolStatus[] = [];
@@ -94,9 +102,8 @@ export async function verifyAnalyzerLeads(params: {
 
   const candidates = overrides?.candidates ?? EXTERNAL_ANALYZER_CANDIDATES;
   const engineOptions = {
-    analyzers: sessionConfig?.analyzers,
-    analyzerConsent: sessionConfig?.analyzer_consent,
-    consentToken: sessionConfig?.external_acquisition?.consent_token,
+    analyzers: analyzerPolicy.analyzers,
+    analyzerConsent: analyzerPolicy.analyzer_consent,
     ...(overrides?.run ? { run: overrides.run } : {}),
   };
 
@@ -116,11 +123,6 @@ export async function verifyAnalyzerLeads(params: {
       skipAll(bucket, analyzerId, "no registered candidate for this analyzer id");
       continue;
     }
-    if (sessionConfig?.external_acquisition?.enabled === false) {
-      skipAll(bucket, analyzerId, "external acquisition disabled in session config");
-      continue;
-    }
-
     // Binary-runner candidates resolve (PATH probe / checksum-gated download)
     // ahead of the synchronous engine, exactly as the audit draw does.
     const resolved = await resolveBinaryCandidates([candidate], root, engineOptions);

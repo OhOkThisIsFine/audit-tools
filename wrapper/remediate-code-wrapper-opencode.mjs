@@ -29,9 +29,6 @@ export const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
 const REMEDIATE_CODE_ALLOWED_SUBCOMMANDS = [
   'ensure*',
   'next-step*',
-  'prepare-implement-dispatch*',
-  'merge-implement-results*',
-  'accept-node*',
   'validate*',
 ];
 
@@ -56,6 +53,27 @@ function buildRemediateBashPermissions() {
 }
 
 export const OPENCODE_REMEDIATE_BASH_PERMISSION = buildRemediateBashPermissions();
+
+const RETIRED_REMEDIATE_CODE_BASH_RULES = [
+  'remediate-code prepare-document-dispatch*',
+  'remediate-code merge-document-results*',
+  'remediate-code prepare-implement-dispatch*',
+  'remediate-code merge-implement-results*',
+  'remediate-code accept-node*',
+  '*remediate-code.mjs* prepare-document-dispatch*',
+  '*remediate-code.mjs* merge-document-results*',
+  '*remediate-code.mjs* prepare-implement-dispatch*',
+  '*remediate-code.mjs* merge-implement-results*',
+  '*remediate-code.mjs* accept-node*',
+];
+
+function withoutRetiredRemediateCodeBashRules(rule) {
+  const cleaned = { ...objectValue(rule) };
+  for (const retired of RETIRED_REMEDIATE_CODE_BASH_RULES) {
+    delete cleaned[retired];
+  }
+  return cleaned;
+}
 
 export function renderOpenCodePermissionConfig() {
   return {
@@ -138,16 +156,18 @@ export function assertOpenCodeRemediatePermissionConfig(permissionConfig, label)
     'remediate-code',
     'remediate-code ensure*',
     'remediate-code next-step*',
-    'remediate-code prepare-implement-dispatch*',
-    'remediate-code merge-implement-results*',
-    'remediate-code accept-node*',
+    'remediate-code validate*',
     '*remediate-code.mjs',
     '*remediate-code.mjs* next-step*',
-    '*remediate-code.mjs* merge-implement-results*',
-    '*remediate-code.mjs* accept-node*',
+    '*remediate-code.mjs* validate*',
   ]) {
     if (bash[pattern] !== 'allow') {
       throw new Error(`OpenCode ${label}.bash must allow ${pattern}. Run "remediate-code install --host opencode".`);
+    }
+  }
+  for (const pattern of RETIRED_REMEDIATE_CODE_BASH_RULES) {
+    if (bash[pattern] === 'allow') {
+      throw new Error(`OpenCode ${label}.bash must not allow retired command ${pattern}. Run "remediate-code install --host opencode".`);
     }
   }
 }
@@ -165,6 +185,7 @@ function withoutManagedBroadBashWildcard(rule) {
 
 function mergePermissionBlock(existingPermission, generatedPermission) {
   const existing = objectValue(existingPermission);
+  const existingBash = withoutRetiredRemediateCodeBashRules(existing.bash);
   const merged = {
     ...generatedPermission,
     ...existing,
@@ -177,7 +198,7 @@ function mergePermissionBlock(existingPermission, generatedPermission) {
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      withoutManagedBroadBashWildcard(existing.bash),
+      withoutManagedBroadBashWildcard(existingBash),
       generatedPermission.bash,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),
@@ -235,7 +256,7 @@ export function buildMergedOpenCodeProjectConfig(existing, root) {
   // union does not manage are preserved (non-clobber).
   const topPermission = mergePermissionBlock(existing.permission, generated.permission);
   topPermission.bash = composeOpenCodeBashCeiling(
-    objectValue(existing.permission).bash,
+    withoutRetiredRemediateCodeBashRules(objectValue(existing.permission).bash),
     collectAgentBashRuleSets(mergedAgent),
   );
   return {

@@ -10,6 +10,10 @@
  * which re-exports this) and the content-key seam (`src/shared/contentKey.ts`)
  * route through this function.
  */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export function stableStringify(value: unknown): string {
   if (value === undefined) {
     return "null";
@@ -22,6 +26,6 @@ export function stableStringify(value: unknown): string {
   }
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b));
+    .sort(([a], [b]) => compareCodeUnits(a, b));
   return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
 }

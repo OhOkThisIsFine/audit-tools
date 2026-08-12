@@ -126,7 +126,7 @@ export const FRICTION_CATEGORY_LABELS: Record<FrictionCategory, string> = {
  */
 export interface FrictionCostSignals {
   /**
-   * Round-trips: the number of aggregated mechanical events. Each backend
+     * Round-trips: the number of aggregated mechanical events. Each workflow
    * step-boundary fact is one avoidable round-trip (a re-emit, a repair round, a
    * re-derive, …), so the event count IS the round-trip count.
    */
@@ -161,7 +161,7 @@ export function costSignalsSurface(signals: FrictionCostSignals): boolean {
 
 /**
  * ONE derived observation aggregated from N same-category mechanical events. This
- * is the pre-populated close-out entry: N same-artifact backend facts collapse
+ * is the pre-populated close-out entry: N same-artifact workflow facts collapse
  * into a SINGLE `inefficient_feeding` (or other-category) observation with the
  * measured cost signals and the covered event ids.
  */
@@ -196,7 +196,7 @@ function aggregationKey(item: CapturedFrictionItem): string {
 
 /**
  * Measure the cost signals across an aggregate of mechanical events. Pure and
- * deterministic — round_trips is the event count (each backend fact is one
+ * deterministic — round_trips is the event count (each workflow fact is one
  * avoidable round-trip), verbatim_re_authors fires only when the SAME subject was
  * touched by MORE THAN ONE event, and tokens sums the best-effort per-event
  * measure (never fabricated: a missing/non-finite `tokens` contributes 0).
@@ -454,7 +454,7 @@ export async function decideFrictionTriage(
   // Materialize the record (so the host always appends to an existing file) AND
   // pre-populate the category walk in ONE locked merge: aggregate the run's
   // tool-tagged mechanical events into derived `open_observations[]` entries so a
-  // category the backend already saw re-work in arrives pre-covered. The merge is
+  // category the workflow already saw re-work in arrives pre-covered. The merge is
   // host-preserving (host-authored observations/dispositions survive) and
   // idempotent (the derived set is recomputed, never duplicated).
   const record = await appendFrictionUnderLock(
@@ -557,26 +557,7 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
     (triage.free_form_notes ? " Already recorded." : "") +
     "\n";
 
-  // Slice A2b, mechanism B — belt-and-suspenders for the TIER-2 broad
-  // quota-suspicious pre-filter (`detectQuotaSuspicious` in
-  // `errorParsing.ts`): the filter only ever sees WORKER ERROR/STATUS channel
-  // text, so a quota/limit/billing-shaped message the HOST itself observes
-  // (e.g. quoted inside a conversational reply, or from a channel the filter
-  // never scans) would otherwise leave no trace. Always rendered — independent
-  // of category coverage state — because it names a standing host obligation,
-  // not a per-run gap.
-  const quotaHarvestSection =
-    `\n### Quota/billing messages the tool did NOT auto-classify (standing obligation)\n\n` +
-    `If you encounter any quota/limit/billing-related provider message that was NOT already ` +
-    `auto-captured as \`credit_exhausted\` or \`quota_unclassified\` friction, record it ` +
-    `as a \`tool_should_decide\` \`open_observations[]\` entry (or in \`free_form_notes\`) ` +
-    `so the pattern set in \`errorParsing.ts\` can be improved. Keep the exact wording of the ` +
-    `error phrasing (that is what lets a new precise pattern be authored) — but you MUST ` +
-    `REDACT any secret value first: replace any API key, token, Bearer credential, password, ` +
-    `or key=value / \`?key=…\` secret with \`[REDACTED]\`. The pattern is authored from the ` +
-    `message SHAPE, never from a live credential — a friction record may be shared or committed.\n`;
-
-  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${categorySection}${quotaHarvestSection}${freeFormSection}\nCall next-step again after writing.\n`;
+  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${categorySection}${freeFormSection}\nCall next-step again after writing.\n`;
 }
 
 /**

@@ -1,0 +1,25 @@
+{
+  "entries": [
+    {
+      "path": "src/shared/contentKey.ts",
+      "sha256": "465a290e92a3b7dae0ae1e797e716e302e1401e33b8c921d3c00a653515ecdd9"
+    },
+    {
+      "path": "src/shared/index.ts",
+      "sha256": "2a6dbbfe5d7e52cbefd3ff0c5f63e075be9489b2886c3cebf324d97ae7d7ff5d"
+    },
+    {
+      "path": "src/shared/types/attributionContract.ts",
+      "sha256": "9f7e1f9ee9c1ad8a7eeb46cdd32e1fa00a6b9e59624c8ea1c910a3d5da7ee587"
+    },
+    {
+      "path": "src/shared/types/sessionConfig.ts",
+      "sha256": "c2b06e39e102d77bd8b773ea824dbf405667fbbd2985cb9e3aff2ac29e3d9982"
+    },
+    {
+      "path": "src/shared/types/stepContract.ts",
+      "sha256": "34d7712a4036bc0296cc1e2ab0e78fe23d5043059a4adab0a747ad6727b2b72b"
+    }
+  ],
+  "tree_sha256": "bef5303c6b9a29df998c846566f97399025cc579b72f43f7346784e3308ca3f8"
+}

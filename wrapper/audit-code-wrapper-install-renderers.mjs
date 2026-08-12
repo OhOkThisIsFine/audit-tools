@@ -6,8 +6,8 @@
  * thin wrappers that pass the canonical body through with the right `kind` and
  * `toolName`; they do NOT re-author per-host loader prose. That makes it
  * impossible for a host asset to drift out of sync with the canonical body — to
- * silently drop the next-step capability handshake (including `--host-models`) or
- * to embed a wrong in-repo entrypoint. A no-drift guard test enforces this.
+ * silently drop the next-step continuation or embed a wrong in-repo entrypoint.
+ * A no-drift guard test enforces this.
  */
 
 import { renderHostAsset } from 'audit-tools/shared';

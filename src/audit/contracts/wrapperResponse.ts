@@ -47,12 +47,12 @@ const SuggestedInputSchema = z
 
 const ActiveReviewRunSchema = z
   .object({
+    contract_version: z.literal("audit-review-run/v1alpha1"),
     run_id: z.string(),
-    task_path: z.string(),
-    prompt_path: z.string(),
-    pending_audit_tasks_path: z.string().optional(),
-    audit_results_path: z.string(),
-    worker_command: z.array(z.string()).min(1),
+    review_run_path: z.string(),
+    pending_audit_tasks_path: z.string(),
+    host_workload_path: z.string(),
+    host_result_map_path: z.string(),
   })
   .strict();
 
@@ -63,7 +63,7 @@ const HandoffArtifactPathsSchema = z
     operator_handoff_markdown: z.string(),
     session_config: z.string(),
     run_ledger: z.string(),
-    current_task: z.string().nullable(),
+    current_review_run: z.string().nullable(),
     current_prompt: z.string().nullable(),
     current_tasks: z.string().nullable(),
     audit_tasks: z.string().nullable(),
@@ -77,12 +77,10 @@ const HandoffSchema = z
     status: AuditStateStatusSchema,
     repo_root: z.string(),
     artifacts_dir: z.string(),
-    provider: z.string().nullable(),
     summary: z.string(),
     pending_obligations: z.array(z.string()),
     suggested_inputs: z.array(SuggestedInputSchema),
     suggested_commands: z.array(z.string()),
-    interactive_provider_hint: z.string().nullable(),
     active_review_run: ActiveReviewRunSchema.optional(),
     artifact_paths: HandoffArtifactPathsSchema,
     quick_start: z.string().optional(),

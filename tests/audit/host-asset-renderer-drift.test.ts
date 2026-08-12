@@ -36,7 +36,7 @@ function lf(text: string): string {
 
 // Every IDE host asset must derive from the ONE canonical prompt body. These are
 // the renderers that previously hand-authored bespoke per-host prose (and so
-// dropped the next-step capability handshake / embedded a wrong entrypoint).
+// dropped the next-step host-work contract / embedded a wrong entrypoint).
 const RENDERED_ASSETS: Record<string, string> = {
   "vscode-agent": renderVSCodeAgentFile(canonicalBody),
   "codex-recipe": renderCodexAutomationRecipe(canonicalBody),
@@ -52,34 +52,25 @@ test("E1: every IDE host asset embeds the canonical loader body verbatim", () =>
   // the canonical body so we know each asset actually wrapped it.
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     expect(asset.includes("# `/audit-code` Loader"), `${kind} asset must embed the canonical loader heading`).toBeTruthy();
-    expect(asset.includes("capability\nhandshake") || asset.includes("capability handshake") ||
-        asset.includes("**capability"), `${kind} asset must embed the capability handshake section`).toBeTruthy();
+    expect(asset.includes("host work"), `${kind} asset must embed the host-work contract`).toBeTruthy();
   }
 });
 
-// ── E1: capability handshake (the --auditor descriptor) in BOTH initial + continuation ─
+// ── E1: retired backend configuration is absent ─────────────────────────────
 
-test("E1: --auditor appears in BOTH the report and continuation guidance for every IDE asset", () => {
+test("E1: every IDE asset omits retired backend configuration", () => {
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
-    // The asset overall must carry the descriptor flag (initial Report block).
-    expect(asset.includes("--auditor"), `${kind} asset must carry --auditor in the capability handshake`).toBeTruthy();
-    // The CONTINUATION guidance ("run ... next-step again with the same --auditor
-    // handshake ...") must itself reference --auditor, so a host that only reads
-    // the continuation block on later turns still reports its roster.
-    const continuationMatch = asset.match(
-      /again with[\s\S]*?(`?--auditor`?)[\s\S]*?prompt_path/,
+    expect(asset, `${kind} asset must omit retired backend flags`).not.toMatch(
+      /--auditor|context_tokens|output_tokens|max_active_subagents|can_dispatch_subagents/iu,
     );
-    expect(continuationMatch, `${kind} asset continuation section must reference the --auditor handshake`).toBeTruthy();
   }
 });
 
-test("E1: the collapsed handshake keys appear in every IDE asset", () => {
-  // G1 collapsed the former N `--host-*` flags into the single `--auditor <json>`
-  // descriptor; the roster/window/subagent-cap concepts now live as `self` keys.
-  const KEYS = ["--auditor", "roster", "context_tokens", "output_tokens", "max_active_subagents"];
+test("E1: the canonical workload anchors appear in every IDE asset", () => {
+  const KEYS = ["next-step", "prompt_path", "host work"];
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     for (const key of KEYS) {
-      expect(asset.includes(key), `${kind} asset must carry handshake key '${key}'`).toBeTruthy();
+      expect(asset.includes(key), `${kind} asset must carry workload anchor '${key}'`).toBeTruthy();
     }
   }
 });

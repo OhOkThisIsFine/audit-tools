@@ -92,14 +92,14 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
-    await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    await decideNextStep({ root: REPO_DIR });
     const firstState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
     expect(Date.parse(firstState.started_at)).not.toBeNaN();
     expect(firstState.step_count).toBe(1);
 
-    await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    await decideNextStep({ root: REPO_DIR });
     const secondState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
@@ -246,18 +246,6 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     const stepEvent = events.find((event) => event.kind === "step");
     expect(stepEvent?.obligation).toBe(step.step_kind);
     expect(typeof stepEvent?.duration_ms).toBe("number");
-  });
-
-  it("does not write a run log when observability.run_log is disabled", async () => {
-    await writeFile(
-      join(REPO_DIR, "session-config.json"),
-      JSON.stringify({ observability: { run_log: false } }),
-      "utf8",
-    );
-
-    await decideNextStep({ root: REPO_DIR });
-
-    expect(existsSync(join(ARTIFACTS_DIR, "run.log.jsonl"))).toBe(false);
   });
 
   it("missing input emits a conversation-first starting-point step", async () => {

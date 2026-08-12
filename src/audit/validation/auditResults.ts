@@ -1,11 +1,9 @@
 import type { AuditTask, Finding } from "../types.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import {
-  captureStepBoundaryFriction,
   describeValue,
   formatValidationIssues,
   isRecord,
-  normalizeRepoPath,
   VALID_LENSES,
   VALID_SEVERITIES,
   VALID_CONFIDENCES,
@@ -45,42 +43,6 @@ export function isSignificantLineCountDivergence(got: number, expected: number):
 
 export function normalizeCoveragePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
-
-/**
- * Force-default each `findings[].lens` from the result's top-level
- * `AuditResult.lens` when the per-finding lens is missing/blank. Deepening
- * (and weaker) workers routinely set only the AuditResult lens and omit the
- * per-finding lens — which the validator requires as a non-empty string — so
- * every such result was hard-rejected and its `deepening:*` task re-queued
- * forever (the non-convergence loop). Backfilling the per-finding lens from the
- * AuditResult lens BEFORE validation is the tool-enforced fix (INV
- * enforce-in-tooling: never rely on the worker remembering to set it).
- *
- * Mutates in place and returns the same payload for chaining. A non-array, a
- * non-object result, a non-array `findings`, or a non-string/blank
- * AuditResult.lens are all left untouched (validation reports them as-is); a
- * finding that already carries a non-empty lens is never overwritten (so a
- * genuine per-finding/AuditResult lens MISMATCH is still surfaced, not masked).
- */
-export function defaultFindingLensFromResult<T>(payload: T): T {
-  if (!Array.isArray(payload)) {
-    return payload;
-  }
-  for (const result of payload) {
-    if (!isRecord(result)) continue;
-    const resultLens = result.lens;
-    if (typeof resultLens !== "string" || resultLens.trim().length === 0) continue;
-    const findings = result.findings;
-    if (!Array.isArray(findings)) continue;
-    for (const finding of findings) {
-      if (!isRecord(finding)) continue;
-      if (typeof finding.lens !== "string" || finding.lens.trim().length === 0) {
-        finding.lens = resultLens;
-      }
-    }
-  }
-  return payload;
 }
 
 export interface AuditResultIssue extends ValidationIssue {
@@ -722,45 +684,6 @@ function validateResultIdentityFields(ctx: ResultValidationContext, issues: Audi
   }
 }
 
-/**
- * Sanity-check an optional `token_usage` field: when present, both
- * `input_tokens`/`output_tokens` must be finite, non-negative numbers. This is
- * host-populated metadata (the worker itself cannot know its own harness-
- * reported usage — see `AuditResultSchema.token_usage` in `types.ts`), so a
- * malformed shape is downgraded to a WARNING rather than a hard reject: it
- * must never block ingest of otherwise-valid findings, it just means this
- * result's usage is not trusted for `recordTokensPerPctObservation` (the merge
- * path independently re-checks `Number.isFinite` before summing, so a warned
- * value is defensively excluded there too, not merely flagged here).
- */
-function validateResultTokenUsage(ctx: ResultValidationContext, issues: AuditResultIssue[]): void {
-  const { result, taskId, resultIndex } = ctx;
-  const tokenUsage = result.token_usage;
-  if (tokenUsage === undefined) return;
-  if (!isRecord(tokenUsage)) {
-    pushIssue(issues, {
-      severity: "warning",
-      result_index: resultIndex,
-      task_id: taskId,
-      field: "token_usage",
-      message: `token_usage must be an object, got ${describeValue(tokenUsage)}. Ignored for quota learning.`,
-    });
-    return;
-  }
-  for (const key of ["input_tokens", "output_tokens"] as const) {
-    const value = tokenUsage[key];
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-      pushIssue(issues, {
-        severity: "warning",
-        result_index: resultIndex,
-        task_id: taskId,
-        field: `token_usage.${key}`,
-        message: `token_usage.${key} must be a non-negative finite number, got ${describeValue(value)}. Ignored for quota learning.`,
-      });
-    }
-  }
-}
-
 function validateFileCoverageEntry(
   entry: unknown,
   j: number,
@@ -1031,7 +954,6 @@ function validateSingleAuditResult(
   const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks, normBoundary };
 
   validateResultIdentityFields(ctx, issues);
-  validateResultTokenUsage(ctx, issues);
 
   const { normalizedFileCoverage, declaredAssignedCoveragePaths } = validateResultFileCoverage(ctx, issues);
 
@@ -1088,52 +1010,6 @@ export function validateAuditResults(
   }
 
   return issues;
-}
-
-/**
- * True when an issue is the deliberately-downgraded `total_lines` != actual
- * coverage-stat mismatch (a `file_coverage[i].total_lines` warning). Single
- * source of the predicate so every ingest locus classifies it identically.
- */
-export function isCoverageTotalLinesMismatch(issue: AuditResultIssue): boolean {
-  return (
-    issue.severity === "warning" &&
-    issue.field.startsWith("file_coverage[") &&
-    issue.field.endsWith("].total_lines")
-  );
-}
-
-/**
- * Route every `total_lines` != actual coverage-stat mismatch through the single
- * friction chokepoint. The validator stays pure and only RETURNS the warnings;
- * THIS is the one policy that turns them into a `coverage_total_lines_mismatch`
- * step-boundary friction event, shared by every ingest locus (merge-and-ingest,
- * worker-run) so the policy can't drift between them. Best-effort:
- * captureStepBoundaryFriction swallows every failure, so it can never break
- * ingest. Does NOT gate ingest — the warning is non-fatal.
- */
-export async function emitCoverageLineCountFriction(
-  artifactsDir: string,
-  runId: string,
-  issues: AuditResultIssue[],
-): Promise<void> {
-  for (const issue of issues) {
-    if (!isCoverageTotalLinesMismatch(issue)) continue;
-    const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
-    await captureStepBoundaryFriction(
-      artifactsDir,
-      runId,
-      {
-        eventType: "coverage_total_lines_mismatch",
-        discriminator: `${issue.result_index}:${coveragePath}`,
-        category: "trap",
-        severity: "low",
-        area: "audit result ingest",
-        note: issue.message,
-      },
-      "audit-code",
-    );
-  }
 }
 
 export function formatAuditResultIssues(issues: AuditResultIssue[]): string {

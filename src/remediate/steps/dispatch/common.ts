@@ -1,13 +1,8 @@
-import { statSync } from "node:fs";
-import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
-  detectRepoConventions,
-  formatRepoConventions,
-  estimateTokensFromBytes,
   normalizeRepoPath,
 } from "audit-tools/shared";
 
@@ -30,22 +25,6 @@ export function toRepoRelative(p: string, root: string): string {
   return s;
 }
 
-export function uniquePaths(paths: string[]): string[] {
-  return [...new Set(paths)];
-}
-
-export function runDir(artifactsDir: string, runId: string, phase: string): string {
-  return join(artifactsDir, "runs", runId, phase);
-}
-
-export function dispatchPlanPath(
-  artifactsDir: string,
-  runId: string,
-  phase: string,
-): string {
-  return join(runDir(artifactsDir, runId, phase), "dispatch-plan.json");
-}
-
 /**
  * Canonical comparison key for a filesystem path. `realpathSync` resolves
  * symlinks and platform short-names so it matches git's `--show-toplevel`
@@ -58,23 +37,6 @@ export function canonicalPathKey(p: string): string {
   } catch {
     return normalizeRepoPath(resolve(p));
   }
-}
-
-/**
- * Deterministic name of the dedicated remediation branch for a run. Derived from
- * the stable run id (= the plan id, constant for the whole remediation) so every
- * wave and the final report resolve the SAME branch without persisting it. Ref-safe:
- * any character outside [A-Za-z0-9._-] collapses to '-'. Distinct from the per-node
- * worktree branches (`remediate-<blockId>-<runId>`) — this uses a `remediation/` ref
- * namespace so the two never collide.
- */
-export function refSafeSegment(s: string, fallback: string): string {
-  return (
-    s
-      .replace(/[^A-Za-z0-9._-]+/g, "-")
-      .replace(/\.{2,}/g, ".") // ".." is invalid in a git ref name
-      .replace(/^[-.]+|[-.]+$/g, "") || fallback
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -309,90 +271,4 @@ export function writeScopeViolations(
     violations.push(rel);
   }
   return violations;
-}
-
-// ---------------------------------------------------------------------------
-// Byte-based token estimation helpers
-// ---------------------------------------------------------------------------
-
-/** Fixed prompt overhead per dispatch slot (prompt instructions, JSON schema, etc.). */
-export const PROMPT_OVERHEAD_TOKENS = 2000;
-
-/** Sum the byte sizes of a list of absolute or repo-relative file paths. */
-function sumFileSizes(filePaths: string[]): number {
-  let total = 0;
-  for (const p of filePaths) {
-    try {
-      total += statSync(p).size;
-    } catch {
-      // Missing file → 0 bytes; not an error for estimation purposes.
-    }
-  }
-  return total;
-}
-
-/**
- * Per-file listing overhead: the path line each read file contributes to the
- * worker's access manifest (not its content — agentic workers read on demand).
- */
-export const FILE_LISTING_OVERHEAD_TOKENS = 8;
-
-/**
- * Estimate slot tokens for an implement dispatch slot the way an AGENTIC worker
- * (host subagent / CLI worker with read tools) actually consumes context: the
- * dispatch packet is the rendered prompt plus a file MANIFEST; the worker opens
- * files itself, incrementally, inside its own session. The honest fit question
- * is therefore "prompt + the largest single artifact the worker must hold at
- * once + the manifest", NOT the byte-sum of the whole access set.
- *
- * The previous unconditional byte-sum applied the content-INLINING cost model
- * (correct only for single-shot workers, whose packing lives with the
- * openai-compatible provider) to every class — so a node whose scope is
- * referenced by many tests exploded quadratically: the 2026-07-22 dogfood's
- * CP-NODE-1 pulled 182 referencing tests into a 943k "cost" for a 14.5KB
- * prompt, which no pool on earth admits (`no_capable_pool` on a node an
- * agentic worker handles comfortably).
- */
-export function estimateImplementSlotTokens(
-  readFiles: string[],
-  root: string,
-  opts?: {
-    /** The rendered per-node prompt file — the packet's actual body. */
-    promptPath?: string;
-  },
-): number {
-  const absPaths = readFiles.map((f) =>
-    f.startsWith("/") || /^[A-Za-z]:[/\\]/.test(f) ? f : join(root, f),
-  );
-  let maxFileBytes = 0;
-  for (const p of absPaths) {
-    try {
-      const size = statSync(p).size;
-      if (size > maxFileBytes) maxFileBytes = size;
-    } catch {
-      /* missing file → 0 bytes; not an error for estimation purposes */
-    }
-  }
-  const promptBytes = opts?.promptPath ? sumFileSizes([opts.promptPath]) : 0;
-  return (
-    PROMPT_OVERHEAD_TOKENS +
-    estimateTokensFromBytes(promptBytes + maxFileBytes) +
-    readFiles.length * FILE_LISTING_OVERHEAD_TOKENS
-  );
-}
-
-// ---------------------------------------------------------------------------
-// detectRepoConventions cache (one call per repo root per process)
-// ---------------------------------------------------------------------------
-
-/** Module-level cache: repo root → formatted conventions string. */
-export const detectRepoConventionsCache = new Map<string, string>();
-
-export function getCachedConventions(root: string): string {
-  if (detectRepoConventionsCache.has(root)) {
-    return detectRepoConventionsCache.get(root)!;
-  }
-  const result = formatRepoConventions(detectRepoConventions(root));
-  detectRepoConventionsCache.set(root, result);
-  return result;
 }

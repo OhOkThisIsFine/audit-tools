@@ -98,7 +98,6 @@ test("RunLogEvent compile-time type constraints", async () => {
     phase: "advance",
     obligation: "repo_manifest",
     artifact: "repo_manifest.json",
-    provider: "claude-code",
     tokens_est: 100,
     duration_ms: 42,
     note: "done",
@@ -113,6 +112,10 @@ test("RunLogEvent compile-time type constraints", async () => {
   // @ts-expect-error — "noop" is not in RunLogEventKind
   const _bad2: RunLogEvent = { kind: "noop" };
   void _bad2;
+
+  // @ts-expect-error — execution-backend attribution is not part of the run log
+  const _bad3: RunLogEvent = { kind: "outcome", provider: "legacy" };
+  void _bad3;
 });
 
 test("a BigInt payload triggers the unserializable_event fallback marker", async () => {

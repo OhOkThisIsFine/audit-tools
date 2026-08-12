@@ -30,7 +30,7 @@ const {
 } = await import("../../src/audit/orchestrator/designReviewSnapshot.js");
 const {
   renderSharedStructuralContext,
-  renderDesignReviewPrompt,
+  renderContractReviewPrompt,
 } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
 const { stableStringifyProjection } = await import("audit-tools/shared");
 
@@ -440,6 +440,6 @@ test("CE-008: the scope flip the projection captures is exactly what the prompt 
   });
   const excludedRender = renderSharedStructuralContext(scoped, 5);
   expect(excludedRender, "the excluded unit renders the tag the projection keys on").toMatch(/U2 \[excluded: third-party\]/);
-  // The whole-prompt path agrees (renderDesignReviewPrompt wraps the shared context).
-  expect(renderDesignReviewPrompt(scoped)).toMatch(/U2 \[excluded: third-party\]/);
+  // The live contract-prompt path agrees with the shared context.
+  expect(renderContractReviewPrompt(scoped)).toMatch(/U2 \[excluded: third-party\]/);
 });

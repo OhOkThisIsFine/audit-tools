@@ -127,6 +127,14 @@ describe("scripts/postinstall.mjs", () => {
     );
     expect(config.permission.bash["remediate-code next-step*"]).toBe("allow");
     expect(config.permission.bash["rm *"]).toBe("deny");
+    for (const bash of [
+      config.permission.bash,
+      config.agent.remediator.permission.bash,
+    ]) {
+      expect(Object.keys(bash).filter((key) =>
+        /prepare-(?:document|implement)-dispatch|merge-(?:document|implement)-results|accept-node/u.test(key),
+      )).toEqual([]);
+    }
   });
 
   it("preserves a non-managed existing \"*\" wildcard in the global bash permission (COR-fc1f12a6)", async () => {

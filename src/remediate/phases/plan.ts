@@ -8,21 +8,15 @@ import {
 } from "../state/types.js";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport } from "audit-tools/shared";
-import { claimsAuditFindingsContract } from "audit-tools/shared";
+import { canonicalizeFilePath, claimsAuditFindingsContract } from "audit-tools/shared";
 import { readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
-  readValidatedRepoSessionIntent,
-  resolveContextBudget,
-  resolveModelStatics,
   estimateTokensFromBytes,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   chunkByBudget,
-  type SessionConfig,
 } from "audit-tools/shared";
-import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
-import { StateStore, type HostCapabilities } from "../state/store.js";
 import { pathTokensInCommand } from "../steps/dispatch/verifyCommands.js";
 
 /**
@@ -183,6 +177,38 @@ export function estimateGroupTokens(
   );
 }
 
+function addAdvisoryTokenEstimates(
+  blocks: RemediationBlock[],
+  findings: Finding[],
+  root: string,
+): RemediationBlock[] {
+  const findingMap = new Map(findings.map((finding) => [finding.id, finding]));
+  const files = new Map<string, string>();
+  for (const block of blocks) {
+    for (const findingId of block.items) {
+      for (const affectedFile of findingMap.get(findingId)?.affected_files ?? []) {
+        const key = canonicalizeFilePath(affectedFile.path, { root });
+        if (!files.has(key)) files.set(key, affectedFile.path);
+      }
+    }
+  }
+
+  const byteCounts = new Map<string, number>();
+  for (const [key, path] of files) {
+    byteCounts.set(key, fileSizeBytes(path, root));
+  }
+
+  return blocks.map((block) => ({
+    ...block,
+    token_estimate: estimateGroupTokens(
+      block.items,
+      findings,
+      byteCounts,
+      root,
+    ),
+  }));
+}
+
 // Thin adapter over the shared `chunkByBudget` greedy chunker (extracted
 // alongside chunkPacketTasks in audit's reviewPackets.ts and chunkByTaskBudget
 // in audit's taskBuilder.ts — three previously byte-identical loop shapes).
@@ -206,146 +232,6 @@ function splitOversizedOverlapGroup(
     budget: contextBudget,
     costOf: (candidate) => estimateGroupTokens(candidate, findings, fileByteCounts, root),
   });
-}
-
-/**
- * Split single-finding blocks whose ONE finding cites more files than fit the
- * context budget (defect (c) of the 2026-07-22 implement-dispatch cluster).
- *
- * `splitBlocksByContextBudget` partitions at FINDING granularity, so a block
- * holding a single finding is atomic to it no matter how oversized — exactly
- * the shape the contract-pipeline promotion emits (one DAG node → one finding →
- * one block; the dogfood wall packed 13 test-lens files ≈ 92.7k tokens into one
- * such node). This pass runs FIRST and partitions the finding's own
- * `affected_files` into token-budgeted sub-findings, each carried by its own
- * sub-block, per INV-RSM-SPLIT-01 field semantics:
- *  - `phase_ordinal` carried UNCHANGED onto every sub-block (it is a barrier);
- *  - `targeted_commands` partitioned by relevance — a command naming one of a
- *    sub-block's files goes to that sub-block; a command naming none of the
- *    parent's files is generic and goes to EVERY sub-block; the union always
- *    covers every pre-split command (no silent drop);
- *  - downstream `dependencies` on the parent are rewritten to ALL sub-blocks;
- *  - sub-findings inherit the parent's obligations/evidence, so obligation
- *    joins and coverage are unaffected (ids are synthetic either way).
- * A single file larger than the whole budget still gets its own sub-block —
- * one file is the partition floor; admission then reports it honestly.
- */
-export function splitOversizedSingleFindingBlocks(
-  blocks: RemediationBlock[],
-  findings: Finding[],
-  root: string,
-  contextBudget: number,
-): { blocks: RemediationBlock[]; findings: Finding[] } {
-  const findingMap = new Map(findings.map((f) => [f.id, f]));
-  const outBlocks: RemediationBlock[] = [];
-  const outFindings: Finding[] = [...findings];
-  const splitRemap = new Map<string, string[]>();
-
-  const groupCost = (
-    group: ReadonlyArray<{ path: string }>,
-    byteCounts: Map<string, number>,
-  ): number =>
-    ESTIMATED_PROMPT_OVERHEAD_TOKENS +
-    ESTIMATED_ITEM_OVERHEAD_TOKENS +
-    estimateTokensFromBytes(
-      group.reduce(
-        (sum, af) => sum + (byteCounts.get(canonicalizeFilePath(af.path, { root })) ?? 0),
-        0,
-      ),
-    );
-
-  for (const block of blocks) {
-    const finding =
-      block.items.length === 1 ? findingMap.get(block.items[0]!) : undefined;
-    const files = finding?.affected_files ?? [];
-    if (!finding || files.length <= 1) {
-      outBlocks.push(block);
-      continue;
-    }
-    const byteCounts = new Map<string, number>();
-    for (const af of files) {
-      const key = canonicalizeFilePath(af.path, { root });
-      if (!byteCounts.has(key)) byteCounts.set(key, fileSizeBytes(af.path, root));
-    }
-    if (groupCost(files, byteCounts) <= contextBudget) {
-      outBlocks.push(block);
-      continue;
-    }
-
-    const groups = chunkByBudget([...files], {
-      budget: contextBudget,
-      costOf: (candidate) => groupCost(candidate, byteCounts),
-    });
-    if (groups.length <= 1) {
-      outBlocks.push(block);
-      continue;
-    }
-
-    const parentPaths = new Set(files.map((af) => af.path));
-    const subBlockIds: string[] = [];
-    for (let i = 0; i < groups.length; i++) {
-      const suffix = `-f${String(i + 1).padStart(2, "0")}`;
-      const subFindingId = `${finding.id}${suffix}`;
-      const subBlockId = `${block.block_id}${suffix}`;
-      subBlockIds.push(subBlockId);
-
-      outFindings.push({
-        ...finding,
-        id: subFindingId,
-        title: `${finding.title} (part ${i + 1}/${groups.length})`,
-        affected_files: groups[i]!,
-      });
-
-      const groupPaths = new Set(groups[i]!.map((af) => af.path));
-      // Relevance partition: file-specific commands follow their file; commands
-      // naming NONE of the parent's files are generic → every sub-block.
-      const targetedCommands = (block.targeted_commands ?? []).filter((cmd) => {
-        const namesAny = [...parentPaths].some((p) => cmd.includes(p));
-        if (!namesAny) return true;
-        return [...groupPaths].some((p) => cmd.includes(p));
-      });
-
-      // Declared-surface partition: each sub-block keeps the parent surface
-      // entries its files cover; surface entries the finding does not cite
-      // (rare — promotion mirrors the citation set) ride on the FIRST sub-block
-      // only, so nothing is silently dropped and no path is double-declared
-      // across parallel siblings.
-      const surface = block.touched_files.filter(
-        (p) => groupPaths.has(p) || (i === 0 && !parentPaths.has(p)),
-      );
-      outBlocks.push({
-        block_id: subBlockId,
-        items: [subFindingId],
-        parallel_safe: block.parallel_safe,
-        ...(block.dependencies !== undefined ? { dependencies: block.dependencies } : {}),
-        touched_files: surface,
-        ...(block.targeted_commands !== undefined
-          ? { targeted_commands: targetedCommands }
-          : {}),
-        ...(block.phase_ordinal !== undefined
-          ? { phase_ordinal: block.phase_ordinal }
-          : {}),
-        ...(block.cofile_parallel_safe !== undefined
-          ? { cofile_parallel_safe: block.cofile_parallel_safe }
-          : {}),
-      });
-    }
-    splitRemap.set(block.block_id, subBlockIds);
-    const idx = outFindings.findIndex((f) => f.id === finding.id);
-    if (idx >= 0) outFindings.splice(idx, 1);
-  }
-
-  // A block depending on a split block now depends on ALL its sub-blocks.
-  if (splitRemap.size > 0) {
-    for (const block of outBlocks) {
-      if (!block.dependencies || block.dependencies.length === 0) continue;
-      block.dependencies = [
-        ...new Set(block.dependencies.flatMap((dep) => splitRemap.get(dep) ?? [dep])),
-      ];
-    }
-  }
-
-  return { blocks: outBlocks, findings: outFindings };
 }
 
 /**
@@ -559,63 +445,65 @@ export function buildCoverageLedger(params: {
         : {}),
     };
   };
-  const entries: CoverageLedgerEntry[] = params.sourceFindings.map((f) => {
-    const phantomPaths = params.droppedPhantomPaths?.get(f.id);
-    if (phantomPaths) {
+  const entries: CoverageLedgerEntry[] = [...params.sourceFindings]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((f) => {
+      const phantomPaths = params.droppedPhantomPaths?.get(f.id);
+      if (phantomPaths) {
+        return {
+          finding_id: f.id,
+          title: f.title,
+          disposition: "dropped_phantom_paths",
+          rationale:
+            "Every cited affected_files path was phantom (does not exist in the repository) and one bounded repair attempt did not produce a real path.",
+          phantom_paths_removed: phantomPaths,
+        };
+      }
+      if (dropped.has(f.id)) {
+        return {
+          finding_id: f.id,
+          title: f.title,
+          disposition: "dropped_no_evidence",
+          rationale: "Finding carried no evidence and was excluded from the plan.",
+        };
+      }
+      const survivor = params.mergeMap.get(f.id);
+      if (survivor) {
+        return {
+          finding_id: f.id,
+          title: f.title,
+          disposition: "folded_into",
+          folded_into: survivor,
+          ...groundingAnnotations(f),
+        };
+      }
+      if (byCheckpoint.has(f.id)) {
+        return {
+          finding_id: f.id,
+          title: f.title,
+          disposition: "dropped_by_checkpoint",
+          rationale:
+            "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        };
+      }
+      if (declinedReasons.has(f.id)) {
+        return {
+          finding_id: f.id,
+          title: f.title,
+          disposition: "declined_by_review",
+          rationale:
+            declinedReasons.get(f.id) ??
+            "Disapproved by the user at the review-approval gate.",
+        };
+      }
       return {
         finding_id: f.id,
         title: f.title,
-        disposition: "dropped_phantom_paths",
-        rationale:
-          "Every cited affected_files path was phantom (does not exist in the repository) and one bounded repair attempt did not produce a real path.",
-        phantom_paths_removed: phantomPaths,
-      };
-    }
-    if (dropped.has(f.id)) {
-      return {
-        finding_id: f.id,
-        title: f.title,
-        disposition: "dropped_no_evidence",
-        rationale: "Finding carried no evidence and was excluded from the plan.",
-      };
-    }
-    const survivor = params.mergeMap.get(f.id);
-    if (survivor) {
-      return {
-        finding_id: f.id,
-        title: f.title,
-        disposition: "folded_into",
-        folded_into: survivor,
+        disposition: "planned",
+        block_id: params.items[f.id]?.block_id,
         ...groundingAnnotations(f),
       };
-    }
-    if (byCheckpoint.has(f.id)) {
-      return {
-        finding_id: f.id,
-        title: f.title,
-        disposition: "dropped_by_checkpoint",
-        rationale:
-          "Finding excluded by the intent checkpoint (filter or excluded scope).",
-      };
-    }
-    if (declinedReasons.has(f.id)) {
-      return {
-        finding_id: f.id,
-        title: f.title,
-        disposition: "declined_by_review",
-        rationale:
-          declinedReasons.get(f.id) ??
-          "Disapproved by the user at the review-approval gate.",
-      };
-    }
-    return {
-      finding_id: f.id,
-      title: f.title,
-      disposition: "planned",
-      block_id: params.items[f.id]?.block_id,
-      ...groundingAnnotations(f),
-    };
-  });
+    });
   const count = (d: CoverageLedgerEntry["disposition"]): number =>
     entries.filter((e) => e.disposition === d).length;
   return {
@@ -716,12 +604,13 @@ export function mergeBlocksSharingFiles(
 }
 
 /**
- * Applies the three post-dedup pipeline steps that every plan must go through
+ * Applies the backend-independent post-dedup steps that every plan must go through
  * before being handed off to the implement phase:
  *
- *   1. mergeBlocksSharingFiles  — prevents parallel workers clobbering the same file
- *   2. splitBlocksByContextBudget — keeps each block within the agent context window
- *   3. snapshotAffectedFileHashes — records baseline hashes for integrity checks
+ *   1. mergeBlocksSharingFiles — preserves content-coherent membership while
+ *      annotating independent co-file work
+ *   2. addAdvisoryTokenEstimates — reports deterministic local size metadata
+ *   3. snapshotAffectedFileHashes — records trusted baseline hashes
  *
  * Sole caller is handlePendingExtractedPlan (LLM-extracted plans join site);
  * kept as its own function so the post-dedup logic has one home.
@@ -735,89 +624,12 @@ export async function applyPlanPipeline(
   // Merge blocks whose findings touch a shared file.
   blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
 
-  // Split blocks that would exceed the implementation agent's context budget.
-  // The budget derives from INTENT fields (block_quota) first; absent those, the
-  // persisted host handshake (state.host_capabilities, written at the
-  // decideNextStep seam) supplies the real window — without it a 200k-window
-  // host would over-fragment (or, pre-fix, never split) against a fabricated
-  // floor. The two split passes run single-finding first: an oversized
-  // single-finding block is atomic to the finding-granularity splitter, so it
-  // must be partitioned by FILE into sub-findings before the general pass runs.
-  const intent = await readValidatedRepoSessionIntent(
-    join(options.root, "session-config.json"),
-  );
-  const contextBudget = await resolvePlanContextBudget(intent ?? null, options.artifactsDir);
-  const singleSplit = splitOversizedSingleFindingBlocks(
-    blocks,
-    findings,
-    options.root,
-    contextBudget,
-  );
-  blocks = singleSplit.blocks;
-  findings = singleSplit.findings;
-  blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
+  // Membership is a content-coherence contract. Planning reports size to the
+  // host but never reshapes work around a backend's context window.
+  blocks = addAdvisoryTokenEstimates(blocks, findings, options.root);
 
   // Record baseline file hashes for the integrity check that runs before dispatch.
   snapshotAffectedFileHashes(options.root, findings);
 
   return { ...plan, findings, blocks };
-}
-
-/**
- * The plan-time context budget: intent `block_quota` fields first (operator
- * intent outranks discovery), then the persisted host-capability handshake for
- * any field the intent omits, then synced models.dev metadata when the host
- * reported a model id. If no real pair resolves, planning refuses resumably.
- */
-async function resolvePlanContextBudget(
-  sessionConfig: SessionConfig | null,
-  artifactsDir?: string,
-): Promise<number> {
-  const quota = sessionConfig?.block_quota ?? {};
-  let caps: HostCapabilities | undefined;
-  if (artifactsDir) {
-    try {
-      caps = (await new StateStore(artifactsDir).loadState())?.host_capabilities;
-    } catch {
-      caps = undefined;
-    }
-  }
-  const finite = (value: unknown): number | null =>
-    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-  const rosterBudgets = Array.isArray(caps?.models)
-    ? caps.models
-        .map((entry) => {
-          if (!entry || typeof entry !== "object") return null;
-          const record = entry as Record<string, unknown>;
-          return resolveContextBudget({
-            contextTokens: quota.context_tokens ?? finite(record.context_tokens),
-            reservedOutputTokens:
-              quota.reserved_output_tokens ?? finite(record.output_tokens),
-          });
-        })
-        .filter((budget): budget is number => budget !== null && budget > 0)
-    : [];
-  if (rosterBudgets.length > 0) return Math.max(...rosterBudgets);
-
-  // Model-only: a window is a property of the MODEL, not of the backend serving
-  // it, and `host_provider` is a quota-attribution key rather than a window
-  // authority. Passing it also resolves to the identical statics today (the
-  // snapshot carries no per-provider index), so this removes a routing input
-  // without moving a number — and stops the next `npm run update-models` from
-  // silently reintroducing a provider axis into sizing.
-  const statics = resolveModelStatics(caps?.model_id);
-  const budget = resolveContextBudget({
-    contextTokens:
-      quota.context_tokens ?? finite(caps?.context_tokens) ?? statics?.context_tokens,
-    reservedOutputTokens:
-      quota.reserved_output_tokens ?? finite(caps?.output_tokens) ?? statics?.output_tokens,
-  });
-  if (budget == null || budget <= 0) {
-    throw new Error(
-      "Cannot size remediation blocks because the current host's context and output token limits are unknown. " +
-        "Report both limits (or a roster/model_id resolvable through models.dev) in the host capability handshake, " +
-        "or configure block_quota.context_tokens and block_quota.reserved_output_tokens.",
-    );
-  }
-  return budget;
 }

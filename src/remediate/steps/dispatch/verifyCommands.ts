@@ -98,27 +98,6 @@ export function isWholeSuiteTestCommand(cmd: string): boolean {
 }
 
 /**
- * Filter a node's `targeted_commands` to the build-free subset for the per-node
- * verify section. Build-prepending or build commands are dropped (the host runs
- * the build centrally) rather than emitted into the prompt. Whole-suite /
- * whole-directory test runs are dropped too — they re-enter the full suite in a
- * per-node worktree and re-create the cross-node verify deadlock (the scoped
- * derive already covers this node's own tests). Surviving `node --test`
- * commands are normalized to carry the tsx loader.
- */
-export function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
-  if (!Array.isArray(commands)) return [];
-  return commands
-    .filter(
-      (c) =>
-        typeof c === "string" &&
-        isBuildFreeVerifyCommand(c) &&
-        !isWholeSuiteTestCommand(c),
-    )
-    .map(normalizeNodeTestCommand);
-}
-
-/**
  * True when a verify command DEPENDS ON A BUILT `dist/` — either the command
  * string itself references a dist path (spawning the built CLI), or, when
  * `treeRoot` is supplied, a test FILE the command names imports/spawns dist in
@@ -334,9 +313,7 @@ export function deriveVerifyCommandsFromBranch(root: string, branch: string): st
 /**
  * A node's own `targeted_commands` for the per-node verify (task_7d35176d) — the union
  * of the block's `targeted_commands` and its findings' `targeted_commands` (the
- * auditor-specified, fix-specific verification). `acceptNodeWorktree` runs these IN
- * ADDITION to the derived touched-test commands (build-free subset, deduped), so a
- * fix-specific regression check is honoured even when the fix touches no test file.
+ * auditor-specified, fix-specific verification) bound into the host workload.
  */
 export function targetedCommandsForBlock(state: RemediationState, blockId: string): string[] {
   const block = state.plan?.blocks?.find((b) => b.block_id === blockId);

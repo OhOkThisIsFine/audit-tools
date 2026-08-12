@@ -83,7 +83,7 @@ test.concurrent("audit-code ensure refreshes stale OpenCode audit permissions", 
     opencodeConfig.agent.auditor.permission.edit = "ask";
     delete opencodeConfig.permission.bash["audit-code ensure*"];
     delete opencodeConfig.permission.bash["audit-code next-step*"];
-    delete opencodeConfig.agent.auditor.permission.bash["*audit-code.mjs* submit-packet*"];
+    delete opencodeConfig.agent.auditor.permission.bash["*audit-code.mjs* next-step*"];
     await writeFile(
       opencodeConfigPath,
       JSON.stringify(opencodeConfig, null, 2) + "\n",
@@ -128,12 +128,11 @@ const repoLocalHostCases: RepoLocalHostCase[] = [
       expect(hostGuidance(parsed, "vscode").primary_path).toBe(paths.vscodePromptPath);
       expect(await readFile(paths.vscodePromptPath, "utf8")).toMatch(/^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m);
       expect(await readFile(paths.vscodePromptPath, "utf8")).toMatch(/\/audit-code/);
-      // The VS Code agent file now derives from the one canonical loader body
-      // (E1 single-source), so it carries the next-step capability handshake
-      // including --auditor '{"self":{...}}' rather than bespoke abbreviated prose.
+      // The VS Code agent file derives from the canonical next-step loader body.
       const vscodeAgent = await readFile(paths.vscodeAgentPath, "utf8");
       expect(vscodeAgent).toMatch(/# Audit Code Agent/);
-      expect(vscodeAgent).toMatch(/--auditor/);
+      expect(vscodeAgent).toMatch(/host work/);
+      expect(vscodeAgent).not.toMatch(/--auditor/);
       expect(vscodeAgent).toMatch(/node audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));

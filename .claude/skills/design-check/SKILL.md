@@ -1,6 +1,6 @@
 ---
 name: design-check
-description: Run the pre-implementation design gate before writing code for a non-trivial change in audit-tools — check the intended approach against the repo's retired decisions and standing invariants, have an independent lane try to refute it, and come back with the minimal failing test that proves the bug. Use before implementing any loop-core, dispatch, quota, contract, or cross-cutting change, and whenever a fix is about to reintroduce a mechanism the repo may already have deliberately removed. Not for trivial mechanical edits.
+description: Run the pre-implementation design gate before writing code for a non-trivial change in audit-tools — check the intended approach against the repo's retired decisions and standing invariants, have an independent lane try to refute it, and come back with the minimal failing test that proves the bug. Use before implementing any loop-core, host-handoff, result-ingestion, shared-contract, or cross-cutting change, and whenever a fix is about to reintroduce a mechanism the repo may already have deliberately removed. Not for trivial mechanical edits.
 ---
 
 # Design-check — refute the approach before writing it
@@ -18,7 +18,7 @@ Bounded and pre-implementation. It ends with a failing test, not with code.
 Skip for trivial mechanical edits (a typo, a message string, a test rename); say so in one line and go.
 Run it when the change touches loop-core (the paths in
 [`src/shared/loopCorePaths.ts`](../../../src/shared/loopCorePaths.ts) — the same set the commit
-attestation gate keys on), a shared contract under `src/shared`, dispatch/quota/rolling behaviour, an
+attestation gate keys on), a shared contract under `src/shared`, host-handoff/result-ingestion behaviour, an
 artifact shape, or anything whose blast radius you cannot state in one sentence.
 
 Risk-tier it the same way a lap is tiered ([[risk-tier-loop-laps-cheap-vs-heavy]]): one pass for a
