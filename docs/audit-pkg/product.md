@@ -113,7 +113,5 @@ crossings, weak-packet gaps) is how extraction gaps are found and prioritized.
 ## Non-goals
 
 - repositioning the CLI as a peer product surface
-- making session config the normal way to redirect semantic review into a
-  second execution backend
 - making backend implementation details outrank the conversation contract
 - tying packetization quality to one programming language

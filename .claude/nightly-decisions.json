@@ -903,7 +903,9 @@
     "answer": "Build with the shared module (full P19): extract the gate's trigger predicates into one module, have both attest scripts import it, run those checks before write-tree, refuse to bind on failure. Correct the durable-traps entry (falsified leg-reorder remedy) in the same commit.",
     "subject": "Make the attest scripts refuse to bind to a tree the pre-commit gate would reject — and correct the durable-traps entry whose stated remedy is falsified",
     "path": ".claude/hooks/attest-loop-core-review.mjs",
-    "decided_at": "2026-08-12T15:08:18.521Z"
+    "decided_at": "2026-08-12T15:08:18.521Z",
+    "completed_at": "2026-08-12T18:51:31.771Z",
+    "completed_ref": "9e868721"
   },
   "c8a2bfb1a352d9cd": {
     "disposition": "settled",

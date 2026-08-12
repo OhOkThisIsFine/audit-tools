@@ -89,7 +89,9 @@ constraints) → `context_bundle` (affected files and evidence) →
 per-module contract drafting and seam reconciliation → `obligation_ledger`
 (one verification/test obligation per invariant and seam) → test/validator plan
 and design gates → `implementation_dag` (the metadata-enriched node graph the
-rolling dispatcher executes). The stage detail — multi-agent seam negotiation,
+tool derives the dependency-ready frontier from — `hostDependencyLevels`,
+`src/remediate/steps/dispatch/hostHandoff.ts`; assignment, concurrency, and
+execution are the host's). The stage detail — multi-agent seam negotiation,
 the adversarial critic→judge→repair loop, DAG promotion metadata — is specified
 in [`spec/remediation-workflow-design.md`](../remediation-workflow-design.md)
 and [`spec/contract-authoring-determinism-design.md`](../contract-authoring-determinism-design.md);
@@ -114,10 +116,12 @@ input is Markdown, free-form, or conversational.
   `finding.schema.json` shape in either case.
 - If the input already carries block assignments (as `audit-findings.json`
   does), adopt them. Otherwise, use the shared deterministic work partitioner:
-  estimate finding plus unique-file context cost against the runtime-resolved
-  token budget, optimize normalized semantic/unit cohesion and cross-block
-  overlap, and keep shared files/units as affinity rather than transitive-closure
-  edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
+  attach an advisory, content-derived token estimate for the finding plus its
+  unique-file context and report that size to the host — planning never reshapes
+  or splits work around a backend's context window (`applyPlanPipeline`,
+  `src/remediate/phases/plan.ts`) — optimize normalized semantic/unit cohesion
+  and cross-block overlap, and keep shared files/units as affinity rather than
+  transitive-closure edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
   it does not force one unbounded block.
 - Compute parallel-safety per block (default true unless dependencies are found).
 - Detect project type and candidate closing actions (git remote, package
@@ -174,7 +178,7 @@ path, and content-derived metadata. The host chooses sequential or parallel
 execution; audit-tools does not configure or infer host concurrency.
 
 **Deterministic Merge & Fallback:**
-Completed worktrees are accepted in the workload's deterministic item order. Before merging, the worktree is rebased onto the current `HEAD` and tests are run. If tests fail, the node is quarantined and re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
+Completed work is accepted in the workload's deterministic item order. Worktrees, merging, and test execution belong to the HOST: the tool emits the workload and, on ingestion, validates the evidence the host reports back (`src/remediate/steps/dispatch/hostHandoff.ts`). A landing is accepted only when the host attests `merge.status: "merged"` on an accepted result; anything else is refused, and the node is re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
 
 Within a block, each item runs through:
 
@@ -384,8 +388,9 @@ parallelism level. Regardless of how the host executes them:
   dependency that surfaces later is resolved through triage.
 - each parallel block runs in an isolated workspace (worktree or
   equivalent),
-- merge-back is serialized in deterministic workload order; before merging, the
-  worktree is rebased onto `HEAD` and tests run, and on failure the node is
-  quarantined into the end-of-run triage window (there is no sorted sequential
-  fallback queue — see Phase 3's Deterministic Merge & Fallback).
+- merge-back is serialized in deterministic workload order; the host performs the
+  merge and the tests, and a node whose reported evidence does not attest a
+  completed landing is refused into the end-of-run triage window (there is no
+  sorted sequential fallback queue — see Phase 3's Deterministic Merge &
+  Fallback).
 - Phase 4 re-validates the final combined tree.

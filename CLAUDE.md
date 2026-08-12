@@ -119,9 +119,16 @@ pending → planning → implementing → closing → complete
   implement dispatch, a review-necessity gate (`runPlanningReviewGate`) surfaces findings tiered by
   review-need for a batched keep/decline (declined → recorded `ignored`) and an up-front ambiguity gate
   (`runPlanAmbiguityGate`) batches all scoping/judgment ambiguities into one `clarification_request`;
-  planning then transitions DIRECTLY to implementing. `ItemSpec` is optional enrichment — when absent,
-  implement dispatch reads scope from `finding.affected_files` (`buildImplementDispatchItem`). Both gates
-  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch.ts`.
+  planning then transitions DIRECTLY to implementing. `ItemSpec` is optional enrichment that rides the
+  dispatch assignment as context — it is NOT the write scope. The enforced scope is
+  `block.touched_files`, normalized into the work item's `allowed_files` by `buildWorkItem`
+  (`src/remediate/steps/dispatch/hostHandoff.ts`) and re-checked against the landed diff at ingestion.
+  `touched_files` is produced upstream two ways: the contract pipeline's `deriveNodeFiles` (node
+  `output_files` → `files_likely_touched` → the matched module's `file_scope`), which makes it a SIBLING
+  of `finding.affected_files` rather than a derivation of it; or, on the no-blocks / lean-fast-path branch
+  of `normalizeExtractedPlan` (`nextStep.ts`), copied straight from `finding.affected_files`. Both gates
+  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch.ts` (a barrel over the
+  host-handoff module above).
 - implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch.ts`
 - `triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)
@@ -184,7 +191,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
   binding and equally self-describing, so it earns the same deletion. A trap enforced only *partly* is
   NOT deletable: state the uncovered half outright, or the covered half reads as a close (two live
   examples in [`durable-traps.md`](docs/backlog/durable-traps.md) — direct `child_process.spawn` calls
-  bypassing the stdin-closing substrate, and the 372 `.mjs` test files `checkJs:false` excludes from
+  bypassing the stdin-closing substrate, and the `.mjs` test holdout `checkJs:false` excludes from
   `check:tests`). Current guards in `.claude/hooks/`:
   `shell-trap-guard.mjs` (PreToolUse Bash/PowerShell — `codex exec` with open stdin; a `git checkout --` /
   `git restore` that would eat unstaged work; Bash-tool Windows-backslash paths, PowerShell here-strings and
@@ -272,7 +279,7 @@ instead of a rewrite. Trivial mechanical edits skip it.
 - **Token/context policy lives in `~/.claude/CLAUDE.md`.** Don't duplicate here.
 - **Token estimates stay local and deterministic.** Never API-call token counting in planning or host-handoff generation. No tokenizer dependency — shared `estimateTokensFromBytes` is the standard. An estimate describes content size only; it is never a backend-fit claim.
 - **Two-tier dependency policy — import vetted libs for correctness-sensitive parsing/schema/lock; own only tiny domain bits.** A format whose grammar we don't fully own (TOML, YAML, lockfiles, schema validation) is *correctness-sensitive*: a hand-rolled scanner silently drops what it doesn't understand (e.g. the TOML line scanner missed inline-table / dotted-key / quoted forms → dropped dependency-graph edges). Import a vetted, pure-JS, well-maintained parser there (`smol-toml`, `yaml`) — pure-JS so OS-agnostic, no native build. Keep hand-rolled only for *tiny, fully-owned* domain bits (e.g. our `.audit-tools` path tokens, the work-block id grammar). When importing: wrap the parser so malformed input degrades to empty (the graph/extractors never throw on a bad manifest), and single-source the parse + safe accessors in one module.
-- **Own-vs-acquire analyzer engine — own the agnostic extractors, acquire + normalize the rest.** OWN only truly language-agnostic extractors in-house (git-history mining, secret-scan); ACQUIRE ecosystem-native analyzers (clippy / rubocop / semgrep / eslint / npm-audit) on demand and NORMALIZE their output into *leads*, never direct findings. Every acquired-tool spawn routes through the single `admitSpawn` chokepoint, where the curated DEFAULT set is admitted WITHOUT a token and every other candidate — including pre-installed `permanent`/`ephemeral` tools — requires the per-run `ExternalAcquisitionConfig.consent_token` (a mechanical run-safety gate + curated default set + first-use consent, never a maintained allowlist); stripping/redacting the consent token before any `SessionConfig` persistence is a planned, not-yet-implemented forward constraint (tracked in `docs/backlog/open-bugs.md`) — do not treat it as current behavior. [[deterministic-analyzers-own-vs-acquire]]
+- **Own-vs-acquire analyzer engine — own the agnostic extractors, acquire + normalize the rest.** OWN only truly language-agnostic extractors in-house (git-history mining, secret-scan); ACQUIRE ecosystem-native analyzers (clippy / rubocop / semgrep / eslint / npm-audit) on demand and NORMALIZE their output into *leads*, never direct findings. Every acquired-tool spawn routes through the single `admitSpawn` chokepoint, where the curated DEFAULT set is admitted WITHOUT a token and every other candidate — including pre-installed `permanent`/`ephemeral` tools — requires the per-run consent token (`consentToken` on `AcquisitionEngineOptions` / `ExternalAcquisitionAdvanceOptions`, consumed by `admitSpawn`) (a mechanical run-safety gate + curated default set + first-use consent, never a maintained allowlist); stripping/redacting the consent token before any `SessionConfig` persistence is a planned, not-yet-implemented forward constraint (tracked in `docs/backlog/open-bugs.md`) — do not treat it as current behavior. [[deterministic-analyzers-own-vs-acquire]]
 - **Dead-code release gate — default-mode knip, not `--production`.** `npm run check:deadcode`
   (runs `knip --no-config-hints`, with `include: ["exports","types","nsExports","nsTypes"]` set in
   `knip.json`; wired into `verify:release`) fails the build on any

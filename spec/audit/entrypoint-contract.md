@@ -37,9 +37,7 @@ A persistent location where continuity artifacts are stored.
 Examples:
 
 - available tools
-- LLM/runtime constraints
 - external analyzer availability
-- budget or step limits
 - user policy overrides
 
 ## Required outputs

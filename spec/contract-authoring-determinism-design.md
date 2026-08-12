@@ -198,13 +198,16 @@ judge — not a reviewer lacking the project's vocabulary. The restorations:
 - **Ground the output (general; = S7 applied to the reviewer).** Conceptual/contract
   findings require component-level evidence, enforced at ingest by `groundDesignFinding`
   (`src/shared/validation/designFindingGrounding.ts`), called from `nextStepHelpers.ts`.
-- **Gate it — half closed.** An auto-completed pass now stamps
-  `contract_auto_completed`/`conceptual_auto_completed` on the assessment
-  (`runDesignReviewAutoComplete`, `src/audit/orchestrator/structureExecutors.ts`; cleared when a
-  real submission is ingested), so "a real review found nothing" and "auto-completed empty" are
-  DISTINGUISHABLE on the artifact. The open half: no consumer acts on the stamp yet — synthesis
-  and obligation derivation still read only the `*_reviewed` booleans, so an auto-completed-empty
-  pass still passes downstream silently until a consumer blocks or annotates on the stamp.
+- **Gate it — cannot auto-complete empty.** There is no auto-complete path. A pass's review flag
+  (`contract_reviewed` / `conceptual_reviewed`) is set ONLY when a validated host submission is
+  consumed (`src/audit/cli/nextStepHelpers.ts`); a submission that fails validation is quarantined
+  and recorded on `design_assessment.rejected_submissions` instead of merged, so it never sets the
+  flag. An absent or empty assessment is therefore deliberately NO-SIGNAL — it means "unreviewed /
+  nothing detected", never "reviewed and clean", and no consumer may read absence as evidence (the
+  documented stance of `collectLensEvidence`,
+  `src/audit/orchestrator/intentCheckpointExecutor.ts`). If auto-completion is ever reintroduced, a
+  stamp that distinguishes "a real review found nothing" from "auto-completed empty" must be
+  designed as part of that same unit — without one the two are indistinguishable on the artifact.
 
 **Synthesis — why S8 is the exception to S1–S7.** The conceptual review is the **one place to lean
 *into* judgment, not toward determinism**. Architectural insight is irreducibly tier-3 (S7) — you

@@ -137,15 +137,17 @@ into partial success.
 
 ## Final output and cleanup
 
-- The final authoritative outputs are repo-root `audit-findings.json` (the machine contract / source
-  of truth) and its human render `audit-report.md`; `promoteFinalAuditReport` promotes both together.
+- The final authoritative outputs are `.audit-tools/audit-findings.json` (the machine contract / source
+  of truth) and its human render `.audit-tools/audit-report.md`; `promoteFinalAuditReport` promotes both
+  together.
 - The report must be deterministic and work-block-first.
 - Root-cause clustering is not part of the mandatory deterministic core: the
   retained deterministic report is work-block-first and does not cluster by root
   cause. The optional host-authored synthesis narrative may add an *additive* themes
   layer (carrying a root-cause field) on top of the deterministic report when
   configured; it never replaces, gates, or is required by the deterministic output.
-- On completion, `promoteFinalAuditReport` copies the final report/findings to the repo root and
+- On completion, `promoteFinalAuditReport` copies the final report/findings one level up from the
+  working artifacts dir — into `.audit-tools/` for the canonical `.audit-tools/audit/` dir — and
   then deletes the now-superseded working artifacts dir — so cleanup IS part of the completion
   transition, folded into promotion rather than routed through `cleanupStaleArtifactsDir`. A
   separate mechanism, `cleanupStaleArtifactsDir` (the `cleanup` CLI command and the pre-run sweep
