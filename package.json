@@ -1,6 +1,6 @@
 {
   "name": "audit-tools",
-  "version": "0.39.15",
+  "version": "0.40.0",
   "private": false,
   "license": "ISC",
   "description": "Provider-neutral code auditing and remediation workflows for arbitrary repositories.",
