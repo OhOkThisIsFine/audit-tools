@@ -874,5 +874,138 @@
     "decided_at": "2026-08-09T14:54:18.193Z",
     "completed_at": "2026-08-09T15:11:26.971Z",
     "completed_ref": "56a58330"
+  },
+  "f1915f8c33500591": {
+    "disposition": "settled",
+    "answer": "Remove the path: results arrive only through a validating tool-owned submit, fan-out records its expected shard set at dispatch. BUT also build a designed hand-recovery mechanism — a validated hand-submit lane for rescuing a stuck run — rather than losing recovery entirely. (Owner, 2026-08-12: 'Remove the path, use validating submission, but also build in a mechanism to enable hand recovery.')",
+    "subject": "Host results arrive by a guessable file path, so a wrong filename, a missing file and a clean empty result are all shaped like success — 9 of 10 lanes drifted",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T15:01:11.064Z"
+  },
+  "820ba9986b5c61ec": {
+    "disposition": "settled",
+    "answer": "Probe, then both: first run the SessionStart probe to confirm child sessions do not fire SessionStart. If confirmed, build both legs (session tagging + commit/push refusal from unregistered sessions with per-dispatch allow token); if not confirmed, build leg (b) alone.",
+    "subject": "A child agent session looks exactly like yours to the repo Stop gates — so the gates recruit read-only subagents into committing and pushing",
+    "path": "docs/backlog/durable-traps.md",
+    "decided_at": "2026-08-12T15:01:11.653Z"
+  },
+  "c8f7271ba4aafee7": {
+    "disposition": "settled",
+    "answer": "Apply it: apply the P22 patch and its test from .audit-tools/nightly/proposals/P22-retired-doc-probe-cannot-close/, full green gate before committing.",
+    "subject": "A nightly item can never auto-close when the doc it asked you to RETIRE is deleted — patch written and red-green validated",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-08-12T15:01:12.258Z"
+  },
+  "6bb133894505286a": {
+    "disposition": "settled",
+    "answer": "Build with the shared module (full P19): extract the gate's trigger predicates into one module, have both attest scripts import it, run those checks before write-tree, refuse to bind on failure. Correct the durable-traps entry (falsified leg-reorder remedy) in the same commit.",
+    "subject": "Make the attest scripts refuse to bind to a tree the pre-commit gate would reject — and correct the durable-traps entry whose stated remedy is falsified",
+    "path": ".claude/hooks/attest-loop-core-review.mjs",
+    "decided_at": "2026-08-12T15:08:18.521Z"
+  },
+  "c8a2bfb1a352d9cd": {
+    "disposition": "settled",
+    "answer": "Do P20 AND fix the stamp: validate verdict/why/action after parsing (mismatch routes to errored-and-retry), put the spread before id/file so model output cannot overwrite record identity, and add classified_total to the coverage stamp so a retry pass does not read as near-total failure.",
+    "subject": "The backlog sweep counts any record that parses as JSON as CLASSIFIED — five of tonight's 120 carry no verdict at all",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-12T15:08:19.094Z"
+  },
+  "285b804c0aef617d": {
+    "disposition": "settled",
+    "answer": "Build the FULL scope ledger as docs/doc-review-guidelines.md specifies: content-hash item keys mapped to {lastCheckedCommit, lastCheckedAt}, persisted as a sidecar under .audit-tools/nightly/, giving leg 1 both coverage accounting and diff-window scoping.",
+    "subject": "Leg 1 has no coverage accounting — build the stamp that leg 2 already has, build the full scope ledger the rubric specifies, or delete the ledger section",
+    "path": "docs/doc-review-guidelines.md",
+    "decided_at": "2026-08-12T15:08:19.657Z"
+  },
+  "5fa08752c53097bb": {
+    "disposition": "settled",
+    "answer": "Ship P21 as a hard DENY: extend the buffering-pipe rule to codex exec / agy -p with the AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1 escape hatch and the red-green tests in tests/shared/hook-trap-guards.test.ts.",
+    "subject": "Extend the buffering-pipe DENY to peer-CLI dispatch (`codex exec` / `agy -p`), or accept that a piped dispatch lane stays invisible until it exits",
+    "path": "tests/shared/hook-trap-guards.test.ts",
+    "decided_at": "2026-08-12T15:08:20.175Z"
+  },
+  "2c8b18b3c63984bf": {
+    "disposition": "settled",
+    "answer": "Carve out hooks: narrow the record-path rule so .claude/hooks/ is treated as ordinary tracked source and may carry premise probes; the rest of .claude (decisions ledger, settings, skill write-ups) stays banned as a record channel.",
+    "subject": "Stop classifying `.claude/hooks/**` as a record path — it is executable guard source, and treating it as a record makes every hook item unprobeable",
+    "path": "scripts/nightly/items.mjs",
+    "decided_at": "2026-08-12T16:27:44.403Z"
+  },
+  "558f0fe937f43907": {
+    "disposition": "settled",
+    "answer": "Apply all three CLAUDE.md corrections: rename the consent-token type to the live shape, describe the mechanism that actually replaced buildImplementDispatchItem (not a straight rename — investigate and state what implement dispatch reads now), and DROP the 372-count clause rather than update the number.",
+    "subject": "instruction-file edit: CLAUDE.md carries three claims the retirement invalidated — approve the batch",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-12T16:27:44.723Z"
+  },
+  "5d4e5c45a854a806": {
+    "disposition": "settled",
+    "answer": "Correct all three statements in spec/remediate/remediation-goals.md to describe the post-retirement host-owned reality (no runtime-resolved token budget sizing, no tool-side rebase/tests/quarantine, no rolling dispatcher).",
+    "subject": "Bring remediation-goals.md back in line with the retirement — three claims describe execution machinery that no longer exists",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-12T16:27:44.978Z"
+  },
+  "22c8a027b799dc4a": {
+    "disposition": "settled",
+    "answer": "Correct spec/audit/audit-goals.md to say the deliverables are promoted to .audit-tools/, matching the code and the three sibling docs.",
+    "subject": "audit-goals.md says the final report is promoted to the repo root; the code promotes it to .audit-tools/",
+    "path": "spec/audit/audit-goals.md",
+    "decided_at": "2026-08-12T16:27:45.168Z"
+  },
+  "50e86c3535cc7826": {
+    "disposition": "settled",
+    "answer": "Just strike them: remove 'LLM/runtime constraints' and 'budget or step limits' from the entrypoint contract's optional list. No added refusal line — the boundary is stated elsewhere.",
+    "subject": "The entrypoint contract still advertises budget/step-limit and LLM-runtime inputs the retirement removed — narrow it, or keep the door open",
+    "path": "spec/audit/entrypoint-contract.md",
+    "decided_at": "2026-08-12T16:33:06.292Z"
+  },
+  "5892df1b9af69154": {
+    "disposition": "settled",
+    "answer": "Close, keep the mitigation: delete the doc-lint-rewrite entry from open-bugs.md and move its working mitigation ('after a not-found on text you just wrote, grep the anchor instead of re-reading the file') into docs/backlog/durable-traps.md as a one-liner.",
+    "subject": "Close the doc-lint-rewrite entry, or name the process that rewrote the bytes — the entry states its own close condition and nobody has met it",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T16:33:06.426Z"
+  },
+  "9e34bca01f48a012": {
+    "disposition": "settled",
+    "answer": "Delete the non-goal: remove the stale sentence from docs/audit-pkg/product.md; the boundary is stated in the goals docs.",
+    "subject": "A product non-goal still concedes that redirecting review into a second execution backend is possible — it is now impossible",
+    "path": "docs/audit-pkg/product.md",
+    "decided_at": "2026-08-12T16:36:40.259Z"
+  },
+  "a360d39985d537e8": {
+    "disposition": "settled",
+    "answer": "Build the gate: keep the entry open as real work — a commit that touches a tracked-work path must carry the corresponding record update, enforced in the pre-commit gate rather than asked about at session end.",
+    "subject": "The 2026-07-28 friction walk states a property nothing enforces — enforce it, accept it as advice, or close the entry",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T16:36:40.386Z"
+  },
+  "afd1e4a354daafce": {
+    "disposition": "settled",
+    "answer": "Reword + retitle: replace the sentence with 'These lanes validate nothing on the way in.', drop the '(submit-command pattern)' parenthetical, retitle from 'no submit chokepoint' to 'no ingest/validation chokepoint'. (The sol-9 build will eventually close the entry itself.)",
+    "subject": "The \"no submit chokepoint\" entry compares against a lane the retirement deleted — reword it rather than delete the live half",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T16:36:40.496Z"
+  },
+  "897c0620b536b57c": {
+    "disposition": "settled",
+    "answer": "Update + widen in place: fix (e) to name renderEdgeReasoningDispatchPrompt (src/audit/cli/prompts.ts), correct the preamble's false shipped-claim, and widen the entry to cover the orphaned renderHostScratchNote/hostScratchDir pair reaching no prompt.",
+    "subject": "A scratch-dir entry needs WIDENING, not trimming — its symbol was renamed, and the fix it claims shipped reaches no prompt at all",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T16:36:40.604Z"
+  },
+  "d918552ff9de54bb": {
+    "disposition": "settled",
+    "answer": "Drop the claim and state the invariant: rewrite S8 to say review flags are set ONLY by a consumed, validated host submission (quarantine + rejected_submissions as the audit trail) and an absent/empty assessment is deliberately no-signal. No stamp — no auto-complete path exists at HEAD; if auto-completion is ever reintroduced, the distinguishing stamp is designed as part of that same unit.",
+    "subject": "S8 describes an auto-complete stamp as shipped-with-a-known-gap; the stamp was never built at all",
+    "path": "spec/contract-authoring-determinism-design.md",
+    "decided_at": "2026-08-12T18:20:14.971Z"
+  },
+  "f65ec9c9ebeb6070": {
+    "disposition": "settled",
+    "answer": "Baseline + scoping (owner accepted the re-worked design 2026-08-12): SessionStart hook records a tree-dirt baseline; every gate scopes its porcelain read to the paths it owns (pattern already in-repo twice) and treats dirt pre-existing the session as foreign (reported, not fired on) and dirt that appeared during the session as challengeable. Own-session work can never be silently missed; residual failure is today's over-firing, no worse. Supersedes P24's classifier shape.",
+    "subject": "Every gate reads the whole working tree and cannot tell whose mess it is — one such gate abandoned all 13 items of a run",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-12T18:20:15.025Z"
   }
 }

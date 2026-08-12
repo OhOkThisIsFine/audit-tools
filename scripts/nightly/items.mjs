@@ -17,7 +17,7 @@
 // item" rule the doc-review ledger already used, applied to the durable side.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
@@ -329,7 +329,21 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
       ? { state: 'record_present' }
       : { state: 'record_missing' };
   }
-  if (!isTrackedPath(root, probe.file)) return { state: 'untrackable', reason: 'untracked' };
+  // An untracked target abstains only when it is untracked AND PRESENT — that
+  // is the gitignored runtime artifact this refusal was built for: a file whose
+  // content varies per run and so can never be evidence.
+  //
+  // An untracked path that is also ABSENT from disk is the opposite case, and
+  // collapsing the two is what made "retire this doc" unclosable: the doc gets
+  // deleted, its path stops being tracked, and the item that ASKED for the
+  // deletion abstains forever. Fall through instead — the missing-file chain
+  // below already answers this exact question with git evidence, separating
+  // 'absent' (history has the file: deleted) from 'bad_path' (no history: a
+  // typo'd probe) and yielding to 'moved' when the prose reappears elsewhere.
+  // Those three verdicts were unreachable while this check preempted them.
+  if (!isTrackedPath(root, probe.file) && existsSync(join(root, probe.file))) {
+    return { state: 'untrackable', reason: 'untracked' };
+  }
 
   // Negative form (P12): `{ file, absent }` — the string must NOT be in the
   // file. It expresses the CODE side of a doc-vs-code divergence ("the code
