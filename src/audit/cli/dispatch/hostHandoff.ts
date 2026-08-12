@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import {
   FindingSchema,
+  findingContractPromptLines,
   assertSubmissionRunId,
   hashContent,
   isFileMissingError,
@@ -330,7 +331,10 @@ function buildPrompt(task: AuditHostTask, resultPath: string): string {
     "Review every listed file and return one JSON object at the bound result path.",
     `Assignment: ${assignment}`,
     "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
-    "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines; findings must satisfy the audit finding contract.",
+    "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines.",
+    // The finding contract is CARRIED, not referenced: it is rendered from the
+    // very schema ingestion enforces, so a host never has to remember or fetch it.
+    ...findingContractPromptLines(),
   ].join("\n");
 }
 
@@ -707,12 +711,55 @@ function validateHandoffBinding(
   return items;
 }
 
+/**
+ * A parsed submission, or the NAMED reason it was refused.
+ *
+ * `detail` opens with the category that failed — envelope, identity binding,
+ * findings, file coverage — because the categories are not interchangeable to
+ * the host that has to repair the result. A live lap lost four submissions whose
+ * identity, prompt binding and file coverage were all byte-correct and whose
+ * FINDINGS failed the finding schema; the single collapsed message sent the host
+ * to re-check the three things that were already right.
+ */
+type HostResultParse =
+  | { readonly ok: true; readonly result: AuditHostResult }
+  | { readonly ok: false; readonly detail: string };
+
+function refuse(detail: string): HostResultParse {
+  return { ok: false, detail };
+}
+
+/** `findings[2].affected_files.0.path` — a zod issue path, host-readable. */
+function issueLocation(
+  prefix: string,
+  path: readonly (string | number)[],
+): string {
+  return [prefix, ...path.map((segment) => String(segment))].join(".");
+}
+
+function parseFindings(findings: readonly unknown[]): HostResultParse | null {
+  for (const [index, finding] of findings.entries()) {
+    const parsed = FindingSchema.safeParse(finding);
+    if (parsed.success) continue;
+    const issue = parsed.error.issues[0];
+    const location =
+      issue === undefined
+        ? `findings[${index}]`
+        : issueLocation(`findings[${index}]`, issue.path);
+    const reason = issue === undefined ? "invalid" : issue.message;
+    return refuse(
+      `findings failed the audit finding contract at ${location}: ${reason}`,
+    );
+  }
+  return null;
+}
+
 function parseHostResult(
   value: unknown,
   runId: string,
   item: AuditHostWorkItem,
   binding: AuditHostTaskBinding,
-): AuditHostResult | null {
+): HostResultParse {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -726,46 +773,90 @@ function parseHostResult(
     ]) ||
     value.contract_version !== RESULT_CONTRACT_VERSION ||
     typeof value.result_id !== "string" ||
-    value.result_id.length === 0 ||
-    value.run_id !== runId ||
-    value.work_item_id !== item.id ||
-    value.prompt_sha256 !== item.prompt.sha256 ||
-    !Array.isArray(value.file_coverage) ||
-    !Array.isArray(value.findings) ||
-    !value.findings.every((finding) => FindingSchema.safeParse(finding).success)
+    value.result_id.length === 0
   ) {
-    return null;
+    return refuse(
+      `result envelope is not ${RESULT_CONTRACT_VERSION} with exactly contract_version, ` +
+        `result_id, run_id, work_item_id, prompt_sha256, file_coverage and findings`,
+    );
   }
+  if (value.run_id !== runId) {
+    return refuse(`identity binding: run_id is not this run's '${runId}'`);
+  }
+  if (value.work_item_id !== item.id) {
+    return refuse(`identity binding: work_item_id is not '${item.id}'`);
+  }
+  if (value.prompt_sha256 !== item.prompt.sha256) {
+    return refuse(
+      "prompt binding: prompt_sha256 is not the sha256 of this work item's prompt",
+    );
+  }
+  if (!Array.isArray(value.file_coverage)) {
+    return refuse("file coverage: file_coverage must be an array");
+  }
+  if (!Array.isArray(value.findings)) {
+    return refuse("findings failed the audit finding contract: findings must be an array");
+  }
+  const findingRefusal = parseFindings(value.findings);
+  if (findingRefusal !== null) return findingRefusal;
   const coveragePaths = new Set<string>();
   for (const coverage of value.file_coverage) {
     if (
       !isRecord(coverage) ||
       !hasExactKeys(coverage, ["path", "reviewed_lines", "total_lines"]) ||
-      typeof coverage.path !== "string" ||
-      coveragePaths.has(coverage.path) ||
+      typeof coverage.path !== "string"
+    ) {
+      return refuse(
+        "file coverage: every entry must contain exactly path, reviewed_lines and total_lines",
+      );
+    }
+    if (coveragePaths.has(coverage.path)) {
+      return refuse(`file coverage: '${coverage.path}' is covered twice`);
+    }
+    if (
       !Number.isInteger(coverage.reviewed_lines) ||
       !Number.isInteger(coverage.total_lines) ||
       (coverage.reviewed_lines as number) < 0 ||
-      coverage.reviewed_lines !== coverage.total_lines ||
-      coverage.total_lines !== binding.file_line_counts[coverage.path]
+      coverage.reviewed_lines !== coverage.total_lines
     ) {
-      return null;
+      return refuse(
+        `file coverage: '${coverage.path}' must report reviewed_lines equal to total_lines`,
+      );
+    }
+    const boundLines: number | undefined = binding.file_line_counts[coverage.path];
+    if (coverage.total_lines !== boundLines) {
+      return refuse(
+        boundLines === undefined
+          ? `file coverage: '${coverage.path}' is not one of this work item's bound files`
+          : `file coverage: '${coverage.path}' reports ${String(coverage.total_lines)} ` +
+            `total_lines, not the bound ${String(boundLines)}`,
+      );
     }
     coveragePaths.add(coverage.path);
   }
-  if (
-    coveragePaths.size !== item.scope.files.length ||
-    item.scope.files.some((path) => !coveragePaths.has(path))
-  ) {
-    return null;
+  const uncovered = item.scope.files.filter((path) => !coveragePaths.has(path));
+  if (uncovered.length > 0 || coveragePaths.size !== item.scope.files.length) {
+    return refuse(
+      uncovered.length > 0
+        ? `file coverage: the assigned scope is not fully covered (missing ${uncovered.join(", ")})`
+        : "file coverage: entries do not match the assigned scope exactly",
+    );
   }
-  return JSON.parse(stableStringify(value)) as AuditHostResult;
+  return {
+    ok: true,
+    result: JSON.parse(stableStringify(value)) as AuditHostResult,
+  };
 }
+
+/** The conversion to the persisted `AuditResult`, or the field that refused it. */
+type AuditResultConversion =
+  | { readonly ok: true; readonly auditResult: AuditResult }
+  | { readonly ok: false; readonly detail: string };
 
 function toAuditResult(
   result: AuditHostResult,
   binding: AuditHostTaskBinding,
-): AuditResult | null {
+): AuditResultConversion {
   const parsed = AuditResultSchema.safeParse({
     task_id: binding.work_item_id,
     unit_id: binding.unit_id,
@@ -781,7 +872,15 @@ function toAuditResult(
     reviewed_clean: result.findings.length === 0,
     run_id: result.run_id,
   });
-  return parsed.success ? parsed.data : null;
+  if (parsed.success) return { ok: true, auditResult: parsed.data };
+  const issue = parsed.error.issues[0];
+  return {
+    ok: false,
+    detail:
+      issue === undefined
+        ? "the converted AuditResult is invalid"
+        : `${issueLocation("audit_result", issue.path)}: ${issue.message}`,
+  };
 }
 
 /** A submission read that either yielded a valid result or says why not. */
@@ -822,20 +921,23 @@ async function readSubmittedResult(
       },
     };
   }
-  const result = parseHostResult(read.value, runId, item, binding);
-  if (result === null) {
+  const parsed = parseHostResult(read.value, runId, item, binding);
+  if (!parsed.ok) {
     return {
       ok: false,
       issue: {
         code: "submission_contract_invalid",
+        // The detail NAMES its own category. The message must never enumerate
+        // categories the submission satisfied — that is how four correct-identity
+        // results read as an identity problem for a whole lap.
         message:
           `work item '${item.id}' submitted JSON that does not satisfy the audit host ` +
-          `result contract (identity, prompt binding, or file coverage)`,
+          `result contract: ${parsed.detail}`,
         ...locators,
       },
     };
   }
-  return { ok: true, result };
+  return { ok: true, result: parsed.result };
 }
 
 export async function ingestAuditHostResults(params: {
@@ -904,13 +1006,13 @@ export async function ingestAuditHostResults(params: {
       });
       continue;
     }
-    const auditResult = toAuditResult(result, binding);
-    if (auditResult === null) {
+    const converted = toAuditResult(result, binding);
+    if (!converted.ok) {
       issues.push({
         code: "submission_contract_invalid",
         message:
           `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
-          `an AuditResult (coverage or finding shape)`,
+          `an AuditResult: ${converted.detail}`,
         work_item_id: entry.work_item_id,
         result_path: entry.result_path,
       });
@@ -924,7 +1026,7 @@ export async function ingestAuditHostResults(params: {
       result_id: result.result_id,
       result_sha256: hashContent(stableStringify(result)),
       result,
-      audit_result: auditResult,
+      audit_result: converted.auditResult,
     });
   }
 

@@ -55,3 +55,38 @@ export function resolveEffectiveLenses(selected: string[] | undefined | null): s
 export function isMandatoryLens(lens: string): boolean {
   return MANDATORY_LENS_SET.has(lens as Lens);
 }
+
+/** The operator's confirmed lens choice, as recorded on the intent checkpoint. */
+export interface LensSelection {
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
+}
+
+/**
+ * Resolve `intent_checkpoint.lens_selection` into the effective lens set — the
+ * ONE resolution every draw reads, so planning and result-ingestion can never
+ * disagree about what the operator admitted.
+ *
+ * `include` is additive (mandatory lenses are always re-unioned by
+ * `resolveEffectiveLenses`); `exclude` then removes non-mandatory lenses and the
+ * result is re-resolved so a mandatory lens can never be excluded away.
+ *
+ * Returns `undefined` — never the full lens list — when the operator expressed
+ * no limit at all, because "no limit" and "every lens" are different answers to
+ * a consumer that gates on the set only when one exists.
+ */
+export function resolveIntentLensSelection(
+  selection: LensSelection | undefined,
+): string[] | undefined {
+  if (selection?.include === undefined && selection?.exclude === undefined) {
+    return undefined;
+  }
+  const resolved = resolveEffectiveLenses(
+    selection.include === undefined ? null : [...selection.include],
+  );
+  if (selection.exclude === undefined || selection.exclude.length === 0) {
+    return resolved;
+  }
+  const excluded = new Set(selection.exclude);
+  return resolveEffectiveLenses(resolved.filter((lens) => !excluded.has(lens)));
+}

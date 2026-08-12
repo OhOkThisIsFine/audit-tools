@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   runPlanningExecutor,
   interpretFreeFormIntent,
-  selectUncoveredRequeueTasks,
 } from "../../src/audit/orchestrator/planningExecutors.js";
+import { selectUncoveredRequeueTasks } from "../../src/audit/orchestrator/requeueFold.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditScopeManifest } from "../../src/audit/types/auditScope.js";
 import type { AuditTask } from "../../src/audit/types.js";

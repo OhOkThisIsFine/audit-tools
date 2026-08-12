@@ -96,6 +96,20 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   authored alongside it, so the join cannot be broken by a rename at all.
   [[prefix-join-between-two-name-spaces-fails-empty]]
 
+- **Wave-friendly host dispatch: run identity survives partial ingest.** A semantic-review run is
+  reused only when the pending task id set is EXACTLY equal (`sameTaskIds`, consulted by
+  `ensureSemanticReviewRun` in `src/audit/cli/reviewRun.ts`), so ingesting even one accepted result
+  mints a new run id — new run directory, workload, task bindings, result map, and new bound result
+  paths. Two consequences, both observed on the 2026-08-12 dogfood lap: a worker still writing into
+  the prior run's `host-results/` is silently orphaned (ingest reads only the current run id), and
+  the per-run accepted ledger does not carry forward. Accepted work itself is durable — it folds
+  into `audit_results.jsonl` and the coverage matrix — so the failure mode is wasted work, not lost
+  work. The tool therefore supports exactly ONE dispatch shape: publish the whole workload, execute
+  all of it, then call `next-step`; never call `next-step` with workers in flight. Making waves
+  first-class needs a run identity that outlives a partial ingest — stable bound paths across
+  re-mints, or an accepted ledger keyed by work item rather than by run — which is a change to the
+  host-handoff contract itself, so it takes a `/design-check` before any build.
+
 - **`ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely
   dead.** Deleting the shadowed `ensure` ACTION (sol-2, 2026-08-09) removed its only non-test caller:
   the bin routes `ensure` to `installer.ensureBootstrap` in `wrapper/`, never to

@@ -55,7 +55,11 @@ function renderIngestIssueLines(
         `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
     ),
     "",
-    "Repair or complete only the named results at their existing bound paths; the workload and its bindings are unchanged.",
+    // NOT "the bindings are unchanged": ingesting anything changes the pending
+    // task set, and a changed pending set re-mints the review run — new run id,
+    // new run directory, new bound result paths. The paths quoted above are the
+    // ones the ingest READ; the workload published below is always the authority.
+    "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — a path quoted above belongs to the ingest just consumed and is stale whenever the run was re-minted.",
     "",
   ];
 }

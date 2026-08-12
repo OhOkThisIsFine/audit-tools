@@ -27,7 +27,8 @@ import {
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
 import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
-import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
+import { resolveIntentLensSelection } from "./lensSelection.js";
+import { foldPendingRequeueTasks } from "./requeueFold.js";
 import { buildSelectiveDeepeningTasks } from "./selectiveDeepening.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
@@ -211,26 +212,22 @@ export function runResultIngestionExecutor(
     selectiveDeepening.bundle.flow_coverage,
     selectiveDeepening.bundle.external_analyzer_results,
   );
-  // Fold pending requeue tasks into the dispatch task list so mandatory
-  // coverage gaps produce actual dispatch packets. Enrich with line-count
-  // hints and dedupe against existing tasks by task_id.
+  // Fold pending requeue tasks into the dispatch task list so mandatory coverage
+  // gaps produce actual dispatch packets — through the SHARED fold, which is
+  // coverage-based and lens-gated. This draw once deduped by task_id alone, which
+  // can never match across the `requeue:<lens>:<path>` and `<unit>:<lens>` id
+  // grammars, and applied no operator lens gate at all; see `requeueFold.ts`.
   const deepenedTasks = selectiveDeepening.bundle.audit_tasks ?? [];
   const lineIndex = lineIndexFromTasks(deepenedTasks);
   const sizeIndex = sizeIndexFromManifest(selectiveDeepening.bundle.repo_manifest);
-  const existingTaskIds = new Set(deepenedTasks.map((t) => t.task_id));
-  const pendingRequeueTasks = requeuePayload.tasks
-    .filter((t) => t.status === "pending")
-    .filter((t) => !existingTaskIds.has(t.task_id))
-    .map((t) => ({
-      ...t,
-      file_line_counts: Object.fromEntries(
-        t.file_paths
-          // Exclude the unmeasured sentinel (NaN) alongside absent keys: NaN would
-          // JSON-serialize as null and violate the numeric file_line_counts contract.
-          .filter((p) => lineIndex[p] != null && !isUnmeasuredLineCount(lineIndex[p]))
-          .map((p) => [p, lineIndex[p]]),
-      ),
-    }));
+  const pendingRequeueTasks = foldPendingRequeueTasks({
+    requeueTasks: requeuePayload.tasks,
+    auditTasks: deepenedTasks,
+    lineIndex,
+    effectiveLenses: resolveIntentLensSelection(
+      selectiveDeepening.bundle.intent_checkpoint?.lens_selection,
+    ),
+  });
   const allReviewTasks = canonicalizeAuditTasks([
     ...deepenedTasks,
     ...pendingRequeueTasks,

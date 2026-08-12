@@ -11,6 +11,7 @@
 // hand-written JSON schema to drift from these types.
 
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
 import { ContentCoherenceTraceSchema } from "../decompose/contentCoherence.js";
 
@@ -168,6 +169,75 @@ export const FindingSchema = z.object({
   ),
 });
 export type Finding = z.infer<typeof FindingSchema>;
+
+/** The JSON-Schema shape this renderer reads. Narrow by design — nothing else is consulted. */
+interface FindingSchemaNode {
+  type?: string | string[];
+  enum?: unknown[];
+  properties?: Record<string, FindingSchemaNode>;
+  required?: string[];
+  items?: FindingSchemaNode;
+}
+
+function describeFindingField(node: FindingSchemaNode | undefined): string {
+  if (node === undefined) return "value";
+  if (Array.isArray(node.enum)) {
+    return `one of ${node.enum.map((value) => String(value)).join("|")}`;
+  }
+  if (node.type === "array") {
+    const item = node.items;
+    if (item?.type === "object") {
+      const required = [...(item.required ?? [])].sort();
+      return required.length > 0
+        ? `array of objects, each requiring ${required.join(" + ")}`
+        : "array of objects";
+    }
+    return typeof item?.type === "string" ? `array of ${item.type}s` : "array";
+  }
+  return typeof node.type === "string" ? node.type : "value";
+}
+
+let renderedFindingContract: readonly string[] | undefined;
+
+/**
+ * The finding contract as prompt lines, DERIVED from `FindingSchema` — the same
+ * schema result ingestion enforces, so the statement can never drift from the
+ * check.
+ *
+ * A dispatch prompt that says only "findings must satisfy the audit finding
+ * contract" leaves the host to remember or fetch the contract, and a measured
+ * lap lost four complete results to exactly that: findings missing the required
+ * per-finding `lens`, and `evidence`/`reproduction` submitted as a string where
+ * an array is required. Both classes are stated here.
+ *
+ * Memoized: the derivation is pure and the result is embedded in every work-item
+ * prompt (and therefore in every prompt hash), so it must be both cheap and
+ * byte-stable across a run.
+ */
+export function findingContractPromptLines(): readonly string[] {
+  if (renderedFindingContract !== undefined) return renderedFindingContract;
+  const schema = zodToJsonSchema(FindingSchema, {
+    $refStrategy: "none",
+    target: "jsonSchema7",
+  }) as FindingSchemaNode;
+  const properties = schema.properties ?? {};
+  const required = [...(schema.required ?? [])].sort();
+  const arrayFields = Object.entries(properties)
+    .filter(([, node]) => node.type === "array")
+    .map(([name]) => name)
+    .sort();
+  renderedFindingContract = [
+    "Finding contract — every entry of `findings` must carry these required fields: " +
+      required
+        .map((name) => `${name} (${describeFindingField(properties[name])})`)
+        .join(", ") +
+      ".",
+    "These fields are JSON arrays whenever present, never a bare string or object: " +
+      arrayFields.join(", ") +
+      ". A finding that fails this contract rejects the whole submission.",
+  ];
+  return renderedFindingContract;
+}
 
 /** Report-level grouping of findings into parallelizable units of work. */
 export const WorkBlockSchema = z.object({

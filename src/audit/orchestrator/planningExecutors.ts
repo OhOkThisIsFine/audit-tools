@@ -23,8 +23,8 @@ import {
 import { taskContentTokens } from "./reviewPacketSizing.js";
 import { computeRiskEstimate } from "./auditTaskUtils.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
-import { resolveEffectiveLenses } from "./lensSelection.js";
-import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
+import { resolveIntentLensSelection } from "./lensSelection.js";
+import { foldPendingRequeueTasks } from "./requeueFold.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
 import {
   applyContentAddressedPreservation,
@@ -66,40 +66,6 @@ export function interpretFreeFormIntent(text: string): Lens[] {
     }
   }
   return [...boosts];
-}
-
-/**
- * The requeue fold's COVERAGE-based dedupe (INV-PLAN-PERSIST-COMPLETE half 1).
- * A pending requeue task duplicates existing work whenever some audit task with
- * the SAME lens already covers every one of its file paths — on a fresh plan the
- * requeue payload mirrors the entire pending coverage set under `requeue:*` ids,
- * so a task_id-only dedupe never matches and the fold would double-audit
- * everything. Only a genuinely-uncovered gap survives. An operator-limited lens
- * set also gates the fold: a lens the operator excluded must not re-enter
- * dispatch through requeue.
- */
-export function selectUncoveredRequeueTasks(
-  requeueTasks: AuditTask[],
-  auditTasks: AuditTask[],
-  effectiveLenses?: string[],
-): AuditTask[] {
-  const coveredPathsByLens = new Map<string, Set<string>>();
-  for (const task of auditTasks) {
-    const covered = coveredPathsByLens.get(task.lens) ?? new Set<string>();
-    for (const path of task.file_paths) covered.add(path);
-    coveredPathsByLens.set(task.lens, covered);
-  }
-  const allowedLenses =
-    effectiveLenses === undefined ? null : new Set(effectiveLenses);
-  return requeueTasks.filter((task) => {
-    if (task.status !== "pending") return false;
-    if (allowedLenses !== null && !allowedLenses.has(task.lens)) return false;
-    const covered = coveredPathsByLens.get(task.lens);
-    const fullyCovered =
-      covered !== undefined &&
-      task.file_paths.every((path) => covered.has(path));
-    return !fullyCovered;
-  });
 }
 
 export async function runPlanningExecutor(
@@ -151,26 +117,11 @@ export async function runPlanningExecutor(
   }
 
   // Resolve effective lenses from lens_selection (mandatory lenses always
-  // included; resolveEffectiveLenses enforces this invariant).
-  const lensSelectionInclude = bundle.intent_checkpoint?.lens_selection?.include;
-  const lensSelectionExclude = bundle.intent_checkpoint?.lens_selection?.exclude;
-  let effectiveLenses: string[] | undefined;
-  if (lensSelectionInclude !== undefined || lensSelectionExclude !== undefined) {
-    // Build a selected set: start from include (or all), subtract exclude
-    const baseSelected = lensSelectionInclude ?? undefined;
-    const resolved = resolveEffectiveLenses(baseSelected ?? null);
-    if (lensSelectionExclude && lensSelectionExclude.length > 0) {
-      const excludeSet = new Set(lensSelectionExclude);
-      // resolveEffectiveLenses already enforces mandatory lenses; we just
-      // need to apply the exclude filter after re-resolving
-      const afterExclude = resolved.filter((l) => !excludeSet.has(l));
-      // resolveEffectiveLenses ensures mandatory lenses are always present —
-      // call again with afterExclude so mandatory lenses are re-unioned in
-      effectiveLenses = resolveEffectiveLenses(afterExclude);
-    } else {
-      effectiveLenses = resolved;
-    }
-  }
+  // included; resolveIntentLensSelection enforces this invariant and is the same
+  // resolution the ingestion draw's requeue fold reads).
+  const effectiveLenses = resolveIntentLensSelection(
+    bundle.intent_checkpoint?.lens_selection,
+  );
 
   const coverage = initializeCoverageFromPlan(
     bundle.repo_manifest,
@@ -264,26 +215,18 @@ export async function runPlanningExecutor(
     externalAnalyzerResults,
   );
   // Fold pending requeue tasks into the review set so mandatory coverage gaps
-  // produce host work items. Dedupe is COVERAGE-based
-  // (`selectUncoveredRequeueTasks`): a requeue task whose (path × lens) an
+  // produce host work items — through the SHARED fold (`foldPendingRequeueTasks`),
+  // whose dedupe is COVERAGE-based: a requeue task whose (path × lens) an
   // existing audit task already covers is a duplicate of planned work (the fresh
   // -plan requeue payload mirrors the whole pending set under different ids), so
   // only genuinely-uncovered gaps survive — and those ARE persisted below
-  // (INV-PLAN-PERSIST-COMPLETE). Enrich survivors with line-count hints.
-  const pendingRequeueTasks = selectUncoveredRequeueTasks(
-    requeuePayload.tasks,
-    taggedAuditTasks,
+  // (INV-PLAN-PERSIST-COMPLETE).
+  const pendingRequeueTasks = foldPendingRequeueTasks({
+    requeueTasks: requeuePayload.tasks,
+    auditTasks: taggedAuditTasks,
+    lineIndex,
     effectiveLenses,
-  ).map((t) => ({
-    ...t,
-    file_line_counts: Object.fromEntries(
-      t.file_paths
-        // Exclude the unmeasured sentinel (NaN) alongside absent keys: NaN would
-        // JSON-serialize as null and violate the numeric file_line_counts contract.
-        .filter((p) => lineIndex[p] != null && !isUnmeasuredLineCount(lineIndex[p]))
-        .map((p) => [p, lineIndex[p]]),
-    ),
-  }));
+  });
   // Freeze local estimates on every review task: a byte-based token estimate and
   // a deterministic risk seed. These persist as descriptive host-workload
   // metadata; the estimate-review step may later refine them.
