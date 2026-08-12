@@ -54,29 +54,28 @@
 - `open-bugs.md:274` — `obligation_ledger.input.json` is listed as a required input but never written (2026-08-09, low).
 - `open-bugs.md:280` — A delegated step prompt can turn its executor into a second driver (2026-07-16, tool-should-decide, medium).
 - `open-bugs.md:296` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:312` — A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).
-- `open-bugs.md:325` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `open-bugs.md:327` — Friction walk (niggle-fix lap, 2026-08-07):
-- `open-bugs.md:343` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
-- `open-bugs.md:355` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
-- `open-bugs.md:367` — Friction walk (nightly-determinations lap, 2026-07-26):
-- `open-bugs.md:379` — Friction walk (contract-sweep producer lap, 2026-07-26):
-- `open-bugs.md:391` — Friction walk (touched_files load-gate lap, 2026-07-25):
-- `open-bugs.md:397` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:410` — Friction walk (second backlog-clearance lap, 2026-07-24):
-- `open-bugs.md:419` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
-- `open-bugs.md:442` — External shared-logic audit V1–V7 residuals
-- `open-bugs.md:454` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:460` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:468` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:477` — Incoming design-review/charter/challenge artifacts have no submit chokepoint.
-- `open-bugs.md:486` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:493` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:500` — CI trigger paths omit `.claude/
-- `open-bugs.md:507` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:512` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:518` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:523` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:312` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `open-bugs.md:314` — Friction walk (niggle-fix lap, 2026-08-07):
+- `open-bugs.md:330` — Friction walk (loop-core `.ts`-conversion tranche lap, 2026-07-28):
+- `open-bugs.md:342` — Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):
+- `open-bugs.md:354` — Friction walk (nightly-determinations lap, 2026-07-26):
+- `open-bugs.md:366` — Friction walk (contract-sweep producer lap, 2026-07-26):
+- `open-bugs.md:378` — Friction walk (touched_files load-gate lap, 2026-07-25):
+- `open-bugs.md:384` — Friction walk (fourth backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:397` — Friction walk (second backlog-clearance lap, 2026-07-24):
+- `open-bugs.md:406` — Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code site).
+- `open-bugs.md:432` — External shared-logic audit V1–V7 residuals
+- `open-bugs.md:444` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:450` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:458` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
+- `open-bugs.md:467` — Incoming design-review/charter/challenge artifacts have no ingest/validation chokepoint.
+- `open-bugs.md:476` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:483` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:490` — CI trigger paths omit `.claude/
+- `open-bugs.md:497` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:502` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:508` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:513` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -131,26 +130,27 @@
 - `durable-traps.md:323` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
 - `durable-traps.md:325` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
 - `durable-traps.md:333` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
-- `durable-traps.md:338` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:346` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:367` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
-- `durable-traps.md:378` — A backlog entry's bold title must not contain `
-- `durable-traps.md:383` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
-- `durable-traps.md:394` — The `audit-code-completion-*` files can flake together under full-suite load, and the symptom reads exactly like a regression (2026-08-09).
-- `durable-traps.md:407` — In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit (2026-08-09).
-- `durable-traps.md:419` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:426` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:440` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
-- `durable-traps.md:451` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:460` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
-- `durable-traps.md:477` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
-- `durable-traps.md:484` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
-- `durable-traps.md:495` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
-- `durable-traps.md:504` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
-- `durable-traps.md:512` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
-- `durable-traps.md:521` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
-- `durable-traps.md:528` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:534` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
+- `durable-traps.md:338` — After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of re-reading the whole file (2026-07-16).
+- `durable-traps.md:342` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:350` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:371` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
+- `durable-traps.md:382` — A backlog entry's bold title must not contain `
+- `durable-traps.md:387` — A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED checkout — it runs this repo's hooks and can mutate git state (2026-08-07).
+- `durable-traps.md:398` — The `audit-code-completion-*` files can flake together under full-suite load, and the symptom reads exactly like a regression (2026-08-09).
+- `durable-traps.md:411` — In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit (2026-08-09).
+- `durable-traps.md:423` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
+- `durable-traps.md:430` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:444` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
+- `durable-traps.md:455` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
+- `durable-traps.md:464` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
+- `durable-traps.md:481` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
+- `durable-traps.md:488` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
+- `durable-traps.md:499` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:508` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
+- `durable-traps.md:516` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
+- `durable-traps.md:525` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
+- `durable-traps.md:532` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
+- `durable-traps.md:538` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
 
 <!-- END GENERATED SEEK INDEX -->
 

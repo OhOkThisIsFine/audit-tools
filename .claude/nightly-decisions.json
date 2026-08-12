@@ -946,28 +946,36 @@
     "answer": "Apply all three CLAUDE.md corrections: rename the consent-token type to the live shape, describe the mechanism that actually replaced buildImplementDispatchItem (not a straight rename — investigate and state what implement dispatch reads now), and DROP the 372-count clause rather than update the number.",
     "subject": "instruction-file edit: CLAUDE.md carries three claims the retirement invalidated — approve the batch",
     "path": "CLAUDE.md",
-    "decided_at": "2026-08-12T16:27:44.723Z"
+    "decided_at": "2026-08-12T16:27:44.723Z",
+    "completed_at": "2026-08-12T18:56:43.807Z",
+    "completed_ref": "202e12a8"
   },
   "5d4e5c45a854a806": {
     "disposition": "settled",
     "answer": "Correct all three statements in spec/remediate/remediation-goals.md to describe the post-retirement host-owned reality (no runtime-resolved token budget sizing, no tool-side rebase/tests/quarantine, no rolling dispatcher).",
     "subject": "Bring remediation-goals.md back in line with the retirement — three claims describe execution machinery that no longer exists",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-08-12T16:27:44.978Z"
+    "decided_at": "2026-08-12T16:27:44.978Z",
+    "completed_at": "2026-08-12T18:56:43.545Z",
+    "completed_ref": "202e12a8"
   },
   "22c8a027b799dc4a": {
     "disposition": "settled",
     "answer": "Correct spec/audit/audit-goals.md to say the deliverables are promoted to .audit-tools/, matching the code and the three sibling docs.",
     "subject": "audit-goals.md says the final report is promoted to the repo root; the code promotes it to .audit-tools/",
     "path": "spec/audit/audit-goals.md",
-    "decided_at": "2026-08-12T16:27:45.168Z"
+    "decided_at": "2026-08-12T16:27:45.168Z",
+    "completed_at": "2026-08-12T18:56:43.597Z",
+    "completed_ref": "202e12a8"
   },
   "50e86c3535cc7826": {
     "disposition": "settled",
     "answer": "Just strike them: remove 'LLM/runtime constraints' and 'budget or step limits' from the entrypoint contract's optional list. No added refusal line — the boundary is stated elsewhere.",
     "subject": "The entrypoint contract still advertises budget/step-limit and LLM-runtime inputs the retirement removed — narrow it, or keep the door open",
     "path": "spec/audit/entrypoint-contract.md",
-    "decided_at": "2026-08-12T16:33:06.292Z"
+    "decided_at": "2026-08-12T16:33:06.292Z",
+    "completed_at": "2026-08-12T18:56:43.649Z",
+    "completed_ref": "202e12a8"
   },
   "5892df1b9af69154": {
     "disposition": "settled",
@@ -981,7 +989,9 @@
     "answer": "Delete the non-goal: remove the stale sentence from docs/audit-pkg/product.md; the boundary is stated in the goals docs.",
     "subject": "A product non-goal still concedes that redirecting review into a second execution backend is possible — it is now impossible",
     "path": "docs/audit-pkg/product.md",
-    "decided_at": "2026-08-12T16:36:40.259Z"
+    "decided_at": "2026-08-12T16:36:40.259Z",
+    "completed_at": "2026-08-12T18:56:43.756Z",
+    "completed_ref": "202e12a8"
   },
   "a360d39985d537e8": {
     "disposition": "settled",
@@ -1009,7 +1019,9 @@
     "answer": "Drop the claim and state the invariant: rewrite S8 to say review flags are set ONLY by a consumed, validated host submission (quarantine + rejected_submissions as the audit trail) and an absent/empty assessment is deliberately no-signal. No stamp — no auto-complete path exists at HEAD; if auto-completion is ever reintroduced, the distinguishing stamp is designed as part of that same unit.",
     "subject": "S8 describes an auto-complete stamp as shipped-with-a-known-gap; the stamp was never built at all",
     "path": "spec/contract-authoring-determinism-design.md",
-    "decided_at": "2026-08-12T18:20:14.971Z"
+    "decided_at": "2026-08-12T18:20:14.971Z",
+    "completed_at": "2026-08-12T18:56:43.702Z",
+    "completed_ref": "202e12a8"
   },
   "f65ec9c9ebeb6070": {
     "disposition": "settled",

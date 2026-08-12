@@ -309,19 +309,6 @@
   **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
   who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 
-- **A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).** Mid-lap an `Edit` on `docs/backlog.md` failed with "String to replace not found" on a paragraph I had authored minutes earlier — a hook had normalized `vs` → `vs.` in it. The Edit tool's own hint ("tried swapping \uXXXX escapes") points at encoding, not at a hook rewrite, so the natural next move is re-reading the whole file to hunt an invisible character. Cost a re-read + a retry. Property to hold: a hook that rewrites a file the agent is mid-edit on should announce the rewrite (or the tool should re-anchor), rather than presenting as a mysterious mismatch. Cheap mitigation until then: after a "not found" on text you just wrote, suspect a normalizer and `grep` the anchor before re-reading the file.
-  **⚠ The SPEC that stood here is UNBUILDABLE AS WRITTEN — premise falsified at HEAD 2026-07-25.** It said
-  "a hook that rewrites a file must announce the rewrite", but no such rewriter exists: nothing in
-  `.claude/hooks/` (nor the single global hook) writes into `docs/` — every hook write is a state
-  marker/journal under the state dir, and the one tree-rewriting mechanism, the pre-commit gate's
-  staged-snapshot round-trip, restores byte-identically and already announces an interrupted one. So the
-  observed mismatch has no hook to announce it, and the remaining suspect is the editing tool's own
-  matching, which this entry correctly says is not ours to change. **Before rebuilding this: name the
-  process that rewrote the bytes, or close the entry.** ⚠ Still standing: do not pursue lint-aware patch
-  semantics inside the editor, and do not "fix" it by disabling a gate during agent edits. Working
-  mitigation: after a "not found" on text you just wrote, `grep` the anchor instead of re-reading the file.
-  **Property to hold:** a file mutated underneath an agent mid-edit is announced, never silent.
-
 - **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 
 - **Friction walk (niggle-fix lap, 2026-08-07):**
@@ -419,9 +406,11 @@
 - **Untracked-exclusion scope rule — residuals only (each low-severity, documented at the code
   site).** Shipped 2026-07-10; the scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
   scope rule (one batched `git ls-files -z`; still-included files absent from the index → `excluded/untracked`,
-  guards mirror the gitignore rule) so untracked litter can never enter the auditable scope, plus a
-  single-sourced `renderHostScratchNote`/`hostScratchDir` prompt line directing host scratch into
-  `.audit-tools/<area>/scratch/<run-id>/`. The unsound bounded/aggregate exclusion representation was deleted
+  guards mirror the gitignore rule) so untracked litter can never enter the auditable scope. A
+  `renderHostScratchNote`/`hostScratchDir` pair (`src/shared/prompts.ts`,
+  `src/shared/io/auditToolsPaths.ts`) never shipped: ZERO callers, only definitions plus a re-export
+  in `src/shared/index.ts` (knip's default mode counts a re-export as a consumer), so it reaches no
+  prompt — wiring it into the prompt below, or deleting it, is in scope. The unsound bounded/aggregate exclusion representation was deleted
   outright (a missing disposition record reads as *included* downstream, so aggregation silently un-excluded
   exactly the matched files — per-file records are now mandatory, validator-enforced). Residuals:
   - (a) **Submodule / nested-repo contents are now excluded as `untracked`** (parent `ls-files` lists only the
@@ -436,8 +425,9 @@
   - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
     only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
     surfaces to the operator despite the summary existing for exactly that purpose.
-  - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
-    lack run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
+  - (e) The audit `renderEdgeReasoningDispatchPrompt` (`src/audit/cli/prompts.ts`, `edge_reasoning`
+    branch of `nextStepCommand.ts`) single-agent dispatch carries no scratch-dir note (params lack
+    run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
   site):
@@ -474,12 +464,12 @@
   (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
   minted by the registry or validated on the way in.
 
-- **Incoming design-review/charter/challenge artifacts have no submit chokepoint.** 2026-08-05
+- **Incoming design-review/charter/challenge artifacts have no ingest/validation chokepoint.** 2026-08-05
   dogfood: 5 of 8 design-review agents drifted on the output contract (wrong filename ×2, wrong
   directory, invalid JSON ×2) and the host hand-repaired all of them; the charter delta-miner also
-  returned invented node_id slugs the host had to remap. The packet lane validates on submit; these
-  lanes validate nothing. **Property to hold:** every incoming artifact rides a tool-validated
-  write (submit-command pattern); an unknown node_id is refused loudly naming the valid set.
+  returned invented node_id slugs the host had to remap. These lanes validate nothing on the way in.
+  **Property to hold:** every incoming artifact rides a tool-validated
+  write; an unknown node_id is refused loudly naming the valid set.
   ⬇ Reproduced 2026-08-08 at 9 of 10 lanes; the invented-node_id half did not. The repairs are invisible
   to the tool, so an uninstrumented run reads as clean (run record O2).
 

@@ -335,6 +335,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   harness display artifact that reads exactly like file corruption. Verify with a Read of the same
   lines before diagnosing corruption or "fixing" the file.
 
+- **After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of
+  re-reading the whole file (2026-07-16).** The one recorded case was never explained (the suspected
+  hook rewriter was falsified 2026-07-25); the mitigation stands on its own.
+
 - **A typecheck sweep's error count is not final until you re-run it.** Clearing the test tree for
   `check:tests` (`tsconfig.test.json`, `allowJs`; wired into `verify:checks`) surfaced ~20 errors
   beyond the initial count — TS unmasks a second error on the same object literal only once its
