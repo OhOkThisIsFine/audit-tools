@@ -531,16 +531,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   index edit. The prescribed reduction is MERGING closed sagas and cutting obsolete memories, never a
   mechanical line-trim (tried, failed).
 
-- **The pre-commit gate can tell you to regenerate a file AFTER you have already attested, which
-  silently invalidates the attestation (2026-08-09).** Loop-core commits carry an attestation bound to
-  the exact staged tree. Attest, then commit, and the gate refuses on a stale `docs/backlog.md` seek
-  index — the fix regenerates a tracked file, which changes the staged tree, which voids the
-  attestation you just wrote. You then attest a second time for the same review. Ordering that works
-  today: run the derived-file regenerators (`generate-backlog-index.mjs`,
-  `generate-handoff-roadmap.mjs`, `check:philosophy-brief -- --write`) FIRST, stage everything, and
-  attest last. ⚠ Enforceable and NOT yet enforced: the gate evaluates the attestation before the
-  derived-index check, so it fails in the order that maximises rework. Reordering those legs — index
-  regeneration checks before attestation binding — removes the trap entirely, at which point this
-  entry goes.
+- **An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it
+  (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).** Loop-core and constitutional
+  commits carry an attestation bound to the exact staged tree; a stale derived file (backlog seek
+  index, HANDOFF roadmap, doc manifest, guard-reach registry) makes the gate demand a regeneration
+  that changes that tree and voids the attestation. Both attest scripts now run the gate's own four
+  derived-file checks BEFORE binding (single-sourced predicates in
+  `scripts/shared/derived-file-preflight.mjs`) and refuse to write an attestation the gate would
+  reject. (An earlier remedy here prescribed reordering the gate's legs — falsified: the derived
+  checks already ran first; leg order was never the mechanism, because the gate runs at commit time
+  and the attestation is written in an earlier tool call.) ⚠ The uncovered half, stated outright:
+  the preflight covers only the four derived-file legs. The doc-contract test leg (`test:doc-contract`,
+  up to 240s) is deliberately excluded — including it would make attest cost as much as the gate —
+  so a doc-contract failure can still void an attestation and force a second attest.
 
 ## Doc-set hygiene (enforced)

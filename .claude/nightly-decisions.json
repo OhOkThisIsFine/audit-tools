@@ -894,7 +894,9 @@
     "answer": "Apply it: apply the P22 patch and its test from .audit-tools/nightly/proposals/P22-retired-doc-probe-cannot-close/, full green gate before committing.",
     "subject": "A nightly item can never auto-close when the doc it asked you to RETIRE is deleted — patch written and red-green validated",
     "path": "scripts/nightly/items.mjs",
-    "decided_at": "2026-08-12T15:01:12.258Z"
+    "decided_at": "2026-08-12T15:01:12.258Z",
+    "completed_at": "2026-08-12T18:26:53.585Z",
+    "completed_ref": "c294c8b2"
   },
   "6bb133894505286a": {
     "disposition": "settled",
@@ -908,7 +910,9 @@
     "answer": "Do P20 AND fix the stamp: validate verdict/why/action after parsing (mismatch routes to errored-and-retry), put the spread before id/file so model output cannot overwrite record identity, and add classified_total to the coverage stamp so a retry pass does not read as near-total failure.",
     "subject": "The backlog sweep counts any record that parses as JSON as CLASSIFIED — five of tonight's 120 carry no verdict at all",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-08-12T15:08:19.094Z"
+    "decided_at": "2026-08-12T15:08:19.094Z",
+    "completed_at": "2026-08-12T18:37:41.603Z",
+    "completed_ref": "c4ed9904"
   },
   "285b804c0aef617d": {
     "disposition": "settled",
@@ -922,14 +926,18 @@
     "answer": "Ship P21 as a hard DENY: extend the buffering-pipe rule to codex exec / agy -p with the AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1 escape hatch and the red-green tests in tests/shared/hook-trap-guards.test.ts.",
     "subject": "Extend the buffering-pipe DENY to peer-CLI dispatch (`codex exec` / `agy -p`), or accept that a piped dispatch lane stays invisible until it exits",
     "path": "tests/shared/hook-trap-guards.test.ts",
-    "decided_at": "2026-08-12T15:08:20.175Z"
+    "decided_at": "2026-08-12T15:08:20.175Z",
+    "completed_at": "2026-08-12T18:39:29.638Z",
+    "completed_ref": "13c08618"
   },
   "2c8b18b3c63984bf": {
     "disposition": "settled",
     "answer": "Carve out hooks: narrow the record-path rule so .claude/hooks/ is treated as ordinary tracked source and may carry premise probes; the rest of .claude (decisions ledger, settings, skill write-ups) stays banned as a record channel.",
     "subject": "Stop classifying `.claude/hooks/**` as a record path — it is executable guard source, and treating it as a record makes every hook item unprobeable",
     "path": "scripts/nightly/items.mjs",
-    "decided_at": "2026-08-12T16:27:44.403Z"
+    "decided_at": "2026-08-12T16:27:44.403Z",
+    "completed_at": "2026-08-12T18:31:14.106Z",
+    "completed_ref": "73c168ef"
   },
   "558f0fe937f43907": {
     "disposition": "settled",

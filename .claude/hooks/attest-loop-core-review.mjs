@@ -61,6 +61,7 @@ function fail(msg) {
 // but it can import a .mjs generated FROM it. One hand-maintained home; drift is
 // caught by `npm run check:loop-core-patterns` in verify:checks.
 import { LOOP_CORE_PATTERNS } from './loop-core-patterns.mjs';
+import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
 function pinsLoopCore(p) {
   const norm = p.replace(/\\/g, '/').replace(/^\.\//, '');
   for (const pattern of LOOP_CORE_PATTERNS) {
@@ -154,6 +155,28 @@ const staged = cached.stdout
 const loopCoreFiles = staged.filter(pinsLoopCore);
 if (loopCoreFiles.length === 0) {
   fail('nothing loop-core staged to attest — the staged set touches no loop-core path.');
+}
+
+// ── P19: refuse to bind to a tree the gate would reject ────────────────────────
+// The gate runs at commit time; this attestation is written earlier, so no
+// arrangement of the gate's own legs can reach back to inform it. Run the same
+// derived-file checks the gate will run (single-sourced module — never copied)
+// and refuse to bind when one fails: a stale index is reported BEFORE any
+// attestation exists, so the same review is never attested twice. An unwired
+// check fails open with an announcement — a missing script must never make a
+// repo un-attestable.
+// No `git` passed: the module's own runner carries `.status`, which the
+// staged-pickaxe scans branch on; this script's local helper does not.
+const preflight = runDerivedFilePreflight({ root, staged });
+for (const s of preflight.skipped) console.error(`attest-loop-core-review: note — ${s}`);
+if (preflight.failures.length > 0) {
+  for (const f of preflight.failures) {
+    console.error(`\n✗ ${f.script} FAILED — fix: ${f.fix}\n${f.tail}`);
+  }
+  fail(
+    'refusing to bind: the staged tree would be rejected by the pre-commit gate\'s derived-file ' +
+      'checks above. Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
+  );
 }
 
 const headRev = git(['rev-parse', 'HEAD']);

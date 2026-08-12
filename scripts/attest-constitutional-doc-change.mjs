@@ -39,6 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONSTITUTIONAL_DOC_PATHS } from './shared/constitutional-doc-paths.generated.mjs';
+import { runDerivedFilePreflight } from './shared/derived-file-preflight.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -131,6 +132,26 @@ const staged = cached.stdout
 const constitutionalFiles = staged.filter(isConstitutional);
 if (constitutionalFiles.length === 0) {
   fail('nothing constitutional staged to attest — the staged set touches no constitutional doc path.');
+}
+
+// ── P19: refuse to bind to a tree the gate would reject ────────────────────────
+// Same preflight as attest-loop-core-review.mjs, same single-sourced module: a
+// constitutional-doc edit is almost always a markdown edit, which is exactly
+// what trips the doc-manifest / HANDOFF / backlog-index legs after binding.
+{
+  // No `git` passed: the module's own runner carries `.status`, which the
+  // staged-pickaxe scans branch on; this script's local helper does not.
+  const preflight = runDerivedFilePreflight({ root, staged });
+  for (const s of preflight.skipped) console.error(`attest-constitutional-doc-change: note — ${s}`);
+  if (preflight.failures.length > 0) {
+    for (const f of preflight.failures) {
+      console.error(`\n✗ ${f.script} FAILED — fix: ${f.fix}\n${f.tail}`);
+    }
+    fail(
+      'refusing to bind: the staged tree would be rejected by the pre-commit gate\'s derived-file ' +
+        'checks above. Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
+    );
+  }
 }
 
 const headRev = git(['rev-parse', 'HEAD']);

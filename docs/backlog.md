@@ -150,7 +150,7 @@
 - `durable-traps.md:512` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
 - `durable-traps.md:521` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
 - `durable-traps.md:528` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:534` — The pre-commit gate can tell you to regenerate a file AFTER you have already attested, which silently invalidates the attestation (2026-08-09).
+- `durable-traps.md:534` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
 
 <!-- END GENERATED SEEK INDEX -->
 

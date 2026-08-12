@@ -158,6 +158,12 @@ export const GUARDS = [
     impl: 'tests/shared/loop-core-gate-parity.test.ts',
     note: 'pins pattern parity between pre-commit-gate and attest-loop-core-review',
   },
+  {
+    id: 'attest-derived-file-preflight-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/attest-derived-file-preflight.test.ts',
+    note: 'P19: attest scripts run the gate-shared derived-file checks before binding and refuse a tree the gate would reject',
+  },
 ];
 
 /** @type {ReachRow[]} */

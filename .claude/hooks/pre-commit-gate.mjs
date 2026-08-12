@@ -62,10 +62,16 @@ import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
 // file there is silently dropped from commits until someone adds the allowlist
 // line. `npm run check:constitutional-doc-paths` fails the build on drift.
 import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
+// The derived-file trigger predicates are SINGLE-SOURCED with both attest
+// scripts (P19): the attest preflight must fire on exactly the staged sets
+// this gate fires on, or an attestation binds to a tree this gate rejects.
+// (The nightly queue path and grep domain they depend on ride along inside.)
 import {
-  OPEN_ITEMS_RELPATH,
-  PREMISE_GREP_PATHSPECS,
-} from "../../scripts/nightly/items.mjs";
+  pinsDocManifest,
+  pinsBacklogIndex,
+  guardReachWired,
+  handoffStateTriggered,
+} from "../../scripts/shared/derived-file-preflight.mjs";
 
 // Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
 // from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a
@@ -532,10 +538,7 @@ function runGate(committedPaths) {
   // nothing to catch it), so the trigger must widen with it — a trigger narrower
   // than the check it fires plants violations the gate never runs on. Same
   // reasoning as the `paths:` filters in .github/workflows/ci.yml.
-  const pinsDocManifest = (p) => {
-    const normalized = p.replace(/\\/g, '/');
-    return /\.md$/i.test(normalized) || normalized === 'scripts/doc-manifest-data.mjs';
-  };
+  // Predicate imported from derived-file-preflight.mjs (P19 single source).
   if (staged.some(pinsDocManifest)) {
     try {
       execSync('npm run check:doc-manifest', {
@@ -573,14 +576,10 @@ function runGate(committedPaths) {
   // package.json therefore skips too — a gate cannot report its own deletion
   // (same accepted property as the doc-manifest leg); the announcement is what
   // keeps the skip from reading as a pass.
-  let hasGuardReachScript = false;
-  try {
-    hasGuardReachScript = Boolean(
-      JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.['check:guard-reach'],
-    );
-  } catch {
-    // unreadable package.json — the typecheck leg above already dealt with worse
-  }
+  // Wiring probe imported from derived-file-preflight.mjs (P19 single source);
+  // an unreadable package.json reads as unwired — the typecheck leg above
+  // already dealt with worse.
+  const hasGuardReachScript = guardReachWired(root);
   if (!hasGuardReachScript) {
     noteFailOpen('check:guard-reach is not wired in this repo — guard-reach leg SKIPPED');
   } else
@@ -652,75 +651,11 @@ function runGate(committedPaths) {
   // Wired HERE as well as in `verify:checks` deliberately: the pre-commit hook
   // does NOT run `verify:checks`, so a gate wired only there first fails in
   // RELEASE CI and burns a tag — the class that burned v0.34.17.
-  const nightlyProbeSources = new Set();
-  const nightlyPositiveProbeNeedles = new Set();
-  try {
-    const queue = JSON.parse(
-      readFileSync(join(root, OPEN_ITEMS_RELPATH), 'utf8'),
-    );
-    for (const item of Array.isArray(queue?.items) ? queue.items : []) {
-      for (const probe of Array.isArray(item?.premise_probes) ? item.premise_probes : []) {
-        if (typeof probe?.file === 'string' && probe.file.trim() !== '') {
-          nightlyProbeSources.add(probe.file.replace(/\\/g, '/').replace(/^\.\//, ''));
-        }
-        if (typeof probe?.contains === 'string' && probe.contains.trim() !== '') {
-          // Positive probes use repo-wide git-grep for rename/move protection,
-          // so a moved copy outside probe.file can change the verdict too. Use
-          // the evaluator's same longest-line needle for staged pickaxe reach.
-          const needle = probe.contains
-            .split('\n')
-            .map((line) => line.trim())
-            .sort((a, b) => b.length - a.length)[0];
-          if (needle) nightlyPositiveProbeNeedles.add(needle);
-        }
-      }
-    }
-  } catch {
-    // Missing/malformed queue state is handled by the parity check when its own
-    // path is staged. A repo with no queue (including hook fixture repos) has no
-    // probe-source dependency to derive.
-  }
-  let nightlyDirectProbeDependencyChanged = false;
-  for (const source of nightlyProbeSources) {
-    const diff = git(['diff', '--cached', '--quiet', '--no-renames', '--', source]);
-    if (diff.status === 1 || !diff.ok) {
-      nightlyDirectProbeDependencyChanged = true;
-      break;
-    }
-  }
-  let nightlyMovedProbeDependencyChanged = false;
-  for (const needle of nightlyPositiveProbeNeedles) {
-    const diff = git([
-      'diff',
-      '--cached',
-      '--name-only',
-      '--no-renames',
-      `-S${needle}`,
-      '--',
-      ...PREMISE_GREP_PATHSPECS,
-    ]);
-    if (!diff.ok || diff.stdout.trim() !== '') {
-      // A pickaxe failure cannot prove the dependency is unchanged; running
-      // the parity check is the safe, cheap fallback.
-      nightlyMovedProbeDependencyChanged = true;
-      break;
-    }
-  }
-  const pinsHandoffState = (p) => {
-    const n = p.replace(/\\/g, '/');
-    return (
-      n === 'docs/HANDOFF.md' ||
-      n === '.audit-tools/nightly/open-items.json' ||
-      n === '.claude/nightly-decisions.json' ||
-      n === 'scripts/shared/generate-handoff-roadmap.mjs' ||
-      n === 'scripts/nightly/items.mjs' ||
-      nightlyProbeSources.has(n) ||
-      nightlyDirectProbeDependencyChanged ||
-      nightlyMovedProbeDependencyChanged ||
-      /^docs\/backlog\/[^/]+\.md$/.test(n)
-    );
-  };
-  if (staged.some(pinsHandoffState)) {
+  // Trigger imported from derived-file-preflight.mjs (P19 single source): the
+  // fixed authoritative inputs, the current premise-probe sources, and the two
+  // staged-pickaxe scans (a probe needle moving anywhere in the grep domain can
+  // change a presentation-time verdict) all live there now.
+  if (handoffStateTriggered({ root, staged, git })) {
     try {
       execSync('npm run check:handoff-roadmap', {
         cwd: root,
@@ -753,10 +688,7 @@ function runGate(committedPaths) {
   // rather than to nothing.
   //
   // Wired HERE as well as in `verify:checks` for the same reason as 2b-ii.
-  const pinsBacklogIndex = (p) => {
-    const n = p.replace(/\\/g, '/');
-    return n === 'docs/backlog.md' || /^docs\/backlog\/[^/]+\.md$/.test(n);
-  };
+  // Predicate imported from derived-file-preflight.mjs (P19 single source).
   if (staged.some(pinsBacklogIndex)) {
     try {
       execSync('npm run check:backlog-index', {
