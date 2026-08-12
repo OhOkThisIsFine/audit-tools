@@ -24,7 +24,6 @@ is deleted too.
 | INV-CO | Contract-pipeline obligation and reconciliation derivation. | src/remediate/validation/contractPipelineGates.ts |
 | INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | src/remediate/validation/contractPipelineGates.ts |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | src/remediate/review/autonomousGate.ts |
-| INV-DS | Remediation work-item reconciliation expectations and evidence. | src/remediate/steps/dispatch/dagNodeFields.ts; src/remediate/steps/dispatch/implementPrompt.ts |
 | INV-GND | Missing grounding evidence is treated as ungrounded. | src/shared/validation/findingGrounding.ts |
 | INV-ID | Idempotent, content-hash-keyed remediation intake. | src/remediate/intake.ts |
 | INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | src/remediate/contractPipeline/derive.ts; src/remediate/contractPipeline/artifactStore.ts |
@@ -54,7 +53,7 @@ namespace.
 
 ## Live counterexample ids
 
-The source currently cites CE-001 through CE-011 except CE-012, plus CE-013, CE-201, and CE-206.
+The source currently cites CE-001 through CE-011 except CE-012, plus CE-013 and CE-206.
 Their meanings are local to the validator, ledger, intent, analyzer, worktree, or scoring code that
 cites them. Reuse of a number in another subsystem does not imply shared identity.
 
