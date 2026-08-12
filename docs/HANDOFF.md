@@ -36,17 +36,18 @@
 
 ## Immediate next
 
-1. Resume the paused dogfood audit lap (see *Resume the audit* above), then the remediate phase.
-2. The four owner-approved builds, in this order:
-   - **P25 re-scoped** (sol-9): gated on the two owner answers in
-     [`docs/reviews/p25-design-check-2026-08-12.md`](reviews/p25-design-check-2026-08-12.md) §6
-     (re-point at the `incoming/` gates? submit verb recovery-only?). The design-check verdict is
-     proceed-with-changes; the original proposal's target surface was already rebuilt by `467b1e8f`.
+1. **Build P25 re-scoped FIRST** (sol-9; all three gating answers recorded 2026-08-12 in
+   [`docs/reviews/p25-design-check-2026-08-12.md`](reviews/p25-design-check-2026-08-12.md) §6):
+   re-pointed at the `incoming/` gates, submit verb recovery-only, ATOMIC migration — the owner
+   chose atomic-and-re-run-the-lap, so this lands before the lap resumes and the paused dispatch
+   re-runs on the new arrival scheme.
+2. Resume the dogfood audit lap (see *Resume the audit* above), then the remediate phase.
+3. The remaining owner-approved builds:
    - **P23** (sol-7): probe whether child sessions fire SessionStart, then session tagging +
      unregistered-session commit/push refusal. Unblocks the freellmapi `pool` lane for this repo.
    - **sol-8**: SessionStart tree-dirt baseline + per-gate pathspec scoping (supersedes P24's shape).
    - **backlog-2 gate + sol-3 leg-1 scope ledger.**
-3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
+4. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
    size hook now fires on every index edit): merge the closed sagas properly — the citations gate
    and `[[name]]` cross-links make it a focused pass, not a side-task.
 

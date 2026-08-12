@@ -422,6 +422,12 @@ existing-coverage check — none of these duplicates a current test.
 
 ## 6. Open questions — owner only
 
+> **ANSWERED by the owner, 2026-08-12, same day:** (1) re-point at `incoming/` — the P25-a…f
+> seam below is the build; (2) the submit verb is RECOVERY-ONLY — the normal path stays a file
+> write to a tool-owned, expected-set-recorded name; (3) migration is ATOMIC and the paused
+> dogfood lap re-runs on the new scheme (deterministic artifacts survive; only dispatched-but-
+> uningested work repeats). Consequence: the P25 build now precedes the lap resume.
+
 1. **The re-scope itself.** `sol-9` says "remove the guessable path from both orchestrators' host
    handoff". That surface was created today and already does this (R1), while the measured drift is on
    `incoming/` (R2). **Is the decision re-pointed at `incoming/` (P25-a…f above), or was the
