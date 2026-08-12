@@ -31,7 +31,7 @@ Gather, with the file tools:
 
 - **Standing decisions** — the *Preferences & standing decisions*, *Conventions & invariants* and
   *Commands* sections of [`CLAUDE.md`](../../../CLAUDE.md). These are where retirements live as prose
-  (`KNOWN_MODEL_LIMITS`, the hardcoded host-model id, `--production` knip, the node:test split).
+  (`--production` knip, the zero-adapter execution/routing/quota retirement).
 - **Durable traps** — [`docs/backlog/durable-traps.md`](../../../docs/backlog/durable-traps.md), and the
   open items in [`docs/backlog/open-bugs.md`](../../../docs/backlog/open-bugs.md) that name the same
   files. An entry that already describes your plan is the answer.
