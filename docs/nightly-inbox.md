@@ -47,7 +47,7 @@ The entry at docs/backlog/open-bugs.md:588 states its own exit condition — nam
 
 ### Your answer
 
-- [ ] **1. Close, keep the mitigation** — Delete the entry from open-bugs.md and move its working mitigation ("after a not-found on text you just wrote, grep the anchor instead of re-reading the file") into docs/backlog/durable-traps.md as a one-liner.
+- [x] **1. Close, keep the mitigation** — Delete the entry from open-bugs.md and move its working mitigation ("after a not-found on text you just wrote, grep the anchor instead of re-reading the file") into docs/backlog/durable-traps.md as a one-liner.
 - [ ] **2. Close outright** — Delete the entry. The premise is falsified and the mitigation is already common practice; it does not need a durable home.
 - [ ] **3. Keep it open** — Leave the entry. The observed failure was real even if the cause was misattributed, and a recurrence would be much harder to diagnose with no record of the first one.
 - [ ] **4. Keep, restated** — Keep the entry but rewrite it around what is actually unknown — an edit failed on text the agent had just written and the cause was never found — dropping the falsified hook theory entirely.
@@ -88,7 +88,7 @@ The 2026-07-28 friction walk's item (1) states "when a lap executes tracked work
 
 ### Your answer
 
-- [ ] **1. Accept the closeout hook as the coverage** — Treat .claude/hooks/closeout-challenge-gate.mjs as sufficient coverage: delete item (1) from the entry and state the uncovered half (it prompts, it does not bind the record update to the same commit) in durable-traps.md.
+- [x] **1. Accept the closeout hook as the coverage** — Treat .claude/hooks/closeout-challenge-gate.mjs as sufficient coverage: delete item (1) from the entry and state the uncovered half (it prompts, it does not bind the record update to the same commit) in durable-traps.md.
 - [ ] **2. Build the gate** — Keep the entry open as real work: a commit that touches a tracked-work path must carry the corresponding record update, enforced in the pre-commit gate rather than asked about at session end.
 - [ ] **3. Downgrade to advice** — Keep the property as written guidance only — move it into CLAUDE.md as a convention and delete the backlog entry. It is a habit, not something worth a gate.
 - [ ] **4. Close outright** — Delete the entry. It records a one-off reconciliation cost from a lap that is long finished, and no recurrence has been logged since.
@@ -132,7 +132,7 @@ Should the attest scripts run the gate's derived-file checks before binding, ref
 
 ### Your answer
 
-- [ ] **1. Yes — build it with the shared module** — Implement P19: extract the gate's trigger predicates into one module, have both attest scripts import it, run those checks before write-tree, and refuse to bind on failure. Correct the durable-traps entry in the same commit.
+- [x] **1. Yes — build it with the shared module** — Implement P19: extract the gate's trigger predicates into one module, have both attest scripts import it, run those checks before write-tree, and refuse to bind on failure. Correct the durable-traps entry in the same commit.
 - [ ] **2. Correct the entry only** — Do not change the attest scripts. Just fix docs/backlog/durable-traps.md so it stops prescribing a leg reorder that is already in place and would ship a no-op.
 - [ ] **3. Regenerate-and-restage instead** — Take the simpler shape: have the attest script run the regenerators itself and stage their output before binding, so the tree it binds to is already correct rather than merely validated.
 - [ ] **4. Leave it** — Accept the double-attest as a known cost. Correct the falsified remedy sentence, keep the ordering advice, and spend the effort elsewhere.
@@ -178,7 +178,7 @@ Should the sweep validate each parsed record against its schema — verdict in t
 
 - [ ] **1. Yes — validate and own the identity** — Implement P20: put the spread before id/file so the model cannot overwrite the record's identity, and require verdict/why/action after parsing, routing a mismatch into the existing errored-and-retry path.
 - [ ] **2. Validate only** — Add the shape check, but leave the object spread as it is. The clobbered file field is cosmetic and a single record showed it.
-- [ ] **3. Also fix the stamp** — Do P20 and additionally add a classified_total field to the coverage stamp, since after a retry pass the field named "classified" reports only that pass and reads as near-total failure.
+- [x] **3. Also fix the stamp** — Do P20 and additionally add a classified_total field to the coverage stamp, since after a retry pass the field named "classified" reports only that pass and reads as near-total failure.
 - [ ] **4. Leave it** — Accept it. Five bad records out of 124 is within tolerance for an advisory sweep, and every verdict is meant to be verified before it is acted on anyway.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
@@ -226,7 +226,7 @@ Leg 1 produces no mechanical record of what it examined, and the scope ledger `d
 
 ### Your answer
 
-- [ ] **1. Coverage stamp** — Build leg 1 a coverage stamp mirroring leg 2's: the run writes the list of doc paths it actually examined, and a mechanical check reconciles that against the doc-manifest's in-scope set, failing loudly on a gap. Do not build the lastCheckedCommit half. Delete the rubric's ledger paragraph or rewrite it to describe the stamp.
+- [x] **1. Coverage stamp** — Build leg 1 a coverage stamp mirroring leg 2's: the run writes the list of doc paths it actually examined, and a mechanical check reconciles that against the doc-manifest's in-scope set, failing loudly on a gap. Do not build the lastCheckedCommit half. Delete the rubric's ledger paragraph or rewrite it to describe the stamp.
 - [ ] **2. Full scope ledger** — Build the full scope ledger as `docs/doc-review-guidelines.md` specifies — content-hash item keys mapped to { lastCheckedCommit, lastCheckedAt }, persisted as a sidecar under `.audit-tools/nightly/` — so leg 1 gets both coverage accounting and the diff-window scoping the rubric wants it for.
 - [ ] **3. Delete the section** — Delete the 'Item keying & the ledger (incremental scope)' section from `docs/doc-review-guidelines.md`. The ledger is not going to be built; a rubric that describes a mechanism nobody implemented is worse than one that admits leg 1 coverage is unmeasured.
 - [ ] **4. Leave it** — Leave leg 1 without coverage accounting and leave the rubric section standing. The orchestrating agent catching the gap by hand tonight is good enough.
@@ -277,7 +277,7 @@ Leg 3 proposes P21: extend `.claude/hooks/shell-trap-guard.mjs`'s buffering-pipe
 
 ### Your answer
 
-- [ ] **1. Ship P21 as DENY** — Apply the P21 patch: extend the existing buffering-pipe rule with a `codex exec` / `agy -p` matcher as a hard DENY, with the `AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1` escape hatch and the red-green tests in `tests/shared/hook-trap-guards.test.ts`. Same treatment the sibling suite rule already gets.
+- [x] **1. Ship P21 as DENY** — Apply the P21 patch: extend the existing buffering-pipe rule with a `codex exec` / `agy -p` matcher as a hard DENY, with the `AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH=1` escape hatch and the red-green tests in `tests/shared/hook-trap-guards.test.ts`. Same treatment the sibling suite rule already gets.
 - [ ] **2. Advisory first** — Ship P21 as a warning rather than a DENY. Two incidents on two dates does not yet justify blocking; promote it to DENY if it is read past and the trap recurs — the same escalation path the suite rule itself went through.
 - [ ] **3. Leave it** — Do not add the rule. Two incidents is below the bar for new friction on the dispatch lanes; revisit if it recurs.
 - [ ] **4. Widen instead** — Do not special-case peer CLIs. Instead widen the existing rule to any long-running command piped into a buffering filter, so the guard stops maintaining a list of command families it has to keep chasing.
@@ -328,7 +328,7 @@ This is the same shape as a problem already fixed once for the backlog leg, wher
 
 ### Your answer
 
-- [ ] **1. Carve out hooks** — Narrow the record-path rule so `.claude/hooks/` is treated as ordinary tracked source and may carry premise probes, while the rest of `.claude` (the decisions ledger, settings, skill write-ups) stays banned as a record channel.
+- [x] **1. Carve out hooks** — Narrow the record-path rule so `.claude/hooks/` is treated as ordinary tracked source and may carry premise probes, while the rest of `.claude` (the decisions ledger, settings, skill write-ups) stays banned as a record channel.
 - [ ] **2. Whole-list rethink** — Do not special-case hooks. Re-derive `RECORD_PATH_PREFIXES` from what a record actually is — a file that QUOTES code rather than being code — and apply that test to every prefix on the list, rather than patching the one case that bit.
 - [ ] **3. Leave it** — Leave the ban as-is. Hook items can probe their contract tests under `tests/` instead; the weaker auto-close on those items is an acceptable cost for keeping the record-path rule simple.
 - [ ] **Other** — record what I write in Notes below.

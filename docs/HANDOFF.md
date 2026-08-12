@@ -9,7 +9,7 @@
   provider-neutral host workloads and ingests bound results; provider adapters, routing, quota
   accounting, backend sizing, and internal worker execution are retired.
 - Old audit/remediation run artifacts are cleared; the artifact dir holds only the tracked
-  deliverable pairs and the nightly queue. The tree is ready for a fresh dogfood run.
+  deliverable pairs and the open decision queue. The tree is ready for a fresh dogfood run.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
