@@ -283,3 +283,80 @@ describe("record-path probes are refused by direction, not outright", () => {
     expect(open).toHaveLength(1);
   });
 });
+
+// sol-5 (owner decision 2026-08-12): `.claude/hooks/**` is executable guard
+// source, not a record — it has contract tests under tests/ and a declared
+// reach registry — so a probe there checks the premise itself, not a record
+// quoting it. The carve-out is NARROW: the rest of `.claude` (decisions
+// ledger, settings, skill write-ups) stays a record channel, and the
+// move/rename search domain admits hooks while still excluding those records.
+describe(".claude/hooks is probe-able source; the rest of .claude stays a record", () => {
+  const HOOK = ".claude/hooks/guard.mjs";
+  const FRAGMENT = "const RULE_X";
+
+  /** A hook carrying a rule, and a skill write-up QUOTING the same fragment. */
+  function seedHook(): void {
+    mkdirSync(join(root, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(root, HOOK), `${FRAGMENT} = /x/;\n`);
+    mkdirSync(join(root, ".claude", "skills", "s"), { recursive: true });
+    writeFileSync(join(root, ".claude", "skills", "s", "SKILL.md"), `quotes ${FRAGMENT} = /x/;\n`);
+    git("add", "-A");
+    git("commit", "-qm", "hooks");
+  }
+
+  it("treats a live hook fragment as an ordinary open premise", () => {
+    seedHook();
+    const { status, probes } = evaluateProbes(root, {
+      premise_probes: [{ file: HOOK, contains: FRAGMENT }],
+    });
+    expect(probes[0]?.state).toBe("present");
+    expect(status).toBe("open");
+  });
+
+  it("accepts WRITING an ordinary auto-closing item probing a hook", () => {
+    seedHook();
+    const payload = writeOpenItems(root, {
+      items: [
+        {
+          id: "h-1",
+          subject_key: "kh1",
+          premise_probes: [{ file: HOOK, contains: FRAGMENT }],
+        },
+      ],
+    });
+    expect(payload.items).toHaveLength(1);
+  });
+
+  it("closes the hook item when the rule is genuinely deleted — a skill write-up quoting it does not hold it open", () => {
+    seedHook();
+    writeFileSync(join(root, HOOK), "const OTHER = 1;\n");
+    git("add", "-A");
+    git("commit", "-qm", "delete the rule");
+    const { status } = evaluateProbes(root, {
+      premise_probes: [{ file: HOOK, contains: FRAGMENT }],
+    });
+    expect(status).toBe("resolved");
+  });
+
+  it("stays OPEN when the rule merely moved to a sibling hook", () => {
+    seedHook();
+    writeFileSync(join(root, ".claude", "hooks", "other-guard.mjs"), `${FRAGMENT} = /x/;\n`);
+    writeFileSync(join(root, HOOK), "const OTHER = 1;\n");
+    git("add", "-A");
+    git("commit", "-qm", "move the rule");
+    const { status, probes } = evaluateProbes(root, {
+      premise_probes: [{ file: HOOK, contains: FRAGMENT }],
+    });
+    expect(probes[0]?.state).toBe("moved");
+    expect(status).toBe("open");
+  });
+
+  it("still refuses a probe into the rest of .claude (a skill write-up)", () => {
+    seedHook();
+    const { status, probes } = evaluateProbes(root, {
+      premise_probes: [{ file: ".claude/skills/s/SKILL.md", contains: FRAGMENT }],
+    });
+    expect(probes[0]?.state).toBe("untrackable");
+    expect(status).not.toBe("resolved");
+  });
+});

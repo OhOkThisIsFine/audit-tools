@@ -264,8 +264,19 @@ const RECORD_PATH_PREFIXES = [
   '.claude',
 ];
 
+// The one deliberate hole in the `.claude` ban (owner decision sol-5,
+// 2026-08-12): `.claude/hooks/**` is live executable guard source — it has
+// contract tests under tests/ and a declared reach registry — so a probe there
+// checks the premise itself, not a record quoting it. The carve-out is NARROW:
+// every other `.claude` child (decisions ledger, settings, skill write-ups),
+// and any FUTURE child, stays a record channel by default.
+const RECORD_PATH_EXEMPT_PREFIXES = ['.claude/hooks'];
+
 export function isRecordPath(file) {
   const norm = file.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (RECORD_PATH_EXEMPT_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`))) {
+    return false;
+  }
   return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
 }
 
@@ -278,13 +289,21 @@ const PASSING_CONTAINS_STATES = new Set(['present', 'record_present']);
 // The repo-wide move/rename search domain. Exported because the pre-commit
 // HANDOFF parity trigger must use the identical domain when deciding whether a
 // staged pickaxe change can alter a presentation-time probe verdict.
+// Git pathspecs cannot re-include beneath an exclusion, so admitting
+// `.claude/hooks` (sol-5) means enumerating the `.claude` record children here
+// instead of banning the directory whole. Decay direction if a new `.claude`
+// child appears before it is listed: it enters this search domain, so its
+// quotes read as 'moved' (items stay open) and the pre-commit parity trigger
+// over-fires — both the safe direction, never a mis-close.
 export const PREMISE_GREP_PATHSPECS = [
   ':!.audit-tools/nightly',
   ':!docs/backlog',
   ':!docs/nightly-inbox.md',
   ':!docs/reviews',
   ':!docs/HANDOFF.md',
-  ':!.claude',
+  ':!.claude/nightly-decisions.json',
+  ':!.claude/settings.json',
+  ':!.claude/skills',
 ];
 
 // `git ls-files --error-unmatch` exits non-zero for an untracked path, so the
