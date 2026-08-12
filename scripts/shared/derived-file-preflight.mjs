@@ -168,7 +168,7 @@ function scriptWired(root, script) {
 }
 
 /** Which of the four checks the gate would run for this staged set. */
-export function evaluateTriggeredChecks({ root, staged, git }) {
+export function evaluateTriggeredChecks({ root, staged, git = (args) => gitRun(root, args) }) {
   const triggered = [];
   if (staged.some(pinsDocManifest)) triggered.push('doc-manifest');
   triggered.push('guard-reach'); // unconditional when wired — see above
@@ -184,7 +184,7 @@ export function evaluateTriggeredChecks({ root, staged, git }) {
  * a repo un-attestable. Returns { failures, skipped }; the caller refuses to
  * bind when failures is non-empty.
  */
-export function runDerivedFilePreflight({ root, staged, git }) {
+export function runDerivedFilePreflight({ root, staged, git = (args) => gitRun(root, args) }) {
   const failures = [];
   const skipped = [];
   for (const check of evaluateTriggeredChecks({ root, staged, git })) {

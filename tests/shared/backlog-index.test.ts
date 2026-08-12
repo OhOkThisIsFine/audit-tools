@@ -34,6 +34,7 @@ import {
   renderIndex,
   spliceIndex,
 } from '../../scripts/shared/generate-backlog-index.mjs';
+import { pinsBacklogIndex } from '../../scripts/shared/derived-file-preflight.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const GATE = join(REPO_ROOT, '.claude', 'hooks', 'pre-commit-gate.mjs');
@@ -151,9 +152,13 @@ describe('the gate fires at COMMIT, not only in verify:checks', () => {
   it('it triggers on docs/backlog.md AND on any docs/backlog/*.md', () => {
     // Both directions stale the index: editing a backlog file moves the
     // anchors, and editing docs/backlog.md can clobber the block itself.
-    const fn = gate.slice(gate.indexOf('const pinsBacklogIndex'));
-    expect(fn).toContain("'docs/backlog.md'");
-    expect(fn).toMatch(/docs\\\/backlog\\\/\[\^\/\]\+\\\.md/);
+    // pinsBacklogIndex is single-sourced in scripts/shared/derived-file-preflight.mjs
+    // (P19) — the gate only imports it, so assert the import plus the predicate's
+    // own behavior instead of grepping a local declaration that no longer exists.
+    expect(gate).toContain('derived-file-preflight.mjs');
+    expect(pinsBacklogIndex('docs/backlog.md')).toBe(true);
+    expect(pinsBacklogIndex('docs/backlog/open-bugs.md')).toBe(true);
+    expect(pinsBacklogIndex('docs/backlog/sub/deep.md')).toBe(false);
   });
 
   it('is wired into verify:checks as well', () => {

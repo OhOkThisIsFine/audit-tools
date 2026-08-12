@@ -7,7 +7,7 @@
 
 - The zero-adapter retirement is LANDED on `main` and published (v0.40.1); audit-tools emits
   complete provider-neutral host workloads and ingests bound results.
-- 2026-08-12: all 19 nightly decisions were answered and recorded; the executable ones landed
+- 2026-08-12: the day's decision queue was answered in full; the executable items landed
   (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch).
   Four owner-approved BUILDS remain queued — see Immediate next.
 - The dogfood audit lap is IN FLIGHT and deliberately PAUSED at the `dispatch_review` step:

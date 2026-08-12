@@ -248,6 +248,13 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `npm test | grep …; echo $?`, which reports grep's status — is REFUSED by the shell-trap guard
   (escape hatches: `pipefail`/`PIPESTATUS` in the command, or `AUDIT_TOOLS_ALLOW_MASKED_EXIT=1`); the
   redirect form above is not detectable without false positives, so it stays yours.)
+  ⚠ The BACKGROUND variant bit on 2026-08-12 and is one level sneakier: `suite > log; echo "EXIT=$?"`
+  run as a background task ends with the echo, so the harness completion notice reads "exit code 0"
+  for a RED suite — the real status lives only in the task's unread stdout, and the log held two
+  TS2345 errors nobody opened before "green" was claimed (CI caught it). In a background task let
+  the suite's exit BE the command's exit (`suite > log 2>&1`, no trailing echo), then read the log
+  on a non-zero notice. Enforceable half, not yet enforced: the shell-trap guard sees the Bash tool
+  payload and could refuse a `; echo` / `; $?`-swallowing tail on a backgrounded verify command.
 
 - **Global `-g` install BLOCKS `postinstall`** (npm 12 `allowScripts`) → the host-integration deploy
   (`~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.gemini`) never runs. npm *does* warn on stderr and
