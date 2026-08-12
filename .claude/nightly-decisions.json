@@ -880,7 +880,9 @@
     "answer": "Remove the path: results arrive only through a validating tool-owned submit, fan-out records its expected shard set at dispatch. BUT also build a designed hand-recovery mechanism — a validated hand-submit lane for rescuing a stuck run — rather than losing recovery entirely. (Owner, 2026-08-12: 'Remove the path, use validating submission, but also build in a mechanism to enable hand recovery.')",
     "subject": "Host results arrive by a guessable file path, so a wrong filename, a missing file and a clean empty result are all shaped like success — 9 of 10 lanes drifted",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T15:01:11.064Z"
+    "decided_at": "2026-08-12T15:01:11.064Z",
+    "completed_at": "2026-08-12T22:32:59.838Z",
+    "completed_ref": "P25 shipped: 94f1a4d0 + 64a9a6f0, v0.41.0 — incoming/ deleted, tool-bound submissions/ paths, expected-set shortfall reporting, drift ledger, recovery-only verb"
   },
   "820ba9986b5c61ec": {
     "disposition": "settled",
