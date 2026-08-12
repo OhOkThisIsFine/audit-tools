@@ -7,6 +7,10 @@ import {
   AccessDeclarationSchema,
 } from "audit-tools/shared";
 import type { AccessDeclaration, StepStatus } from "audit-tools/shared";
+import {
+  LaneSubmissionShortfallSchema,
+  type LaneSubmissionShortfall,
+} from "./laneSubmissions.js";
 
 export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
 
@@ -86,6 +90,13 @@ export const StepArtifactSchema = z
     artifacts_dir: z.string(),
     artifact_paths: z.record(z.string(), z.string().nullable()),
     access: AccessDeclarationSchema.optional(),
+    /**
+     * What a PREVIOUS emission of this step's lanes is still owed, by lane and
+     * issue code. Present only when something is actually outstanding, so an
+     * automated consumer reads the shortfall off the contract instead of
+     * diffing two identical-looking steps.
+     */
+    submission_shortfall: LaneSubmissionShortfallSchema.optional(),
   })
   .strict();
 export type StepArtifact = z.infer<typeof StepArtifactSchema>;
@@ -142,6 +153,7 @@ export async function writeCurrentStep(params: {
   artifactPaths: Record<string, string | null>;
   prompt: string;
   access?: AccessDeclaration;
+  submissionShortfall?: LaneSubmissionShortfall;
 }): Promise<StepArtifact> {
   const echo = scopeEchoLine(params.artifactsDir);
   return writeStepContract<StepArtifact, StepKind, string | null>({
@@ -163,6 +175,12 @@ export async function writeCurrentStep(params: {
         ? { allowed_mcp_tools: params.allowedMcpTools }
         : {}),
       ...(params.access ? { access: params.access } : {}),
+      // Omitted when nothing is outstanding: a field that is always present
+      // reads as noise, while its presence IS the statement.
+      ...(params.submissionShortfall &&
+      params.submissionShortfall.outstanding.length > 0
+        ? { submission_shortfall: params.submissionShortfall }
+        : {}),
     },
   });
 }

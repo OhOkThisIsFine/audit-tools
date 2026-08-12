@@ -58,7 +58,7 @@ const ActiveReviewRunSchema = z
 
 const HandoffArtifactPathsSchema = z
   .object({
-    incoming_dir: z.string(),
+    operator_inputs_dir: z.string(),
     operator_handoff_json: z.string(),
     operator_handoff_markdown: z.string(),
     session_config: z.string(),

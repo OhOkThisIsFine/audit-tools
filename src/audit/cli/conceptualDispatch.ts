@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   type IntentCheckpoint,
   charterReviewDisposition,
@@ -12,6 +10,16 @@ import {
   renderConceptualJudgePrompt,
   selectPerspectives,
 } from "../orchestrator/designReviewPrompt.js";
+import { materializeFanoutLanes } from "./fanoutLanes.js";
+import type { FanoutLaneSpec } from "./fanoutLanes.js";
+import {
+  AUDIT_GATE_SUBMISSION_SCOPE,
+  GATE_LANES,
+  conceptualPerspectiveLane,
+  conceptualRoundToken,
+  laneSubmissionPath,
+  type LaneSubmissionShortfall,
+} from "./laneSubmissions.js";
 
 export interface ConceptualReviewSettings {
   max_units?: number;
@@ -118,6 +126,8 @@ export interface ConceptualDispatch {
   readPaths: string[];
   /** Result files the host's subagents write. */
   writePaths: string[];
+  /** What a previous emission of this pass's lanes is still owed. */
+  shortfall: LaneSubmissionShortfall;
 }
 
 /**
@@ -147,22 +157,31 @@ export async function prepareConceptualDispatch(opts: {
   const reReviewSuffix = opts.reReviewSection
     ? `\n\n${opts.reReviewSection}`
     : "";
-  const incoming = join(artifactsDir, "incoming");
-  await mkdir(incoming, { recursive: true });
-  const conceptualResultsPath = join(
-    incoming,
-    "design-review-conceptual-findings.json",
+  // The single conceptual submission the orchestrator ingests — written by the
+  // lone reviewer when shallow, by the independent judge when deep. Either way
+  // it is the `design_review_conceptual` LANE, so the gate reads one bound path
+  // and the state machine is unchanged by the depth choice.
+  const conceptualResultsPath = laneSubmissionPath(
+    artifactsDir,
+    GATE_LANES.design_review_conceptual,
   );
   const reviewOptions: DesignReviewOptions = { max_units: settings.max_units };
 
   if (settings.conceptual_depth !== "deep") {
-    const conceptualPromptPath = join(
-      incoming,
-      "design-review-conceptual-prompt.md",
-    );
-    const conceptualPromptText =
-      renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix;
-    await writeFile(conceptualPromptPath, conceptualPromptText, "utf8");
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
+      lanes: [
+        {
+          id: GATE_LANES.design_review_conceptual,
+          label: "Conceptual review (generative)",
+          promptFilename: "design-review-conceptual-prompt.md",
+          promptText:
+            renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
+        },
+      ],
+    });
+    const conceptualPromptPath = fanout.lanes[0]!.promptPath;
     return {
       deep: false,
       conceptualResultsPath,
@@ -176,49 +195,89 @@ export async function prepareConceptualDispatch(opts: {
       },
       readPaths: [conceptualPromptPath],
       writePaths: [conceptualResultsPath],
+      shortfall: fanout.shortfall,
     };
   }
 
   // Deep: real fan-out — N perspective subagents + an independent judge.
+  // Every one of them is a LANE through the same materializer the rest of the
+  // audit uses; this pass used to mint its own filenames, which is precisely how
+  // a second naming convention (and a second way for a host to mistype one)
+  // came to exist.
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
+  const perspectiveTexts = perspectives.map((p, i) =>
+    renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions),
+  );
+  // The round the perspectives are being asked about: the prompts themselves
+  // (the whole upstream projection each perspective reads) plus the judge's
+  // re-review section, which is present exactly when this is a re-review after
+  // staleness. A fresh round therefore mints fresh lane ids and fresh prompts;
+  // an unchanged one re-declares the identical bound paths.
+  const roundToken = conceptualRoundToken([
+    ...perspectiveTexts,
+    opts.reReviewSection ?? "",
+  ]);
   const perspectiveFiles: Array<{
     name: string;
-    promptPath: string;
+    lane: string;
+    promptFilename: string;
+    promptText: string;
     resultsPath: string;
-  }> = [];
-  for (let i = 0; i < total; i++) {
-    const p = perspectives[i];
-    const promptPath = join(
-      incoming,
-      `design-review-conceptual-p${i + 1}-prompt.md`,
-    );
-    const resultsPath = join(
-      incoming,
-      `design-review-conceptual-p${i + 1}-findings.json`,
-    );
-    const promptText = renderConceptualPerspectivePrompt(
-      bundle,
-      p,
-      i,
-      total,
-      reviewOptions,
-    );
-    await writeFile(promptPath, promptText, "utf8");
-    perspectiveFiles.push({ name: p.name, promptPath, resultsPath });
-  }
+  }> = perspectives.map((p, i) => {
+    const lane = conceptualPerspectiveLane(i + 1, roundToken);
+    return {
+      name: p.name,
+      lane,
+      promptFilename: `design-review-conceptual-p${i + 1}-prompt.md`,
+      promptText: perspectiveTexts[i]!,
+      resultsPath: laneSubmissionPath(
+        artifactsDir,
+        lane,
+        AUDIT_GATE_SUBMISSION_SCOPE,
+      ),
+    };
+  });
 
-  const judgePromptPath = join(
-    incoming,
-    "design-review-conceptual-judge-prompt.md",
-  );
   const judgePromptText =
     renderConceptualJudgePrompt(
       perspectiveFiles.map((f) => ({ name: f.name, path: f.resultsPath })),
     ) + reReviewSuffix;
-  await writeFile(judgePromptPath, judgePromptText, "utf8");
 
-  const perspectiveLines = perspectiveFiles.map(
+  const laneSpecs: FanoutLaneSpec[] = [
+    ...perspectiveFiles.map((f) => ({
+      id: f.lane,
+      label: `Conceptual perspective — ${f.name}`,
+      promptFilename: f.promptFilename,
+      promptText: f.promptText,
+      // A perspective's findings are read by the JUDGE, never by this tool —
+      // so the tool is owed nothing here and must not record an expectation it
+      // will never satisfy. The bound path is still minted and declared below.
+      expected: false,
+    })),
+    {
+      // The judge PRODUCES the conceptual submission, so it is that lane — a
+      // separate judge lane id would mint a bound path nothing reads.
+      id: GATE_LANES.design_review_conceptual,
+      label: "Conceptual review judge (independent merge)",
+      promptFilename: "design-review-conceptual-judge-prompt.md",
+      promptText: judgePromptText,
+    },
+  ];
+  const fanout = await materializeFanoutLanes({
+    artifactsDir,
+    runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    lanes: laneSpecs,
+  });
+  const promptPathFor = (laneId: string): string =>
+    fanout.lanes.find((lane) => lane.id === laneId)!.promptPath;
+  const judgePromptPath = promptPathFor(GATE_LANES.design_review_conceptual);
+  const perspectivePrompts = perspectiveFiles.map((f) => ({
+    ...f,
+    promptPath: promptPathFor(f.lane),
+  }));
+
+  const perspectiveLines = perspectivePrompts.map(
     (f, i) =>
       `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
   );
@@ -227,7 +286,7 @@ export async function prepareConceptualDispatch(opts: {
     conceptual_results: conceptualResultsPath,
     conceptual_judge_prompt: judgePromptPath,
   };
-  perspectiveFiles.forEach((f, i) => {
+  perspectivePrompts.forEach((f, i) => {
     artifactPaths[`conceptual_perspective_${i + 1}_prompt`] = f.promptPath;
     artifactPaths[`conceptual_perspective_${i + 1}_results`] = f.resultsPath;
   });
@@ -247,13 +306,14 @@ export async function prepareConceptualDispatch(opts: {
     // Perspective result files must be in readPaths: the judge subagent reads
     // them to merge and synthesise the final output (COR-60ca1f72).
     readPaths: [
-      ...perspectiveFiles.map((f) => f.promptPath),
-      ...perspectiveFiles.map((f) => f.resultsPath),
+      ...perspectivePrompts.map((f) => f.promptPath),
+      ...perspectivePrompts.map((f) => f.resultsPath),
       judgePromptPath,
     ],
     writePaths: [
-      ...perspectiveFiles.map((f) => f.resultsPath),
+      ...perspectivePrompts.map((f) => f.resultsPath),
       conceptualResultsPath,
     ],
+    shortfall: fanout.shortfall,
   };
 }

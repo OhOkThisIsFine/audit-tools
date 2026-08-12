@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { readJsonFile } from "audit-tools/shared";
+import { readJsonFile, type SubmissionIssue } from "audit-tools/shared";
 
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AuditTask } from "../types.js";
@@ -36,6 +36,31 @@ function toHostTask(task: AuditTask): AuditHostTask {
 }
 
 /**
+ * The classified failures of the ingest that just ran, stated to the host that
+ * has to repair them. Same section the remediate draw already renders from the
+ * same shared vocabulary — a work item whose result never arrived, would not
+ * parse, or failed the contract is NAMED here instead of silently reappearing
+ * in an identical workload.
+ */
+function renderIngestIssueLines(
+  issues: readonly SubmissionIssue[],
+): string[] {
+  if (issues.length === 0) return [];
+  return [
+    "## Result status requiring attention",
+    "",
+    ...issues.map(
+      (issue) =>
+        `- ${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
+        `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`,
+    ),
+    "",
+    "Repair or complete only the named results at their existing bound paths; the workload and its bindings are unchanged.",
+    "",
+  ];
+}
+
+/**
  * Publish the complete provider-neutral semantic-review workload. The host owns
  * every execution choice; audit-tools only binds prompts/results and ingests
  * validated AuditResult objects on the next invocation.
@@ -46,6 +71,8 @@ export async function renderSemanticReviewStep(params: {
   activeReviewRun: ActiveReviewRun;
   selectedExecutor?: string | null;
   inProcessMadeProgress?: boolean;
+  /** Failures the ingest that preceded this emission classified. */
+  ingestIssues?: readonly SubmissionIssue[];
 }): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
   if (!activeReviewRun.pending_audit_tasks_path) {
@@ -67,6 +94,7 @@ export async function renderSemanticReviewStep(params: {
   const resultPaths = handoff.workload.work_items.map((item) =>
     resolve(root, item.result_path),
   );
+  const issues = params.ingestIssues ?? [];
 
   return writeCurrentStep({
     artifactsDir,
@@ -78,7 +106,10 @@ export async function renderSemanticReviewStep(params: {
     progress: {
       summary:
         `Published ${handoff.workload.work_items.length} pending semantic-review ` +
-        `work item(s) for host execution.`,
+        `work item(s) for host execution.` +
+        (issues.length > 0
+          ? ` ${issues.length} prior submission(s) could not be accepted — see "Result status requiring attention".`
+          : ""),
       pending_tasks: handoff.workload.work_items.length,
       completed_tasks: tasks.length - handoff.workload.work_items.length,
     },
@@ -94,6 +125,7 @@ export async function renderSemanticReviewStep(params: {
     prompt: [
       "# audit-code semantic review",
       "",
+      ...renderIngestIssueLines(issues),
       `Read the complete provider-neutral workload at: ${handoff.workload_path}`,
       "",
       "Execute every work item using the host facilities available in this conversation.",

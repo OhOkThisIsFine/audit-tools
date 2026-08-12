@@ -239,8 +239,12 @@ test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e
     expect(warnings.length, "warn must be called exactly once").toBe(1);
     expect(warnings[0], "warn message must mention audit-findings.json").toMatch(/audit-findings\.json/);
     expect(warnings[0], "warn message must include the error text").toMatch(/ENOENT/);
-    // Both copies were attempted (report first, then the failing findings copy).
-    expect(copyCallCount, "both copies must be attempted").toBe(2);
+    // Every copy was attempted, in order and independently: the report, then
+    // the failing findings contract, then the submission ledger (the durable
+    // drift/repair record, archived out of the tree before it is destroyed).
+    // A failure in one must not skip the others — that is what "best-effort"
+    // has to mean here, since each rescues a different deliverable.
+    expect(copyCallCount, "report, findings, and ledger copies are each attempted").toBe(3);
   });
 });
 

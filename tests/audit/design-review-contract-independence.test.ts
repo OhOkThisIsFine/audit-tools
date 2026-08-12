@@ -25,6 +25,23 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
 const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+
+/**
+ * The contract pass's bound submission path, asked of the tool rather than
+ * re-spelled. Post-P25 the name is a digest, so a shape-only assertion
+ * (`/submissions/<hex>.json`) would pass for ANY lane's submission — it proves
+ * the naming scheme and loses the identity. This asserts the exact path the
+ * `design_review_contract` LANE binds.
+ */
+function contractSubmissionPath(artifactsDir: string): string {
+  return laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract).replace(
+    /\\/g,
+    "/",
+  );
+}
 
 interface DesignReviewStep {
   step_kind: string;
@@ -115,13 +132,18 @@ test(
         packetPath,
         "solo contract pass must emit a worker packet (contract_prompt), not review inline",
       ).toBeTruthy();
-      expect(endsWithPath(packetPath, "incoming/design-review-contract-prompt.md")).toBe(true);
+      expect(endsWithPath(packetPath, "lanes/design-review-contract-prompt.md")).toBe(true);
 
       const packet = await readFile(packetPath, "utf8");
       expect(packet).toContain("Project contract review (adversarial pass)");
-      // Separator-agnostic: the packet embeds the OS-native results path, while
-      // the step contract forward-slashes every host-facing path field.
-      expect(packet).toContain("design-review-contract-findings.json");
+      // Post-P25 the packet embeds the TOOL-COMPUTED submission path, not a
+      // filename a worker could retype. Separator-agnostic: the packet carries
+      // the OS-native path, while the step contract forward-slashes every
+      // host-facing field.
+      expect(packet.replaceAll("\\", "/")).toContain(
+        contractSubmissionPath(artifactsDir),
+      );
+      expect(packet).not.toContain("design-review-contract-findings.json");
       // Advance-free: the same double-driver guard the parallel branch carries.
       expect(packet).not.toContain("Then run:");
 
@@ -138,16 +160,14 @@ test(
       // Packet readable / results writable are pre-declared, as in the parallel branch.
       expect(
         (step.access?.read_paths ?? []).some((p) =>
-          endsWithPath(p, "incoming/design-review-contract-prompt.md"),
+          endsWithPath(p, "lanes/design-review-contract-prompt.md"),
         ),
         "the contract packet must be declared readable",
       ).toBe(true);
       expect(
-        (step.access?.write_paths ?? []).some((p) =>
-          endsWithPath(p, "incoming/design-review-contract-findings.json"),
-        ),
-        "the contract results path must be declared writable",
-      ).toBe(true);
+        (step.access?.write_paths ?? []).map((p) => p.replaceAll("\\", "/")),
+        "the contract results path must be declared writable, at the exact path its LANE binds",
+      ).toContain(contractSubmissionPath(artifactsDir));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -182,14 +202,12 @@ test(
 
       expect(
         (step.access?.read_paths ?? []).some((p) =>
-          endsWithPath(p, "incoming/design-review-contract-prompt.md"),
+          endsWithPath(p, "lanes/design-review-contract-prompt.md"),
         ),
       ).toBe(true);
       expect(
-        (step.access?.write_paths ?? []).some((p) =>
-          endsWithPath(p, "incoming/design-review-contract-findings.json"),
-        ),
-      ).toBe(true);
+        (step.access?.write_paths ?? []).map((p) => p.replaceAll("\\", "/")),
+      ).toContain(contractSubmissionPath(artifactsDir));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

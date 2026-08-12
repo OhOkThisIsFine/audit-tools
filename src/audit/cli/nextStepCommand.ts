@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   loadAnalyzerPolicy,
@@ -6,10 +6,22 @@ import {
   applyGuidanceFile,
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
+  laneAssetsDir,
   renderFanoutExecutionLines,
   writeTextFile,
 } from "audit-tools/shared";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
+import {
+  AUDIT_GATE_SUBMISSION_SCOPE,
+  GATE_LANES,
+  charterExtractionLane,
+  charterExtractionPacketFilename,
+  laneSubmissionPath,
+  mergeLaneShortfalls,
+  recordExpectedLanes,
+  renderLaneShortfallLines,
+  type LaneSubmissionShortfall,
+} from "./laneSubmissions.js";
 import { materializeCharterPacket } from "../orchestrator/charterPackets.js";
 import {
   buildEdgeReasoningPrompt,
@@ -74,9 +86,9 @@ import {
   renderEdgeReasoningRejectionNotice,
 } from "./nextStepHelpers.js";
 export {
-  tryConsumeIncoming,
-  consumeArrayIncoming,
-  consumeObjectIncoming,
+  tryConsumeSubmission,
+  consumeArraySubmission,
+  consumeObjectSubmission,
   renderDesignReviewRejectionNotice,
   renderEdgeReasoningRejectionNotice,
   buildTerminalStep,
@@ -101,6 +113,8 @@ interface ContractDispatch {
   artifactPaths: Record<string, string>;
   readPaths: string[];
   writePaths: string[];
+  /** What a previous emission of this pass's lane is still owed. */
+  shortfall: LaneSubmissionShortfall;
 }
 
 /**
@@ -177,25 +191,40 @@ async function prepareContractDispatch(opts: {
   bundle: ArtifactBundle;
   maxUnits: number | undefined;
 }): Promise<ContractDispatch> {
-  const incoming = join(opts.artifactsDir, "incoming");
-  await mkdir(incoming, { recursive: true });
-  const promptPath = join(incoming, "design-review-contract-prompt.md");
-  const resultsPath = join(incoming, "design-review-contract-findings.json");
   const notesSection = await designReviewNotesSection(
     opts.artifactsDir,
     opts.bundle,
     "contract",
   );
-  const promptText = [
-    renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
-    "## Results path",
-    "",
-    'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
-    "",
-    `  ${resultsPath}`,
-    ...(notesSection ? ["", notesSection] : []),
-  ].join("\n");
-  await writeFile(promptPath, promptText, "utf8");
+  // Routed through the lane materializer like every other fan-out: the lane
+  // declares an id and a prompt, and the tool derives where the findings go.
+  // The prompt body renders that bound path rather than a name the worker could
+  // retype — the two used to be the same guessable string.
+  const resultsPath = laneSubmissionPath(
+    opts.artifactsDir,
+    GATE_LANES.design_review_contract,
+  );
+  const fanout = await materializeFanoutLanes({
+    artifactsDir: opts.artifactsDir,
+    runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    lanes: [
+      {
+        id: GATE_LANES.design_review_contract,
+        label: "Contract review (adversarial)",
+        promptFilename: "design-review-contract-prompt.md",
+        promptText: [
+          renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
+          "## Results path",
+          "",
+          'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
+          "",
+          `  ${resultsPath}`,
+          ...(notesSection ? ["", notesSection] : []),
+        ].join("\n"),
+      },
+    ],
+  });
+  const promptPath = fanout.lanes[0]!.promptPath;
 
   return {
     instructionLine:
@@ -206,6 +235,7 @@ async function prepareContractDispatch(opts: {
     },
     readPaths: [promptPath],
     writePaths: [resultsPath],
+    shortfall: fanout.shortfall,
   };
 }
 
@@ -370,9 +400,14 @@ async function cmdNextStepBody(
       conceptualSettings,
     );
 
+    const shortfall = mergeLaneShortfalls([
+      contract.shortfall,
+      conceptual.shortfall,
+    ]);
     const dispatchPrompt = [
       "# Design review — parallel dispatch",
       "",
+      ...renderLaneShortfallLines(shortfall),
       "Run the two design-review passes concurrently. Do not wait for one before starting the other.",
       "",
       `1. ${contract.instructionLine}`,
@@ -402,6 +437,7 @@ async function cmdNextStepBody(
         read_paths: [...contract.readPaths, ...conceptual.readPaths],
         write_paths: [...contract.writePaths, ...conceptual.writePaths],
       },
+      submissionShortfall: shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -423,6 +459,7 @@ async function cmdNextStepBody(
     const dispatchPrompt = [
       "# Design review — contract pass",
       "",
+      ...renderLaneShortfallLines(contract.shortfall),
       contract.instructionLine,
       "",
       "When the contract results have been written, run:",
@@ -446,6 +483,7 @@ async function cmdNextStepBody(
         read_paths: contract.readPaths,
         write_paths: contract.writePaths,
       },
+      submissionShortfall: contract.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -455,7 +493,6 @@ async function cmdNextStepBody(
     // Only the conceptual pass remains — shallow (one agent) or deep (N
     // independent perspective subagents + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const conceptual = await prepareConceptualPass(
@@ -467,6 +504,7 @@ async function cmdNextStepBody(
     const prompt = [
       "# Design review — conceptual pass",
       "",
+      ...renderLaneShortfallLines(conceptual.shortfall),
       conceptual.instructionLines.join("\n"),
       "",
       "When the conceptual results have been written, run:",
@@ -494,6 +532,7 @@ async function cmdNextStepBody(
         read_paths: conceptual.readPaths,
         write_paths: conceptual.writePaths,
       },
+      submissionShortfall: conceptual.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -516,15 +555,11 @@ async function cmdNextStepBody(
     const packetPaths: string[] = [];
     const laneSpecs = await Promise.all(
       kinds.map(async (kind) => {
-        const submissionPath = join(
-          artifactsDir,
-          "incoming",
-          `charter-extraction-${kind}.json`,
-        );
+        const lane = charterExtractionLane(kind);
+        const submissionPath = laneSubmissionPath(artifactsDir, lane);
         const packetPath = join(
-          artifactsDir,
-          "incoming",
-          `charter-extraction-${kind}-packet.md`,
+          laneAssetsDir(artifactsDir),
+          charterExtractionPacketFilename(kind),
         );
         await writeTextFile(
           packetPath,
@@ -532,10 +567,9 @@ async function cmdNextStepBody(
         );
         packetPaths.push(packetPath);
         return {
-          id: `charter_extraction_${kind}`,
+          id: lane,
           label: `Charter ${kind} author (blind lane)`,
           promptFilename: `charter-extraction-${kind}-prompt.md`,
-          resultFilename: `charter-extraction-${kind}.json`,
           promptText: renderCharterKindLanePrompt(result.bundle, {
             kind,
             submissionPath,
@@ -546,6 +580,7 @@ async function cmdNextStepBody(
     );
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: laneSpecs,
     });
     const completedLanes = fanout.lanes.filter((lane) => lane.resultExists);
@@ -562,6 +597,7 @@ async function cmdNextStepBody(
       prompt: [
         "# audit-code charter extraction (per-kind blind lanes)",
         "",
+        ...renderLaneShortfallLines(fanout.shortfall),
         "Each charter kind is authored by its OWN blind lane: a lane must not see another lane's prompt or output, so the later stated↔revealed delta is genuine disagreement rather than one author's self-consistent story. The tool merges the per-kind submissions at ingest.",
         "",
         ...renderFanoutExecutionLines({
@@ -593,6 +629,7 @@ async function cmdNextStepBody(
         read_paths: [...fanout.readPaths, ...packetPaths],
         write_paths: fanout.writePaths,
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -606,16 +643,16 @@ async function cmdNextStepBody(
     // produced ≥1 subsystem (charter_register.deltas_pending).
     // Always-materialized (design resolution 2): the miner prompt is a lane FILE.
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const submissionPath = join(artifactsDir, "incoming", "charter-delta.json");
+    const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_delta);
     const lanePrompt = renderCharterDeltaPrompt(result.bundle, { submissionPath });
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: "charter_delta",
+          id: GATE_LANES.charter_delta,
           label: "Independent charter delta-miner",
           promptFilename: "charter-delta-prompt.md",
-          resultFilename: "charter-delta.json",
           promptText: lanePrompt,
         },
       ],
@@ -633,6 +670,7 @@ async function cmdNextStepBody(
       prompt: [
         "# audit-code charter delta-mining",
         "",
+        ...renderLaneShortfallLines(fanout.shortfall),
         "The assembled charters are ready for the INDEPENDENT delta-miner (it did not author them).",
         "",
         ...renderFanoutExecutionLines({
@@ -660,6 +698,7 @@ async function cmdNextStepBody(
         ],
         write_paths: fanout.writePaths,
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -672,10 +711,22 @@ async function cmdNextStepBody(
     // answers back; the executor applies them + re-splits (interruptible: unanswered
     // questions leave-open). Only reached at a deep+ ceiling with attention > 0 and
     // ≥1 open interactive question.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const answersPath = join(artifactsDir, "incoming", "charter-clarification.json");
+    const answersPath = laneSubmissionPath(
+      artifactsDir,
+      GATE_LANES.charter_clarification,
+    );
     const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
+    const clarificationPrompt = renderCharterClarificationPrompt(result.bundle, {
+      answersPath,
+      continueCommand,
+      ceiling,
+    });
+    const shortfall = await recordExpectedLanes(
+      artifactsDir,
+      AUDIT_GATE_SUBMISSION_SCOPE,
+      [{ lane: GATE_LANES.charter_clarification, promptText: clarificationPrompt }],
+    );
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "charter_clarification",
@@ -688,15 +739,15 @@ async function cmdNextStepBody(
       artifactPaths: {
         charter_clarification_answers: answersPath,
       },
-      prompt: renderCharterClarificationPrompt(result.bundle, {
-        answersPath,
-        continueCommand,
-        ceiling,
-      }),
+      prompt: [
+        ...renderLaneShortfallLines(shortfall),
+        clarificationPrompt,
+      ].join("\n"),
       access: {
         read_paths: [join(artifactsDir, "charter_clarification.json")],
         write_paths: [answersPath],
       },
+      submissionShortfall: shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -709,7 +760,10 @@ async function cmdNextStepBody(
     // the round's improvement findings (true-lens) back, and the executor folds them
     // + decides convergence. An empty submission converges the loop.
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const submissionPath = join(artifactsDir, "incoming", "systemic-challenge.json");
+    const submissionPath = laneSubmissionPath(
+      artifactsDir,
+      GATE_LANES.systemic_challenge,
+    );
     const metrics =
       result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
     const adversaryPrompt = renderSecondOrderAdversaryPrompt({
@@ -722,12 +776,12 @@ async function cmdNextStepBody(
     // FILE — the adversary is a SEPARATE agent by lane class, on every host.
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: "systemic_challenge",
+          id: GATE_LANES.systemic_challenge,
           label: "Second-order adversary (improvement-seeking challenge)",
           promptFilename: "systemic-challenge-prompt.md",
-          resultFilename: "systemic-challenge.json",
           promptText: adversaryPrompt,
         },
       ],
@@ -745,6 +799,7 @@ async function cmdNextStepBody(
       prompt: [
         "# audit-code systemic challenge (second-order adversary)",
         "",
+        ...renderLaneShortfallLines(fanout.shortfall),
         "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
         "",
         ...renderFanoutExecutionLines({
@@ -774,6 +829,7 @@ async function cmdNextStepBody(
         ],
         write_paths: fanout.writePaths,
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -812,13 +868,21 @@ async function cmdNextStepBody(
   }
 
   if (result.kind === "analyzer_consent") {
-    const decisionsPath = join(
+    const decisionsPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "analyzer-consent-decisions.json",
+      GATE_LANES.analyzer_consent,
     );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
+    const consentPrompt = renderAnalyzerConsentPrompt({
+      pending: result.pending,
+      decisionsPath,
+      continueCommand,
+    });
+    const shortfall = await recordExpectedLanes(
+      artifactsDir,
+      AUDIT_GATE_SUBMISSION_SCOPE,
+      [{ lane: GATE_LANES.analyzer_consent, promptText: consentPrompt }],
+    );
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "analyzer_consent",
@@ -831,24 +895,29 @@ async function cmdNextStepBody(
       artifactPaths: {
         analyzer_consent_decisions: decisionsPath,
       },
-      prompt: renderAnalyzerConsentPrompt({
-        pending: result.pending,
-        decisionsPath,
-        continueCommand,
-      }),
+      prompt: [...renderLaneShortfallLines(shortfall), consentPrompt].join("\n"),
+      submissionShortfall: shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   if (result.kind === "analyzer_install") {
-    const decisionsPath = join(
+    const decisionsPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "analyzer-decisions.json",
+      GATE_LANES.analyzer_decisions,
     );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
+    const installPrompt = renderAnalyzerInstallPrompt({
+      unresolved: result.unresolved,
+      decisionsPath,
+      continueCommand,
+    });
+    const shortfall = await recordExpectedLanes(
+      artifactsDir,
+      AUDIT_GATE_SUBMISSION_SCOPE,
+      [{ lane: GATE_LANES.analyzer_decisions, promptText: installPrompt }],
+    );
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "analyzer_install",
@@ -861,22 +930,17 @@ async function cmdNextStepBody(
       artifactPaths: {
         analyzer_decisions: decisionsPath,
       },
-      prompt: renderAnalyzerInstallPrompt({
-        unresolved: result.unresolved,
-        decisionsPath,
-        continueCommand,
-      }),
+      prompt: [...renderLaneShortfallLines(shortfall), installPrompt].join("\n"),
+      submissionShortfall: shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   if (result.kind === "edge_reasoning") {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const edgeReasoningResultsPath = join(
+    const edgeReasoningResultsPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "edge-reasoning.json",
+      GATE_LANES.edge_reasoning,
     );
     const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = buildEdgeReasoningPrompt(result.candidates);
@@ -894,12 +958,12 @@ async function cmdNextStepBody(
     // step so the K-of-N/result-exists semantics stay single-sourced.
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: "edge_reasoning",
+          id: GATE_LANES.edge_reasoning,
           label: "Edge-reasoning rewrites",
           promptFilename: "edge-reasoning-prompt.md",
-          resultFilename: "edge-reasoning.json",
           promptText: rejectionNotice
             ? `${basePrompt}\n\n${rejectionNotice}`
             : basePrompt,
@@ -907,6 +971,7 @@ async function cmdNextStepBody(
       ],
     });
     const edgeReasoningPromptPath = fanout.lanes[0]!.promptPath;
+    const shortfallLines = renderLaneShortfallLines(fanout.shortfall);
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "edge_reasoning_dispatch",
@@ -917,29 +982,31 @@ async function cmdNextStepBody(
         "Execute the edge-reasoning lane prompt (subagent if available, else yourself), write the rewrites to the results path, then run next-step.",
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
-      prompt: renderEdgeReasoningDispatchPrompt({
-        promptPath: edgeReasoningPromptPath,
-        resultsPath: edgeReasoningResultsPath,
-        continueCommand,
-        contentHash,
-        candidateCount: result.candidates.length,
-      }),
+      prompt: [
+        ...shortfallLines,
+        renderEdgeReasoningDispatchPrompt({
+          promptPath: edgeReasoningPromptPath,
+          resultsPath: edgeReasoningResultsPath,
+          continueCommand,
+          contentHash,
+          candidateCount: result.candidates.length,
+        }),
+      ].join("\n"),
       access: {
         read_paths: [edgeReasoningPromptPath],
         write_paths: [edgeReasoningResultsPath],
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   if (result.kind === "intent_equivalence") {
-    const verdictPath = join(
+    const verdictPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "intent-equivalence-verdict.json",
+      GATE_LANES.intent_equivalence,
     );
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
     const status = deriveIntentEquivalenceStatus(result.bundle);
     const pending =
@@ -994,6 +1061,11 @@ async function cmdNextStepBody(
       `Then run: ${continueCommand}`,
       "",
     ].join("\n");
+    const shortfall = await recordExpectedLanes(
+      artifactsDir,
+      AUDIT_GATE_SUBMISSION_SCOPE,
+      [{ lane: GATE_LANES.intent_equivalence, promptText: fullPrompt }],
+    );
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "intent_equivalence",
@@ -1006,21 +1078,21 @@ async function cmdNextStepBody(
       artifactPaths: {
         intent_equivalence_verdict: verdictPath,
       },
-      prompt: fullPrompt,
+      prompt: [...renderLaneShortfallLines(shortfall), fullPrompt].join("\n"),
       access: {
         read_paths: [],
         write_paths: [verdictPath],
       },
+      submissionShortfall: shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   if (result.kind === "critical_flow_fallback") {
-    const fallbackResultsPath = join(
+    const fallbackResultsPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "critical-flow-fallback.json",
+      GATE_LANES.critical_flow_fallback,
     );
     const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = result.bundle.critical_flows
@@ -1039,12 +1111,12 @@ async function cmdNextStepBody(
     ].join("\n");
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: "critical_flow_fallback",
+          id: GATE_LANES.critical_flow_fallback,
           label: "Critical-flow fallback enrichment",
           promptFilename: "critical-flow-fallback-prompt.md",
-          resultFilename: "critical-flow-fallback.json",
           promptText: lanePrompt,
         },
       ],
@@ -1062,6 +1134,7 @@ async function cmdNextStepBody(
       prompt: [
         "# audit-code critical-flow fallback",
         "",
+        ...renderLaneShortfallLines(fanout.shortfall),
         ...renderFanoutExecutionLines({
           lanes: fanout.pendingLanes.map((lane) => ({
             label: lane.label,
@@ -1084,16 +1157,16 @@ async function cmdNextStepBody(
         read_paths: fanout.readPaths,
         write_paths: fanout.writePaths,
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   if (result.kind === "synthesis_narrative") {
-    const narrativeResultsPath = join(
+    const narrativeResultsPath = laneSubmissionPath(
       artifactsDir,
-      "incoming",
-      "synthesis-narrative.json",
+      GATE_LANES.synthesis_narrative,
     );
     const continueCommand = nextStepCommand(root, artifactsDir);
     const basePrompt = result.bundle.audit_findings
@@ -1113,12 +1186,12 @@ async function cmdNextStepBody(
     ].join("\n");
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
-          id: "synthesis_narrative",
+          id: GATE_LANES.synthesis_narrative,
           label: "Synthesis narrative (themes / exec summary / top risks)",
           promptFilename: "synthesis-narrative-prompt.md",
-          resultFilename: "synthesis-narrative.json",
           promptText: lanePrompt,
         },
       ],
@@ -1136,6 +1209,7 @@ async function cmdNextStepBody(
       prompt: [
         "# audit-code synthesis narrative",
         "",
+        ...renderLaneShortfallLines(fanout.shortfall),
         ...renderFanoutExecutionLines({
           lanes: fanout.pendingLanes.map((lane) => ({
             label: lane.label,
@@ -1158,6 +1232,7 @@ async function cmdNextStepBody(
         read_paths: fanout.readPaths,
         write_paths: fanout.writePaths,
       },
+      submissionShortfall: fanout.shortfall,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -1169,6 +1244,7 @@ async function cmdNextStepBody(
     activeReviewRun: result.activeReviewRun,
     selectedExecutor: result.selectedExecutor,
     inProcessMadeProgress: result.inProcessMadeProgress,
+    ingestIssues: result.ingestIssues,
   });
   console.log(JSON.stringify(step, null, 2));
 }

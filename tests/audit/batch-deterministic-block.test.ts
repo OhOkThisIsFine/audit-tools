@@ -9,6 +9,12 @@ import { test, expect } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
 const { runDeterministicForNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { loadArtifactBundle } = await import("../../src/audit/io/artifacts.js");
 const { ensureSupervisorDirs } = await import("../../src/audit/io/runArtifacts.js");
@@ -53,9 +59,9 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     // would otherwise halt at critical_flow_fallback before reaching the intent
     // checkpoint. Provide an empty host submission (the durable upstream input) so
     // the deterministic block under test folds straight through to confirm_intent.
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
     await writeFile(
-      join(artifactsDir, "incoming", "critical-flow-fallback.json"),
+      laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
 

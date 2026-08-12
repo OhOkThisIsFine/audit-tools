@@ -59,7 +59,6 @@ export async function advancePastDesignReview(
   wrapperOpts: Record<string, unknown> = {},
 ) {
   return walkStepsUntilTerminal({
-    root,
     transport: async () =>
       JSON.parse(
         (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,

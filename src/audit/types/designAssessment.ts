@@ -1,9 +1,10 @@
 import type { Finding } from "../types.js";
 
 /**
- * A design-review incoming submission whose top-level shape did not match
- * "a JSON array of findings" (nor its tolerant single-array-wrapped-object
- * unwrap) — quarantined rather than silently discarded (the
+ * A design-review submission that was refused — its top-level shape did not
+ * match "a JSON array of findings" (nor its tolerant
+ * single-array-wrapped-object unwrap), or there was no assessment to merge it
+ * into yet. Quarantined rather than silently discarded (the
  * `malformed-submission-destroys-work` fix). Recorded on `DesignAssessment`
  * so it survives the same-call `continue` re-derivation and the re-emitted
  * design-review step can name the quarantined file + reason. Cleared for a
@@ -11,8 +12,11 @@ import type { Finding } from "../types.js";
  */
 export interface RejectedDesignReviewSubmission {
   pass: "legacy" | "contract" | "conceptual";
-  /** Original filename under `incoming/` (e.g. `design-review-contract-findings.json`). */
-  filename: string;
+  /**
+   * The lane the submission arrived on. Names the lane, not a filename: the
+   * bound path is a digest, which would tell an operator nothing.
+   */
+  lane: string;
   /** Absolute path the malformed submission was moved to. */
   quarantine_path: string;
   /** Human-readable shape-mismatch description. */

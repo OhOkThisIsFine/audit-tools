@@ -8,6 +8,8 @@ import {
   auditFindingsPath,
   promotedAuditReportPath,
   promotedAuditFindingsPath,
+  readSubmissionLedger,
+  submissionLedgerPath,
 } from "audit-tools/shared";
 import type {
   AuditResult,
@@ -19,7 +21,7 @@ import type {
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, CriticalFlowFallbackResult, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
-import type { AccessMemory } from "audit-tools/shared";
+import type { AccessMemory, SubmissionLedgerEvent } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type {
   ExternalAnalyzerResults,
@@ -161,6 +163,17 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
    * structure executor reads it as the prior cache and returns a refreshed one.
    */
   graph_edge_cache?: GraphEdgeCache;
+  /**
+   * The submission ledger's events, in arrival order. Loaded specially for the
+   * same reason as `agent_reflections`: it is an APPEND-only NDJSON record the
+   * orchestrator only ever reads, so it must never become an
+   * `ARTIFACT_DEFINITIONS` entry a write-back could round-trip (that would drop
+   * events appended after load and re-sort a file whose order is its meaning).
+   * Synthesis renders its per-kind totals, which is what makes "this run
+   * drifted and was repaired" a fact the REPORT states rather than one that
+   * lived only in a transcript.
+   */
+  submission_ledger?: readonly SubmissionLedgerEvent[];
 };
 export type ArtifactBundleKey = keyof ArtifactPayloadMap;
 type ArtifactPhase =
@@ -377,6 +390,12 @@ export async function loadArtifactBundle(
   if (feedbackText !== undefined) {
     bundle.agent_reflections = parseReflectionsNdjson(feedbackText);
   }
+  // The submission ledger rides the same read-only NDJSON seam: absent (a run
+  // where nothing was ever submitted through a gate) reads as nothing to say.
+  const ledger = await readSubmissionLedger(root);
+  if (ledger.length > 0) {
+    bundle.submission_ledger = ledger;
+  }
 
   return bundle;
 }
@@ -469,6 +488,31 @@ export async function promoteFinalAuditReport(params: {
     copyFile: copy,
     warn: (message) => warn(`audit-code: ${message}`),
   });
+  // The submission ledger rides the same seam. It is the only durable statement
+  // that a run drifted and was repaired — a rejection, a re-emit, a hand
+  // recovery — so letting the tree rm take it would mean the distinction
+  // between a clean run and a repaired one survives only in a transcript.
+  // Best-effort: a run that never drifted has no ledger to archive.
+  const ledgerSource = submissionLedgerPath(params.artifactsDir);
+  const ledgerDestination = join(
+    dirname(destination),
+    "audit-submission-ledger.jsonl",
+  );
+  try {
+    await copy(ledgerSource, ledgerDestination, { force: true });
+  } catch (error) {
+    // A missing ledger is the ordinary case (nothing was ever submitted through
+    // a gate) and says nothing. Any OTHER failure means the one durable record
+    // that this run drifted is about to be destroyed by the rm below — so it is
+    // announced, exactly as the friction-archive seam announces its own copy
+    // failures. Still best-effort: bookkeeping must not fail a completed audit.
+    if (!isFileMissingError(error)) {
+      warn(
+        `audit-code: could not archive the submission ledger to ${ledgerDestination}: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
   try {
     await remove(params.artifactsDir, { recursive: true, force: true });
     return { promoted: true, cleaned: true };

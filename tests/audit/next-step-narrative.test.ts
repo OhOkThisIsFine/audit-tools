@@ -120,7 +120,12 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
       throw new TypeError("synthesis narrative artifact paths were not emitted");
     }
     const narrativeResultsPath = paused.artifact_paths.synthesis_narrative_results;
-    expect(narrativeResultsPath).toMatch(/synthesis-narrative\.json$/);
+    // The submission lands at the TOOL-computed path, not a name the host
+    // could type. (The registered `synthesis-narrative.json` artifact the
+    // executor writes afterwards keeps its own name.)
+    expect(String(narrativeResultsPath).replaceAll("\\", "/")).toMatch(
+      /\/submissions\/[0-9a-f]{64}\.json$/u,
+    );
     if (typeof narrativeResultsPath !== "string") {
       throw new TypeError("synthesis narrative results path was not emitted");
     }

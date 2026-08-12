@@ -355,7 +355,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(diagnosed).not.toBe("unsupported_retired_state");
     if (diagnosed === "unsupported_retired_state") return;
     expect(diagnosed.issues.map((issue) => issue.code)).toContain(
-      "result_malformed",
+      "submission_malformed",
     );
   });
 

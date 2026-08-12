@@ -10,8 +10,10 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   writeFileSync,
   readFileSync,
   rmSync,
@@ -19,6 +21,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pendingAnalyzerConsent } from "../../src/audit/orchestrator/hostInputPause.js";
+import { handleAnalyzerConsentBranch } from "../../src/audit/cli/nextStepHelpers.js";
+import {
+  GATE_LANES,
+  laneSubmissionPath,
+} from "../../src/audit/cli/laneSubmissions.js";
+import { readSubmissionLedger } from "../../src/shared/submission/submissionLedger.js";
 import {
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
@@ -149,15 +157,92 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
     const eslint = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "eslint")!;
     const prompt = renderAnalyzerConsentPrompt({
       pending: [eslint],
-      decisionsPath: "X:/artifacts/incoming/analyzer-consent-decisions.json",
+      decisionsPath: "X:/artifacts/submissions/0000000000000000000000000000000000000000000000000000000000000000.json",
       continueCommand: "audit-code next-step",
     });
     expect(prompt).toContain("`eslint`");
     expect(prompt).toContain(eslint.purpose!);
     expect(prompt).toContain("config can execute repo code");
-    expect(prompt).toContain("analyzer-consent-decisions.json");
+    expect(prompt).toContain("X:/artifacts/submissions/0000000000000000000000000000000000000000000000000000000000000000.json");
     expect(prompt).toContain('"eslint": "granted"');
     expect(prompt).toContain("audit-code next-step");
+  });
+});
+
+describe("the consent gate refuses a submission it understands nothing in", () => {
+  /** Plant a decisions submission at the consent lane's tool-owned bound path. */
+  const plant = (artifactsDir: string, body: unknown): string => {
+    const path = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_consent);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(body), "utf8");
+    return path;
+  };
+
+  const driveConsentGate = async (root: string) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    mkdirSync(artifactsDir, { recursive: true });
+    return {
+      artifactsDir,
+      run: () =>
+        handleAnalyzerConsentBranch(
+          {
+            root,
+            artifactsDir,
+            externalAcquisition: { enabled: true },
+          },
+          {} as never,
+          { status: "active", obligations: [] } as never,
+          { value: undefined },
+        ),
+    };
+  };
+
+  it("zero recognized values: quarantined and recorded rejected, never accepted-and-deleted", async () => {
+    const root = nodeRepo();
+    const { artifactsDir, run } = await driveConsentGate(root);
+    // The whole submission answers in a vocabulary the gate does not know.
+    const planted = plant(artifactsDir, { eslint: "yes", knip: "maybe" });
+
+    const branch = await run();
+    expect(branch.action).toBe("continue");
+
+    // The bytes survive: moved to quarantine, never unlinked-and-forgotten.
+    expect(existsSync(planted), "the refused submission must leave its bound path").toBe(
+      false,
+    );
+    const quarantined = readdirSync(join(artifactsDir, "quarantine"));
+    expect(quarantined.some((name) => name.startsWith(GATE_LANES.analyzer_consent))).toBe(
+      true,
+    );
+
+    const events = await readSubmissionLedger(artifactsDir);
+    const outcomes = events.filter((event) => event.kind !== "expected");
+    expect(outcomes.map((event) => event.kind)).toEqual(["rejected"]);
+    expect(outcomes[0]!.issue_code).toBe("submission_contract_invalid");
+
+    // ...and the gate re-asks rather than treating an unusable answer as done.
+    const reEmit = await run();
+    expect(reEmit.action).toBe("return");
+  });
+
+  it("partial recognition still applies the real decisions, naming the ignored keys on the record", async () => {
+    const root = nodeRepo();
+    const { artifactsDir, run } = await driveConsentGate(root);
+    plant(artifactsDir, { eslint: "granted", knip: "maybe" });
+
+    expect((await run()).action).toBe("continue");
+
+    const policy = JSON.parse(readFileSync(getAnalyzerPolicyPath(root), "utf8")) as {
+      analyzer_consent?: Record<string, string>;
+    };
+    expect(policy.analyzer_consent).toEqual({ eslint: "granted" });
+
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(
+      (event) => event.kind === "accepted",
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]!.message, "the dropped key is on the record, not only on stderr")
+      .toContain("knip");
   });
 });
 

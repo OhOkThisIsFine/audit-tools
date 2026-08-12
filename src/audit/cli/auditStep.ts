@@ -61,7 +61,7 @@ export interface RunAuditStepOptions {
   /**
    * Already-validated edge-reasoning rewrites. Parsed + shape-checked by the
    * caller (`handleGraphEnrichmentBranch` tolerant-unwraps or quarantines the
-   * incoming file) — never a raw file path, so no unvalidated cast here.
+   * submission) — never a raw file path, so no unvalidated cast here.
    */
   edgeReasoningResults?: EdgeReasoningResults;
   analyzers?: Record<string, AnalyzerSetting>;

@@ -43,7 +43,7 @@ import {
 } from "../validation/charterGate.js";
 import type { Finding } from "../types/finding.js";
 
-// ── Submission contracts (what the host LLM writes to incoming/) ───────────────
+// ── Submission contracts (what the host LLM writes to its bound path) ───────
 
 /**
  * One teleology node as a lane emits it: a charter statement WITH its file scope

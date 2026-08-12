@@ -105,8 +105,7 @@ export async function buildSyntheticResults(tasks, root, smokeLabel) {
 // answering each pause with scripted host inputs (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review).
-async function advanceToDispatchReady(runNextStep, root, log) {
-  const incomingDir = join(root, ".audit-tools", "audit", "incoming");
+async function advanceToDispatchReady(runNextStep, log) {
   for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
     const step = JSON.parse((await runNextStep()).stdout);
     assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
@@ -114,7 +113,6 @@ async function advanceToDispatchReady(runNextStep, root, log) {
     if (step.step_kind === "critical_flow_fallback") {
       // Deterministic flow inference fell below the confidence bar; answer the
       // host fallback gate with an empty enrichment (nothing to add).
-      await mkdir(incomingDir, { recursive: true });
       await writeFile(
         step.artifact_paths.critical_flow_fallback_results,
         JSON.stringify({ flows: [] }, null, 2) + "\n",
@@ -122,7 +120,6 @@ async function advanceToDispatchReady(runNextStep, root, log) {
       continue;
     }
     if (step.step_kind === "analyzer_consent") {
-      await mkdir(incomingDir, { recursive: true });
       await writeFile(
         step.artifact_paths.analyzer_consent_decisions,
         JSON.stringify({ semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" }, null, 2) + "\n",
@@ -130,7 +127,6 @@ async function advanceToDispatchReady(runNextStep, root, log) {
       continue;
     }
     if (step.step_kind === "analyzer_install") {
-      await mkdir(incomingDir, { recursive: true });
       await writeFile(
         step.artifact_paths.analyzer_decisions,
         JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
@@ -155,23 +151,19 @@ async function advanceToDispatchReady(runNextStep, root, log) {
       continue;
     }
     if (step.step_kind === "design_review_parallel") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(join(incomingDir, "design-review-contract-findings.json"), "[]\n");
-      await writeFile(join(incomingDir, "design-review-conceptual-findings.json"), "[]\n");
+      await writeFile(step.artifact_paths.contract_results, "[]\n");
+      await writeFile(step.artifact_paths.conceptual_results, "[]\n");
       continue;
     }
     if (step.step_kind === "design_review_contract") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(join(incomingDir, "design-review-contract-findings.json"), "[]\n");
+      await writeFile(step.artifact_paths.contract_results, "[]\n");
       continue;
     }
     if (step.step_kind === "design_review_conceptual") {
-      await mkdir(incomingDir, { recursive: true });
-      await writeFile(join(incomingDir, "design-review-conceptual-findings.json"), "[]\n");
+      await writeFile(step.artifact_paths.conceptual_results, "[]\n");
       continue;
     }
     if (step.step_kind === "edge_reasoning_dispatch") {
-      await mkdir(incomingDir, { recursive: true });
       await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
       continue;
     }
@@ -627,7 +619,7 @@ export async function runAuditFlowPhase({
 
   let stepStart = Date.now();
   log.step("next-step until dispatch_review (expect a ready review step)");
-  const dispatchStep = await advanceToDispatchReady(runNextStep, root, log);
+  const dispatchStep = await advanceToDispatchReady(runNextStep, log);
   assert.equal(dispatchStep.contract_version, STEP_CONTRACT_VERSION);
   assert.equal(dispatchStep.status, "ready");
   assert.equal(dispatchStep.step_kind, "dispatch_review");

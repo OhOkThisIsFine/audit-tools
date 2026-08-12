@@ -2,7 +2,7 @@
 //
 // The second-order adversary runs as a SEPARATE agent (host_delegation); each
 // loop-until-dry round it writes the improvements it surfaced to
-// `incoming/systemic-challenge.json`. This is the schema the audit-side executor
+// the `systemic_challenge` lane. This is the schema the audit-side executor
 // validates that submission against (mirrors the Phase-D
 // `ClarificationAnswersSubmission`). The findings carry their TRUE lens — the
 // adversary tags a test-parallelization finding `tests`/`performance`, an ops finding

@@ -1,56 +1,89 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { access } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+import { laneAssetsDir } from "audit-tools/shared";
+
+import {
+  laneSubmissionPath,
+  recordExpectedLanes,
+  type LaneSubmissionShortfall,
+} from "./laneSubmissions.js";
 
 /**
  * Always-materialized fan-out lanes (design resolution 2, 2026-08-05).
  *
  * A fan-out step never inlines lane work into its step prompt and never
  * branches on host capability: every lane's prompt is a FILE on disk and every
- * lane's result is a FILE on disk, identical across IDEs/providers, so a run is
- * resumable and parallelizable regardless of who executes the lanes. Lane
+ * lane's submission is a FILE on disk, identical across IDEs/providers, so a run
+ * is resumable and parallelizable regardless of who executes the lanes. Lane
  * prompt files are ADVANCE-FREE — the continue-command lives in the step
  * prompt, never inside a lane file, so no lane executor can become a second
  * orchestrator driver (the same property `prepareContractDispatch` pins for
  * design review).
  *
- * K-of-N resume: a lane whose RESULT file already exists under `incoming/` is
+ * This is also the MINTING CHOKEPOINT: a lane declares an id and a prompt, and
+ * the tool derives where the answer goes. A lane spec cannot name its own
+ * result file, so a host-typed filename is not expressible here or in any
+ * caller.
+ *
+ * K-of-N resume: a lane whose submission already exists at its bound path is
  * complete — its prompt is not rewritten and it is excluded from the pending
  * set, so a re-emitted step instructs only the missing lanes and never
  * regenerates or overwrites completed lane results.
  */
 export interface FanoutLaneSpec {
-  /** Stable lane id — becomes the `artifact_paths` key prefix. */
+  /**
+   * Stable lane id — the `artifact_paths` key prefix AND the identity the
+   * lane's submission path is derived from, so it must be unique across the
+   * whole audit and stable across re-emissions of the same lane.
+   */
   id: string;
   /** Human label rendered into the step's lane list. */
   label: string;
-  /** Lane prompt filename under `incoming/`. */
+  /** Lane prompt filename under the tool-owned lane-asset dir. */
   promptFilename: string;
-  /** Lane result filename under `incoming/`. */
-  resultFilename: string;
   /** Advance-free lane prompt body (no continue-command). */
   promptText: string;
+  /**
+   * False for a lane whose submission the TOOL never reads — a host-side
+   * intermediate another lane consumes (the conceptual perspectives, which
+   * only the judge reads). Its bound path is still minted, declared, and
+   * rendered so the worker has a tool-named place to write; but nothing is
+   * ever owed to the tool, so it is not an expected submission, appears in no
+   * expected set, and produces no ledger expectation the run can never
+   * satisfy. Defaults to true — a lane owes the tool a submission unless it
+   * says otherwise.
+   */
+  expected?: boolean;
 }
 
 export interface MaterializedFanoutLane {
   id: string;
   label: string;
   promptPath: string;
+  /** Tool-computed bound path this lane's submission must land at. */
   resultPath: string;
-  /** True when the lane's result file already exists (K-of-N resume). */
+  /** True when the lane's submission already exists (K-of-N resume). */
   resultExists: boolean;
 }
 
 export interface MaterializedFanout {
   lanes: MaterializedFanoutLane[];
-  /** Lanes still owed a result — the only lanes the step instructs. */
+  /** Lanes still owed a submission — the only lanes the step instructs. */
   pendingLanes: MaterializedFanoutLane[];
   /** `<id>_prompt` / `<id>_results` entries for the step contract. */
   artifactPaths: Record<string, string>;
   /** Pending lanes' prompt paths (step `access.read_paths`). */
   readPaths: string[];
-  /** Pending lanes' result paths (step `access.write_paths`). */
+  /** Pending lanes' bound submission paths (step `access.write_paths`). */
   writePaths: string[];
+  /**
+   * What a PREVIOUS emission of these lanes is still owed — empty on a first
+   * emission. Rendered into the re-emitted step prompt and persisted on the
+   * step contract so a dropped lane is reported by name instead of showing up
+   * as the same step arriving twice.
+   */
+  shortfall: LaneSubmissionShortfall;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -62,18 +95,31 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-/** Write the pending lanes' prompt files and describe the whole fan-out. */
+/**
+ * Write the pending lanes' prompt files, record what the emission owes, and
+ * describe the whole fan-out.
+ */
 export async function materializeFanoutLanes(params: {
   artifactsDir: string;
+  /**
+   * The scope the lane submissions belong to. Audit gate emitters pass
+   * `AUDIT_GATE_SUBMISSION_SCOPE` — see `laneSubmissions.ts` for why the gates
+   * have no run id of their own.
+   */
+  runId: string;
   lanes: FanoutLaneSpec[];
 }): Promise<MaterializedFanout> {
-  const incoming = join(params.artifactsDir, "incoming");
-  await mkdir(incoming, { recursive: true });
+  const promptDir = laneAssetsDir(params.artifactsDir);
+  await mkdir(promptDir, { recursive: true });
 
   const lanes: MaterializedFanoutLane[] = [];
   for (const spec of params.lanes) {
-    const promptPath = join(incoming, spec.promptFilename);
-    const resultPath = join(incoming, spec.resultFilename);
+    const promptPath = join(promptDir, spec.promptFilename);
+    const resultPath = laneSubmissionPath(
+      params.artifactsDir,
+      spec.id,
+      params.runId,
+    );
     const resultExists = await fileExists(resultPath);
     // Pending lanes always get a fresh prompt. A COMPLETED lane's prompt is
     // left untouched (its content matches the result that was produced) —
@@ -91,6 +137,14 @@ export async function materializeFanoutLanes(params: {
     });
   }
 
+  const shortfall = await recordExpectedLanes(
+    params.artifactsDir,
+    params.runId,
+    params.lanes
+      .filter((spec) => spec.expected !== false)
+      .map((spec) => ({ lane: spec.id, promptText: spec.promptText })),
+  );
+
   const pendingLanes = lanes.filter((lane) => !lane.resultExists);
   const artifactPaths: Record<string, string> = {};
   for (const lane of lanes) {
@@ -103,5 +157,6 @@ export async function materializeFanoutLanes(params: {
     artifactPaths,
     readPaths: pendingLanes.map((lane) => lane.promptPath),
     writePaths: pendingLanes.map((lane) => lane.resultPath),
+    shortfall,
   };
 }

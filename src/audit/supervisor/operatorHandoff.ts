@@ -24,7 +24,7 @@ export interface AuditCodeHandoffInput {
 }
 
 export interface AuditCodeHandoffArtifactPaths {
-  incoming_dir: string;
+  operator_inputs_dir: string;
   operator_handoff_json: string;
   operator_handoff_markdown: string;
   session_config: string;
@@ -61,7 +61,14 @@ export interface AuditCodeHandoff {
   file_map?: Record<string, string>;
 }
 
-export const INCOMING_DIRNAME = "incoming";
+/**
+ * Where an OPERATOR drops files they pass to a CLI import flag
+ * (`--results`, `--batch-results`, `--updates`,
+ * `--external-analyzer-results`). Distinct from `submissions/`: those paths are
+ * tool-computed and a host may not choose them, whereas these are advisory
+ * suggestions for a human who names the file on the command line.
+ */
+export const OPERATOR_INPUTS_DIRNAME = "operator-inputs";
 export const OPERATOR_HANDOFF_JSON_FILENAME = "operator-handoff.json";
 export const OPERATOR_HANDOFF_MARKDOWN_FILENAME = "operator-handoff.md";
 export const RUN_LEDGER_FILENAME = "run-ledger.json";
@@ -103,26 +110,26 @@ function buildSuggestedInputs(
   activeReviewRun?: ActiveReviewRun,
 ): AuditCodeHandoffInput[] {
   if (status !== BLOCKED_STATUS || isConfigError || activeReviewRun) return [];
-  const incomingDir = join(artifactsDir, INCOMING_DIRNAME);
+  const inputsDir = join(artifactsDir, OPERATOR_INPUTS_DIRNAME);
   return [
     {
       flag: "--results",
-      suggested_path: join(incomingDir, "audit-results.json"),
+      suggested_path: join(inputsDir, "audit-results.json"),
       description: "Import structured audit-review results.",
     },
     {
       flag: "--batch-results",
-      suggested_path: join(incomingDir, "audit-results-batch"),
+      suggested_path: join(inputsDir, "audit-results-batch"),
       description: "Import a directory of canonical per-task audit results.",
     },
     {
       flag: "--updates",
-      suggested_path: join(incomingDir, "runtime-validation-updates.json"),
+      suggested_path: join(inputsDir, "runtime-validation-updates.json"),
       description: "Merge runtime validation evidence gathered outside the wrapper.",
     },
     {
       flag: "--external-analyzer-results",
-      suggested_path: join(incomingDir, "external-analyzer-results.json"),
+      suggested_path: join(inputsDir, "external-analyzer-results.json"),
       description: "Import normalized external-analyzer results.",
     },
   ];
@@ -158,7 +165,7 @@ const ARTIFACT_PATH_RENDER_FIELDS: {
 } = {
   operator_handoff_json: { label: "operator handoff json" },
   operator_handoff_markdown: { label: "operator handoff markdown" },
-  incoming_dir: { label: "incoming dir" },
+  operator_inputs_dir: { label: "operator inputs dir" },
   session_config: { label: "session intent" },
   run_ledger: { label: "run ledger" },
   current_review_run: { label: "current review run", fallback: "not available" },
@@ -226,7 +233,7 @@ export function buildAuditCodeHandoff(params: {
   const isConfigError = params.isConfigError ?? false;
   const blocked = params.state.status === BLOCKED_STATUS;
   const artifactPaths: AuditCodeHandoffArtifactPaths = {
-    incoming_dir: join(params.artifactsDir, INCOMING_DIRNAME),
+    operator_inputs_dir: join(params.artifactsDir, OPERATOR_INPUTS_DIRNAME),
     operator_handoff_json: join(params.artifactsDir, OPERATOR_HANDOFF_JSON_FILENAME),
     operator_handoff_markdown: join(params.artifactsDir, OPERATOR_HANDOFF_MARKDOWN_FILENAME),
     session_config: join(params.root, ...SESSION_INTENT_RELATIVE_PATH.split("/")),
@@ -292,8 +299,8 @@ export async function writeAuditCodeHandoffArtifacts(
   handoff: AuditCodeHandoff,
 ): Promise<void> {
   try {
-    await mkdir(handoff.artifact_paths.incoming_dir, { recursive: true });
-    await mkdir(join(handoff.artifact_paths.incoming_dir, "audit-results-batch"), {
+    await mkdir(handoff.artifact_paths.operator_inputs_dir, { recursive: true });
+    await mkdir(join(handoff.artifact_paths.operator_inputs_dir, "audit-results-batch"), {
       recursive: true,
     });
     await writeJsonFile(handoff.artifact_paths.operator_handoff_json, handoff);

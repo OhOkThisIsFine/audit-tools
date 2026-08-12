@@ -5,6 +5,12 @@ import { dirname, join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { withTempRepo } from "./helpers/next-step-harness.js";
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
 
 test.concurrent("next-step emits present_report for a complete audit", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
@@ -74,9 +80,9 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
     // Pre-satisfy the critical-flow fallback gate (this fixture's deterministic
     // flow inference falls below the confidence bar) so the first pause under test
     // is the analyzer install, not the fallback host step.
-    await mkdir(join(root, ".audit-tools/audit", "incoming"), { recursive: true });
+    await mkdir(submissionsDir(join(root, ".audit-tools/audit")), { recursive: true });
     await writeFile(
-      join(root, ".audit-tools/audit", "incoming", "critical-flow-fallback.json"),
+      laneSubmissionPath(join(root, ".audit-tools/audit"), GATE_LANES.critical_flow_fallback),
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
 
@@ -88,9 +94,9 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
     expect(consent.step_kind).toBe("analyzer_consent");
-    expect(consent.artifact_paths.analyzer_consent_decisions).toMatch(
-      /analyzer-consent-decisions\.json$/,
-    );
+    expect(
+      String(consent.artifact_paths.analyzer_consent_decisions).replaceAll("\\", "/"),
+    ).toMatch(/\/submissions\/[0-9a-f]{64}\.json$/u);
     const consentPrompt = await readFile(consent.prompt_path, "utf8");
     expect(consentPrompt).toMatch(/eslint/);
     expect(consentPrompt).toMatch(/"granted"/);
@@ -107,13 +113,15 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
     expect(proposed.step_kind).toBe("analyzer_install");
-    expect(proposed.artifact_paths.analyzer_decisions).toMatch(/analyzer-decisions\.json$/);
+    expect(
+      String(proposed.artifact_paths.analyzer_decisions).replaceAll("\\", "/"),
+    ).toMatch(/\/submissions\/[0-9a-f]{64}\.json$/u);
     const prompt = await readFile(proposed.prompt_path, "utf8");
     expect(prompt).toMatch(/typescript/);
     expect(prompt).toMatch(/ephemeral/);
 
     // Host declines the install.
-    await mkdir(join(root, ".audit-tools/audit", "incoming"), { recursive: true });
+    await mkdir(submissionsDir(join(root, ".audit-tools/audit")), { recursive: true });
     await writeFile(
       proposed.artifact_paths.analyzer_decisions,
       JSON.stringify({ typescript: "skip" }, null, 2) + "\n",

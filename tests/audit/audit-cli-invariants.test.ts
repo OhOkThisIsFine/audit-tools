@@ -152,7 +152,7 @@ const { ADVANCE_AUDIT_CONTRACT_VERSION, buildEnvelope } = await import("../../sr
 
 function minimalHandoff(): AuditCodeHandoff {
   const artifactPaths: AuditCodeHandoffArtifactPaths = {
-    incoming_dir: "/repo/.audit-tools/audit/incoming",
+    operator_inputs_dir: "/repo/.audit-tools/audit/operator-inputs",
     operator_handoff_json: "/repo/.audit-tools/audit/operator-handoff.json",
     operator_handoff_markdown: "/repo/.audit-tools/audit/operator-handoff.md",
     session_config: "/repo/.audit-tools/audit/session-config.json",

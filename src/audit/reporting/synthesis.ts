@@ -1,6 +1,6 @@
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import type { IntentCheckpoint } from "audit-tools/shared";
+import type { IntentCheckpoint, SubmissionLedgerEvent } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
@@ -334,6 +334,85 @@ export interface RenderAuditReportOptions {
    * "Excluded / Out-of-Scope" section so omissions are explicit in the report.
    */
   intent_checkpoint?: IntentCheckpoint;
+  /**
+   * The submission ledger's events, in arrival order. Rendered as per-kind
+   * totals in the process section so a run that drifted and was repaired stays
+   * distinguishable, in the DELIVERABLE, from one that was clean on the first
+   * try — the fact the ledger exists to preserve, previously readable only by
+   * opening the ledger itself.
+   */
+  submission_ledger?: readonly SubmissionLedgerEvent[];
+}
+
+/**
+ * What happened to this run's submissions, when something went wrong.
+ *
+ * DRIFT is a refusal or a hand repair — never an acceptance, which is the happy
+ * path and says nothing. So a run that was clean on the first try renders no
+ * section at all, and the section's PRESENCE is itself the statement that this
+ * run was not.
+ *
+ * Counted PER SUBMISSION, not per event, and "repaired" is read off each
+ * submission's own trailing state. A bare `rejected N / accepted M` pair would
+ * invite reading M as "of those N" while the two totals cover different
+ * populations (a gate lane records every acceptance; a host work item records
+ * one only where a refusal precedes it), so a fully-repaired run could render
+ * as `rejected 3, accepted 0`. Per-submission trailing state has no such
+ * ambiguity. Totals are sorted by content, never arrival: a derived summary may
+ * sort; the ledger file it derives from may not.
+ */
+function renderSubmissionDriftSection(
+  events: readonly SubmissionLedgerEvent[],
+): string[] {
+  const refusedIds = new Set(
+    events
+      .filter((event) => event.kind === "rejected")
+      .map((event) => event.submission_id),
+  );
+  const handRepairedIds = new Set(
+    events
+      .filter((event) => event.kind === "recovered_by_hand")
+      .map((event) => event.submission_id),
+  );
+  if (refusedIds.size === 0 && handRepairedIds.size === 0) return [];
+  // Trailing state per submission: a refusal followed by an acceptance or a
+  // hand recovery is RESOLVED; one that is still the last word is not.
+  const trailing = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind === "expected") continue;
+    trailing.set(event.submission_id, event.kind);
+  }
+  const resolved = [...refusedIds].filter(
+    (id) => trailing.get(id) !== "rejected",
+  ).length;
+  const rejected = events.filter((event) => event.kind === "rejected");
+  const lines = [
+    "### Submission drift and repair",
+    "",
+    `${refusedIds.size} submission(s) were refused at least once during this run; ` +
+      `${resolved} of them were later accepted or re-landed by hand` +
+      (handRepairedIds.size > 0
+        ? ` (${handRepairedIds.size} by an operator's hand recovery)`
+        : "") +
+      ". A refusal stays on the record after the later acceptance lands, so this run " +
+      "is distinguishable from one that was clean on the first try.",
+    "",
+  ];
+  if (rejected.length > 0) {
+    const byCode = new Map<string, number>();
+    for (const event of rejected) {
+      const code = event.issue_code ?? "unspecified";
+      byCode.set(code, (byCode.get(code) ?? 0) + 1);
+    }
+    lines.push(
+      `- Refusals by reason: ${[...byCode.entries()]
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([code, count]) => `${code} ${count}`)
+        .join(", ")}`,
+      "",
+    );
+  }
+  return lines;
 }
 
 /**
@@ -503,7 +582,14 @@ export function renderAuditReportMarkdown(
     }
   }
 
-  lines.push(...renderProcessFeedbackSection(options.reflections ?? []));
+  const driftLines = renderSubmissionDriftSection(options.submission_ledger ?? []);
+  const feedbackLines = renderProcessFeedbackSection(options.reflections ?? []);
+  if (driftLines.length > 0 && feedbackLines.length === 0) {
+    // The drift block lives UNDER the process heading; with no reflections
+    // there is no heading yet, so it brings its own.
+    lines.push("## Process Feedback", "");
+  }
+  lines.push(...feedbackLines, ...driftLines);
 
   const excludedScope = options.intent_checkpoint?.excluded_scope ?? [];
   if (excludedScope.length > 0) {

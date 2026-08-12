@@ -1,16 +1,23 @@
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
 import {
   headCommit,
   FindingSchema,
+  SUBMISSION_ISSUE_CODES,
+  assertSubmissionRunId,
+  hashContent,
   isGitRepo,
   normalizeRepoPath,
+  readSubmissionDocument,
+  repoRelativePath,
+  resolveContainedPath,
   spawnSyncHidden,
   stableStringify,
+  submissionPathFor,
   writeJsonFile,
+  type SubmissionIssue,
 } from "audit-tools/shared";
 import type { RemediationState } from "../../state/store.js";
 import {
@@ -68,25 +75,33 @@ export interface PreparedRemediationHostHandoff {
   readonly handoff_record: RemediationHostHandoffRecord;
 }
 
-export interface RemediationHostIngestIssue {
-  readonly code:
-    | "workload_missing"
-    | "workload_invalid"
-    | "trusted_binding_missing"
-    | "result_missing"
-    | "result_malformed"
-    | "result_contract_invalid"
-    | "duplicate_result_id"
-    | "commit_missing"
-    | "commit_not_landed"
-    | "baseline_not_ancestor"
-    | "changed_files_mismatch"
-    | "run_start_dirty_overlap"
-    | "required_test_failed";
-  readonly message: string;
-  readonly work_item_id?: string;
-  readonly result_path?: string;
-}
+/**
+ * Remediation's issue vocabulary: the SHARED submission codes plus this draw's
+ * own domain corroboration codes.
+ *
+ * The submission half is imported, never restated — a submission that is
+ * missing, unparseable, contract-invalid, or a duplicate identity means exactly
+ * the same thing on both sides of the pipeline, and the two used to spell it
+ * differently (`result_missing` here, a bare `null` in the audit ingest). The
+ * git/worktree/test half stays here: audit has no analogue and dragging
+ * `commit_not_landed` into the shared core would suggest it could emit one.
+ */
+export const REMEDIATION_ISSUE_CODES = [
+  ...SUBMISSION_ISSUE_CODES,
+  "workload_missing",
+  "workload_invalid",
+  "trusted_binding_missing",
+  "commit_missing",
+  "commit_not_landed",
+  "baseline_not_ancestor",
+  "changed_files_mismatch",
+  "run_start_dirty_overlap",
+  "required_test_failed",
+] as const;
+
+export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
+
+export type RemediationHostIngestIssue = SubmissionIssue<RemediationIssueCode>;
 
 export interface RemediationHostIngestSummary {
   readonly accepted_count: number;
@@ -178,10 +193,6 @@ const CURRENT_ITEM_KEYS = new Set([
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -280,43 +291,11 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
   return value as unknown as CurrentRemediationHostState;
 }
 
-function assertRunId(runId: string): void {
-  if (
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(runId) ||
-    runId === "." ||
-    runId === ".."
-  ) {
-    throw new Error(`Invalid remediation host run id: ${JSON.stringify(runId)}`);
-  }
-}
-
-function resolveContained(base: string, candidate: string, label: string): string {
-  const absoluteBase = resolve(base);
-  const absoluteCandidate = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolve(absoluteBase, candidate);
-  const rel = relative(absoluteBase, absoluteCandidate);
-  const firstSegment = rel.split(/[\\/]/u)[0];
-  if (isAbsolute(rel) || firstSegment === "..") {
-    throw new Error(`${label} must remain beneath ${absoluteBase}`);
-  }
-  return absoluteCandidate;
-}
-
-function repoRelative(root: string, candidate: string, label: string): string {
-  const absolute = resolveContained(root, candidate, label);
-  const rel = relative(resolve(root), absolute).replaceAll("\\", "/");
-  if (rel.length === 0) {
-    throw new Error(`${label} must identify a path beneath the repository root`);
-  }
-  return rel;
-}
-
 function normalizeDeclaredPath(root: string, candidate: string, label: string): string {
   if (candidate.length === 0 || isAbsolute(candidate)) {
     throw new Error(`${label} must be a non-empty repository-relative path`);
   }
-  return repoRelative(root, candidate, label);
+  return repoRelativePath(root, candidate, label);
 }
 
 function resolveBoundaryPaths(params: {
@@ -324,10 +303,10 @@ function resolveBoundaryPaths(params: {
   readonly artifactsDir: string;
   readonly runId: string;
 }): BoundaryPaths {
-  assertRunId(params.runId);
+  assertSubmissionRunId(params.runId, "remediation host run id");
   const root = resolve(params.root);
-  const artifactsDir = resolveContained(root, params.artifactsDir, "artifactsDir");
-  const runDir = resolveContained(
+  const artifactsDir = resolveContainedPath(root, params.artifactsDir, "artifactsDir");
+  const runDir = resolveContainedPath(
     artifactsDir,
     join("runs", params.runId, "implement"),
     "remediation host run directory",
@@ -340,12 +319,66 @@ function resolveBoundaryPaths(params: {
   };
 }
 
+/**
+ * The bound path for one work item's submission — the SHARED rule, not a local
+ * copy of it. This and its audit twin were byte-equivalent private helpers; a
+ * divergence between them would have been silent on both sides.
+ */
 function resultPathFor(paths: BoundaryPaths, workItemId: string): string {
-  return repoRelative(
-    paths.root,
-    join(paths.resultDir, `${sha256(workItemId)}.json`),
-    `result path for ${workItemId}`,
+  return submissionPathFor(
+    { root: paths.root, submissionDir: paths.resultDir },
+    workItemId,
   );
+}
+
+/**
+ * Resolve the submission validator the INGEST applies to one work item, plus
+ * the directory that work item's submission is bound to.
+ *
+ * The hand-recovery verb draws from this rather than carrying a check of its
+ * own: `parseResult` is the ingest's contract gate, so a rescued submission has
+ * to satisfy exactly what a host-written one would. Everything downstream of
+ * the shape gate — git corroboration, write-scope, the required-test rerun —
+ * still runs at the next ingest, so recovery lands a submission, it does not
+ * accept one.
+ *
+ * Returns `null` when there is no live workload naming that work item; a lane
+ * with no contract to check against must never read as "passes".
+ */
+export async function remediationSubmissionBinding(params: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  readonly workItemId: string;
+}): Promise<{
+  readonly submissionDir: string;
+  readonly validate: (value: unknown) => SubmissionIssue | null;
+} | null> {
+  const paths = resolveBoundaryPaths(params);
+  const read = await readSubmissionDocument(paths.workloadPath);
+  if (read.kind !== "value" || !isRecord(read.value)) return null;
+  const workload = read.value;
+  if (
+    workload.contract_version !== WORKLOAD_CONTRACT_VERSION ||
+    workload.run_id !== params.runId ||
+    !Array.isArray(workload.work_items)
+  ) {
+    return null;
+  }
+  const workItem = workload.work_items.find(
+    (item): item is RemediationHostWorkItem =>
+      isRecord(item) && item.id === params.workItemId,
+  );
+  if (workItem === undefined) return null;
+  return {
+    submissionDir: paths.resultDir,
+    validate: (value: unknown): SubmissionIssue | null => {
+      const parsed = parseResult(value, params.runId, workItem);
+      return parsed.ok
+        ? null
+        : { code: "submission_contract_invalid", message: parsed.reason };
+    },
+  };
 }
 
 /** Absolute result-file path owned by the current host-handoff boundary. */
@@ -356,7 +389,7 @@ export function remediationHostResultFilePath(params: {
   readonly workItemId: string;
 }): string {
   const paths = resolveBoundaryPaths(params);
-  return resolveContained(
+  return resolveContainedPath(
     paths.root,
     resultPathFor(paths, params.workItemId),
     `result path for ${params.workItemId}`,
@@ -513,7 +546,7 @@ function buildWorkItem(
     finding_ids: [...block.items],
     allowed_files: allowedFiles,
     baseline_commit: baselineCommit,
-    prompt: { text: promptText, sha256: sha256(promptText) },
+    prompt: { text: promptText, sha256: hashContent(promptText) },
     required_tests: requiredTests,
     result_path: resultPath,
     token_estimate: block.token_estimate ?? 0,
@@ -521,7 +554,7 @@ function buildWorkItem(
 }
 
 function hostWorkloadSha256(workload: RemediationHostWorkload): string {
-  return sha256(stableStringify(workload));
+  return hashContent(stableStringify(workload));
 }
 
 function buildCanonicalWorkload(params: {
@@ -589,7 +622,7 @@ function parseWorkItem(
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     typeof value.prompt.text !== "string" ||
     !isSha256(value.prompt.sha256) ||
-    sha256(value.prompt.text) !== value.prompt.sha256
+    hashContent(value.prompt.text) !== value.prompt.sha256
   ) {
     return null;
   }
@@ -649,32 +682,6 @@ function parseWorkload(
     return null;
   }
   return value as unknown as RemediationHostWorkload;
-}
-
-type JsonDocumentRead =
-  | { readonly kind: "missing" }
-  | { readonly kind: "malformed"; readonly detail: string }
-  | { readonly kind: "value"; readonly value: unknown };
-
-async function readJsonDocument(path: string): Promise<JsonDocumentRead> {
-  try {
-    const source = await readFile(path, "utf8");
-    try {
-      return { kind: "value", value: JSON.parse(source) as unknown };
-    } catch (error) {
-      return {
-        kind: "malformed",
-        detail: error instanceof Error ? error.message : String(error),
-      };
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { kind: "missing" };
-    return {
-      kind: "malformed",
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 function stringArray(value: unknown): readonly string[] | null {
@@ -1115,7 +1122,7 @@ export async function ingestRemediationHostResults(params: {
   const paths = resolveBoundaryPaths(params);
   const nextState = structuredClone(state);
   const issues: RemediationHostIngestIssue[] = [];
-  const workloadRead = await readJsonDocument(paths.workloadPath);
+  const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") {
     if (state.host_handoff) {
       issues.push({
@@ -1194,7 +1201,7 @@ export async function ingestRemediationHostResults(params: {
     if (pendingItems.length === 0) continue;
     if (!eligibleIds.has(workItem.id)) {
       issues.push({
-        code: "result_contract_invalid",
+        code: "submission_contract_invalid",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: "the work item is no longer dependency/phase eligible",
@@ -1202,16 +1209,16 @@ export async function ingestRemediationHostResults(params: {
       continue;
     }
 
-    const absoluteResultPath = resolveContained(
+    const absoluteResultPath = resolveContainedPath(
       paths.root,
       workItem.result_path,
       `result path for ${workItem.id}`,
     );
-    resolveContained(paths.artifactsDir, absoluteResultPath, `result path for ${workItem.id}`);
-    const resultRead = await readJsonDocument(absoluteResultPath);
+    resolveContainedPath(paths.artifactsDir, absoluteResultPath, `result path for ${workItem.id}`);
+    const resultRead = await readSubmissionDocument(absoluteResultPath);
     if (resultRead.kind === "missing") {
       issues.push({
-        code: "result_missing",
+        code: "submission_missing",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: "no result file exists for this pending work item",
@@ -1220,7 +1227,7 @@ export async function ingestRemediationHostResults(params: {
     }
     if (resultRead.kind === "malformed") {
       issues.push({
-        code: "result_malformed",
+        code: "submission_malformed",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: `result JSON could not be parsed: ${resultRead.detail}`,
@@ -1230,7 +1237,7 @@ export async function ingestRemediationHostResults(params: {
     const parsed = parseResult(resultRead.value, params.runId, workItem);
     if (!parsed.ok) {
       issues.push({
-        code: "result_contract_invalid",
+        code: "submission_contract_invalid",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: parsed.reason,
@@ -1240,7 +1247,7 @@ export async function ingestRemediationHostResults(params: {
     const resultId = parsed.result.result_id;
     if (resultIds.has(resultId)) {
       issues.push({
-        code: "duplicate_result_id",
+        code: "duplicate_submission_id",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: `result_id ${resultId} is duplicated in this workload`,

@@ -5,7 +5,7 @@ import { dirname, join, resolve, sep } from "node:path";
  * orchestrators. Every path is derived from a passed repository root (or, for
  * the per-artifacts-dir helpers, from an already-resolved artifacts dir) so the
  * literal directory names (`.audit-tools`, `audit`, `remediation`, `steps`,
- * `incoming`) live in exactly one place. CLI arg resolvers route through this
+ * `submissions`) live in exactly one place. CLI arg resolvers route through this
  * module instead of re-spelling the join literals — that is what keeps the two
  * tools from drifting and what the CLI-args guard test enforces.
  *
@@ -138,11 +138,37 @@ export function taskClaimsPath(artifactsDir: string): string {
 }
 
 /**
- * `<artifactsDir>/incoming` — the drop directory for upstream worker results
- * and externally supplied evidence. Takes an already-resolved artifacts dir.
+ * `<artifactsDir>/submissions` — where host submissions land, one file per
+ * tool-minted submission id (`<sha256(submission_id)>.json`). Takes an
+ * already-resolved artifacts dir.
+ *
+ * The name is the ONLY thing a host may not choose: the tool mints the id, the
+ * tool derives the path, and the step contract declares it. A submission
+ * written anywhere else is read by nothing.
  */
-export function incomingDir(artifactsDir: string): string {
-  return join(artifactsDir, "incoming");
+export function submissionsDir(artifactsDir: string): string {
+  return join(artifactsDir, "submissions");
+}
+
+/**
+ * `<artifactsDir>/submissions/expected-submissions.json` — the current
+ * statement of which lanes still owe a submission. Deliberately UNREGISTERED
+ * (outside `ARTIFACT_DEFINITIONS` and the staleness DAG): it is regenerable
+ * bookkeeping rewritten at every emit, and hashing it into the DAG would churn
+ * `artifact_metadata` and cascade phantom staleness downstream.
+ */
+export function expectedSubmissionsPath(artifactsDir: string): string {
+  return join(submissionsDir(artifactsDir), "expected-submissions.json");
+}
+
+/**
+ * `<artifactsDir>/lanes` — tool-WRITTEN lane inputs (lane prompt files,
+ * per-kind evidence packets). Kept apart from `submissions/` because the two
+ * populations have opposite ownership: the tool authors everything here and a
+ * host only reads it, while `submissions/` holds what a host writes back.
+ */
+export function laneAssetsDir(artifactsDir: string): string {
+  return join(artifactsDir, "lanes");
 }
 
 /**

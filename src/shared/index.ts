@@ -433,6 +433,63 @@ export { checkFileIntegrityRecords } from "./fileIntegrity.js";
 // Single canonical deterministic serializer (INV-CK-2) — the ONE stableStringify.
 export { stableStringify } from "./stableStringify.js";
 
+// Submission core: the ONE tool-owned path rule, failure vocabulary,
+// expected-set contract, append-only drift/repair ledger, and the validated
+// hand-recovery entry point both bins draw from. See src/shared/submission/.
+export type {
+  SubmissionIdParts,
+  SubmissionRoots,
+} from "./submission/submissionIdentity.js";
+export {
+  absoluteSubmissionPath,
+  assertSubmissionRunId,
+  mintSubmissionId,
+  repoRelativePath,
+  resolveContainedPath,
+  submissionPathFor,
+} from "./submission/submissionIdentity.js";
+export type {
+  SubmissionIssue,
+  SubmissionIssueCode,
+  SubmissionReadContext,
+  SubmissionReadOutcome,
+} from "./submission/submissionClassifier.js";
+export {
+  SUBMISSION_ISSUE_CODES,
+  classifyRead,
+  readSubmissionDocument,
+} from "./submission/submissionClassifier.js";
+export type {
+  ExpectedSetDiff,
+  ExpectedSubmission,
+  ExpectedSubmissionLane,
+  ExpectedSubmissionSet,
+  SubmissionClassification,
+} from "./submission/expectedSubmissions.js";
+export {
+  EXPECTED_SET_CONTRACT_VERSION,
+  buildExpectedSubmissionSet,
+  diffExpectedSet,
+  mergeExpectedSets,
+  withoutExpectedSubmissions,
+} from "./submission/expectedSubmissions.js";
+export type {
+  SubmissionEventKind,
+  SubmissionLedgerEvent,
+} from "./submission/submissionLedger.js";
+export {
+  SUBMISSION_EVENT_KINDS,
+  SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+  appendSubmissionEvent,
+  readSubmissionLedger,
+  submissionLedgerPath,
+} from "./submission/submissionLedger.js";
+export type {
+  HandRecoveryOutcome,
+  HandRecoveryRequest,
+} from "./submission/handRecovery.js";
+export { recoverSubmission } from "./submission/handRecovery.js";
+
 // Content-key seam (O2 ↔ F1): tool-owned task-content signature + discriminator,
 // grouping identityKey, signature-stable idempotencyKey, signature-sensitive
 // contentKey, per-record instance id. See src/shared/contentKey.ts.
@@ -629,7 +686,9 @@ export {
   artifactTreeLockPath,
   nodeClaimsPath,
   taskClaimsPath,
-  incomingDir,
+  submissionsDir,
+  expectedSubmissionsPath,
+  laneAssetsDir,
   hostScratchDir,
   outputDirFor,
   auditReportPath,

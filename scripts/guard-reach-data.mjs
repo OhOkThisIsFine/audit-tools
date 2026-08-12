@@ -123,6 +123,22 @@ export const GUARDS = [
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
   {
+    id: 'submission-no-sizing-identity-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/submission-contract-has-no-sizing-identity.test.ts',
+    note:
+      'mechanical replacement for a backlog note: the submission core must not re-grow a packet/shard/' +
+      'provider/model/budget field, in the emitted objects OR as a source identifier',
+  },
+  {
+    id: 'submission-path-tool-owned-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/submission-path-is-tool-owned.test.ts',
+    note:
+      'scans all of src/ for a reintroduced host-typed drop directory — the guard that keeps the ' +
+      'tool-owned submission path from being undone one call site at a time',
+  },
+  {
     id: 'pre-commit-staged-snapshot-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-staged-snapshot.test.ts',

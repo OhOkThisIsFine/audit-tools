@@ -8,10 +8,14 @@
 export const LOOP_CORE_PATTERNS = [
   "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
+  "src/audit/cli/laneSubmissions.ts",
+  "src/audit/cli/laneValidators.ts",
+  "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/nextStep.ts",
   "src/shared/engine/",
+  "src/shared/submission/",
 ];

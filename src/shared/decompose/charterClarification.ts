@@ -26,7 +26,7 @@ import type { Finding } from "../types/finding.js";
 
 /**
  * The host answers submission (what the host writes to
- * `incoming/charter-clarification.json`): one symmetric answer per interactive
+ * the `charter_clarification` lane): one symmetric answer per interactive
  * question. A question with no answer in the submission defaults to `leave_open`
  * (the interruptible-loop rule — a user who taps out leaves the rest open), which
  * guarantees the queue drains and the loop terminates in one round-trip.

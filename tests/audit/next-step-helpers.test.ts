@@ -18,9 +18,9 @@ const {
   handleGraphEnrichmentBranch,
   handleDesignReviewBranch,
   checkFinalizationCycle,
-  tryConsumeIncoming,
-  consumeArrayIncoming,
-  consumeObjectIncoming,
+  tryConsumeSubmission,
+  consumeArraySubmission,
+  consumeObjectSubmission,
   renderDesignReviewRejectionNotice,
   renderEdgeReasoningRejectionNotice,
 } = await import("../../src/audit/cli/nextStepCommand.js");
@@ -38,6 +38,14 @@ const {
   handleCharterClarificationBranch,
   handleSystemicChallengeBranch,
 } = await import("../../src/audit/cli/nextStepHelpers.js");
+
+// Post-P25 a lane's submission path is TOOL-computed from its lane id, so these
+// tests ask the tool where a submission goes instead of re-spelling a filename
+// the host used to type.
+const { GATE_LANES, charterExtractionLane, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import("../../src/shared/io/auditToolsPaths.js");
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "ns-helpers-"));
@@ -100,7 +108,7 @@ await test("buildTerminalStep returns blocked when audit_report is falsy and sta
 
 await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved entries exist and no decisions file", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     // Build a minimal bundle with a repo_manifest that contains one Python file
     // whose analyzer (pylint) requires an install decision.
@@ -141,9 +149,9 @@ await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved
 
 await test("handleGraphEnrichmentBranch returns continue after consuming a valid decisions file", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const decisionsPath = join(artifactsDir, "incoming", "analyzer-decisions.json");
+    const decisionsPath = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_decisions);
     // Write a decisions file mapping one analyzer to "skip"
     await writeFile(
       decisionsPath,
@@ -200,10 +208,10 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
 
 // ── handleDesignReviewBranch ──────────────────────────────────────────────────
 
-await test("handleDesignReviewBranch returns design_review_parallel when both passes unsatisfied and no incoming files", async () => {
+await test("handleDesignReviewBranch returns design_review_parallel when both passes unsatisfied and nothing submitted", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    // No incoming files — both passes unsatisfied → parallel dispatch.
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    // Nothing submitted — both passes unsatisfied → parallel dispatch.
     const bundle: ArtifactBundle = {
       design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false },
     };
@@ -219,9 +227,9 @@ await test("handleDesignReviewBranch returns design_review_parallel when both pa
 
 await test("handleDesignReviewBranch returns continue after merging contract findings only, sets contract_reviewed=true", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract finding" }]), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
@@ -244,9 +252,9 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
 
 await test("handleDesignReviewBranch returns continue after merging conceptual findings only, sets conceptual_reviewed=true", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
     await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual finding" }]), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
@@ -265,12 +273,12 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
   });
 });
 
-await test("handleDesignReviewBranch returns continue after merging both incoming files simultaneously", async () => {
+await test("handleDesignReviewBranch returns continue after merging both lane submissions simultaneously", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
-    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
+    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
     await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract" }]), "utf8");
     await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual" }]), "utf8");
 
@@ -293,8 +301,8 @@ await test("handleDesignReviewBranch returns continue after merging both incomin
 
 await test("handleDesignReviewBranch returns single-pass design_review_conceptual when contract pass already satisfied", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    // No incoming files, contract already done.
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    // Nothing submitted, contract already done.
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
@@ -308,9 +316,9 @@ await test("handleDesignReviewBranch returns single-pass design_review_conceptua
 
 await test("handleDesignReviewBranch returns continue after merging a valid legacy findings file and deleting it", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const findingsPath = join(artifactsDir, "incoming", "design-review-findings.json");
+    const findingsPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy);
     await writeFile(findingsPath, JSON.stringify([{ id: "F-1", title: "test" }]), "utf8");
 
     // Write a stub design_assessment.json so writeCoreArtifacts has a path
@@ -331,7 +339,7 @@ await test("handleDesignReviewBranch returns continue after merging a valid lega
     const branch = await handleDesignReviewBranch(params, bundle, state);
     expect(branch.action).toBe("continue");
 
-    // The incoming findings file should have been deleted
+    // The submitted findings file should have been deleted
     let exists = true;
     try {
       await import("node:fs/promises").then((m) => m.access(findingsPath));
@@ -428,71 +436,68 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
   });
 });
 
-// ── tryConsumeIncoming ────────────────────────────────────────────────────────
+// ── tryConsumeSubmission ──────────────────────────────────────────────────────
 
-await test("tryConsumeIncoming reports absent when file does not exist", async () => {
+await test("tryConsumeSubmission reports absent when nothing was submitted", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    // No file written under incoming/
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    // Nothing written at the lane's bound path.
 
-    const result = await tryConsumeIncoming(artifactsDir, "nonexistent.json");
+    const result = await tryConsumeSubmission(artifactsDir, GATE_LANES.charter_delta);
 
     expect(result, "should resolve to absent without throwing").toEqual({ status: "absent" });
   });
 });
 
-await test("tryConsumeIncoming returns parsed value and path when file exists", async () => {
+await test("tryConsumeSubmission returns parsed value and the bound path when a submission exists", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     const payload = { foo: "bar", count: 42 };
-    const filename = "test-artifact.json";
-    await writeFile(
-      join(artifactsDir, "incoming", filename),
-      JSON.stringify(payload),
-      "utf8",
-    );
+    const lane = GATE_LANES.charter_delta;
+    const boundPath = laneSubmissionPath(artifactsDir, lane);
+    await writeFile(boundPath, JSON.stringify(payload), "utf8");
 
-    const result = await tryConsumeIncoming(artifactsDir, filename);
+    const result = await tryConsumeSubmission(artifactsDir, lane);
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected ok");
     expect(result.value, "value should match the written payload").toEqual(payload);
-    expect(result.path, "path should equal join(artifactsDir, 'incoming', filename)").toBe(join(artifactsDir, "incoming", filename));
+    expect(
+      result.path,
+      "path is the tool-computed bound path for the lane, not a host-typed name",
+    ).toBe(boundPath);
   });
 });
 
-await test("tryConsumeIncoming reports a JSON parse failure as malformed, never a throw", async () => {
+await test("tryConsumeSubmission reports a JSON parse failure as malformed, never a throw", async () => {
   // INVERTED 2026-08-06: this used to pin "re-throws JSON parse errors" — the
   // exact defect behavior that let one malformed lane hard-fail the whole
   // next-step call and destroy a sibling lane's consumed results. Submitted
   // content is the caller's to quarantine; only infrastructure errors throw.
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const filename = "bad-json.json";
-    await writeFile(
-      join(artifactsDir, "incoming", filename),
-      "not valid json {{",
-      "utf8",
-    );
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const lane = GATE_LANES.charter_delta;
+    const boundPath = laneSubmissionPath(artifactsDir, lane);
+    await writeFile(boundPath, "not valid json {{", "utf8");
 
-    const result = await tryConsumeIncoming(artifactsDir, filename);
+    const result = await tryConsumeSubmission(artifactsDir, lane);
     expect(result.status).toBe("malformed");
     if (result.status !== "malformed") throw new Error("expected malformed");
-    expect(result.path).toBe(join(artifactsDir, "incoming", filename));
+    expect(result.path).toBe(boundPath);
     expect(/invalid json/i.test(result.reason)).toBe(true);
   });
 });
 
-await test("tryConsumeIncoming still re-throws genuine IO errors (directory in place of the file)", async () => {
+await test("tryConsumeSubmission still re-throws genuine IO errors (directory in place of the file)", async () => {
   await withTempDir(async (artifactsDir) => {
-    const filename = "dir-not-file.json";
+    const lane = GATE_LANES.charter_delta;
     // A DIRECTORY where the submission file should be: reading it is an
     // infrastructure failure (EISDIR), not malformed content — must throw.
-    await mkdir(join(artifactsDir, "incoming", filename), { recursive: true });
+    await mkdir(laneSubmissionPath(artifactsDir, lane), { recursive: true });
 
     await assert.rejects(
-      () => tryConsumeIncoming(artifactsDir, filename),
+      () => tryConsumeSubmission(artifactsDir, lane),
       "should re-throw non-ENOENT, non-parse IO errors",
     );
   });
@@ -500,8 +505,12 @@ await test("tryConsumeIncoming still re-throws genuine IO errors (directory in p
 
 // ── HOST_GATE_DESCRIPTORS coverage (Tier C2 consolidation) ────────────────────
 
-await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 9 audit host-gate kinds", () => {
+await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 10 audit host-gate kinds", () => {
   const expected: HostGateKind[] = [
+    // P25 added `analyzer_consent`: it is a real gate with a real submission
+    // and the registry did not name it, so the registry could not be the
+    // complete enumeration it is documented to be.
+    "analyzer_consent",
     "graph_enrichment",
     "critical_flow_fallback",
     "intent_equivalence",
@@ -524,14 +533,31 @@ await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 9 audit ho
   expect(generic.sort()).toEqual(
     ["critical_flow_fallback", "synthesis_narrative", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
   );
-  expect(custom.sort()).toEqual(["graph_enrichment", "design_review", "intent_equivalence", "charter_extraction"].sort());
+  expect(custom.sort()).toEqual(
+    [
+      "analyzer_consent",
+      "graph_enrichment",
+      "design_review",
+      "intent_equivalence",
+      "charter_extraction",
+    ].sort(),
+  );
+
+  // Every descriptor enumerates LANES, never a host-typed filename — the
+  // registry is what an expected-submission set is derived from.
+  for (const kind of expected) {
+    expect(HOST_GATE_DESCRIPTORS[kind].lanes.length).toBeGreaterThan(0);
+    for (const lane of HOST_GATE_DESCRIPTORS[kind].lanes) {
+      expect(lane).not.toMatch(/\.json$/u);
+    }
+  }
 });
 
 // ── handleDesignReviewBranch — malformed-submission quarantine ───────────────
 //
 // Regression coverage for the "silently DESTROYS a malformed submission"
 // defect: `handleDesignReviewBranch` used to unconditionally `unlink` every
-// incoming design-review file and merge ONLY when `Array.isArray(value)` — any
+// design-review submission and merge ONLY when `Array.isArray(value)` — any
 // other shape (most commonly a JSON-object-mode host wrapping its array as
 // `{findings:[...]}`) was destroyed with no quarantine, no message, and the
 // identical step re-emitted forever. Fixed via `consumeArrayIncoming`
@@ -550,9 +576,9 @@ async function quarantinedFiles(artifactsDir: string): Promise<string[]> {
 
 await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} contract submission (tolerant unwrap)", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     // Object-wrapped, not a bare array — the PowerShell/json_object-mode
     // single-element-array-collapses-to-object shape (memory:
     // result-json-array trap) generalized to a whole-array wrap.
@@ -579,7 +605,7 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     expect(await quarantinedFiles(artifactsDir)).toEqual([]);
     expect(written.rejected_submissions ?? []).toEqual([]);
 
-    // The incoming file was consumed (deleted), not left behind.
+    // The submission was consumed (deleted), not left behind.
     let stillExists = true;
     try {
       await readFile(contractPath, "utf8");
@@ -592,9 +618,9 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
 
 await test("handleDesignReviewBranch quarantines a bare-string malformed contract submission instead of destroying it", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     await writeFile(contractPath, JSON.stringify("oops, not an array"), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
@@ -612,7 +638,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     if (branch.action !== "return") throw new Error("expected action=return");
     expect(["design_review_contract", "design_review_parallel"]).toContain(branch.result.kind);
 
-    // The original incoming file is gone from incoming/ ...
+    // The original submission is gone from its bound path ...
     let stillInIncoming = true;
     try {
       await readFile(contractPath, "utf8");
@@ -624,7 +650,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     // ... but NOT destroyed: it survives, verbatim, under quarantine/.
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
-    expect(quarantined[0].startsWith("design-review-contract-findings.json.")).toBe(true);
+    expect(quarantined[0].startsWith(`${GATE_LANES.design_review_contract}.`)).toBe(true);
     const quarantinedContent = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
     expect(JSON.parse(quarantinedContent)).toBe("oops, not an array");
 
@@ -634,7 +660,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     expect(written.rejected_submissions.length).toBe(1);
     const rejection = written.rejected_submissions[0];
     expect(rejection.pass).toBe("contract");
-    expect(rejection.filename).toBe("design-review-contract-findings.json");
+    expect(rejection.lane).toBe(GATE_LANES.design_review_contract);
     expect(rejection.reason.includes("string")).toBe(true);
     expect(rejection.quarantine_path.endsWith(quarantined[0])).toBe(true);
 
@@ -644,7 +670,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     const notice = renderDesignReviewRejectionNotice(branch.result.bundle, ["legacy", "contract"]);
     expect(notice).toBeTruthy();
     if (notice === undefined) throw new Error("expected a notice");
-    expect(notice.includes("design-review-contract-findings.json")).toBe(true);
+    expect(notice.includes(GATE_LANES.design_review_contract)).toBe(true);
     expect(notice.includes(rejection.quarantine_path)).toBe(true);
     expect(notice.includes("string")).toBe(true);
   });
@@ -652,20 +678,20 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
 
 await test("handleDesignReviewBranch quarantines a syntactically malformed conceptual lane without losing the sibling contract lane", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     // Valid contract lane + malformed-JSON conceptual lane, arriving in the
     // same call — the 2026-08-06 dogfood loss: the contract file was consumed
     // (unlinked), then the conceptual parse threw out of the whole branch, so
     // the merged-but-unpersisted contract findings were destroyed and the
     // contract lane had to re-run.
-    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
     await writeFile(
       contractPath,
       JSON.stringify([{ id: "DR-101", title: "contract finding" }]),
       "utf8",
     );
-    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
     await writeFile(conceptualPath, '{"findings": [ {"id": "DR-2', "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
@@ -686,7 +712,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     // The malformed conceptual lane survives, verbatim, under quarantine/.
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
-    expect(quarantined[0].startsWith("design-review-conceptual-findings.json.")).toBe(true);
+    expect(quarantined[0].startsWith(`${GATE_LANES.design_review_conceptual}.`)).toBe(true);
     const quarantinedContent = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
     expect(quarantinedContent).toBe('{"findings": [ {"id": "DR-2');
 
@@ -695,16 +721,16 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
       (r: RejectedDesignReviewSubmission) => r.pass === "conceptual",
     );
     expect(rejection).toBeTruthy();
-    expect(rejection.filename).toBe("design-review-conceptual-findings.json");
+    expect(rejection.lane).toBe(GATE_LANES.design_review_conceptual);
     expect(/json/i.test(rejection.reason)).toBe(true);
   });
 });
 
 await test("handleDesignReviewBranch quarantines an ambiguous two-array-property submission (fails both the array check and the unwrap)", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
     await writeFile(
       conceptualPath,
       JSON.stringify({
@@ -738,9 +764,9 @@ await test("handleDesignReviewBranch quarantines an ambiguous two-array-property
 
 await test("handleDesignReviewBranch quarantines a malformed legacy findings file rather than destroying it", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const findingsPath = join(artifactsDir, "incoming", "design-review-findings.json");
+    const findingsPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy);
     await writeFile(findingsPath, JSON.stringify({ not: "an array or a single-array wrapper" }), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
@@ -760,13 +786,13 @@ await test("handleDesignReviewBranch quarantines a malformed legacy findings fil
 
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
-    expect(quarantined[0].startsWith("design-review-findings.json.")).toBe(true);
+    expect(quarantined[0].startsWith(`${GATE_LANES.design_review_legacy}.`)).toBe(true);
 
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.rejected_submissions.length).toBe(1);
     expect(written.rejected_submissions[0].pass).toBe("legacy");
 
-    // Legacy file must be gone from incoming/ (quarantined, not left in place).
+    // Legacy submission must be gone from its bound path (quarantined, not left in place).
     let stillInIncoming = true;
     try {
       await readFile(findingsPath, "utf8");
@@ -788,7 +814,7 @@ await test("renderDesignReviewRejectionNotice returns undefined when there is no
       rejected_submissions: [
         {
           pass: "conceptual",
-          filename: "design-review-conceptual-findings.json",
+          lane: "design_review_conceptual",
           quarantine_path: "/tmp/quarantine/x.json",
           reason: "a bare string",
           rejected_at: "2026-01-01T00:00:00.000Z",
@@ -800,34 +826,39 @@ await test("renderDesignReviewRejectionNotice returns undefined when there is no
   expect(renderDesignReviewRejectionNotice(bundleWithUnrelatedRejection, ["contract"])).toBe(undefined);
 });
 
-// ── consumeArrayIncoming ──────────────────────────────────────────────────────
+// ── consumeArraySubmission ───────────────────────────────────────────────────
 
-await test("consumeArrayIncoming returns absent when the file does not exist", async () => {
+await test("consumeArraySubmission returns absent when nothing was submitted", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const result = await consumeArrayIncoming(artifactsDir, "nonexistent.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const result = await consumeArraySubmission(
+      artifactsDir,
+      GATE_LANES.design_review_contract,
+    );
     expect(result).toEqual({ status: "absent" });
   });
 });
 
-await test("consumeArrayIncoming accepts a bare array untouched (existing array-shaped path)", async () => {
+await test("consumeArraySubmission accepts a bare array and LEAVES IT ON DISK for the caller (P25-f)", async () => {
+  // The unlink used to happen here, at unwrap time — so a caller that then had
+  // no target to merge into destroyed valid work. Deletion is now the caller's,
+  // after it has applied the value.
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const filePath = join(artifactsDir, "incoming", "arr.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const lane = GATE_LANES.design_review_contract;
+    const filePath = laneSubmissionPath(artifactsDir, lane);
     await writeFile(filePath, JSON.stringify([{ id: "A" }, { id: "B" }]), "utf8");
 
-    const result = await consumeArrayIncoming(artifactsDir, "arr.json");
+    const result = await consumeArraySubmission(artifactsDir, lane);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected status=ok");
     expect(result.value).toEqual([{ id: "A" }, { id: "B" }]);
+    expect(result.path).toBe(filePath);
 
-    let stillExists = true;
-    try {
-      await readFile(filePath, "utf8");
-    } catch {
-      stillExists = false;
-    }
-    expect(stillExists).toBe(false);
+    expect(
+      await readFile(filePath, "utf8"),
+      "an accepted submission survives the read — the caller unlinks after applying",
+    ).toBe(JSON.stringify([{ id: "A" }, { id: "B" }]));
   });
 });
 
@@ -840,7 +871,7 @@ await test("consumeArrayIncoming accepts a bare array untouched (existing array-
 // unwrap (bare array OR single-array-property object), else quarantine + a
 // rejection marker the re-emitted step's prompt reads. analyzer-decisions.json
 // had the related stuck-loop shape (a non-object value was neither merged,
-// deleted, nor diagnosed) — now quarantined via consumeObjectIncoming.
+// deleted, nor diagnosed) — now quarantined via consumeObjectSubmission.
 
 /**
  * `RunAuditStepOptions` (src/audit/cli/auditStep.ts) no longer declares an
@@ -902,8 +933,8 @@ async function fileExists(path: string): Promise<boolean> {
 
 await test("handleGraphEnrichmentBranch applies a canonical {rewrites:[...]} submission as a parsed object and deletes it after apply", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const resultsPath = laneSubmissionPath(artifactsDir, GATE_LANES.edge_reasoning);
     const rewrites = [{ from: "src/a.ts", to: "src/b.ts", kind: "import", reason: "clearer reason" }];
     await writeFile(resultsPath, JSON.stringify({ rewrites }), "utf8");
 
@@ -930,8 +961,8 @@ await test("handleGraphEnrichmentBranch applies a canonical {rewrites:[...]} sub
 
 await test("handleGraphEnrichmentBranch tolerant-unwraps a bare-array edge-reasoning submission into {rewrites}", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const resultsPath = laneSubmissionPath(artifactsDir, GATE_LANES.edge_reasoning);
     const rewrites = [{ from: "src/a.ts", to: "src/b.ts", reason: "clearer reason" }];
     await writeFile(resultsPath, JSON.stringify(rewrites), "utf8");
 
@@ -953,8 +984,8 @@ await test("handleGraphEnrichmentBranch tolerant-unwraps a bare-array edge-reaso
 
 await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning submission instead of destroying it, and the re-emitted step carries the notice", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const resultsPath = laneSubmissionPath(artifactsDir, GATE_LANES.edge_reasoning);
     await writeFile(resultsPath, JSON.stringify("oops, not rewrites"), "utf8");
 
     const runStepCalls: RunAuditStepOptions[] = [];
@@ -972,10 +1003,10 @@ await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning s
     expect(branch.action).toBe("continue");
     expect(runStepCalls.length).toBe(0);
 
-    // Gone from incoming/ ... but NOT destroyed: verbatim under quarantine/.
+    // Gone from the bound path ... but NOT destroyed: verbatim under quarantine/.
     expect(await fileExists(resultsPath)).toBe(false);
     const quarantined = (await quarantinedFiles(artifactsDir)).filter((name) =>
-      name.startsWith("edge-reasoning.json."),
+      name.startsWith(`${GATE_LANES.edge_reasoning}.`),
     );
     expect(quarantined.length).toBe(1);
     const quarantinedContent = await readFile(
@@ -989,11 +1020,11 @@ await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning s
     const notice = await renderEdgeReasoningRejectionNotice(artifactsDir);
     expect(notice).toBeTruthy();
     if (notice === undefined) throw new Error("expected a notice");
-    expect(notice.includes("edge-reasoning.json")).toBe(true);
+    expect(notice.includes(GATE_LANES.edge_reasoning)).toBe(true);
     expect(notice.includes(quarantined[0])).toBe(true);
     expect(notice.includes("string")).toBe(true);
 
-    // Next fold iteration (incoming now absent): the edge_reasoning step
+    // Next fold iteration (the submission now absent): the edge_reasoning step
     // re-emits — with the marker still pending for its prompt — instead of the
     // silent identical re-ask the destroy path produced.
     const reEmit = await handleGraphEnrichmentBranch(
@@ -1012,8 +1043,8 @@ await test("handleGraphEnrichmentBranch quarantines a malformed edge-reasoning s
 
 await test("handleGraphEnrichmentBranch clears the rejection marker once a valid resubmission is applied", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const resultsPath = join(artifactsDir, "incoming", "edge-reasoning.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const resultsPath = laneSubmissionPath(artifactsDir, GATE_LANES.edge_reasoning);
     const deps = { runStep: async () => STUB_ADVANCE_RESULT };
 
     // Round 1: malformed (two array properties — ambiguous) → quarantined.
@@ -1050,8 +1081,8 @@ await test("handleGraphEnrichmentBranch clears the rejection marker once a valid
 
 await test("consumeObjectIncoming quarantines a non-object value instead of leaving it to re-emit forever", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const filePath = join(artifactsDir, "incoming", "analyzer-decisions.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const filePath = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_decisions);
     await writeFile(filePath, JSON.stringify("not a decisions map"), "utf8");
 
     const stderrWrites: string[] = [];
@@ -1059,7 +1090,7 @@ await test("consumeObjectIncoming quarantines a non-object value instead of leav
     process.stderr.write = (chunk) => { stderrWrites.push(String(chunk)); return true; };
     let result;
     try {
-      result = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+      result = await consumeObjectSubmission(artifactsDir, GATE_LANES.analyzer_decisions);
     } finally {
       process.stderr.write = origWrite;
     }
@@ -1068,11 +1099,11 @@ await test("consumeObjectIncoming quarantines a non-object value instead of leav
     if (result.status !== "quarantined") throw new Error("expected status=quarantined");
     expect(result.reason.includes("string")).toBe(true);
     // Diagnosed loudly — the old path was neither merged, deleted, nor diagnosed.
-    expect(stderrWrites.join("").includes("analyzer-decisions.json")).toBe(true);
-    // Gone from incoming/ (the stuck loop), preserved verbatim in quarantine/.
+    expect(stderrWrites.join("").includes(GATE_LANES.analyzer_decisions)).toBe(true);
+    // Gone from the bound path (the stuck loop), preserved verbatim in quarantine/.
     expect(await fileExists(filePath)).toBe(false);
     const quarantined = (await quarantinedFiles(artifactsDir)).filter((name) =>
-      name.startsWith("analyzer-decisions.json."),
+      name.startsWith(`${GATE_LANES.analyzer_decisions}.`),
     );
     expect(quarantined.length).toBe(1);
     const content = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
@@ -1080,17 +1111,17 @@ await test("consumeObjectIncoming quarantines a non-object value instead of leav
   });
 });
 
-await test("consumeObjectIncoming quarantines an array (never a valid id→decision map) and accepts an object without deleting it", async () => {
+await test("consumeObjectSubmission quarantines an array (never a valid id→decision map) and accepts an object without deleting it", async () => {
   await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const filePath = join(artifactsDir, "incoming", "analyzer-decisions.json");
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
+    const filePath = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_decisions);
 
     await writeFile(filePath, JSON.stringify(["ephemeral", "skip"]), "utf8");
     const origWrite = process.stderr.write;
     process.stderr.write = () => true;
     let arrayResult;
     try {
-      arrayResult = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+      arrayResult = await consumeObjectSubmission(artifactsDir, GATE_LANES.analyzer_decisions);
     } finally {
       process.stderr.write = origWrite;
     }
@@ -1099,7 +1130,7 @@ await test("consumeObjectIncoming quarantines an array (never a valid id→decis
     // A plain object is accepted — and NOT deleted here: the caller unlinks
     // after applying, so a crash mid-apply retains the submission.
     await writeFile(filePath, JSON.stringify({ pylint: "skip" }), "utf8");
-    const okResult = await consumeObjectIncoming(artifactsDir, "analyzer-decisions.json");
+    const okResult = await consumeObjectSubmission(artifactsDir, GATE_LANES.analyzer_decisions);
     expect(okResult.status).toBe("ok");
     if (okResult.status !== "ok") throw new Error("expected status=ok");
     expect(okResult.value).toEqual({ pylint: "skip" });
@@ -1112,7 +1143,7 @@ await test("consumeObjectIncoming quarantines an array (never a valid id→decis
 //
 // Regression coverage for the "runtime loop defect" class: the 6 host-gate
 // ingests driven by the shared `runOmittableGate` engine used to hand the raw
-// incoming file straight to the executor. A mis-shaped submission then EITHER
+// submitted file straight to the executor. A mis-shaped submission then EITHER
 // crashed next-step with an uncaught ZodError (the 4 schema-parsed gates —
 // charter_extraction / charter_delta / charter_clarification / systemic_challenge)
 // OR was silently accepted as an empty "reviewed, found nothing" result (the 2
@@ -1124,7 +1155,7 @@ type OmittableGateParams = Pick<NextStepParams, "root" | "artifactsDir">;
 
 type OmittableGateCase = {
   kind: string;
-  filename: string;
+  lane: string;
   /** Bundle override for gates whose lanes are only consulted under a specific state. */
   bundle?: ArtifactBundle;
   handler: (
@@ -1137,14 +1168,14 @@ type OmittableGateCase = {
 const OMITTABLE_GATES: OmittableGateCase[] = [
   {
     kind: "synthesis_narrative",
-    filename: "synthesis-narrative.json",
+    lane: GATE_LANES.synthesis_narrative,
     // narrativeEnabled:true → shouldOmit false → host turn owed ("return").
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleSynthesisNarrativeBranch({ ...params, narrativeEnabled: true }, bundle, state),
   },
   {
     kind: "critical_flow_fallback",
-    filename: "critical-flow-fallback.json",
+    lane: GATE_LANES.critical_flow_fallback,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleCriticalFlowFallbackBranch(params, bundle, state),
   },
@@ -1155,7 +1186,7 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
     // step (action "return"), never crash or silently merge around it. The
     // lanes are only consulted at a deep+ ceiling, so this entry carries the
     // checkpoint that requests charters.
-    filename: "charter-extraction-stated.json",
+    lane: charterExtractionLane("stated"),
     bundle: {
       intent_checkpoint: {
         schema_version: "intent-checkpoint/v1",
@@ -1171,19 +1202,19 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
   },
   {
     kind: "charter_delta",
-    filename: "charter-delta.json",
+    lane: GATE_LANES.charter_delta,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleCharterDeltaBranch(params, bundle, state),
   },
   {
     kind: "charter_clarification",
-    filename: "charter-clarification.json",
+    lane: GATE_LANES.charter_clarification,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleCharterClarificationBranch(params, bundle, state),
   },
   {
     kind: "systemic_challenge",
-    filename: "systemic-challenge.json",
+    lane: GATE_LANES.systemic_challenge,
     handler: (params: OmittableGateParams, bundle: ArtifactBundle, state: AuditState) =>
       handleSystemicChallengeBranch(params, bundle, state),
   },
@@ -1192,11 +1223,11 @@ const OMITTABLE_GATES: OmittableGateCase[] = [
 for (const gate of OMITTABLE_GATES) {
   await test(`runOmittableGate quarantines a malformed ${gate.kind} submission instead of crashing or silently degrading`, async () => {
     await withTempDir(async (artifactsDir) => {
-      await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-      const incomingPath = join(artifactsDir, "incoming", gate.filename);
+      await mkdir(submissionsDir(artifactsDir), { recursive: true });
+      const submissionPath = laneSubmissionPath(artifactsDir, gate.lane);
       // A bare number fails every top-level object schema ("expected object,
       // received number") — a shape no gate could ever legitimately accept.
-      await writeFile(incomingPath, JSON.stringify(42), "utf8");
+      await writeFile(submissionPath, JSON.stringify(42), "utf8");
 
       const params = { root: artifactsDir, artifactsDir };
       const bundle = gate.bundle ?? {};
@@ -1218,12 +1249,12 @@ for (const gate of OMITTABLE_GATES) {
       // (apply → runAuditStep is unreachable), so the action is not "continue".
       expect(["run_omit", "return"]).toContain(branch.action);
 
-      // Moved out of incoming/ ...
-      expect(await fileExists(incomingPath)).toBe(false);
+      // Moved off the bound path ...
+      expect(await fileExists(submissionPath)).toBe(false);
       // ... and preserved verbatim under quarantine/ (never unlink-and-discard).
       const quarantined = await quarantinedFiles(artifactsDir);
       expect(quarantined.length).toBe(1);
-      expect(quarantined[0].startsWith(`${gate.filename}.`)).toBe(true);
+      expect(quarantined[0].startsWith(`${gate.lane}.`)).toBe(true);
       const content = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
       expect(JSON.parse(content)).toBe(42);
     });

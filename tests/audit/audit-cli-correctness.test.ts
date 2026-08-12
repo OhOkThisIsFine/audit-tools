@@ -25,6 +25,12 @@ async function withTempDir<T>(
 // Previously: task_id was the literal "src-api:security:src/api/auth.ts:1-100"
 // After fix:  task_id is `${sampleUnitId}:${sampleLens}` (derived from planning output).
 
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
 const { runSample } = await import("../../src/audit/cli/sampleRunCommand.js");
 
 test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async () => {
@@ -100,10 +106,10 @@ test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape
 test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid analyzer decisions", async () => {
   await withTempDir(async (dir) => {
     const { handleGraphEnrichmentBranch } = await import("../../src/audit/cli/nextStepCommand.js");
-    await mkdir(join(dir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(dir), { recursive: true });
     // Write decisions file with all-invalid values
     await writeFile(
-      join(dir, "incoming", "analyzer-decisions.json"),
+      laneSubmissionPath(dir, GATE_LANES.analyzer_decisions),
       JSON.stringify({ "myanalyzer": "install", "otheralyzer": "disable" }),
       "utf8",
     );

@@ -5,16 +5,25 @@
 
 ## Live state
 
-- The zero-adapter retirement is LANDED on `main` and published (v0.40.1); audit-tools emits
-  complete provider-neutral host workloads and ingests bound results.
+- P25 (sol-9) is LANDED: every host submission rides a tool-computed sha256-bound path under
+  `<artifactsDir>/submissions/` (the flat `incoming/` scheme is deleted), with an
+  expected-submission-set record, per-member shortfall classification rendered by name into
+  re-emitted steps, an append-only drift/repair ledger surfaced in the report's process section,
+  one shared `submission_*` classifier vocabulary across both draws, and a recovery-only
+  `recover-submission` verb on both bins. Built red-tests-first (7 contract tests), six-lens
+  adversarially reviewed plus an independent free-lane pass; every confirmed finding fixed and
+  independently re-verified.
+- The zero-adapter retirement is published (v0.40.1); audit-tools emits complete provider-neutral
+  host workloads and ingests bound results.
 - 2026-08-12: the day's decision queue was answered in full; the executable items landed
-  (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch).
-  Four owner-approved BUILDS remain queued — see Immediate next.
+  (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch,
+  then P25). Three owner-approved BUILDS remain queued — see Immediate next.
 - The dogfood audit lap is IN FLIGHT and deliberately PAUSED at the `dispatch_review` step:
   intake/scope/lenses confirmed (930 files; custom `host_contract_robustness` lens included),
   all 5 analyzers consented, critical-flow enrichment plus both design reviews (contract +
-  conceptual) ingested — both reviews were produced by free offload lanes. The semantic review
-  workload for run `20260812T192026635Z_audit_tasks_completed_001` is published and unstarted.
+  conceptual) ingested. Per the owner's atomic-migration call the paused dispatch re-runs on the
+  new arrival scheme: `next-step` re-emits it; deterministic artifacts survive, only
+  dispatched-but-uningested work repeats.
 
 ## Resume the audit (fresh conversation)
 
@@ -29,25 +38,21 @@
 
 ## Verification state
 
-- Green at landing: full `verify:release` (all checks + packaging smokes + full vitest + linked
-  smokes), plus independent stale-surface sweeps (docs, host-integration surfaces, backlog) and an
-  independent loop-core review whose one confirmed defect (stale `host_handoff` binding surviving an
-  applied clarification answer) was fixed red-green in the landing commit.
+- P25 green at landing: build + typecheck (src and test tree) + full vitest (406 files / 5077
+  passed) + loop-core-patterns byte-match + knip; six-lens adversarial review (every finding
+  refuter-verified) plus an independent free-lane defect hunt; the review's three majors and all
+  corroborated minors fixed and re-verified by a dedicated fix-delta lane. Loop-core and
+  constitutional-doc attestations recorded against the final staged tree.
 
 ## Immediate next
 
-1. **Build P25 re-scoped FIRST** (sol-9; all three gating answers recorded 2026-08-12 in
-   [`docs/reviews/p25-design-check-2026-08-12.md`](reviews/p25-design-check-2026-08-12.md) §6):
-   re-pointed at the `incoming/` gates, submit verb recovery-only, ATOMIC migration — the owner
-   chose atomic-and-re-run-the-lap, so this lands before the lap resumes and the paused dispatch
-   re-runs on the new arrival scheme.
-2. Resume the dogfood audit lap (see *Resume the audit* above), then the remediate phase.
-3. The remaining owner-approved builds:
+1. Resume the dogfood audit lap (see *Resume the audit* above), then the remediate phase.
+2. The remaining owner-approved builds:
    - **P23** (sol-7): probe whether child sessions fire SessionStart, then session tagging +
      unregistered-session commit/push refusal. Unblocks the freellmapi `pool` lane for this repo.
    - **sol-8**: SessionStart tree-dirt baseline + per-gate pathspec scoping (supersedes P24's shape).
    - **backlog-2 gate + sol-3 leg-1 scope ledger.**
-4. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
+3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
    size hook now fires on every index edit): merge the closed sagas properly — the citations gate
    and `[[name]]` cross-links make it a focused pass, not a side-task.
 

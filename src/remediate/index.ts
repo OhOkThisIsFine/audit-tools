@@ -30,10 +30,12 @@ import {
   migrateOpenCodeGlobalExternalDirectory,
   withoutOpenCodeWildcard,
   readOptionalJsonFile,
+  recoverSubmission,
   runTracked,
   runWithBlockedStepBackstop,
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
+import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -198,6 +200,72 @@ for (const [verb, summary] of BIN_ROUTED_INSTALLER_VERBS) {
       );
     });
 }
+
+program
+  .command("recover-submission")
+  .description(
+    "Re-land a host submission that was mangled, through the same validator the normal lane runs",
+  )
+  .option("--root <path>", "Repository root", ".")
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
+  .requiredOption("--run-id <id>", "The run the work item belongs to")
+  .requiredOption("--submission-id <id>", "The work item id the submission answers")
+  .requiredOption("--from <path>", "Path to the corrected payload")
+  .action(async (options) => {
+    // Deliberately the ONLY new verb: the ordinary lane needs no command at all
+    // (the host writes a file at a tool-named path), so the fragile argv surface
+    // is paid only on the rare rescue, by an operator at a terminal.
+    const root = resolve(options.root);
+    const artifactsDir = resolveArtifactsDirOption(options.root, options.artifactsDir);
+    const binding = await remediationSubmissionBinding({
+      root,
+      artifactsDir,
+      runId: options.runId,
+      workItemId: options.submissionId,
+    });
+    if (binding === null) {
+      // No contract to check against must never read as "passes".
+      console.error(
+        `No live workload for run '${options.runId}' names work item ` +
+          `'${options.submissionId}'. Recovery refuses a submission it cannot validate.`,
+      );
+      process.exit(1);
+    }
+    const outcome = await recoverSubmission(
+      {
+        root,
+        artifactsDir,
+        runId: options.runId,
+        submissionId: options.submissionId,
+        fromPath: resolve(options.from),
+        lane: options.submissionId,
+        submissionDir: binding.submissionDir,
+      },
+      binding.validate,
+    );
+    if (!outcome.ok) {
+      console.error(
+        `recover-submission refused the payload for '${options.submissionId}' ` +
+          `(${outcome.issue.code}): ${outcome.issue.message}`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      JSON.stringify(
+        {
+          status: "recovered",
+          work_item_id: options.submissionId,
+          submission_path: outcome.submission_path,
+        },
+        null,
+        2,
+      ),
+    );
+  });
 
 program
   .command("validate-artifacts")

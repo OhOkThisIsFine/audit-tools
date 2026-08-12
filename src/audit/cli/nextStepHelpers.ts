@@ -24,6 +24,7 @@ import type {
   AnalyzerSetting,
   CriticalFlowFallbackResult,
   GraphEdge,
+  SubmissionIssue,
   SynthesisNarrative,
 } from "audit-tools/shared";
 import {
@@ -36,19 +37,19 @@ import {
   artifactTreeLockPath,
   auditReportPath,
   groundDesignFindings,
+  laneAssetsDir,
   promotedAuditReportPath,
   withFileLock,
 } from "audit-tools/shared";
-import {
-  CharterSubmissionSchema,
-  CharterDeltaSubmissionSchema,
-  ClarificationAnswersSubmissionSchema,
-  CriticalFlowFallbackResultSchema,
-  SynthesisNarrativeSchema,
-  SystemicChallengeSubmissionSchema,
-} from "audit-tools/shared";
 import type { CharterKind, CharterSubmission } from "audit-tools/shared";
 import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
+import {
+  LANE_SUBMISSION_SCHEMAS,
+  charterLaneSchema,
+  describeSubmissionShapeMismatch,
+  isSubmissionObjectMap,
+  unwrapSubmissionArray,
+} from "./laneValidators.js";
 import type { ZodError, ZodTypeAny } from "zod";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
@@ -71,10 +72,7 @@ import {
 } from "../orchestrator/charterExtractionExecutor.js";
 import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
-import {
-  deriveIntentEquivalenceStatus,
-  IntentEquivalenceVerdictSchema,
-} from "../orchestrator/intentEquivalenceExecutor.js";
+import { deriveIntentEquivalenceStatus } from "../orchestrator/intentEquivalenceExecutor.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import type { EdgeReasonRewrite } from "../orchestrator/edgeReasoning.js";
 import {
@@ -94,33 +92,42 @@ import {
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { ingestAuditHostResults } from "./dispatch/hostHandoff.js";
+import {
+  CHARTER_EXTRACTION_MERGED_FILENAME,
+  GATE_LANES,
+  charterExtractionLane,
+  charterExtractionPacketFilename,
+  laneSubmissionPath,
+  recordHostResultOutcomes,
+  recordLaneOutcome,
+} from "./laneSubmissions.js";
 
-// ── Incoming-artifact helper ──────────────────────────────────────────────────
+// ── Gate submission helper ────────────────────────────────────────────────────
 
 /**
- * One poll attempt over an `incoming/<filename>` submission. Every gate that
+ * One poll attempt over a lane's bound submission path. Every gate that
  * consumes host/worker submissions narrows on `status`, so a malformed lane can
  * never hard-fail the whole next-step call (the 2026-08-06 design-review loss:
  * a SyntaxError thrown out of one lane destroyed the sibling lane's consumed,
  * not-yet-persisted results).
  */
-export type IncomingConsumeAttempt<T> =
+export type SubmissionConsumeAttempt<T> =
   | { status: "ok"; value: T; path: string }
   | { status: "absent" }
   | { status: "malformed"; path: string; reason: string };
 
 /**
- * Read a JSON file from the `incoming/` subdirectory of `artifactsDir`.
- * `ok` when the file exists and parses; `absent` on ENOENT-family errors;
- * `malformed` when the file exists but is not JSON — submitted content is the
- * CALLER's to quarantine, never an infrastructure failure. All other IO errors
- * re-throw unchanged.
+ * Read a lane's submission from the TOOL-COMPUTED path its emission bound —
+ * never a name a host could type. `ok` when the file exists and parses;
+ * `absent` on ENOENT-family errors; `malformed` when the file exists but is not
+ * JSON — submitted content is the CALLER's to quarantine, never an
+ * infrastructure failure. All other IO errors re-throw unchanged.
  */
-export async function tryConsumeIncoming<T>(
+export async function tryConsumeSubmission<T>(
   artifactsDir: string,
-  filename: string,
-): Promise<IncomingConsumeAttempt<T>> {
-  const filePath = join(artifactsDir, "incoming", filename);
+  lane: string,
+): Promise<SubmissionConsumeAttempt<T>> {
+  const filePath = laneSubmissionPath(artifactsDir, lane);
   try {
     const value = await readJsonFile<T>(filePath);
     return { status: "ok", value, path: filePath };
@@ -164,7 +171,21 @@ export type TerminalStepResult =
  * the fold continues).
  */
 export type NextStepResult =
-  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null; inProcessMadeProgress?: boolean }
+  | {
+      kind: "semantic_review";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      activeReviewRun: ActiveReviewRun;
+      selectedExecutor?: string | null;
+      inProcessMadeProgress?: boolean;
+      /**
+       * Failures the just-completed ingest classified — a bound result that
+       * never arrived, would not parse, or failed the contract. Carried to the
+       * emitted step so the host is TOLD which items to repair instead of
+       * receiving an identical workload with no statement of what went wrong.
+       */
+      ingestIssues?: readonly SubmissionIssue[];
+    }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
@@ -301,8 +322,8 @@ type AnalyzerConsentBranchResult =
  * mirroring the analyzer-install consent fold exactly:
  *   - nothing pending (acquisition off / token present / all decided) → run the
  *     deterministic acquisition executor (`fallthrough`);
- *   - a decisions file arrived (`incoming/analyzer-consent-decisions.json`,
- *     `{ "<id>": "granted" | "declined" }`) → persist the decisions into
+ *   - a decisions submission arrived on the `analyzer_consent` lane
+ *     (`{ "<id>": "granted" | "declined" }`) → persist the decisions into
  *     session config (decisions durable, tokens never), fold them into the
  *     in-flight acquisition options, and re-scan (`continue`);
  *   - otherwise → emit the ONE batched operator-interactive offer step
@@ -323,36 +344,29 @@ export async function handleAnalyzerConsentBranch(
     acquisitionConsentToken: params.externalAcquisition?.consentToken,
   });
   if (pending.length === 0) return { action: "fallthrough" };
-  const incoming = await consumeObjectIncoming(
+  const incoming = await consumeEnumMapSubmission(
     params.artifactsDir,
-    "analyzer-consent-decisions.json",
+    GATE_LANES.analyzer_consent,
+    ANALYZER_CONSENT_VALUES,
   );
   if (incoming.status === "quarantined") {
     return { action: "continue" };
   }
   if (incoming.status === "ok") {
-    const decisions: Record<string, "granted" | "declined"> = {};
-    for (const [id, value] of Object.entries(incoming.value)) {
-      if (value === "granted" || value === "declined") {
-        decisions[id] = value;
-      }
-    }
-    if (Object.keys(decisions).length > 0) {
-      await persistAnalyzerConsent(params.root, decisions);
-      if (params.externalAcquisition) {
-        params.externalAcquisition.analyzerConsent = {
-          ...(params.externalAcquisition.analyzerConsent ?? {}),
-          ...decisions,
-        };
-      }
-    } else {
-      const invalidEntries = Object.keys(incoming.value).join(", ") || "(none)";
-      process.stderr.write(
-        `[audit-code] analyzer-consent-decisions.json ignored: no recognized values (got: ${invalidEntries}). ` +
-          `Valid values are: granted, declined.\n`,
-      );
+    await persistAnalyzerConsent(params.root, incoming.values);
+    if (params.externalAcquisition) {
+      params.externalAcquisition.analyzerConsent = {
+        ...(params.externalAcquisition.analyzerConsent ?? {}),
+        ...incoming.values,
+      };
     }
     await unlink(incoming.path).catch(() => {});
+    await recordLaneOutcome(params.artifactsDir, GATE_LANES.analyzer_consent, {
+      kind: "accepted",
+      ...(incoming.ignored.length > 0
+        ? { message: describeIgnoredKeys(incoming.ignored, ANALYZER_CONSENT_VALUES) }
+        : {}),
+    });
     return { action: "continue" };
   }
   return { action: "return", result: { kind: "analyzer_consent", state, bundle, pending } };
@@ -365,12 +379,12 @@ type GraphEnrichmentBranchResult =
   | { action: "fallthrough" };
 
 /**
- * Handle the `graph_enrichment_executor` incoming-artifact polling block.
+ * Handle the `graph_enrichment_executor` submission-polling block.
  * Checks for pending analyzer install decisions and edge-reasoning results.
  * Returns an action object:
- *   - `continue`    → caller should keep folding (already consumed an artifact).
+ *   - `continue`    → caller should keep folding (already consumed a submission).
  *   - `return`      → caller should emit the embedded result to cmdNextStep.
- *   - `fallthrough` → no incoming artifacts; run the deterministic executor.
+ *   - `fallthrough` → nothing submitted; run the deterministic executor.
  */
 export async function handleGraphEnrichmentBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
@@ -390,43 +404,27 @@ export async function handleGraphEnrichmentBranch(
   };
   const unresolved = graphEnrichmentUnresolvedAnalyzers(bundle, pauseInputs);
   if (unresolved.length > 0) {
-    const incoming = await consumeObjectIncoming(
+    const incoming = await consumeEnumMapSubmission<AnalyzerSetting>(
       params.artifactsDir,
-      "analyzer-decisions.json",
+      GATE_LANES.analyzer_decisions,
+      ANALYZER_SETTING_VALUES,
     );
     if (incoming.status === "quarantined") {
       // A non-object top-level value used to be neither merged, deleted, nor
-      // diagnosed — the file lingered in incoming/ and the analyzer_install
+      // diagnosed — the file lingered at its bound path and the analyzer_install
       // step re-emitted silently forever. Quarantined + diagnosed instead.
       return { action: "continue" };
     }
     if (incoming.status === "ok") {
-      const settings: Record<string, AnalyzerSetting> = {};
-      for (const [id, value] of Object.entries(incoming.value)) {
-        if (
-          value === "ephemeral" ||
-          value === "permanent" ||
-          value === "skip" ||
-          value === "repo" ||
-          value === "auto"
-        ) {
-          settings[id] = value;
-        }
-      }
-      if (Object.keys(settings).length > 0) {
-        const merged = await persistAnalyzerSettings(params.root, settings);
-        analyzersRef.value = merged.analyzers;
-      } else {
-        // All entries in analyzer-decisions.json failed the recognized-value
-        // check (ephemeral|permanent|skip|repo|auto). Emit a diagnostic so the
-        // operator knows why no settings were applied (COR-03418a9f fix).
-        const invalidEntries = Object.keys(incoming.value).join(", ") || "(none)";
-        process.stderr.write(
-          `[audit-code] analyzer-decisions.json ignored: no recognized values (got: ${invalidEntries}). ` +
-            `Valid values are: ephemeral, permanent, skip, repo, auto.\n`,
-        );
-      }
+      const merged = await persistAnalyzerSettings(params.root, incoming.values);
+      analyzersRef.value = merged.analyzers;
       await unlink(incoming.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, GATE_LANES.analyzer_decisions, {
+        kind: "accepted",
+        ...(incoming.ignored.length > 0
+          ? { message: describeIgnoredKeys(incoming.ignored, ANALYZER_SETTING_VALUES) }
+          : {}),
+      });
       return { action: "continue" };
     }
     return { action: "return", result: { kind: "analyzer_install", state, bundle, unresolved } };
@@ -443,21 +441,26 @@ export async function handleGraphEnrichmentBranch(
   {
     const candidates = graphEnrichmentLowConfidenceEdges(bundle, pauseInputs);
     if (candidates.length > 0) {
-      const edgeReasoningIncoming = await tryConsumeIncoming<unknown>(
+      const edgeReasoningIncoming = await tryConsumeSubmission<unknown>(
         params.artifactsDir,
-        "edge-reasoning.json",
+        GATE_LANES.edge_reasoning,
       );
       if (edgeReasoningIncoming.status === "malformed") {
-        const quarantinePath = await quarantineIncomingFile(
+        const quarantinePath = await quarantineSubmissionFile(
           params.artifactsDir,
           edgeReasoningIncoming.path,
-          "edge-reasoning.json",
+          GATE_LANES.edge_reasoning,
         );
         await recordEdgeReasoningRejection(params.artifactsDir, {
-          filename: "edge-reasoning.json",
+          lane: GATE_LANES.edge_reasoning,
           quarantine_path: quarantinePath,
           reason: edgeReasoningIncoming.reason,
           rejected_at: new Date().toISOString(),
+        });
+        await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
+          kind: "rejected",
+          issueCode: "submission_malformed",
+          message: edgeReasoningIncoming.reason,
         });
         return { action: "continue" };
       }
@@ -470,22 +473,27 @@ export async function handleGraphEnrichmentBranch(
         // so the same "exactly one array-valued top-level property" rule
         // applies, and a bare rewrites array is accepted too); anything else is
         // quarantined and named in the re-emitted step's prompt.
-        const unwrapped = unwrapIncomingArray(edgeReasoningIncoming.value);
+        const unwrapped = unwrapSubmissionArray(edgeReasoningIncoming.value);
         if (!unwrapped.ok) {
-          const quarantinePath = await quarantineIncomingFile(
+          const quarantinePath = await quarantineSubmissionFile(
             params.artifactsDir,
             edgeReasoningIncoming.path,
-            "edge-reasoning.json",
+            GATE_LANES.edge_reasoning,
           );
           await recordEdgeReasoningRejection(params.artifactsDir, {
-            filename: "edge-reasoning.json",
+            lane: GATE_LANES.edge_reasoning,
             quarantine_path: quarantinePath,
             reason: unwrapped.reason,
             rejected_at: new Date().toISOString(),
           });
+          await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
+            kind: "rejected",
+            issueCode: "submission_contract_invalid",
+            message: unwrapped.reason,
+          });
           return { action: "continue" };
         }
-        // Apply BEFORE deleting the incoming file: if runStep throws (locks,
+        // Apply BEFORE deleting the submission: if runStep throws (locks,
         // crash), the submission survives for the retry instead of being lost.
         await runStep({
           root: params.root,
@@ -497,6 +505,9 @@ export async function handleGraphEnrichmentBranch(
         });
         await unlink(edgeReasoningIncoming.path).catch(() => {});
         await clearEdgeReasoningRejection(params.artifactsDir);
+        await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
+          kind: "accepted",
+        });
         return { action: "continue" };
       }
       return { action: "return", result: { kind: "edge_reasoning", state, bundle, candidates } };
@@ -515,11 +526,11 @@ type BranchActionResult =
   | { action: "return"; result: { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
- * Handle the `design_review_contract` or `design_review_conceptual` incoming-artifact
- * polling blocks. Checks for contract and/or conceptual findings files independently.
+ * Handle the `design_review_contract` or `design_review_conceptual` submission
+ * polling blocks. Checks the contract and conceptual lanes independently.
  *
  * Returns:
- *   - `continue`               → one or both incoming files were consumed; keep folding.
+ *   - `continue`               → one or both lane submissions were consumed; keep folding.
  *   - `design_review_parallel` → both passes still needed; dispatch two subagents.
  *   - `design_review_contract` → only contract pass still needed.
  *   - `design_review_conceptual` → only conceptual pass still needed.
@@ -532,9 +543,9 @@ function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
   return snapshot ? isDesignReviewStale(snapshot, bundle) : false;
 }
 
-// ── Design-review incoming-array quarantine (malformed-submission fix) ───────
+// ── Submission-array quarantine (malformed-submission fix) ───────────────────
 //
-// `handleDesignReviewBranch` used to unconditionally `unlink` every incoming
+// `handleDesignReviewBranch` used to unconditionally `unlink` every
 // design-review submission and merge ONLY when `Array.isArray(value)` — any
 // other top-level shape (an object-wrapped `{findings:[...]}`, a bare string,
 // two competing array properties, ...) was silently destroyed with no
@@ -548,54 +559,43 @@ function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
 //      unwrap is quarantined — moved to `<artifactsDir>/quarantine/`, never
 //      unlinked-and-forgotten;
 //   3. the quarantine is recorded on `design_assessment.rejected_submissions`
-//      so it survives the same-call `continue` re-derivation, and the
-//      re-emitted design-review step names the quarantined file + reason
-//      (see `renderDesignReviewRejectionNotice`, threaded in nextStepCommand.ts).
+//      AND on the submission ledger so it survives the same-call `continue`
+//      re-derivation, and the re-emitted design-review step names the
+//      quarantined file + reason (see `renderDesignReviewRejectionNotice`,
+//      threaded in nextStepCommand.ts).
+//
+// P25-f closes the remaining half: an ACCEPTED array is no longer deleted here.
+// Deleting at unwrap time meant a submission the caller then had no target to
+// merge into was gone — valid work destroyed with no quarantine and no record.
+// The caller now unlinks after it has applied the value, exactly as the object
+// variant has always worked, so a submission is only ever destroyed once its
+// content is somewhere else.
 
-type ConsumeArrayIncomingResult<T> =
+type ConsumeArraySubmissionResult<T> =
   | { status: "absent" }
   | { status: "ok"; value: T[]; path: string }
   | {
       status: "quarantined";
       quarantinePath: string;
-      originalFilename: string;
+      lane: string;
       reason: string;
     };
 
-/** Human-readable description of why an incoming value is neither an array nor a single-array-wrapped object. */
-function describeIncomingShapeMismatch(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "an array"; // reachable from consumeObjectIncoming (an array is not a key→value map)
-  const t = typeof value;
-  if (t !== "object") return `a bare ${t}`;
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length === 0) return "an empty object";
-  const arrayKeys = entries.filter(([, v]) => Array.isArray(v)).map(([k]) => k);
-  const allKeys = entries.map(([k]) => k).join(", ");
-  if (arrayKeys.length === 0) {
-    return `an object with no array-valued properties (keys: ${allKeys})`;
-  }
-  return (
-    `an object with ${arrayKeys.length} array-valued propert${arrayKeys.length === 1 ? "y" : "ies"} ` +
-    `out of ${entries.length} total key(s) (${allKeys}) — exactly one top-level array property is ` +
-    `required for the tolerant unwrap`
-  );
-}
-
 /**
- * Move a malformed incoming submission to `<artifactsDir>/quarantine/` rather
- * than deleting it. Falls back to copy+unlink if `rename` fails (e.g. a
- * cross-device incoming/ mount) so the content is never lost.
+ * Move a refused submission to `<artifactsDir>/quarantine/` rather than
+ * deleting it. Falls back to copy+unlink if `rename` fails (e.g. a cross-device
+ * artifacts mount) so the content is never lost. The quarantined file is named
+ * for its LANE — the bound path is a digest, which tells an operator nothing.
  */
-async function quarantineIncomingFile(
+async function quarantineSubmissionFile(
   artifactsDir: string,
   filePath: string,
-  originalFilename: string,
+  lane: string,
 ): Promise<string> {
   const quarantineDir = join(artifactsDir, "quarantine");
   await mkdir(quarantineDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const quarantinePath = join(quarantineDir, `${originalFilename}.${timestamp}.json`);
+  const quarantinePath = join(quarantineDir, `${lane}.${timestamp}.json`);
   try {
     await rename(filePath, quarantinePath);
   } catch {
@@ -612,17 +612,18 @@ async function quarantineIncomingFile(
 
 /**
  * Quarantine a submission that failed zod validation — or failed to parse as
- * JSON at all (a plain string reason): move it out of `incoming/` (never
- * unlink-and-discard) and write a stderr diagnostic naming the quarantined
- * file + the error. The single loud-quarantine path shared by every
- * schema-validated incoming gate (`runOmittableGate` + `handleIntentEquivalenceBranch`
- * + the charter lane loop) so the "quarantine loudly" property cannot drift
- * between them. Returns the quarantine path.
+ * JSON at all (a plain string reason): move it off its bound path (never
+ * unlink-and-discard), write a stderr diagnostic naming the quarantined file +
+ * the error, and record the refusal on the submission ledger so a repaired run
+ * stays distinguishable from a clean one. The single loud-quarantine path
+ * shared by every schema-validated gate (`runOmittableGate` +
+ * `handleIntentEquivalenceBranch` + the charter lane loop) so the "quarantine
+ * loudly" property cannot drift between them. Returns the quarantine path.
  */
-async function quarantineMisshapedIncoming(
+async function quarantineMisshapedSubmission(
   artifactsDir: string,
   filePath: string,
-  filename: string,
+  lane: string,
   error: ZodError | string,
 ): Promise<string> {
   const reason = typeof error === "string"
@@ -630,99 +631,203 @@ async function quarantineMisshapedIncoming(
     : error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; ");
-  const quarantinePath = await quarantineIncomingFile(artifactsDir, filePath, filename);
+  const quarantinePath = await quarantineSubmissionFile(artifactsDir, filePath, lane);
   process.stderr.write(
-    `[audit-code] ${filename} quarantined to ${quarantinePath}: ${reason}. ` +
+    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
+  await recordLaneOutcome(artifactsDir, lane, {
+    kind: "rejected",
+    issueCode:
+      typeof error === "string" ? "submission_malformed" : "submission_contract_invalid",
+    message: reason,
+  });
   return quarantinePath;
 }
 
 /**
- * The single tolerant-unwrap rule: a bare array is accepted as-is; a top-level
- * object wrapping exactly one array-valued property is unambiguous and is
- * accepted as that array. Anything else fails with a shape description.
- * Single-sourced so `consumeArrayIncoming` and the edge-reasoning gate cannot
- * drift on what shapes are accepted.
- */
-function unwrapIncomingArray(
-  value: unknown,
-): { ok: true; array: unknown[] } | { ok: false; reason: string } {
-  if (Array.isArray(value)) return { ok: true, array: value };
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 1 && Array.isArray(entries[0][1])) {
-      return { ok: true, array: entries[0][1] };
-    }
-  }
-  return { ok: false, reason: describeIncomingShapeMismatch(value) };
-}
-
-/**
- * Read a JSON `incoming/` file expected to be an array (or a top-level object
+ * Read a lane submission expected to be an array (or a top-level object
  * wrapping exactly one array-valued property, the tolerant unwrap). Accepts
- * either shape and deletes the source file; any other shape is quarantined
- * (never unlinked-and-discarded) and reported with a reason.
+ * either shape; any other shape is quarantined (never unlinked-and-discarded)
+ * and reported with a reason.
+ *
+ * An accepted submission is NOT deleted here (P25-f) — the caller unlinks after
+ * it has applied the value, so a submission is never destroyed before its
+ * content has landed somewhere else.
  */
-export async function consumeArrayIncoming<T>(
+export async function consumeArraySubmission<T>(
   artifactsDir: string,
-  filename: string,
-): Promise<ConsumeArrayIncomingResult<T>> {
-  const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
+  lane: string,
+): Promise<ConsumeArraySubmissionResult<T>> {
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
-    const quarantinePath = await quarantineIncomingFile(artifactsDir, incoming.path, filename);
-    return { status: "quarantined", quarantinePath, originalFilename: filename, reason: incoming.reason };
+    const quarantinePath = await quarantineSubmissionFile(
+      artifactsDir,
+      incoming.path,
+      lane,
+    );
+    await recordLaneOutcome(artifactsDir, lane, {
+      kind: "rejected",
+      issueCode: "submission_malformed",
+      message: incoming.reason,
+    });
+    return { status: "quarantined", quarantinePath, lane, reason: incoming.reason };
   }
   const { value, path } = incoming;
-  const unwrapped = unwrapIncomingArray(value);
+  const unwrapped = unwrapSubmissionArray(value);
   if (unwrapped.ok) {
-    await unlink(path).catch(() => {});
     return { status: "ok", value: unwrapped.array as T[], path };
   }
-  const quarantinePath = await quarantineIncomingFile(artifactsDir, path, filename);
-  return { status: "quarantined", quarantinePath, originalFilename: filename, reason: unwrapped.reason };
+  const quarantinePath = await quarantineSubmissionFile(artifactsDir, path, lane);
+  await recordLaneOutcome(artifactsDir, lane, {
+    kind: "rejected",
+    issueCode: "submission_contract_invalid",
+    message: unwrapped.reason,
+  });
+  return { status: "quarantined", quarantinePath, lane, reason: unwrapped.reason };
 }
 
-type ConsumeObjectIncomingResult =
+type ConsumeObjectSubmissionResult =
   | { status: "absent" }
   | { status: "ok"; value: Record<string, unknown>; path: string }
   | { status: "quarantined"; quarantinePath: string; reason: string };
 
 /**
- * Read a JSON `incoming/` file expected to be a plain top-level object (a
- * key → value map, e.g. analyzer-decisions.json). A non-object value — null,
+ * Read a lane submission expected to be a plain top-level object (a
+ * key → value map, e.g. the analyzer decisions). A non-object value — null,
  * an array, a bare primitive — is quarantined with a stderr diagnostic rather
- * than left lingering in `incoming/` (where it used to make the emitting step
- * re-ask silently forever). Unlike `consumeArrayIncoming`, an accepted file is
- * NOT deleted here — the caller unlinks after applying, so a crash mid-apply
- * retains the submission for the retry.
+ * than left lingering at the bound path (where it used to make the emitting
+ * step re-ask silently forever). An accepted file is NOT deleted here — the
+ * caller unlinks after applying, so a crash mid-apply retains the submission
+ * for the retry.
  */
-export async function consumeObjectIncoming(
+export async function consumeObjectSubmission(
   artifactsDir: string,
-  filename: string,
-): Promise<ConsumeObjectIncomingResult> {
-  const incoming = await tryConsumeIncoming<unknown>(artifactsDir, filename);
+  lane: string,
+): Promise<ConsumeObjectSubmissionResult> {
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
-    const quarantinePath = await quarantineIncomingFile(artifactsDir, incoming.path, filename);
+    const quarantinePath = await quarantineSubmissionFile(
+      artifactsDir,
+      incoming.path,
+      lane,
+    );
     process.stderr.write(
-      `[audit-code] ${filename} quarantined to ${quarantinePath}: ${incoming.reason}. ` +
+      `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${incoming.reason}. ` +
         `Fix the JSON and resubmit.\n`,
     );
+    await recordLaneOutcome(artifactsDir, lane, {
+      kind: "rejected",
+      issueCode: "submission_malformed",
+      message: incoming.reason,
+    });
     return { status: "quarantined", quarantinePath, reason: incoming.reason };
   }
   const { value, path } = incoming;
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    return { status: "ok", value: value as Record<string, unknown>, path };
+  if (isSubmissionObjectMap(value)) {
+    return { status: "ok", value, path };
   }
-  const reason = describeIncomingShapeMismatch(value);
-  const quarantinePath = await quarantineIncomingFile(artifactsDir, path, filename);
+  const reason = describeSubmissionShapeMismatch(value);
+  const quarantinePath = await quarantineSubmissionFile(artifactsDir, path, lane);
   process.stderr.write(
-    `[audit-code] ${filename} quarantined to ${quarantinePath}: expected a JSON object, got ${reason}. ` +
+    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: expected a JSON object, got ${reason}. ` +
       `Fix the shape and resubmit.\n`,
   );
+  await recordLaneOutcome(artifactsDir, lane, {
+    kind: "rejected",
+    issueCode: "submission_contract_invalid",
+    message: reason,
+  });
   return { status: "quarantined", quarantinePath, reason };
+}
+
+/** The two decision vocabularies the operator-facing analyzer gates accept. */
+const ANALYZER_CONSENT_VALUES = ["granted", "declined"] as const;
+const ANALYZER_SETTING_VALUES = [
+  "ephemeral",
+  "permanent",
+  "skip",
+  "repo",
+  "auto",
+] as const;
+
+/** Name the keys that carried no recognized value, for the ledger event. */
+function describeIgnoredKeys(
+  ignored: readonly string[],
+  allowed: readonly string[],
+): string {
+  return (
+    `ignored ${ignored.length} unrecognized entr${ignored.length === 1 ? "y" : "ies"} ` +
+    `(${ignored.join(", ")}); recognized values are: ${allowed.join(", ")}`
+  );
+}
+
+type ConsumeEnumMapResult<T extends string> =
+  | { status: "absent" }
+  | { status: "quarantined" }
+  | {
+      status: "ok";
+      values: Record<string, T>;
+      /** Keys whose value was not one of the recognized ones. */
+      ignored: string[];
+      path: string;
+    };
+
+/**
+ * Read a decisions submission — a `{ "<id>": "<one of a fixed vocabulary>" }`
+ * map — for the two operator-facing analyzer gates.
+ *
+ * The value-enum filter used to be per-gate, and both copies treated a
+ * submission with ZERO recognized values as a SUCCESS: nothing was applied, the
+ * file was deleted, and an `accepted` event went on the ledger, so a host that
+ * answered in the wrong vocabulary had its answer destroyed, the run recorded
+ * as clean, and the identical step re-emitted. A submission that says nothing
+ * the gate understands is a refusal: it is quarantined (bytes kept), recorded
+ * `rejected`, and re-asked. PARTIAL recognition still applies — the operator's
+ * real decisions are not held hostage to one typo — with the ignored keys named
+ * on the accepting event so the omission is on the record rather than in a
+ * stderr line nobody kept.
+ */
+async function consumeEnumMapSubmission<T extends string>(
+  artifactsDir: string,
+  lane: string,
+  allowed: readonly T[],
+): Promise<ConsumeEnumMapResult<T>> {
+  const incoming = await consumeObjectSubmission(artifactsDir, lane);
+  if (incoming.status === "absent") return { status: "absent" };
+  if (incoming.status === "quarantined") return { status: "quarantined" };
+  const values: Record<string, T> = {};
+  const ignored: string[] = [];
+  for (const [id, value] of Object.entries(incoming.value)) {
+    if (allowed.includes(value as T)) {
+      values[id] = value as T;
+    } else {
+      ignored.push(id);
+    }
+  }
+  if (Object.keys(values).length > 0) {
+    return { status: "ok", values, ignored, path: incoming.path };
+  }
+  const reason =
+    `no recognized values (got: ${Object.keys(incoming.value).join(", ") || "(none)"}). ` +
+    `Valid values are: ${allowed.join(", ")}.`;
+  const quarantinePath = await quarantineSubmissionFile(
+    artifactsDir,
+    incoming.path,
+    lane,
+  );
+  process.stderr.write(
+    `[audit-code] ${lane} submission quarantined to ${quarantinePath}: ${reason} ` +
+      `Fix the values and resubmit.\n`,
+  );
+  await recordLaneOutcome(artifactsDir, lane, {
+    kind: "rejected",
+    issueCode: "submission_contract_invalid",
+    message: reason,
+  });
+  return { status: "quarantined" };
 }
 
 // ── Edge-reasoning rejection marker ──────────────────────────────────────────
@@ -734,7 +839,7 @@ export async function consumeObjectIncoming(
 // note into them would churn the staleness DAG).
 
 interface EdgeReasoningRejection {
-  filename: string;
+  lane: string;
   quarantine_path: string;
   reason: string;
   rejected_at: string;
@@ -781,7 +886,7 @@ export async function renderEdgeReasoningRejectionNotice(
     "Your last edge-reasoning submission did not match the expected shape and was " +
       "quarantined (not applied, not silently discarded). Fix the shape and resubmit:",
     "",
-    `- \`${rejection.filename}\` quarantined to \`${rejection.quarantine_path}\` (${rejection.rejected_at}): ${rejection.reason}`,
+    `- lane \`${rejection.lane}\` quarantined to \`${rejection.quarantine_path}\` (${rejection.rejected_at}): ${rejection.reason}`,
     "",
     'Expected shape: {"rewrites":[{"from":"...","to":"...","kind":"...","reason":"..."}]} — ' +
       "a bare JSON array of rewrites is also accepted.",
@@ -789,24 +894,38 @@ export async function renderEdgeReasoningRejectionNotice(
 }
 
 /**
- * Record a quarantined design-review submission on `design_assessment` (and
- * persist immediately) so the note survives the same-call `continue`
- * re-derivation. A no-op when `design_assessment` doesn't exist yet — in
- * practice unreachable, since `design_assessment_current` is a
- * higher-priority obligation than either design-review pass (PRIORITY in
- * nextStep.ts), so `design_assessment` always exists by the time this branch
- * runs.
+ * Record a quarantined design-review submission.
+ *
+ * TWO homes, because they answer different questions and one of them can be
+ * absent. `design_assessment.rejected_submissions` is what the re-emitted step
+ * reads back to tell the host WHY its last submission was refused — so it is
+ * written whenever there is an assessment to write it on. The submission ledger
+ * is the durable record that a refusal happened at all, and it is written
+ * unconditionally.
+ *
+ * This function used to open `if (!existing) return;`, which meant the one case
+ * where a submission had no merge target — exactly the case where the host most
+ * needs to be told something went wrong — recorded nothing anywhere. The
+ * ledger closes that hole without inventing a partial `design_assessment.json`
+ * for an assessment that does not exist yet: every quarantine reaches it, but
+ * through the ONE site that performs the quarantine (`consumeArraySubmission`,
+ * or `holdWithoutTarget` for the no-merge-target case), never a second append
+ * here. Two appends per refusal made a single rejection read as two on a record
+ * whose whole value is counting them.
  */
 async function recordRejectedDesignReviewSubmission(
   artifactsDir: string,
   existing: DesignAssessment | undefined,
   pass: RejectedDesignReviewSubmission["pass"],
-  quarantined: Extract<ConsumeArrayIncomingResult<unknown>, { status: "quarantined" }>,
+  quarantined: Extract<
+    ConsumeArraySubmissionResult<unknown>,
+    { status: "quarantined" }
+  >,
 ): Promise<void> {
   if (!existing) return;
   const entry: RejectedDesignReviewSubmission = {
     pass,
-    filename: quarantined.originalFilename,
+    lane: quarantined.lane,
     quarantine_path: quarantined.quarantinePath,
     reason: quarantined.reason,
     rejected_at: new Date().toISOString(),
@@ -842,7 +961,7 @@ export function renderDesignReviewRejectionNotice(
   ];
   for (const r of rejected) {
     lines.push(
-      `- **${r.pass}** — \`${r.filename}\` quarantined to \`${r.quarantine_path}\` (${r.rejected_at}): ${r.reason}`,
+      `- **${r.pass}** — lane \`${r.lane}\` quarantined to \`${r.quarantine_path}\` (${r.rejected_at}): ${r.reason}`,
     );
   }
   lines.push(
@@ -860,11 +979,55 @@ export async function handleDesignReviewBranch(
 ): Promise<BranchActionResult> {
   const existing = bundle.design_assessment;
 
-  // Legacy: consume old combined findings file. Tolerant-unwrap or quarantine
-  // (never a bare unconditional delete) — see the quarantine block comment above.
-  const legacyResult = await consumeArrayIncoming<Finding>(
+  /**
+   * P25-f: a valid submission with nowhere to merge it is HELD and RECORDED,
+   * never consumed-and-dropped. `design_assessment` is normally present by the
+   * time this branch runs (`design_assessment_current` outranks both review
+   * passes in PRIORITY) — but that is a reasoning argument, and the old code
+   * relied on it: it deleted the file at unwrap time and then skipped the merge
+   * on `&& existing`, destroying valid work and re-emitting the identical step
+   * with zero signal to the host. Quarantining keeps the bytes and puts the
+   * refusal on the record, so the next pass can still use them.
+   */
+  const holdWithoutTarget = async (
+    pass: RejectedDesignReviewSubmission["pass"],
+    lane: string,
+    path: string,
+  ): Promise<void> => {
+    const reason = "no design assessment exists yet to merge this submission into";
+    const quarantinePath = await quarantineSubmissionFile(
+      params.artifactsDir,
+      path,
+      lane,
+    );
+    process.stderr.write(
+      `[audit-code] ${lane} submission quarantined to ${quarantinePath}: no design ` +
+        `assessment exists yet to merge it into. Re-run next-step; the assessment is ` +
+        `built by a higher-priority obligation.\n`,
+    );
+    // The ledger append belongs to the site that performs the quarantine — this
+    // is the one quarantine `consumeArraySubmission` does not do — so a refusal
+    // is recorded exactly once no matter which path refused it. With no
+    // assessment on disk there is no `rejected_submissions` note to write, and
+    // this event is the only durable record that the submission was received.
+    await recordLaneOutcome(params.artifactsDir, lane, {
+      kind: "rejected",
+      issueCode: "submission_rejected",
+      message: `${pass} pass: ${reason}`,
+    });
+    await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, pass, {
+      status: "quarantined",
+      quarantinePath,
+      lane,
+      reason,
+    });
+  };
+
+  // Legacy: consume the old combined findings submission. Tolerant-unwrap or
+  // quarantine (never a bare unconditional delete) — see the block comment above.
+  const legacyResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
-    "design-review-findings.json",
+    GATE_LANES.design_review_legacy,
   );
   if (legacyResult.status === "quarantined") {
     await recordRejectedDesignReviewSubmission(params.artifactsDir, existing, "legacy", legacyResult);
@@ -881,21 +1044,25 @@ export async function handleDesignReviewBranch(
         join(params.artifactsDir, "design_assessment.json"),
         existing,
       );
+      await unlink(legacyResult.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_legacy, {
+        kind: "accepted",
+      });
       return { action: "continue" };
     }
-    // File consumed but no target to merge into — keep folding.
+    await holdWithoutTarget("legacy", GATE_LANES.design_review_legacy, legacyResult.path);
     return { action: "continue" };
   }
   // absent: fall through to the contract/conceptual check.
 
   // New: consume contract-findings and/or conceptual-findings independently.
-  const contractResult = await consumeArrayIncoming<Finding>(
+  const contractResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
-    "design-review-contract-findings.json",
+    GATE_LANES.design_review_contract,
   );
-  const conceptualResult = await consumeArrayIncoming<Finding>(
+  const conceptualResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
-    "design-review-conceptual-findings.json",
+    GATE_LANES.design_review_conceptual,
   );
 
   let consumed = false;
@@ -909,6 +1076,12 @@ export async function handleDesignReviewBranch(
       (r) => r.pass !== "contract",
     );
     consumed = true;
+  } else if (contractResult.status === "ok") {
+    await holdWithoutTarget(
+      "contract",
+      GATE_LANES.design_review_contract,
+      contractResult.path,
+    );
   }
 
   if (conceptualResult.status === "quarantined") {
@@ -920,6 +1093,12 @@ export async function handleDesignReviewBranch(
       (r) => r.pass !== "conceptual",
     );
     consumed = true;
+  } else if (conceptualResult.status === "ok") {
+    await holdWithoutTarget(
+      "conceptual",
+      GATE_LANES.design_review_conceptual,
+      conceptualResult.path,
+    );
   }
 
   if (consumed && existing) {
@@ -941,6 +1120,12 @@ export async function handleDesignReviewBranch(
         bundle,
         reviewedAt,
       );
+      // Unlink only now: the findings are persisted and snapshotted, so the
+      // submission's content survives its own deletion.
+      await unlink(contractResult.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_contract, {
+        kind: "accepted",
+      });
     }
     if (conceptualResult.status === "ok") {
       await captureDesignReviewSnapshot(
@@ -950,6 +1135,10 @@ export async function handleDesignReviewBranch(
         bundle,
         reviewedAt,
       );
+      await unlink(conceptualResult.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, GATE_LANES.design_review_conceptual, {
+        kind: "accepted",
+      });
     }
     return { action: "continue" };
   }
@@ -980,7 +1169,7 @@ export async function handleDesignReviewBranch(
 // ── Tier C2: consolidated "omittable host gate" engine ─────────────────────────
 //
 // Five of the seven host-gate branch handlers below share ONE shape: poll a
-// single `incoming/<file>.json`; if present, apply it via runAuditStep and
+// single lane's bound submission; if present, apply it via runAuditStep and
 // `continue`; else, if a ceiling/flag says no host turn is owed this pass,
 // `run_omit` (so the deterministic omit executor satisfies the obligation);
 // else `return` the one host step this gate ever emits. `runOmittableGate`
@@ -992,7 +1181,7 @@ export async function handleDesignReviewBranch(
 // graph_enrichment and design_review do NOT fit this shape and are
 // intentionally NOT routed through `runOmittableGate` — forcing them in would
 // paper over real differences rather than carry them:
-//   - graph_enrichment polls TWO independent incoming files in sequence, each
+//   - graph_enrichment polls TWO independent lane submissions in sequence, each
 //     gated by its own "is a decision still owed" predicate CHECKED BEFORE
 //     attempting to consume (the opposite order from the shape above, which
 //     always tries to consume first, ceiling-check second). Its stage-1 apply
@@ -1001,7 +1190,7 @@ export async function handleDesignReviewBranch(
 //     `fallthrough`, not `run_omit` (same caller-side effect, kept as its own
 //     literal so `handleGraphEnrichmentBranch`'s existing action union — and
 //     the tests asserting `"fallthrough"` — stay untouched).
-//   - design_review polls THREE incoming files: a legacy one handled and
+//   - design_review polls THREE lane submissions: a legacy one handled and
 //     returned on its own first, then two (contract/conceptual) polled
 //     INDEPENDENTLY of each other (both are checked and, if valid, applied —
 //     not first-match-wins) and merged into a single write plus a
@@ -1027,16 +1216,16 @@ type SystemicChallengeBranchResult = OmittableGateAction<"systemic_challenge">;
 interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
   /** The step kind this gate returns when a host turn is owed. */
   kind: TStepKind;
-  /** Filename under `incoming/` this gate polls. */
-  filename: string;
+  /** The lane whose bound submission path this gate polls. */
+  lane: string;
   /**
    * Schema the consumed submission MUST satisfy before it is applied. REQUIRED —
    * the compiler enumerates every gate so a new one cannot forget it. A mis-shaped
    * submission is quarantined loudly (moved to `quarantine/`, stderr diagnostic
-   * naming the file + shape error) and the gate falls through to shouldOmit/return;
+   * naming the lane + shape error) and the gate falls through to shouldOmit/return;
    * it is NEVER handed to the executor to crash on (raw `.parse()`) or silently
    * degrade (bare cast). Single-sources the quarantine-loudly property for every
-   * incoming gate this engine drives.
+   * gate this engine drives.
    */
   schema: ZodTypeAny;
   /** Apply the consumed value (the executor dispatch this gate's host turn feeds). */
@@ -1057,7 +1246,7 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
 }
 
 /**
- * Drive one "poll incoming → apply+continue, else omit-or-return" gate — the
+ * Drive one "poll the lane → apply+continue, else omit-or-return" gate — the
  * shape common to synthesis_narrative, charter_extraction,
  * charter_clarification, and systemic_challenge. See the section comment
  * above for the two gates that deviate and are not run through this engine.
@@ -1068,13 +1257,13 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<OmittableGateAction<TStepKind>> {
-  const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, descriptor.filename);
+  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, descriptor.lane);
   if (incoming.status === "malformed") {
     // Not-JSON submission: same quarantine-loudly lifecycle as a mis-shaped one.
-    await quarantineMisshapedIncoming(
+    await quarantineMisshapedSubmission(
       params.artifactsDir,
       incoming.path,
-      descriptor.filename,
+      descriptor.lane,
       incoming.reason,
     );
   } else if (incoming.status === "ok") {
@@ -1082,15 +1271,16 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
     if (parsed.success) {
       await descriptor.apply(parsed.data as TIncoming, incoming.path, params);
       await unlink(incoming.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, descriptor.lane, { kind: "accepted" });
       return { action: "continue" };
     }
     // Mis-shaped submission: quarantine loudly and fall through to
     // shouldOmit/return — never hand it to the executor to crash on or silently
     // treat as an empty "reviewed, found nothing" result.
-    await quarantineMisshapedIncoming(
+    await quarantineMisshapedSubmission(
       params.artifactsDir,
       incoming.path,
-      descriptor.filename,
+      descriptor.lane,
       parsed.error,
     );
   }
@@ -1101,9 +1291,9 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
 }
 
 /**
- * Handle the `synthesis_narrative_executor` incoming-artifact polling block.
+ * Handle the `synthesis_narrative_executor` submission-polling block.
  * Returns:
- *   - `continue`  → an incoming narrative file was consumed + applied (progress
+ *   - `continue`  → a narrative submission was consumed + applied (progress
  *     made); re-scan on the reloaded bundle.
  *   - `return`    → a host turn is still needed (narrative enabled, none supplied
  *     yet); emit the synthesis_narrative step.
@@ -1120,8 +1310,8 @@ export async function handleSynthesisNarrativeBranch(
   return runOmittableGate<SynthesisNarrative, "synthesis_narrative">(
     {
       kind: "synthesis_narrative",
-      filename: "synthesis-narrative.json",
-      schema: SynthesisNarrativeSchema,
+      lane: GATE_LANES.synthesis_narrative,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.synthesis_narrative]!,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1155,18 +1345,18 @@ export async function handleIntentEquivalenceBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<IntentEquivalenceBranchResult> {
-  const filename = "intent-equivalence-verdict.json";
-  const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
+  const lane = GATE_LANES.intent_equivalence;
+  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane);
   if (incoming.status === "malformed") {
-    await quarantineMisshapedIncoming(
+    await quarantineMisshapedSubmission(
       params.artifactsDir,
       incoming.path,
-      filename,
+      lane,
       incoming.reason,
     );
     // Fall through: no valid submission — re-emit or deterministically resolve.
   } else if (incoming.status === "ok") {
-    const parsed = IntentEquivalenceVerdictSchema.safeParse(incoming.value);
+    const parsed = LANE_SUBMISSION_SCHEMAS[lane]!.safeParse(incoming.value);
     if (parsed.success) {
       await runAuditStep({
         root: params.root,
@@ -1175,12 +1365,13 @@ export async function handleIntentEquivalenceBranch(
         intentEquivalenceVerdictPath: incoming.path,
       });
       await unlink(incoming.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, lane, { kind: "accepted" });
       return { action: "continue" };
     }
-    await quarantineMisshapedIncoming(
+    await quarantineMisshapedSubmission(
       params.artifactsDir,
       incoming.path,
-      filename,
+      lane,
       parsed.error,
     );
     // Fall through: no valid submission — re-emit or deterministically resolve.
@@ -1192,7 +1383,7 @@ export async function handleIntentEquivalenceBranch(
 }
 
 /**
- * Handle the `critical_flow_fallback_executor` incoming-artifact polling block.
+ * Handle the `critical_flow_fallback_executor` submission-polling block.
  * The obligation is only ever selected when the deterministic flow inference
  * marked itself below the confidence bar (`critical_flows.fallback_required`),
  * so — unlike the synthesis-narrative / charter gates — there is NO autonomous
@@ -1211,8 +1402,8 @@ export async function handleCriticalFlowFallbackBranch(
   return runOmittableGate<CriticalFlowFallbackResult, "critical_flow_fallback">(
     {
       kind: "critical_flow_fallback",
-      filename: "critical-flow-fallback.json",
-      schema: CriticalFlowFallbackResultSchema,
+      lane: GATE_LANES.critical_flow_fallback,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.critical_flow_fallback]!,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1232,9 +1423,9 @@ export async function handleCriticalFlowFallbackBranch(
 }
 
 /**
- * Handle the `charter_extraction_executor` incoming-artifact polling block
+ * Handle the `charter_extraction_executor` submission-polling block
  * (Phase C). Mirrors the synthesis-narrative branch:
- *   - a pending `incoming/charter-extraction.json` → assemble+gate it via the
+ *   - every per-kind lane present and valid → assemble+gate the merge via the
  *     preferred executor (ingest), then `continue`;
  *   - otherwise a `shallow` ceiling → `run_omit` (the deterministic executor
  *     writes an empty `status:omitted` register — the conversation-first default,
@@ -1269,49 +1460,28 @@ export async function handleCharterExtractionBranch(
   const laneValues = new Map<CharterKind, { value: CharterSubmission; path: string }>();
   let quarantinedAny = false;
   for (const kind of kinds) {
-    const filename = `charter-extraction-${kind}.json`;
-    const incoming = await tryConsumeIncoming<unknown>(params.artifactsDir, filename);
+    const lane = charterExtractionLane(kind);
+    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane);
     if (incoming.status === "absent") continue;
     if (incoming.status === "malformed") {
       quarantinedAny = true;
-      await quarantineMisshapedIncoming(
+      await quarantineMisshapedSubmission(
         params.artifactsDir,
         incoming.path,
-        filename,
+        lane,
         incoming.reason,
       );
       continue;
     }
-    const laneSchema = CharterSubmissionSchema.superRefine((submission, ctx) => {
-      submission.nodes.forEach((node, ni) => {
-        if (node.kind !== kind) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["nodes", ni, "kind"],
-            message: `lane '${kind}' may only carry kind '${kind}', got '${node.kind}'`,
-          });
-        }
-        const unknown = node.files.filter((f) => !universe.has(f));
-        if (unknown.length > 0) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["nodes", ni, "files"],
-            message:
-              `teleology node cites file(s) outside the repo: ${unknown.sort().join(", ")} — ` +
-              "scopes must be repo-relative paths exactly as the evidence packet names them",
-          });
-        }
-      });
-    });
-    const parsed = laneSchema.safeParse(incoming.value);
+    const parsed = charterLaneSchema(kind, universe).safeParse(incoming.value);
     if (parsed.success) {
-      laneValues.set(kind, { value: parsed.data, path: incoming.path });
+      laneValues.set(kind, { value: parsed.data as CharterSubmission, path: incoming.path });
     } else {
       quarantinedAny = true;
-      await quarantineMisshapedIncoming(
+      await quarantineMisshapedSubmission(
         params.artifactsDir,
         incoming.path,
-        filename,
+        lane,
         parsed.error,
       );
     }
@@ -1327,7 +1497,13 @@ export async function handleCharterExtractionBranch(
     const merged: CharterSubmission = {
       nodes: kinds.flatMap((kind) => laneValues.get(kind)!.value.nodes),
     };
-    const mergedPath = join(params.artifactsDir, "incoming", "charter-extraction.json");
+    // The merged submission is TOOL-written, so it lives with the other lane
+    // assets rather than under `submissions/` (which holds only what a host
+    // wrote). It is handed to the executor by path and deleted after ingest.
+    const mergedPath = join(
+      laneAssetsDir(params.artifactsDir),
+      CHARTER_EXTRACTION_MERGED_FILENAME,
+    );
     await writeJsonFile(mergedPath, merged);
     await runAuditStep({
       root: params.root,
@@ -1336,14 +1512,20 @@ export async function handleCharterExtractionBranch(
       charterSubmissionPath: mergedPath,
     });
     await unlink(mergedPath).catch(() => {});
-    for (const lane of laneValues.values()) {
+    for (const [kind, lane] of laneValues.entries()) {
       await unlink(lane.path).catch(() => {});
+      await recordLaneOutcome(params.artifactsDir, charterExtractionLane(kind), {
+        kind: "accepted",
+      });
     }
     // Evidence packets are consumed inputs like the lane submissions — a stale
     // packet left behind would feed a later re-extraction yesterday's evidence.
     for (const kind of kinds) {
       await unlink(
-        join(params.artifactsDir, "incoming", `charter-extraction-${kind}-packet.md`),
+        join(
+          laneAssetsDir(params.artifactsDir),
+          charterExtractionPacketFilename(kind),
+        ),
       ).catch(() => {});
     }
     return { action: "continue" };
@@ -1354,9 +1536,9 @@ export async function handleCharterExtractionBranch(
 }
 
 /**
- * Handle the `charter_delta_executor` incoming-artifact polling block (Phase C.2 —
+ * Handle the `charter_delta_executor` submission-polling block (Phase C.2 —
  * the INDEPENDENT delta-miner). Mirrors the charter-extraction branch:
- *   - a pending `incoming/charter-delta.json` → route+gate it via the preferred
+ *   - a pending `charter_delta` lane submission → route+gate it via the preferred
  *     executor (ingest), then `continue`;
  *   - otherwise, when the register is NOT `deltas_pending` (extraction omitted, or
  *     found no subsystems to mine) → `run_omit` (the deterministic executor settles
@@ -1372,8 +1554,8 @@ export async function handleCharterDeltaBranch(
   return runOmittableGate<unknown, "charter_delta">(
     {
       kind: "charter_delta",
-      filename: "charter-delta.json",
-      schema: CharterDeltaSubmissionSchema,
+      lane: GATE_LANES.charter_delta,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_delta]!,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1397,7 +1579,7 @@ export async function handleCharterDeltaBranch(
  * loop). Mirrors the charter-extraction branch, but the loop is DETERMINISTIC — the
  * executor assembles asked/banked from the Phase-C `charter_register` deltas, so the
  * host turn only surfaces the VOI-ranked interactive queue for relay:
- *   - a pending `incoming/charter-clarification.json` (host answers) → assemble via
+ *   - a pending `charter_clarification` lane submission (host answers) → assemble via
  *     the deterministic runner, then `continue`;
  *   - a `shallow` ceiling OR zero attention → `run_omit` (the runner writes the
  *     register autonomously — every question banks as a finding, no host turn);
@@ -1414,8 +1596,8 @@ export async function handleCharterClarificationBranch(
   return runOmittableGate<unknown, "charter_clarification">(
     {
       kind: "charter_clarification",
-      filename: "charter-clarification.json",
-      schema: ClarificationAnswersSubmissionSchema,
+      lane: GATE_LANES.charter_clarification,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_clarification]!,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1450,7 +1632,7 @@ export async function handleCharterClarificationBranch(
 /**
  * Handle the `systemic_challenge_executor` obligation (Phase E — the second-order
  * adversary loop-until-dry pass). Mirrors the charter-clarification branch:
- *   - a pending `incoming/systemic-challenge.json` (an adversary round's findings) →
+ *   - a pending `systemic_challenge` lane submission (an adversary round's findings) →
  *     fold it via the deterministic runner, then `continue`;
  *   - a `shallow` ceiling → `run_omit` (the runner writes an omitted register
  *     autonomously, no host turn);
@@ -1469,8 +1651,8 @@ export async function handleSystemicChallengeBranch(
   return runOmittableGate<unknown, "systemic_challenge">(
     {
       kind: "systemic_challenge",
-      filename: "systemic-challenge.json",
-      schema: SystemicChallengeSubmissionSchema,
+      lane: GATE_LANES.systemic_challenge,
+      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.systemic_challenge]!,
       apply: async (_value, path, p) => {
         await runAuditStep({
           root: p.root,
@@ -1510,6 +1692,7 @@ export async function handleSystemicChallengeBranch(
  * happen to exist.
  */
 export type HostGateKind =
+  | "analyzer_consent"
   | "graph_enrichment"
   | "critical_flow_fallback"
   | "intent_equivalence"
@@ -1520,53 +1703,84 @@ export type HostGateKind =
   | "charter_clarification"
   | "systemic_challenge";
 
-export const HOST_GATE_DESCRIPTORS: Record<
-  HostGateKind,
-  { driven: "generic" | "custom"; incomingFiles: readonly string[] }
-> = {
+export interface HostGateDescriptor {
+  readonly driven: "generic" | "custom";
+  /**
+   * The content-coherent lanes this gate can be owed a submission on. A lane id
+   * is the join key between the emitter and this gate's reader; the bound path
+   * is derived from it. NEVER a filename — a name a host could type is exactly
+   * what P25 removed.
+   */
+  readonly lanes: readonly string[];
+}
+
+/**
+ * The single enumeration of every gate that can be owed a host submission, and
+ * of every lane within it.
+ *
+ * It under-counted before P25 in three ways, each of which meant the "complete"
+ * registry could not be used to derive what a run expects: the analyzer-consent
+ * gate had no entry at all, the conceptual perspective lanes were minted
+ * privately by `conceptualDispatch`, and the charter lane set was hard-coded
+ * three deep instead of derived from `charterExtractionKindsForCeiling`. All
+ * three are fixed here; tool-WRITTEN inputs (lane prompts, evidence packets,
+ * the merged charter submission) are deliberately absent — they are not
+ * submissions, so nothing is ever owed on them.
+ */
+export const HOST_GATE_DESCRIPTORS: Record<HostGateKind, HostGateDescriptor> = {
+  analyzer_consent: {
+    driven: "custom",
+    lanes: [GATE_LANES.analyzer_consent],
+  },
   graph_enrichment: {
     driven: "custom",
-    incomingFiles: ["analyzer-decisions.json", "edge-reasoning.json"],
+    lanes: [GATE_LANES.analyzer_decisions, GATE_LANES.edge_reasoning],
   },
   design_review: {
     driven: "custom",
-    incomingFiles: [
-      "design-review-findings.json",
-      "design-review-contract-findings.json",
-      "design-review-conceptual-findings.json",
+    // The deep conceptual pass's independent JUDGE produces the conceptual
+    // submission, so it is the `design_review_conceptual` lane rather than one
+    // of its own. The pass's N perspective lanes are deliberately ABSENT: the
+    // tool never reads a perspective's findings (the judge does), so it is owed
+    // nothing on them — listing them here would state an expectation the run
+    // could never satisfy and could never drop.
+    lanes: [
+      GATE_LANES.design_review_legacy,
+      GATE_LANES.design_review_contract,
+      GATE_LANES.design_review_conceptual,
     ],
   },
   critical_flow_fallback: {
     driven: "generic",
-    incomingFiles: ["critical-flow-fallback.json"],
+    lanes: [GATE_LANES.critical_flow_fallback],
   },
   // Custom: runOmittableGate minus the plain-consume — the verdict is
   // schema-validated + quarantined-loudly in the handler itself.
   intent_equivalence: {
     driven: "custom",
-    incomingFiles: ["intent-equivalence-verdict.json"],
+    lanes: [GATE_LANES.intent_equivalence],
   },
-  synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
+  synthesis_narrative: { driven: "generic", lanes: [GATE_LANES.synthesis_narrative] },
   // Custom: the per-kind blind-lane gate (design resolution 2) — one submission
-  // file per charter kind, each validated (shape + kind purity + scope
-  // grounding) and quarantined loudly per lane, tool-side merge only when every
-  // lane is present + valid. The three estimator channels are the lane set at
-  // every charter-authorizing ceiling; `true` is nominated by the delta miner
-  // at deepest, never a lane (design resolution 4).
+  // per charter kind, each validated (shape + kind purity + scope grounding) and
+  // quarantined loudly per lane, tool-side merge only when every lane is present
+  // + valid. The lane set is DERIVED from the same function the gate loop walks,
+  // so the registry and the loop cannot disagree at any ceiling; `true` is
+  // nominated by the delta miner at deepest, never a lane (design resolution 4).
   charter_extraction: {
     driven: "custom",
-    incomingFiles: [
-      "charter-extraction-stated.json",
-      "charter-extraction-structural.json",
-      "charter-extraction-revealed.json",
-    ],
+    lanes: charterExtractionKindsForCeiling({
+      rung: "deepest",
+      explicit_opt_in: true,
+    }).map(charterExtractionLane),
   },
-  charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
-  charter_clarification: { driven: "generic", incomingFiles: ["charter-clarification.json"] },
-  systemic_challenge: { driven: "generic", incomingFiles: ["systemic-challenge.json"] },
+  charter_delta: { driven: "generic", lanes: [GATE_LANES.charter_delta] },
+  charter_clarification: { driven: "generic", lanes: [GATE_LANES.charter_clarification] },
+  systemic_challenge: { driven: "generic", lanes: [GATE_LANES.systemic_challenge] },
 };
 
 export const HOST_GATE_KINDS: readonly HostGateKind[] = [
+  "analyzer_consent",
   "graph_enrichment",
   "critical_flow_fallback",
   "intent_equivalence",
@@ -1990,7 +2204,7 @@ export function buildAuditObligations(
       },
     },
     {
-      // Graph enrichment: poll the analyzer-decision / edge-reasoning incoming
+      // Graph enrichment: poll the analyzer-decision / edge-reasoning lane
       // artifacts first (emit a host step when one is needed), otherwise run the
       // deterministic enrichment executor.
       id: "graph_enrichment_current",
@@ -2020,7 +2234,7 @@ export function buildAuditObligations(
     deterministic("docs_digest_current"),
     {
       // Confirm-intent host step: the host writes intent_checkpoint.json (read by
-      // deriveAuditState on re-invocation), so there is no incoming artifact to
+      // deriveAuditState on re-invocation), so there is no submission to
       // consume — emit the step directly.
       id: "intent_checkpoint_current",
       derive: deriveObligationState("intent_checkpoint_current"),
@@ -2051,7 +2265,7 @@ export function buildAuditObligations(
       },
     },
     {
-      // Charter extraction (Phase C): poll the incoming submission (ingest+gate),
+      // Charter extraction (Phase C): poll the lane submissions (ingest+gate),
       // omit at a shallow ceiling, or emit the host charter-extraction step at a
       // deep+ ceiling. Mirrors the synthesis-narrative branch.
       id: "charter_extraction_current",
@@ -2069,7 +2283,7 @@ export function buildAuditObligations(
       },
     },
     {
-      // Charter delta-mining (Phase C.2): poll the incoming delta submission
+      // Charter delta-mining (Phase C.2): poll the delta lane submission
       // (route+gate it), settle deterministically when the register is not
       // deltas_pending (extraction omitted / no subsystems), or emit the host step
       // for the INDEPENDENT delta-miner when a deltas_pending register has no
@@ -2089,21 +2303,21 @@ export function buildAuditObligations(
       },
     },
     {
-      // Contract design-review pass: poll incoming contract/conceptual findings;
+      // Contract design-review pass: poll the contract/conceptual lanes;
       // emit the dispatch step when a pass still needs to run.
       id: "design_review_contract_completed",
       derive: deriveObligationState("design_review_contract_completed"),
       execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
     },
     {
-      // Conceptual design-review pass: same incoming-poll handler (it resolves
+      // Conceptual design-review pass: same submission-poll handler (it resolves
       // which pass remains).
       id: "design_review_conceptual_completed",
       derive: deriveObligationState("design_review_conceptual_completed"),
       execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
     },
     {
-      // Charter clarification (Phase D triangulation loop): poll incoming answers
+      // Charter clarification (Phase D triangulation loop): poll the answers lane
       // (apply + re-split), assemble the loop deterministically at a shallow ceiling
       // / zero attention (autonomous), or emit the host step relaying the VOI-ranked
       // interactive queue at a deep+ ceiling with attention > 0. Non-drainable
@@ -2123,7 +2337,7 @@ export function buildAuditObligations(
       },
     },
     {
-      // Systemic challenge (Phase E loop-until-dry): poll the incoming adversary
+      // Systemic challenge (Phase E loop-until-dry): poll the adversary lane's
       // round (fold it), omit at a shallow ceiling, or emit the second-order-adversary
       // host step when the loop is open at a deep+ ceiling. Non-drainable
       // (host_delegation), so the drain stops here.
@@ -2153,7 +2367,7 @@ export function buildAuditObligations(
     deterministic("runtime_validation_current"),
     deterministic("synthesis_current"),
     {
-      // Synthesis narrative: poll the incoming narrative; emit the host step when
+      // Synthesis narrative: poll the narrative lane; emit the host step when
       // narrative is enabled and not yet supplied, otherwise the deterministic
       // omit runs (fold on).
       id: "synthesis_narrative_current",
@@ -2170,7 +2384,7 @@ export function buildAuditObligations(
           // (A bare reload here would leave it actionable and spin the fold.)
           return runDeterministicExecutor(bundle, ctx);
         }
-        // continue: an incoming narrative was consumed + applied — re-scan.
+        // continue: a narrative submission was consumed + applied — re-scan.
         return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
       },
     },
@@ -2215,23 +2429,37 @@ async function runHostDelegationObligation(
   // accepted ledger written before core ingestion is retried, while results
   // already reflected in coverage are not replayed.
   const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
+  let ingestIssues: readonly SubmissionIssue[] = [];
   if (currentRun) {
     let acceptedResults: Awaited<
       ReturnType<typeof ingestAuditHostResults>
     >["accepted_results"] = [];
+    let completedIds: readonly string[] = [];
     try {
-      acceptedResults = (
-        await ingestAuditHostResults({
-          root: ctx.params.root,
-          artifactsDir: ctx.params.artifactsDir,
-          runId: currentRun.run_id,
-        })
-      ).accepted_results;
+      const ingested = await ingestAuditHostResults({
+        root: ctx.params.root,
+        artifactsDir: ctx.params.artifactsDir,
+        runId: currentRun.run_id,
+      });
+      acceptedResults = ingested.accepted_results;
+      ingestIssues = ingested.issues;
+      completedIds = ingested.completed_work_item_ids;
     } catch (error) {
       // No handoff exists on the first visit, or prepare was interrupted before
       // all binding artifacts landed. Re-preparing below restores it exactly.
       if (!isFileMissingError(error)) throw error;
     }
+    // The ingest CLASSIFIES every failed read — a submission that never
+    // arrived, unreadable bytes (an EACCES or a directory at the bound path
+    // reads as malformed WITH the OS detail in its message), a body that fails
+    // the contract, a replayed result id. Those classifications used to die in
+    // the caller that computed them; they now land on the ledger and, below,
+    // in the re-emitted step the host actually reads. The completed set rides
+    // along so a repaired item closes its own record.
+    await recordHostResultOutcomes(ctx.params.artifactsDir, currentRun.run_id, {
+      issues: ingestIssues,
+      acceptedIds: completedIds,
+    });
 
     const pendingIds = new Set(
       buildPendingAuditTasks(bundle).map((task) => task.task_id),
@@ -2265,6 +2493,7 @@ async function runHostDelegationObligation(
       kind: "semantic_review",
       selectedExecutor: decision.selected_executor,
       ...review,
+      ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
     },
   };
 }

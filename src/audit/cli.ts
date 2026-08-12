@@ -31,6 +31,7 @@ import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
 import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
 import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
+import { cmdRecoverSubmission } from "./cli/recoverSubmissionCommand.js";
 
 export { runSample };
 
@@ -123,10 +124,13 @@ async function main(argv: string[]): Promise<void> {
     case "score-audit":
       await cmdScoreAudit(argv);
       return;
+    case "recover-submission":
+      await cmdRecoverSubmission(argv);
+      return;
     default:
       console.error(`Unknown command: ${command}`);
       console.error(
-        "Available commands: sample-run, next-step, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, force-synthesis, resynthesize, cleanup, status, score-audit",
+        "Available commands: sample-run, next-step, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, force-synthesis, resynthesize, cleanup, status, score-audit, recover-submission",
       );
       process.exitCode = 1;
   }

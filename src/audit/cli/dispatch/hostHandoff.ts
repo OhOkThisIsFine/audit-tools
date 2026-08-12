@@ -1,14 +1,19 @@
-import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   FindingSchema,
+  assertSubmissionRunId,
+  hashContent,
   isFileMissingError,
-  isJsonParseError,
   readJsonFile,
+  readSubmissionDocument,
+  repoRelativePath,
+  resolveContainedPath,
   stableStringify,
+  submissionPathFor,
   writeJsonFile,
+  type SubmissionIssue,
 } from "audit-tools/shared";
 import { AuditResultSchema, type AuditResult } from "../../types.js";
 
@@ -83,6 +88,17 @@ export interface AuditHostIngestSummary {
   readonly accepted_results: readonly AuditResult[];
   readonly accepted_results_path: string;
   readonly completed_work_item_ids: readonly string[];
+  /**
+   * Every submission this ingest could not accept, classified.
+   *
+   * The four ways a submission used to fail — absent file, unparseable bytes, a
+   * body that violates the result contract, and a conversion that yields
+   * nothing — all collapsed into the same bare `null` and the same silent
+   * `continue`. A host that never wrote its result and a host that wrote
+   * garbage were indistinguishable to every caller, which is exactly the
+   * measured drift P25 exists to make visible.
+   */
+  readonly issues: readonly SubmissionIssue[];
 }
 
 interface HostCoverage {
@@ -149,10 +165,6 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -172,51 +184,15 @@ function isSha256(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 }
 
-function assertRunId(runId: string): void {
-  if (
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(runId) ||
-    runId === "." ||
-    runId === ".."
-  ) {
-    throw new Error(`Invalid audit host run id: ${JSON.stringify(runId)}`);
-  }
-}
-
-function resolveContained(
-  base: string,
-  candidate: string,
-  label: string,
-): string {
-  const absoluteBase = resolve(base);
-  const absoluteCandidate = isAbsolute(candidate)
-    ? resolve(candidate)
-    : resolve(absoluteBase, candidate);
-  const rel = relative(absoluteBase, absoluteCandidate);
-  const firstSegment = rel.split(/[\\/]/u)[0];
-  if (isAbsolute(rel) || firstSegment === "..") {
-    throw new Error(`${label} must remain beneath ${absoluteBase}`);
-  }
-  return absoluteCandidate;
-}
-
-function repoRelative(root: string, absolutePath: string, label: string): string {
-  const contained = resolveContained(root, absolutePath, label);
-  const rel = relative(resolve(root), contained).replaceAll("\\", "/");
-  if (rel.length === 0) {
-    throw new Error(`${label} must identify a path beneath the repository root`);
-  }
-  return rel;
-}
-
 function resolveBoundaryPaths(params: {
   readonly root: string;
   readonly artifactsDir: string;
   readonly runId: string;
 }): ResolvedBoundaryPaths {
-  assertRunId(params.runId);
+  assertSubmissionRunId(params.runId, "audit host run id");
   const root = resolve(params.root);
-  const artifactsDir = resolveContained(root, params.artifactsDir, "artifactsDir");
-  const runDir = resolveContained(
+  const artifactsDir = resolveContainedPath(root, params.artifactsDir, "artifactsDir");
+  const runDir = resolveContainedPath(
     artifactsDir,
     join("runs", params.runId),
     "audit host run directory",
@@ -234,12 +210,20 @@ function resolveBoundaryPaths(params: {
   };
 }
 
+/**
+ * The bound path for one work item's submission — the SHARED rule, not a local
+ * copy of it. The audit and remediate handoffs both derived
+ * `<resultDir>/<sha256(id)>.json` in their own private helpers; a divergence
+ * between the two would have been silent on both sides.
+ */
 function resultPathFor(
   paths: ResolvedBoundaryPaths,
   workItemId: string,
 ): string {
-  const absolute = join(paths.resultDir, `${sha256(workItemId)}.json`);
-  return repoRelative(paths.root, absolute, `result path for ${workItemId}`);
+  return submissionPathFor(
+    { root: paths.root, submissionDir: paths.resultDir },
+    workItemId,
+  );
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {
@@ -282,16 +266,16 @@ function normalizeTask(
     ...new Set(
       task.file_paths.map((path) => {
         const raw = requireNonEmptyString(path, `${taskId}.file_paths[]`);
-        const absolute = resolveContained(root, raw, `${taskId} file path`);
-        return repoRelative(root, absolute, `${taskId} file path`);
+        const absolute = resolveContainedPath(root, raw, `${taskId} file path`);
+        return repoRelativePath(root, absolute, `${taskId} file path`);
       }),
     ),
   ].sort(compareCodeUnits);
   const normalizedLineCounts: Record<string, number> = {};
   for (const [path, count] of Object.entries(task.file_line_counts)) {
-    const normalizedPath = repoRelative(
+    const normalizedPath = repoRelativePath(
       root,
-      resolveContained(root, path, `${taskId} line-count path`),
+      resolveContainedPath(root, path, `${taskId} line-count path`),
       `${taskId} line-count path`,
     );
     if (!Number.isInteger(count) || count < 0) {
@@ -365,7 +349,7 @@ function buildWorkItem(
       token_estimate: task.token_estimate,
     },
     prompt: {
-      sha256: sha256(promptText),
+      sha256: hashContent(promptText),
       text: promptText,
     },
     scope: {
@@ -400,7 +384,7 @@ function validateAcceptedEntry(
     typeof value.result_id === "string" &&
     isSha256(value.result_sha256) &&
     isRecord(value.result) &&
-    value.result_sha256 === sha256(stableStringify(value.result)) &&
+    value.result_sha256 === hashContent(stableStringify(value.result)) &&
     value.result.work_item_id === value.work_item_id &&
     value.result.prompt_sha256 === value.prompt_sha256 &&
     value.result.result_id === value.result_id &&
@@ -568,7 +552,7 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     !isSha256(value.prompt.sha256) ||
     typeof value.prompt.text !== "string" ||
-    sha256(value.prompt.text) !== value.prompt.sha256 ||
+    hashContent(value.prompt.text) !== value.prompt.sha256 ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, ["files", "unit_ids"]) ||
     !Array.isArray(value.scope.files) ||
@@ -800,23 +784,58 @@ function toAuditResult(
   return parsed.success ? parsed.data : null;
 }
 
+/** A submission read that either yielded a valid result or says why not. */
+type SubmittedResultOutcome =
+  | { readonly ok: true; readonly result: AuditHostResult }
+  | { readonly ok: false; readonly issue: SubmissionIssue };
+
+/**
+ * Read one bound submission and CLASSIFY the outcome. Every failure names
+ * itself and the bound path it looked at; nothing collapses to `null`.
+ */
 async function readSubmittedResult(
   absolutePath: string,
+  boundPath: string,
   runId: string,
   item: AuditHostWorkItem,
   binding: AuditHostTaskBinding,
-): Promise<AuditHostResult | null> {
-  try {
-    return parseHostResult(
-      await readJsonFile<unknown>(absolutePath),
-      runId,
-      item,
-      binding,
-    );
-  } catch (error) {
-    if (isFileMissingError(error) || isJsonParseError(error)) return null;
-    throw error;
+): Promise<SubmittedResultOutcome> {
+  const locators = { work_item_id: item.id, result_path: boundPath } as const;
+  const read = await readSubmissionDocument(absolutePath);
+  if (read.kind === "missing") {
+    return {
+      ok: false,
+      issue: {
+        code: "submission_missing",
+        message: `work item '${item.id}' submitted nothing at its bound path`,
+        ...locators,
+      },
+    };
   }
+  if (read.kind === "malformed") {
+    return {
+      ok: false,
+      issue: {
+        code: "submission_malformed",
+        message: `work item '${item.id}' submitted bytes that are not JSON: ${read.detail}`,
+        ...locators,
+      },
+    };
+  }
+  const result = parseHostResult(read.value, runId, item, binding);
+  if (result === null) {
+    return {
+      ok: false,
+      issue: {
+        code: "submission_contract_invalid",
+        message:
+          `work item '${item.id}' submitted JSON that does not satisfy the audit host ` +
+          `result contract (identity, prompt binding, or file coverage)`,
+        ...locators,
+      },
+    };
+  }
+  return { ok: true, result };
 }
 
 export async function ingestAuditHostResults(params: {
@@ -850,33 +869,60 @@ export async function ingestAuditHostResults(params: {
   const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
   const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
   const additions: AcceptedResultEntry[] = [];
+  const issues: SubmissionIssue[] = [];
 
   for (const entry of resultMap.entries) {
     if (acceptedBindings.has(bindingIdentity(entry))) continue;
     const item = items.get(entry.work_item_id);
     const binding = taskBindings.get(entry.work_item_id);
     if (item === undefined || binding === undefined) continue;
-    const absoluteResultPath = resolveContained(
+    const absoluteResultPath = resolveContainedPath(
       paths.root,
       entry.result_path,
       `result path for ${entry.work_item_id}`,
     );
-    const result = await readSubmittedResult(
+    const outcome = await readSubmittedResult(
       absoluteResultPath,
+      entry.result_path,
       params.runId,
       item,
       binding,
     );
-    if (result === null || resultIds.has(result.result_id)) continue;
+    if (!outcome.ok) {
+      issues.push(outcome.issue);
+      continue;
+    }
+    const result = outcome.result;
+    if (resultIds.has(result.result_id)) {
+      issues.push({
+        code: "duplicate_submission_id",
+        message:
+          `work item '${entry.work_item_id}' submitted result id '${result.result_id}', ` +
+          `which this run has already accepted`,
+        work_item_id: entry.work_item_id,
+        result_path: entry.result_path,
+      });
+      continue;
+    }
     const auditResult = toAuditResult(result, binding);
-    if (auditResult === null) continue;
+    if (auditResult === null) {
+      issues.push({
+        code: "submission_contract_invalid",
+        message:
+          `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
+          `an AuditResult (coverage or finding shape)`,
+        work_item_id: entry.work_item_id,
+        result_path: entry.result_path,
+      });
+      continue;
+    }
     resultIds.add(result.result_id);
     additions.push({
       work_item_id: entry.work_item_id,
       prompt_sha256: entry.prompt_sha256,
       result_path: entry.result_path,
       result_id: result.result_id,
-      result_sha256: sha256(stableStringify(result)),
+      result_sha256: hashContent(stableStringify(result)),
       result,
       audit_result: auditResult,
     });
@@ -908,5 +954,6 @@ export async function ingestAuditHostResults(params: {
     completed_work_item_ids: [
       ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
     ].sort(compareCodeUnits),
+    issues,
   };
 }

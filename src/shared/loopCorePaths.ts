@@ -26,17 +26,23 @@
 export const LOOP_CORE_PATTERNS: readonly string[] = [
   // Path-sorted (JS default string order) so the serialized order is stable and
   // the hook-parity comparison is deterministic. Groups, for the reader:
-  //   • audit orchestrator step machine + host-handoff boundary
+  //   • audit orchestrator step machine + host-handoff boundary + gate ingest
+  //     (the lane modules carry the bound-path rule and the lane validators —
+  //     the audit draw of the submission core, not a helper beside it)
   //   • remediate step machine + host-handoff/landing + risk/pipeline core
-  //   • shared obligation engine
+  //   • shared obligation engine + submission core
   "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
+  "src/audit/cli/laneSubmissions.ts",
+  "src/audit/cli/laneValidators.ts",
+  "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/nextStep.ts",
   "src/shared/engine/",
+  "src/shared/submission/",
 ];
 
 /** Normalize a repo-relative path to forward slashes, no leading "./". */

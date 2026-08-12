@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 113 entr(y/ies) indexed.
+> and at commit). 112 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -68,15 +68,14 @@
 - `open-bugs.md:444` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
 - `open-bugs.md:450` — Selective-deepening convergence — live validation env-bound.
 - `open-bugs.md:458` — `goal_id` is read verbatim off the LLM envelope, so its format is unvalidated (re-verified at HEAD 2026-07-25).
-- `open-bugs.md:467` — Incoming design-review/charter/challenge artifacts have no ingest/validation chokepoint.
-- `open-bugs.md:480` — A valid design-review submission is consumed and DELETED when design_assessment is absent (2026-08-12, found by the P25 design-check, high).
-- `open-bugs.md:489` — systemic_challenge findings ids are adversary-invented and round-colliding.
-- `open-bugs.md:496` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:503` — CI trigger paths omit `.claude/
-- `open-bugs.md:510` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:515` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:521` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:526` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:467` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
+- `open-bugs.md:473` — systemic_challenge findings ids are adversary-invented and round-colliding.
+- `open-bugs.md:480` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
+- `open-bugs.md:487` — CI trigger paths omit `.claude/
+- `open-bugs.md:494` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:499` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:505` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:510` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

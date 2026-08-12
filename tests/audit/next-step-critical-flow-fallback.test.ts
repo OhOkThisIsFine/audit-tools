@@ -8,6 +8,12 @@ import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import type { CriticalFlow } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
@@ -92,18 +98,26 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     expect(paused.step_kind).toBe("critical_flow_fallback");
     expect(paused.status).toBe("ready");
     const resultsPath = paused.artifact_paths.critical_flow_fallback_results;
-    expect(resultsPath).toMatch(/critical-flow-fallback\.json$/);
+    // The submission path is TOOL-computed \u2014 a digest of the lane's minted id,
+    // not a name the host could type. (The registered
+    // `critical-flow-fallback.json` ARTIFACT the executor writes keeps its name;
+    // this is the submission that feeds it.)
+    expect(resultsPath.replaceAll("\\", "/")).toMatch(
+      /\/submissions\/[0-9a-f]{64}\.json$/u,
+    );
     // The results path is pre-declared writable.
     expect(
-      (paused.access?.write_paths ?? []).some((p) =>
-        p.endsWith("critical-flow-fallback.json"),
+      (paused.access?.write_paths ?? []).some(
+        (p) => p.replaceAll("\\", "/") === resultsPath.replaceAll("\\", "/"),
       ),
     ).toBeTruthy();
     // Always-materialized (design resolution 2): the flow-stub body lives in
     // the LANE file; the step prompt is the capability-neutral instruction.
     const stepPrompt = await readFile(paused.prompt_path, "utf8");
     expect(stepPrompt).toMatch(/critical-flow fallback/i);
-    expect(stepPrompt).toMatch(/critical-flow-fallback\.json/);
+    expect(stepPrompt.replaceAll("\\", "/")).toContain(
+      resultsPath.replaceAll("\\", "/"),
+    );
     expect(stepPrompt).toMatch(/sequentially yourself|else read and follow/);
     const lanePromptPath = paused.artifact_paths.critical_flow_fallback_prompt;
     expect(lanePromptPath).toMatch(/critical-flow-fallback-prompt\.md$/);
@@ -148,9 +162,9 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
     await persistFallbackState(root, artifactsDir);
 
     // Provide the host submission up front (empty is a valid "nothing to add").
-    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await mkdir(submissionsDir(artifactsDir), { recursive: true });
     await writeFile(
-      join(artifactsDir, "incoming", "critical-flow-fallback.json"),
+      laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
 

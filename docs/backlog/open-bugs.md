@@ -464,27 +464,11 @@
   (`derive.ts`), so its FORMAT is unvalidated. **Property to hold:** an id the tool relies on is either
   minted by the registry or validated on the way in.
 
-- **Incoming design-review/charter/challenge artifacts have no ingest/validation chokepoint.** 2026-08-05
-  dogfood: 5 of 8 design-review agents drifted on the output contract (wrong filename ×2, wrong
-  directory, invalid JSON ×2) and the host hand-repaired all of them; the charter delta-miner also
-  returned invented node_id slugs the host had to remap. These lanes validate nothing on the way in.
-  **Property to hold:** every incoming artifact rides a tool-validated
-  write; an unknown node_id is refused loudly naming the valid set.
-  ⬇ Reproduced 2026-08-08 at 9 of 10 lanes; the invented-node_id half did not. The repairs are invisible
-  to the tool, so an uninstrumented run reads as clean (run record O2).
-  ⬇ 2026-08-12 design-check (docs/reviews/p25-design-check-2026-08-12.md): the hostHandoff surface
-  already implements the expected-set + tool-computed-path scheme (created by 467b1e8f); the measured
-  drift lives on the flat incoming/ gates in nextStepHelpers.ts, the submit VERB is refuted by the trap
-  corpus for the normal path, and the re-scope awaits two owner answers (§6) before build.
-
-- **A valid design-review submission is consumed and DELETED when design_assessment is absent (2026-08-12,
-  found by the P25 design-check, high).** In handleDesignReviewBranch (src/audit/cli/nextStepHelpers.ts), a
-  submitted findings file is consumed from incoming/ and the code path that merges it requires an existing
-  design_assessment; when the assessment artifact is absent (e.g. archived by staleness moments earlier),
-  the submission is deleted without being recorded anywhere — "File consumed but no target to merge into —
-  keep folding." The host's work is silently destroyed and the pass re-dispatches as if nothing arrived.
-  Independent of P25's re-scope and worth landing alone. **Property to hold:** a consumed submission is
-  either merged, quarantined with a record, or left in place — never consumed-and-dropped.
+- **`StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.** `steps.ts` declares
+  the audit step contract strict while `stepContractWriter.ts` stamps a per-process `agent_id` onto the
+  written JSON, so parsing an emitted contract with its own schema fails. Readers work around it by
+  reading raw JSON. **Property to hold:** a contract the tool writes parses with the schema the tool
+  declares for it.
 
 - **systemic_challenge findings ids are adversary-invented and round-colliding.** Rounds 3 and 4
   both minted SC-001..004 for different findings (host prefixed r4- to avoid accumulator clobber);

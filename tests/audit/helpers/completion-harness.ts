@@ -10,6 +10,9 @@ import { countLines } from "./countLines.mjs";
 import { walkStepsUntilTerminal } from "./step-driver.js";
 import type { AuditTask } from "../../../src/audit/types.js";
 
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../../src/audit/cli/laneSubmissions.js"
+);
 const { currentStepPath } = await import("audit-tools/shared");
 
 const { cmdNextStep } = await import("../../../src/audit/cli/nextStepCommand.js");
@@ -159,7 +162,6 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
 export async function advanceToDispatchReady(root: string) {
   const artifactsDir = join(root, ".audit-tools/audit");
   return walkStepsUntilTerminal({
-    root,
     transport: () => callNextStep(root, artifactsDir),
     terminalKinds: new Set(["dispatch_review"]),
     label: "advanceToDispatchReady",
@@ -169,10 +171,10 @@ export async function advanceToDispatchReady(root: string) {
 // Seed the host's valid empty optional narrative result so completion remains
 // deterministic without transport-owned configuration.
 export async function seedEmptyNarrative(artifactsDir: string) {
-  const incomingDir = join(artifactsDir, "incoming");
-  await mkdir(incomingDir, { recursive: true });
+  const path = laneSubmissionPath(artifactsDir, GATE_LANES.synthesis_narrative);
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(
-    join(incomingDir, "synthesis-narrative.json"),
+    path,
     JSON.stringify({ themes: [], top_risks: [] }, null, 2) + "\n",
   );
 }

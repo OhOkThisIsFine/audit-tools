@@ -31,6 +31,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
+const { submissionsDir } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
 
 // A fresh repo with a `.ts` file but an EMPTY, pinned analyzer cache → the
 // `typescript` analyzer resolves "absent" deterministically and the pipeline
@@ -75,8 +81,7 @@ const MAX_PAUSES = 8;
 test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withFloorOnlyRepo(async (root, env) => {
     const artifactsDir = join(root, ".audit-tools/audit");
-    const incomingDir = join(artifactsDir, "incoming");
-
+    
     // The decisive assertion: iteration 1 must not be `blocked`. This is the
     // exact symptom ATTEMPT 1 produced on Linux.
     let firstKind;
@@ -92,7 +97,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
           `state and tolerate content-signature revisits (see HANDOFF ⚠️ block).`).not.toBe("blocked");
 
       if (step.step_kind === "critical_flow_fallback") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
           step.artifact_paths.critical_flow_fallback_results,
           JSON.stringify({ flows: [] }, null, 2) + "\n",
@@ -100,7 +105,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         continue;
       }
       if (step.step_kind === "analyzer_consent") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
           step.artifact_paths.analyzer_consent_decisions,
           JSON.stringify({ semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" }, null, 2) + "\n",
@@ -108,7 +113,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         continue;
       }
       if (step.step_kind === "analyzer_install") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
           step.artifact_paths.analyzer_decisions,
           JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
@@ -116,43 +121,43 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
         continue;
       }
       if (step.step_kind === "design_review") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
-          join(incomingDir, "design-review-findings.json"),
+          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_legacy),
           JSON.stringify([], null, 2) + "\n",
         );
         continue;
       }
       if (step.step_kind === "design_review_parallel") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
-          join(incomingDir, "design-review-contract-findings.json"),
+          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
           JSON.stringify([], null, 2) + "\n",
         );
         await writeFile(
-          join(incomingDir, "design-review-conceptual-findings.json"),
+          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual),
           JSON.stringify([], null, 2) + "\n",
         );
         continue;
       }
       if (step.step_kind === "design_review_contract") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
-          join(incomingDir, "design-review-contract-findings.json"),
+          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
           JSON.stringify([], null, 2) + "\n",
         );
         continue;
       }
       if (step.step_kind === "design_review_conceptual") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
-          join(incomingDir, "design-review-conceptual-findings.json"),
+          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual),
           JSON.stringify([], null, 2) + "\n",
         );
         continue;
       }
       if (step.step_kind === "edge_reasoning_dispatch") {
-        await mkdir(incomingDir, { recursive: true });
+        await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(
           step.artifact_paths.edge_reasoning_results,
           JSON.stringify([], null, 2) + "\n",
