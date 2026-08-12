@@ -375,6 +375,45 @@ for (const sub of subCmds) {
   break;
 }
 
+// ── Rule: a peer-CLI dispatch piped into a buffering filter ─────────────────
+// Same defect class as the masked-suite-exit rule above, hitting a different
+// command family: `tail`/`head`/`grep`/etc. buffer to EOF before printing
+// anything, so a long `codex exec` / `agy -p` dispatch piped through one of
+// them is indistinguishable from a hang on stdout. One run sat at 0 bytes for
+// ~30 minutes and then returned a complete verdict (2026-08-09,
+// docs/backlog/durable-traps.md "A background lane piped through tail/head").
+// The night after, a WEDGED `codex exec` run had already emitted 24 findings
+// into its transcript before hanging, recoverable only because that
+// particular call happened to be redirected to a file rather than piped —
+// `awk '/^FINDING:/,0'` salvaged it (2026-08-09/10, "A broad multi-file
+// review scope kills both peer-CLI lanes"). Had that run been piped instead,
+// the same 24 findings would have been lost with it. DENY, not advisory, for
+// the same reason the sibling rule above is a DENY: there is a strictly
+// better form (redirect to a file, read/grep the file separately) for every
+// legitimate use, and this project has already watched an advisory over the
+// identical mechanism get read past once ([[false-red-is-as-corrosive-as-false-green]]
+// — same mechanism, different command family).
+const CLI_DISPATCH_CMD = /\bcodex\s+exec\b|\bagy\b[^|;&]*\s(?:-p|--print)\b/;
+for (const sub of subCmds) {
+  const stripped = stripQuoted(sub);
+  if (!CLI_DISPATCH_CMD.test(stripped) || !FILTER_PIPE.test(stripped)) continue;
+  if (bypassEnabled('AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH')) continue;
+  denials.push(
+    'peer-CLI dispatch piped into a buffering filter — `codex exec` / `agy -p` output piped into ' +
+      '`tail`/`head`/`grep`/etc. shows ZERO bytes until the process exits, so a live run and a hung ' +
+      'one look identical. One run sat at 0 bytes for ~30 minutes before returning a complete verdict; ' +
+      "a wedged run the following night had already emitted 24 findings into its transcript, recoverable " +
+      "only because that call was redirected to a FILE, not piped — a pipe would have discarded them.\n" +
+      (isBash
+        ? '  fix: redirect to a file instead — `codex exec "…" < /dev/null > run.log 2>&1 &` (or ' +
+          '`*> run.log` in PowerShell), then read/tail/grep `run.log` separately. On a wedge, salvage a ' +
+          "partial transcript with e.g. `awk '/^FINDING:/,0' run.log`.\n"
+        : '  fix: redirect to a file instead — `*> run.log`, then read/tail/grep `run.log` separately.\n') +
+      `  offending statement: ${sub.slice(0, 200)}`,
+  );
+  break;
+}
+
 // ── Emit ─────────────────────────────────────────────────────────────────────
 if (denials.length > 0) {
   console.error(

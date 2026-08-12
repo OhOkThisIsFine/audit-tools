@@ -69,6 +69,7 @@ const BYPASS_VARS = [
   'AUDIT_TOOLS_ALLOW_BACKTICKS',
   'AUDIT_TOOLS_ALLOW_MASKED_EXIT',
   'AUDIT_TOOLS_ALLOW_UNSET_ENV',
+  'AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH',
 ];
 
 interface HookPayload {
@@ -367,6 +368,62 @@ describe('shell-trap-guard: a masked suite exit code is REFUSED (manufactured fa
 
   it('does not fire on an unrelated command piped into a filter', () => {
     expect(runHook(SHELL_GUARD, bash('git log --oneline | head -20')).code).toBe(0);
+  });
+});
+
+describe('shell-trap-guard: a peer-CLI dispatch piped into a buffering filter (2026-08-09/10)', () => {
+  // CLI_DISPATCH_CMD extends the masked-suite rule's mechanism to the two
+  // peer-CLI dispatch lanes — the commands most likely to run for many minutes
+  // with zero visible output when piped.
+  it('blocks `codex exec` piped into tail', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash("codex exec '<prompt>' < /dev/null 2>&1 | tail -120"),
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/buffering filter/);
+    expect(stderr).toMatch(/redirect to a file/);
+  });
+
+  it('blocks `agy -p` piped into grep', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('agy --sandbox -p "review this" 2>&1 | grep -i error')).code,
+    ).toBe(2);
+  });
+
+  it('blocks `agy --print` piped into head', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('agy --print "review this" | head -50')).code,
+    ).toBe(2);
+  });
+
+  it('allows the correct form: redirect to a file, read it separately', () => {
+    const { code } = runHook(
+      SHELL_GUARD,
+      bash('codex exec "review" < /dev/null > run.log 2>&1 &'),
+    );
+    expect(code).toBe(0);
+  });
+
+  it('does not fire on codex exec with no pipe', () => {
+    expect(runHook(SHELL_GUARD, bash('codex exec "review" < /dev/null')).code).toBe(0);
+  });
+
+  it('does not fire on an unrelated command piped into a filter', () => {
+    expect(runHook(SHELL_GUARD, bash('git log --oneline | head -20')).code).toBe(0);
+  });
+
+  it('does not fire on a QUOTED textual mention', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('rg "codex exec foo | tail -50" docs/')).code,
+    ).toBe(0);
+  });
+
+  it('honors the deliberate escape hatch', () => {
+    const r = runHook(SHELL_GUARD, bash('codex exec "review" < /dev/null | tail -50'), {
+      env: { AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH: '1' },
+    });
+    expect(r.code).toBe(0);
   });
 });
 
