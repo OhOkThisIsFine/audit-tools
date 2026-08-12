@@ -12,7 +12,7 @@ Where the shipped mechanisms live:
   one core, two draws). Candidate registry + parse adapters: `src/shared/analyzers/candidates.ts`.
 - Consent surfacing: the `analyzer_consent` step kind (`src/audit/cli/steps.ts`), emitted while
   resolving the `external_analyzers_current` obligation; decisions persist under `analyzer_consent`
-  in session config; tokens never persist.
+  in `.audit-tools/audit/analyzer-policy.json` (`src/shared/analyzerPolicy.ts`); tokens never persist.
 - Lead provenance: `src/shared/analyzers/provenance.ts` — `{analyzer_id, rule?, path,
   snippet_hash}`, snippet-hash over the normalized flagged span (content identity, not layout);
   attached at `src/shared/analyzers/normalizeExternal.ts`, carried packet lead → finding
