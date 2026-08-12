@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { appendNdjsonFile } from "../io/json.js";
+import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import { submissionsDir } from "../io/auditToolsPaths.js";
 import type { SubmissionIssueCode } from "./submissionClassifier.js";
 
@@ -68,6 +69,16 @@ export async function appendSubmissionEvent(
  * that never drifted has nothing to say — and a partially-written tail is
  * skipped rather than thrown, because a bookkeeping record must never be able
  * to fail the call it is recording.
+ *
+ * An event stamped with another release's contract version is skipped EXACTLY
+ * like a torn line, per event. The FILE stays a faithful historical record —
+ * nothing is rewritten or dropped from disk — but this function is a REPORTING
+ * surface, and its callers read `kind`, `issue_code` and `message` to decide
+ * whether a lane is outstanding because it was refused, and to dedupe against
+ * the last recorded event. Reinterpreting a foreign contract's event under
+ * those field semantics is how a run gets MISreported; skipping it degrades to
+ * the same shape as a ledger that had not recorded that event yet. The skip is
+ * per line, so the current release's events on either side of it still load.
  */
 export async function readSubmissionLedger(
   artifactsDir: string,
@@ -82,7 +93,11 @@ export async function readSubmissionLedger(
   for (const line of content.split(/\r?\n/u)) {
     if (line.trim().length === 0) continue;
     try {
-      events.push(JSON.parse(line) as SubmissionLedgerEvent);
+      const event = discardOnSchemaVersionMismatch(
+        JSON.parse(line) as SubmissionLedgerEvent,
+        SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+      );
+      if (event !== undefined) events.push(event);
     } catch {
       // A torn final line (crash mid-append) drops; every complete event before
       // it stays readable, which is the whole point of an append-only record.

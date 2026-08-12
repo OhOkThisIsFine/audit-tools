@@ -16,10 +16,12 @@
 import { unlink } from "node:fs/promises";
 
 import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
+import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
 import {
   expectedSubmissionsPath,
   submissionsDir,
 } from "../io/auditToolsPaths.js";
+import { EXPECTED_SET_CONTRACT_VERSION } from "./expectedSubmissions.js";
 import type { ExpectedSubmissionSet } from "./expectedSubmissions.js";
 import type { SubmissionIssue } from "./submissionClassifier.js";
 import { readSubmissionDocument } from "./submissionClassifier.js";
@@ -62,14 +64,23 @@ export type HandRecoveryOutcome =
  * Resolve which lane the id belongs to from the recorded expectation, so the
  * ledger entry reads in lane vocabulary. Best-effort: a draw that keeps its
  * expected set somewhere other than the artifacts dir simply records the id.
+ *
+ * The set is REGENERABLE bookkeeping (rewritten at every emit), so one left by
+ * another release is discarded rather than read under this release's field
+ * semantics — a lane name is a label on the record, and a wrong one taken from
+ * a foreign contract is worse than the raw id this function already falls back
+ * to. Discarding lands on exactly that existing degrade path.
  */
 async function resolveLane(
   artifactsDir: string,
   submissionId: string,
 ): Promise<string> {
-  const set = await readOptionalJsonFile<ExpectedSubmissionSet>(
-    expectedSubmissionsPath(artifactsDir),
-  ).catch(() => undefined);
+  const set = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<ExpectedSubmissionSet>(
+      expectedSubmissionsPath(artifactsDir),
+    ).catch(() => undefined),
+    EXPECTED_SET_CONTRACT_VERSION,
+  );
   return (
     set?.entries?.find((entry) => entry.submission_id === submissionId)?.lane ??
     submissionId

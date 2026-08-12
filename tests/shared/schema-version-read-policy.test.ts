@@ -61,6 +61,39 @@ describe("schema-version read policy pair", () => {
     ).toBeUndefined();
   });
 
+  // Both spellings of the version key are read, because the repo stamps both:
+  // `schema_version` on artifacts, `contract_version` on contracts. A helper
+  // that knew only one would return undefined for EVERY payload of the other —
+  // discarding a current file as though it had never been written, which is
+  // indistinguishable from a working guard until a run silently loses its
+  // bookkeeping.
+  it("reads contract_version when that is how the payload stamps its version", () => {
+    const payload = { contract_version: "thing/v1", data: 1 };
+    expect(discardOnSchemaVersionMismatch(payload, "thing/v1")).toBe(payload);
+    expect(discardOnSchemaVersionMismatch(payload, "thing/v2")).toBeUndefined();
+    expect(() =>
+      throwOnSchemaVersionMismatch({ contract_version: "thing/v1" }, "thing.json", "thing/v1"),
+    ).not.toThrow();
+    expect(() =>
+      throwOnSchemaVersionMismatch({ contract_version: "thing/v0" }, "thing.json", "thing/v1"),
+    ).toThrow(SchemaVersionMismatchError);
+  });
+
+  it("prefers schema_version when a payload carries both keys", () => {
+    expect(
+      discardOnSchemaVersionMismatch(
+        { schema_version: "thing/v1", contract_version: "thing/v0" },
+        "thing/v1",
+      ),
+    ).toBeTruthy();
+    expect(
+      discardOnSchemaVersionMismatch(
+        { schema_version: "thing/v0", contract_version: "thing/v1" },
+        "thing/v1",
+      ),
+    ).toBeUndefined();
+  });
+
   it("discardOnSchemaVersionMismatch passes an absent payload through as absent", () => {
     expect(discardOnSchemaVersionMismatch(undefined, "thing/v1")).toBeUndefined();
     expect(discardOnSchemaVersionMismatch(null, "thing/v1")).toBeUndefined();

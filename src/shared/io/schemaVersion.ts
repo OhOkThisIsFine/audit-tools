@@ -3,10 +3,11 @@
  * unmissable at the call site.
  *
  * State written by an older version of the tool is read back under the CURRENT
- * version's semantics. A reader that never compares the stamped
- * `schema_version` silently reinterprets old bytes as new-shape data. Stamping
- * a version on WRITE and not comparing it on READ is therefore not "versioned"
- * at all — it is an unchecked cast wearing a version field.
+ * version's semantics. A reader that never compares the stamped version (spelled
+ * `schema_version` on artifacts, `contract_version` on contracts — both are read
+ * here) silently reinterprets old bytes as new-shape data. Stamping a version on
+ * WRITE and not comparing it on READ is therefore not "versioned" at all — it is
+ * an unchecked cast wearing a version field.
  *
  * There are exactly two correct policies, and which one applies is a property
  * of the STATE, not of the module:
@@ -51,8 +52,19 @@ export class SchemaVersionMismatchError extends Error {
 // Both directions accept ANY object — an unstamped payload is a defined input
 // (discard: stale; throw: mismatch), and the parameter types state that real
 // contract rather than requiring a `schema_version`-bearing shape.
+//
+// TWO spellings are recognized, because the repo stamps both: `schema_version`
+// on artifacts and `contract_version` on contracts (the version-gate scan's own
+// version-key family). That is a naming convention of the payload FAMILY, not a
+// difference in policy — and a helper that knew only one spelling would return
+// `undefined` for every payload of the other, i.e. discard a current file as if
+// it were never written, or throw on a correctly-stamped one. A silent
+// always-discard is indistinguishable from a working guard in review, so the
+// helper resolves the key rather than making each call site remember it.
+// `schema_version` wins when a payload carries both.
 function stampedVersion(value: object): unknown {
-  return (value as Record<string, unknown>).schema_version;
+  const record = value as Record<string, unknown>;
+  return "schema_version" in record ? record.schema_version : record.contract_version;
 }
 
 /**

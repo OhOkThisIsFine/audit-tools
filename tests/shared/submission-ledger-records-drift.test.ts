@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
   readSubmissionLedger,
   submissionLedgerPath,
   SUBMISSION_EVENT_KINDS,
+  SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   type SubmissionLedgerEvent,
 } from "../../src/shared/submission/submissionLedger.js";
 
@@ -139,5 +140,80 @@ describe("submission ledger — a repaired run stays distinguishable from a clea
     for (const kind of ["expected", "accepted", "rejected", "recovered_by_hand"] as const) {
       expect(SUBMISSION_EVENT_KINDS).toContain(kind);
     }
+  });
+
+  // The reader is a REPORTING surface: callers read `kind`, `issue_code` and
+  // `message` off these events to decide whether a lane is outstanding BECAUSE
+  // it was refused, and to dedupe against the last recorded event. An event
+  // written by another release carries those fields under another contract's
+  // semantics, so it is skipped exactly like a torn line — per event, never by
+  // rewriting the file, which stays the faithful historical record it is.
+  it("skips an event from another contract version while newer lines still load", async () => {
+    const { artifactsDir } = await tempArtifactsDir();
+
+    await appendSubmissionEvent(
+      artifactsDir,
+      event({ submission_id: "before-lane", kind: "rejected", issue_code: "submission_malformed" }),
+    );
+    // Byte-for-byte the shape this module writes, except the contract version —
+    // i.e. exactly what an older release left on the ledger. Written raw,
+    // because the append helper would stamp the current version.
+    await appendFile(
+      submissionLedgerPath(artifactsDir),
+      JSON.stringify({
+        contract_version: "submission-ledger-event/v0",
+        run_id: "run-p25",
+        submission_id: "foreign-lane",
+        lane: "synthesis_narrative",
+        kind: "rejected",
+        issue_code: "submission_malformed",
+        recorded_at: "2026-08-12T00:00:00.000Z",
+      }) + "\n",
+      "utf8",
+    );
+    await appendSubmissionEvent(
+      artifactsDir,
+      event({ submission_id: "after-lane", kind: "accepted" }),
+    );
+
+    const events = await readSubmissionLedger(artifactsDir);
+
+    expect(
+      events.map((e) => e.submission_id),
+      "the foreign event is skipped; the events on either side of it still load, in arrival order",
+    ).toEqual(["before-lane", "after-lane"]);
+    for (const e of events) {
+      expect(e.contract_version).toBe(SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION);
+    }
+
+    // The record itself is untouched — skipping is a READ policy, not a rewrite.
+    const lines = (await readFile(submissionLedgerPath(artifactsDir), "utf8"))
+      .split(/\r?\n/u)
+      .filter((line) => line.trim().length > 0);
+    expect(lines).toHaveLength(3);
+  });
+
+  it("skips an event with no contract_version at all", async () => {
+    const { artifactsDir } = await tempArtifactsDir();
+
+    // The stamped event goes first so the append helper creates the directory.
+    await appendSubmissionEvent(
+      artifactsDir,
+      event({ submission_id: "stamped-lane", kind: "accepted" }),
+    );
+    await appendFile(
+      submissionLedgerPath(artifactsDir),
+      JSON.stringify({
+        run_id: "run-p25",
+        submission_id: "unstamped-lane",
+        lane: "synthesis_narrative",
+        kind: "rejected",
+        recorded_at: "2026-08-12T00:00:00.000Z",
+      }) + "\n",
+      "utf8",
+    );
+
+    const events = await readSubmissionLedger(artifactsDir);
+    expect(events.map((e) => e.submission_id)).toEqual(["stamped-lane"]);
   });
 });

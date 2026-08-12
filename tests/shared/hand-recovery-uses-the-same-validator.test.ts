@@ -13,7 +13,12 @@ import {
   readSubmissionLedger,
   submissionLedgerPath,
 } from "../../src/shared/submission/submissionLedger.js";
-import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
+import {
+  expectedSubmissionsPath,
+  submissionsDir,
+} from "../../src/shared/io/auditToolsPaths.js";
+import { EXPECTED_SET_CONTRACT_VERSION } from "../../src/shared/submission/expectedSubmissions.js";
+import { writeJsonFile } from "../../src/shared/io/json.js";
 
 // P25-e / design record §5 #5.
 //
@@ -155,6 +160,67 @@ describe("hand recovery — the recovery lane is the normal lane's validator, no
       (e) => e.kind === "recovered_by_hand" && e.submission_id === submissionId,
     );
     expect(recovered).toHaveLength(1);
+  });
+
+  // The lane name on the ledger is looked up from the recorded expectation. That
+  // set is REGENERABLE bookkeeping, so one left by another release is treated as
+  // absent — landing on this function's existing degrade path (record the raw
+  // id) rather than labelling the repair with a lane read out of a foreign
+  // contract. CONTROL first, so the empty-lane case below is the version check
+  // firing and not a lookup that never worked.
+  describe("the lane label is read from the expected set only at the current contract version", () => {
+    const good = {
+      contract_version: "synthesis-narrative/v1alpha1",
+      executive_summary: "the repo is fine",
+      themes: ["coupling"],
+    };
+
+    async function recoverWithPersistedSet(setContractVersion: string): Promise<string> {
+      const { root, artifactsDir, request } = await fixture();
+      const submissionId = "synthesis-narrative-lane";
+      const operatorPath = join(root, "operator-fixed.json");
+      await writeFile(operatorPath, JSON.stringify(good), "utf8");
+
+      await writeJsonFile(expectedSubmissionsPath(artifactsDir), {
+        contract_version: setContractVersion,
+        run_id: "run-p25",
+        entries: [
+          {
+            submission_id: submissionId,
+            lane: "synthesis_narrative",
+            prompt_sha256: "0".repeat(64),
+            submission_path: submissionPathFor(
+              { root, submissionDir: submissionsDir(artifactsDir) },
+              submissionId,
+            ),
+          },
+        ],
+      });
+
+      const outcome = await recoverSubmission(
+        request(submissionId, operatorPath),
+        validateGateSubmission,
+      );
+      expect(outcome.ok).toBe(true);
+
+      const recovered = (await readSubmissionLedger(artifactsDir)).filter(
+        (e) => e.kind === "recovered_by_hand" && e.submission_id === submissionId,
+      );
+      expect(recovered).toHaveLength(1);
+      return recovered[0]!.lane;
+    }
+
+    it("CONTROL: a set at the CURRENT version supplies the lane vocabulary", async () => {
+      expect(await recoverWithPersistedSet(EXPECTED_SET_CONTRACT_VERSION)).toBe(
+        "synthesis_narrative",
+      );
+    });
+
+    it("a set at an OLDER version falls back to the raw submission id", async () => {
+      expect(await recoverWithPersistedSet("submission-expected-set/v0")).toBe(
+        "synthesis-narrative-lane",
+      );
+    });
   });
 
   it("rolls the payload back when the repair cannot be recorded", async () => {

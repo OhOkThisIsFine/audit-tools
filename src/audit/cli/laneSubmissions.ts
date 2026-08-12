@@ -32,6 +32,7 @@ import {
   absoluteSubmissionPath,
   buildExpectedSubmissionSet,
   diffExpectedSet,
+  discardOnSchemaVersionMismatch,
   expectedSubmissionsPath,
   hashContent,
   mergeExpectedSets,
@@ -43,6 +44,7 @@ import {
   submissionsDir,
   withoutExpectedSubmissions,
   writeJsonFile,
+  EXPECTED_SET_CONTRACT_VERSION,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
   type CharterKind,
@@ -195,12 +197,28 @@ export function laneSubmissionPath(
   );
 }
 
+/**
+ * The current statement of what is owed, or `undefined` when there isn't one.
+ *
+ * REGENERABLE state: the set is rewritten at every emit from the lanes the
+ * emission declares, so a set left by another release is DISCARDED rather than
+ * reinterpreted under this release's field semantics. The fail-shape is the one
+ * this reader already has for an absent file — the merge below starts from
+ * nothing, every declared lane counts as newly added, and the carried-lane diff
+ * therefore sees no prior entries and reports no shortfall. That is exactly
+ * right after an upgrade: nothing was carried into this emission that this
+ * release ever asked for, so the emission is first-emission-silent instead of
+ * accusing the host of dropping lanes it was never coherently asked for.
+ */
 async function loadExpectedSet(
   artifactsDir: string,
 ): Promise<ExpectedSubmissionSet | undefined> {
   try {
-    return await readOptionalJsonFile<ExpectedSubmissionSet>(
-      expectedSubmissionsPath(artifactsDir),
+    return discardOnSchemaVersionMismatch(
+      await readOptionalJsonFile<ExpectedSubmissionSet>(
+        expectedSubmissionsPath(artifactsDir),
+      ),
+      EXPECTED_SET_CONTRACT_VERSION,
     );
   } catch {
     // Corrupt bookkeeping must never fail the emission it is recording; the

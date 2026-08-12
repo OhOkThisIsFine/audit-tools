@@ -25,7 +25,7 @@ import { dirname, join } from "node:path";
 // The P25 shared submission core. These module paths and exported names ARE the
 // contract the implementation is built to — see `handoff-twins.md` §7 and the
 // brief's D1/D3/D5/D8.
-const { mintSubmissionId, absoluteSubmissionPath } = await import(
+const { mintSubmissionId, absoluteSubmissionPath, submissionPathFor } = await import(
   "../../src/shared/submission/submissionIdentity.js"
 );
 const { buildExpectedSubmissionSet, diffExpectedSet } = await import(
@@ -35,6 +35,16 @@ const { readSubmissionDocument } = await import(
   "../../src/shared/submission/submissionClassifier.js"
 );
 const { materializeFanoutLanes } = await import("../../src/audit/cli/fanoutLanes.js");
+const { EXPECTED_SET_CONTRACT_VERSION } = await import(
+  "../../src/shared/submission/expectedSubmissions.js"
+);
+const { expectedSubmissionsPath } = await import(
+  "../../src/shared/io/auditToolsPaths.js"
+);
+const { writeJsonFile } = await import("../../src/shared/io/json.js");
+const { laneSubmissionId, laneSubmissionRoots, recordExpectedLanes } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
 
 const CHARTER_LANES = ["stated", "structural", "revealed"] as const;
 
@@ -168,5 +178,118 @@ describe("the expected-submission set", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * The set is REGENERABLE bookkeeping — rewritten from the declared lanes at
+ * every emit. A set left by ANOTHER release must therefore be treated as
+ * absent, not merged: its entries would otherwise re-enter this release as
+ * "lanes a previous emission already asked for", and the emission would report
+ * a shortfall against lanes that were never coherently asked for under these
+ * semantics.
+ *
+ * These two cases are a matched pair on purpose. The control proves the carry
+ * path is live (a CURRENT-version set of the same lane does produce a
+ * shortfall), so the subject's empty shortfall is the version check firing and
+ * not the test failing to set up a carry at all.
+ */
+describe("an expected set from another contract version is treated as absent", () => {
+  const LANE = "synthesis_narrative";
+  const RUN_ID = "p25-stale-set-run";
+
+  /**
+   * Persist a set for `LANE` stamped with `contractVersion`, then re-declare the
+   * same lane and report the shortfall the emission computes.
+   */
+  async function emitAgainstPersistedSet(contractVersion: string | undefined): Promise<{
+    shortfall: Awaited<ReturnType<typeof recordExpectedLanes>>;
+    persisted: { contract_version: string; entries: { lane: string }[] };
+  }> {
+    const root = await mkdtemp(join(tmpdir(), "p25-stale-expected-set-"));
+    try {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      const submissionId = laneSubmissionId(LANE, RUN_ID);
+      await writeJsonFile(expectedSubmissionsPath(artifactsDir), {
+        ...(contractVersion === undefined ? {} : { contract_version: contractVersion }),
+        run_id: RUN_ID,
+        entries: [
+          {
+            submission_id: submissionId,
+            lane: LANE,
+            prompt_sha256: "0".repeat(64),
+            submission_path: submissionPathFor(
+              laneSubmissionRoots(artifactsDir),
+              submissionId,
+            ),
+          },
+          // A lane this emission does NOT re-declare. It never enters the diff
+          // (that is computed from the declared lanes), but a set that was
+          // MERGED rather than discarded would carry it into the rewritten
+          // file — which is what makes "rebuilds, not merges" testable below.
+          {
+            submission_id: laneSubmissionId("charter_delta", RUN_ID),
+            lane: "charter_delta",
+            prompt_sha256: "1".repeat(64),
+            submission_path: submissionPathFor(
+              laneSubmissionRoots(artifactsDir),
+              laneSubmissionId("charter_delta", RUN_ID),
+            ),
+          },
+        ],
+      });
+
+      // The lane is re-declared verbatim, so its submission id is identical —
+      // which is what makes it a CARRIED lane when the persisted set is read.
+      const shortfall = await recordExpectedLanes(artifactsDir, RUN_ID, [
+        { lane: LANE, promptText: "Author the synthesis narrative." },
+      ]);
+      const persisted = JSON.parse(
+        await readFile(expectedSubmissionsPath(artifactsDir), "utf8"),
+      ) as { contract_version: string; entries: { lane: string }[] };
+      return { shortfall, persisted };
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("CONTROL: a set at the CURRENT version carries its lane into the diff", async () => {
+    const { shortfall } = await emitAgainstPersistedSet(EXPECTED_SET_CONTRACT_VERSION);
+    expect(shortfall.expected, "the lane was already owed, so it is carried").toBe(1);
+    expect(shortfall.accepted).toBe(0);
+    expect(shortfall.outstanding.map((entry) => entry.lane)).toEqual([LANE]);
+  });
+
+  it("a set at an OLDER version carries nothing — the emission is first-emission-silent", async () => {
+    const { shortfall } = await emitAgainstPersistedSet("submission-expected-set/v0");
+    expect(
+      shortfall.outstanding,
+      "a lane recorded under another contract is not a lane THIS release asked for",
+    ).toEqual([]);
+    expect(shortfall.expected).toBe(0);
+    expect(shortfall.accepted).toBe(0);
+  });
+
+  it("a set with no contract_version at all carries nothing either", async () => {
+    const { shortfall } = await emitAgainstPersistedSet(undefined);
+    expect(shortfall.outstanding).toEqual([]);
+    expect(shortfall.expected).toBe(0);
+  });
+
+  it("CONTROL: a set at the CURRENT version is MERGED — its other lanes survive the rewrite", async () => {
+    const { persisted } = await emitAgainstPersistedSet(EXPECTED_SET_CONTRACT_VERSION);
+    expect(persisted.entries.map((entry) => entry.lane).sort()).toEqual([
+      "charter_delta",
+      LANE,
+    ]);
+  });
+
+  it("rebuilds rather than merges — the stale entries are gone from the rewritten set", async () => {
+    const { persisted } = await emitAgainstPersistedSet("submission-expected-set/v0");
+    expect(persisted.contract_version).toBe(EXPECTED_SET_CONTRACT_VERSION);
+    expect(
+      persisted.entries.map((entry) => entry.lane),
+      "only the lanes THIS emission declared — the foreign set's other lane is gone",
+    ).toEqual([LANE]);
   });
 });
