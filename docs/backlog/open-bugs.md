@@ -472,6 +472,19 @@
   write; an unknown node_id is refused loudly naming the valid set.
   ⬇ Reproduced 2026-08-08 at 9 of 10 lanes; the invented-node_id half did not. The repairs are invisible
   to the tool, so an uninstrumented run reads as clean (run record O2).
+  ⬇ 2026-08-12 design-check (docs/reviews/p25-design-check-2026-08-12.md): the hostHandoff surface
+  already implements the expected-set + tool-computed-path scheme (created by 467b1e8f); the measured
+  drift lives on the flat incoming/ gates in nextStepHelpers.ts, the submit VERB is refuted by the trap
+  corpus for the normal path, and the re-scope awaits two owner answers (§6) before build.
+
+- **A valid design-review submission is consumed and DELETED when design_assessment is absent (2026-08-12,
+  found by the P25 design-check, high).** In handleDesignReviewBranch (src/audit/cli/nextStepHelpers.ts), a
+  submitted findings file is consumed from incoming/ and the code path that merges it requires an existing
+  design_assessment; when the assessment artifact is absent (e.g. archived by staleness moments earlier),
+  the submission is deleted without being recorded anywhere — "File consumed but no target to merge into —
+  keep folding." The host's work is silently destroyed and the pass re-dispatches as if nothing arrived.
+  Independent of P25's re-scope and worth landing alone. **Property to hold:** a consumed submission is
+  either merged, quarantined with a record, or left in place — never consumed-and-dropped.
 
 - **systemic_challenge findings ids are adversary-invented and round-colliding.** Rounds 3 and 4
   both minted SC-001..004 for different findings (host prefixed r4- to avoid accumulator clobber);

@@ -982,7 +982,9 @@
     "answer": "Close, keep the mitigation: delete the doc-lint-rewrite entry from open-bugs.md and move its working mitigation ('after a not-found on text you just wrote, grep the anchor instead of re-reading the file') into docs/backlog/durable-traps.md as a one-liner.",
     "subject": "Close the doc-lint-rewrite entry, or name the process that rewrote the bytes — the entry states its own close condition and nobody has met it",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T16:33:06.426Z"
+    "decided_at": "2026-08-12T16:33:06.426Z",
+    "completed_at": "2026-08-12T18:57:19.510Z",
+    "completed_ref": "27b722c8"
   },
   "9e34bca01f48a012": {
     "disposition": "settled",
@@ -1005,14 +1007,18 @@
     "answer": "Reword + retitle: replace the sentence with 'These lanes validate nothing on the way in.', drop the '(submit-command pattern)' parenthetical, retitle from 'no submit chokepoint' to 'no ingest/validation chokepoint'. (The sol-9 build will eventually close the entry itself.)",
     "subject": "The \"no submit chokepoint\" entry compares against a lane the retirement deleted — reword it rather than delete the live half",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T16:36:40.496Z"
+    "decided_at": "2026-08-12T16:36:40.496Z",
+    "completed_at": "2026-08-12T18:57:19.581Z",
+    "completed_ref": "27b722c8"
   },
   "897c0620b536b57c": {
     "disposition": "settled",
     "answer": "Update + widen in place: fix (e) to name renderEdgeReasoningDispatchPrompt (src/audit/cli/prompts.ts), correct the preamble's false shipped-claim, and widen the entry to cover the orphaned renderHostScratchNote/hostScratchDir pair reaching no prompt.",
     "subject": "A scratch-dir entry needs WIDENING, not trimming — its symbol was renamed, and the fix it claims shipped reaches no prompt at all",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T16:36:40.604Z"
+    "decided_at": "2026-08-12T16:36:40.604Z",
+    "completed_at": "2026-08-12T18:57:19.638Z",
+    "completed_ref": "27b722c8"
   },
   "d918552ff9de54bb": {
     "disposition": "settled",

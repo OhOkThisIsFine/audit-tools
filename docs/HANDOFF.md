@@ -5,11 +5,24 @@
 
 ## Live state
 
-- The zero-adapter retirement is LANDED on `main` and published: audit-tools emits complete
-  provider-neutral host workloads and ingests bound results; provider adapters, routing, quota
-  accounting, backend sizing, and internal worker execution are retired.
-- Old audit/remediation run artifacts are cleared; the artifact dir holds only the tracked
-  deliverable pairs and the open decision queue. The tree is ready for a fresh dogfood run.
+- The zero-adapter retirement is LANDED on `main` and published (v0.40.1); audit-tools emits
+  complete provider-neutral host workloads and ingests bound results.
+- 2026-08-12: all 19 nightly decisions were answered and recorded; the executable ones landed
+  (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch).
+  Four owner-approved BUILDS remain queued — see Immediate next.
+- The dogfood audit lap is IN FLIGHT and deliberately PAUSED at the `dispatch_review` step:
+  intake/scope/lenses confirmed (930 files; custom `host_contract_robustness` lens included),
+  all 5 analyzers consented, critical-flow enrichment plus both design reviews (contract +
+  conceptual) ingested — both reviews were produced by free offload lanes. The semantic review
+  workload for run `20260812T192026635Z_audit_tasks_completed_001` is published and unstarted.
+
+## Resume the audit (fresh conversation)
+
+1. `node audit-code.mjs next-step` re-renders the current step; follow its prompt — it is the
+   `dispatch_review` host workload (dispatch items to workers, write each bound result, then
+   `next-step` again). Free-lane caveat: the freellmapi `pool` lane is unusable for long tasks
+   in THIS repo until P23 lands (the repo Stop gates fire inside the child and replace its
+   deliverable); use the agy lanes, with verification-shaped prompts.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
@@ -23,8 +36,19 @@
 
 ## Immediate next
 
-1. Run the next dogfood lap (audit → remediate) on the zero-adapter architecture — old run
-   artifacts are already cleared.
+1. Resume the paused dogfood audit lap (see *Resume the audit* above), then the remediate phase.
+2. The four owner-approved builds, in this order:
+   - **P25 re-scoped** (sol-9): gated on the two owner answers in
+     [`docs/reviews/p25-design-check-2026-08-12.md`](reviews/p25-design-check-2026-08-12.md) §6
+     (re-point at the `incoming/` gates? submit verb recovery-only?). The design-check verdict is
+     proceed-with-changes; the original proposal's target surface was already rebuilt by `467b1e8f`.
+   - **P23** (sol-7): probe whether child sessions fire SessionStart, then session tagging +
+     unregistered-session commit/push refusal. Unblocks the freellmapi `pool` lane for this repo.
+   - **sol-8**: SessionStart tree-dirt baseline + per-gate pathspec scoping (supersedes P24's shape).
+   - **backlog-2 gate + sol-3 leg-1 scope ledger.**
+3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
+   size hook now fires on every index edit): merge the closed sagas properly — the citations gate
+   and `[[name]]` cross-links make it a focused pass, not a side-task.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
