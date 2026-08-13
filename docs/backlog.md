@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 113 entr(y/ies) indexed.
+> and at commit). 114 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -152,6 +152,7 @@
 - `durable-traps.md:532` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
 - `durable-traps.md:539` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
 - `durable-traps.md:545` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
+- `durable-traps.md:559` — `docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is
 
 <!-- END GENERATED SEEK INDEX -->
 

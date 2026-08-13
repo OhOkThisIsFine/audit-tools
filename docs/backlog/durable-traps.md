@@ -556,4 +556,15 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   up to 240s) is deliberately excluded — including it would make attest cost as much as the gate —
   so a doc-contract failure can still void an attestation and force a second attest.
 
+- **`docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is** (hit
+  2026-08-13). `isRecordPath` (`scripts/nightly/items.mjs`) matches the `docs/backlog/` prefix, so
+  the split item files are record paths and the router file one directory up is not. The two
+  refusals are opposite and both fire at write: an item probing `docs/backlog/durable-traps.md`
+  MUST declare `auto_close: false`, and an item probing `docs/backlog.md` must NOT — declaring it
+  is refused as "not a positive probe on a record path". Nothing about the two filenames signals
+  which side a given item falls on, so authoring a queue item against the router file is a
+  guess-then-retry. Enforceable half: the refusal message already names the record set, but it
+  fires only after the batch is assembled; a `recordPathHint(file)` export would let an author
+  check the classification up front.
+
 ## Doc-set hygiene (enforced)
