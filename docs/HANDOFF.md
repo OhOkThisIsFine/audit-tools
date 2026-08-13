@@ -5,20 +5,11 @@
 
 ## Live state
 
-- P25 (sol-9) is LANDED: every host submission rides a tool-computed sha256-bound path under
-  `<artifactsDir>/submissions/` (the flat `incoming/` scheme is deleted), with an
-  expected-submission-set record, per-member shortfall classification rendered by name into
-  re-emitted steps, an append-only drift/repair ledger surfaced in the report's process section,
-  one shared `submission_*` classifier vocabulary across both draws, and a recovery-only
-  `recover-submission` verb on both bins. Built red-tests-first (7 contract tests), six-lens
-  adversarially reviewed plus an independent free-lane pass; every confirmed finding fixed and
-  independently re-verified.
 - Published state: v0.41.1 (the tag, not a sha — a sha here restales on every commit). The
   zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
-  and ingests bound results.
-- 2026-08-12: the day's decision queue was answered in full; the executable items landed
-  (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch,
-  then P25). The owner-approved BUILDS that remain are enumerated under Immediate next.
+  and ingests bound results. Host submissions ride tool-computed sha256-bound paths under
+  `<artifactsDir>/submissions/`; the flat `incoming/` scheme is gone, so anything still writing
+  to it will be rejected.
 - The dogfood audit lap is IN FLIGHT and deliberately PAUSED at the `dispatch_review` step:
   intake/scope/lenses confirmed (930 files; custom `host_contract_robustness` lens included),
   all 5 analyzers consented, critical-flow enrichment plus both design reviews (contract +
@@ -50,21 +41,13 @@
   - `backlog-1` — Two trap entries cite line numbers that never could have been right — and the file's own rule says to delete the suffixes, not bump them
   - `backlog-2` — The completion-test entry counts five files and four tests; there are three files and three tests — and a sibling entry says three then four in ten lines
   - `backlog-3` — The live-validation guide's premise did not survive the backlog split — it says "each such item", and 2 of 113 entries have the line
-  - `backlog-4` — HANDOFF has re-accreted changelog creep — a seven-line landing narrative and a whole Verification state section, both banned by its own contract
+  - `sol-5` — HANDOFF changelog creep has recurred against a written rule — enforce it in the generator, or accept it as advice the nightly re-trims
   - `sol-1` — A gate inspects .claude/** but CI cannot be triggered by it — generate the trigger paths from the guard-reach registry
   - `sol-2` — The guard that blocks a masked suite exit prescribes, in its own remedy text, the shape that fakes a green suite in the background — both shell branches
   - `sol-3` — The strongest recurrence in the store: an over-scoped offload call silently loses its whole answer — the working pattern exists once and generalizes to nothing
   - `sol-4` — The citation gate cannot see a directory citation or a bare filename — two of tonight's doc findings were in that blind spot, and the coverage count hides it
 
 <!-- END GENERATED LIVE STATUS -->
-
-## Verification state
-
-- P25 green at landing: build + typecheck (src and test tree) + full vitest + loop-core-patterns
-  byte-match + knip; six-lens adversarial review (every finding
-  refuter-verified) plus an independent free-lane defect hunt; the review's three majors and all
-  corroborated minors fixed and re-verified by a dedicated fix-delta lane. Loop-core and
-  constitutional-doc attestations recorded against the final staged tree.
 
 ## Immediate next
 

@@ -562,26 +562,29 @@ Re-home the guide to the file whose items it annotates, drop the per-item contra
 ---
 
 
-<!-- nightly:item key=415c0b9e6fad9154 -->
+# Recurring-problem solutions
 
-## `backlog-4` — HANDOFF has re-accreted changelog creep — a seven-line landing narrative and a whole Verification state section, both banned by its own contract
 
-*Backlog disambiguation · open 1 night · `docs/HANDOFF.md`*
+<!-- nightly:item key=afc6b718063bd95a -->
+
+## `sol-5` — HANDOFF changelog creep has recurred against a written rule — enforce it in the generator, or accept it as advice the nightly re-trims
+
+*Recurring-problem solutions · open 1 night · `scripts/shared/generate-handoff-roadmap.mjs`*
 
 ### In plain terms
 
-HANDOFF is supposed to hold the current published state and the immediate next step, and nothing else — CLAUDE.md says "immediate-next-only, never a changelog", and the doc philosophy repeats it. It currently holds three things that are neither: a seven-line narrative of how the last item was built and reviewed, a bullet narrating which items landed on 2026-08-12, and an entire "Verification state" section describing the gates that passed at that landing. All three are records of what already shipped, which is git log's job. This exact creep was answered before (2026-07-26): the owner's rule was that a Live-state bullet must be the immediate next step or a currently-live gate that will bite the next lap, and anything else has another home. It has come back. Tonight's run stripped one stale test count out of that section under the no-hand-carried-counts rule, but deleting the sections themselves is a judgment call, so it is yours.
+HANDOFF is supposed to hold the current published state and the immediate next step only. Shipped-work narration keeps growing back into it: it was cut on 2026-07-25, you set an explicit rule on 2026-07-26 (a Live-state bullet must be the immediate next step, or a currently-live gate that will bite the next lap — anything else has another home), that rule was written at the foot of the section it governs, and tonight the section had re-accreted a seven-line landing narrative, a landed-items bullet, and a whole Verification state block. This run APPLIED the trim rather than asking about it, because your 2026-07-26 answer makes the trim unambiguous. What stays open is the pattern: the rule exists, it is written in the very file it governs, and it was violated anyway. That is this repo’s own signal that a property resting on someone remembering it belongs in tooling.
 
 ### The question
 
-Cut the landing narrative, the 2026-08-12 bullet and the Verification state section down to the one-line state they leave behind — or is the verification record worth keeping in HANDOFF?
+Should the HANDOFF generator refuse a hand-written Live-state bullet that is neither the immediate next step nor a currently-live gate — or is this acceptable as advice that the nightly re-trims each time?
 
 ### Your answer
 
-- [ ] **1. Cut all three** — Cut the P25 landing narrative, the 2026-08-12 landed-items bullet, and the whole Verification state section down to the one-line state they leave behind. Provenance lives in git log.
-- [ ] **2. Keep verification** — Cut the landing narrative and the 2026-08-12 bullet, but keep the Verification state section — knowing which gates were green at the last landing is worth a few lines to the next lap.
-- [ ] **3. Enforce it** — Cut all three AND make it mechanical: extend the HANDOFF generator or a check to refuse a hand-written Live-state bullet that is neither the immediate next step nor a currently-live gate, so this stops recurring on memory alone.
-- [ ] **4. Leave as is** — Leave it as written; the narrative earns its space.
+- [ ] **1. Enforce in the generator** — Extend the HANDOFF generator with a --check leg that refuses a hand-written Live-state bullet which is neither the immediate next step nor a currently-live gate/trap, wired into the existing check:handoff-roadmap gate so creep fails at commit.
+- [ ] **2. Heuristic gate** — Do not classify a bullet semantically — add a narrower mechanical check instead (refuse a dated bullet, a past-tense landing narrative, or a Verification-state heading in HANDOFF), accepting that it catches the common shapes rather than all of them.
+- [ ] **3. Nightly re-trims** — Leave it as advice. The nightly doc-review found and trimmed it both times, so the routine IS the enforcement; do not add a gate.
+- [ ] **4. Something else** — A different mechanism — describe it.
 - [ ] **Other** — record what I write in Notes below.
 - [ ] **Won't fix** — not doing this; reason in Notes.
 - [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
@@ -590,20 +593,20 @@ Cut the landing narrative, the 2026-08-12 bullet and the Verification state sect
 
 ```
 
-<details>
-<summary>Evidence (4) — what was verified against code, and how</summary>
+Full proposal: [`.audit-tools/nightly/proposals/P30-handoff-changelog-creep-recurs/PROPOSAL.md`](../.audit-tools/nightly/proposals/P30-handoff-changelog-creep-recurs/PROPOSAL.md)
 
-- CLAUDE.md end-of-sprint step (4): trim docs/HANDOFF.md to "immediate-next-only, never a changelog". docs/documentation-philosophy.md gives HANDOFF the same contract: current published state plus the immediate next step, explicitly NOT "a changelog (what already shipped, narrated)".
-- Three offending blocks at HEAD: the seven-line P25 landing narrative, the "2026-08-12:" landed-items bullet, and the "## Verification state" section.
-- This subject was answered once already (2026-07-26): a Live-state bullet must be the immediate next step or a currently-live gate/trap; anything else has another home. The rule was stated at the foot of the section and the creep returned anyway — which is the argument for the mechanical option.
-- Tonight's run removed the stale "406 files / 5077 passed" figure from that section under the no-hand-carried-computed-values rule, but left the sections standing because deleting them is a design decision.
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- Recurrence, 2 dates: cut 2026-07-25 (Live state went from 150 lines / 20 bullets to 59 / 8); the rule was set 2026-07-26 and written at the foot of the section; creep found again 2026-08-13 — a seven-line landing narrative, a landed-items bullet, and a Verification state section, all trimmed by this run.
+- CLAUDE.md end-of-sprint step (4) states the same rule independently: trim HANDOFF to immediate-next-only, never a changelog. docs/documentation-philosophy.md gives HANDOFF the same contract.
+- The enforcement point already exists: the generator owns two marker-delimited blocks and has a --check gate wired into verify:checks and the pre-commit gate. It simply does not inspect the hand-written region.
+- The generator header comment records that version-by-version changelog narration regrew in HANDOFF as the reason it was built — so the recurrence was anticipated and still not gated.
+- False-positive surface, stated honestly: deciding whether a bullet is "the immediate next step or a live gate" is a judgment a script cannot make reliably. The heuristic option is what is actually mechanizable; the full option would require the bullet set to be generated rather than checked.
 
 </details>
 
 ---
-
-
-# Recurring-problem solutions
 
 
 <!-- nightly:item key=8ae16b26e46ae812 -->
