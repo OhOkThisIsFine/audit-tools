@@ -13,8 +13,8 @@
   `recover-submission` verb on both bins. Built red-tests-first (7 contract tests), six-lens
   adversarially reviewed plus an independent free-lane pass; every confirmed finding fixed and
   independently re-verified.
-- The zero-adapter retirement is published (v0.40.1); audit-tools emits complete provider-neutral
-  host workloads and ingests bound results.
+- Published state: v0.41.1 at HEAD `c2c0424d`. The zero-adapter retirement is live; audit-tools
+  emits complete provider-neutral host workloads and ingests bound results.
 - 2026-08-12: the day's decision queue was answered in full; the executable items landed
   (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch,
   then P25). Three owner-approved BUILDS remain queued — see Immediate next.
@@ -52,8 +52,8 @@
      unregistered-session commit/push refusal. Unblocks the freellmapi `pool` lane for this repo.
    - **sol-8**: SessionStart tree-dirt baseline + per-gate pathspec scoping (supersedes P24's shape).
    - **backlog-2 gate + sol-3 leg-1 scope ledger.**
-3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; the
-   size hook now fires on every index edit): merge the closed sagas properly — the citations gate
+3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; there
+   is no size gate — measure with `wc -c` after an index edit): merge the closed sagas properly — the citations gate
    and `[[name]]` cross-links make it a focused pass, not a side-task.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

@@ -33,7 +33,7 @@ Use independent lanes wherever they preserve coverage:
   fallible.
 - If a lane is unavailable, route the work elsewhere. A dead lane may not
   silently shrink coverage; any coverage that still could not run belongs in
-  the digest's `skipped` list.
+  the inbox's `skipped` list.
 
 ## The three legs
 
@@ -53,7 +53,7 @@ a bad thing to discover at 3am. So autonomy narrows as blast radius widens.
 Reuse the rubric in [`.claude/skills/disambiguate-backlog/SKILL.md`](../.claude/skills/disambiguate-backlog/SKILL.md);
 do not fork it. The skill is the conversational form of the same pass, and the
 nightly is its unattended half: it finds the under-specified items and asks the
-same reviewer+adversary-characterized question, but posts it to the digest
+same reviewer+adversary-characterized question, but posts it to the inbox
 instead of asking live.
 
 *Verify before deleting.* An entry claiming to be shipped is a LEAD, not a fact —
@@ -141,7 +141,7 @@ verified against HEAD before it becomes a proposal, and leg 3's propose-only
 bound applies unchanged — the pass lands nothing.
 
 Classify every suggestion as one of: **already shipped** (name the mechanism at
-HEAD and drop the suggestion), **debatable** (escalate it as a digest item), or
+HEAD and drop the suggestion), **debatable** (escalate it as an inbox item), or
 **genuinely open** (make it a leg-3 proposal with the report's recurrence
 evidence). Check the retirement direction specifically; a stale report can
 recommend re-adding a mechanism that was deliberately removed.
@@ -159,7 +159,7 @@ The numeric values are that run's real counts. Never write the stamp after a
 failed pass; leaving it absent or old makes the pass due again tomorrow instead
 of parking the failure for a week.
 
-Being *not due* is not a skipped leg and does not go in the digest's skipped
+Being *not due* is not a skipped leg and does not go in the inbox's skipped
 list. Being due and failing to run does.
 
 ## Where it runs — locally, not in the cloud
@@ -178,13 +178,13 @@ The routine runs as a local scheduled task on the owner's box
 
 **Clean-tree rule.** Review against HEAD. If the working tree is dirty, the run
 still reviews and still reports, but applies **nothing** and says so in the
-digest's *Not covered* section — reviewing a dirty tree is fine, writing to one
+inbox's *What the last run could NOT cover* block — reviewing a dirty tree is fine, writing to one
 is how you lose the owner's uncommitted work.
 
 ## Machine output contract
 
 Write `.audit-tools/nightly/open-items.json` through `writeOpenItems()`; it is
-the machine contract behind both digest surfaces. Each candidate item has this
+the machine contract behind the inbox and the SessionStart notice. Each candidate item has this
 shape:
 
 ```text
@@ -263,7 +263,7 @@ Call `writeOpenItems(root, { items: open, applied, skipped, run })` so
 `skipped` names every leg or scope that could not run and why. Never hand-write
 the JSON or discard the previous state before this merge.
 
-## Surfacing — the digest, not the conversation
+## Surfacing — the inbox, not the conversation
 
 Each item carries three layers, so the reader spends only the attention the
 decision needs: a **one-line title** (the summary), an expandable **"In plain
@@ -375,7 +375,7 @@ Rules that make the ledger trustworthy:
   it under the normal gate rather than asking again.
 
 `nights_open` is carried across runs and shown per item. An item open five or
-more nights is called out at the top of the digest: a question that keeps coming
+more nights is marked on its own item in the inbox: a question that keeps coming
 back is itself a finding — either it is not answerable as posed, or it should not
 have been asked. Repetition without a counter is what hides that.
 
@@ -389,5 +389,5 @@ npm test`) passes before any push. No auto-apply rests on one reviewer's verdict
 including the routine's own.
 
 **Silent on clean, never silent on skipped.** Nothing found and nothing applied →
-no digest churn and no notification. But a leg that could not run says so in the
-digest — a quiet digest must mean "all clear", never "did not look".
+no inbox churn and no notification. But a leg that could not run says so in the
+inbox — a quiet inbox must mean "all clear", never "did not look".

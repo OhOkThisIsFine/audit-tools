@@ -1,7 +1,8 @@
 # External analyzer adapters
 
 Adapters normalize output from acquired external tools into the shared `ExternalAnalyzerResults` /
-`ExternalAnalyzerGraphEdge` contracts, through the common normalization seam in `normalizeExternal.ts`.
+`ExternalAnalyzerGraphEdge` contracts, through the common normalization seam in
+`src/shared/analyzers/normalizeExternal.ts`.
 
 Implemented:
 

@@ -53,7 +53,7 @@ namespace.
 
 ## Live counterexample ids
 
-The source currently cites CE-001 through CE-011 except CE-012, plus CE-013 and CE-206.
+The source currently cites CE-001 (plus the variant CE-001b) through CE-011, plus CE-013 and CE-206.
 Their meanings are local to the validator, ledger, intent, analyzer, worktree, or scoring code that
 cites them. Reuse of a number in another subsystem does not imply shared identity.
 

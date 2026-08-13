@@ -164,7 +164,7 @@ Tier the grounding by claim type:
   already in the pipeline (independent refuter + judge) **plus traceability**: every synthesis claim
   must trace to grounded tier-1/2 findings, so judgment can't invent its own facts.
 - **Implementation:** the span requirement is in `schemas/audit_result.schema.json`; quote-verify
-  grounding (`verifyFindingGrounding`, `src/audit/validation/quoteGrounding.ts`) is enforced at
+  grounding (`verifyFindingGrounding`, `src/shared/validation/findingGrounding.ts`) is enforced at
   ingest by `ingestAuditHostResults` in `src/audit/cli/dispatch/hostHandoff.ts` for every audit finding, and the equivalent
   design-review grounding (`groundDesignFinding`, `src/shared/validation/designFindingGrounding.ts`)
   is enforced at ingest by `nextStepHelpers.ts` for design findings. Executable anchors reuse the

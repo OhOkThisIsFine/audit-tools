@@ -23,7 +23,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `npx vitest run --changed` (only tests touching your uncommitted edits) +
   `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
   `npm run check:doc-manifest` (0.1s — ANY new/renamed tracked `*.md` anywhere in the repo, not just
-  `docs/**`, unregistered in `docs/doc-review-guidelines.md` otherwise fails only in RELEASE CI;
+  `docs/**`, unregistered in `scripts/doc-manifest-data.mjs`; the pre-commit gate already runs this
+  whenever the staged set touches markdown, so running it here is fast feedback, not the only gate;
   burned v0.34.17) +
   `npm run check:lint` (14s — `tsc` does NOT flag an unused DESTRUCTURED binding or a
   newly-dead import, so `build && check` goes green while eslint fails; burned v0.39.7).
@@ -102,7 +103,8 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
 under GitHub Actions each profile also appends a markdown table to the job summary.
 
 - **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
-- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs suffix `-shardXofY`).
+- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
+  profile name, not the file suffix).
 - **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
 
 `*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
