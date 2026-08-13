@@ -13,11 +13,12 @@
   `recover-submission` verb on both bins. Built red-tests-first (7 contract tests), six-lens
   adversarially reviewed plus an independent free-lane pass; every confirmed finding fixed and
   independently re-verified.
-- Published state: v0.41.1 at HEAD `c2c0424d`. The zero-adapter retirement is live; audit-tools
-  emits complete provider-neutral host workloads and ingests bound results.
+- Published state: v0.41.1 (the tag, not a sha — a sha here restales on every commit). The
+  zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
+  and ingests bound results.
 - 2026-08-12: the day's decision queue was answered in full; the executable items landed
   (P19–P22, the hooks probe carve-out, the docs-1..6 constitutional batch, the backlog batch,
-  then P25). Three owner-approved BUILDS remain queued — see Immediate next.
+  then P25). The owner-approved BUILDS that remain are enumerated under Immediate next.
 - The dogfood audit lap is IN FLIGHT and deliberately PAUSED at the `dispatch_review` step:
   intake/scope/lenses confirmed (930 files; custom `host_contract_robustness` lens included),
   all 5 analyzers consented, critical-flow enrichment plus both design reviews (contract +
@@ -35,7 +36,7 @@
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **17 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **18 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-1` — Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out
   - `docs-2` — The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source
   - `docs-3` — Constitutional catalog contradicts itself about friction capture — one line says "not in the priority chain", another says its id sits in PRIORITY
@@ -49,6 +50,7 @@
   - `backlog-1` — Two trap entries cite line numbers that never could have been right — and the file's own rule says to delete the suffixes, not bump them
   - `backlog-2` — The completion-test entry counts five files and four tests; there are three files and three tests — and a sibling entry says three then four in ten lines
   - `backlog-3` — The live-validation guide's premise did not survive the backlog split — it says "each such item", and 2 of 113 entries have the line
+  - `backlog-4` — HANDOFF has re-accreted changelog creep — a seven-line landing narrative and a whole Verification state section, both banned by its own contract
   - `sol-1` — A gate inspects .claude/** but CI cannot be triggered by it — generate the trigger paths from the guard-reach registry
   - `sol-2` — The guard that blocks a masked suite exit prescribes, in its own remedy text, the shape that fakes a green suite in the background — both shell branches
   - `sol-3` — The strongest recurrence in the store: an over-scoped offload call silently loses its whole answer — the working pattern exists once and generalizes to nothing

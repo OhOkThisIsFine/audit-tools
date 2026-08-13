@@ -562,6 +562,47 @@ Re-home the guide to the file whose items it annotates, drop the per-item contra
 ---
 
 
+<!-- nightly:item key=415c0b9e6fad9154 -->
+
+## `backlog-4` — HANDOFF has re-accreted changelog creep — a seven-line landing narrative and a whole Verification state section, both banned by its own contract
+
+*Backlog disambiguation · open 1 night · `docs/HANDOFF.md`*
+
+### In plain terms
+
+HANDOFF is supposed to hold the current published state and the immediate next step, and nothing else — CLAUDE.md says "immediate-next-only, never a changelog", and the doc philosophy repeats it. It currently holds three things that are neither: a seven-line narrative of how the last item was built and reviewed, a bullet narrating which items landed on 2026-08-12, and an entire "Verification state" section describing the gates that passed at that landing. All three are records of what already shipped, which is git log's job. This exact creep was answered before (2026-07-26): the owner's rule was that a Live-state bullet must be the immediate next step or a currently-live gate that will bite the next lap, and anything else has another home. It has come back. Tonight's run stripped one stale test count out of that section under the no-hand-carried-counts rule, but deleting the sections themselves is a judgment call, so it is yours.
+
+### The question
+
+Cut the landing narrative, the 2026-08-12 bullet and the Verification state section down to the one-line state they leave behind — or is the verification record worth keeping in HANDOFF?
+
+### Your answer
+
+- [ ] **1. Cut all three** — Cut the P25 landing narrative, the 2026-08-12 landed-items bullet, and the whole Verification state section down to the one-line state they leave behind. Provenance lives in git log.
+- [ ] **2. Keep verification** — Cut the landing narrative and the 2026-08-12 bullet, but keep the Verification state section — knowing which gates were green at the last landing is worth a few lines to the next lap.
+- [ ] **3. Enforce it** — Cut all three AND make it mechanical: extend the HANDOFF generator or a check to refuse a hand-written Live-state bullet that is neither the immediate next step nor a currently-live gate, so this stops recurring on memory alone.
+- [ ] **4. Leave as is** — Leave it as written; the narrative earns its space.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- CLAUDE.md end-of-sprint step (4): trim docs/HANDOFF.md to "immediate-next-only, never a changelog". docs/documentation-philosophy.md gives HANDOFF the same contract: current published state plus the immediate next step, explicitly NOT "a changelog (what already shipped, narrated)".
+- Three offending blocks at HEAD: the seven-line P25 landing narrative, the "2026-08-12:" landed-items bullet, and the "## Verification state" section.
+- This subject was answered once already (2026-07-26): a Live-state bullet must be the immediate next step or a currently-live gate/trap; anything else has another home. The rule was stated at the foot of the section and the creep returned anyway — which is the argument for the mechanical option.
+- Tonight's run removed the stale "406 files / 5077 passed" figure from that section under the no-hand-carried-computed-values rule, but left the sections standing because deleting them is a design decision.
+
+</details>
+
+---
+
+
 # Recurring-problem solutions
 
 
