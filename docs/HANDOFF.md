@@ -34,12 +34,32 @@
    deliverable); use the agy lanes, with verification-shaped prompts.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **17 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `docs-1` — Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out
+  - `docs-2` — The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source
+  - `docs-3` — Constitutional catalog contradicts itself about friction capture — one line says "not in the priority chain", another says its id sits in PRIORITY
+  - `docs-4` — Constitutional policy still says "one bounded step"; the engine drains the frontier — and the sibling contract already has the corrected wording
+  - `docs-5` — Constitutional goals doc documents a closing action the schema would reject — merge-to-base was deleted with the execution substrate
+  - `docs-6` — instruction-file edit: the own-vs-acquire rule puts secret-scan on the wrong side, and npm-audit on the wrong side in the opposite direction
+  - `docs-7` — The philosophy map states the opposite of its named home on concurrency — and two dead code helpers are the last physical trace of the retired mechanism
+  - `docs-8` — Two conflicting round-trip counts in one doc (~12 and 17) against a real phase count of 15 — but collapsing them to one number would erase the mechanism
+  - `docs-9` — A loader body pins version: 0.3.0 while the package is 0.41.1 — nothing reads the field, and its sibling loader has none
+  - `docs-10` — A glossary row points at two files deleted with the execution substrate, and its contract sentence over-claims three of its four nouns
+  - `backlog-1` — Two trap entries cite line numbers that never could have been right — and the file's own rule says to delete the suffixes, not bump them
+  - `backlog-2` — The completion-test entry counts five files and four tests; there are three files and three tests — and a sibling entry says three then four in ten lines
+  - `backlog-3` — The live-validation guide's premise did not survive the backlog split — it says "each such item", and 2 of 113 entries have the line
+  - `sol-1` — A gate inspects .claude/** but CI cannot be triggered by it — generate the trigger paths from the guard-reach registry
+  - `sol-2` — The guard that blocks a masked suite exit prescribes, in its own remedy text, the shape that fakes a green suite in the background — both shell branches
+  - `sol-3` — The strongest recurrence in the store: an over-scoped offload call silently loses its whole answer — the working pattern exists once and generalizes to nothing
+  - `sol-4` — The citation gate cannot see a directory citation or a bare filename — two of tonight's doc findings were in that blind spot, and the coverage count hides it
+
 <!-- END GENERATED LIVE STATUS -->
 
 ## Verification state
 
-- P25 green at landing: build + typecheck (src and test tree) + full vitest (406 files / 5077
-  passed) + loop-core-patterns byte-match + knip; six-lens adversarial review (every finding
+- P25 green at landing: build + typecheck (src and test tree) + full vitest + loop-core-patterns
+  byte-match + knip; six-lens adversarial review (every finding
   refuter-verified) plus an independent free-lane defect hunt; the review's three majors and all
   corroborated minors fixed and re-verified by a dedicated fix-delta lane. Loop-core and
   constitutional-doc attestations recorded against the final staged tree.
