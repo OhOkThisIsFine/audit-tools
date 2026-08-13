@@ -108,25 +108,6 @@ const STUB_AUDIT_FINDINGS = {
         tags: ["reliability"],
       },
     ],
-    pair_scores: [
-      {
-        left: "AUD-001",
-        right: "AUD-002",
-        evidence: {
-          call_import_reference_adjacency: false,
-          same_directory: false,
-          shared_critical_flow: false,
-          shared_file: false,
-          shared_semantic_tag_or_same_lens: false,
-          shared_unit: false,
-        },
-        score: 0,
-        eligible: false,
-      },
-    ],
-    eligible_candidates: [],
-    merge_trace: [],
-    merge_decisions: [],
     components: [["AUD-001"], ["AUD-002"]],
   },
   work_blocks: [

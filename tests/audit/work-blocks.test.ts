@@ -99,10 +99,6 @@ test("empty findings produce a complete empty trace and projection", () => {
   expect(buildWorkBlockPartition({ findings: [] })).toEqual({
     coherence_trace: {
       normalized_items: [],
-      pair_scores: [],
-      eligible_candidates: [],
-      merge_trace: [],
-      merge_decisions: [],
       components: [],
     },
     blocks: [],

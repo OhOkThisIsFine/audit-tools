@@ -56,6 +56,54 @@ function cloneState(state: AuditState): AuditState {
   };
 }
 
+/**
+ * The identity of the executor that ACTUALLY threw, carried ON the error.
+ *
+ * `advanceAudit` DRAINS — one call folds through successive obligations — so a
+ * caller that re-derives the failing identity from its own pre-drain
+ * `decideNextStep` selection names the drain's FIRST obligation no matter which
+ * fold step failed. That misattribution is not hypothetical: a
+ * `synthesis_executor` blowup was recorded against `runtime_validation_executor`
+ * (which had already succeeded), and sent the investigation to the wrong file.
+ * The fix is structural — the identity travels with the error instead of being
+ * reconstructed by a caller that cannot know it.
+ */
+export class ExecutorFailure extends Error {
+  /** The executor whose runner threw. */
+  readonly executor: string;
+  /** The obligation it was resolving (`forced:<executor>` for a forced dispatch). */
+  readonly obligation: string | null;
+
+  constructor(
+    message: string,
+    params: { executor: string; obligation: string | null; cause?: Error },
+  ) {
+    super(message, params.cause ? { cause: params.cause } : undefined);
+    this.name = "ExecutorFailure";
+    this.executor = params.executor;
+    this.obligation = params.obligation;
+  }
+}
+
+/**
+ * Find the failing-executor identity on `error` or anywhere down its `cause`
+ * chain. Chain-walking (rather than a bare `instanceof` on the outermost error)
+ * so an intermediate wrapper added later cannot silently reinstate the
+ * misattribution it replaced.
+ */
+export function findExecutorFailure(
+  error: unknown,
+): ExecutorFailure | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    if (current instanceof ExecutorFailure) return current;
+    seen.add(current);
+    current = current.cause;
+  }
+  return undefined;
+}
+
 function formatExecutorFailure(
   selectedExecutor: string,
   selectedObligation: string | null,
@@ -63,10 +111,12 @@ function formatExecutorFailure(
 ): Error {
   const detail =
     error instanceof Error ? error.message : String(error ?? "unknown error");
-  return new Error(
+  return new ExecutorFailure(
     `advanceAudit ${selectedExecutor} failed while resolving ${selectedObligation ?? "the current obligation"}: ${detail}`,
     {
-      cause: error instanceof Error ? error : undefined,
+      executor: selectedExecutor,
+      obligation: selectedObligation,
+      ...(error instanceof Error ? { cause: error } : {}),
     },
   );
 }

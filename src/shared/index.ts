@@ -369,19 +369,12 @@ export type {
   ContentCoherenceRelationship,
   ContentCoherenceInput,
   NormalizedContentCoherenceItem,
-  ContentCoherencePairScore,
-  ContentCoherenceCandidate,
-  ContentCoherenceMergeTraceEntry,
   ContentCoherenceTrace,
 } from "./decompose/contentCoherence.js";
 export {
   CONTENT_COHERENCE_SCORES,
   CONTENT_COHERENCE_THRESHOLD,
-  ContentCoherenceEvidenceSchema,
   NormalizedContentCoherenceItemSchema,
-  ContentCoherencePairScoreSchema,
-  ContentCoherenceCandidateSchema,
-  ContentCoherenceMergeTraceEntrySchema,
   ContentCoherenceTraceSchema,
   buildContentCoherenceTrace,
 } from "./decompose/contentCoherence.js";

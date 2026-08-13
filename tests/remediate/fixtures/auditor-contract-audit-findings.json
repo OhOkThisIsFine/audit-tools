@@ -52,69 +52,6 @@
         ]
       }
     ],
-    "pair_scores": [
-      {
-        "left": "AUD-001",
-        "right": "AUD-002",
-        "evidence": {
-          "call_import_reference_adjacency": false,
-          "same_directory": true,
-          "shared_critical_flow": false,
-          "shared_file": true,
-          "shared_semantic_tag_or_same_lens": false,
-          "shared_unit": true
-        },
-        "score": 190,
-        "eligible": true
-      },
-      {
-        "left": "AUD-001",
-        "right": "AUD-003",
-        "evidence": {
-          "call_import_reference_adjacency": false,
-          "same_directory": false,
-          "shared_critical_flow": false,
-          "shared_file": false,
-          "shared_semantic_tag_or_same_lens": false,
-          "shared_unit": false
-        },
-        "score": 0,
-        "eligible": false
-      },
-      {
-        "left": "AUD-002",
-        "right": "AUD-003",
-        "evidence": {
-          "call_import_reference_adjacency": false,
-          "same_directory": false,
-          "shared_critical_flow": false,
-          "shared_file": false,
-          "shared_semantic_tag_or_same_lens": false,
-          "shared_unit": false
-        },
-        "score": 0,
-        "eligible": false
-      }
-    ],
-    "eligible_candidates": [
-      {
-        "left": "AUD-001",
-        "right": "AUD-002",
-        "score": 190
-      }
-    ],
-    "merge_trace": [
-      {
-        "left": "AUD-001",
-        "right": "AUD-002",
-        "score": 190,
-        "decision": "merge",
-        "root": "AUD-001"
-      }
-    ],
-    "merge_decisions": [
-      "merge"
-    ],
     "components": [
       [
         "AUD-001",

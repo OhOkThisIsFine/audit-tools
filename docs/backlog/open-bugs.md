@@ -6,6 +6,27 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Coherence components have no granularity control, so a whole audit collapses into one work block
+  (2026-08-13, high).** `buildContentCoherenceTrace` unions on a DISJUNCTIVE threshold — 4 of 6 evidence
+  weights (`shared_file` 100, `shared_unit` 80, `call_import_reference_adjacency` 70,
+  `shared_critical_flow` 60) each clear the 60 floor alone — and then takes the transitive closure, so
+  membership is the connected components of a near-complete graph: measured 32 components with 2,202 of
+  2,241 findings (98.3%) in one, and no single evidence class whose removal breaks it (three connect
+  70–91% alone). The predecessor's 200 blocks were never a coherence result — `partitionWorkItems` sized
+  *k* from `capacityTokens`, so `467b1e8f` removed the only granularity bound there had ever been and
+  replaced it with a partition that bounds nothing. **Property:** component size is bounded by something
+  content-derived, or `work_blocks` stops claiming to be a unit of parallel work. Owner decision, four
+  options characterized (conjunctive eligibility / capped merge / clustering / host-side bundling) in the
+  P25 recon record §components-collapse. Related input: the unit manifest's 24 units × ~93 files make
+  `shared_unit` near-vacuous.
+
+- **`runCommand` buffers child output unboundedly (2026-08-13, medium).**
+  `src/audit/orchestrator/runtimeCommand.ts:48-55` does `stdout += String(chunk)` and truncates only
+  after `close`, so a verbose suite can exhaust memory or throw a `RangeError` from inside a stream
+  `data` listener — **uncaught**, killing the process with no recoverable state (the awaiting caller
+  never sees it). Same defect class as the coherence-trace blowup, one layer over. **Property:**
+  accumulate a bounded ring of trailing lines, never the whole stream.
+
 - **`shell-trap-guard` misses `git stash push <pathspec>` eating uncommitted work (2026-08-12, medium).**
   The guard DENIES a `git checkout --`/`git restore` that would eat unstaged edits, but a pathspec'd
   `stash push` removes them just as silently (hit live: it swept a 200k-line uncommitted retirement

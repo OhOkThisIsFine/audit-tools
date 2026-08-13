@@ -57,7 +57,11 @@ import type {
   DesignAssessment,
   RejectedDesignReviewSubmission,
 } from "../types/designAssessment.js";
-import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
+import {
+  advanceAudit,
+  findExecutorFailure,
+  type AdvanceAuditResult,
+} from "../orchestrator/advance.js";
 import {
   captureDesignReviewSnapshot,
   isDesignReviewStale,
@@ -1837,27 +1841,41 @@ export async function executeAndRecord(
     });
     return result;
   } catch (error) {
+    // `runAuditStep` → `advanceAudit` DRAINS: this one call folds through
+    // successive obligations, so `decision` names only the FIRST one. Reporting
+    // it would attribute a failure in any later fold step to an executor that
+    // already SUCCEEDED (observed: a synthesis_executor blowup recorded against
+    // runtime_validation_executor). The failing identity is read off the error
+    // that carries it; `decision` is only the fallback for a throw raised before
+    // any executor was dispatched.
+    const failure = findExecutorFailure(error);
+    const failedExecutor = failure?.executor ?? decision.selected_executor;
+    const failedObligation = failure?.obligation ?? decision.selected_obligation;
     // O2: error-recovery is itself a load→modify→persist artifact-tree mutation
     // (runAuditStep has already released its lock by the time we reach this
     // catch), so hold the artifact-tree lock across the whole RMW.
     await withFileLock(artifactTreeLockPath(params.artifactsDir), async () => {
       const current = await loadArtifactBundle(params.artifactsDir);
       const currentState = deriveAuditState(current);
-      currentState.last_executor = decision.selected_executor ?? undefined;
-      currentState.last_obligation = decision.selected_obligation ?? undefined;
+      currentState.last_executor = failedExecutor ?? undefined;
+      currentState.last_obligation = failedObligation ?? undefined;
       await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
-      last_executor: decision.selected_executor,
-      last_obligation: decision.selected_obligation,
+      last_executor: failedExecutor,
+      last_obligation: failedObligation,
+      // The obligation the drain STARTED from, kept alongside the failing one so
+      // the fold position stays reconstructable from the marker alone.
+      selected_executor: decision.selected_executor,
+      selected_obligation: decision.selected_obligation,
       prior_summary: lastSummary || null,
       error: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString(),
     });
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}, prior progress: ${lastSummary || "none"}): ${detail}`,
+      `Deterministic executor ${failedExecutor} failed on obligation ${failedObligation} (iteration ${index + 1}, prior progress: ${lastSummary || "none"}): ${detail}`,
       { cause: error instanceof Error ? error : undefined },
     );
   }

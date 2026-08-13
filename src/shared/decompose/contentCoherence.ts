@@ -60,45 +60,28 @@ export interface NormalizedContentCoherenceItem {
   critical_flow_ids?: string[];
 }
 
-export interface ContentCoherencePairScore {
+/**
+ * One eligible pair on the way to a component. MODULE-PRIVATE and deliberately
+ * so: the pairwise layer is O(N²) intermediate scratch, never a payload.
+ *
+ * The trace used to return the whole pairwise layer (`pair_scores`,
+ * `eligible_candidates`, `merge_trace`, `merge_decisions`). Nothing read them —
+ * the only non-test reference copied them through a filter — and at 3,194
+ * findings `pair_scores` alone reached 1.33 GB, exceeding V8's 512 MB string cap
+ * inside `stableStringify` and wedging artifact hashing before any persist.
+ * Keep this layer local; see the trace-shape contract test in
+ * `tests/shared/content-coherence.test.ts`.
+ */
+interface CoherenceCandidate {
   left: string;
   right: string;
-  evidence: ContentCoherenceEvidence;
   score: number;
-  eligible: boolean;
-}
-
-export interface ContentCoherenceCandidate {
-  left: string;
-  right: string;
-  score: number;
-}
-
-export interface ContentCoherenceMergeTraceEntry
-  extends ContentCoherenceCandidate {
-  decision: "merge" | "already_connected";
-  root: string;
 }
 
 export interface ContentCoherenceTrace {
   normalized_items: NormalizedContentCoherenceItem[];
-  pair_scores: ContentCoherencePairScore[];
-  eligible_candidates: ContentCoherenceCandidate[];
-  merge_trace: ContentCoherenceMergeTraceEntry[];
-  merge_decisions: Array<ContentCoherenceMergeTraceEntry["decision"]>;
   components: string[][];
 }
-
-export const ContentCoherenceEvidenceSchema = z
-  .object({
-    call_import_reference_adjacency: z.boolean(),
-    same_directory: z.boolean(),
-    shared_critical_flow: z.boolean(),
-    shared_file: z.boolean(),
-    shared_semantic_tag_or_same_lens: z.boolean(),
-    shared_unit: z.boolean(),
-  })
-  .strict();
 
 export const NormalizedContentCoherenceItemSchema = z
   .object({
@@ -110,37 +93,9 @@ export const NormalizedContentCoherenceItemSchema = z
   })
   .strict();
 
-export const ContentCoherencePairScoreSchema = z
-  .object({
-    left: z.string(),
-    right: z.string(),
-    evidence: ContentCoherenceEvidenceSchema,
-    score: z.number().int(),
-    eligible: z.boolean(),
-  })
-  .strict();
-
-export const ContentCoherenceCandidateSchema = z
-  .object({
-    left: z.string(),
-    right: z.string(),
-    score: z.number().int(),
-  })
-  .strict();
-
-export const ContentCoherenceMergeTraceEntrySchema =
-  ContentCoherenceCandidateSchema.extend({
-    decision: z.enum(["merge", "already_connected"]),
-    root: z.string(),
-  }).strict();
-
 export const ContentCoherenceTraceSchema = z
   .object({
     normalized_items: z.array(NormalizedContentCoherenceItemSchema),
-    pair_scores: z.array(ContentCoherencePairScoreSchema),
-    eligible_candidates: z.array(ContentCoherenceCandidateSchema),
-    merge_trace: z.array(ContentCoherenceMergeTraceEntrySchema),
-    merge_decisions: z.array(z.enum(["merge", "already_connected"])),
     components: z.array(z.array(z.string())),
   })
   .strict();
@@ -365,7 +320,13 @@ export function buildContentCoherenceTrace(
     input.relationships,
     itemIds,
   );
-  const pairScores: ContentCoherencePairScore[] = [];
+  // Only ELIGIBLE pairs are retained. The ineligible majority (82% of pairs on
+  // the 3,194-finding dogfood run) can affect nothing downstream — union-find
+  // consumes eligibility alone — so materializing the full O(N²) pair layer was
+  // pure cost. Scoring itself is unchanged; the sort comparator below is total
+  // over distinct (left,right) pairs, so filtering during the scan yields the
+  // byte-identical candidate order the filter-then-sort form produced.
+  const eligibleCandidates: CoherenceCandidate[] = [];
 
   for (let leftIndex = 0; leftIndex < normalizedItems.length; leftIndex += 1) {
     for (
@@ -380,45 +341,28 @@ export function buildContentCoherenceTrace(
         evidence[kind] = true;
       }
       const score = scoreEvidence(evidence);
-      pairScores.push({
-        left: left.id,
-        right: right.id,
-        evidence,
-        score,
-        eligible: score >= CONTENT_COHERENCE_THRESHOLD,
-      });
+      if (score < CONTENT_COHERENCE_THRESHOLD) continue;
+      eligibleCandidates.push({ left: left.id, right: right.id, score });
     }
   }
 
-  const eligibleCandidates = pairScores
-    .filter((pair) => pair.eligible)
-    .map(({ left, right, score }) => ({ left, right, score }))
-    .sort((left, right) => {
-      if (left.score !== right.score) return right.score - left.score;
-      const leftDelta = compareCodeUnits(left.left, right.left);
-      return leftDelta !== 0
-        ? leftDelta
-        : compareCodeUnits(left.right, right.right);
-    });
+  eligibleCandidates.sort((left, right) => {
+    if (left.score !== right.score) return right.score - left.score;
+    const leftDelta = compareCodeUnits(left.left, right.left);
+    return leftDelta !== 0
+      ? leftDelta
+      : compareCodeUnits(left.right, right.right);
+  });
 
   const parent = new Map(normalizedItems.map((item) => [item.id, item.id]));
-  const mergeTrace: ContentCoherenceMergeTraceEntry[] = [];
   for (const candidate of eligibleCandidates) {
     const leftRoot = findRoot(parent, candidate.left);
     const rightRoot = findRoot(parent, candidate.right);
-    if (leftRoot === rightRoot) {
-      mergeTrace.push({
-        ...candidate,
-        decision: "already_connected",
-        root: leftRoot,
-      });
-      continue;
-    }
+    if (leftRoot === rightRoot) continue;
     const root =
       compareCodeUnits(leftRoot, rightRoot) <= 0 ? leftRoot : rightRoot;
     const other = root === leftRoot ? rightRoot : leftRoot;
     parent.set(other, root);
-    mergeTrace.push({ ...candidate, decision: "merge", root });
   }
 
   const groups = new Map<string, string[]>();
@@ -436,10 +380,6 @@ export function buildContentCoherenceTrace(
 
   return {
     normalized_items: normalizedItems,
-    pair_scores: pairScores,
-    eligible_candidates: eligibleCandidates,
-    merge_trace: mergeTrace,
-    merge_decisions: mergeTrace.map((entry) => entry.decision),
     components,
   };
 }

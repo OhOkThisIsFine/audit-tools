@@ -49,25 +49,6 @@
         "tags": ["security"]
       }
     ],
-    "pair_scores": [
-      {
-        "left": "FP-001",
-        "right": "FP-002",
-        "evidence": {
-          "call_import_reference_adjacency": false,
-          "same_directory": true,
-          "shared_critical_flow": false,
-          "shared_file": false,
-          "shared_semantic_tag_or_same_lens": false,
-          "shared_unit": false
-        },
-        "score": 10,
-        "eligible": false
-      }
-    ],
-    "eligible_candidates": [],
-    "merge_trace": [],
-    "merge_decisions": [],
     "components": [["FP-001"], ["FP-002"]]
   },
   "work_blocks": [

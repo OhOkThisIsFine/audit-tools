@@ -548,10 +548,6 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
       findings: [],
       coherence_trace: {
         normalized_items: [],
-        pair_scores: [],
-        eligible_candidates: [],
-        merge_trace: [],
-        merge_decisions: [],
         components: [],
       },
       work_blocks: [],

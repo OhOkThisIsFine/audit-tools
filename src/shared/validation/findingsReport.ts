@@ -471,12 +471,6 @@ export function projectAuditFindingsReportSubset(
   const normalizedById = new Map(
     normalizedItems.map((item) => [item.id, item]),
   );
-  const pairSurvives = (entry: { left: string; right: string }): boolean =>
-    selectedIds.has(entry.left) && selectedIds.has(entry.right);
-  const mergeTrace = report.coherence_trace.merge_trace.filter(
-    (entry) => pairSurvives(entry) && selectedIds.has(entry.root),
-  );
-
   const componentBlocks = report.coherence_trace.components.flatMap(
     (component, index) => {
       const findingIds = component.filter((id) => selectedIds.has(id));
@@ -551,11 +545,6 @@ export function projectAuditFindingsReportSubset(
     findings,
     coherence_trace: {
       normalized_items: normalizedItems,
-      pair_scores: report.coherence_trace.pair_scores.filter(pairSurvives),
-      eligible_candidates:
-        report.coherence_trace.eligible_candidates.filter(pairSurvives),
-      merge_trace: mergeTrace,
-      merge_decisions: mergeTrace.map((entry) => entry.decision),
       components: componentBlocks.map(({ component }) => component),
     },
     work_blocks: workBlocks,

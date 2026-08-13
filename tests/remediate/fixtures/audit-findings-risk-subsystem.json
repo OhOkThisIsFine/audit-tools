@@ -32,10 +32,6 @@
         "tags": ["correctness"]
       }
     ],
-    "pair_scores": [],
-    "eligible_candidates": [],
-    "merge_trace": [],
-    "merge_decisions": [],
     "components": [["RS-001"]]
   },
   "work_blocks": [

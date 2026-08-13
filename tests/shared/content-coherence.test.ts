@@ -9,7 +9,26 @@ type UnknownRecord = Record<string, unknown>;
 interface CoreModule {
   readonly CONTENT_COHERENCE_SCORES: Readonly<Record<string, number>>;
   readonly buildContentCoherenceTrace: (input: UnknownRecord) => UnknownRecord;
+  readonly ContentCoherenceTraceSchema: { readonly shape: UnknownRecord };
 }
+
+/**
+ * The complete emitted trace surface — every field with a PRODUCTION reader,
+ * and nothing else.
+ *
+ * `components` is read by every projection (audit packets, work blocks, the
+ * deliverable emitter, the approved-subset projection); `normalized_items` is
+ * read by the work-block projection and by the report contract's own
+ * `superRefine`. The pairwise layer that used to ride alongside them
+ * (`pair_scores`, `eligible_candidates`, `merge_trace`, `merge_decisions`) had
+ * NO reader — its one non-test reference copied it through a filter — while
+ * being O(N²): at 3,194 findings `pair_scores` alone serialized to 1.33 GB and
+ * blew V8's 512 MB string cap inside `stableStringify`, wedging artifact
+ * hashing before anything could be persisted. Adding a field here is therefore
+ * a deliberate act: name its production reader, or it does not belong in a
+ * persisted contract.
+ */
+const TRACE_FIELDS = ["components", "normalized_items"] as const;
 
 interface AuditProjectionModule {
   readonly buildTaskCoherencePartition: (
@@ -36,7 +55,8 @@ async function loadCore(): Promise<CoreModule> {
     )) as unknown as Partial<CoreModule>;
     if (
       typeof loaded.buildContentCoherenceTrace !== "function" ||
-      loaded.CONTENT_COHERENCE_SCORES === undefined
+      loaded.CONTENT_COHERENCE_SCORES === undefined ||
+      loaded.ContentCoherenceTraceSchema === undefined
     ) {
       throw new Error("shared coherence exports are absent");
     }
@@ -121,38 +141,41 @@ function goldenInput(reverse = false): UnknownRecord {
 }
 
 const GOLDEN = {
-  eligible_candidates: [
-    { left: "a", right: "c", score: 120 },
-    { left: "a", right: "b", score: 110 },
-    { left: "d", right: "e", score: 70 },
-  ],
-  merge_decisions: ["merge", "merge", "merge"],
   components: [
     ["a", "b", "c"],
     ["d", "e"],
   ],
 } as const;
 
+/**
+ * The trace's ONLY consumed fields. The pairwise layer (`pair_scores`,
+ * `eligible_candidates`, `merge_trace`, `merge_decisions`) is module-private
+ * scratch — see TRACE_FIELDS below.
+ */
 function traceProjection(trace: UnknownRecord): UnknownRecord {
-  return {
-    eligible_candidates: trace.eligible_candidates,
-    merge_decisions: trace.merge_decisions,
-    components: trace.components,
-  };
+  return { components: trace.components };
 }
 
-function pair(
-  trace: UnknownRecord,
-  left: string,
-  right: string,
-): UnknownRecord {
-  const pairs = trace.pair_scores;
-  expect(Array.isArray(pairs)).toBe(true);
-  const found = (pairs as UnknownRecord[]).find(
-    (entry) => entry.left === left && entry.right === right,
+/**
+ * Whether `left` and `right` landed in the SAME component — the observable form
+ * of "this pair scored at or above the threshold and was unioned". Scoring is
+ * asserted through membership, never through a persisted pair record.
+ */
+function merged(trace: UnknownRecord, left: string, right: string): boolean {
+  return (trace.components as string[][]).some(
+    (component) => component.includes(left) && component.includes(right),
   );
-  expect(found, `missing pair ${left}/${right}`).toBeDefined();
-  return found ?? {};
+}
+
+/** Two bare items joined only by `kinds`; no direct evidence of any class. */
+function relatedOnly(...kinds: string[]): UnknownRecord {
+  return {
+    items: [
+      { id: "left", file_paths: [], unit_ids: [], tags: [] },
+      { id: "right", file_paths: [], unit_ids: [], tags: [] },
+    ],
+    relationships: kinds.map((kind) => ({ left: "left", right: "right", kind })),
+  };
 }
 
 function finding(
@@ -336,45 +359,72 @@ describe(RED_SIGNATURE, () => {
 
   it("scores every boolean class once, honors aliases, and rejects unknown relations", async () => {
     const core = await loadCore();
-    const trace = core.buildContentCoherenceTrace({
-      items: [
-        {
-          id: "left",
-          file_paths: ["src/x.ts"],
-          unit_ids: ["unit"],
-          tags: ["tag"],
-          critical_flow_ids: ["flow"],
-        },
-        {
-          id: "right",
-          file_paths: ["src/x.ts"],
-          unit_ids: ["unit"],
-          tags: ["tag"],
-          critical_flow_ids: ["flow"],
-        },
-      ],
-      relationships: [
-        { left: "right", right: "left", kind: "shared_file" },
-        { left: "left", right: "right", kind: "cross_lens_same_file" },
-        { left: "left", right: "right", kind: "same_unit" },
-        { left: "left", right: "right", kind: "call_adjacent" },
-        { left: "left", right: "right", kind: "same_flow" },
-        { left: "left", right: "right", kind: "same_lens" },
-        { left: "left", right: "right", kind: "same_dir" },
-      ],
-    });
-    expect(pair(trace, "left", "right")).toMatchObject({
-      score: 350,
-      eligible: true,
-      evidence: {
-        call_import_reference_adjacency: true,
-        same_directory: true,
-        shared_critical_flow: true,
-        shared_file: true,
-        shared_semantic_tag_or_same_lens: true,
-        shared_unit: true,
-      },
-    });
+    // Every relationship kind maps onto exactly one evidence class, and the
+    // weight table (asserted verbatim above) decides whether that ONE class
+    // clears the 60 threshold on its own. Membership is the observable form.
+    for (const kind of [
+      "shared_file",
+      "cross_lens_same_file",
+      "same_unit",
+      "call_adjacent",
+      "same_flow",
+    ]) {
+      const trace = core.buildContentCoherenceTrace(relatedOnly(kind));
+      expect(merged(trace, "left", "right"), `${kind} must merge alone`).toBe(true);
+    }
+    for (const kind of ["same_lens", "same_dir"]) {
+      const trace = core.buildContentCoherenceTrace(relatedOnly(kind));
+      expect(merged(trace, "left", "right"), `${kind} must not merge alone`).toBe(
+        false,
+      );
+    }
+    // 30 + 10 still under threshold — weak classes accumulate but do not reach it.
+    expect(
+      merged(
+        core.buildContentCoherenceTrace(relatedOnly("same_lens", "same_dir")),
+        "left",
+        "right",
+      ),
+    ).toBe(false);
+    // Endpoint order is canonicalized: a reversed relationship is the same pair.
+    expect(
+      merged(
+        core.buildContentCoherenceTrace({
+          items: [
+            { id: "left", file_paths: [], unit_ids: [], tags: [] },
+            { id: "right", file_paths: [], unit_ids: [], tags: [] },
+          ],
+          relationships: [{ left: "right", right: "left", kind: "shared_file" }],
+        }),
+        "left",
+        "right",
+      ),
+    ).toBe(true);
+    // Direct (relationship-free) evidence scores identically.
+    expect(
+      merged(
+        core.buildContentCoherenceTrace({
+          items: [
+            { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
+            { id: "right", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
+          ],
+        }),
+        "left",
+        "right",
+      ),
+    ).toBe(true);
+    expect(
+      merged(
+        core.buildContentCoherenceTrace({
+          items: [
+            { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: ["t"] },
+            { id: "right", file_paths: ["src/y.ts"], unit_ids: [], tags: ["t"] },
+          ],
+        }),
+        "left",
+        "right",
+      ),
+    ).toBe(false);
 
     expect(() =>
       core.buildContentCoherenceTrace({
@@ -387,7 +437,7 @@ describe(RED_SIGNATURE, () => {
     ).toThrow(/unknown.*mystery/i);
   });
 
-  it("uses threshold 60, deterministic roots, and an already-connected trace", async () => {
+  it("uses threshold 60 inclusively and folds an already-connected triangle", async () => {
     const core = await loadCore();
     const threshold = core.buildContentCoherenceTrace({
       items: [
@@ -398,9 +448,14 @@ describe(RED_SIGNATURE, () => {
       ],
       relationships: [{ left: "a", right: "b", kind: "same_flow" }],
     });
-    expect(pair(threshold, "a", "b")).toMatchObject({ score: 60, eligible: true });
-    expect(pair(threshold, "c", "d")).toMatchObject({ score: 40, eligible: false });
+    // a/b score exactly 60 (shared_critical_flow, different dirs) → merged: the
+    // threshold is inclusive. c/d score 40 (same_directory 10 + same tag 30).
+    expect(merged(threshold, "a", "b")).toBe(true);
+    expect(merged(threshold, "c", "d")).toBe(false);
+    expect(threshold.components).toEqual([["a", "b"], ["c"], ["d"]]);
 
+    // A triangle: the third eligible pair is already connected, so the union
+    // is idempotent and the whole triangle is ONE component.
     const triangle = core.buildContentCoherenceTrace({
       items: ["c", "a", "b"].map((id) => ({
         id,
@@ -410,17 +465,7 @@ describe(RED_SIGNATURE, () => {
       })),
       relationships: [],
     });
-    expect(triangle.merge_decisions).toEqual([
-      "merge",
-      "merge",
-      "already_connected",
-    ]);
     expect(triangle.components).toEqual([["a", "b", "c"]]);
-    expect(triangle.merge_trace).toMatchObject([
-      { left: "a", right: "b", decision: "merge", root: "a" },
-      { left: "a", right: "c", decision: "merge", root: "a" },
-      { left: "b", right: "c", decision: "already_connected", root: "a" },
-    ]);
   });
 
   it("is byte-stable across permutations and covers every item exactly once", async () => {
@@ -516,6 +561,48 @@ describe(RED_SIGNATURE, () => {
     expect(owning).toMatchObject({ role: "coordination" });
     expect(owning?.finding_ids).toEqual(["a", "b", "c"]);
   });
+
+  it("emits no trace field without a production reader", async () => {
+    const core = await loadCore();
+    // The persisted contract's shape IS the schema (.strict(), so an extra key
+    // is a validation error rather than silent payload). Both the schema and a
+    // real returned trace must carry exactly the consumed set.
+    expect(Object.keys(core.ContentCoherenceTraceSchema.shape).sort()).toEqual(
+      [...TRACE_FIELDS],
+    );
+    const trace = core.buildContentCoherenceTrace(goldenInput());
+    expect(Object.keys(trace).sort()).toEqual([...TRACE_FIELDS]);
+    // The empty draw carries the same shape — no field appears only when
+    // populated.
+    expect(
+      Object.keys(core.buildContentCoherenceTrace({ items: [] })).sort(),
+    ).toEqual([...TRACE_FIELDS]);
+  });
+
+  it("stays hashable at audit scale (3,000 items)", async () => {
+    const core = await loadCore();
+    const { hashArtifactValue } = await import(
+      "../../src/shared/artifactFreshness.js"
+    );
+    // 3,000 items = 4,498,500 pairs. Emitting the pairwise layer put ~1.2 GB
+    // into ONE JavaScript string inside stableStringify's Array.join, over V8's
+    // 512 MB cap — a RangeError("Invalid string length") thrown from artifact
+    // content hashing, BEFORE any persist, which wedged a live audit lap on a
+    // deterministically-repeating retry. Membership is O(N²) in TIME by
+    // construction; it must never be O(N²) in PAYLOAD.
+    const items = Array.from({ length: 3000 }, (_, index) => ({
+      // Distinct directory per item keeps the pair set almost entirely
+      // ineligible, so this guards serialization size, not merge behavior.
+      id: `F-${String(index).padStart(5, "0")}`,
+      file_paths: [`src/pkg${index}/file${index}.ts`],
+      unit_ids: [`unit-${index}`],
+      tags: [`lens-${index % 11}`],
+    }));
+    const trace = core.buildContentCoherenceTrace({ items });
+    expect((trace.components as string[][]).length).toBe(3000);
+    const digest = hashArtifactValue("audit-findings.json", trace);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+  }, 120_000);
 
   it("deletes every local membership and backend-fit surface", async () => {
     const sources = await Promise.all(
