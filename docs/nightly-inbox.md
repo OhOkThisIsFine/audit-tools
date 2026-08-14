@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-14 at `4708366b`.*
+*Last run: 2026-08-14 at `45f28940`.*
 
 
 > **3 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
@@ -438,6 +438,49 @@ Repoint the row and narrow its contract to the ancestry probe — and add the mi
 ---
 
 
+<!-- nightly:item key=acf85544944a3aef -->
+
+## `docs-11` — Constitutional specs say the host handoff reads access_memory and the affinity graph — it takes neither; correct the docs, or wire the consumption they describe
+
+*Documentation · open 1 night · `spec/audit/dependency-map.md`*
+
+### In plain terms
+
+Two of the normative spec documents describe a continuity feature: as an audit runs it records which files earlier steps touched (access_memory) and how review tasks cluster together (the task-affinity graph), and the docs say the handoff step reads those back so later work stays near earlier work. The recording half is real and works. The reading half is not there. The function that builds host work items accepts exactly four inputs — repo root, artifacts directory, run id, and the task list — and nothing anywhere in the audit source reads bundle.access_memory at all. The affinity graph is genuinely read, but during PLANNING, not by the handoff the docs point at. So these are write-only artifacts wearing the description of consumed ones, which is the shape that makes a reader trust a feature that is not running. Because these are constitutional docs, nothing here can be corrected without your call: either the prose is wrong and should describe what the artifacts currently are, or the prose is the intent and the missing consumption is a real gap to build.
+
+### The question
+
+Are the access-memory and affinity-graph consumption claims in spec/audit/dependency-map.md and spec/audit/artifact-contract.md stale prose to correct, or a specification of intended behaviour that is not yet built?
+
+### Your answer
+
+- [ ] **1. Docs are stale — correct them** — The prose is stale. Correct both constitutional docs to describe what the artifacts currently are: access_memory.json is a persisted per-run path-level access summary that nothing currently consumes, and task_affinity_graph.json is consumed during PLANNING (partitionTaskGraph -> reviewPackets), not when forming host work items. Land under the constitutional-doc override with this decision recorded.
+- [ ] **2. Docs are the intent — build the consumption** — The docs specify intended behaviour. Keep the prose and open work to actually thread continuity into host-work composition: prepareAuditHostHandoff gains access-memory input and biases work-item composition toward files earlier steps touched. Until it lands, the claim stays a known-unbuilt specification rather than a doc bug.
+- [ ] **3. Split the two** — Treat them separately: correct the access_memory claim as stale (zero readers, no plausible near-term consumer) and correct only the LOCATION of the affinity-graph claim (planning, not host handoff) while keeping the artifact described as consumed.
+- [ ] **4. Retire the artifacts** — If the consumption is not wanted, delete the write side too rather than keeping write-only artifacts: retire access_memory.json from the audit bundle and its dependency-map row, so the tree stops carrying a persisted artifact nothing reads.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- src/audit/cli/dispatch/hostHandoff.ts:446 — prepareAuditHostHandoff(params: { root, artifactsDir, runId, tasks }). No access-memory or affinity-graph parameter exists.
+- Grepping the READERS (not the writers): zero occurrences of bundle.access_memory anywhere under src/audit. The only audit-side references are the writer (orchestrator/ingestionExecutors.ts:254-262) and the artifact registry (io/artifacts.ts:293).
+- spec/audit/dependency-map.md:129 states the bias "threads in at the handoff code level (reading `bundle.access_memory`)" — the exact mechanism named is the one that does not exist.
+- spec/audit/artifact-contract.md:93 says task_affinity_graph.json is "consumed when forming complete host work items"; its real consumer is src/audit/orchestrator/partitionTaskGraph.ts via reviewPackets.ts, on the PLANNING side.
+- Consumption does exist on the REMEDIATE side (src/remediate/state/accessMemory.ts, src/shared/continuityScore.ts), so this is an audit-side gap, not a dead feature repo-wide. The codex lane asserted "not consumed" flatly; that half was overstated and is corrected here.
+- Both files are in CONSTITUTIONAL_DOC_PATHS (src/shared/constitutionalDocPaths.ts), so this is escalate-only regardless of disposition.
+
+</details>
+
+---
+
+
 # Backlog disambiguation
 
 
@@ -846,7 +889,9 @@ Full proposal: [`.audit-tools/nightly/proposals/P31-inline-script-payload-mangle
 
 - The free-provider lane (freellmapi claude.ps1) was UNAVAILABLE: it refuses the workspace as untrusted ('Ignoring 29 permissions.allow entries ... this workspace has not been trusted') and exits without contacting a model. Its assigned work (docs/audit-pkg drift) was re-routed to the primary lane rather than dropped, so no scope was lost — but leg 1 ran with one independent lane instead of two, which weakens the adversary half of the three-agent gate.
 
-- The codex lane ran for ~10 minutes and produced 620KB of output that is mostly PowerShell quoting errors and raw file dumps, with no usable finding list. Its assigned scope (the six spec/audit/*.md normative contracts) is therefore UNVERIFIED tonight beyond what the already-open docs-1..docs-10 items cover.
+- The codex lane DID deliver, correcting an earlier read of this run's own: it covered all six spec/audit/*.md normative contracts and returned 12 findings. Its interim output was ~600KB of PowerShell quoting errors and raw file dumps, which an interim check mistook for a failed lane; the finding list arrived only in the final message. Triage: 3 duplicate already-open items (docs-2 analyzer candidate counts, docs-3 friction-capture contradiction), 8 unverified-but-plausible leads left for a future pass, and 1 verified against source and escalated as docs-11. One of its claims was OVERSTATED and corrected before escalation — it asserted access_memory is 'not consumed', which is false repo-wide (src/remediate/state/accessMemory.ts and src/shared/continuityScore.ts consume it); the true finding is narrower and audit-side only.
+
+- 8 codex leads were NOT verified tonight and are deliberately not escalated: promoteFinalAuditReport treating audit-findings.json as best-effort (audit-goals.md); ToolingManifest detecting no analyzer versions and the dependency-map claim that an analyzer-version change re-stales repo_manifest (artifact-contract.md, dependency-map.md); the external-analyzer marker naming 4 candidates against a 12-entry registry (partially covered by docs-2); no automatic pre-run cleanup sweep in cmdNextStep (audit-goals.md); and intake_executor satisfying two obligation ids (executor-catalog.md). Each is a LEAD at the same bar as a backlog entry claiming to be shipped, and all six target files are constitutional, so none could have been auto-applied in any case.
 
 - Leg 2 coverage stamp: .audit-tools/nightly/triage-2026-08-14-coverage.json — 62 of 62 backlog entries attempted, 55 classified, 7 errored, not aborted. Caveat: 16 verdicts stamped premise probes_unusable and 20 unprobed, so 36 of 55 premises were NOT mechanically confirmed against the tree.
 
