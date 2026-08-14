@@ -923,7 +923,9 @@
     "answer": "Build the FULL scope ledger as docs/doc-review-guidelines.md specifies: content-hash item keys mapped to {lastCheckedCommit, lastCheckedAt}, persisted as a sidecar under .audit-tools/nightly/, giving leg 1 both coverage accounting and diff-window scoping.",
     "subject": "Leg 1 has no coverage accounting — build the stamp that leg 2 already has, build the full scope ledger the rubric specifies, or delete the ledger section",
     "path": "docs/doc-review-guidelines.md",
-    "decided_at": "2026-08-12T15:08:19.657Z"
+    "decided_at": "2026-08-12T15:08:19.657Z",
+    "completed_at": "2026-08-14T09:16:45.920Z",
+    "completed_ref": "4708366b — scripts/nightly/scope-ledger.mjs + tests/shared/nightly-scope-ledger.test.ts, wired into guard-reach and docs/nightly-routine.md"
   },
   "5fa08752c53097bb": {
     "disposition": "settled",

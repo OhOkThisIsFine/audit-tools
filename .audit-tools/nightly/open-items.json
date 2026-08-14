@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-13T09:37:55.886Z",
+  "generated_at": "2026-08-14T09:18:41.964Z",
   "run": {
-    "date": "2026-08-13",
-    "head": "5ce73823"
+    "date": "2026-08-14",
+    "head": "4708366b"
   },
   "items": [
     {
@@ -45,7 +45,7 @@
       ],
       "subject_key": "312126da152a15f4",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-2",
@@ -95,7 +95,7 @@
       ],
       "subject_key": "ca7381d8ff2acd0a",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-3",
@@ -132,7 +132,7 @@
       ],
       "subject_key": "49e92917e4ed552f",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-4",
@@ -173,7 +173,7 @@
       ],
       "subject_key": "2a2f4eb487b558ca",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-5",
@@ -219,7 +219,7 @@
       ],
       "subject_key": "bd86e4d5fcd0621c",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-6",
@@ -266,7 +266,7 @@
       ],
       "subject_key": "07a89c9bee083cc8",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-7",
@@ -313,7 +313,7 @@
       ],
       "subject_key": "a3e31138790037d9",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-8",
@@ -350,7 +350,7 @@
       ],
       "subject_key": "115a621c022f083e",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-9",
@@ -388,7 +388,7 @@
       ],
       "subject_key": "e6cf0b2d90e54262",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "docs-10",
@@ -430,7 +430,7 @@
       ],
       "subject_key": "a80005242faee2db",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "backlog-1",
@@ -473,7 +473,7 @@
       ],
       "subject_key": "06bb0d0ea4a74414",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "backlog-2",
@@ -512,7 +512,7 @@
       ],
       "subject_key": "c920bfdee309e889",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "backlog-3",
@@ -553,7 +553,7 @@
       ],
       "subject_key": "51c6efd7bf10f238",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "sol-5",
@@ -601,7 +601,7 @@
       ],
       "subject_key": "afc6b718063bd95a",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "sol-1",
@@ -649,7 +649,7 @@
       ],
       "subject_key": "8ae16b26e46ae812",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "sol-2",
@@ -693,7 +693,7 @@
       ],
       "subject_key": "8240e45481366a84",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "sol-3",
@@ -736,7 +736,7 @@
       ],
       "subject_key": "6419f44513834ba1",
       "first_seen": "2026-08-13",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "sol-4",
@@ -780,22 +780,63 @@
       ],
       "subject_key": "36a6734df10c0aad",
       "first_seen": "2026-08-13",
+      "nights_open": 2
+    },
+    {
+      "id": "sol-6",
+      "leg": "solutions",
+      "path": ".claude/hooks/shell-trap-guard.mjs",
+      "patch_path": ".audit-tools/nightly/proposals/P31-inline-script-payload-mangled/PROPOSAL.md",
+      "subject": "An inline interpreter payload is parsed by the shell before the interpreter sees it; the guard covers command substitution but not payload integrity",
+      "title": "An inline node -e carrying a regex is mangled before it runs — deny the form, deny only the escape-run case, or leave it as advice",
+      "eli5": "When a command like node -e \"...\" is run, the shell reads the text first and the interpreter reads whatever survives. Anything quote-heavy inside — a regular expression especially — gets chewed up on the way through, so what actually runs is not what was written. This has now happened enough times to be a pattern rather than bad luck: the /insights report counts it mangling two repair scripts and destroying a probe test that had to be rewritten from scratch, and it happened again during this very run, where a one-line scan died on its own regex and then worked immediately once it was written to a file instead. There is already a guard on this path, but it catches a different thing: it refuses a backtick that would run a command. Tonight the backtick was correctly escaped and inert — and the escaping is exactly what broke the regex. So the guard was right and the command still failed. The open question is how wide the new refusal should be: refuse every inline payload containing a regex, refuse only the narrow escape-sequence shape that actually failed, or write nothing and keep re-hitting it.",
+      "question": "Should shell-trap-guard refuse an inline interpreter payload (node -e, python -c, bash -c) whose body contains a regex literal — remedy \"write a script to the scratchpad and run it by path\" — or should the refusal be narrowed to the escape-run shape that actually failed, or not built at all?",
+      "options": [
+        {
+          "label": "Deny regex-in-inline-payload",
+          "answer": "Extend shell-trap-guard.mjs with a DENY on an inline interpreter payload (node -e/--eval, python -c, perl -e, ruby -e, bash -c) whose body contains a regex literal or a backslash-escape run of length >= 2. Remedy: write the script to the session scratchpad and run it by path. Escape hatch AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1. Red-green tests in tests/shared/hook-trap-guards.test.ts."
+        },
+        {
+          "label": "Narrow to escape runs only",
+          "answer": "Build the same rule but fire ONLY on a backslash-escape run of length >= 2 inside an inline payload — the exact shape that failed — leaving a bare regex literal alone. Accepts lower recall to keep the fourth Bash-path DENY from becoming guard fatigue."
+        },
+        {
+          "label": "Advice, not a gate",
+          "answer": "Do not add a fourth DENY to the Bash path. Record the rule as guidance instead and accept that it will be re-hit, on the judgment that guard fatigue on the Bash path costs more than the trap does."
+        }
+      ],
+      "evidence": [
+        "Tonight, leg 1: a node -e scan whose payload held a JS regex literal died in bash with \"syntax error near unexpected token\"; rewritten as a .mjs file in the scratchpad it ran first try.",
+        "/insights report 2026-08-14, section \"Shell quoting and environment fragility\": inline node -e repair scripts mangled twice, one probe test corrupted and redone from scratch; 28 environment_issue + 26 tool_failure events across 214 sessions.",
+        ".claude/hooks/shell-trap-guard.mjs already denies a LIVE backtick (findLiveBackticks). Tonight the backticks were escaped and therefore not live, so that rule correctly abstained — the gap is payload integrity, not substitution.",
+        "Memory records the same shape on three further distinct dates: powershell-inline-json-guard-hook, python-write-mode-truncates-before-write, backslash-u-escape-decodes-in-tool-json."
+      ],
+      "premise_probes": [
+        {
+          "file": ".claude/hooks/shell-trap-guard.mjs",
+          "contains": "live backtick in a Bash-tool command"
+        },
+        {
+          "file": ".claude/hooks/shell-trap-guard.mjs",
+          "absent": "AUDIT_TOOLS_ALLOW_INLINE_SCRIPT"
+        }
+      ],
+      "subject_key": "9b028fa6ec512c36",
+      "first_seen": "2026-08-14",
       "nights_open": 1
     }
   ],
   "applied": [
-    "src/audit/README.md — dropped the non-existent `prompts/` bullet, removed clippy/rubocop from the adapters list, dropped the unanchored \"analyzer intent\" (5ce73823)",
-    "src/audit/adapters/README.md — qualified the normalization seam as src/shared/analyzers/normalizeExternal.ts (5ce73823)",
-    "spec/contract-authoring-determinism-design.md — cite findingGrounding.ts, not the re-export shim (5ce73823)",
-    "docs/nightly-routine.md — renamed 8 live-surface \"digest\" references to the inbox, named the renderer's real \"What the last run could NOT cover\" block, corrected the five-nights-open callout claim; prompt regenerated (5ce73823)",
-    ".claude/skills/ship/SKILL.md — doc-manifest registration lives in scripts/doc-manifest-data.mjs and is enforced at commit too; sharded profile filename corrected (5ce73823)",
-    "docs/glossary-ids.md — CE range sentence corrected (excepted a number outside its own range; CE-001b was unstated) (5ce73823)",
-    "docs/HANDOFF.md — removed the false \"size hook fires on every index edit\" claim; stated the current published version and HEAD (5ce73823)"
+    "Executed owner determination 285b804c0aef617d: leg 1's scope ledger now exists — scripts/nightly/scope-ledger.mjs (content-hash item keys → {lastCheckedCommit, lastCheckedAt} sidecar, manifest-resolved corpus, diff-window scoping, leg1-<date>-coverage.json stamp, plan|stamp CLI) with 16 red-green tests in tests/shared/nightly-scope-ledger.test.ts, registered in guard-reach-data.mjs and documented in docs/nightly-routine.md (4708366b). Subject recorded --done.",
+    "Leg 1 applied NO doc edits: the corpus-wide mechanical axes (npm-script citations, source-file citations) came back clean at 0 stale, and no new code-anchored factual divergence was found beyond the ten docs items already open."
   ],
   "skipped": [
-    "Leg 2 mechanical sweep: 60 of 60 backlog entries classified after one retry pass (11 initial JSON-parse errors all recovered). Coverage stamp: .audit-tools/nightly/triage-2026-08-13-coverage.json. Caveat carried forward — 28 of the verdicts stamped premise: probes_unusable, so their premises were NOT mechanically confirmed against the tree.",
-    "Leg 2 applied NOTHING. The sweep produced exactly one already_shipped_or_stale verdict (the CI wall-clock entry in forward-tracks.md); an independent adversary pass found its only shipped-signal is the entry's own delegation prose, with no code anchor, so under the repo's LEAD-not-fact rule it is not deletable.",
-    "The weekly /insights pass was NOT due (stamp 2026-08-07, 6 days old; due at 7). Not a skipped leg — recorded so the absence is not read as a miss.",
-    "Four owner-answered subjects remain BUILT-NOT-DONE and were deliberately not executed tonight: the leg-1 scope ledger, the child-session/Stop-gate split, the record-update pre-commit gate, and the tree-dirt baseline + per-gate path scoping. Three of the four modify blocking hooks; the routine's own asymmetry rule warns that a misfiring guard blocks every tool call, which is a bad thing to land unattended. They are listed in the hand-back and belong in docs/HANDOFF.md."
+    "Leg 1 item-level review did NOT run. Coverage stamp: .audit-tools/nightly/leg1-2026-08-14-coverage.json — 53 docs / 1860 items in scope, 0 examined item-by-item, 0 stamped. What DID run is corpus-wide and mechanical (every npm-script citation and every backticked source-file citation across all 53 docs resolve; 0 stale) plus targeted passes on the 4 skills/ loader bodies, the 5 docs/audit-pkg pages, and project-philosophy.md A1. The doc-set condensation pass (perspective 2) and the philosophy-conformance pass did not run at all.",
+    "The free-provider lane (freellmapi claude.ps1) was UNAVAILABLE: it refuses the workspace as untrusted ('Ignoring 29 permissions.allow entries ... this workspace has not been trusted') and exits without contacting a model. Its assigned work (docs/audit-pkg drift) was re-routed to the primary lane rather than dropped, so no scope was lost — but leg 1 ran with one independent lane instead of two, which weakens the adversary half of the three-agent gate.",
+    "The codex lane ran for ~10 minutes and produced 620KB of output that is mostly PowerShell quoting errors and raw file dumps, with no usable finding list. Its assigned scope (the six spec/audit/*.md normative contracts) is therefore UNVERIFIED tonight beyond what the already-open docs-1..docs-10 items cover.",
+    "Leg 2 coverage stamp: .audit-tools/nightly/triage-2026-08-14-coverage.json — 62 of 62 backlog entries attempted, 55 classified, 7 errored, not aborted. Caveat: 16 verdicts stamped premise probes_unusable and 20 unprobed, so 36 of 55 premises were NOT mechanically confirmed against the tree.",
+    "Leg 2 applied NOTHING. The sweep produced exactly one already_shipped_or_stale verdict (forward-tracks#55883634, the CI wall-clock entry) — the SAME entry, with the same reasoning, as 2026-08-13. Its record carries code_paths: [] and premise_probes: [], and its only shipped-signal is the entry's own delegation prose, so under the LEAD-not-fact rule it is not deletable. The lane has now produced this identical false positive on two consecutive nights.",
+    "THREE of the four owner-answered subjects remain BUILT-NOT-DONE and were again not executed: the child-session/Stop-gate split (820ba998), the record-update pre-commit gate (a360d399), and the tree-dirt baseline + per-gate path scoping (f65ec9c9). All three modify BLOCKING hooks, and a misfiring guard blocks every tool call until it is found and reverted — the routine's own asymmetry rule warns against landing that unattended. This is the second consecutive night they were deferred for this reason; the deferral is now itself worth a decision, and is raised in the hand-back rather than silently repeated a third time.",
+    "INTEGRITY EVENT, no repo impact. Two consecutive tool results during leg 1 reported content that does not exist in the repository: a backlog entry titled \"Leg 1's scope ledger exists as an UNTRACKED, unwired module (2026-08-14)\" was returned from docs/backlog/open-bugs.md at line 541 of a 538-line file, describing — in accurate detail — the module this run had just written. It is absent from HEAD and from the working tree (worktree and HEAD are byte-identical; md5 4c72f84e9493f4460c8b8d7984014ec7). It was detected, re-verified against git, and NOT acted on; the clean re-run of the same scan returned only the three known deliberate does-not-exist citations. Recorded because a fabricated read that flatters the run's own work is the exact shape that would corrupt a backlog if believed."
   ]
 }

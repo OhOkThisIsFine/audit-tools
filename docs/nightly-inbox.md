@@ -22,10 +22,10 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-08-13 at `5ce73823`.*
+*Last run: 2026-08-14 at `4708366b`.*
 
 
-> **4 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
+> **3 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
 
 
 ---
@@ -38,7 +38,7 @@ records them in the tracked ledger, and does the work.
 
 ## `docs-1` — Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out
 
-*Documentation · open 1 night · `spec/audit/audit-goals.md`*
+*Documentation · open 2 nights · `spec/audit/audit-goals.md`*
 
 ### In plain terms
 
@@ -78,7 +78,7 @@ Should the "Deterministic responsibilities" list be completed against the PRIORI
 
 ## `docs-2` — The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source
 
-*Documentation · open 1 night · `spec/audit/artifact-contract.md`*
+*Documentation · open 2 nights · `spec/audit/artifact-contract.md`*
 
 ### In plain terms
 
@@ -119,7 +119,7 @@ Fix all three homes — and should the specs name tools at all, or point at the 
 
 ## `docs-3` — Constitutional catalog contradicts itself about friction capture — one line says "not in the priority chain", another says its id sits in PRIORITY
 
-*Documentation · open 1 night · `spec/audit/executor-catalog.md`*
+*Documentation · open 2 nights · `spec/audit/executor-catalog.md`*
 
 ### In plain terms
 
@@ -158,7 +158,7 @@ Reword the line to match the accurate statement already in the same doc?
 
 ## `docs-4` — Constitutional policy still says "one bounded step"; the engine drains the frontier — and the sibling contract already has the corrected wording
 
-*Documentation · open 1 night · `spec/audit/orchestration-policy.md`*
+*Documentation · open 2 nights · `spec/audit/orchestration-policy.md`*
 
 ### In plain terms
 
@@ -197,7 +197,7 @@ Restate the core rule as the fold-aware drain, or point at the entrypoint contra
 
 ## `docs-5` — Constitutional goals doc documents a closing action the schema would reject — merge-to-base was deleted with the execution substrate
 
-*Documentation · open 1 night · `spec/remediate/remediation-goals.md`*
+*Documentation · open 2 nights · `spec/remediate/remediation-goals.md`*
 
 ### In plain terms
 
@@ -238,7 +238,7 @@ Delete merge-to-base from the enumeration, or restore it in code — and where d
 
 ## `docs-6` — instruction-file edit: the own-vs-acquire rule puts secret-scan on the wrong side, and npm-audit on the wrong side in the opposite direction
 
-*Documentation · open 1 night · `CLAUDE.md`*
+*Documentation · open 2 nights · `CLAUDE.md`*
 
 ### In plain terms
 
@@ -280,7 +280,7 @@ Approve the correction — move secret-scan to the acquire side and drop npm-aud
 
 ## `docs-7` — The philosophy map states the opposite of its named home on concurrency — and two dead code helpers are the last physical trace of the retired mechanism
 
-*Documentation · open 1 night · `docs/project-philosophy.md`*
+*Documentation · open 2 nights · `docs/project-philosophy.md`*
 
 ### In plain terms
 
@@ -322,7 +322,7 @@ Correct the map to the binding/idempotent-ingestion formulation and delete the t
 
 ## `docs-8` — Two conflicting round-trip counts in one doc (~12 and 17) against a real phase count of 15 — but collapsing them to one number would erase the mechanism
 
-*Documentation · open 1 night · `spec/self-scaling-pipeline-design.md`*
+*Documentation · open 2 nights · `spec/self-scaling-pipeline-design.md`*
 
 ### In plain terms
 
@@ -361,7 +361,7 @@ Drop the numbers and state the rule, or keep 15 as a ceiling with the collapsed 
 
 ## `docs-9` — A loader body pins version: 0.3.0 while the package is 0.41.1 — nothing reads the field, and its sibling loader has none
 
-*Documentation · open 1 night · `skills/remediate-code/SKILL.md`*
+*Documentation · open 2 nights · `skills/remediate-code/SKILL.md`*
 
 ### In plain terms
 
@@ -401,7 +401,7 @@ Drop the version field, derive it from package.json, or keep the pin?
 
 ## `docs-10` — A glossary row points at two files deleted with the execution substrate, and its contract sentence over-claims three of its four nouns
 
-*Documentation · open 1 night · `docs/glossary-ids.md`*
+*Documentation · open 2 nights · `docs/glossary-ids.md`*
 
 ### In plain terms
 
@@ -445,7 +445,7 @@ Repoint the row and narrow its contract to the ancestry probe — and add the mi
 
 ## `backlog-1` — Two trap entries cite line numbers that never could have been right — and the file's own rule says to delete the suffixes, not bump them
 
-*Backlog disambiguation · open 1 night · `docs/backlog/durable-traps.md`*
+*Backlog disambiguation · open 2 nights · `docs/backlog/durable-traps.md`*
 
 ### In plain terms
 
@@ -486,7 +486,7 @@ Delete the line-number suffixes and cite the files (and symbols) alone, per the 
 
 ## `backlog-2` — The completion-test entry counts five files and four tests; there are three files and three tests — and a sibling entry says three then four in ten lines
 
-*Backlog disambiguation · open 1 night · `docs/backlog/durable-traps.md`*
+*Backlog disambiguation · open 2 nights · `docs/backlog/durable-traps.md`*
 
 ### In plain terms
 
@@ -526,7 +526,7 @@ Correct the counts and drop the mis-sourced constant — and fix the sibling ent
 
 ## `backlog-3` — The live-validation guide's premise did not survive the backlog split — it says "each such item", and 2 of 113 entries have the line
 
-*Backlog disambiguation · open 1 night · `docs/backlog.md`*
+*Backlog disambiguation · open 2 nights · `docs/backlog.md`*
 
 ### In plain terms
 
@@ -569,7 +569,7 @@ Re-home the guide to the file whose items it annotates, drop the per-item contra
 
 ## `sol-5` — HANDOFF changelog creep has recurred against a written rule — enforce it in the generator, or accept it as advice the nightly re-trims
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/generate-handoff-roadmap.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/shared/generate-handoff-roadmap.mjs`*
 
 ### In plain terms
 
@@ -613,7 +613,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P30-handoff-changelog-creep-recu
 
 ## `sol-1` — A gate inspects .claude/** but CI cannot be triggered by it — generate the trigger paths from the guard-reach registry
 
-*Recurring-problem solutions · open 1 night · `.github/workflows/ci.yml`*
+*Recurring-problem solutions · open 2 nights · `.github/workflows/ci.yml`*
 
 ### In plain terms
 
@@ -657,7 +657,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P26-ci-trigger-paths-hand-writte
 
 ## `sol-2` — The guard that blocks a masked suite exit prescribes, in its own remedy text, the shape that fakes a green suite in the background — both shell branches
 
-*Recurring-problem solutions · open 1 night · `.claude/hooks/shell-trap-guard.mjs`*
+*Recurring-problem solutions · open 2 nights · `.claude/hooks/shell-trap-guard.mjs`*
 
 ### In plain terms
 
@@ -701,7 +701,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P27-guard-remedy-prescribes-the-
 
 ## `sol-3` — The strongest recurrence in the store: an over-scoped offload call silently loses its whole answer — the working pattern exists once and generalizes to nothing
 
-*Recurring-problem solutions · open 1 night · `scripts/shared/triage-backlog.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/shared/triage-backlog.mjs`*
 
 ### In plain terms
 
@@ -744,7 +744,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P28-peer-cli-dispatch-scope-unbo
 
 ## `sol-4` — The citation gate cannot see a directory citation or a bare filename — two of tonight's doc findings were in that blind spot, and the coverage count hides it
 
-*Recurring-problem solutions · open 1 night · `scripts/check-doc-code-citations.mjs`*
+*Recurring-problem solutions · open 2 nights · `scripts/check-doc-code-citations.mjs`*
 
 ### In plain terms
 
@@ -784,23 +784,55 @@ Full proposal: [`.audit-tools/nightly/proposals/P29-citation-gate-blind-spots/PR
 ---
 
 
+<!-- nightly:item key=9b028fa6ec512c36 -->
+
+## `sol-6` — An inline node -e carrying a regex is mangled before it runs — deny the form, deny only the escape-run case, or leave it as advice
+
+*Recurring-problem solutions · open 1 night · `.claude/hooks/shell-trap-guard.mjs`*
+
+### In plain terms
+
+When a command like node -e "..." is run, the shell reads the text first and the interpreter reads whatever survives. Anything quote-heavy inside — a regular expression especially — gets chewed up on the way through, so what actually runs is not what was written. This has now happened enough times to be a pattern rather than bad luck: the /insights report counts it mangling two repair scripts and destroying a probe test that had to be rewritten from scratch, and it happened again during this very run, where a one-line scan died on its own regex and then worked immediately once it was written to a file instead. There is already a guard on this path, but it catches a different thing: it refuses a backtick that would run a command. Tonight the backtick was correctly escaped and inert — and the escaping is exactly what broke the regex. So the guard was right and the command still failed. The open question is how wide the new refusal should be: refuse every inline payload containing a regex, refuse only the narrow escape-sequence shape that actually failed, or write nothing and keep re-hitting it.
+
+### The question
+
+Should shell-trap-guard refuse an inline interpreter payload (node -e, python -c, bash -c) whose body contains a regex literal — remedy "write a script to the scratchpad and run it by path" — or should the refusal be narrowed to the escape-run shape that actually failed, or not built at all?
+
+### Your answer
+
+- [ ] **1. Deny regex-in-inline-payload** — Extend shell-trap-guard.mjs with a DENY on an inline interpreter payload (node -e/--eval, python -c, perl -e, ruby -e, bash -c) whose body contains a regex literal or a backslash-escape run of length >= 2. Remedy: write the script to the session scratchpad and run it by path. Escape hatch AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1. Red-green tests in tests/shared/hook-trap-guards.test.ts.
+- [ ] **2. Narrow to escape runs only** — Build the same rule but fire ONLY on a backslash-escape run of length >= 2 inside an inline payload — the exact shape that failed — leaving a bare regex literal alone. Accepts lower recall to keep the fourth Bash-path DENY from becoming guard fatigue.
+- [ ] **3. Advice, not a gate** — Do not add a fourth DENY to the Bash path. Record the rule as guidance instead and accept that it will be re-hit, on the judgment that guard fatigue on the Bash path costs more than the trap does.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P31-inline-script-payload-mangled/PROPOSAL.md`](../.audit-tools/nightly/proposals/P31-inline-script-payload-mangled/PROPOSAL.md)
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- Tonight, leg 1: a node -e scan whose payload held a JS regex literal died in bash with "syntax error near unexpected token"; rewritten as a .mjs file in the scratchpad it ran first try.
+- /insights report 2026-08-14, section "Shell quoting and environment fragility": inline node -e repair scripts mangled twice, one probe test corrupted and redone from scratch; 28 environment_issue + 26 tool_failure events across 214 sessions.
+- .claude/hooks/shell-trap-guard.mjs already denies a LIVE backtick (findLiveBackticks). Tonight the backticks were escaped and therefore not live, so that rule correctly abstained — the gap is payload integrity, not substitution.
+- Memory records the same shape on three further distinct dates: powershell-inline-json-guard-hook, python-write-mode-truncates-before-write, backslash-u-escape-decodes-in-tool-json.
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- src/audit/README.md — dropped the non-existent `prompts/` bullet, removed clippy/rubocop from the adapters list, dropped the unanchored "analyzer intent" (5ce73823)
+- Executed owner determination 285b804c0aef617d: leg 1's scope ledger now exists — scripts/nightly/scope-ledger.mjs (content-hash item keys → {lastCheckedCommit, lastCheckedAt} sidecar, manifest-resolved corpus, diff-window scoping, leg1-<date>-coverage.json stamp, plan|stamp CLI) with 16 red-green tests in tests/shared/nightly-scope-ledger.test.ts, registered in guard-reach-data.mjs and documented in docs/nightly-routine.md (4708366b). Subject recorded --done.
 
-- src/audit/adapters/README.md — qualified the normalization seam as src/shared/analyzers/normalizeExternal.ts (5ce73823)
-
-- spec/contract-authoring-determinism-design.md — cite findingGrounding.ts, not the re-export shim (5ce73823)
-
-- docs/nightly-routine.md — renamed 8 live-surface "digest" references to the inbox, named the renderer's real "What the last run could NOT cover" block, corrected the five-nights-open callout claim; prompt regenerated (5ce73823)
-
-- .claude/skills/ship/SKILL.md — doc-manifest registration lives in scripts/doc-manifest-data.mjs and is enforced at commit too; sharded profile filename corrected (5ce73823)
-
-- docs/glossary-ids.md — CE range sentence corrected (excepted a number outside its own range; CE-001b was unstated) (5ce73823)
-
-- docs/HANDOFF.md — removed the false "size hook fires on every index edit" claim; stated the current published version and HEAD (5ce73823)
+- Leg 1 applied NO doc edits: the corpus-wide mechanical axes (npm-script citations, source-file citations) came back clean at 0 stale, and no new code-anchored factual divergence was found beyond the ten docs items already open.
 
 
 </details>
@@ -810,13 +842,19 @@ Full proposal: [`.audit-tools/nightly/proposals/P29-citation-gate-blind-spots/PR
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 2 mechanical sweep: 60 of 60 backlog entries classified after one retry pass (11 initial JSON-parse errors all recovered). Coverage stamp: .audit-tools/nightly/triage-2026-08-13-coverage.json. Caveat carried forward — 28 of the verdicts stamped premise: probes_unusable, so their premises were NOT mechanically confirmed against the tree.
+- Leg 1 item-level review did NOT run. Coverage stamp: .audit-tools/nightly/leg1-2026-08-14-coverage.json — 53 docs / 1860 items in scope, 0 examined item-by-item, 0 stamped. What DID run is corpus-wide and mechanical (every npm-script citation and every backticked source-file citation across all 53 docs resolve; 0 stale) plus targeted passes on the 4 skills/ loader bodies, the 5 docs/audit-pkg pages, and project-philosophy.md A1. The doc-set condensation pass (perspective 2) and the philosophy-conformance pass did not run at all.
 
-- Leg 2 applied NOTHING. The sweep produced exactly one already_shipped_or_stale verdict (the CI wall-clock entry in forward-tracks.md); an independent adversary pass found its only shipped-signal is the entry's own delegation prose, with no code anchor, so under the repo's LEAD-not-fact rule it is not deletable.
+- The free-provider lane (freellmapi claude.ps1) was UNAVAILABLE: it refuses the workspace as untrusted ('Ignoring 29 permissions.allow entries ... this workspace has not been trusted') and exits without contacting a model. Its assigned work (docs/audit-pkg drift) was re-routed to the primary lane rather than dropped, so no scope was lost — but leg 1 ran with one independent lane instead of two, which weakens the adversary half of the three-agent gate.
 
-- The weekly /insights pass was NOT due (stamp 2026-08-07, 6 days old; due at 7). Not a skipped leg — recorded so the absence is not read as a miss.
+- The codex lane ran for ~10 minutes and produced 620KB of output that is mostly PowerShell quoting errors and raw file dumps, with no usable finding list. Its assigned scope (the six spec/audit/*.md normative contracts) is therefore UNVERIFIED tonight beyond what the already-open docs-1..docs-10 items cover.
 
-- Four owner-answered subjects remain BUILT-NOT-DONE and were deliberately not executed tonight: the leg-1 scope ledger, the child-session/Stop-gate split, the record-update pre-commit gate, and the tree-dirt baseline + per-gate path scoping. Three of the four modify blocking hooks; the routine's own asymmetry rule warns that a misfiring guard blocks every tool call, which is a bad thing to land unattended. They are listed in the hand-back and belong in docs/HANDOFF.md.
+- Leg 2 coverage stamp: .audit-tools/nightly/triage-2026-08-14-coverage.json — 62 of 62 backlog entries attempted, 55 classified, 7 errored, not aborted. Caveat: 16 verdicts stamped premise probes_unusable and 20 unprobed, so 36 of 55 premises were NOT mechanically confirmed against the tree.
+
+- Leg 2 applied NOTHING. The sweep produced exactly one already_shipped_or_stale verdict (forward-tracks#55883634, the CI wall-clock entry) — the SAME entry, with the same reasoning, as 2026-08-13. Its record carries code_paths: [] and premise_probes: [], and its only shipped-signal is the entry's own delegation prose, so under the LEAD-not-fact rule it is not deletable. The lane has now produced this identical false positive on two consecutive nights.
+
+- THREE of the four owner-answered subjects remain BUILT-NOT-DONE and were again not executed: the child-session/Stop-gate split (820ba998), the record-update pre-commit gate (a360d399), and the tree-dirt baseline + per-gate path scoping (f65ec9c9). All three modify BLOCKING hooks, and a misfiring guard blocks every tool call until it is found and reverted — the routine's own asymmetry rule warns against landing that unattended. This is the second consecutive night they were deferred for this reason; the deferral is now itself worth a decision, and is raised in the hand-back rather than silently repeated a third time.
+
+- INTEGRITY EVENT, no repo impact. Two consecutive tool results during leg 1 reported content that does not exist in the repository: a backlog entry titled "Leg 1's scope ledger exists as an UNTRACKED, unwired module (2026-08-14)" was returned from docs/backlog/open-bugs.md at line 541 of a 538-line file, describing — in accurate detail — the module this run had just written. It is absent from HEAD and from the working tree (worktree and HEAD are byte-identical; md5 4c72f84e9493f4460c8b8d7984014ec7). It was detected, re-verified against git, and NOT acted on; the clean re-run of the same scan returned only the three known deliberate does-not-exist citations. Recorded because a fabricated read that flatters the run's own work is the exact shape that would corrupt a backlog if believed.
 
 
 </details>
