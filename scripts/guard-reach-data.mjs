@@ -116,6 +116,7 @@ export const GUARDS = [
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
+  { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
@@ -289,14 +290,17 @@ export const REACH = [
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'check:lint', 'check:dup'],
+    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'check:lint', 'check:dup'],
     note:
       'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
       'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
-      'refusals. UNCOVERED HALF: nothing executes the routine end-to-end, so the ORDER of the legs and ' +
-      'the decision to escalate-vs-apply remain behavioural, guarded by docs/nightly-routine.md and the ' +
-      'three-agent gate rather than by a test.',
+      'refusals. scope-ledger.mjs is covered by tests/shared/nightly-scope-ledger.test.ts — item ' +
+      'identity, the refusal of an unanchored stamp, the never-examined window, and the coverage ' +
+      'record. UNCOVERED HALF: nothing executes the routine end-to-end, so the ORDER of the legs, the ' +
+      'decision to escalate-vs-apply, and whether a run actually CALLS `stamp` for the docs it claims ' +
+      'to have examined all remain behavioural, guarded by docs/nightly-routine.md and the three-agent ' +
+      'gate rather than by a test.',
   },
   {
     area: 'rendered host assets',

@@ -59,6 +59,19 @@ silently decide something the owner would have decided differently; and a guard
 that misfires blocks *every* tool call until it is found and reverted — which is
 a bad thing to discover at 3am. So autonomy narrows as blast radius widens.
 
+### Leg 1 — docs
+
+The rubric is [`doc-review-guidelines.md`](doc-review-guidelines.md). Its scope
+ledger is implemented in [`scripts/nightly/scope-ledger.mjs`](../scripts/nightly/scope-ledger.mjs):
+`plan` enumerates the in-scope corpus through the doc manifest and reports each
+item's evidence window, `stamp <doc>` records a doc as examined at HEAD, and the
+run writes `leg1-<date>-coverage.json` beside leg 2's stamp. **Coverage is read
+from that file, never eyeballed** — the same rule leg 2 already lives under, and
+the reason it exists: until it shipped, leg 1 reported its own coverage from
+prose, so the number was whatever the agent believed. Stamp a doc only after an
+agent actually examined it; an item with no ledger entry has no window and is
+reviewed cold, which is the honest answer rather than a defect.
+
 ### Leg 2 — backlog
 
 Reuse the rubric in [`.claude/skills/disambiguate-backlog/SKILL.md`](../.claude/skills/disambiguate-backlog/SKILL.md);
