@@ -536,3 +536,13 @@
   identical claim was corrected in `spec/mechanical-analyzer-layer-design.md` (`4d5987bf`); this is
   its code-comment sibling, left because the nightly's autonomy covers docs only.
   **Property to hold:** doc and code name the same persistence home for consent.
+
+- **`writeOpenItems` reads `subject_key` but never computes or requires it; the HANDOFF generator
+  hard-requires it (2026-08-14, nightly, low).** `scripts/nightly/items.mjs` consumes
+  `item.subject_key` for carry-forward and settled-lookup (lines 596/600/639) yet accepts a batch
+  without it, so a hand-authored item persists fine — and the failure surfaces two steps later as a
+  BLOCKED COMMIT from `generate-handoff-roadmap.mjs` reporting `items[N] must carry a canonical id
+  ... and subject_key`, which names HANDOFF rather than the item that is actually malformed. Hit
+  tonight; cost a restore-and-rewrite of the queue. **Property to hold:** the writer that reads a
+  field validates or derives it, so the refusal names the real defect at the point it is introduced
+  ([[validator-guards-every-field-caller-reads]]).
