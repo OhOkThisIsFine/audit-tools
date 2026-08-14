@@ -546,3 +546,14 @@
   tonight; cost a restore-and-rewrite of the queue. **Property to hold:** the writer that reads a
   field validates or derives it, so the refusal names the real defect at the point it is introduced
   ([[validator-guards-every-field-caller-reads]]).
+
+- **`check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling
+  (2026-08-14, nightly, low).** The gate matches only the `memory: <name>` prose form in tracked
+  docs, so the OTHER citation form — the `[[name]]` links memories use to reference each other — is
+  unchecked. Dangling at HEAD: `per-model-tiering` (from `unified-dispatch-routing-direction`),
+  `publish-workflow-hardening` (`audit-tools-run-hazards`), `relax-dispatch-source-forcing` (three
+  files), `review-gate-execution-status` (`remediate-extracted-plan-join-architecture`). This is the
+  same failure the gate was built for — a pointer nobody can follow re-asserting a deleted design
+  with the authority of a citation — and the memory-index header already warns the `[[…]]` half is
+  ungated, which makes every prune a hand-audit. **Property to hold:** both citation forms are
+  mechanically checked, so pruning a memory cannot silently strand a reference.

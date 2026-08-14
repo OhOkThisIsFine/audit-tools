@@ -54,14 +54,22 @@
 ## Immediate next
 
 1. Resume the dogfood audit lap (see *Resume the audit* above), then the remediate phase.
-2. The remaining owner-approved builds:
-   - **P23** (sol-7): probe whether child sessions fire SessionStart, then session tagging +
-     unregistered-session commit/push refusal. Unblocks the freellmapi `pool` lane for this repo.
-   - **sol-8**: SessionStart tree-dirt baseline + per-gate pathspec scoping (supersedes P24's shape).
-   - **backlog-2 gate + sol-3 leg-1 scope ledger.**
+2. The three remaining owner-approved builds. All modify BLOCKING hooks, so two unattended
+   maintenance runs declined to land them; they need an attended lap, or an explicit owner call to
+   land them unattended anyway. Each is an answered subject in the durable decision ledger, keyed
+   below. Named, never numbered: the per-run `sol-N` labels are recycled and go stale immediately.
+   - **Child-session/Stop-gate split** (`820ba998`): probe whether child sessions fire SessionStart,
+     then session tagging + unregistered-session commit/push refusal. Unblocks the freellmapi
+     `pool` lane for this repo.
+   - **Record-update pre-commit gate** (`a360d399`): a commit touching a tracked-work path must
+     carry the corresponding record update.
+   - **Tree-dirt baseline + per-gate pathspec scoping** (`f65ec9c9`), superseding P24's shape.
 3. Memory-index consolidation (owner decision 2026-08-09, recorded in the MEMORY.md header; there
-   is no size gate — measure with `wc -c` after an index edit): merge the closed sagas properly — the citations gate
-   and `[[name]]` cross-links make it a focused pass, not a side-task.
+   is no size gate — measure with `wc -c` after an index edit). The account-metering saga and six
+   other retired-substrate entries were pruned 2026-08-14. **Remaining target: the quota/cost
+   cluster** — same retirement, but not uniformly obsolete (the host-quota entries are still live
+   for the offload lanes) and its `[[name]]` cross-links are ungated, so it is a focused per-entry
+   pass, not a side-task.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
