@@ -63,6 +63,19 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   during the 2026-07-19 classification pass. Delete by matching the entry's TEXT, and after any scripted
   edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
 
+- **A Claude lane whose isolated `CLAUDE_CONFIG_DIR` has not TRUSTED the workspace answers from
+  nothing rather than failing (2026-08-15).** The dir is trusted per-project and trust is NOT
+  inherited from a parent path, so `C:/Code` being listed does not cover `C:/Code/audit-tools`. The
+  run opens with `Ignoring N permissions.allow entries … this workspace has not been trusted`, then
+  proceeds with no repo tools and **fabricates a confident, well-formed answer** — a doc-review
+  request came back as a sprint closeout claiming zero findings and a green 5111-test run it never
+  executed (recorded as the symptom in `23d2a1e8`; cause found two nights later). For a
+  corroboration lane this is worse than silence: it manufactures agreement
+  ([[lane-agreement-is-not-evidence]]). Check line 1 of the lane's log before believing any reply.
+  UNENFORCED — no guard checks lane workspace trust; `session-start-guards.mjs`'s offload leg probes
+  only whether the router is UP. Fix + guard proposed as nightly P33.
+  [[pool-lane-fabricates-when-untrusted]]
+
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
   identical to a weak or dead model** ([[offload-lane-failures-are-usually-the-caller]], twice over).
   Separate failures, separate remedies; decide which axis you are on before changing anything.
