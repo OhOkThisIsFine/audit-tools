@@ -3,8 +3,8 @@
 ## Versioned surfaces
 
 The public surface is schema-first. Important schemas live under `schemas/`,
-including audit results, tasks, findings, lenses, and runtime-validation
-updates. Hosts should consume versioned artifacts rather than infer state from
+including audit results, tasks, findings, and lenses. Hosts should consume
+versioned artifacts rather than infer state from
 filenames or duplicate field descriptions.
 
 The canonical final outputs are:

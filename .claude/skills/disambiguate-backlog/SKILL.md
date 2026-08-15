@@ -2,11 +2,11 @@
 name: disambiguate-backlog
 description: >-
   Clarify under-specified backlog and meta-audit items in conversation — collect
-  every open backlog item (docs/backlog.md) and meta-audit reflection
+  every open backlog item (docs/backlog/) and meta-audit reflection
   (agent-feedback.jsonl / meta-audit-log.md), decide which are under-specified,
   then pin them down one at a time with reviewer+adversary-characterized
   propositions (pros/cons) for the owner to judge, writing the agreed spec back into
-  backlog.md or memory. Use this whenever the owner wants to disambiguate, pin down,
+  the docs/backlog/ files or memory. Use this whenever the owner wants to disambiguate, pin down,
   clarify, spec out, triage, or surface design gaps in backlog / meta-audit /
   reflection items — including phrasings like "tighten up the backlog", "which
   backlog items are vague", "turn these raw items into specs", "run the design-gap
