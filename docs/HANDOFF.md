@@ -27,7 +27,7 @@
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **20 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **32 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-1` — Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out
   - `docs-2` — The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source
   - `docs-3` — Constitutional catalog contradicts itself about friction capture — one line says "not in the priority chain", another says its id sits in PRIORITY
@@ -48,6 +48,18 @@
   - `sol-4` — The citation gate cannot see a directory citation or a bare filename — two of tonight's doc findings were in that blind spot, and the coverage count hides it
   - `sol-6` — An inline node -e carrying a regex is mangled before it runs — deny the form, deny only the escape-run case, or leave it as advice
   - `docs-11` — Constitutional specs say the host handoff reads access_memory and the affinity graph — it takes neither; correct the docs, or wire the consumption they describe
+  - `docs-12` — Constitutional dependency map says task_affinity_graph.json has one writer; it has four — and the two rows beside it already list them
+  - `docs-13` — The analyzer default/consent split is described wrong in two constitutional specs and a third time in the source comment — one stale fact, three decaying copies
+  - `docs-14` — Constitutional goals doc names a "pre-run sweep" that does not exist — cleanupStaleArtifactsDir has exactly one caller, the CLI verb
+  - `docs-15` — Executor catalog note says intake_executor satisfies one obligation; its own Obligation column beside it lists two, and they have different satisfaction rules
+  - `docs-16` — Finding grounding is documented as enforced at ingest and advertised to users in the README, but verifyFindingGrounding has zero production callers — the verdict is whatever the worker self-reported
+  - `docs-17` — The workflow design's deterministic-block enumeration omits docs_digest and runtime_validation, both of which are registered deterministic and sit in PRIORITY
+  - `docs-19` — Doc-set condensation: the release flow has two hand-maintained homes — the ship skill and release.md restate the same gate list, shard split, dist-tag rule and live check
+  - `backlog-4` — ensureGlobalAssets is unreachable through the bin — decide whether it is duplicated elsewhere or genuinely dead code to delete
+  - `sol-7` — writeOpenItems refuses an item four ways over probes but never checks options or eli5 — the two fields the contract calls mandatory, and the two that shipped missing on 18 items
+  - `sol-8` — The free-provider lane has had no file access for at least three nights and answers from nothing — it fabricated last night's "zero findings" closeout
+  - `sol-9` — Four cheap gates in verify:checks are still absent from the pre-commit hook — the same hand-accretion that burned v0.34.17 and v0.34.40
+  - `sol-10` — Step prompts instruct the host to do what the tool cannot deliver — 7 incidents across 5 dates, and the design-review write instruction is still live at HEAD
 
 <!-- END GENERATED LIVE STATUS -->
 
