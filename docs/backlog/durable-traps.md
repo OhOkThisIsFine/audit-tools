@@ -173,6 +173,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   list, this one included.
   A listed model may still fail at work time, so probe it with a real `/v1/chat/completions`
   round-trip after a router upgrade; endpoint-alive is not model-alive.
+  ⚠ **`/health` is NOT a health check on this router — it has no such route, and the SPA catch-all
+  answers `200` for ANY unmatched path** (verified 2026-08-18: `/health` → 200,
+  `/this-path-does-not-exist-xyz` → 200, `/v1/models` → 401). So a status-only probe of `/health`
+  passes whenever *a web server is listening*, including when the inference surface is dead. Probe
+  `/v1/models` instead and treat `200` or `401` as up — `401` is "router up, key wrong", which is a
+  different failure with a different fix.
   (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
   (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:

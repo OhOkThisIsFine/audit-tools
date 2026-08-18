@@ -27,7 +27,7 @@
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **32 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **43 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `docs-1` — Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out
   - `docs-2` — The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source
   - `docs-3` — Constitutional catalog contradicts itself about friction capture — one line says "not in the priority chain", another says its id sits in PRIORITY
@@ -60,6 +60,17 @@
   - `sol-8` — The free-provider lane has had no file access for at least three nights and answers from nothing — it fabricated last night's "zero findings" closeout
   - `sol-9` — Four cheap gates in verify:checks are still absent from the pre-commit hook — the same hand-accretion that burned v0.34.17 and v0.34.40
   - `sol-10` — Step prompts instruct the host to do what the tool cannot deliver — 7 incidents across 5 dates, and the design-review write instruction is still live at HEAD
+  - `docsN-1` — instruction-file edit: CLAUDE.md cites a half-closed trap whose mechanism was deleted with the execution substrate — one of its "two live examples" has no backlog home
+  - `docsN-2` — instruction-file edit: CLAUDE.md says a non-default analyzer "requires the per-run consent token" — the code also admits on a persisted recorded grant
+  - `docsN-3` — instruction-file edit: CLAUDE.md warns that consent-token redaction is "not yet implemented" and tracked in open-bugs — it is neither tracked there nor unimplemented
+  - `docsN-4` — A loader still tells the host to echo the scope line — the tool took that job over deliberately, so a compliant host now prints it twice in two formats
+  - `docsN-5` — A loader promises a scope-confirmation gate the tool cannot honour — the warning text reaches no prompt, and the drain has already folded past intake before any host can act
+  - `docsN-6` — The audit loader advertises a target-dir argument nothing honours — a typed path is shown back to the user and silently dropped; the remediate loader does the opposite
+  - `docsN-7` — The loop-core module header names a consumer deleted with the execution substrate, and its exported predicate has zero production callers while the hook re-implements it
+  - `solN-1` — The lane-liveness guard covers one lane of several, and the one probe it runs cannot fail — tonight the Codex lane was dead all run and nothing said so
+  - `docsN-8` — Constitutional goals doc defines the remediator's output as Markdown only — the machine contract is missing from all three output statements, and its audit sibling states the pair correctly
+  - `docsN-9` — Batched de-status: two design docs that declare "no dated status here" carry dated process provenance and a heading defined against a superseded state
+  - `docsN-10` — Doc-set condensation: the shared cross-tool contract is deliberately listed in both workflow designs — and the two copies have already drifted to four bullets versus six
 
 <!-- END GENERATED LIVE STATUS -->
 

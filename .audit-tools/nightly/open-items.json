@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-15T09:22:43.677Z",
+  "generated_at": "2026-08-18T18:25:32.363Z",
   "run": {
-    "date": "2026-08-15",
-    "head": "f1ceede5"
+    "date": "2026-08-18",
+    "head": "a1d0c21c"
   },
   "items": [
     {
@@ -45,7 +45,7 @@
       ],
       "subject_key": "312126da152a15f4",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-2",
@@ -95,7 +95,7 @@
       ],
       "subject_key": "ca7381d8ff2acd0a",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-3",
@@ -132,7 +132,7 @@
       ],
       "subject_key": "49e92917e4ed552f",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-4",
@@ -173,7 +173,7 @@
       ],
       "subject_key": "2a2f4eb487b558ca",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-5",
@@ -219,7 +219,7 @@
       ],
       "subject_key": "bd86e4d5fcd0621c",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-6",
@@ -266,7 +266,7 @@
       ],
       "subject_key": "07a89c9bee083cc8",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-7",
@@ -313,7 +313,7 @@
       ],
       "subject_key": "a3e31138790037d9",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-8",
@@ -350,7 +350,7 @@
       ],
       "subject_key": "115a621c022f083e",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-9",
@@ -388,7 +388,7 @@
       ],
       "subject_key": "e6cf0b2d90e54262",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "docs-10",
@@ -430,7 +430,7 @@
       ],
       "subject_key": "a80005242faee2db",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "backlog-1",
@@ -473,7 +473,7 @@
       ],
       "subject_key": "06bb0d0ea4a74414",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "backlog-2",
@@ -512,7 +512,7 @@
       ],
       "subject_key": "c920bfdee309e889",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "backlog-3",
@@ -553,7 +553,7 @@
       ],
       "subject_key": "51c6efd7bf10f238",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-5",
@@ -601,7 +601,7 @@
       ],
       "subject_key": "afc6b718063bd95a",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-1",
@@ -649,7 +649,7 @@
       ],
       "subject_key": "8ae16b26e46ae812",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-2",
@@ -693,7 +693,7 @@
       ],
       "subject_key": "8240e45481366a84",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-3",
@@ -736,7 +736,7 @@
       ],
       "subject_key": "6419f44513834ba1",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-4",
@@ -780,7 +780,7 @@
       ],
       "subject_key": "36a6734df10c0aad",
       "first_seen": "2026-08-13",
-      "nights_open": 3
+      "nights_open": 6
     },
     {
       "id": "sol-6",
@@ -823,7 +823,7 @@
       ],
       "subject_key": "9b028fa6ec512c36",
       "first_seen": "2026-08-14",
-      "nights_open": 2
+      "nights_open": 5
     },
     {
       "id": "docs-11",
@@ -871,7 +871,7 @@
       ],
       "subject_key": "acf85544944a3aef",
       "first_seen": "2026-08-14",
-      "nights_open": 2
+      "nights_open": 5
     },
     {
       "id": "docs-12",
@@ -908,7 +908,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-13",
@@ -950,7 +950,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-14",
@@ -987,7 +987,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-15",
@@ -1024,7 +1024,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-16",
@@ -1075,7 +1075,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-17",
@@ -1111,7 +1111,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "docs-19",
@@ -1148,7 +1148,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "backlog-4",
@@ -1185,7 +1185,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "sol-7",
@@ -1234,7 +1234,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "sol-8",
@@ -1279,7 +1279,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "sol-9",
@@ -1327,7 +1327,7 @@
         }
       ],
       "first_seen": "2026-08-15",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "sol-10",
@@ -1371,18 +1371,490 @@
         }
       ],
       "first_seen": "2026-08-15",
+      "nights_open": 4
+    },
+    {
+      "leg": "docs",
+      "path": "CLAUDE.md",
+      "subject": "The durable-traps bullet names two live partly-enforced examples in durable-traps.md; the stdin-closing-substrate one describes a mechanism that was retired",
+      "title": "instruction-file edit: CLAUDE.md cites a half-closed trap whose mechanism was deleted with the execution substrate — one of its \"two live examples\" has no backlog home",
+      "eli5": "CLAUDE.md has a rule saying that when a trap is only PARTLY enforced you must say which half is still uncovered, and it points at two live examples in docs/backlog/durable-traps.md to show what that looks like. Only one of those two examples still exists. The first — \"direct child_process.spawn calls bypassing the stdin-closing substrate\" — was added on 2026-07-28 together with a matching backlog entry, and that entry was deleted on the day the execution substrate was retired. The function it was about, spawnLoggedCommand, exists nowhere in the source tree any more. So the instruction file points a reader at an example they cannot find, and the example itself describes a guard for code that no longer exists. Both the reviewer and an independent adversary confirmed this by searching the whole backlog (zero hits for \"stdin\") and by tracing the git history of the deletion. Nothing was changed: CLAUDE.md is an instruction file and this routine never edits one.",
+      "question": "CLAUDE.md says the partly-enforced rule has \"two live examples in docs/backlog/durable-traps.md — direct `child_process.spawn` calls bypassing the stdin-closing substrate, and the `.mjs` test holdout `checkJs:false` excludes from `check:tests`\". The first example's backlog entry was deleted in 467b1e8f and `spawnLoggedCommand` no longer exists in src/. How should the parenthetical be corrected?",
+      "options": [
+        {
+          "label": "Delete the stale example",
+          "answer": "Delete the stdin-closing-substrate example from the parenthetical and keep the surviving `checkJs` one, which still carries the rule. Reword \"two live examples\" to \"a live example\"."
+        },
+        {
+          "label": "Replace it with a current example",
+          "answer": "Delete the stdin-closing-substrate example and replace it with a different partly-enforced trap that is live at HEAD, so the rule keeps two illustrations."
+        },
+        {
+          "label": "Re-add the backlog entry",
+          "answer": "The uncovered half is still real in some form — re-add a durable-traps entry describing it against the current substrate, and leave CLAUDE.md alone."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the parenthetical as it is; the illustration still communicates the rule even though one example is no longer findable."
+        }
+      ],
+      "evidence": [
+        "CLAUDE.md:194 carries the parenthetical naming both examples.",
+        "grep -rni \"stdin\" docs/backlog/ returns zero hits across all four backlog files; only the `checkJs: false` holdout exists (docs/backlog/durable-traps.md:377).",
+        "Adversary git archaeology: 4fc9feaa (2026-07-28) added the CLAUDE.md parenthetical AND the matching durable-traps entry; git log -S spawnLoggedCommand shows that entry deleted in 467b1e8f (\"retire the execution substrate\").",
+        "`spawnLoggedCommand` appears nowhere in src/ or tests/ at HEAD — only in historical docs/reviews/ prose.",
+        "Reviewer and adversary independently agreed; the adversary explicitly rejected the reading that the parenthetical is a generic illustration rather than a file-scoped claim."
+      ],
+      "premise_probes": [
+        {
+          "file": "CLAUDE.md",
+          "contains": "bypassing the stdin-closing substrate"
+        }
+      ],
+      "id": "docsN-1",
+      "subject_key": "241c6d16088979e9",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "CLAUDE.md",
+      "subject": "The own-vs-acquire rule says every non-default analyzer candidate requires the per-run consent token; admitSpawn admits on three channels including a durably recorded grant",
+      "title": "instruction-file edit: CLAUDE.md says a non-default analyzer \"requires the per-run consent token\" — the code also admits on a persisted recorded grant",
+      "eli5": "CLAUDE.md describes how audit-tools decides whether it may run an external analyzer tool (eslint, semgrep, clippy and so on). It says a curated default set runs without asking, and that everything else \"requires the per-run consent token\". The code is more permissive than that. The single admission chokepoint, admitSpawn, lets a tool through on any of three conditions: it is in the default set, OR the operator previously recorded a \"granted\" decision, OR a per-run token is supplied. The recorded-grant channel is durable — it is written into .audit-tools/audit/analyzer-policy.json and read back on later runs — so a tool can be admitted on a future run with no token at all. The code comment says so in as many words. This matters because the doc reads as a stronger safety promise than the code makes. Both the reviewer and an independent adversary traced the persistence path end to end. Nothing was changed: CLAUDE.md is an instruction file.",
+      "question": "CLAUDE.md says every non-default analyzer candidate \"requires the per-run consent token\". `admitSpawn` (src/shared/analyzers/acquisitionEngine.ts:238-250) admits on three channels: `candidate.defaultRun`, a recorded `granted` decision, or the token. Should the doc be corrected to name both consent channels?",
+      "options": [
+        {
+          "label": "Name both channels",
+          "answer": "Correct the sentence to: requires first-use consent — either a durable recorded `granted` decision in analyzer-policy.json, or a per-run consent token. This matches the code comment and the phrase \"first-use consent\" already in the same sentence."
+        },
+        {
+          "label": "Narrow the code instead",
+          "answer": "The doc states the intended policy and the code is too permissive — remove the recorded-grant channel from admitSpawn so a per-run token really is required."
+        },
+        {
+          "label": "Simplify to \"consent\"",
+          "answer": "Drop the mechanism from CLAUDE.md entirely — say non-default candidates require recorded consent and let the code own which channels satisfy it."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the wording as it is."
+        }
+      ],
+      "evidence": [
+        "src/shared/analyzers/acquisitionEngine.ts:238-249 — admitSpawn returns admitted on defaultRun, recordedDecision === \"granted\", or a non-empty consentToken; its doc comment reads \"requires EITHER a recorded 'granted' decision OR a per-run consent token\".",
+        "The recorded channel is durable and reachable: handleAnalyzerConsentBranch (src/audit/cli/nextStepHelpers.ts:337-375) consumes an operator analyzer_consent submission and calls persistAnalyzerConsent, writing analyzer_consent into .audit-tools/audit/analyzer-policy.json (src/shared/analyzerPolicy.ts:22-40).",
+        "Read back at src/audit/cli/nextStepCommand.ts:333 and src/remediate/phases/closeVerifyAnalyzerLeads.ts:106 — a grant survives the run.",
+        "Adversary note: the same CLAUDE.md sentence already says \"first-use consent\", which is this channel described loosely; the precise defect is \"the per-run consent token\" naming one channel where there are two."
+      ],
+      "premise_probes": [
+        {
+          "file": "CLAUDE.md",
+          "contains": "requires the per-run consent token"
+        }
+      ],
+      "id": "docsN-2",
+      "subject_key": "f25faecc5b987cd7",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "CLAUDE.md",
+      "subject": "The consent-token redaction clause says it is a planned not-yet-implemented constraint tracked in open-bugs.md; it is tracked nowhere and the property already holds by construction",
+      "title": "instruction-file edit: CLAUDE.md warns that consent-token redaction is \"not yet implemented\" and tracked in open-bugs — it is neither tracked there nor unimplemented",
+      "eli5": "CLAUDE.md ends its analyzer-consent rule with a warning: that stripping the consent token before persisting session config is a planned but not-yet-implemented constraint, tracked in docs/backlog/open-bugs.md, and that you should not treat it as current behaviour. Two things are wrong. First, there is no such entry in open-bugs.md — the only place this was ever written down is a dated review record from 2026-07-25. Second, and more useful: the property already holds. Both persisted schemas are strict and neither has a field for a token, every consent-token reference in the source is an in-memory option, and no serializer touches it. There is not even a type called SessionConfig any more. So the doc warns a reader away from behaviour that is in fact guaranteed. An independent adversary found the second half, which the first reviewer had missed. Nothing was changed: CLAUDE.md is an instruction file.",
+      "question": "CLAUDE.md calls consent-token redaction \"a planned, not-yet-implemented forward constraint (tracked in docs/backlog/open-bugs.md) — do not treat it as current behavior\". No such backlog entry exists, and the property holds at HEAD by construction. How should the clause be resolved?",
+      "options": [
+        {
+          "label": "Delete the clause",
+          "answer": "Delete the whole \"planned, not-yet-implemented forward constraint\" clause. The property is guaranteed by the strict schemas, so the warning is actively misleading."
+        },
+        {
+          "label": "Restate as a guarantee",
+          "answer": "Replace the warning with the positive statement: consent tokens are per-run and never persisted — guaranteed by the strict AnalyzerPolicySchema and SessionIntentV1Schema, neither of which has a token field."
+        },
+        {
+          "label": "File the backlog entry",
+          "answer": "There is still an unguarded gap worth tracking — create the open-bugs entry the clause claims exists, and leave the CLAUDE.md pointer valid."
+        },
+        {
+          "label": "Add a contract test",
+          "answer": "Keep the clause but make the guarantee mechanical: add a contract test asserting no persisted schema admits a consent token, then reword to point at the test."
+        }
+      ],
+      "evidence": [
+        "grep over docs/backlog/*.md finds no entry on stripping/redacting a consent token before persistence; the only consent-adjacent open-bugs entry (line 531) is about hostInputPause naming the wrong persistence home.",
+        "The subject appears only in docs/reviews/backlog-triage-2026-07-25.md:298, a dated record.",
+        "Adversary: AnalyzerPolicySchema is .strict() with only analyzers and analyzer_consent (src/shared/analyzerPolicy.ts:33-39, comment: \"tokens authorize one run and must never become a persisted capability\"); SessionIntentV1Schema is .strict() with only review_mode/observability (src/shared/sessionConfig.ts:8-13).",
+        "All 10 consentToken references in src/ are in-memory options passed to admitSpawn; no serializer touches it. No type named SessionConfig exists in the tree.",
+        "docs/backlog/forward-tracks.md:71-73 states \"per-run consent tokens are never persisted\" as a settled durable choice — the opposite framing, in a different file."
+      ],
+      "premise_probes": [
+        {
+          "file": "CLAUDE.md",
+          "contains": "not-yet-implemented forward constraint"
+        }
+      ],
+      "id": "docsN-3",
+      "subject_key": "8fa364b21bc8fc8a",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "skills/audit-code/audit-code.prompt.md",
+      "subject": "The loader instructs the host to read scope_summary.json and echo a scope line after intake, a job the tool took over and now renders into every step prompt itself",
+      "title": "A loader still tells the host to echo the scope line — the tool took that job over deliberately, so a compliant host now prints it twice in two formats",
+      "eli5": "The audit-code loader tells the host agent: after intake, read scope_summary.json and print a line saying which repo is being audited, how many files, and whether git is available. That instruction is left over. The tool now renders its own scope line into every step prompt, and the code says exactly why it was moved: when the echo lived only in the loader it was keyed to \"after the FIRST next-step\", so a RESUMED run silently skipped it — and the fix was to render it in the tool so no host has to remember. The two lines are worded differently, so a host that follows the loader faithfully emits a second, differently-formatted echo right under the tool's. An independent adversary confirmed the tool-rendered echo is on every prompt by checking that the writer is the only step-prompt path. This is the retired host-discretion form of a rule the tool already enforces, which is the pattern CLAUDE.md calls a latent failure mode.",
+      "question": "skills/audit-code/audit-code.prompt.md:38 says \"After intake, read `.audit-tools/audit/scope_summary.json` and echo:\" a scope line, but src/audit/cli/steps.ts renders `scopeEchoLine` into every step prompt already. Should the loader instruction be deleted?",
+      "options": [
+        {
+          "label": "Delete the loader instruction",
+          "answer": "Delete the echo instruction from both loader bodies. The tool enforces it, and the leftover text produces a duplicate differently-formatted line. Regenerate the mirrored host assets in the same commit."
+        },
+        {
+          "label": "Keep, reworded as a pointer",
+          "answer": "Replace the instruction with a note that the tool renders the scope line itself, so hosts do not add their own."
+        },
+        {
+          "label": "Align the formats",
+          "answer": "Keep the host echo but change its wording to match the tool-rendered line exactly, so a duplicate is at least identical."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the loader instruction in place."
+        }
+      ],
+      "evidence": [
+        "src/audit/cli/steps.ts:124-140 defines scopeEchoLine; :158-166 prepends it inside writeCurrentStep, which the adversary verified is the ONLY audit step-prompt writer (16 call sites in nextStepCommand.ts plus one in semanticReviewStep.ts).",
+        "The function doc comment (steps.ts:116-121) names the 2026-08-05 friction and states the fix: the echo previously \"lived only in the host loader instructions, keyed to 'after the FIRST next-step (the intake step)'\" so a resumed run silently skipped it — \"Tool-rendered here ... and no host has to remember.\"",
+        "Formats differ: tool renders \"> Scope: auditing `<root>` — N files, git: yes.\"; loader instructs \"Auditing <repo_root>, <auditable_file_count> files, git: <yes|no>\".",
+        "Adversary: ask as a deletion, not a rewrite — the loader sentence is the exact text that was superseded and not removed."
+      ],
+      "premise_probes": [
+        {
+          "file": "skills/audit-code/audit-code.prompt.md",
+          "contains": "read `.audit-tools/audit/scope_summary.json` and echo"
+        }
+      ],
+      "id": "docsN-4",
+      "subject_key": "72d7ccc74740cd88",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "skills/audit-code/SKILL.md",
+      "subject": "The loader tells the host to show mis_scope_smells and require confirmation before continuing, but the warning text reaches no prompt and the first interactive halt comes long after intake",
+      "title": "A loader promises a scope-confirmation gate the tool cannot honour — the warning text reaches no prompt, and the drain has already folded past intake before any host can act",
+      "eli5": "The audit-code loader tells the host: if the intake step found mis-scope warnings, show them and require confirmation before continuing. The tool cannot deliver that. The warnings are computed and stored, but only their COUNT is ever read — the warning text itself reaches no prompt, no pause and no gate, so a host has nothing to show. Worse, and this is the part that makes it unfixable by the host: intake satisfies the first two obligations in the priority list, and the first point where the run actually stops for a human is the intent checkpoint at position twelve. Because a single call drains the obligation frontier by default, by the time a host could ask for confirmation the run has already folded through the external analyzers and both structure passes. So a host following the sentence perfectly still cannot honour it. This is the exact shape CLAUDE.md calls a latent failure mode: correctness resting on the host remembering something the tool does not enforce.",
+      "question": "skills/audit-code/SKILL.md says \"If `mis_scope_smells` is non-empty, show them and require confirmation before continuing.\" The warning text has no reader, and the first operator-interactive halt (`intent_checkpoint_current`) sits far past intake in the drain. Should this become a tool-enforced pause, or should the instruction go?",
+      "options": [
+        {
+          "label": "Render it at the existing pause",
+          "answer": "Surface the mis-scope warnings in the confirm-intent pause, which already renders a ScopePreDigest and is the first place a host can genuinely act, and delete the loader sentence."
+        },
+        {
+          "label": "Add a real gate at intake",
+          "answer": "Make mis-scope warnings break the fold: a non-empty list becomes an operator-interactive halt at intake, so \"require confirmation before continuing\" is literally true."
+        },
+        {
+          "label": "Delete the instruction",
+          "answer": "Drop the sentence. The count already rides into the step progress summary; a full confirmation gate is not worth the extra halt."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the loader text as advisory guidance."
+        }
+      ],
+      "evidence": [
+        "mis_scope_smells is written at src/audit/orchestrator/intakeExecutors.ts:116 (from detectMisScopeSmells, :40-73). The only read is :128-130, which appends \"; N mis-scope warning(s)\" to progress_summary — the count, never the text.",
+        "scopeEchoLine (steps.ts:127-138) parses scope_summary.json but reads only repo_root / auditable_file_count / git_available.",
+        "Adversary: the scope_summary hits in confirmIntentStep.ts / intentCheckpointGate.ts are a NAME COLLISION with the intent checkpoint prose field, not the intake ScopeSummary type.",
+        "Adversary: intake satisfies repo_manifest/file_disposition at PRIORITY positions 1-2; the first operator-interactive halt is intent_checkpoint_current at position 12, and the drain is the default — so the gate is structurally unhonorable, not merely unenforced."
+      ],
+      "premise_probes": [
+        {
+          "file": "skills/audit-code/SKILL.md",
+          "contains": "require confirmation before continuing"
+        }
+      ],
+      "id": "docsN-5",
+      "subject_key": "7c9b3d891e3d9364",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "skills/audit-code/audit-code.prompt.md",
+      "subject": "The audit loader advertises a positional target-dir argument in its frontmatter that no part of the loader body or CLI consumes",
+      "title": "The audit loader advertises a target-dir argument nothing honours — a typed path is shown back to the user and silently dropped; the remediate loader does the opposite",
+      "eli5": "The audit-code slash command declares in its frontmatter that it takes a directory argument. Nothing acts on it. The loader body never mentions the argument, and the audit CLI has no positional path at all — the only way to point it at another repo is the --root flag. So a user who types /audit-code ../other-repo sees their argument echoed by the host and then gets an audit of the current repo instead. The adversary found the detail that makes this clear rather than debatable: the sibling remediate loader does exactly the opposite — it has no argument hint but does carry an explicit section mapping user input onto real flags. One loader advertises and does not wire; the other wires and does not advertise. Note before changing it: the loader body is mirrored into about six committed host-integration files under byte-equality drift tests, so any edit has to regenerate all of them in the same commit.",
+      "question": "skills/audit-code/audit-code.prompt.md frontmatter declares `argument-hint: [target-dir]`, but nothing consumes it — no placeholder in the body, and the audit CLI has no positional root (only `--root`). Should the hint be wired up or removed?",
+      "options": [
+        {
+          "label": "Wire it up",
+          "answer": "Add a \"preserve user arguments\" section mapping a typed directory onto `--root <path>`, matching what skills/remediate-code/remediate-code.prompt.md already does for its flags."
+        },
+        {
+          "label": "Remove the hint",
+          "answer": "Delete `argument-hint: [target-dir]` so the command stops advertising a capability it drops. Regenerate the mirrored host assets in the same commit."
+        },
+        {
+          "label": "Wire it and keep the hint",
+          "answer": "Do both: keep the hint and add the argument-to---root mapping, so the advertised and actual behaviour agree."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the frontmatter as it is."
+        }
+      ],
+      "evidence": [
+        "argument-hint appears in exactly two tracked files: skills/audit-code/audit-code.prompt.md:3 and its installed copy .audit-code/install/audit-code.import.md:3. No installer, renderer or script parses it (grep -rln argument-hint scripts/ src/ wrapper/ is empty).",
+        "The audit CLI has no positional root: no .argument( call; getRootDir reads only --root (src/audit/cli/args.ts:75-77), default \".\".",
+        "Adversary: the argument IS delivered by the host, which makes the hint displayed but not honoured — a typed target dir is shown back and dropped.",
+        "Asymmetry: skills/remediate-code/remediate-code.prompt.md has no argument-hint but carries an explicit \"Preserve user arguments\" section mapping input onto --input/--guidance-file (both real, src/remediate/index.ts:113-127).",
+        "Blast radius: the canonical body is mirrored into ~6 committed host assets under byte-equality tests in tests/audit/host-asset-renderer-drift.test.ts."
+      ],
+      "premise_probes": [
+        {
+          "file": "skills/audit-code/audit-code.prompt.md",
+          "contains": "argument-hint: [target-dir]"
+        }
+      ],
+      "id": "docsN-6",
+      "subject_key": "0dfed52f4bd6d828",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "src/shared/loopCorePaths.ts",
+      "subject": "The loop-core paths header says two tool-enforcement mechanisms consume it and names acceptNode.ts as one; that file was deleted and the exported predicate has no production caller",
+      "title": "The loop-core module header names a consumer deleted with the execution substrate, and its exported predicate has zero production callers while the hook re-implements it",
+      "eli5": "src/shared/loopCorePaths.ts is the single list of \"loop-core\" file patterns — the paths whose changes need a review attestation before they can be committed. Its header says two mechanisms consume the list and names the first as a per-node guard in acceptNode.ts. That file was deleted when the execution substrate was retired, so only one consumer survives. Underneath that is a second, more consequential fact the adversary found: the module exports a predicate, isLoopCorePath, that nothing in production calls. The surviving consumer — the pre-commit hook — re-implements the same logic itself with a comment saying it mirrors the exported function. So the predicate is exercised only by its own tests, which is exactly the tested-but-unwired dead-code class CLAUDE.md describes, and the repo now carries the same rule in more than one hand-written copy. There is also a test asserting the predicate matches the deleted acceptNode.ts path.",
+      "question": "src/shared/loopCorePaths.ts:5 names `acceptNode.ts` as a consumer, but that file was deleted in 467b1e8f; and `isLoopCorePath` has zero production callers while .claude/hooks/pre-commit-gate.mjs re-implements the predicate. Correct the header only, or also resolve the unwired predicate?",
+      "options": [
+        {
+          "label": "Fix header and wire the predicate",
+          "answer": "Correct the header to name the one surviving consumer, and have the pre-commit hook import the shared predicate instead of re-implementing it, collapsing the duplicate copy."
+        },
+        {
+          "label": "Fix header and delete the predicate",
+          "answer": "Correct the header and delete isLoopCorePath with its orphaned tests — the hook already has a working implementation and the patterns list is what is actually shared."
+        },
+        {
+          "label": "Fix the header only",
+          "answer": "Correct the consumer count and leave isLoopCorePath as a supported export for future callers."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the module as it is."
+        }
+      ],
+      "evidence": [
+        "src/shared/loopCorePaths.ts:1-15 says \"Two independent tool-enforcement mechanisms consume it\" and names the per-node merged-base guard (acceptNode.ts) as one.",
+        "No acceptNode file exists in src/ at HEAD; it was deleted in 467b1e8f (\"retire the execution substrate\"). Verified independently: remaining hits are a test fixture JSON and one test assertion.",
+        "isLoopCorePath (loopCorePaths.ts:57) has zero production callers — the only non-test reference is the barrel re-export at src/shared/index.ts:989.",
+        ".claude/hooks/pre-commit-gate.mjs:76 re-implements the predicate with the comment \"Mirrors `isLoopCorePath`\".",
+        "tests/shared/loop-core-paths.test.ts:14 asserts isLoopCorePath(\"src/remediate/steps/dispatch/acceptNode.ts\") === true — a coverage assertion on a path that no longer exists.",
+        "Adversary confirmed the header's OTHER claims still hold: the .mjs mirror is real and guarded by tests/shared/loop-core-gate-parity.test.ts."
+      ],
+      "premise_probes": [
+        {
+          "file": "src/shared/loopCorePaths.ts",
+          "contains": "acceptNode.ts"
+        }
+      ],
+      "id": "docsN-7",
+      "subject_key": "6ee16e365c866811",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "solutions",
+      "path": ".claude/hooks/session-start-guards.mjs",
+      "subject": "The offload-lane liveness guard probes a single hardcoded router URL while the repo declares several lanes, and that probe hits a path the server answers 200 for unconditionally",
+      "title": "The lane-liveness guard covers one lane of several, and the one probe it runs cannot fail — tonight the Codex lane was dead all run and nothing said so",
+      "eli5": "A session-start guard exists so that a dead offload lane is known at the start of a lap instead of discovered halfway through. It has two problems, both measured tonight. First, it probes only the FreeLLMAPI router; the Codex lane runs over a different local proxy that the guard never checks. Tonight that proxy was down, so the Codex lane was dead for this entire run and no guard mentioned it — it was found the way the guard exists to prevent, by dispatching into it and reading a connection-refused error. Second, the one probe it does run asks for a /health path that does not exist on that server; the single-page-app catch-all answers 200 for ANY unmatched path, so the probe passes whenever a web server is listening at all, even if the inference API is completely broken. A probe that cannot fail for the reason it exists is the false-green shape this repo already treats as corrosive. The proposal is to hold the lanes as declared data, the way guard reach already is, and probe a route that actually routes.",
+      "question": "The lane-liveness guard hardcodes `http://127.0.0.1:3001/health` and covers only the router lane. The headroom lane (Codex transport, port 8787) is unprobed, and `/health` returns 200 from a catch-all that answers 200 for any path. Which fix?",
+      "options": [
+        {
+          "label": "Lane registry + real probe",
+          "answer": "Hold the lanes as declared data (scripts/shared/offload-lane-data.mjs), have the guard iterate it, and move the router probe to /v1/models accepting 200 or 401. Fixes both halves and reconciles the way guard reach already does."
+        },
+        {
+          "label": "Fix the vacuous probe only",
+          "answer": "Change /health to /v1/models so the probe can fail, and leave lane coverage as it is. One line, removes the false green, but leaves headroom and workspace trust uncovered."
+        },
+        {
+          "label": "Leave it as advice",
+          "answer": "Record in durable-traps.md that a caller probes each lane itself before a long dispatch, and change no code."
+        },
+        {
+          "label": "Something narrower",
+          "answer": "Add only the headroom lane to the existing hardcoded probe, without introducing a registry."
+        }
+      ],
+      "evidence": [
+        "Measured tonight: /health -> 200, /this-path-does-not-exist-xyz -> 200 (same catch-all), /v1/models -> 401. res.statusCode < 500 therefore passes for a router whose API surface is broken.",
+        "The guard hardcodes one URL (.claude/hooks/session-start-guards.mjs:229) and its comment asserts \"The local router is the free offload lane and it has no standalone fallback\" — false against the global CLAUDE.md, which declares three lanes over two transports.",
+        "Tonight headroom (127.0.0.1:8787) was down; codex exec failed with \"actively refused it. (os error 10061)\" and the guard said nothing. Restarting headroom fixed reachability; the Codex lane then reported quota exhaustion until 2026-08-20.",
+        "Recurrence, 6 records across 5 dates: durable-traps.md:100 (2026-07-28, \"dead-lane detection is NOT automatic any more ... nothing replaced it\"); P11 (2026-08-06, \"three consecutive nights degraded silently to a partial sweep, each for a different transport fault\"); P5 (triage lane masks 429); durable-traps.md:66-77 + P33 (2026-08-15, untrusted workspace, filed UNENFORCED naming this same guard); durable-traps.md:171 (\"endpoint-alive is not model-alive\"); tonight.",
+        "Full proposal, mechanism, false-positive surface and red-green test plan: .audit-tools/nightly/proposals/P36-lane-liveness-probe-is-vacuous-and-partial/PROPOSAL.md"
+      ],
+      "premise_probes": [
+        {
+          "file": ".claude/hooks/session-start-guards.mjs",
+          "contains": "'http://127.0.0.1:3001/health'"
+        }
+      ],
+      "proposal": "P36",
+      "patch_path": ".audit-tools/nightly/proposals/P36-lane-liveness-probe-is-vacuous-and-partial/PROPOSAL.md",
+      "id": "solN-1",
+      "subject_key": "ba1870fe98c61657",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "spec/remediate/remediation-goals.md",
+      "subject": "The normative remediation goals doc names Markdown as the final retained output in all three of its output statements and never mentions the machine contract remediation-outcomes.json",
+      "title": "Constitutional goals doc defines the remediator's output as Markdown only — the machine contract is missing from all three output statements, and its audit sibling states the pair correctly",
+      "eli5": "spec/remediate/remediation-goals.md is the normative definition of what the remediator is; it says other specs should defer to it. In three separate places — its core principles, its completion section, and its final-output section — it names deterministic Markdown at remediation-report.md as the retained output, and it never mentions remediation-outcomes.json at all. But that JSON file is a real deliverable: the close phase writes it, and the code calls the two files together the ones that are meant to be committed. The matching audit-side goals doc already gets this right, saying the retained outputs are the machine contract audit-findings.json plus its Markdown render. Because this doc is normative and declares itself the thing other specs defer to, anything deferring to it inherits a Markdown-only model of the remediator's output. It is a constitutional doc, so nothing was changed.",
+      "question": "spec/remediate/remediation-goals.md says \"The final retained output is deterministic Markdown at `remediation-report.md`\" and never mentions `remediation-outcomes.json`, while spec/audit/audit-goals.md states the JSON-plus-render pair. Should the remediation goals doc be corrected to name the pair?",
+      "options": [
+        {
+          "label": "State the pair, all three places",
+          "answer": "Correct all three output statements to name remediation-outcomes.json as the machine contract and source of truth, with remediation-report.md as its render — matching audit-goals #4, CLAUDE.md's artifact layout, and the README."
+        },
+        {
+          "label": "The JSON is internal",
+          "answer": "The remediator side deliberately treats the outcomes JSON as internal rather than a deliverable — leave the goals doc alone and correct the README and CLAUDE.md claims instead."
+        },
+        {
+          "label": "Correct principle 4 only",
+          "answer": "Fix the core-principles statement so the normative definition is right, and leave the completion and final-output sections as prose that follows from it."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the goals doc as it is."
+        }
+      ],
+      "evidence": [
+        "spec/remediate/remediation-goals.md:31-32 — \"The final retained output is deterministic Markdown at `remediation-report.md`.\" Zero occurrences of `remediation-outcomes` anywhere in the file; the omission recurs at :350 (Completion) and :358 (Final output).",
+        "src/remediate/phases/close.ts:1645 writes remediation-outcomes.json; close.ts:503-530 calls the pair \"the two files this close phase itself writes... meant to be committed\".",
+        "spec/audit/audit-goals.md:33-34 states the corrected pairing for the audit side.",
+        "Adversary confirmed quote and substrate, and noted the doc declares itself \"the normative product definition... other specs should defer to it\", so anything deferring inherits a Markdown-only output model.",
+        "Adversary checked the decision ledger: the two settled items on this path are clarification-pause and terminal-states; open item docs-5 is closing-action enumeration. This subject is new."
+      ],
+      "premise_probes": [
+        {
+          "file": "spec/remediate/remediation-goals.md",
+          "contains": "The final retained output is deterministic Markdown"
+        }
+      ],
+      "id": "docsN-8",
+      "subject_key": "0ba01687e163daf8",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "spec/conceptual-design-review-design.md",
+      "subject": "Two design docs that declare themselves free of dated status carry dated design-process provenance and a delta-framed section heading",
+      "title": "Batched de-status: two design docs that declare \"no dated status here\" carry dated process provenance and a heading defined against a superseded state",
+      "eli5": "Two spec documents each open by declaring themselves durable design with no dated status, and then carry exactly that. spec/conceptual-design-review-design.md has two parentheticals recording when something was deleted and when something was settled, including an opaque label, resolution 4, that is registered nowhere. spec/remediation-workflow-design.md has a section headed \"Unchanged from the prior architecture\" — in a doc whose own preamble says it is not a status log and is never edited to record what has or has not shipped. A heading defined by reference to a superseded state names nothing to a reader who does not remember that state. In both cases the surrounding content is durable and correct; only the dated attributions and the delta-framed heading are the problem. These two are batched into one question because the owner has already answered this exact class twice, both times the same way: strip the dated stamps in place.",
+      "question": "spec/conceptual-design-review-design.md:246,271 carry dated design-process parentheticals (\"deleted 2026-08-06, design resolution 4\"; \"Settled at the resolution-4 design check, 2026-08-05/06\") and spec/remediation-workflow-design.md:418 has the heading \"## Unchanged from the prior architecture\" — both in docs declaring no dated status. Strip them?",
+      "options": [
+        {
+          "label": "Strip both in place",
+          "answer": "Delete the two dated parentheticals and rename the heading to what the section actually holds (e.g. \"Retained invariants\"). Content unchanged in both — the surrounding statements already carry the durable rule. Same treatment as the two prior de-status answers."
+        },
+        {
+          "label": "Strip, and cite the record",
+          "answer": "Remove the dated text from the docs but add a pointer to the docs/reviews/ record each came from, so the provenance stays reachable."
+        },
+        {
+          "label": "Heading only",
+          "answer": "Rename the delta-framed heading but keep the dated parentheticals, which record decisions that agents keep trying to re-litigate."
+        },
+        {
+          "label": "Leave both",
+          "answer": "Leave both docs as they are; the provenance is worth its cost."
+        }
+      ],
+      "evidence": [
+        "spec/conceptual-design-review-design.md:5 preamble says \"Durable conceptual design; no dated status here\"; :246-247 and :271-272 carry the two dated parentheticals. \"Resolution 4\" is an opaque label with no home in docs/glossary-ids.md.",
+        "spec/remediation-workflow-design.md:3-7 preamble says \"It is **not** a status log... never edited to record what has or hasn't shipped\"; :418 is the heading \"## Unchanged from the prior architecture\".",
+        "Both match named smells in docs/documentation-philosophy.md — :40 (pinned version/date/status strings) and :44 (changelog / progress creep).",
+        "Adversary: the seven bullets under the heading are durable design statements, so the fix is a rename, not a content change; and the owner has answered this class twice identically (\"De-status to timeless\"; \"Strip the dated stamps... in place\"), which is why these are batched into one ask.",
+        "Adversary confirmed neither subject is already settled on these paths (prior de-status settlements were on spec/backend-identity-axes.md and spec/cross-provider-quota-matrix.md)."
+      ],
+      "premise_probes": [
+        {
+          "file": "spec/conceptual-design-review-design.md",
+          "contains": "design resolution 4"
+        },
+        {
+          "file": "spec/remediation-workflow-design.md",
+          "contains": "## Unchanged from the prior architecture"
+        }
+      ],
+      "id": "docsN-9",
+      "subject_key": "a7403a2c1c04df98",
+      "first_seen": "2026-08-18",
+      "nights_open": 1
+    },
+    {
+      "leg": "docs",
+      "path": "spec/remediation-workflow-design.md",
+      "subject": "The two workflow design docs each declare a Cross-tool alignment list of the shared contract, and the two declared copies have drifted to different lengths and wordings",
+      "title": "Doc-set condensation: the shared cross-tool contract is deliberately listed in both workflow designs — and the two copies have already drifted to four bullets versus six",
+      "eli5": "The audit workflow design and the remediation workflow design each carry a section listing the parts of the contract the two tools share — host-handoff guarantees, how free-form intent is read, token estimation, prompt-cache ordering, and so on. The duplication is deliberate: the remediation doc says outright that these items are listed under Cross-tool alignment in both. The problem is what has happened since. The two copies are no longer the same list. The audit side has four bullets, the remediation side has six, and the shared wording has drifted — one says treat returned records as untrusted, the other says validate returned records as untrusted input. This is the predicted outcome of one fact living in two homes, and the content is by definition shared-core rather than per-orchestrator. The question is not whether an accidental copy exists — it was declared — but whether a declared duplicate is still acceptable now that it has measurably drifted.",
+      "question": "spec/audit-workflow-design.md and spec/remediation-workflow-design.md each declare a \"Cross-tool alignment\" list of the shared contract. They have drifted to four bullets versus six with differing wording. Where should the shared contract live?",
+      "options": [
+        {
+          "label": "One home plus a pointer",
+          "answer": "Keep the section in one of the two designs and reduce the other to a pointer, so the shared contract has a single home and cannot drift."
+        },
+        {
+          "label": "A third shared home",
+          "answer": "Move the shared contract to its own home — a spec/ shared-boundary doc, or CLAUDE.md's audit-tools/shared section — and point at it from both designs."
+        },
+        {
+          "label": "Keep both, reconcile now",
+          "answer": "The declared duplication reads better in context — keep both copies but reconcile them to the same bullet set and wording, and accept that they will need reconciling again."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave both copies as they are; the divergence is cosmetic."
+        }
+      ],
+      "evidence": [
+        "spec/audit-workflow-design.md:326-347 has four bullets; spec/remediation-workflow-design.md:397-414 has six — remediation adds \"Pinned shared seam contracts\" and splits token estimation from prompt caching.",
+        "Wording has drifted: \"treat returned records as untrusted\" (audit) versus \"validate returned records as untrusted input\" (remediation); \"shared prefix first\" versus \"shared context first\".",
+        "The duplication is declared, not accidental: spec/remediation-workflow-design.md:11-12 says the shared items are \"listed under *Cross-tool alignment* in both\".",
+        "Adversary corrected the original finding, which claimed six near-verbatim bullets on both sides; the reframing is that the copies have drifted to different LENGTHS, which is stronger evidence for the one-home rule than near-verbatim duplication would be."
+      ],
+      "premise_probes": [
+        {
+          "file": "spec/remediation-workflow-design.md",
+          "contains": "Cross-tool alignment (shared with the auditor)"
+        }
+      ],
+      "id": "docsN-10",
+      "subject_key": "7e881704566349d8",
+      "first_seen": "2026-08-18",
       "nights_open": 1
     }
   ],
-  "applied": [
-    "docs/audit-pkg/contracts.md — removed the runtime-validation schema from the contract-surface list; schemas/ holds five files and the generator writes exactly WORKER_SCHEMA_SOURCES, which has no runtime-validation entry.",
-    ".claude/skills/ship/SKILL.md — dropped canary-results.json from the stray-artifact exclusion list; git log -S across all refs shows no source revision ever contained the string.",
-    ".claude/skills/disambiguate-backlog/SKILL.md — the description pointed at docs/backlog.md for open items and as the write-back target; entries live in docs/backlog/ since the split, and backlog.md is now a router plus a generated seek index."
-  ],
+  "applied": [],
   "skipped": [
-    "Leg-1 corroboration by the free-provider lane: the lane has no file access (untrusted workspace in its isolated config dir) and fabricates confident output rather than failing. Its assigned leg-2 citation check did not run. See sol-8 / P33.",
-    "Leg-1 item-level review of the generated host assets (.agent/**, .github/**) and the two generator-owned docs (nightly-routine-prompt.md, nightly-inbox.md): renderer/generator-owned by manifest, reviewed at their canonical sources instead.",
-    "Leg-2: 3 of 64 backlog entries errored during the mechanical sweep and were not classified; 19 more carry probes the sweep could not evaluate. No entry was mechanically proven shipped, so no entry was deleted this run.",
-    "Leg-3: an exhaustive per-file sweep of the 227-file memory store did not happen; coverage was the full MEMORY.md index, targeted greps and full reads of the files those pointed at."
+    "codex exec lane — headroom proxy (127.0.0.1:8787) was DOWN at run start; restarted it, after which codex reported ChatGPT quota exhausted until 2026-08-20. Leg-1 corroboration that would have gone to Codex was routed to in-session reviewer/adversary agents instead.",
+    "freellmapi claude.ps1 pool lane — NOT USED. Its isolated CLAUDE_CONFIG_DIR still does not trust C:/Code/audit-tools, so the lane has no repo tools and answers from nothing. This is sol-8 / P33, confirmed still live tonight.",
+    "leg-2 mechanical sweep — attempted all 64 backlog entries, but 7 remain ERRORED after one retry pass (truncated JSON, finish_reason=length). 57 of 64 classified; the 7 unclassified entries were NOT triaged tonight.",
+    "leg-1 item-level review — 37 docs carried a HEAD-stamped window from 2026-08-15 and no src/ code has landed since, so their factual claims could not have been invalidated; this run concentrated on the never-item-reviewed docs (CLAUDE.md, AGENTS.md) and the docs that moved."
   ]
 }
