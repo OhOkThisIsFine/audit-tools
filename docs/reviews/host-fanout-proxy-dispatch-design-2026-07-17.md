@@ -67,7 +67,8 @@ Concretely:
   flips `rolling_engine` default-on only when claude-worker pools resolved? (The latter keeps one gate;
   the former is a distinct, self-describing trigger.)
 - **B. Tier→backend selection policy.** Cheapest-fit-per-tier from the resolved pools, or route through
-  the existing cost↔speed λ dial ([[cost-speed-dispatch-dial]])? Free pools (cost 0) make cost-first
+  the existing cost↔speed λ dial (the memory entry was pruned 2026-08-18 with the retired routing
+  substrate)? Free pools (cost 0) make cost-first
   degenerate → tier/capability becomes the real discriminator.
 - **C. Host's role.** Does the conversation host remain a pool (mixed host + claude-worker fan-out), or
   does `proxy_transport` route ALL packets to claude-worker pools (host reserved for synthesis/judgment)?

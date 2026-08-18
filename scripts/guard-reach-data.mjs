@@ -49,7 +49,14 @@ export const GUARDS = [
   { id: 'check:control-bytes', kind: 'gate', impl: 'check:control-bytes' },
   { id: 'check:deadcode', kind: 'gate', impl: 'check:deadcode', note: 'knip, default mode' },
   { id: 'check:doc-manifest', kind: 'gate', impl: 'check:doc-manifest' },
-  { id: 'check:doc-links', kind: 'gate', impl: 'check:doc-links' },
+  {
+    id: 'check:doc-links',
+    kind: 'gate',
+    impl: 'check:doc-links',
+    note:
+      'uncovered half: generated deliverable renders are excluded (shared/generated-renders.mjs) — ' +
+      'their worker-authored prose may quote link-shaped text (2026-08-18)',
+  },
   { id: 'check:doc-code-citations', kind: 'gate', impl: 'check:doc-code-citations' },
   { id: 'check:gate-enumeration', kind: 'gate', impl: 'check:gate-enumeration' },
   { id: 'check:philosophy-brief', kind: 'gate', impl: 'check:philosophy-brief' },
@@ -60,7 +67,15 @@ export const GUARDS = [
   { id: 'check:backlog-index', kind: 'gate', impl: 'check:backlog-index' },
   { id: 'check:backlog-budget', kind: 'gate', impl: 'check:backlog-budget' },
   { id: 'check:backlog-status', kind: 'gate', impl: 'check:backlog-status' },
-  { id: 'check:memory-citations', kind: 'gate', impl: 'check:memory-citations' },
+  {
+    id: 'check:memory-citations',
+    kind: 'gate',
+    impl: 'check:memory-citations',
+    note:
+      'uncovered halves: [[name]] cross-links between memory files are not checked; generated ' +
+      'deliverable renders (.audit-tools/audit-report.md, remediation-report.md) are excluded — ' +
+      'their worker-authored prose may quote citation-shaped text (2026-08-18)',
+  },
   { id: 'check:version-gates', kind: 'gate', impl: 'check:version-gates' },
   { id: 'check:guard-reach', kind: 'gate', impl: 'check:guard-reach', note: 'this registry, reconciled' },
   {

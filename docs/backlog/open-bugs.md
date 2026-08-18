@@ -557,3 +557,13 @@
   with the authority of a citation — and the memory-index header already warns the `[[…]]` half is
   ungated, which makes every prune a hand-audit. **Property to hold:** both citation forms are
   mechanically checked, so pruning a memory cannot silently strand a reference.
+
+- **Steward verification metadata is undeliverable through the host-result envelope (hit
+  2026-08-18).** The `deepening:steward` prompt instructs the host to return `findings: []` plus
+  `verification.followup_tasks`, but `parseHostResult` enforces exactly seven envelope keys and
+  `toAuditResult` maps no `verification` field — the channel exists only in the retired
+  worker-result contract (`workerSchemas.ts`), so `buildVerificationFollowupTasks` can never see
+  host-submitted suggestions. Same class as the approved P35 (step prompts must not instruct what
+  the tool cannot deliver); fold into that build or carry `verification` through the envelope.
+  **Property to hold:** every instruction a step prompt emits has a deliverable channel the
+  ingest actually reads.

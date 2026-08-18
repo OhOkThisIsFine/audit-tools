@@ -25,6 +25,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
+import { isGeneratedRender } from "./shared/generated-renders.mjs";
 
 /** The host derives its per-project dir by replacing every non-alphanumeric char. */
 function defaultMemoryDir() {
@@ -53,7 +54,9 @@ const tracked = execFileSync("git", ["ls-files", "*.md"], {
   windowsHide: true,
 })
   .split(/\r?\n/)
-  .filter(Boolean);
+  .filter(Boolean)
+  // worker-authored render prose may quote citation-shaped text — see the module
+  .filter((file) => !isGeneratedRender(file));
 
 // `memory: a, b, c` — runs to the end of the parenthetical or the line group.
 // Names are kebab-case slugs; prose after an em-dash is an annotation, not a name.

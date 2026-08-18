@@ -31,6 +31,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve, relative, basename } from "node:path";
+import { isGeneratedRender } from "./shared/generated-renders.mjs";
 
 const root = resolve(process.argv[2] ?? process.cwd());
 
@@ -41,7 +42,11 @@ function trackedMarkdown() {
     encoding: "utf8",
     windowsHide: true,
   });
-  return out.split("\0").filter(Boolean);
+  return out
+    .split("\0")
+    .filter(Boolean)
+    // worker-authored render prose may quote link-shaped text — see the module
+    .filter((file) => !isGeneratedRender(file));
 }
 
 

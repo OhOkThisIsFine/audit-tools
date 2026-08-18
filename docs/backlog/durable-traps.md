@@ -586,4 +586,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   fires only after the batch is assembled; a `recordPathHint(file)` export would let an author
   check the classification up front.
 
+- **Git-bash `/tmp` and node's `C:	mp` are different directories (hit 2026-08-18).** A Bash-tool
+  redirect to `/tmp/x.log` lands in the msys temp root, but a node script reading `/tmp/x.log`
+  resolves `C:	mp` and ENOENTs on a file that exists. Redirect to the session scratchpad (or any
+  explicit `C:/` path) when node will read the file back.
+
 ## Doc-set hygiene (enforced)

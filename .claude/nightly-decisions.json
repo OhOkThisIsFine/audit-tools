@@ -1039,5 +1039,231 @@
     "subject": "Every gate reads the whole working tree and cannot tell whose mess it is — one such gate abandoned all 13 items of a run",
     "path": "docs/backlog/open-bugs.md",
     "decided_at": "2026-08-12T18:20:15.025Z"
+  },
+  "72f6ee7c1d1b7cb3": {
+    "disposition": "settled",
+    "answer": "Both: add hasTrustDialogAccepted for C:/Code/audit-tools to the freellmapi claude-config, AND make claude.ps1 assert the flag and refuse loudly when it is missing.",
+    "subject": "The free-provider lane has had no file access for at least three nights and answers from nothing — it fabricated last night's \"zero findings\" closeout",
+    "path": "docs/nightly-routine.md",
+    "decided_at": "2026-08-18T18:46:10.881Z",
+    "completed_at": "2026-08-18T18:53:18.108Z",
+    "completed_ref": "Applied 2026-08-18: trust entry projects['C:/Code/audit-tools'].hasTrustDialogAccepted=true added to freellmapi claude-config .claude.json; claude.ps1 now asserts trust for its cwd and refuses loudly (verified: trusted probe exercised repo tools; probe from C:/Windows refused with the assertion message)."
+  },
+  "cce8a39fd59ef056": {
+    "disposition": "settled",
+    "answer": "Wire it: call verifyFindingGrounding in ingestAuditHostResults so grounding is tool-computed, not worker-self-reported; stop accepting grounding as a worker-supplied field.",
+    "subject": "Finding grounding is documented as enforced at ingest and advertised to users in the README, but verifyFindingGrounding has zero production callers — the verdict is whatever the worker self-reported",
+    "path": "spec/contract-authoring-determinism-design.md",
+    "decided_at": "2026-08-18T18:46:12.589Z"
+  },
+  "7092acf8e55d324b": {
+    "disposition": "settled",
+    "answer": "Do it with P26: derive the pre-commit leg set from the guard-reach registry with a per-guard preCommit flag AND generate the CI trigger paths from the same registry, one change, reconciled in check:guard-reach.",
+    "subject": "Four cheap gates in verify:checks are still absent from the pre-commit hook — the same hand-accretion that burned v0.34.17 and v0.34.40",
+    "path": "package.json",
+    "decided_at": "2026-08-18T18:46:14.283Z"
+  },
+  "8ae16b26e46ae812": {
+    "disposition": "settled",
+    "answer": "Covered by the sol-9 decision (owner, 2026-08-18): derive the CI trigger paths from the guard-reach registry TOGETHER with P34's registry-derived pre-commit legs — one change, both registry consumers, reconciled in check:guard-reach.",
+    "subject": "A gate inspects .claude/** but CI cannot be triggered by it — generate the trigger paths from the guard-reach registry",
+    "path": ".github/workflows/ci.yml",
+    "decided_at": "2026-08-18T18:59:00.984Z"
+  },
+  "d6c39c1f412ffce8": {
+    "disposition": "settled",
+    "answer": "Apply both halves: derive Required Inputs from the artifact write map (make the ENOENT class unrepresentable) AND add the prompt-capability contract test under tests/.",
+    "subject": "Step prompts instruct the host to do what the tool cannot deliver — 7 incidents across 5 dates, and the design-review write instruction is still live at HEAD",
+    "path": "src/audit/orchestrator/designReviewPrompt.ts",
+    "decided_at": "2026-08-18T19:00:56.994Z"
+  },
+  "8240e45481366a84": {
+    "disposition": "settled",
+    "answer": "General detector: fix the remedy text on both shell branches AND build the general status-laundering rule — detect from the statement's last exit-producing element, not a third named syntactic instance.",
+    "subject": "The guard that blocks a masked suite exit prescribes, in its own remedy text, the shape that fakes a green suite in the background — both shell branches",
+    "path": ".claude/hooks/shell-trap-guard.mjs",
+    "decided_at": "2026-08-18T19:00:58.492Z"
+  },
+  "36a6734df10c0aad": {
+    "disposition": "settled",
+    "answer": "Widen both: resolve directory citations (trailing slash means the directory must exist) and bare filenames (resolve against the tracked set, fail on no-match or ambiguity), and count them.",
+    "subject": "The citation gate cannot see a directory citation or a bare filename — two of tonight's doc findings were in that blind spot, and the coverage count hides it",
+    "path": "scripts/check-doc-code-citations.mjs",
+    "decided_at": "2026-08-18T19:00:59.956Z"
+  },
+  "1c7bcf48ec7e3c43": {
+    "disposition": "settled",
+    "answer": "Apply P32 as written: options and eli5 refusals in writeOpenItems plus the five red-green tests under tests/shared/.",
+    "subject": "writeOpenItems refuses an item four ways over probes but never checks options or eli5 — the two fields the contract calls mandatory, and the two that shipped missing on 18 items",
+    "path": "docs/nightly-routine.md",
+    "decided_at": "2026-08-18T19:01:01.373Z"
+  },
+  "6419f44513834ba1": {
+    "disposition": "settled",
+    "answer": "Wrapper plus guard: extract the one-item-per-call dispatch driver into a shared module (bounded items, one call per item, per-item log redirect, finish-reason and output-size recorded per item, coverage stamp) AND add the shell-trap rule denying ad-hoc peer-CLI statements whose prompt exceeds the size threshold, pointing at the wrapper.",
+    "subject": "The strongest recurrence in the store: an over-scoped offload call silently loses its whole answer — the working pattern exists once and generalizes to nothing",
+    "path": "scripts/shared/triage-backlog.mjs",
+    "decided_at": "2026-08-18T19:01:58.978Z"
+  },
+  "afc6b718063bd95a": {
+    "disposition": "settled",
+    "answer": "Heuristic gate: add the narrower mechanical check — refuse a dated bullet, a past-tense landing narrative, or a Verification-state heading in HANDOFF — accepting it catches the shape, not the semantics.",
+    "subject": "HANDOFF changelog creep has recurred against a written rule — enforce it in the generator, or accept it as advice the nightly re-trims",
+    "path": "scripts/shared/generate-handoff-roadmap.mjs",
+    "decided_at": "2026-08-18T19:02:00.298Z"
+  },
+  "9b028fa6ec512c36": {
+    "disposition": "settled",
+    "answer": "Narrow to escape runs only: fire only on a backslash-escape run of length >= 2 inside an inline interpreter payload — the exact shape that failed; keep the Bash path's guard-fatigue budget.",
+    "subject": "An inline node -e carrying a regex is mangled before it runs — deny the form, deny only the escape-run case, or leave it as advice",
+    "path": ".claude/hooks/shell-trap-guard.mjs",
+    "decided_at": "2026-08-18T19:02:01.546Z"
+  },
+  "e08d4a2436623fe9": {
+    "disposition": "settled",
+    "answer": "Fold into the skill: move the maintainer flow into the ship skill, trim release.md to per-host validation checklists + trusted-publisher config + troubleshooting, leave a pointer.",
+    "subject": "Doc-set condensation: the release flow has two hand-maintained homes — the ship skill and release.md restate the same gate list, shard split, dist-tag rule and live check",
+    "path": "docs/audit-pkg/release.md",
+    "decided_at": "2026-08-18T19:02:02.703Z"
+  },
+  "312126da152a15f4": {
+    "disposition": "settled",
+    "answer": "Complete the list: add the six missing deterministic obligations and the terminal friction close-out, with design_assessment_current carrying the same 'deterministic + optional host-delegated' parenthetical edgeReasoning already has. Attested constitutional-doc edit.",
+    "subject": "Constitutional goals doc: the deterministic-responsibilities list is missing six live obligations plus the friction close-out",
+    "path": "spec/audit/audit-goals.md",
+    "decided_at": "2026-08-18T19:02:47.900Z"
+  },
+  "ca7381d8ff2acd0a": {
+    "disposition": "settled",
+    "answer": "Point at the registry: replace the frozen tool parenthetical in both specs with a pointer to EXTERNAL_ANALYZER_CANDIDATES (default members plus consent-gated), and correct the registry header comment in src/shared/analyzers/candidates.ts in the same change. Attested constitutional-doc edit.",
+    "subject": "The analyzer candidate set is described as 4 tools with 1 default in three places; it is 12 tools with 5 defaults — and the code comment is the likely source",
+    "path": "spec/audit/artifact-contract.md",
+    "decided_at": "2026-08-18T19:02:49.024Z"
+  },
+  "49e92917e4ed552f": {
+    "disposition": "settled",
+    "answer": "Reword to match: 'never emitted as an obligation by deriveAuditState, though its id sits in PRIORITY to satisfy the executor-registry-coverage invariant' — matching the accurate later passage. Attested constitutional-doc edit.",
+    "subject": "Constitutional catalog contradicts itself about friction capture — one line says \"not in the priority chain\", another says its id sits in PRIORITY",
+    "path": "spec/audit/executor-catalog.md",
+    "decided_at": "2026-08-18T19:02:50.101Z"
+  },
+  "2a2f4eb487b558ca": {
+    "disposition": "settled",
+    "answer": "Point at the contract: replace the core rule with a pointer to the entrypoint contract so the definition of bounded lives in exactly one place. Attested constitutional-doc edit.",
+    "subject": "Constitutional policy still says \"one bounded step\"; the engine drains the frontier — and the sibling contract already has the corrected wording",
+    "path": "spec/audit/orchestration-policy.md",
+    "decided_at": "2026-08-18T19:02:51.186Z"
+  },
+  "bd86e4d5fcd0621c": {
+    "disposition": "settled",
+    "answer": "Delete it, keep the gap: delete merge-to-base from the enumeration and its paragraph; file the isolated-branch landing gap as a backlog entry so it is not lost. Attested constitutional-doc edit.",
+    "subject": "Constitutional goals doc documents a closing action the schema would reject — merge-to-base was deleted with the execution substrate",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-18T19:29:02.926Z"
+  },
+  "07a89c9bee083cc8": {
+    "disposition": "settled",
+    "answer": "Fix both: move secret-scan from OWN to ACQUIRE, drop npm-audit from ACQUIRE (or describe it as an import-normalizer), mirror the same correction in the instruction file. Attested edit.",
+    "subject": "instruction-file edit: the own-vs-acquire rule puts secret-scan on the wrong side, and npm-audit on the wrong side in the opposite direction",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-18T19:29:03.939Z"
+  },
+  "a3e31138790037d9": {
+    "disposition": "settled",
+    "answer": "Both, spec wins: correct the A9 map line to persisted workload/result bindings + idempotent ingestion (no claim registry, lease, or per-IDE namespace) and delete the two dead claim-path helpers and their re-exports.",
+    "subject": "The philosophy map states the opposite of its named home on concurrency — and two dead code helpers are the last physical trace of the retired mechanism",
+    "path": "docs/project-philosophy.md",
+    "decided_at": "2026-08-18T19:29:04.983Z"
+  },
+  "115a621c022f083e": {
+    "disposition": "settled",
+    "answer": "Drop the numbers: state the rule — one artifact write plus validate per pipeline phase, degenerate phases collapsing — so nothing re-stales.",
+    "subject": "Two conflicting round-trip counts in one doc (~12 and 17) against a real phase count of 15 — but collapsing them to one number would erase the mechanism",
+    "path": "spec/self-scaling-pipeline-design.md",
+    "decided_at": "2026-08-18T19:29:05.830Z"
+  },
+  "e6cf0b2d90e54262": {
+    "disposition": "settled",
+    "answer": "Drop the field: remove version from skills/remediate-code/SKILL.md and its rendered .agent/ copy in the same commit, matching the audit-code loader which has none.",
+    "subject": "A loader body pins version: 0.3.0 while the package is 0.41.1 — nothing reads the field, and its sibling loader has none",
+    "path": "skills/remediate-code/SKILL.md",
+    "decided_at": "2026-08-18T19:47:54.228Z"
+  },
+  "a80005242faee2db": {
+    "disposition": "settled",
+    "answer": "Both fixes: repoint the INV-WTS row to the surviving module and narrow its contract text to the landed-node ancestry probe only; separately ADD src/audit/types/artifactMetadata.ts to the INV-O2 row.",
+    "subject": "A glossary row points at two files deleted with the execution substrate, and its contract sentence over-claims three of its four nouns",
+    "path": "docs/glossary-ids.md",
+    "decided_at": "2026-08-18T19:47:54.890Z"
+  },
+  "acf85544944a3aef": {
+    "disposition": "settled",
+    "answer": "Split the two: correct the access_memory claim as stale (zero readers, write-only today, no near-term consumer); correct only the LOCATION of the affinity-graph claim — consumed in planning, not host handoff.",
+    "subject": "Constitutional specs say the host handoff reads access_memory and the affinity graph — it takes neither; correct the docs, or wire the consumption they describe",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-18T19:47:55.540Z"
+  },
+  "05f4ef9a37125b3e": {
+    "disposition": "settled",
+    "answer": "Fill it in: list result_ingestion_executor and runtime_validation_executor (selective deepening) on the task_affinity_graph.json row, matching its sibling rows.",
+    "subject": "Constitutional dependency map says task_affinity_graph.json has one writer; it has four — and the two rows beside it already list them",
+    "path": "spec/audit/dependency-map.md",
+    "decided_at": "2026-08-18T19:47:56.120Z"
+  },
+  "2bb4aa51ba125eb7": {
+    "disposition": "settled",
+    "answer": "Point at the registry: delete the enumeration from both specs and the source header; state the RULE (defaultRun bypasses the consent token) and point at EXTERNAL_ANALYZER_CANDIDATES as the single home.",
+    "subject": "The analyzer default/consent split is described wrong in two constitutional specs and a third time in the source comment — one stale fact, three decaying copies",
+    "path": "spec/audit/artifact-contract.md",
+    "decided_at": "2026-08-18T19:49:18.229Z"
+  },
+  "b51fafc90f49d088": {
+    "disposition": "settled",
+    "answer": "Build the sweep: the doc describes intended behaviour — wire cleanupStaleArtifactsDir into the pre-run path so a stale dir is cleared automatically, and fix the stale function comment.",
+    "subject": "Constitutional goals doc names a \"pre-run sweep\" that does not exist — cleanupStaleArtifactsDir has exactly one caller, the CLI verb",
+    "path": "spec/audit/audit-goals.md",
+    "decided_at": "2026-08-18T19:49:18.735Z"
+  },
+  "4ebd702b9781bf33": {
+    "disposition": "settled",
+    "answer": "Reword it: 'one call satisfies two obligations' — one executor call, genuinely two obligations with different satisfaction rules.",
+    "subject": "Executor catalog note says intake_executor satisfies one obligation; its own Obligation column beside it lists two, and they have different satisfaction rules",
+    "path": "spec/audit/executor-catalog.md",
+    "decided_at": "2026-08-18T19:49:19.212Z"
+  },
+  "d1a5700af8e4e651": {
+    "disposition": "settled",
+    "answer": "Add them: the enumerations are meant to be complete — add docs_digest and runtime_validation in their PRIORITY positions to both the deterministic block and the pipeline order.",
+    "subject": "The workflow design's deterministic-block enumeration omits docs_digest and runtime_validation, both of which are registered deterministic and sit in PRIORITY",
+    "path": "spec/audit-workflow-design.md",
+    "decided_at": "2026-08-18T19:49:19.664Z"
+  },
+  "06bb0d0ea4a74414": {
+    "disposition": "settled",
+    "answer": "Enforce it: delete both line-number suffixes, cite file+symbol alone, AND add a check that fails when a backlog entry cites a bare line number so the rule stops depending on the writer remembering.",
+    "subject": "Two trap entries cite line numbers that never could have been right — and the file's own rule says to delete the suffixes, not bump them",
+    "path": "docs/backlog/durable-traps.md",
+    "decided_at": "2026-08-18T20:05:44.102Z"
+  },
+  "c920bfdee309e889": {
+    "disposition": "settled",
+    "answer": "Drop the counts: remove the per-file counts and timings — they measure a set that no longer exists — keep only the durable 'these are slow, do not parallelise them' rule.",
+    "subject": "The completion-test entry counts five files and four tests; there are three files and three tests — and a sibling entry says three then four in ten lines",
+    "path": "docs/backlog/durable-traps.md",
+    "decided_at": "2026-08-18T20:05:44.530Z"
+  },
+  "51c6efd7bf10f238": {
+    "disposition": "settled",
+    "answer": "Drop the contract: keep the run-config matrix, drop the 'each such item carries a ⬇ line' contract, and reconcile the ⬇ Live-run watch / ⬇ LIVE vocabulary split into one marker.",
+    "subject": "The live-validation guide's premise did not survive the backlog split — it says \"each such item\", and 2 of 113 entries have the line",
+    "path": "docs/backlog.md",
+    "decided_at": "2026-08-18T20:05:44.976Z"
+  },
+  "efd0b72bb9b767c6": {
+    "disposition": "settled",
+    "answer": "Run the audit first: run the documented tested-but-unwired manual audit (knip --production filtered by grep-zero production callers) across the tree and handle the whole class at once — ensureGlobalAssets included.",
+    "subject": "ensureGlobalAssets is unreachable through the bin — decide whether it is duplicated elsewhere or genuinely dead code to delete",
+    "path": "docs/backlog/forward-tracks.md",
+    "decided_at": "2026-08-18T20:05:45.379Z"
   }
 }
