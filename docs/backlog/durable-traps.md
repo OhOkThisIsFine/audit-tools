@@ -609,4 +609,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   resolves `C:	mp` and ENOENTs on a file that exists. Redirect to the session scratchpad (or any
   explicit `C:/` path) when node will read the file back.
 
+- **A commit-carries-its-record-update gate has a covered mechanical half and an uncovered
+  semantic half (measured 2026-08-18, closed covered-by-neighbors).** The one real incident
+  (2026-07-28: execution state lived only in an untracked checkpoint while HANDOFF/backlog/queue
+  said otherwise) does not get a dedicated gate — measurement against 180 commits found zero true
+  positives at any threshold and zero declarable work↔record path pairs
+  (`docs/reviews/record-update-gate-measurement-2026-08-18.md`). Its mechanical halves are each
+  independently enforced instead: HANDOFF generated-state parity (`check:handoff-roadmap` at
+  commit + CI + the closeout gate at Stop), answered≠done ledger visibility
+  (`completed_at`/`completed_ref` split + the SessionStart nudge in `nightly-surface.mjs`), and
+  nobody-asked-at-close (closeout-challenge evidence legs). The semantic half — record PROSE says
+  the right thing — is the unscriptable sol-5 class: uncovered, and stated here outright per the
+  partly-enforced-trap rule, since `check:backlog-status` bans status fields so there is no field
+  a gate could even demand.
+
 ## Doc-set hygiene (enforced)
