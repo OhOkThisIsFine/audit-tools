@@ -141,19 +141,14 @@
   **Property:** attribute a red to the run only for paths it touched; persist the failing output; an
   unattributable all-items abandonment pauses resumably, never closes terminal.
 
-- **A contract change swept `tests/` and missed the PRODUCERS in `scripts/` — caught only by CI
-  (2026-07-25, low, friction: inefficient-feeding).** Adding `reviewed_clean`, the fixture sweep globbed
-  `tests/**`; the synthetic-result generators in `scripts/` are reached only by `verify:checks`, which
-  the pre-commit hook does NOT run, so it failed release CI ([[lap-green-must-match-ci-evidence]]).
-  **Narrowed 2026-07-26 (AuditResult is CLOSED):** `scripts/` is covered by neither tsconfig, so the
-  producer could not fail on a contract it never consulted. `buildSyntheticResults` now validates its own
-  output through `validateAuditResults` and throws on any error, and
-  `tests/audit/smoke-producer-contract.test.ts` gates both that refusal and the single-construction-site
-  claim its docblock used to merely assert. What stays open is the GENERALIZATION to the other validated
-  contract types: coverage should be derivable from the contract (every construction site of the type),
-  not from where tests live. Not yet designed — the doc-manifest data+refusal shape (`2adc716c`) is the
-  precedent to follow, and a typecheck gate is NOT (a cast makes it inert,
-  [[test-tree-typecheck-gate-and-its-cost]]).
+- **Contract-type coverage is derived from where TESTS live, not from the contract (2026-07-25, low,
+  friction: inefficient-feeding).** `scripts/` is covered by no tsconfig, so a producer there cannot fail
+  on a contract it never consults — that is how adding `reviewed_clean` swept `tests/**`, missed the
+  `scripts/` producers, and failed release CI ([[lap-green-must-match-ci-evidence]]). AuditResult is
+  closed by a per-type gate written by hand for it. **Property:** for every validated contract type, the
+  set of construction sites is derivable FROM THE CONTRACT, not from test placement. Not yet designed —
+  the doc-manifest data+refusal shape (`2adc716c`) is the precedent to follow, and a typecheck gate is
+  NOT (a cast makes it inert, [[test-tree-typecheck-gate-and-its-cost]]).
 
 - **Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong
   implementation (2026-07-24, medium, friction: ambiguous-direction).** The partial-wave entry said
