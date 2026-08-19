@@ -41,7 +41,6 @@ is deleted too.
 | INV-RSM-RESOLUTION-CORRELATE | Review and triage answers must match the requesting run and plan. | src/remediate/review/reviewGate.ts; src/remediate/phases/triage.ts |
 | INV-RSM-SPLIT | Splitting a remediation block preserves phase, dependency, scope, and verification semantics. | src/remediate/phases/plan.ts |
 | INV-RSM-STATE-COMPLETE | Persisted remediation state contains every field implied by its status. | src/remediate/state/store.ts; src/remediate/phases/triage.ts |
-| INV-RSM-VERIFY | Verification-command admission is checked per invocation. | src/remediate/steps/dispatch/verifyCommands.ts |
 | INV-S04 | Verbatim free-form intent is never copied into a host workload or output; only interpreted signals cross the boundary. | src/shared/intent/freeFormIntentInterpreter.ts; src/shared/intent/pathScope.ts |
 | INV-SCC | Portable run-id path encoding and live-holder file-lock freshness. | src/shared/io/frictionCapture.ts; src/shared/io/fileLock.ts; src/shared/friction/triage.ts |
 | INV-SOO | Canonical physical-file identity for ownership and overlap checks. | src/shared/io/pathIdentity.ts |
