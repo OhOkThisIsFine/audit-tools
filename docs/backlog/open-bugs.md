@@ -6,6 +6,16 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **`writeOpenItems` accepts an item with no `subject_key` and persists it; the refusal lands two
+  steps later in the HANDOFF generator (2026-08-19, low, friction: tool_should_decide).** The writer
+  validates probes exhaustively — four distinct refusals — but never checks the field the whole
+  durable-answer mechanism keys on, so a missing `subject_key` is written to
+  `.audit-tools/nightly/open-items.json` and only `generate-handoff-roadmap.mjs` refuses it, naming `items[0]` rather
+  than the authoring mistake. The writer already imports `subjectKey`, and every item carries the
+  `subject` it is computed from. **Property:** the writer either derives `subject_key` from
+  `subject` itself or refuses at write; a persisted item missing it is unreachable for
+  [[settled-subject-slips-through-a-reword]] and cannot be re-asked correctly.
+
 - **The nightly inbox wipes doc-citation-exempt markers on every render, so its stale-path citation
   reds recur (2026-08-19, low, owner decision pending).** `docs/nightly-inbox.md` is generator-owned
   (`scripts/nightly/render-inbox.mjs` rewrites everything but ticks and notes), so the two inline
