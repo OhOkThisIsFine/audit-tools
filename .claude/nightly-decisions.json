@@ -1432,5 +1432,37 @@
     "decided_at": "2026-08-19T00:15:10.725Z",
     "completed_at": "2026-08-19T05:54:59.432Z",
     "completed_ref": "4cbce643"
+  },
+  "8d7b9bb8d978307d": {
+    "disposition": "settled",
+    "answer": "Delete HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS and its hardcoded-vs-hardcoded tests on the next tested-but-unwired pass unless a production reader lands first — owner decision already recorded 2026-08-19 in docs/backlog/open-bugs.md (commit a764f423); this settle records that existing decision, it is not a new answer.",
+    "subject": "HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass",
+    "path": "src/audit/cli/nextStepHelpers.ts",
+    "decided_at": "2026-08-19T16:21:09.892Z"
+  },
+  "587c1796832c5cbc": {
+    "disposition": "settled",
+    "answer": "Apply P37 as written: backtick the 45 citations in docs/glossary-ids.md and land tests/shared/glossary-citations-backticked.test.ts so the existing citation gate covers them.",
+    "subject": "The citation gate only sees BACKTICKED citations, and the glossary writes all 45 of its citations as bare table cells — third recurrence of a stale citation the gate structurally cannot see",
+    "path": "scripts/check-doc-code-citations.mjs",
+    "decided_at": "2026-08-19T16:24:56.044Z",
+    "completed_at": "2026-08-19T16:39:55.812Z",
+    "completed_ref": "fe48db4c"
+  },
+  "e7846967872260ea": {
+    "disposition": "settled",
+    "answer": "Move the uncovered-half admission (record PROSE says the right thing — the unscriptable sol-5 class) into docs/backlog/durable-traps.md as a standing reference, then delete the friction-walk entry from open-bugs.md.",
+    "subject": "A friction-walk entry has no open work left, but deleting it would orphan the one uncovered property it deliberately states outright",
+    "path": "docs/backlog/open-bugs.md",
+    "decided_at": "2026-08-19T16:24:56.180Z",
+    "completed_at": "2026-08-19T16:39:58.907Z",
+    "completed_ref": "e38616f9"
+  },
+  "48295eac950efe87": {
+    "disposition": "settled",
+    "answer": "Conjunctive eligibility: require more than one evidence class to join, instead of the disjunctive threshold where four weights each clear the 60 floor alone. Measure the actual effect on the promoted findings before landing; if it does not bound enough, come back with the measurement.",
+    "subject": "Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick",
+    "path": "src/shared/decompose/contentCoherence.ts",
+    "decided_at": "2026-08-19T16:24:56.313Z"
   }
 }

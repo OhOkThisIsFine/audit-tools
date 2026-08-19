@@ -22,12 +22,6 @@
    build queue below overlaps several themes; land those builds first where they coincide.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **3 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `backlogN-1` — A friction-walk entry has no open work left, but deleting it would orphan the one uncovered property it deliberately states outright
-  - `backlogN-3` — HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass
-  - `backlogN-4` — Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick
-
 <!-- END GENERATED LIVE STATUS -->
 
 ## Immediate next
