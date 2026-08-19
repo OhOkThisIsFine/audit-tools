@@ -44,7 +44,7 @@ export function g(repo: string, ...args: string[]) {
 export function runGate(
   repo: string,
   command: string = "git commit -m x",
-  { sessionId, env = {} }: { sessionId?: string; env?: NodeJS.ProcessEnv } = {},
+  { sessionId, env = {}, cwd }: { sessionId?: string; env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ) {
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
@@ -53,6 +53,9 @@ export function runGate(
     input: JSON.stringify({
       tool_name: "Bash",
       tool_input: { command },
+      // Target-repo scoping reads the payload cwd; omitted = the hook falls
+      // back to CLAUDE_PROJECT_DIR, so existing callers see no change.
+      ...(cwd === undefined ? {} : { cwd }),
       ...(sessionId === undefined ? {} : { session_id: sessionId }),
     }),
     encoding: "utf8",

@@ -2,7 +2,9 @@
 // PreToolUse gate: block `git commit` until `npm run check` is green.
 // Receives the hook payload on stdin: { tool_name, tool_input: { command } }.
 // Exit 0 = allow, exit 2 = block (stderr is fed back to the agent).
-// Fires on every Bash/PowerShell call; non-commit commands exit in ~ms.
+// Fires on every Bash/PowerShell call; non-commit commands exit in ~ms, and a
+// commit/push that targets a DIFFERENT repository is out of jurisdiction
+// entirely (see "Target-repo scoping" below).
 //
 // STAGED-SNAPSHOT SEMANTICS (why this is not just `npm run check` on the cwd):
 // The gate must validate the snapshot that would actually be COMMITTED — the
@@ -27,9 +29,9 @@
 // restore, git error) — never wedge the session; FAIL-CLOSED on gate results
 // (a real `npm run check` / doc-contract failure blocks the commit).
 import { execSync, spawnSync } from 'node:child_process';
-import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import {
   stripQuoted,
@@ -88,10 +90,12 @@ for await (const chunk of process.stdin) raw += chunk;
 
 let cmd = '';
 let payloadSessionId = '';
+let payloadCwd = '';
 try {
   const payload = JSON.parse(raw);
   cmd = payload?.tool_input?.command ?? '';
   payloadSessionId = sanitizeSessionId(payload?.session_id);
+  payloadCwd = typeof payload?.cwd === 'string' ? payload.cwd : '';
 } catch {
   // Never wedge the session — but the gate did NOT run, and a silent exit 0 is
   // indistinguishable from a pass.
@@ -222,16 +226,218 @@ const isGitSubcommand = (name) => (s) => gitSubcommandRe(name).test(collapseQuot
 // guarantees: no commit-creating command runs from an already-red snapshot,
 // and the hook-bypass vectors are refused on every history-writing form.
 const COMMIT_CREATING_SUBCOMMANDS = ['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am'];
-const commitSubCmds = subCmds.filter((s) =>
-  COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s)),
-);
+const isCommitCreating = (s) => COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s));
 
 // Build 1 (P23): `git push` is detected ONLY for the child-session refusal
 // below. It must never enter the commit machinery — no hook-bypass scan, no
 // staged-set reads, no runGate, no staged-snapshot round-trip.
-const pushSubCmds = subCmds.filter((s) => isGitSubcommand('push')(s));
+const isPush = isGitSubcommand('push');
 
 // Exit early if no commit-creating or push invocation exists in any statement.
+if (!subCmds.some((s) => isCommitCreating(s) || isPush(s))) process.exit(0);
+
+// ── Target-repo scoping ──────────────────────────────────────────────────────
+// Every check below reads THIS repository's state (root = CLAUDE_PROJECT_DIR):
+// the staged set, the attestations, the branch, the staged-snapshot round-trip.
+// But the hook fires on every Bash/PowerShell call in the session, so a commit
+// made in a DIFFERENT repo — `cd C:/other && git commit …`, `git -C ../other
+// commit …`, or a plain `git commit` after the session cd'd away — used to be
+// gated against audit-tools' own index anyway. Observed live 2026-08-19: an
+// unrelated fresh repo's first commit was blocked because a concurrent session
+// had loop-core files staged HERE. That is the false-RED class — as corrosive
+// as a false green, because it trains the reader to distrust or bypass the
+// gate. [[false-red-is-as-corrosive-as-false-green]]
+//
+// So each detected commit/push statement is resolved to the repository it
+// actually targets: the payload cwd, folded through the `cd`/`chdir`/`pushd`/
+// `sl`/`Set-Location`/`Push-Location` statements EARLIER in the chain, then
+// through the statement's own `git -C <path>` hops. Repo identity is the
+// absolute `--git-common-dir`, NOT `--show-toplevel`: a linked worktree has
+// its own toplevel but shares the common dir, and a commit into a sibling
+// worktree of THIS repo must stay gated. Statements that target another
+// repository fall out of the gate's view entirely — including the hook-bypass
+// scan and the child-session refusal, which exist to protect this repo's
+// history, not to govern git use elsewhere.
+//
+// FAIL-CLOSED on resolution faults, by design: an unresolvable hop (`cd "$V"`,
+// `cd -`, popd, a bare `cd`, a `--git-dir`/`--work-tree` override, a target
+// git cannot answer for) counts as targeting THIS repo. The worst residue is
+// the old false RED in an exotic shape — never an ungated audit-tools commit.
+
+// Canonical comparable form of a filesystem path: realpath when it exists
+// (settles symlinked tempdirs, Windows 8.3/case aliases), forward slashes,
+// case-folded on win32.
+function normalizeFsPath(p) {
+  let n = resolve(p);
+  try {
+    n = realpathSync.native(n);
+  } catch {
+    /* nonexistent — keep the resolved form */
+  }
+  n = n.replace(/\\/g, '/');
+  return process.platform === 'win32' ? n.toLowerCase() : n;
+}
+
+// Quote-aware tokenization of one statement: whitespace splits only outside
+// quoted spans; tokens keep their quote characters (unquoteToken strips them).
+// Same escape model as stripQuoted.
+function tokenizeStatement(s) {
+  const tokens = [];
+  let cur = '';
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === '"' && c === '\\' && i + 1 < s.length) {
+      cur += c + s[i + 1];
+      i++;
+    } else if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+    } else if (c === '\\' && i + 1 < s.length) {
+      cur += c + s[i + 1];
+      i++;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      cur += c;
+    } else if (/\s/.test(c)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = '';
+      }
+    } else {
+      cur += c;
+    }
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+}
+
+function unquoteToken(tok) {
+  const m = /^(["'])([\s\S]*)\1$/.exec(tok);
+  return m ? m[2] : tok;
+}
+
+// A path we can resolve WITHOUT evaluating shell: no substitutions ($var,
+// backtick), no globs. `~` expands to the home directory. Null = unresolvable.
+function resolvablePathToken(tok) {
+  const t = unquoteToken(tok);
+  if (!t || t === '-' || /[$`*?]/.test(t)) return null;
+  if (t === '~') return homedir();
+  if (t.startsWith('~/') || t.startsWith('~\\')) return join(homedir(), t.slice(2));
+  return t;
+}
+
+// The effect of one statement on the effective cwd: { to } for a resolvable
+// directory change, { poison: true } when it changes cwd in a way this hook
+// cannot evaluate, null when it does not change cwd at all.
+const CD_WORDS = new Set(['cd', 'chdir', 'pushd', 'sl', 'set-location', 'push-location']);
+function cdEffect(statement) {
+  const tokens = tokenizeStatement(statement.replace(/^[\s(]+/, ''));
+  if (tokens.length === 0) return null;
+  const head = unquoteToken(tokens[0]).toLowerCase();
+  if (head === 'popd' || head === 'pop-location') return { poison: true };
+  if (!CD_WORDS.has(head)) return null;
+  let i = 1;
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    if (tokens[i] === '-') return { poison: true }; // `cd -` — previous dir, unknown here
+    // PowerShell -Path/-LiteralPath name the target in the NEXT token; every
+    // other option (-P, -L, -PassThru, …) is skipped.
+    if (/^-(?:path|literalpath)$/i.test(tokens[i])) {
+      i++;
+      break;
+    }
+    i++;
+  }
+  if (i >= tokens.length) return { poison: true }; // bare `cd` — target is shell-dependent
+  const target = resolvablePathToken(tokens[i]);
+  // Trailing tokens mean this is not a plain directory change (`cd x & git …`
+  // backgrounds the cd; redirects/extra args are anyone's guess) — refuse to
+  // model it rather than mis-track the cwd.
+  if (target === null || i + 1 < tokens.length) return { poison: true };
+  return { to: target };
+}
+
+// Fold a statement's `git -C <path>` hops onto `dir`. Null = the statement
+// overrides the repo in a way this hook does not model (--git-dir/--work-tree)
+// or hops through an unresolvable path — callers fail closed.
+function gitTargetDir(statement, dir) {
+  const tokens = tokenizeStatement(statement.replace(/^[\s(]+/, ''));
+  const gitIdx = tokens.findIndex((t) => unquoteToken(t) === 'git');
+  if (gitIdx === -1) return dir; // defensive — detection already saw `git` here
+  let out = dir;
+  for (let i = gitIdx + 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (/^--(?:git-dir|work-tree)(?:$|=)/.test(t)) return null;
+    if (t === '-C') {
+      const hop = i + 1 < tokens.length ? resolvablePathToken(tokens[i + 1]) : null;
+      if (hop === null) return null;
+      out = resolve(out, hop);
+      i++;
+    } else if (t === '-c') {
+      i++; // -c name=val — skip its value
+    } else if (!t.startsWith('-')) {
+      break; // the subcommand — git's global options end here
+    }
+  }
+  return out;
+}
+
+// The repository identity of `dir`: its absolute git common dir — shared by
+// the main checkout and every linked worktree — normalized for comparison.
+// Null when git cannot answer (missing dir, not a repo, spawn fault).
+const repoKeyCache = new Map();
+function repoKeyFor(dir) {
+  const key = normalizeFsPath(dir);
+  if (repoKeyCache.has(key)) return repoKeyCache.get(key);
+  let out = null;
+  try {
+    const r = spawnSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    // Relative output (e.g. `.git`) is relative to the spawn cwd.
+    if (r.status === 0 && !r.error) out = normalizeFsPath(resolve(dir, r.stdout.trim()));
+  } catch {
+    /* unresolvable — fall through to null */
+  }
+  repoKeyCache.set(key, out);
+  return out;
+}
+
+// Effective cwd when each statement runs: the payload cwd folded through the
+// directory changes before it. Null = poisoned (unknown from that point on).
+const stmtCwd = [];
+{
+  let cur = payloadCwd || root;
+  for (const s of subCmds) {
+    stmtCwd.push(cur);
+    if (cur === null) continue;
+    const eff = cdEffect(s);
+    if (eff) cur = eff.poison ? null : resolve(cur, eff.to);
+  }
+}
+
+// Whether the statement at index i targets THIS repository. Fail-closed: a
+// poisoned cwd, an unmodeled repo override, or a failed identity lookup on
+// EITHER side all answer true (the gate runs — the pre-scoping behavior).
+function statementTargetsThisRepo(i) {
+  const base = stmtCwd[i];
+  if (base === null) return true;
+  const dir = gitTargetDir(subCmds[i], base);
+  if (dir === null) return true;
+  if (normalizeFsPath(dir) === normalizeFsPath(root)) return true; // the common case, no spawn
+  const targetKey = repoKeyFor(dir);
+  const ownKey = repoKeyFor(root);
+  return targetKey === null || ownKey === null || targetKey === ownKey;
+}
+
+const commitSubCmds = subCmds.filter((s, i) => isCommitCreating(s) && statementTargetsThisRepo(i));
+const pushSubCmds = subCmds.filter((s, i) => isPush(s) && statementTargetsThisRepo(i));
+
+// Every detected commit/push lands in a DIFFERENT repository — this gate has
+// no jurisdiction there. Exit before any leg runs.
 if (commitSubCmds.length === 0 && pushSubCmds.length === 0) process.exit(0);
 
 // Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,

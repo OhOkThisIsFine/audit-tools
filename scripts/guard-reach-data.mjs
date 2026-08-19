@@ -387,6 +387,16 @@ export const GUARDS = [
     note: 'Build 1 (P23) child-session commit/push refusal + push narrowness leg of the pre-commit-gate family',
   },
   {
+    id: 'pre-commit-target-repo-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-target-repo.test.ts',
+    note:
+      'target-repo scoping leg of the pre-commit-gate family: a commit/push into a DIFFERENT ' +
+      'repository (via cd chain, `git -C`, or the payload cwd) is out of jurisdiction — closes the ' +
+      '2026-08-19 false-RED class (an unrelated repo\'s commit blocked by audit-tools\' red index) — ' +
+      'while linked worktrees of THIS repo and unresolvable targets stay gated, fail-closed',
+  },
+  {
     id: 'loop-core-gate-parity-test',
     kind: 'contract-test',
     impl: 'tests/shared/loop-core-gate-parity.test.ts',
@@ -524,6 +534,7 @@ export const REACH = [
       'pre-commit-attestation-test',
       'pre-commit-branch-strand-test',
       'pre-commit-child-session-test',
+      'pre-commit-target-repo-test',
       'pre-commit-derived-legs-test',
       'loop-core-gate-parity-test',
       'offload-lane-probe-test',
