@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   louvain,
+  modularityOf,
   resolutionSweep,
   DEFAULT_RESOLUTIONS,
   decompose,
@@ -405,5 +406,119 @@ describe("decompose — consensus vs contested", () => {
       consensus: [],
       contested: [],
     });
+  });
+});
+
+// ── Modularity: determinism under permutation, and arithmetic envelope ───────
+
+/** Deterministic LCG — permutation tests must not depend on Math.random. */
+function shuffled<T>(values: readonly T[], seed: number): T[] {
+  const out = [...values];
+  let state = seed >>> 0;
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    const j = state % (i + 1);
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
+/** Two 5-cliques joined by one weak bridge, plus an isolated node. */
+function permutationFixture(): WeightedGraph {
+  const nodes: string[] = ["isolated"];
+  const edges: Array<{ a: string; b: string; weight: number }> = [];
+  for (const [prefix, weight] of [["p", 9], ["q", 7]] as const) {
+    const group = [1, 2, 3, 4, 5].map((n) => `${prefix}${n}`);
+    nodes.push(...group);
+    for (let i = 0; i < group.length; i += 1) {
+      for (let j = i + 1; j < group.length; j += 1) {
+        edges.push({ a: group[i]!, b: group[j]!, weight });
+      }
+    }
+  }
+  edges.push({ a: "p5", b: "q1", weight: 1 });
+  return { nodes, edges };
+}
+
+describe("modularity — permutation invariance of the algorithm itself", () => {
+  it("is invariant to edge order, endpoint orientation, and node-universe order", () => {
+    const base = permutationFixture();
+    const expectedPartition = partitionObject(louvain(base, 1));
+    const expectedQuality = modularityOf(base, louvain(base, 1), 1);
+    expect(communities(louvain(base, 1))).toEqual([
+      ["isolated"],
+      ["p1", "p2", "p3", "p4", "p5"],
+      ["q1", "q2", "q3", "q4", "q5"],
+    ]);
+
+    for (let seed = 1; seed <= 8; seed += 1) {
+      const permuted: WeightedGraph = {
+        // node-universe order
+        nodes: shuffled(base.nodes, seed * 31),
+        // edge order + endpoint orientation
+        edges: shuffled(base.edges, seed * 17).map((edge, index) =>
+          (index + seed) % 2 === 0
+            ? edge
+            : { a: edge.b, b: edge.a, weight: edge.weight },
+        ),
+      };
+      const partition = louvain(permuted, 1);
+      expect(partitionObject(partition), `seed ${seed} partition`).toEqual(
+        expectedPartition,
+      );
+      expect(modularityOf(permuted, partition, 1), `seed ${seed} Q`).toBe(
+        expectedQuality,
+      );
+    }
+  });
+
+  it("scores the trivial whole-graph partition at exactly 1 − γ", () => {
+    const base = permutationFixture();
+    const whole: Partition = new Map(base.nodes.map((node) => [node, "all"]));
+    expect(modularityOf(base, whole, 1)).toBeCloseTo(0, 12);
+    expect(modularityOf(base, whole, 0.5)).toBeCloseTo(0.5, 12);
+    expect(modularityOf({ nodes: ["a"], edges: [] }, new Map([["a", "a"]]), 1)).toBe(0);
+  });
+});
+
+describe("modularity — arithmetic envelope", () => {
+  /** A banded graph whose weights are supplied by `weightAt`. */
+  function banded(n: number, weightAt: (i: number, j: number) => number): WeightedGraph {
+    const nodes = Array.from({ length: n }, (_, i) => `n${String(i).padStart(3, "0")}`);
+    const edges: Array<{ a: string; b: string; weight: number }> = [];
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < Math.min(n, i + 4); j += 1) {
+        edges.push({ a: nodes[i]!, b: nodes[j]!, weight: weightAt(i, j) });
+      }
+    }
+    return { nodes, edges };
+  }
+
+  it("partitions fractional weights whose accumulation drifts past a fixed epsilon", () => {
+    // The community-degree guard compared the add-then-subtract residual against
+    // a FIXED -1e-12. At ~1e5-magnitude fractional weights the residual is larger
+    // than that by float arithmetic alone, so a perfectly ordinary graph was
+    // refused with "Community degree … became negative".
+    const g = banded(120, (i, j) => 98_765.4321 + (i % 11) * 0.5678 + j * 0.0009);
+    const partition = louvain(g, 1);
+    expect(partition.size).toBe(120);
+    expect(Number.isFinite(modularityOf(g, partition, 1))).toBe(true);
+  });
+
+  it("partitions large integer weights whose γ·k·Σtot intermediate exceeds MAX_SAFE_INTEGER", () => {
+    // Rescaling weights by 1e6 — the obvious way to make fractional metrics
+    // integral — put the INTERMEDIATE product γ·k_i·Σtot over MAX_SAFE_INTEGER
+    // while the mathematical value γ·k_i·Σtot/2m stayed small, refusing a graph
+    // whose real arithmetic is nowhere near the limit.
+    const g = banded(60, (i, j) => (220 + ((i * 7 + j) % 130)) * 1_000_000);
+    const partition = louvain(g, 1);
+    expect(partition.size).toBe(60);
+    expect(Number.isFinite(modularityOf(g, partition, 1))).toBe(true);
+  });
+
+  it("still refuses weights whose graph mass genuinely leaves the exact range", () => {
+    expect(() =>
+      louvain(banded(60, (i, j) => (220 + ((i * 7 + j) % 130)) * 100_000_000_000), 1),
+    ).toThrow(/mass/i);
   });
 });

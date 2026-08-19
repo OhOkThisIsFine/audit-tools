@@ -17,7 +17,10 @@ import { FindingSchema, findingIdentity } from "../../src/shared/types/finding.j
 import { SEVERITIES } from "../../src/shared/types/lens.js";
 import { buildObligationLedger } from "../../src/shared/types/obligationLedger.js";
 import { CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION } from "../../src/shared/types/contractPipeline.js";
-import { buildContentCoherenceTrace } from "../../src/shared/decompose/contentCoherence.js";
+import {
+  FINDINGS_DRAW_COHERENCE_POLICY,
+  buildContentCoherenceTrace,
+} from "../../src/shared/decompose/contentCoherence.js";
 import {
   validateAuditFindingsReport,
   isValidAuditFindingsReport,
@@ -241,7 +244,10 @@ test("INV-shared-core-06: validateAuditFindingsReport passes with correct contra
   const issues = validateAuditFindingsReport({
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     findings: [],
-    coherence_trace: buildContentCoherenceTrace({ items: [] }),
+    coherence_trace: buildContentCoherenceTrace(
+      { items: [] },
+      FINDINGS_DRAW_COHERENCE_POLICY,
+    ),
     work_blocks: [],
     work_block_seams: [],
     summary: {
@@ -294,14 +300,17 @@ test("INV-shared-core-06: approved projection enforces closed membership and rec
       runtime_validation_status_breakdown: {},
     },
     findings: [approved],
-    coherence_trace: buildContentCoherenceTrace({
-      items: [{
-        id: approved.id,
-        file_paths: approved.affected_files.map((file) => file.path),
-        unit_ids: ["unit-1"],
-        tags: [approved.lens],
-      }],
-    }),
+    coherence_trace: buildContentCoherenceTrace(
+      {
+        items: [{
+          id: approved.id,
+          file_paths: approved.affected_files.map((file) => file.path),
+          unit_ids: ["unit-1"],
+          tags: [approved.lens],
+        }],
+      },
+      FINDINGS_DRAW_COHERENCE_POLICY,
+    ),
     quarantined_findings: [quarantined],
     work_blocks: [{
       id: "block-1",
@@ -574,4 +583,114 @@ test("INV-shared-core-16: settings.json registers pre-commit-gate as a PreToolUs
     (h: unknown) => JSON.stringify(h).includes("pre-commit-gate"),
   );
   expect(gateHooks.length > 0, "settings.json PreToolUse must include at least one pre-commit-gate.mjs hook — CRIT-tests-with-source").toBeTruthy();
+});
+
+// ── Work-block seams: ONE derivation, two findings-draw producers ────────────
+// `buildAuditFindingsDeliverable` hard-coded `work_block_seams: []`. That was
+// vacuously true while any two findings on one file merged; under the
+// file-AND-lens rule they no longer do, so a contested file now yields several
+// blocks and the hard-coded empty list silently drops the write conflict —
+// which `emitAutonomousLeftoverDeliverable` round-trips into a Path-A seed whose
+// phase cut then dispatches the contesting blocks in parallel, ungated.
+
+function seamProbeFindings(): Finding[] {
+  return (["security", "reliability", "performance"] as const).map((lens, index) => ({
+    id: `SP-${index + 1}`,
+    title: `probe ${lens}`,
+    category: "test",
+    severity: "medium",
+    confidence: "high",
+    lens,
+    summary: `probe ${lens}`,
+    affected_files: [{ path: "src/contested.ts" }],
+  }));
+}
+
+test("INV-shared-core-17: the leftover deliverable emits the seam for a contested file", async () => {
+  const { buildAuditFindingsDeliverable } = await import(
+    "../../src/shared/reporting/auditDeliverable.js"
+  );
+  const report = buildAuditFindingsDeliverable(seamProbeFindings());
+
+  // Three lenses over one file → three blocks, all contesting `src/contested.ts`.
+  expect(report.work_blocks).toHaveLength(3);
+  expect(report.work_block_seams).toHaveLength(1);
+  expect(report.work_block_seams[0]).toMatchObject({
+    file: "src/contested.ts",
+    kind: "predicted_write_conflict",
+    requires_preparation: true,
+  });
+  expect(report.work_block_seams[0]!.block_ids).toEqual([
+    "block-1",
+    "block-2",
+    "block-3",
+  ]);
+  // The contract validator must accept what the producer emits.
+  expect(validateAuditFindingsReport(report)).toEqual([]);
+});
+
+test("INV-shared-core-17: both findings-draw producers derive identical seams", async () => {
+  const { buildAuditFindingsDeliverable } = await import(
+    "../../src/shared/reporting/auditDeliverable.js"
+  );
+  const { buildWorkBlockPartition } = await import(
+    "../../src/audit/reporting/workBlocks.js"
+  );
+  const findings = seamProbeFindings();
+
+  expect(buildAuditFindingsDeliverable(findings).work_block_seams).toEqual(
+    buildWorkBlockPartition({ findings }).seams,
+  );
+});
+
+test("INV-shared-core-18: the seam schema refuses a duplicate block id or a non-preparing seam", async () => {
+  const { WorkBlockSeamSchema } = await import(
+    "../../src/shared/types/finding.js"
+  );
+  const base = {
+    id: "seam-000000000000",
+    file: "src/contested.ts",
+    block_ids: ["block-1", "block-2"],
+    kind: "predicted_write_conflict" as const,
+    requires_preparation: true,
+    rationale: "two components cite the same predicted write path",
+  };
+  expect(WorkBlockSeamSchema.safeParse(base).success).toBe(true);
+  // `.min(2)` is load-bearing now, so one block repeated must not satisfy it.
+  expect(
+    WorkBlockSeamSchema.safeParse({ ...base, block_ids: ["block-1", "block-1"] })
+      .success,
+  ).toBe(false);
+  // A contested file IS a write conflict; a `false` seam would be silently
+  // dropped by the remediation gate's requires_preparation filter.
+  expect(
+    WorkBlockSeamSchema.safeParse({ ...base, requires_preparation: false }).success,
+  ).toBe(false);
+});
+
+test("INV-shared-core-18: narrowing a seam to surviving blocks restates its own count", async () => {
+  const { projectAuditFindingsReportSubset } = await import(
+    "../../src/shared/validation/findingsReport.js"
+  );
+  const { buildAuditFindingsDeliverable } = await import(
+    "../../src/shared/reporting/auditDeliverable.js"
+  );
+  const probe = seamProbeFindings();
+  const report = buildAuditFindingsDeliverable(probe);
+  expect(report.work_block_seams[0]!.rationale).toContain("3 components");
+
+  const subset = projectAuditFindingsReportSubset(report, probe.slice(0, 2));
+  expect(subset.work_block_seams).toHaveLength(1);
+  const narrowed = subset.work_block_seams[0]!;
+  expect(narrowed.block_ids).toHaveLength(2);
+  // The rationale counted three blocks; after narrowing it must count two, or
+  // the persisted seam contradicts its own block list.
+  expect(narrowed.rationale).toContain("2 components");
+  expect(narrowed.rationale).not.toContain("3 components");
+  expect(validateAuditFindingsReport(subset)).toEqual([]);
+
+  // A seam whose survivors drop below two is no longer a conflict.
+  expect(
+    projectAuditFindingsReportSubset(report, probe.slice(0, 1)).work_block_seams,
+  ).toEqual([]);
 });

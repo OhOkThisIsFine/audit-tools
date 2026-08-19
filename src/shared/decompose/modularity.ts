@@ -8,6 +8,23 @@
 // persists across resolutions is trusted. This module owns only the clustering;
 // the stability scoring across the resulting partitions lives in consensus.ts.
 //
+// ARITHMETIC ENVELOPE — what this module accepts, stated honestly. Weights must
+// be finite and positive, and the GRAPH MASS (Σ degrees) must stay inside the
+// exact-integer range; a graph past that is refused rather than silently
+// approximated, because community membership must not depend on input order
+// changing the rounding of very large repeated sums. Two narrower limits were
+// removed after they refused ordinary inputs: the community-degree guard now
+// scales its tolerance to the graph mass instead of a fixed 1e-12 (fractional
+// weights around 1e5 drift past a fixed epsilon by float arithmetic alone), and
+// the modularity penalty divides by 2m before multiplying by Σtot so the bounded
+// VALUE is checked rather than an unbounded intermediate. NOT fixed: the degree
+// guard binds at every AGGREGATED level, where super-node degrees are larger
+// than any original node's, so the mass at which a graph is refused depends on
+// how many Louvain levels it produces — which is data-dependent, and at γ > 1
+// (more, smaller communities → more levels) not monotone in the input size.
+// Nothing in this repo runs above γ = 1; a metric sweep that does should
+// re-measure rather than assume the envelope scales smoothly.
+//
 // PURE + DETERMINISTIC: no IO, no Math.random, no Date. Ties are broken by
 // lexical node/community id so the same graph always yields the same partition.
 // Language-neutral by construction — it consumes only string node ids and numeric
@@ -193,6 +210,14 @@ function localMoving(
   resolution: number,
 ): { communityOf: Map<string, string>; moved: boolean } {
   const twoM = checkedMultiply(graph.totalWeight, 2, "Graph mass");
+  // A community's degree is repeatedly added to and subtracted from as nodes
+  // move, and floating-point residue from that scales with the MAGNITUDE of the
+  // sums, not with a fixed absolute epsilon. A fixed -1e-12 therefore refused
+  // ordinary fractional-weight graphs ("Community degree … became negative") as
+  // soon as weights reached ~1e5 over ~100 nodes. Scale the tolerance to the
+  // graph's own mass; a genuinely negative degree is a whole weight below zero
+  // and stays far outside it.
+  const negativeDegreeTolerance = Math.max(1e-9, twoM * 1e-12);
   const communityOf = new Map<string, string>();
   // Σtot(C): total degree of nodes currently in community C.
   const communityDegree = new Map<string, number>();
@@ -221,7 +246,7 @@ function localMoving(
       // Remove node from its community.
       const remainingDegree = (communityDegree.get(current) ?? 0) - nodeDegree;
       assertSignedBounded(remainingDegree, `Community degree for ${current}`);
-      if (remainingDegree < -1e-12) {
+      if (remainingDegree < -negativeDegreeTolerance) {
         throw new RangeError(`Community degree for ${current} became negative.`);
       }
       communityDegree.set(current, Math.max(0, remainingDegree));
@@ -256,12 +281,12 @@ function localMoving(
           nodeDegree,
           `Modularity resolution-degree product for ${node}`,
         );
-        const numerator = checkedMultiply(
-          scaledDegree,
-          sigmaTot,
-          `Modularity mass product for ${node}`,
-        );
-        const penalty = numerator / twoM;
+        // DIVIDE BEFORE MULTIPLYING. The value γ·k_i·Σtot/2m is bounded by γ·k_i
+        // because Σtot ≤ 2m, but the intermediate product γ·k_i·Σtot is not:
+        // rescaling integral weights by 1e6 — the obvious way to make fractional
+        // metrics exact — pushed it past MAX_SAFE_INTEGER and refused a graph
+        // whose real arithmetic was nowhere near the limit. Bound the RESULT.
+        const penalty = (scaledDegree / twoM) * sigmaTot;
         assertSignedBounded(penalty, `Modularity penalty for ${node}`);
         const gain = kiIn - penalty;
         assertSignedBounded(gain, `Modularity gain for ${node}`);
@@ -393,6 +418,70 @@ export function louvain(graph: WeightedGraph, resolution: number): Partition {
     result.set(node, community);
   }
   return canonicalizeCommunities(result);
+}
+
+/**
+ * Score a partition with the resolution-parameterised modularity Q the
+ * {@link louvain} local-moving phase optimises:
+ *
+ *   Q = Σ_c [ Σ_in(c)/m − γ·(Σ_tot(c)/2m)² ]
+ *
+ * where Σ_in(c) is the intra-community edge weight (each undirected pair counted
+ * once, self-loops once), Σ_tot(c) the summed degree of its members, and m the
+ * graph mass. The convention is self-consistent rather than universal, and that
+ * is what it is for: the ONE trivial partition (every node in one community)
+ * scores exactly `1 − γ`, so comparing a candidate partition against the whole
+ * needs no tuned constant — at the canonical γ = 1 the comparison is against 0.
+ *
+ * Deterministic: communities are accumulated in lexical id order, so the same
+ * graph and partition always yield the same float.
+ */
+export function modularityOf(
+  graph: WeightedGraph,
+  partition: Partition,
+  resolution: number,
+): number {
+  assertPositiveBounded(resolution, "Modularity resolution");
+  const base = buildAdjacency(graph);
+  if (base.totalWeight === 0) return 0;
+  const twoM = checkedMultiply(base.totalWeight, 2, "Graph mass");
+
+  const internal = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const node of base.nodes) {
+    const community = partition.get(node) ?? node;
+    total.set(
+      community,
+      checkedAdd(
+        total.get(community) ?? 0,
+        base.degree.get(node) ?? 0,
+        `Community degree for ${community}`,
+      ),
+    );
+    const row = base.adjacency.get(node) ?? new Map<string, number>();
+    for (const [neighbor, weight] of row) {
+      // Visit each undirected pair once; a self-loop (neighbor === node) is not
+      // skipped, so it contributes its weight exactly once.
+      if (compareNodeIds(neighbor, node) < 0) continue;
+      if ((partition.get(neighbor) ?? neighbor) !== community) continue;
+      internal.set(
+        community,
+        checkedAdd(
+          internal.get(community) ?? 0,
+          weight,
+          `Community internal weight for ${community}`,
+        ),
+      );
+    }
+  }
+
+  let quality = 0;
+  for (const community of [...total.keys()].sort(compareNodeIds)) {
+    const share = (total.get(community) ?? 0) / twoM;
+    quality += (internal.get(community) ?? 0) / base.totalWeight - resolution * share * share;
+    assertSignedBounded(quality, `Modularity accumulation for ${community}`);
+  }
+  return quality;
 }
 
 /**

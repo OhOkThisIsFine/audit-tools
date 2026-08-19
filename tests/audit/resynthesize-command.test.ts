@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import type { AuditFindingsReport } from "audit-tools/shared";
-import { buildContentCoherenceTrace } from "../../src/shared/decompose/contentCoherence.js";
+import {
+  FINDINGS_DRAW_COHERENCE_POLICY,
+  buildContentCoherenceTrace,
+} from "../../src/shared/decompose/contentCoherence.js";
 
 const { runCli } = await import("../../src/audit/cli.js");
 const {
@@ -50,14 +53,17 @@ function makeReport(overrides: Partial<AuditFindingsReport> = {}): AuditFindings
       runtime_validation_status_breakdown: { pass: 1 },
     },
     findings,
-    coherence_trace: buildContentCoherenceTrace({
-      items: findings.map((finding) => ({
-        id: finding.id,
-        file_paths: finding.affected_files.map((file) => file.path),
-        unit_ids: ["unit-core"],
-        tags: [finding.lens],
-      })),
-    }),
+    coherence_trace: buildContentCoherenceTrace(
+      {
+        items: findings.map((finding) => ({
+          id: finding.id,
+          file_paths: finding.affected_files.map((file) => file.path),
+          unit_ids: ["unit-core"],
+          tags: [finding.lens],
+        })),
+      },
+      FINDINGS_DRAW_COHERENCE_POLICY,
+    ),
     work_block_seams: [],
     work_blocks: [
       {

@@ -6,10 +6,20 @@ const RED_SIGNATURE = "contract:shared-content-coherence:not-yet-satisfied";
 
 type UnknownRecord = Record<string, unknown>;
 
+interface CoherencePolicy {
+  readonly eligibility: string;
+  readonly refineAtModularityPeak: boolean;
+}
+
 interface CoreModule {
   readonly CONTENT_COHERENCE_SCORES: Readonly<Record<string, number>>;
-  readonly buildContentCoherenceTrace: (input: UnknownRecord) => UnknownRecord;
+  readonly buildContentCoherenceTrace: (
+    input: UnknownRecord,
+    policy: CoherencePolicy,
+  ) => UnknownRecord;
   readonly ContentCoherenceTraceSchema: { readonly shape: UnknownRecord };
+  readonly TASK_DRAW_COHERENCE_POLICY: CoherencePolicy;
+  readonly FINDINGS_DRAW_COHERENCE_POLICY: CoherencePolicy;
 }
 
 /**
@@ -56,7 +66,9 @@ async function loadCore(): Promise<CoreModule> {
     if (
       typeof loaded.buildContentCoherenceTrace !== "function" ||
       loaded.CONTENT_COHERENCE_SCORES === undefined ||
-      loaded.ContentCoherenceTraceSchema === undefined
+      loaded.ContentCoherenceTraceSchema === undefined ||
+      loaded.TASK_DRAW_COHERENCE_POLICY === undefined ||
+      loaded.FINDINGS_DRAW_COHERENCE_POLICY === undefined
     ) {
       throw new Error("shared coherence exports are absent");
     }
@@ -350,18 +362,37 @@ describe(RED_SIGNATURE, () => {
       shared_unit: 80,
     });
 
-    const trace = core.buildContentCoherenceTrace(goldenInput());
+    const trace = core.buildContentCoherenceTrace(
+      goldenInput(),
+      core.TASK_DRAW_COHERENCE_POLICY,
+    );
     expect(traceProjection(trace), RED_SIGNATURE).toEqual(GOLDEN);
     expect(trace.normalized_items).toEqual(goldenItems().sort((a, b) =>
       String(a.id) < String(b.id) ? -1 : 1,
     ));
   });
 
+  it("declares exactly two draw policies and refines only the findings draw", async () => {
+    const core = await loadCore();
+    // Eligibility is a POLICY AXIS of the ONE shared core, never a fork: the two
+    // draws differ by these values and by nothing else.
+    expect(core.TASK_DRAW_COHERENCE_POLICY).toEqual({
+      eligibility: "weighted_score_threshold",
+      refineAtModularityPeak: false,
+    });
+    expect(core.FINDINGS_DRAW_COHERENCE_POLICY).toEqual({
+      eligibility: "shared_file_and_same_lens",
+      refineAtModularityPeak: true,
+    });
+  });
+
   it("scores every boolean class once, honors aliases, and rejects unknown relations", async () => {
     const core = await loadCore();
-    // Every relationship kind maps onto exactly one evidence class, and the
-    // weight table (asserted verbatim above) decides whether that ONE class
-    // clears the 60 threshold on its own. Membership is the observable form.
+    const task = core.TASK_DRAW_COHERENCE_POLICY;
+    // Every relationship kind maps onto exactly one evidence class, and under the
+    // TASK draw's weighted-score eligibility the weight table (asserted verbatim
+    // above) decides whether that ONE class clears the 60 threshold on its own.
+    // Membership is the observable form.
     for (const kind of [
       "shared_file",
       "cross_lens_same_file",
@@ -369,11 +400,11 @@ describe(RED_SIGNATURE, () => {
       "call_adjacent",
       "same_flow",
     ]) {
-      const trace = core.buildContentCoherenceTrace(relatedOnly(kind));
+      const trace = core.buildContentCoherenceTrace(relatedOnly(kind), task);
       expect(merged(trace, "left", "right"), `${kind} must merge alone`).toBe(true);
     }
     for (const kind of ["same_lens", "same_dir"]) {
-      const trace = core.buildContentCoherenceTrace(relatedOnly(kind));
+      const trace = core.buildContentCoherenceTrace(relatedOnly(kind), task);
       expect(merged(trace, "left", "right"), `${kind} must not merge alone`).toBe(
         false,
       );
@@ -381,7 +412,10 @@ describe(RED_SIGNATURE, () => {
     // 30 + 10 still under threshold — weak classes accumulate but do not reach it.
     expect(
       merged(
-        core.buildContentCoherenceTrace(relatedOnly("same_lens", "same_dir")),
+        core.buildContentCoherenceTrace(
+          relatedOnly("same_lens", "same_dir"),
+          task,
+        ),
         "left",
         "right",
       ),
@@ -389,13 +423,16 @@ describe(RED_SIGNATURE, () => {
     // Endpoint order is canonicalized: a reversed relationship is the same pair.
     expect(
       merged(
-        core.buildContentCoherenceTrace({
-          items: [
-            { id: "left", file_paths: [], unit_ids: [], tags: [] },
-            { id: "right", file_paths: [], unit_ids: [], tags: [] },
-          ],
-          relationships: [{ left: "right", right: "left", kind: "shared_file" }],
-        }),
+        core.buildContentCoherenceTrace(
+          {
+            items: [
+              { id: "left", file_paths: [], unit_ids: [], tags: [] },
+              { id: "right", file_paths: [], unit_ids: [], tags: [] },
+            ],
+            relationships: [{ left: "right", right: "left", kind: "shared_file" }],
+          },
+          task,
+        ),
         "left",
         "right",
       ),
@@ -403,51 +440,151 @@ describe(RED_SIGNATURE, () => {
     // Direct (relationship-free) evidence scores identically.
     expect(
       merged(
-        core.buildContentCoherenceTrace({
-          items: [
-            { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
-            { id: "right", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
-          ],
-        }),
+        core.buildContentCoherenceTrace(
+          {
+            items: [
+              { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
+              { id: "right", file_paths: ["src/x.ts"], unit_ids: [], tags: [] },
+            ],
+          },
+          task,
+        ),
         "left",
         "right",
       ),
     ).toBe(true);
     expect(
       merged(
-        core.buildContentCoherenceTrace({
-          items: [
-            { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: ["t"] },
-            { id: "right", file_paths: ["src/y.ts"], unit_ids: [], tags: ["t"] },
-          ],
-        }),
+        core.buildContentCoherenceTrace(
+          {
+            items: [
+              { id: "left", file_paths: ["src/x.ts"], unit_ids: [], tags: ["t"] },
+              { id: "right", file_paths: ["src/y.ts"], unit_ids: [], tags: ["t"] },
+            ],
+          },
+          task,
+        ),
         "left",
         "right",
       ),
     ).toBe(false);
 
     expect(() =>
-      core.buildContentCoherenceTrace({
-        items: [
-          { id: "a", file_paths: [], unit_ids: [], tags: [] },
-          { id: "b", file_paths: [], unit_ids: [], tags: [] },
-        ],
-        relationships: [{ left: "a", right: "b", kind: "mystery" }],
-      }),
+      core.buildContentCoherenceTrace(
+        {
+          items: [
+            { id: "a", file_paths: [], unit_ids: [], tags: [] },
+            { id: "b", file_paths: [], unit_ids: [], tags: [] },
+          ],
+          relationships: [{ left: "a", right: "b", kind: "mystery" }],
+        },
+        task,
+      ),
     ).toThrow(/unknown.*mystery/i);
+  });
+
+  it("joins a findings-draw pair only on shared_file AND same_lens", async () => {
+    const core = await loadCore();
+    const findings = core.FINDINGS_DRAW_COHERENCE_POLICY;
+    const pair = (
+      left: UnknownRecord,
+      right: UnknownRecord,
+      relationships: UnknownRecord[] = [],
+    ): boolean =>
+      merged(
+        core.buildContentCoherenceTrace(
+          { items: [{ id: "left", ...left }, { id: "right", ...right }], relationships },
+          findings,
+        ),
+        "left",
+        "right",
+      );
+
+    // Both halves present → joins.
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: ["u"], tags: ["security"] },
+        { file_paths: ["src/x.ts"], unit_ids: ["u"], tags: ["security"] },
+      ),
+    ).toBe(true);
+    // Same file, different lens → does NOT join (this is the half the disjunctive
+    // rule cleared on `shared_file`'s weight of 100 alone).
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: ["u"], tags: ["security"] },
+        { file_paths: ["src/x.ts"], unit_ids: ["u"], tags: ["reliability"] },
+      ),
+    ).toBe(false);
+    // Same lens, no shared file → does NOT join, whatever else agrees.
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: ["u"], tags: ["security"] },
+        { file_paths: ["src/y.ts"], unit_ids: ["u"], tags: ["security"] },
+      ),
+    ).toBe(false);
+    // Neither call adjacency nor a shared critical flow can substitute for the
+    // conjunction — the two classes that carried the collapse.
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: [], tags: ["security"] },
+        { file_paths: ["src/y.ts"], unit_ids: [], tags: ["security"] },
+        [{ left: "left", right: "right", kind: "call_adjacent" }],
+      ),
+    ).toBe(false);
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: [], tags: ["security"] },
+        { file_paths: ["src/y.ts"], unit_ids: [], tags: ["security"] },
+        [{ left: "left", right: "right", kind: "same_flow" }],
+      ),
+    ).toBe(false);
+    // RELATIONSHIP-contributed evidence can never satisfy either conjunct. The
+    // `shared_file` / `cross_lens_same_file` / `same_lens` relationship kinds map
+    // onto the very bits the conjunction reads, so without this mask a caller
+    // that passed them would create eligibility and "same_lens is a hard
+    // partition no edge may cross" would hold only by call-site habit. The bits
+    // still raise the pair's WEIGHT, which is refinement's input.
+    expect(
+      pair(
+        { file_paths: [], unit_ids: [], tags: ["security"] },
+        { file_paths: [], unit_ids: [], tags: ["security"] },
+        [{ left: "left", right: "right", kind: "shared_file" }],
+      ),
+    ).toBe(false);
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: [], tags: ["security"] },
+        { file_paths: ["src/y.ts"], unit_ids: [], tags: ["reliability"] },
+        [
+          { left: "left", right: "right", kind: "cross_lens_same_file" },
+          { left: "left", right: "right", kind: "same_lens" },
+        ],
+      ),
+    ).toBe(false);
+    // …while the SAME two conjuncts supplied directly still join.
+    expect(
+      pair(
+        { file_paths: ["src/x.ts"], unit_ids: [], tags: ["security"] },
+        { file_paths: ["src/x.ts"], unit_ids: [], tags: ["security"] },
+        [{ left: "left", right: "right", kind: "call_adjacent" }],
+      ),
+    ).toBe(true);
   });
 
   it("uses threshold 60 inclusively and folds an already-connected triangle", async () => {
     const core = await loadCore();
-    const threshold = core.buildContentCoherenceTrace({
-      items: [
-        { id: "a", file_paths: ["x/a"], unit_ids: [], tags: [] },
-        { id: "b", file_paths: ["y/b"], unit_ids: [], tags: [] },
-        { id: "c", file_paths: ["x/c"], unit_ids: [], tags: ["tag"] },
-        { id: "d", file_paths: ["x/d"], unit_ids: [], tags: ["tag"] },
-      ],
-      relationships: [{ left: "a", right: "b", kind: "same_flow" }],
-    });
+    const threshold = core.buildContentCoherenceTrace(
+      {
+        items: [
+          { id: "a", file_paths: ["x/a"], unit_ids: [], tags: [] },
+          { id: "b", file_paths: ["y/b"], unit_ids: [], tags: [] },
+          { id: "c", file_paths: ["x/c"], unit_ids: [], tags: ["tag"] },
+          { id: "d", file_paths: ["x/d"], unit_ids: [], tags: ["tag"] },
+        ],
+        relationships: [{ left: "a", right: "b", kind: "same_flow" }],
+      },
+      core.TASK_DRAW_COHERENCE_POLICY,
+    );
     // a/b score exactly 60 (shared_critical_flow, different dirs) → merged: the
     // threshold is inclusive. c/d score 40 (same_directory 10 + same tag 30).
     expect(merged(threshold, "a", "b")).toBe(true);
@@ -456,25 +593,171 @@ describe(RED_SIGNATURE, () => {
 
     // A triangle: the third eligible pair is already connected, so the union
     // is idempotent and the whole triangle is ONE component.
-    const triangle = core.buildContentCoherenceTrace({
-      items: ["c", "a", "b"].map((id) => ({
-        id,
-        file_paths: ["src/shared.ts"],
-        unit_ids: [],
-        tags: [],
-      })),
-      relationships: [],
-    });
+    const triangle = core.buildContentCoherenceTrace(
+      {
+        items: ["c", "a", "b"].map((id) => ({
+          id,
+          file_paths: ["src/shared.ts"],
+          unit_ids: [],
+          tags: [],
+        })),
+        relationships: [],
+      },
+      core.TASK_DRAW_COHERENCE_POLICY,
+    );
     expect(triangle.components).toEqual([["a", "b", "c"]]);
   });
 
   it("is byte-stable across permutations and covers every item exactly once", async () => {
     const core = await loadCore();
-    const forward = core.buildContentCoherenceTrace(goldenInput());
-    const reverse = core.buildContentCoherenceTrace(goldenInput(true));
+    const forward = core.buildContentCoherenceTrace(
+      goldenInput(),
+      core.TASK_DRAW_COHERENCE_POLICY,
+    );
+    const reverse = core.buildContentCoherenceTrace(
+      goldenInput(true),
+      core.TASK_DRAW_COHERENCE_POLICY,
+    );
     expect(JSON.stringify(reverse)).toBe(JSON.stringify(forward));
     const ids = (forward.components as string[][]).flat();
     expect(ids).toEqual(["a", "b", "c", "d", "e"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // ── Modularity-peak refinement (findings draw) ─────────────────────────────
+  // Constant-free granularity: inside every eligible-edge component, Louvain at
+  // the canonical resolution γ=1 proposes a split and the split is ACCEPTED only
+  // when its modularity strictly beats the whole component's. No budget,
+  // threshold, or ceiling of any denomination enters the decision.
+
+  /**
+   * Two 3-cliques (each: one shared file + one shared unit + one directory,
+   * pairwise score 220) joined by exactly ONE weak bridge — a single link file
+   * shared by `a3`/`b1` with no shared unit (score 140). Eligible-edge closure
+   * makes this ONE component; the bridge is the data-derived thin seam.
+   */
+  function twoClustersOneBridge(): UnknownRecord[] {
+    return [
+      { id: "a1", file_paths: ["alpha/a.ts"], unit_ids: ["uA"], tags: ["security"] },
+      { id: "a2", file_paths: ["alpha/a.ts"], unit_ids: ["uA"], tags: ["security"] },
+      {
+        id: "a3",
+        file_paths: ["alpha/a.ts", "link/shared.ts"],
+        unit_ids: ["uA"],
+        tags: ["security"],
+      },
+      {
+        id: "b1",
+        file_paths: ["beta/b.ts", "link/shared.ts"],
+        unit_ids: ["uB"],
+        tags: ["security"],
+      },
+      { id: "b2", file_paths: ["beta/b.ts"], unit_ids: ["uB"], tags: ["security"] },
+      { id: "b3", file_paths: ["beta/b.ts"], unit_ids: ["uB"], tags: ["security"] },
+    ];
+  }
+
+  it("splits a non-uniform same-file clique at its secondary-evidence contrast", async () => {
+    const core = await loadCore();
+    // Six findings on ONE file with ONE lens — a complete eligible graph — but
+    // two different units. Intra-unit pairs weigh 220, cross-unit pairs 140, and
+    // that contrast alone beats the whole component's modularity. So "a clique
+    // survives whole" is true of a UNIFORM-weight clique only; a same-file clique
+    // whose secondary evidence disagrees may still split, and its halves then
+    // contest the shared file as a seam. Two-sided below: the same six items with
+    // one unit stay whole.
+    const items = (unitOf: (index: number) => string): UnknownRecord[] =>
+      ["k1", "k2", "k3", "k4", "k5", "k6"].map((id, index) => ({
+        id,
+        file_paths: ["src/one.ts"],
+        unit_ids: [unitOf(index)],
+        tags: ["security"],
+      }));
+
+    const split = core.buildContentCoherenceTrace(
+      { items: items((index) => (index < 3 ? "uA" : "uB")) },
+      core.FINDINGS_DRAW_COHERENCE_POLICY,
+    );
+    expect(split.components).toEqual([
+      ["k1", "k2", "k3"],
+      ["k4", "k5", "k6"],
+    ]);
+    // Exhaustive and disjoint even after a same-file component is cut.
+    expect((split.components as string[][]).flat().sort()).toEqual([
+      "k1",
+      "k2",
+      "k3",
+      "k4",
+      "k5",
+      "k6",
+    ]);
+
+    const whole = core.buildContentCoherenceTrace(
+      { items: items(() => "uA") },
+      core.FINDINGS_DRAW_COHERENCE_POLICY,
+    );
+    expect(whole.components).toEqual([["k1", "k2", "k3", "k4", "k5", "k6"]]);
+  });
+
+  it("splits a loose component at its thin seam and keeps a uniform clique whole", async () => {
+    const core = await loadCore();
+    const findingsPolicy = core.FINDINGS_DRAW_COHERENCE_POLICY;
+
+    // Without refinement the bridge welds all six into one component: the split
+    // below is refinement's doing, not eligibility's.
+    const unrefined = core.buildContentCoherenceTrace(
+      { items: twoClustersOneBridge() },
+      { ...findingsPolicy, refineAtModularityPeak: false },
+    );
+    expect(unrefined.components).toEqual([["a1", "a2", "a3", "b1", "b2", "b3"]]);
+
+    const refined = core.buildContentCoherenceTrace(
+      { items: twoClustersOneBridge() },
+      findingsPolicy,
+    );
+    expect(refined.components).toEqual([
+      ["a1", "a2", "a3"],
+      ["b1", "b2", "b3"],
+    ]);
+
+    // A UNIFORM-weight clique has no thin seam: every split scores below the
+    // whole, so the component survives refinement intact. (A clique whose edge
+    // weights differ is a separate case — see the non-uniform test above.)
+    const clique = core.buildContentCoherenceTrace(
+      {
+        items: ["c6", "c1", "c4", "c2", "c5", "c3"].map((id) => ({
+          id,
+          file_paths: ["src/clique.ts"],
+          unit_ids: ["uC"],
+          tags: ["security"],
+        })),
+      },
+      findingsPolicy,
+    );
+    expect(clique.components).toEqual([
+      ["c1", "c2", "c3", "c4", "c5", "c6"],
+    ]);
+  });
+
+  it("keeps refinement permutation-invariant and item-exhaustive", async () => {
+    const core = await loadCore();
+    const findingsPolicy = core.FINDINGS_DRAW_COHERENCE_POLICY;
+    const forward = core.buildContentCoherenceTrace(
+      { items: twoClustersOneBridge() },
+      findingsPolicy,
+    );
+    const reverse = core.buildContentCoherenceTrace(
+      {
+        items: [...twoClustersOneBridge()].reverse().map((item) => ({
+          ...item,
+          file_paths: [...(item.file_paths as string[])].reverse(),
+        })),
+      },
+      findingsPolicy,
+    );
+    expect(JSON.stringify(reverse)).toBe(JSON.stringify(forward));
+    const ids = (forward.components as string[][]).flat();
+    expect([...ids].sort()).toEqual(["a1", "a2", "a3", "b1", "b2", "b3"]);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -509,21 +792,46 @@ describe(RED_SIGNATURE, () => {
       ],
       relationships: [{ left: "a", right: "b", kind: "same_flow" }],
     };
-    expect(core.buildContentCoherenceTrace(base).components).toEqual([["a", "b"]]);
+    expect(
+      core.buildContentCoherenceTrace(base, core.TASK_DRAW_COHERENCE_POLICY)
+        .components,
+    ).toEqual([["a", "b"]]);
     expect(() =>
-      core.buildContentCoherenceTrace({
-        ...base,
-        items: [
-          { ...(base.items[0] as UnknownRecord), annotations: { token_estimate: Number.NaN } },
-          base.items[1],
-        ],
-      }),
+      core.buildContentCoherenceTrace(
+        {
+          ...base,
+          items: [
+            { ...(base.items[0] as UnknownRecord), annotations: { token_estimate: Number.NaN } },
+            base.items[1],
+          ],
+        },
+        core.TASK_DRAW_COHERENCE_POLICY,
+      ),
     ).toThrow(/finite|annotation/i);
   });
 
-  it("makes audit packets and finding blocks project the identical core trace", async () => {
+  it("makes both draws project ONE core that differs only by its declared policy", async () => {
+    const core = await loadCore();
     const audit = await loadAuditProjection();
     const findings = await loadFindingsProjection();
+
+    // ONE core, ONE input, TWO policies — the whole divergence between the draws
+    // is these two values. Neither draw owns an algorithm the other lacks.
+    expect(
+      traceProjection(
+        core.buildContentCoherenceTrace(
+          goldenInput(),
+          core.TASK_DRAW_COHERENCE_POLICY,
+        ),
+      ),
+    ).toEqual(GOLDEN);
+    expect(
+      core.buildContentCoherenceTrace(
+        goldenInput(),
+        core.FINDINGS_DRAW_COHERENCE_POLICY,
+      ).components,
+    ).toEqual([["a"], ["b"], ["c"], ["d"], ["e"]]);
+
     const auditResult = audit.buildTaskCoherencePartition(
       consumerGoldenGraph(),
       {
@@ -536,15 +844,30 @@ describe(RED_SIGNATURE, () => {
       consumerGoldenFindings(),
     );
 
+    // The task draw is UNCHANGED by this lap.
     expect(traceProjection(auditResult.coherence_trace)).toEqual(GOLDEN);
-    expect(auditResult.coherence_trace).toEqual(findingsResult.coherence_trace);
     expect(
       auditResult.packets.map((packet) => packet.task_ids),
     ).toEqual(GOLDEN.components);
-    expect(componentMembers(findingsResult.blocks)).toEqual(GOLDEN.components);
     expect(auditResult.packets).toHaveLength(2);
     expect(auditResult.packets.some((packet) => packet.over_budget === true)).toBe(false);
-    expect(findingsResult.seams).toEqual([]);
+
+    // The findings draw keeps only `a`/`b`'s shared `src/x.ts` as an overlap, and
+    // their lenses differ — so they stay separate blocks and the contested file
+    // becomes a seam instead of a silent merge.
+    expect(componentMembers(findingsResult.blocks)).toEqual([
+      ["a"],
+      ["b"],
+      ["c"],
+      ["d"],
+      ["e"],
+    ]);
+    expect(findingsResult.seams).toHaveLength(1);
+    expect(findingsResult.seams[0]).toMatchObject({
+      file: "src/x.ts",
+      kind: "predicted_write_conflict",
+      requires_preparation: true,
+    });
     expectAcyclic(findingsResult.blocks);
   });
 
@@ -554,12 +877,25 @@ describe(RED_SIGNATURE, () => {
     const systemic = findings.buildWorkBlockPartition(consumerGoldenFindings(true));
 
     expect(systemic.coherence_trace).toEqual(regular.coherence_trace);
-    expect(componentMembers(systemic.blocks)).toEqual(GOLDEN.components);
+    expect(componentMembers(systemic.blocks)).toEqual([
+      ["a"],
+      ["b"],
+      ["c"],
+      ["d"],
+      ["e"],
+    ]);
     const owning = systemic.blocks.find((block) =>
       ((block.finding_ids as string[]) ?? []).includes("a"),
     );
     expect(owning).toMatchObject({ role: "coordination" });
-    expect(owning?.finding_ids).toEqual(["a", "b", "c"]);
+    expect(owning?.finding_ids).toEqual(["a"]);
+    // The systemic block contests `src/x.ts` with `b`, so its seam is escalated
+    // from a plain write conflict to a coordination seam.
+    expect(systemic.seams).toHaveLength(1);
+    expect(systemic.seams[0]).toMatchObject({
+      file: "src/x.ts",
+      kind: "systemic_coordination",
+    });
   });
 
   it("emits no trace field without a production reader", async () => {
@@ -570,13 +906,18 @@ describe(RED_SIGNATURE, () => {
     expect(Object.keys(core.ContentCoherenceTraceSchema.shape).sort()).toEqual(
       [...TRACE_FIELDS],
     );
-    const trace = core.buildContentCoherenceTrace(goldenInput());
-    expect(Object.keys(trace).sort()).toEqual([...TRACE_FIELDS]);
-    // The empty draw carries the same shape — no field appears only when
-    // populated.
-    expect(
-      Object.keys(core.buildContentCoherenceTrace({ items: [] })).sort(),
-    ).toEqual([...TRACE_FIELDS]);
+    for (const policy of [
+      core.TASK_DRAW_COHERENCE_POLICY,
+      core.FINDINGS_DRAW_COHERENCE_POLICY,
+    ]) {
+      const trace = core.buildContentCoherenceTrace(goldenInput(), policy);
+      expect(Object.keys(trace).sort()).toEqual([...TRACE_FIELDS]);
+      // The empty draw carries the same shape — no field appears only when
+      // populated.
+      expect(
+        Object.keys(core.buildContentCoherenceTrace({ items: [] }, policy)).sort(),
+      ).toEqual([...TRACE_FIELDS]);
+    }
   });
 
   it("stays hashable at audit scale (3,000 items)", async () => {
@@ -598,7 +939,10 @@ describe(RED_SIGNATURE, () => {
       unit_ids: [`unit-${index}`],
       tags: [`lens-${index % 11}`],
     }));
-    const trace = core.buildContentCoherenceTrace({ items });
+    const trace = core.buildContentCoherenceTrace(
+      { items },
+      core.FINDINGS_DRAW_COHERENCE_POLICY,
+    );
     expect((trace.components as string[][]).length).toBe(3000);
     const digest = hashArtifactValue("audit-findings.json", trace);
     expect(digest).toMatch(/^[0-9a-f]{64}$/u);

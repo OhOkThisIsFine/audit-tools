@@ -19,7 +19,11 @@ import type {
 import { AUDIT_FINDINGS_CONTRACT_VERSION } from "../validation/findingsReport.js";
 import { renderFindingBlockLines } from "./findingDisplay.js";
 import { countBy } from "../countBy.js";
-import { buildContentCoherenceTrace } from "../decompose/contentCoherence.js";
+import {
+  FINDINGS_DRAW_COHERENCE_POLICY,
+  buildContentCoherenceTrace,
+} from "../decompose/contentCoherence.js";
+import { deriveWorkBlockSeams } from "../decompose/workBlockSeams.js";
 import {
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
@@ -56,15 +60,18 @@ function lensBreakdown(findings: readonly Finding[]): Record<string, number> {
 export function buildAuditFindingsDeliverable(
   findings: readonly Finding[],
 ): AuditFindingsReport {
-  const coherenceTrace = buildContentCoherenceTrace({
-    items: findings.map((finding) => ({
-      id: finding.id,
-      file_paths: finding.affected_files.map((file) => file.path),
-      unit_ids: [],
-      tags: [finding.lens],
-    })),
-    relationships: [],
-  });
+  const coherenceTrace = buildContentCoherenceTrace(
+    {
+      items: findings.map((finding) => ({
+        id: finding.id,
+        file_paths: finding.affected_files.map((file) => file.path),
+        unit_ids: [],
+        tags: [finding.lens],
+      })),
+      relationships: [],
+    },
+    FINDINGS_DRAW_COHERENCE_POLICY,
+  );
   const findingById = new Map(findings.map((finding) => [finding.id, finding]));
   const blocks: WorkBlock[] = coherenceTrace.components.map((ids, index) => {
     const members = ids.map((id) => findingById.get(id)!);
@@ -112,7 +119,11 @@ export function buildAuditFindingsDeliverable(
     findings: [...findings],
     coherence_trace: coherenceTrace,
     work_blocks: blocks,
-    work_block_seams: [],
+    // Derived, never assumed empty: under the findings draw's file-AND-lens
+    // eligibility a file cited by several lenses lands in several blocks, and a
+    // hard-coded [] would hand the remediator a seed whose phase cut runs those
+    // blocks in parallel over the same write path.
+    work_block_seams: deriveWorkBlockSeams(blocks),
   };
 }
 

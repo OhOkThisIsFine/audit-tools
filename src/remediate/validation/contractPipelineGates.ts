@@ -19,6 +19,8 @@ import { join } from "node:path";
 import {
   type ValidationIssue,
   type Finding,
+  type WorkBlockSeam,
+  WorkBlockSeamSchema,
   isRecord,
   pushValidationIssue,
   groundDesignFinding,
@@ -766,8 +768,33 @@ export function validateWorkBlockSeamPreparation(
   if (!isRecord(pathASeedPayload) || !Array.isArray(pathASeedPayload.work_block_seams)) {
     return issues;
   }
-  const requiredSeams = (pathASeedPayload.work_block_seams as unknown[]).filter(
-    (seam) => isRecord(seam) && seam.requires_preparation === true,
+  // Parse every seam against the contract BEFORE gating on it. The contested-file
+  // check used to read `typeof seam.file === "string" ? … : skip`, so an
+  // old-shape or malformed seed lost the check and the gate still reported green
+  // — a fail-OPEN on exactly the record that authorizes parallel writes.
+  const parsedSeams: WorkBlockSeam[] = [];
+  for (const [index, candidate] of (
+    pathASeedPayload.work_block_seams as unknown[]
+  ).entries()) {
+    const parsed = WorkBlockSeamSchema.safeParse(candidate);
+    if (!parsed.success) {
+      const seamLabel =
+        isRecord(candidate) && typeof candidate.id === "string"
+          ? candidate.id
+          : `#${index}`;
+      pushValidationIssue(
+        issues,
+        `path_a_seed.work_block_seams[${index}]`,
+        `Seam "${seamLabel}" does not match the work-block seam contract, so its preparation cannot be checked: ${parsed.error.issues
+          .map((issue) => `${issue.path.map(String).join(".") || "<root>"}: ${issue.message}`)
+          .join("; ")}`,
+      );
+      continue;
+    }
+    parsedSeams.push(parsed.data);
+  }
+  const requiredSeams = parsedSeams.filter(
+    (seam) => seam.requires_preparation === true,
   );
   if (requiredSeams.length === 0) return issues;
 
@@ -782,11 +809,7 @@ export function validateWorkBlockSeamPreparation(
     isRecord(moduleDecompositionPayload) && Array.isArray(moduleDecompositionPayload.modules)
       ? (moduleDecompositionPayload.modules as unknown[]).filter(isRecord)
       : [];
-  const requiredSeamIds = new Set(
-    requiredSeams
-      .map((seam) => (isRecord(seam) && typeof seam.id === "string" ? seam.id : undefined))
-      .filter((id): id is string => id !== undefined),
-  );
+  const requiredSeamIds = new Set(requiredSeams.map((seam) => seam.id));
 
   for (const [index, mod] of modules.entries()) {
     const sourceIds = Array.isArray(mod.source_work_block_ids)
@@ -816,7 +839,6 @@ export function validateWorkBlockSeamPreparation(
   }
 
   for (const seam of requiredSeams) {
-    if (!isRecord(seam) || typeof seam.id !== "string") continue;
     const seamId = seam.id;
     const preparers = modules.filter(
       (mod) =>
@@ -832,26 +854,20 @@ export function validateWorkBlockSeamPreparation(
       continue;
     }
     const preparer = preparers[0]!;
-    const sharedFiles = Array.isArray(seam.shared_files)
-      ? (seam.shared_files as unknown[]).filter((file): file is string => typeof file === "string")
-      : [];
     const preparerFiles = new Set(
       Array.isArray(preparer.file_scope)
         ? (preparer.file_scope as unknown[]).filter((file): file is string => typeof file === "string")
         : [],
     );
-    if (sharedFiles.length > 0 && !sharedFiles.some((file) => preparerFiles.has(file))) {
+    if (!preparerFiles.has(seam.file)) {
       pushValidationIssue(
         issues,
         `module_decomposition.seam_preparation[${seamId}].file_scope`,
-        `The module preparing seam "${seamId}" must own at least one shared file (${sharedFiles.join(", ")}).`,
+        `The module preparing seam "${seamId}" must own its contested file (${seam.file}).`,
       );
     }
 
-    const blockIds = Array.isArray(seam.block_ids)
-      ? (seam.block_ids as unknown[]).filter((id): id is string => typeof id === "string")
-      : [];
-    for (const blockId of blockIds) {
+    for (const blockId of seam.block_ids) {
       const block = blockById.get(blockId);
       if (!block) {
         pushValidationIssue(

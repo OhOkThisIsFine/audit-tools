@@ -8,6 +8,8 @@
 
 import { z } from "zod";
 
+import { louvain, modularityOf, type Partition } from "./modularity.js";
+
 export const CONTENT_COHERENCE_SCORES = Object.freeze({
   call_import_reference_adjacency: 70,
   same_directory: 10,
@@ -18,6 +20,66 @@ export const CONTENT_COHERENCE_SCORES = Object.freeze({
 } as const);
 
 export const CONTENT_COHERENCE_THRESHOLD = 60;
+
+/**
+ * Which pairs may join at all — the ONE policy axis of the shared core, never a
+ * fork. Both draws run the identical scan, union-find, and canonical ordering;
+ * they differ only in this predicate and in {@link ContentCoherencePolicy.refineAtModularityPeak}.
+ *
+ * - `weighted_score_threshold` — a pair joins when its summed evidence weight
+ *   reaches {@link CONTENT_COHERENCE_THRESHOLD}. Disjunctive: four of the six
+ *   classes clear 60 alone.
+ * - `shared_file_and_same_lens` — a pair joins only when it shares a FILE **and**
+ *   a lens. Measured on the promoted 2026-08-18 run (3,230 findings): the
+ *   threshold rule left 99.97% of findings in a single component, and no
+ *   class-COUNT variant fixed it, because `shared_unit`/`same_lens`/`same_directory`
+ *   are near-vacuous partitions at audit scale. The conjunction bounds by
+ *   STRUCTURE, not density — `same_lens` is a hard partition no edge may cross.
+ */
+export type ContentCoherenceEligibility =
+  | "weighted_score_threshold"
+  | "shared_file_and_same_lens";
+
+/** The per-draw policy. Every difference between the draws lands here. */
+export interface ContentCoherencePolicy {
+  readonly eligibility: ContentCoherenceEligibility;
+  /**
+   * Refine each eligible-edge component at its modularity peak (below), so a
+   * loose component splits at its own data-derived thin seam while a true clique
+   * survives whole. No budget, ceiling, or size target participates.
+   */
+  readonly refineAtModularityPeak: boolean;
+}
+
+/**
+ * The audit TASK draw. Unmeasured for collapse — its eligibility is deliberately
+ * left as-is until it is measured on its own lap (`docs/backlog/open-bugs.md`).
+ */
+export const TASK_DRAW_COHERENCE_POLICY: ContentCoherencePolicy = Object.freeze({
+  eligibility: "weighted_score_threshold",
+  refineAtModularityPeak: false,
+});
+
+/** The FINDINGS draw (work blocks + the findings deliverable). Owner cut, 2026-08-19. */
+export const FINDINGS_DRAW_COHERENCE_POLICY: ContentCoherencePolicy = Object.freeze({
+  eligibility: "shared_file_and_same_lens",
+  refineAtModularityPeak: true,
+});
+
+/**
+ * The canonical modularity resolution (γ). NOT a tuned knob and never to become
+ * one: γ = 1 is the literature default, at which the trivial whole-component
+ * partition scores exactly 0, so "did the split beat keeping the component
+ * whole" is answered by the data alone.
+ */
+const MODULARITY_RESOLUTION = 1;
+
+/**
+ * Components at or below this size are handed back unrefined. A triviality
+ * guard, not a size budget: modularity over one, two, or three nodes describes
+ * noise rather than structure, and nothing downstream reads the number.
+ */
+const TRIVIAL_COMPONENT_SIZE = 3;
 
 export type ContentCoherenceEvidence = {
   -readonly [Kind in keyof typeof CONTENT_COHERENCE_SCORES]: boolean;
@@ -296,6 +358,81 @@ function scoreEvidence(evidence: ContentCoherenceEvidence): number {
   return score;
 }
 
+/**
+ * The two conjuncts of `shared_file_and_same_lens`, read from DIRECT evidence
+ * only. `RELATION_EVIDENCE` maps `shared_file`/`cross_lens_same_file` onto the
+ * file bit and `same_lens` onto the tag bit, so an unmasked predicate would let
+ * a caller manufacture eligibility by passing those relationship kinds — the
+ * lens partition would then hold only by call-site habit rather than by the
+ * core. Relationship bits still raise the pair's SCORE, which is what
+ * modularity refinement reads.
+ */
+interface DirectConjuncts {
+  sharedFile: boolean;
+  sameLens: boolean;
+}
+
+function isEligible(
+  direct: DirectConjuncts,
+  score: number,
+  policy: ContentCoherencePolicy,
+): boolean {
+  return policy.eligibility === "shared_file_and_same_lens"
+    ? direct.sharedFile && direct.sameLens
+    : score >= CONTENT_COHERENCE_THRESHOLD;
+}
+
+/**
+ * Split one eligible-edge component at its modularity PEAK, or hand it back
+ * whole. The component's own eligible pairs are the weighted graph (edge weight =
+ * the pair's evidence score), Louvain proposes a partition at the canonical γ,
+ * and the proposal is accepted only when it scores strictly above keeping the
+ * component whole. A component held together by one weak bridge splits there.
+ * Nothing in the decision is a constant of any denomination.
+ *
+ * What survives whole is a UNIFORM-weight clique: with every edge equal, any cut
+ * scores below the trivial partition, so it cannot be split. A clique whose
+ * weights DIFFER can still split — six findings on one file and one lens but two
+ * units weigh 220 within a unit and 140 across it, and that contrast alone beats
+ * the whole. That is intended (the halves are genuinely less coupled), and the
+ * shared file then surfaces as a seam between them rather than disappearing into
+ * one block. "A clique stays whole" without the uniform qualifier is an
+ * overclaim; the two cases are pinned separately in
+ * `tests/shared/content-coherence.test.ts`.
+ */
+function refineAtModularityPeak(
+  members: readonly string[],
+  candidates: readonly CoherenceCandidate[],
+): string[][] {
+  if (members.length <= TRIVIAL_COMPONENT_SIZE) return [[...members]];
+  const graph = {
+    nodes: [...members],
+    edges: candidates.map((candidate) => ({
+      a: candidate.left,
+      b: candidate.right,
+      weight: candidate.score,
+    })),
+  };
+  const proposed = louvain(graph, MODULARITY_RESOLUTION);
+  const whole: Partition = new Map(
+    members.map((id) => [id, members[0] ?? id] as const),
+  );
+  if (
+    modularityOf(graph, proposed, MODULARITY_RESOLUTION) <=
+    modularityOf(graph, whole, MODULARITY_RESOLUTION)
+  ) {
+    return [[...members]];
+  }
+  const communities = new Map<string, string[]>();
+  for (const member of members) {
+    const community = proposed.get(member) ?? member;
+    const group = communities.get(community) ?? [];
+    group.push(member);
+    communities.set(community, group);
+  }
+  return [...communities.values()];
+}
+
 function findRoot(parent: Map<string, string>, id: string): string {
   const lineage: string[] = [];
   let root = id;
@@ -307,9 +444,18 @@ function findRoot(parent: Map<string, string>, id: string): string {
   return root;
 }
 
-/** Build the complete canonical trace used by both audit and findings draws. */
+/**
+ * Build the complete canonical trace used by both audit and findings draws.
+ *
+ * `policy` is REQUIRED and has no default: a draw that forgot to declare its
+ * eligibility would otherwise silently inherit the other draw's, which is
+ * exactly the class of latent failure this project refuses to leave to a
+ * caller's memory. Pass {@link TASK_DRAW_COHERENCE_POLICY} or
+ * {@link FINDINGS_DRAW_COHERENCE_POLICY}.
+ */
 export function buildContentCoherenceTrace(
   input: ContentCoherenceInput | Record<string, unknown>,
+  policy: ContentCoherencePolicy,
 ): ContentCoherenceTrace {
   if (!isRecord(input)) {
     throw new Error("Content-coherence input must be an object.");
@@ -337,11 +483,17 @@ export function buildContentCoherenceTrace(
       const left = normalizedItems[leftIndex]!;
       const right = normalizedItems[rightIndex]!;
       const evidence = directEvidence(left, right);
+      // Captured BEFORE relationship evidence is folded in — the conjunctive
+      // policy must read only what the items themselves assert.
+      const direct: DirectConjuncts = {
+        sharedFile: evidence.shared_file,
+        sameLens: evidence.shared_semantic_tag_or_same_lens,
+      };
       for (const kind of relationshipEvidence.get(pairKey(left.id, right.id)) ?? []) {
         evidence[kind] = true;
       }
       const score = scoreEvidence(evidence);
-      if (score < CONTENT_COHERENCE_THRESHOLD) continue;
+      if (!isEligible(direct, score, policy)) continue;
       eligibleCandidates.push({ left: left.id, right: right.id, score });
     }
   }
@@ -372,8 +524,28 @@ export function buildContentCoherenceTrace(
     members.push(item.id);
     groups.set(root, members);
   }
-  const components = [...groups.values()]
-    .map((members) => members.sort(compareCodeUnits))
+  // Bucket the eligible pairs by the component they ended up inside, so
+  // refinement reads each component's own weighted evidence graph once.
+  const candidatesByRoot = new Map<string, CoherenceCandidate[]>();
+  if (policy.refineAtModularityPeak) {
+    for (const candidate of eligibleCandidates) {
+      const root = findRoot(parent, candidate.left);
+      const bucket = candidatesByRoot.get(root) ?? [];
+      bucket.push(candidate);
+      candidatesByRoot.set(root, bucket);
+    }
+  }
+  const merged = [...groups.entries()].map(
+    ([root, members]) => [root, members.sort(compareCodeUnits)] as const,
+  );
+  const components = (
+    policy.refineAtModularityPeak
+      ? merged.flatMap(([root, members]) =>
+          refineAtModularityPeak(members, candidatesByRoot.get(root) ?? []),
+        )
+      : merged.map(([, members]) => members)
+  )
+    .map((members) => [...members].sort(compareCodeUnits))
     .sort((left, right) =>
       compareCodeUnits(left[0] ?? "", right[0] ?? ""),
     );

@@ -8,6 +8,15 @@
 
 ## Open tracks
 
+**Metric-pool empirical program — grouping/characterization metrics (owner-directed 2026-08-19).**
+The in-tree grouping (`shared_file ∧ same_lens` eligibility + constant-free modularity-peak
+refinement + per-file aggregated seams) is INTERIM: it is the best-measured choice on one run, not a
+selected one. Build the pool catalog and the five-repo dataset in the lab
+(`C:\Code\metrics-lab`), then run the experiment that selects which combination of signals actually
+groups and characterizes work best. **Property:** the shipped combination is chosen by measurement
+across repos, or it is labelled interim wherever it is documented — no in-tool ceiling of any
+denomination re-enters, and sizing stays host-side whichever combination wins.
+
 **Track 2.5 — keep production-orphan detection beside knip.** The dated
 [`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md) is a historical lead set,
 not a current deletion list; the provider and dispatch subgraphs it identified have since been retired.

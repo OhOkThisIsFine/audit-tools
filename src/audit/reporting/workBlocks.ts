@@ -11,10 +11,12 @@ import {
   estimateTokensFromBytes,
 } from "audit-tools/shared";
 import {
+  FINDINGS_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
   type ContentCoherenceRelationship,
   type ContentCoherenceTrace,
 } from "../../shared/decompose/contentCoherence.js";
+import { deriveWorkBlockSeams } from "../../shared/decompose/workBlockSeams.js";
 import { severityRank } from "./findingRanks.js";
 
 export type { WorkBlock } from "audit-tools/shared";
@@ -258,46 +260,6 @@ function blockDependencies(params: {
   }));
 }
 
-function deriveSeams(blocks: readonly WorkBlock[]): WorkBlockSeam[] {
-  const seams: WorkBlockSeam[] = [];
-  for (let leftIndex = 0; leftIndex < blocks.length; leftIndex += 1) {
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < blocks.length;
-      rightIndex += 1
-    ) {
-      const left = blocks[leftIndex]!;
-      const right = blocks[rightIndex]!;
-      const rightFiles = new Set(right.owned_files);
-      const rightUnits = new Set(right.unit_ids);
-      const sharedFiles = left.owned_files.filter((path) => rightFiles.has(path));
-      const sharedUnits = left.unit_ids.filter((unitId) => rightUnits.has(unitId));
-      if (sharedFiles.length === 0 && sharedUnits.length === 0) continue;
-      const systemic =
-        left.role === "coordination" || right.role === "coordination";
-      const kind = systemic
-        ? "systemic_coordination"
-        : sharedFiles.length > 0
-          ? "predicted_write_conflict"
-          : "shared_context";
-      seams.push({
-        id: `seam-${seams.length + 1}`,
-        block_ids: [left.id, right.id],
-        kind,
-        shared_files: sharedFiles,
-        shared_unit_ids: sharedUnits,
-        requires_preparation: systemic || sharedFiles.length > 0,
-        rationale: systemic
-          ? "A coordination component shares remediation context with another component."
-          : sharedFiles.length > 0
-            ? "Components cite the same predicted write path."
-            : "Components share unit context without a predicted write overlap.",
-      });
-    }
-  }
-  return seams;
-}
-
 /** Project findings through the shared content-coherence membership core. */
 export function buildWorkBlockPartition(
   params: WorkBlockPartitionInput,
@@ -309,15 +271,18 @@ export function buildWorkBlockPartition(
       unitsForFinding(finding, fileUnitMap),
     ]),
   );
-  const coherenceTrace = buildContentCoherenceTrace({
-    items: params.findings.map((finding) => ({
-      id: finding.id,
-      file_paths: finding.affected_files.map((file) => file.path),
-      unit_ids: unitsByFinding.get(finding.id) ?? [],
-      tags: [finding.lens],
-    })),
-    relationships: relationshipsForFindings(params),
-  });
+  const coherenceTrace = buildContentCoherenceTrace(
+    {
+      items: params.findings.map((finding) => ({
+        id: finding.id,
+        file_paths: finding.affected_files.map((file) => file.path),
+        unit_ids: unitsByFinding.get(finding.id) ?? [],
+        tags: [finding.lens],
+      })),
+      relationships: relationshipsForFindings(params),
+    },
+    FINDINGS_DRAW_COHERENCE_POLICY,
+  );
   const findingById = new Map(
     params.findings.map((finding) => [finding.id, finding]),
   );
@@ -364,6 +329,6 @@ export function buildWorkBlockPartition(
   return {
     coherence_trace: coherenceTrace,
     blocks: withDependencies,
-    seams: deriveSeams(withDependencies),
+    seams: deriveWorkBlockSeams(withDependencies),
   };
 }

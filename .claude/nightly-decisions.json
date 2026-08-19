@@ -1460,9 +1460,9 @@
   },
   "48295eac950efe87": {
     "disposition": "settled",
-    "answer": "Conjunctive eligibility: require more than one evidence class to join, instead of the disjunctive threshold where four weights each clear the 60 floor alone. Measure the actual effect on the promoted findings before landing; if it does not bound enough, come back with the measurement.",
+    "answer": "Interim: file+lens eligibility + constant-free modularity-peak refinement + per-file aggregated seams landed (this commit); no in-tool ceiling - sizing is host-side and dynamic. FINAL grouping combination deliberately open pending the owner-directed metric-pool empirical program (metrics-lab dataset, forward-tracks entry).",
     "subject": "Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick",
     "path": "src/shared/decompose/contentCoherence.ts",
-    "decided_at": "2026-08-19T16:24:56.313Z"
+    "decided_at": "2026-08-19T20:07:48.927Z"
   }
 }

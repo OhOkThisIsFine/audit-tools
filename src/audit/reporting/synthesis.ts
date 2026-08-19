@@ -521,14 +521,9 @@ export function renderAuditReportMarkdown(
     for (const seam of workBlockSeams) {
       lines.push(`### ${seam.id} — ${seam.kind}`);
       lines.push("");
+      lines.push(`- Contested file: ${seam.file}`);
       lines.push(`- Blocks: ${seam.block_ids.join(", ")}`);
-      lines.push(
-        `- Shared files: ${seam.shared_files.length > 0 ? seam.shared_files.join(", ") : "none"}`,
-      );
-      lines.push(
-        `- Shared units: ${seam.shared_unit_ids.length > 0 ? seam.shared_unit_ids.join(", ") : "none"}`,
-      );
-      lines.push(`- Seam preparation required: ${seam.requires_preparation ? "yes" : "no"}`);
+      lines.push(`- Seam preparation required: yes`);
       lines.push(`- Rationale: ${seam.rationale}`, "");
     }
   }

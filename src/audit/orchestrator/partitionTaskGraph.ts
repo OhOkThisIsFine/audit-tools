@@ -1,4 +1,5 @@
 import {
+  TASK_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
   type ContentCoherenceRelationship,
   type ContentCoherenceTrace,
@@ -58,15 +59,18 @@ export function buildTaskCoherencePartition(
   ..._ignored: readonly unknown[]
 ): TaskCoherencePartition {
   const graph = TaskAffinityGraphSchema.parse(input);
-  const coherenceTrace = buildContentCoherenceTrace({
-    items: graph.nodes.map((node) => ({
-      id: node.task_id,
-      file_paths: node.file_paths,
-      unit_ids: node.unit_id.length > 0 ? [node.unit_id] : [],
-      tags: node.lens.length > 0 ? [node.lens] : [],
-    })),
-    relationships: relationshipsFromGraph(graph),
-  });
+  const coherenceTrace = buildContentCoherenceTrace(
+    {
+      items: graph.nodes.map((node) => ({
+        id: node.task_id,
+        file_paths: node.file_paths,
+        unit_ids: node.unit_id.length > 0 ? [node.unit_id] : [],
+        tags: node.lens.length > 0 ? [node.lens] : [],
+      })),
+      relationships: relationshipsFromGraph(graph),
+    },
+    TASK_DRAW_COHERENCE_POLICY,
+  );
   const nodeById = new Map(graph.nodes.map((node) => [node.task_id, node]));
   const packets = coherenceTrace.components.map((taskIds, index) => {
     const nodes = taskIds.map((taskId) => nodeById.get(taskId)!);

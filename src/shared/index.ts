@@ -166,6 +166,7 @@ export type { WeightedGraph, Partition } from "./decompose/modularity.js";
 export {
   DEFAULT_RESOLUTIONS,
   louvain,
+  modularityOf,
   resolutionSweep,
 } from "./decompose/modularity.js";
 export type {
@@ -363,8 +364,10 @@ export { chunkByBudget } from "./chunkByBudget.js";
 // One provider-neutral content-coherence membership core. Audit packets and
 // findings work blocks are projections over this exact trace.
 export type {
+  ContentCoherenceEligibility,
   ContentCoherenceEvidence,
   ContentCoherenceItem,
+  ContentCoherencePolicy,
   ContentCoherenceRelationshipKind,
   ContentCoherenceRelationship,
   ContentCoherenceInput,
@@ -374,10 +377,18 @@ export type {
 export {
   CONTENT_COHERENCE_SCORES,
   CONTENT_COHERENCE_THRESHOLD,
+  FINDINGS_DRAW_COHERENCE_POLICY,
+  TASK_DRAW_COHERENCE_POLICY,
   NormalizedContentCoherenceItemSchema,
   ContentCoherenceTraceSchema,
   buildContentCoherenceTrace,
 } from "./decompose/contentCoherence.js";
+// ONE seam derivation for every findings-draw producer — see the module header.
+export {
+  deriveWorkBlockSeams,
+  workBlockSeamId,
+  workBlockSeamRationale,
+} from "./decompose/workBlockSeams.js";
 
 // Concurrency: bounded, order-preserving parallel map
 export { mapWithConcurrency } from "./concurrency.js";

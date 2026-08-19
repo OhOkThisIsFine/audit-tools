@@ -24,19 +24,18 @@
   invested-in-but-write-only shape [[write-only-data-looks-authoritative]] warns about does not earn
   a keep.
 
-- **Coherence components have no granularity control, so a whole audit collapses into one work block
-  (2026-08-13, high).** `buildContentCoherenceTrace` unions on a DISJUNCTIVE threshold — 4 of 6 evidence
-  weights (`shared_file` 100, `shared_unit` 80, `call_import_reference_adjacency` 70,
-  `shared_critical_flow` 60) each clear the 60 floor alone — and then takes the transitive closure, so
-  membership is the connected components of a near-complete graph: measured 32 components with 2,202 of
-  2,241 findings (98.3%) in one, and no single evidence class whose removal breaks it (three connect
-  70–91% alone). The predecessor's 200 blocks were never a coherence result — `partitionWorkItems` sized
-  *k* from `capacityTokens`, so `467b1e8f` removed the only granularity bound there had ever been and
-  replaced it with a partition that bounds nothing. **Property:** component size is bounded by something
-  content-derived, or `work_blocks` stops claiming to be a unit of parallel work. Owner decision, four
-  options characterized (conjunctive eligibility / capped merge / clustering / host-side bundling) in the
-  P25 recon record §components-collapse. Related input: the unit manifest's 24 units × ~93 files make
-  `shared_unit` near-vacuous.
+- **Modularity refinement is superlinear on one large component and unpinned at scale (2026-08-19,
+  low).** Measured 78ms at 200 members → 726ms at 800, with Louvain's pass bound at `n + 8`; the
+  promoted run's largest component was 33, so nothing exercises the tail. **Property:** refinement
+  cost on the largest single component is bounded by a test, or the partition has a latent stall on a
+  repo that produces one big eligible component.
+
+- **The TASK draw's coherence eligibility is still disjunctive and has never been measured for
+  collapse (2026-08-19, medium).** The findings draw moved to `shared_file AND same_lens`;
+  `TASK_DRAW_COHERENCE_POLICY` keeps `weighted_score_threshold` deliberately, because no measurement
+  of `buildTaskCoherencePartition`'s components on a real graph exists. **Property:** the task draw's
+  eligibility is either measured and shown not to collapse, or aligned with the findings draw's — it
+  is not left disjunctive on the grounds that nobody looked.
 
 - **The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red
   against it (2026-08-18, low, friction).** `handoff-roadmap.test.ts`'s live-tree case (an empty

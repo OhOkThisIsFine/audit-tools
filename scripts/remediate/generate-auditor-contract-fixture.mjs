@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION,
+  FINDINGS_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
+  deriveWorkBlockSeams,
 } from "audit-tools/shared";
 
 // The remediator consumes the auditor's canonical audit-findings.json (Phase 6/7),
@@ -74,20 +76,23 @@ const unitIdsByFinding = new Map([
   ["AUD-002", ["src-auth"]],
   ["AUD-003", ["src-billing"]],
 ]);
-const coherenceTrace = buildContentCoherenceTrace({
-  items: findings.map((finding) => ({
-    id: finding.id,
-    file_paths: finding.affected_files.map((location) => location.path),
-    unit_ids: unitIdsByFinding.get(finding.id) ?? [],
-    tags: [finding.lens],
-  })),
-});
+const coherenceTrace = buildContentCoherenceTrace(
+  {
+    items: findings.map((finding) => ({
+      id: finding.id,
+      file_paths: finding.affected_files.map((location) => location.path),
+      unit_ids: unitIdsByFinding.get(finding.id) ?? [],
+      tags: [finding.lens],
+    })),
+  },
+  FINDINGS_DRAW_COHERENCE_POLICY,
+);
 
 const model = {
   contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
   summary: {
     finding_count: 3,
-    work_block_count: 2,
+    work_block_count: 3,
     severity_breakdown: {
       high: 1,
       medium: 1,
@@ -98,33 +103,48 @@ const model = {
     runtime_validation_status_breakdown: {},
   },
   coherence_trace: coherenceTrace,
+  // One block per coherence component (the report contract requires exactly
+  // that). The findings draw joins only on shared file AND shared lens, and
+  // these three findings carry three different lenses, so each stands alone —
+  // AUD-001/AUD-002 contest `src/api/auth.ts`, which the derived seam below
+  // records. Only the blocks are hand-written here; the seams come from the ONE
+  // shared derivation, so the fixture cannot claim an overlap topology the
+  // producer would not emit.
   work_blocks: [
     {
       id: "block-1",
-      finding_ids: ["AUD-001", "AUD-002"],
+      finding_ids: ["AUD-001"],
       unit_ids: ["src-auth"],
-      owned_files: ["src/api/auth.ts", "src/lib/session.ts"],
+      owned_files: ["src/api/auth.ts"],
       role: "implementation",
       max_severity: "high",
       depends_on: [],
-      rationale:
-        "All findings map to the same owned unit and should be remediated together.",
+      rationale: "Canonical coherence component with 1 finding(s).",
     },
     {
       id: "block-2",
+      finding_ids: ["AUD-002"],
+      unit_ids: ["src-auth"],
+      owned_files: ["src/api/auth.ts", "src/lib/session.ts"],
+      role: "implementation",
+      max_severity: "medium",
+      depends_on: [],
+      rationale: "Canonical coherence component with 1 finding(s).",
+    },
+    {
+      id: "block-3",
       finding_ids: ["AUD-003"],
       unit_ids: ["src-billing"],
       owned_files: ["src/billing/invoice.ts"],
       role: "implementation",
       max_severity: "low",
-      depends_on: ["block-1"],
-      rationale:
-        "Findings share owned units transitively and should remain one non-overlapping remediation block.",
+      depends_on: [],
+      rationale: "Canonical coherence component with 1 finding(s).",
     },
   ],
-  work_block_seams: [],
   findings,
 };
+model.work_block_seams = deriveWorkBlockSeams(model.work_blocks);
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(model, null, 2)}\n`, "utf8");

@@ -255,20 +255,47 @@ export const WorkBlockSchema = z.object({
 });
 export type WorkBlock = z.infer<typeof WorkBlockSchema>;
 
-/** Explicit overlap between two work blocks. Dangerous overlaps require a seam-first phase. */
-export const WorkBlockSeamSchema = z.object({
-  id: z.string(),
-  block_ids: z.tuple([z.string(), z.string()]),
-  kind: z.enum([
-    "predicted_write_conflict",
-    "shared_context",
-    "systemic_coordination",
-  ]),
-  shared_files: z.array(z.string()),
-  shared_unit_ids: z.array(z.string()),
-  requires_preparation: z.boolean(),
-  rationale: z.string(),
-});
+/**
+ * One CONTESTED FILE and every work block that owns it — a predicted write
+ * conflict, which always requires a seam-first phase before those blocks may run
+ * in parallel.
+ *
+ * The seam is keyed on the file rather than on a block PAIR: the conflict is a
+ * property of the contested path, so N blocks over one file are one seam with N
+ * `block_ids`, not N·(N−1)/2 records repeating it. `id` is derived from the file
+ * (never positional) because `prepares_seam_ids` in the remediation contract
+ * pipeline references it.
+ */
+export const WorkBlockSeamSchema = z
+  .object({
+    id: z.string(),
+    /** The contested repo-relative path, forward-slashed. */
+    file: z.string().min(1),
+    /**
+     * Every block owning `file`: at least two DISTINCT ids, sorted. `.min(2)` is
+     * load-bearing (it is what makes the record a conflict), so a repeated id
+     * must not satisfy it.
+     */
+    block_ids: z.array(z.string()).min(2),
+    kind: z.enum(["predicted_write_conflict", "systemic_coordination"]),
+    /**
+     * A contested file IS a write conflict, so this is `true` by construction.
+     * Stated as a literal rather than left to the producer: the remediation gate
+     * and the phase cut both filter on `requires_preparation === true`, so a
+     * seam that arrived `false` would be silently dropped rather than refused.
+     */
+    requires_preparation: z.literal(true),
+    rationale: z.string(),
+  })
+  .superRefine((seam, context) => {
+    if (new Set(seam.block_ids).size !== seam.block_ids.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["block_ids"],
+        message: "block_ids must name at least two DISTINCT work blocks.",
+      });
+    }
+  });
 export type WorkBlockSeam = z.infer<typeof WorkBlockSeamSchema>;
 
 /** A synthesis theme: a root cause spanning several findings (Phase 6). */

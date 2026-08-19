@@ -119,6 +119,7 @@ import {
   validateFinalizedModuleSetPreserved,
 } from "../validation/contractPipeline.js";
 import type { Finding } from "audit-tools/shared";
+import { compareCodeUnits } from "../../shared/affinityArtifacts.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import { loaderCommand } from "./prompts.js";
@@ -644,7 +645,7 @@ export async function writePathASeedFromFindings(
   if (existsSync(seedPath)) return; // idempotent
 
   const findings = [...approved.findings].sort((left, right) =>
-    left.id.localeCompare(right.id),
+    compareCodeUnits(left.id, right.id),
   );
 
   const affectedFilesSet = new Set<string>();
@@ -667,15 +668,17 @@ export async function writePathASeedFromFindings(
       owned_files: [...block.owned_files].sort(),
       depends_on: [...block.depends_on].sort(),
     }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => compareCodeUnits(a.id, b.id));
+  // Code-unit order, not `localeCompare`, on EVERY persisted seed array: the
+  // seed order must not depend on the host's ICU collation, and seam ids are
+  // hex now — a locale that orders digits against letters differently would
+  // reshuffle the file.
   const workBlockSeams: WorkBlockSeam[] = approved.workBlockSeams
     .map((seam): WorkBlockSeam => ({
       ...seam,
-      block_ids: [...seam.block_ids] as [string, string],
-      shared_files: [...seam.shared_files].sort(),
-      shared_unit_ids: [...seam.shared_unit_ids].sort(),
+      block_ids: [...seam.block_ids].sort(compareCodeUnits),
     }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => compareCodeUnits(a.id, b.id));
 
   const seed: PathASeed = {
     schema_version: "remediate-code-contract-pipeline/path-a-seed/v1alpha2",

@@ -117,25 +117,67 @@ Policy axes — every difference between the draws must land here or it is a for
   `resolvePlanContextBudget` (`plan.ts:772`), `resolveCurrentWorkPartitionRuntime`
   (`workPartitionRuntime.ts:13`), and `block_quota` / `quota.*` as sizing inputs.
 
-## 5. Open before coding — the findings draw's mass ceiling
+## 5. RESOLVED (owner, 2026-08-19) — there is no ceiling, in any denomination
 
-The task draw's ceiling is risk mass. The findings draw has no equivalent today, because capacity was
-doing that job. **This is the one genuinely undecided element of the design** — it decides whether
-findings blocks stay bounded, and picking wrong reproduces the single-giant-block failure in a new
-place, so it is settled in the implementation lap against a test, not guessed here.
+> **The grouping MECHANISM below is INTERIM** (owner-directed, 2026-08-19). What is settled
+> permanently is the *shape* of the answer: no in-tool ceiling of any denomination, sizing host-side
+> and dynamic, eligibility as a policy axis of one core. Which **combination** of signals actually
+> groups and characterizes best — the eligibility conjuncts, the refinement objective, the seam
+> definition — is deliberately open, pending the metric-pool empirical program (pool catalog and a
+> five-repo dataset in `C:\Code\metrics-lab`, then an experiment to select the combination). Read
+> `file ∧ lens` + modularity-peak refinement as the current best-measured choice, not as the design's
+> terminus; see the forward-tracks entry.
 
-**Recommendation: a severity-derived scalar mass, mirroring `risk_estimate` on the task draw.** The
-core's ceiling has one currency — mass — and both draws must denominate in it or the ceiling is a
-policy fork rather than a policy value. Note what is *not* reusable: `src/remediate/riskSignal.ts`
-does have findings-side risk, but `findingRiskEvidence` (`:409`) and `RiskTier` (`:38`) are a
-three-level classifier that selects review depth and adversarial granularity — a different job from a
-summable mass, and findings carry five severities, not three. Structural alternatives
-(distinct-unit or distinct-file count) are a different *kind* of ceiling — spread, not mass — and
-would break the symmetry that makes this one core.
+§5 previously asked which *mass ceiling* should bound the findings draw and recommended a
+severity-derived scalar. **The premise was rejected.** The owner:
 
-Whichever is chosen, the binding test is the same and must be red-green validated: a synthetic input
-whose items are all mutually related must still produce more than one group, and inverting the
-ceiling check must turn that test red.
+> "My reasoning for avoiding token counts was to avoid having some arbitrary ceiling - looking for
+> different ways to represent the same arbitrary ceiling, using another analog of token counts, is
+> completely off track. [...] the point is to make that optimization dynamic and not set
+> magic-constant ceilings."
+
+So no budget or threshold constant of any denomination — tokens, files, severity, lines — enters the
+partition. **The severity-mass recommendation above is superseded.** Three things replace it:
+
+1. **Eligibility is a policy axis, and the findings draw's value is `shared_file AND same_lens`.**
+   Measured against the promoted 3,230-finding run, the disjunctive threshold left 99.97% of findings
+   in one component, and *no* class-count variant fixed it: `shared_unit`, `same_lens`, and
+   `same_directory` are near-vacuous partitions at audit scale (30%, 16%, and 8.7% of all pairs), so
+   requiring more of them is still near-vacuous. `shared_file AND same_lens` bounds because
+   `same_lens` is a **hard partition** no edge may cross — structure, not density. It is a policy
+   value, not a fork: both draws run the identical scan, union-find, and canonical ordering. The task
+   draw keeps `weighted_score_threshold`, which is **unmeasured** for collapse and left alone until
+   its own lap (`docs/backlog/open-bugs.md`).
+2. **Granularity inside a component comes from a modularity PEAK, not a cap.** Each eligible-edge
+   component is refined by Louvain (`src/shared/decompose/modularity.ts`) over its own weighted
+   evidence graph at the canonical resolution γ = 1, and the proposed split is accepted only when its
+   modularity strictly beats keeping the component whole. At γ = 1 the whole-component partition
+   scores exactly 0, so the comparison needs no tuned constant: a loose component splits at its own
+   data-derived thin seam. A **uniform-weight** clique has no such seam and survives intact; a clique
+   whose weights differ (same file and lens, but two units — 220 within a unit, 140 across it) may
+   still split, and its halves then contest the shared file as a seam. "A clique stays whole" without
+   the uniform qualifier is an overclaim. Components of three or fewer items skip refinement — a
+   triviality guard, not a size budget.
+3. **Sizing is host-side and dynamic.** Blocks report a deterministic `token_estimate` and nothing
+   else; the host packs and splits them against the real window only it knows. That is the same
+   inversion as *Conversation-first*, applied to size.
+
+Measured effect on the promoted run (3,230 findings): 2 components / largest 99.97% → **1,452
+components / largest 19 (0.59%), p50 1, p90 5**; eligibility alone reaches 1,330 / largest 33, and
+refinement takes the largest from 33 to 19.
+
+§6's honest losses stand, with one addition: nothing bounds block size by construction any more. The
+partition is now bounded by structure (a lens boundary no edge crosses) and refined by the data's own
+modularity, which is a *measured* bound rather than a *guaranteed* one — the guarantee was what
+required the constant.
+
+**Seams became per-file.** `deriveSeams` emitted one record per unordered BLOCK PAIR sharing a file or
+a unit. It is now one seam per **contested file**, listing every block that owns it, with a
+content-derived id (the file's hash, so `prepares_seam_ids` survives re-partitioning). A contested
+file is by definition a predicted write conflict, so every emitted seam requires preparation; the
+unit-only `shared_context` kind is deleted as vacuous. Over the same 1,452 blocks the pairwise form
+would emit **181,251** records (178,111 of them vacuous `shared_context`) where the per-file form
+emits **839**.
 
 ## 6. Honest losses
 

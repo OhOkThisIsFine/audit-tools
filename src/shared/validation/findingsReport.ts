@@ -10,6 +10,7 @@ import {
   type WorkBlockSeam,
 } from "../types/finding.js";
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
+import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
 import { severityRank } from "../types/lens.js";
 import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
@@ -548,9 +549,28 @@ export function projectAuditFindingsReportSubset(
       components: componentBlocks.map(({ component }) => component),
     },
     work_blocks: workBlocks,
-    work_block_seams: report.work_block_seams.filter((seam) =>
-      seam.block_ids.every((id) => survivingBlockIds.has(id)),
-    ),
+    // A per-file seam narrows to the blocks that survived the projection, and
+    // stops being a conflict once fewer than two of them remain. The rationale
+    // states the block COUNT, so it is re-derived from the narrowed list rather
+    // than carried over — a persisted seam must not contradict itself.
+    work_block_seams: report.work_block_seams.flatMap((seam) => {
+      const blockIds = [
+        ...new Set(seam.block_ids.filter((id) => survivingBlockIds.has(id))),
+      ];
+      return blockIds.length < 2
+        ? []
+        : [
+            {
+              ...seam,
+              block_ids: blockIds,
+              rationale: workBlockSeamRationale(
+                seam.file,
+                blockIds.length,
+                seam.kind,
+              ),
+            },
+          ];
+    }),
     ...(themes === undefined ? {} : { themes }),
     summary: {
       ...report.summary,
