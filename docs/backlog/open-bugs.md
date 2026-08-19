@@ -563,3 +563,35 @@
   check:control-bytes correctly reds CI. Scrubbed by hand this lap. **Property to hold:** the
   render step sanitizes C0 control characters out of worker-authored strings (or re-escapes them
   as text), so a contract-valid finding can never produce a tracked file the byte gate refuses.
+
+- **remediate-code step prompts drift from the validators that read their output (2026-08-19, low,
+  friction: tool_should_decide).** Three instances in one run: the `confirm_intent` prompt renders
+  `excluded_scope` as a bare `[]` while the reader (`fileExclusionReason` in
+  `src/shared/intent/pathScope.ts`) requires `{path, reason}` objects — prose strings crash
+  `normalize()` deep in path matching because the checkpoint read path is an unvalidated cast
+  (`readOptionalJsonFile<IntentCheckpoint>` in `src/remediate/steps/nextStep.ts`, ~line 3718)
+  though `IntentCheckpointSchema` is `.strict()`; the `synthesize_intake` prompt mandates
+  checkpoint fields (`pre_draft_questions`, `closing_action`, `intent_interpretation`) the
+  `.strict()` schema does not admit; the `goal_normalization` prompt's schema sketch omits
+  `created_at` which `validateGoalSpec` requires. **Property:** a step prompt's schema sketch is
+  derived from the same contract its reader enforces, and the checkpoint read path validates
+  before use instead of casting.
+
+- **The commit gate's doc-contract leg did not run check:doc-code-citations for a staged
+  docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying
+  premise dissolves on inspection.** `check:doc-code-citations` was reported red repo-wide over
+  durable-traps.md's bare `` `server.log` `` citation. Re-run at HEAD: exits 0, "every one
+  resolves" — and `git ls-tree` at the cited landing commit (`e38616f9`) shows no tracked `.log`
+  file there either, so the bare-name rule's `trackedExtensions.has(ext)` guard has silently
+  skipped this token all along, never failed it. That skip is not a fresh gap: it's the uncovered
+  half `scripts/guard-reach-data.mjs`'s `check:doc-code-citations` row already states verbatim
+  ("bare names whose extension no tracked file uses go unchecked"), and the row's `preCommit:
+  'reach'` already unions `**/*.md` — so the doc-contract leg's trigger set does cover
+  durable-traps.md; nothing narrower is in play. The separate, real 2026-08-19 incident (a stale
+  glossary-ids.md citation invisible because it was never backticked) is already fixed by `fe48db4c`.
+  The reworded token (this batch) sidesteps the loophole rather than leaving it live.
+  **Property:** the extension-skip rule exists to exclude non-file tokens (`vi.spyOn`,
+  `claude.exe`) but also hides genuinely file-shaped non-repo mentions like `server.log` — open
+  question for the owner is whether that trade stays accepted as-is (reword such tokens out of
+  backticks, as done here) or the rule should distinguish "no plausible non-file reading" before
+  skipping; no trigger-set widening is needed either way.

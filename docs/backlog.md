@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 121 entr(y/ies) indexed.
+> and at commit). 124 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -81,6 +81,8 @@
 - `open-bugs.md:539` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
 - `open-bugs.md:550` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
 - `open-bugs.md:560` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:567` — remediate-code step prompts drift from the validators that read their output (2026-08-19, low, friction: tool_should_decide).
+- `open-bugs.md:580` — The commit gate's doc-contract leg did not run check:doc-code-citations for a staged docs/backlog/durable-traps.md (2026-08-19, low) — verified NOT a trigger-set gap; the underlying premise dissolves on inspection.
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -96,6 +98,7 @@
 - `forward-tracks.md:88` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:100` — Wave-friendly host dispatch: run identity survives partial ingest.
 - `forward-tracks.md:114` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:123` — One-core dissolution lap — unify the host-handoff substrate and converge remediate on the obligation walk (owner-routed 2026-08-19).
 
 ### [`deferred.md`](backlog/deferred.md)
 

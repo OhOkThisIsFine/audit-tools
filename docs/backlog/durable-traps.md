@@ -431,10 +431,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
     owner unless the dispatcher sets `AUDIT_TOOLS_CHILD_SESSION=1` on the child env, per
     dispatch. Lanes: the freellmapi pool launcher (`claude.ps1`) pointed at this repo, the
     nightly `/insights` invocation (docs/nightly-routine.md), any ad-hoc `claude -p` worker, and
-    the freellmapi MCP offload pool lane (`claude.exe -p`, repo cwd, server-side env, marker
-    absent — STILL OPEN; observed 2026-08-18: the child
-    self-registered and its Stop closeout-challenge REPLACED the final answer; `claude.ps1` was
-    fixed the same day; recorded on the `mcp-pool` row of `scripts/shared/offload-lane-data.mjs`).
+    the freellmapi MCP offload pool lane (`claude.exe -p`, repo cwd, server-side env; observed
+    2026-08-18: child self-registered, Stop closeout-challenge REPLACED the final answer;
+    `claude.ps1` fixed same day. FIXED 2026-08-19, config-only, no restart — detail on the
+    `mcp-pool` row of `scripts/shared/offload-lane-data.mjs`).
   - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
     a child process the PreToolUse hook never sees.
   - The refusal is a footgun guard, not an adversary gate: the allow token and recovery CLI are
@@ -519,7 +519,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `rate_limit_error` / `All models exhausted` with a reset time. `POST /v1/chat/completions` with
   `Authorization: Bearer <key>` kept working throughout and is the safe fallback surface.
   ⚠ Check `Get-Process` start time on the listener before diagnosing anything — the router restarts on
-  config change, so behaviour can flip under a running session with nothing in `server.log`.
+  config change, so behaviour can flip under a running session with nothing in its own log output.
 
 - **A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s
   (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung

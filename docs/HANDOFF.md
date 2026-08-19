@@ -30,11 +30,6 @@
    decision-batch build queue is fully landed and stamped in the ledger (`completed_ref` per
    subject) — the ledger, not this doc, says what if anything remains.
 2. Outside-repo residue this repo cannot carry:
-   - The freellmapi MCP offload `pool` lane spawns `claude.exe -p` with repo cwd and no
-     `AUDIT_TOOLS_CHILD_SESSION=1`, so the child self-registers as an owner and its Stop
-     closeout-challenge replaces the returned answer — the env must be set in the freellmapi
-     server's lane config (`claude.ps1` already carries it; lane list in the child-sessions
-     entry of `docs/backlog/durable-traps.md`).
    - Transitional: any live session predating the session registry is child-classified while
      enforcement is armed; it self-registers from the repo root with
      `node scripts/shared/sessionRegistry.mjs --register <session-id>`.

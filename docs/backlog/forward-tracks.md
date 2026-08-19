@@ -119,3 +119,15 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   dispatching on an isolated branch must land the work itself (`custom` or a manual merge). If
   isolated-branch dispatch returns as a first-class flow, re-add a landing action in tooling rather
   than relying on the host remembering.
+
+- **One-core dissolution lap — unify the host-handoff substrate and converge remediate on the
+  obligation walk (owner-routed 2026-08-19).** The owner declined two remediation-run findings
+  explicitly to route them here as a dedicated lap: ARC-e96acb7e (host-handoff subsystem
+  duplicated across `src/audit/cli/dispatch/hostHandoff.ts` and
+  `src/remediate/steps/dispatch/hostHandoff.ts` — path containment, sha256 prompt hashing,
+  result-map verification, schema validation reimplemented both sides) and ARC-908bbca5
+  (remediate's ~3,800-line procedural `src/remediate/steps/nextStep.ts` vs audit's priority-array
+  obligation walk). Scope: single-source the handoff substrate in `audit-tools/shared`, then
+  converge remediate's step derivation on the obligation-walk shape; per-mode differences become
+  policy axes of the shared core. [[dissolve-auditor-remediator-distinction]]
+  [[a3-a4-engine-unification]]

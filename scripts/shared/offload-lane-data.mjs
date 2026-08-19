@@ -99,10 +99,12 @@ export const OFFLOAD_LANES = [
       'powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1 — then verify with the ' +
       'mcp__freellmapi__offload_lanes tool',
     note:
-      'OPEN TRAP (observed 2026-08-18): this lane spawns `claude.exe -p` with the repo as cwd ' +
-      'WITHOUT AUDIT_TOOLS_CHILD_SESSION=1 — the env is freellmapi-server-side (the claude.ps1 ' +
-      'launcher was fixed the same day; this lane was not), so the child self-registers as an ' +
-      'OWNER session and its Stop closeout-challenge REPLACES the final answer.',
+      'Observed 2026-08-18: this lane spawns `claude.exe -p` with the repo as cwd WITHOUT ' +
+      'AUDIT_TOOLS_CHILD_SESSION=1 — the env is freellmapi-server-side (the claude.ps1 launcher ' +
+      'was fixed the same day; this lane was not), so the child self-registered as an OWNER ' +
+      'session and its Stop closeout-challenge REPLACED the final answer. FIXED 2026-08-19: the ' +
+      "pool lane's env in the server's offload-lanes.json now sets AUDIT_TOOLS_CHILD_SESSION=1 — " +
+      'config-only, mtime-memoized reload, no restart.',
   },
   {
     id: 'mcp-agy-recon',
