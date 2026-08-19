@@ -42,12 +42,22 @@ function runHook(
   payload: HookPayload,
   { root = REPO_ROOT, env = {} }: RunHookOptions = {},
 ): { code: number | null; stderr: string } {
+  // Scrub the session/bypass env before every spawn: a dispatched child session
+  // carries AUDIT_TOOLS_CHILD_SESSION=1, and kill switches may be exported in
+  // the invoking shell — inherited, either would flip the very behavior these
+  // tests pin. A case testing one re-adds it via `env`.
+  const inherited = { ...process.env };
+  delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.AUDIT_TOOLS_AGENT_GIT;
+  delete inherited.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE;
+  delete inherited.AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY;
+  delete inherited.AUDIT_TOOLS_NO_FRICTION_STOP_GATE;
   const r = spawnSyncHidden(process.execPath, [hook], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     timeout: 60_000,
     windowsHide: true,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
+    env: { ...inherited, CLAUDE_PROJECT_DIR: root, ...env },
   });
   return { code: r.status, stderr: r.stderr ?? '' };
 }
@@ -371,6 +381,156 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
       expect(stderr).not.toContain('CI is RED');
       rmSync(binDir, { recursive: true, force: true });
     });
+  });
+});
+
+// The closeout gate's Build 3 leg: whole-tree dirt partitioned by the session's
+// registered tree-dirt baseline. Dirt present at session start is FOREIGN —
+// reported as pre-session, never challenged, never in the dedupe key.
+describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () => {
+  // Arming the registry is PERMANENT for a root: one `*.json` under
+  // `.claude/hooks/.state/sessions/` flips every later spawn in that root onto
+  // the partition/child-skip path. So EVERY case here gets a FRESH mkdtemp
+  // repo — the shared beforeAll fixture above must stay UNARMED for the legacy
+  // whole-tree cases (which double as the transitional-window regression
+  // guard).
+  const partitionRoots: string[] = [];
+  afterAll(() => {
+    for (const root of partitionRoots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  function freshRepo({ backdatedHours = 24 }: { backdatedHours?: number } = {}): string {
+    const root = mkdtempSync(join(tmpdir(), 'closeout-part-'));
+    partitionRoots.push(root);
+    const g = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+      spawnSyncHidden('git', args, {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 30_000,
+        env: { ...process.env, ...env },
+      });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'test']);
+    g(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(root, 'a.ts'), 'export const one = 1;\n');
+    g(['add', '.']);
+    // Backdated so `headMovedRecently` is false and the DIRT signal alone
+    // decides (a fresh commit fires the gate regardless of the partition).
+    const when = new Date(Date.now() - backdatedHours * 60 * 60 * 1000).toISOString();
+    g(
+      ['commit', '-qm', 'initial'],
+      backdatedHours > 0 ? { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } : {},
+    );
+    return root;
+  }
+
+  async function register(root: string, sessionId: string, baseline: string[]): Promise<void> {
+    // The lib's own writer — the same write path the SessionStart leg uses, so
+    // this fixture can never drift from the frozen record shape. Imported
+    // lazily so a tree without the lib fails only these cases, not the file.
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    lib.writeSessionRecord(root, {
+      version: 1,
+      session_id: sessionId,
+      registered_at: new Date().toISOString(),
+      source: 'test',
+      baseline,
+    });
+  }
+
+  const stopPayload = (session: string): HookPayload => ({ hook_event_name: 'Stop', session_id: session });
+
+  it("foreign-only dirt does not challenge — pre-session dirt is not this session's work", async () => {
+    const repo = freshRepo();
+    writeFileSync(join(repo, 'pre.txt'), 'pre-session\n');
+    const session = sid('foreign-only');
+    await register(repo, session, ['pre.txt']);
+    expect(runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo }).code).toBe(0);
+  });
+
+  it('a first-sorted TRACKED modification in the baseline is classified foreign', async () => {
+    // The trim trap: ` M a.ts` sorts first, so its leading space is the first
+    // byte of the porcelain output — a trimmed read mangles exactly this
+    // record and the phantom path never matches the baseline.
+    const repo = freshRepo();
+    writeFileSync(join(repo, 'a.ts'), 'export const one = 2;\n'); // unstaged ` M a.ts`
+    const session = sid('tracked-mod-foreign');
+    await register(repo, session, ['a.ts']);
+    expect(runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo }).code).toBe(0);
+  });
+
+  it('session dirt still challenges, with the evidence partitioned into yours vs pre-session', async () => {
+    const repo = freshRepo();
+    writeFileSync(join(repo, 'pre.txt'), 'pre-session\n');
+    const session = sid('partitioned');
+    await register(repo, session, ['pre.txt']);
+    writeFileSync(join(repo, 'own.txt'), 'session work\n');
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo });
+    expect(code).toBe(2);
+    expect(stderr).toContain('UNCOMMITTED work in the tree (1 path(s))');
+    expect(stderr).toContain('own.txt');
+    expect(stderr).toMatch(/PRE-SESSION dirt/);
+    expect(stderr).toMatch(/NOT yours/i);
+    // pre.txt appears ONLY as pre-session evidence, after the marker — never
+    // in the UNCOMMITTED block.
+    expect(stderr.indexOf('pre.txt')).toBeGreaterThan(stderr.indexOf('PRE-SESSION'));
+    expect(stderr.indexOf('own.txt')).toBeLessThan(stderr.indexOf('PRE-SESSION'));
+  });
+
+  it('foreign changes cannot re-key the challenge dedupe', async () => {
+    const repo = freshRepo();
+    writeFileSync(join(repo, 'pre.txt'), 'pre\n');
+    writeFileSync(join(repo, 'gone.txt'), 'pre, about to be cleaned by its owner\n');
+    const session = sid('rekey');
+    await register(repo, session, ['pre.txt', 'gone.txt']);
+    writeFileSync(join(repo, 'own.txt'), 'session work\n');
+    expect(runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo }).code).toBe(2);
+    // Another session commits/cleans ITS dirt: the porcelain text shrinks, but
+    // this session's dirt is unchanged — the same challenge must not re-fire
+    // and burn the second cap slot.
+    rmSync(join(repo, 'gone.txt'));
+    expect(runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo }).code).toBe(0);
+  });
+
+  it("an unregistered session under an ARMED registry is skipped — its stop is not this repo's closeout", async () => {
+    // Fresh HEAD + dirty tree: the strongest work signal, still skipped. This
+    // is the gate-side half of the child-session split, landed with the
+    // partition because the decision tree forces it.
+    const repo = freshRepo({ backdatedHours: 0 });
+    await register(repo, 'someone-else', []);
+    writeFileSync(join(repo, 'work.txt'), "a child's deliverable\n");
+    expect(runHook(CLOSEOUT_GATE, stopPayload(sid('unregistered-child')), { root: repo }).code).toBe(0);
+  });
+
+  it('a CORRUPT record degrades to whole-tree challenging, never to gate silence', () => {
+    // Near-miss for the child skip: corrupt ≠ absent. A corrupt record still
+    // arms the registry, but the session counts as REGISTERED with an empty
+    // baseline — no worse than today, never silent for the owner.
+    const repo = freshRepo();
+    const session = sid('corrupt-record');
+    const sessions = join(repo, '.claude', 'hooks', '.state', 'sessions');
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, `${session}.json`), 'not json{{{');
+    writeFileSync(join(repo, 'work.txt'), 'session work\n');
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo });
+    expect(code).toBe(2);
+    expect(stderr).toContain('work.txt');
+  });
+
+  it('an UNARMED registry still fires on any dirt — the transitional-window guarantee', () => {
+    const repo = freshRepo();
+    writeFileSync(join(repo, 'pre-existing.txt'), 'dirt from before the session\n');
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stopPayload(sid('unarmed')), { root: repo });
+    expect(code).toBe(2);
+    expect(stderr).toContain('pre-existing.txt');
   });
 });
 

@@ -72,13 +72,6 @@
   [`reviews/analysis-tools-plan-2026-08-07.md`](../reviews/analysis-tools-plan-2026-08-07.md) §4/§5.
   **Property:** no regex over audited-repo content is super-linear on adversarial input.
 
-- **`ensureCleanWorktree` blocks a release on sibling UNTRACKED files (2026-08-07, low, friction).**
-  Bare `git status --porcelain` counts `??` rows, so owner-run Codex tooling's analyzer droppings at
-  repo root refused `release:patch:publish` from the primary checkout; the sanctioned lap-worktree
-  release path worked unchanged. **Property:** the guard should refuse on tracked dirt (the thing a
-  release could actually absorb) and at most WARN on untracked files — npm pack ships by allowlist
-  and the bump commit stages only package.json/package-lock.
-
 - **Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking
   worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test
   passes", 2026-08-06).** The exit-code half is a non-issue through the sanctioned path:

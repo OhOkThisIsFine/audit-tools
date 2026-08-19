@@ -116,6 +116,18 @@ test("one-command release helper wires the trusted publishing path", async () =>
   expect(helper).toMatch(/`\$\{packageName\}@\$\{version\}`/);
 });
 
+test("ensureCleanWorktree blocks on tracked dirt only, wired through the pure assessor", async () => {
+  const helper = normalizeLineEndings(
+    await readText("scripts/release-and-publish.mjs"),
+  );
+  // The WIRING, not just the predicate: a pure function in no call path is not
+  // a gate.
+  expect(helper).toMatch(/function ensureCleanWorktree\(\)[\s\S]*?assessWorktreeCleanliness\(/);
+  // Untracked rows warn instead of blocking (npm pack ships by allowlist; the
+  // bump commit stages only package.json/package-lock).
+  expect(helper).toMatch(/untracked path\(s\)/);
+});
+
 test("the single release script imports the pure poll-log throttle helper", async () => {
   // Single-package repo: there is ONE release script (scripts/release-and-publish.mjs)
   // and ONE canonical helper module (scripts/poll-log-throttle.mjs). The helper is a

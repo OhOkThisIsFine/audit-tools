@@ -202,8 +202,10 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `isolation:"worktree"` on a dispatch node, a deny-once when HEAD is behind remote main),
   `session-start-guards.mjs` (SessionStart — stale-main probe, missing `node_modules`, a stale git
   `index.lock`/`shallow.lock`, offload-lane liveness so a down proxy is a known constraint at lap start
-  rather than a mid-lap stall, and — the one leg that MUTATES the filesystem — reaping agent worktrees
-  that are an ancestor of a main ref, idle ≥6h, and clean),
+  rather than a mid-lap stall, the one leg that MUTATES the filesystem — reaping agent worktrees
+  that are an ancestor of a main ref, idle ≥6h, and clean — and session registration: a
+  per-`session_id` record with the tree-dirt baseline at session start, the substrate the Stop gates
+  scope themselves by (a dispatched child sets `AUDIT_TOOLS_CHILD_SESSION=1` and is not registered)),
   `nightly-surface.mjs` (SessionStart — surfaces the nightly routine's open items),
   `friction-stop-gate.mjs` (Stop — the blocking friction-walk backstop; `process.exit(2)`),
   `question-philosophy-gate.mjs` (PreToolUse AskUserQuestion + Stop — a question is about to reach the owner,
@@ -212,7 +214,8 @@ instead of a rewrite. Trivial mechanical edits skip it.
   `closeout-challenge-gate.mjs` (Stop — asks "are you sure that was all taken care of, and will the handoff
   be clear for the next agent?" with the mechanical evidence attached: uncommitted work, unpushed commits, a
   HANDOFF generated state that no longer matches the nightly queue / decision ledger or backlog,
-  memory files missing from `MEMORY.md`; capped at 2 per session).
+  memory files missing from `MEMORY.md`; capped at 2 per session; dirt present at session start is
+  reported as pre-session (not yours), never challenged).
   **Guard wiring + reach are DECLARED DATA, never prose:** `scripts/guard-reach-data.mjs` registers every
   guard (gate / hook / contract-test), how it is wired, and the file set it scans — with every known
   uncovered half stated as data. `npm run check:guard-reach` (in `verify:checks`, plus an unconditional

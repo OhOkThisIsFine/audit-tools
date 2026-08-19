@@ -19,8 +19,13 @@
 //    scheduled session crons: that stop is a WAIT the harness resumes, not a
 //    closeout, and challenging there was exactly how both cap slots kept being
 //    burned mid-lap;
-//  - only fires when the session actually did work (HEAD moved recently, dirty
-//    tree, or unpushed commits) — nothing to close out means nothing to ask;
+//  - only fires when the session actually did work (HEAD moved recently,
+//    SESSION-scoped tree dirt, or unpushed commits) — nothing to close out
+//    means nothing to ask. Dirt already present at session start (the
+//    registered baseline) is FOREIGN: reported as pre-session, never
+//    challenged, never in the dedupe key;
+//  - a session with NO registry record under an ARMED registry is a dispatched
+//    child — its stop is not this repo's closeout, so it exits 0 untouched;
 //  - swallows every fs/git/spawn fault → exit 0.
 //
 // Exit 0 = allow stop, exit 2 = block (stderr is fed back to the agent).
@@ -30,6 +35,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
+import {
+  readSessionRegistry,
+  runPorcelainStatus,
+  sanitizeSessionId,
+  SESSIONS_DIR_SEGMENTS,
+} from '../../scripts/shared/sessionRegistry.mjs';
 
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
@@ -54,8 +65,21 @@ if ((payload?.hook_event_name ?? 'Stop') !== 'Stop') process.exit(0);
 // untouched.
 if (sessionHasLiveBackgroundWork(payload)) process.exit(0);
 
-const sessionId = String(payload?.session_id ?? '').replace(/[^\w.-]/g, '');
+const sessionId = sanitizeSessionId(payload?.session_id);
 if (!sessionId) process.exit(0); // no session key → cannot cap → fail open
+
+// ── Session registry: child skip + tree-dirt baseline ────────────────────────
+// An unregistered session under an ARMED registry is a dispatched child — its
+// stop is not this repo's closeout. Exit BEFORE any cap/state accounting, like
+// the wait-skip above. Registry not armed, or a corrupt record → empty
+// baseline → every dirt entry is "session dirt" → the old whole-tree FIRING
+// behavior (the transitional-window guarantee). The read itself is not
+// byte-identical to the legacy one even unarmed: `-uall` enumerates untracked
+// files individually, and the .state/ self-exclusion below always applies.
+const registry = readSessionRegistry(ROOT, payload?.session_id);
+if (registry.isUnregisteredChild) process.exit(0);
+const baseline = new Set(registry.record?.baseline ?? []);
+
 const marker = join(STATE_DIR, `${sessionId}.json`);
 
 let state = { count: 0, states: [] };
@@ -78,7 +102,28 @@ function git(args, timeout = 8_000) {
 }
 
 // ── Did this session do work worth closing out? ──────────────────────────────
-const dirty = git(['status', '--porcelain']).out;
+// Raw `-z` porcelain via the lib — the exact argv the baseline was captured
+// with, or partition identity silently breaks (untracked-dir collapse, the
+// trimmed leading space of a first-sorted ` M path` record).
+const porcelain = runPorcelainStatus(ROOT);
+// The gate substrate's own state is never the session's work: markers and
+// session records live under .claude/hooks/.state/ (gitignored in this repo —
+// but in a repo without that ignore rule, `-uall` lists every marker THIS gate
+// writes, so its own bookkeeping would re-key the dedupe and burn cap slots on
+// itself).
+const STATE_PREFIX = `${SESSIONS_DIR_SEGMENTS.slice(0, 3).join('/')}/`;
+const entries = (porcelain.ok ? porcelain.entries : []).filter(
+  (entry) => !entry.paths.every((p) => p.startsWith(STATE_PREFIX)),
+);
+// FOREIGN = every path the entry names was already dirty at session start
+// (rename rows: foreign only if BOTH sides pre-existed). Everything else is
+// session dirt. Foreign dirt is another session's business: it never fires the
+// gate, never enters the dedupe key, and is only REPORTED alongside a
+// challenge that is firing anyway.
+const isForeign = (entry) => entry.paths.every((p) => baseline.has(p));
+const foreign = entries.filter(isForeign);
+const sessionDirt = entries.filter((entry) => !isForeign(entry));
+
 const headTs = Number(git(['log', '-1', '--format=%ct']).out) * 1000;
 const headMovedRecently = Number.isFinite(headTs) && Date.now() - headTs < RECENT_MS;
 
@@ -86,21 +131,39 @@ const remotes = git(['remote']).out.split(/\r?\n/).map((s) => s.trim()).filter(B
 const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];
 const unpushed = remote ? git(['log', '--oneline', `${remote}/main..HEAD`]).out : '';
 
-if (!dirty && !headMovedRecently && !unpushed) process.exit(0);
+if (sessionDirt.length === 0 && !headMovedRecently && !unpushed) process.exit(0);
 
 // Already challenged this exact tree state? Then the agent answered and nothing
-// moved — do not ask the same question twice about the same evidence.
-const stateKey = `${git(['rev-parse', 'HEAD']).out}:${dirty.length}:${unpushed.length}`;
+// moved — do not ask the same question twice about the same evidence. Foreign
+// dirt is excluded so another session committing or cleaning ITS dirt cannot
+// mint a fresh key and burn a cap slot. Same length-degeneracy class as the old
+// whole-tree key: equal-length reshapes of session dirt do not re-key.
+const sessionDirtKey = sessionDirt
+  .map((entry) => entry.display)
+  .sort()
+  .join('|').length;
+const stateKey = `${git(['rev-parse', 'HEAD']).out}:${sessionDirtKey}:${unpushed.length}`;
 if ((state.states ?? []).includes(stateKey)) process.exit(0);
 
 // ── Mechanical evidence — the part a confident "yes" cannot survive ──────────
 const findings = [];
 
-if (dirty) {
-  const files = dirty.split(/\r?\n/).filter(Boolean).slice(0, 12);
+if (sessionDirt.length > 0) {
   findings.push(
-    `UNCOMMITTED work in the tree (${dirty.split(/\r?\n/).filter(Boolean).length} path(s)):\n` +
-      files.map((f) => `      ${f}`).join('\n'),
+    `UNCOMMITTED work in the tree (${sessionDirt.length} path(s)):\n` +
+      sessionDirt.slice(0, 12).map((entry) => `      ${entry.display}`).join('\n'),
+  );
+}
+
+// Informational only: never fires the gate, never enters the stateKey, and is
+// printed only when the challenge fires anyway (a Stop hook exiting 0 stays
+// silent).
+if (foreign.length > 0) {
+  findings.push(
+    `PRE-SESSION dirt — present when this session started, so NOT yours to close out ` +
+      `(${foreign.length} path(s); likely a concurrent session's work — leave it alone, do not ` +
+      `commit or clean it):\n` +
+      foreign.slice(0, 8).map((entry) => `      ${entry.display}`).join('\n'),
   );
 }
 

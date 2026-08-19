@@ -4,6 +4,7 @@ import { test, expect } from "vitest";
 // the module is invoked as the entry script, so importing these pure gate
 // helpers here does NOT push/tag/publish.
 import {
+  assessWorktreeCleanliness,
   evaluateReleaseBranch,
   resolveReleasePushRefspec,
 } from "../../scripts/release-and-publish.mjs";
@@ -99,4 +100,41 @@ test("push refspec: from a linked worktree pushes HEAD onto the remote default b
   expect(
     resolveReleasePushRefspec({ branch: "claude/lap", defaultBranch: DEFAULT }),
   ).toEqual({ target: `HEAD:refs/heads/${DEFAULT}` });
+});
+
+// ── assessWorktreeCleanliness: tracked dirt blocks, untracked warns ──────────
+// Pure classifier over plain `git status --porcelain` text; ensureCleanWorktree
+// wires it (pinned in release-contract.test.ts).
+
+test("worktree cleanliness: untracked-only dirt warns without blocking", () => {
+  const verdict = assessWorktreeCleanliness("?? new.txt\n");
+  expect(verdict.ok).toBe(true);
+  expect(verdict.blockingPaths).toEqual([]);
+  expect(verdict.warnPaths).toEqual(["?? new.txt"]);
+});
+
+test("worktree cleanliness: tracked dirt blocks, untracked rides along as a warning", () => {
+  const verdict = assessWorktreeCleanliness(" M src/a.ts\n?? x.txt\n");
+  expect(verdict.ok).toBe(false);
+  expect(verdict.blockingPaths).toEqual([" M src/a.ts"]);
+  expect(verdict.warnPaths).toEqual(["?? x.txt"]);
+});
+
+test("worktree cleanliness: a rename row is tracked dirt", () => {
+  expect(assessWorktreeCleanliness("R  a.txt -> b.txt\n").ok).toBe(false);
+});
+
+test("worktree cleanliness: empty and whitespace-only status is clean", () => {
+  for (const text of ["", "\n"]) {
+    const verdict = assessWorktreeCleanliness(text);
+    expect(verdict.ok).toBe(true);
+    expect(verdict.blockingPaths).toEqual([]);
+    expect(verdict.warnPaths).toEqual([]);
+  }
+});
+
+test("worktree cleanliness: CRLF rows classify identically to LF", () => {
+  expect(assessWorktreeCleanliness("?? x.txt\r\n M y.ts\r\n")).toEqual(
+    assessWorktreeCleanliness("?? x.txt\n M y.ts\n"),
+  );
 });

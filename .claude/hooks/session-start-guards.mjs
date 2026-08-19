@@ -10,10 +10,38 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { get as httpGet } from 'node:http';
 import { join, resolve } from 'node:path';
+import {
+  baselineFromEntries,
+  pruneStaleSessionRecords,
+  runPorcelainStatus,
+  sanitizeSessionId,
+  writeSessionRecord,
+} from '../../scripts/shared/sessionRegistry.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state');
 const MARKER = join(STATE_DIR, 'stale-main.json');
+
+// SessionStart payload (fail-open). Bounded: under spawnSync with no input the
+// pipe closes immediately and the loop ends, but a harness that keeps stdin
+// open must not burn the hook's 45s budget and kill every later leg — ~3s,
+// then degrade to {} (registration is skipped with a note; every other leg
+// still runs).
+const payload = await new Promise((resolvePayload) => {
+  const timer = setTimeout(() => resolvePayload({}), 3_000);
+  timer.unref?.();
+  (async () => {
+    let raw = '';
+    try {
+      for await (const chunk of process.stdin) raw += chunk;
+      resolvePayload(raw ? JSON.parse(raw) : {});
+    } catch {
+      resolvePayload({});
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+});
 
 function gitIn(cwd, args, timeout = 25_000) {
   const r = spawnSync('git', args, {
@@ -38,6 +66,44 @@ function samePath(a, b) {
 }
 
 const notes = [];
+
+// ── Session registration + tree-dirt baseline ────────────────────────────────
+// Shared substrate for the session-scoped Stop/PreToolUse gates (child-session
+// split + closeout dirt partition): a per-session_id record with the tree's
+// dirt snapshot at session start. FIRST leg on purpose — registration must be
+// durable before the network-touching stale-main probe can burn the hook's
+// budget. Touches only `.claude/hooks/.state/`, never the working tree.
+try {
+  const sessionId = sanitizeSessionId(payload?.session_id);
+  if (process.env.AUDIT_TOOLS_CHILD_SESSION === '1') {
+    notes.push(
+      'session registry: AUDIT_TOOLS_CHILD_SESSION=1 — this session is a dispatched child and was ' +
+        'NOT registered; repo Stop gates will not recruit it.',
+    );
+  } else if (!sessionId) {
+    notes.push(
+      'session registry: payload carried no session_id — session not registered ' +
+        '(gates fall back to whole-tree behavior).',
+    );
+  } else {
+    // Raw `-z` porcelain via the lib — a trimmed read would eat the leading
+    // space of a first-sorted ` M path` record. A status fault registers an
+    // EMPTY baseline rather than skipping: an unregistered owner session loses
+    // its Stop gates entirely, while an empty baseline merely restores
+    // whole-tree over-firing (the safe direction).
+    const status = runPorcelainStatus(ROOT);
+    writeSessionRecord(ROOT, {
+      version: 1,
+      session_id: sessionId,
+      registered_at: new Date().toISOString(),
+      source: sanitizeSessionId(payload?.source) || 'unknown',
+      baseline: status.ok ? baselineFromEntries(status.entries) : [],
+    });
+  }
+  pruneStaleSessionRecords(ROOT); // light hygiene, best-effort, same leg
+} catch {
+  /* registration is best-effort — a probe must never block a session */
+}
 
 // ── Fresh-worktree node_modules ──────────────────────────────────────────────
 // Without node_modules, `audit-tools/shared` resolves a STALE dist/ and tsc

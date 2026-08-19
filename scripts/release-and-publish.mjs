@@ -117,12 +117,24 @@ function getRepoSlug() {
 }
 
 function ensureCleanWorktree() {
+  // Raw stdout, never trimmed: a whole-output trim would eat the leading space
+  // of a first-sorted ` M path` row before the assessor classifies it.
   const status = run("git", ["status", "--porcelain", "--ignore-submodules=all"], {
     capture: true,
-  }).stdout.trim();
-  if (status.length > 0) {
+  }).stdout;
+  const verdict = assessWorktreeCleanliness(status);
+  if (!verdict.ok) {
     throw new Error(
-      "Release publishing requires a clean git worktree. Commit, stash, or discard local changes first.",
+      "Release publishing requires a clean git worktree (tracked changes present). " +
+        "Commit, stash, or discard these first:\n" +
+        verdict.blockingPaths.map((row) => `  ${row}`).join("\n"),
+    );
+  }
+  if (verdict.warnPaths.length > 0) {
+    console.warn(
+      `WARNING: ${verdict.warnPaths.length} untracked path(s) in the worktree — not blocking ` +
+        "(npm pack ships by allowlist; the bump commit stages only package.json/package-lock):\n" +
+        verdict.warnPaths.map((row) => `  ${row}`).join("\n"),
     );
   }
 }
@@ -149,6 +161,27 @@ function getDefaultBranch() {
     if (match) return match[1];
   }
   return "main";
+}
+
+// Pure worktree-cleanliness assessment over plain `git status --porcelain`
+// text. Deliberately LOCAL to the release script, not sessionRegistry.mjs: it
+// parses a different porcelain dialect (plain rows, kept verbatim for the
+// operator-facing refusal/warn lists), not the session gates' `-z` identity
+// parse.
+//
+// Tracked dirt (any row not starting '??') blocks a release — it is the thing
+// a release could actually absorb. Untracked rows only WARN: npm pack ships by
+// allowlist and the bump commit stages only package.json/package-lock, so an
+// untracked sibling file cannot reach the artifact.
+// Returns { ok: boolean, blockingPaths: string[], warnPaths: string[] }.
+export function assessWorktreeCleanliness(statusText) {
+  const rows = String(statusText ?? "")
+    .split(/\r?\n/)
+    .map((row) => row.replace(/\r$/, ""))
+    .filter((row) => row.trim().length > 0);
+  const blockingPaths = rows.filter((row) => !row.startsWith("?? "));
+  const warnPaths = rows.filter((row) => row.startsWith("?? "));
+  return { ok: blockingPaths.length === 0, blockingPaths, warnPaths };
 }
 
 // Pure, deterministic release-branch gate. Decides whether the current branch is

@@ -37,7 +37,9 @@
      `pool` lane for this repo.
    - **Record-update pre-commit gate** (`a360d399`): a commit touching a tracked-work path must
      carry the corresponding record update.
-   - **Tree-dirt baseline + per-gate pathspec scoping** (`f65ec9c9`), superseding P24's shape.
+   - **Tree-dirt baseline + per-gate pathspec scoping** (`f65ec9c9`), superseding P24's shape —
+     LANDED this session (session-registry lib + registration leg + closeout dirt partition with
+     the closeout child-skip + `ensureCleanWorktree` tracked/untracked split).
    - The 2026-08-18 decision batch: wire `verifyFindingGrounding` into ingest; P34+P26
      registry-derived pre-commit legs + CI trigger paths; P35 Required-Inputs derivation +
      prompt-capability test; P32 writeOpenItems refusals; general status-laundering guard rule;

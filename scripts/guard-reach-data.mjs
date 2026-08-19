@@ -130,6 +130,15 @@ export const GUARDS = [
   // ── contract tests (the guards' own guards) ────────────────────────────────
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
+  {
+    id: 'session-registry-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/session-registry.test.ts',
+    note:
+      'session registry substrate (child-session split + closeout dirt partition): the registration ' +
+      'leg end-to-end, the explicit-id CLI, and the readSessionRegistry predicate the session-scoped ' +
+      'gates import',
+  },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
@@ -244,6 +253,7 @@ export const REACH = [
       'hook-async-typecheck-test',
       'hook-friction-stop-test',
       'hook-session-start-guards-test',
+      'session-registry-test',
       'session-start-hook-test',
       'doc-manifest-gate-test',
       'pre-commit-staged-snapshot-test',

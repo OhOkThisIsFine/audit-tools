@@ -130,4 +130,28 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     expect(existsSync(join(repo, 'a.txt'))).toBe(true);
     expect(isListed(repo)).toBe(true);
   });
+
+  it('still reaps with a SessionStart payload on stdin — the registration leg runs first and must not break the reap leg', () => {
+    // A NEW reapable worktree: the beforeAll pass already consumed `landed`,
+    // and re-running against it would not exercise anything.
+    git(repo, 'worktree', 'add', '-q', wt('landed2'), '-b', 'wt-landed2');
+    backdate(wt('landed2'));
+    const inherited = { ...process.env };
+    delete inherited.AUDIT_TOOLS_CHILD_SESSION; // a child env must not skip registration here
+    const r = spawnSyncHidden(process.execPath, [GUARDS], {
+      cwd: repo,
+      encoding: 'utf8',
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: `reap-payload-${process.pid}`,
+        source: 'startup',
+      }),
+      timeout: 120_000,
+      windowsHide: true,
+      env: { ...inherited, CLAUDE_PROJECT_DIR: repo },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout ?? '').toMatch(/landed2/);
+    expect(existsSync(wt('landed2'))).toBe(false);
+  });
 });
