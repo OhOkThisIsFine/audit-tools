@@ -20,6 +20,14 @@
   P25 recon record §components-collapse. Related input: the unit manifest's 24 units × ~93 files make
   `shared_unit` near-vacuous.
 
+- **The HANDOFF empty-queue projection contract is full-suite-only, so the commit gates pass a red
+  against it (2026-08-18, low, friction).** `handoff-roadmap.test.ts`'s live-tree case (an empty
+  nightly queue leaves no hand-written "nightly" text in HANDOFF) is not run by the staged-triggered
+  `check:handoff-roadmap` leg — a HANDOFF edit landed through a green pre-commit gate and green
+  targeted suites, and only a voluntary full-suite run caught it before push. **Property:** every
+  live-tree doc contract either runs in the gate leg that its trigger paths fire, or the gap is a
+  declared `uncovered` in guard-reach — never discoverable only by the full suite.
+
 - **`runCommand` buffers child output unboundedly (2026-08-13, medium).**
   `src/audit/orchestrator/runtimeCommand.ts:48-55` does `stdout += String(chunk)` and truncates only
   after `close`, so a verbose suite can exhaust memory or throw a `RangeError` from inside a stream
