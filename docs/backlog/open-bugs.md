@@ -19,6 +19,16 @@
   round-trip has no business materializing snapshots for history-MOVING commands (`rebase`, `merge`,
   `am`, …) whose own execution rewrites the tree it would restore.
 
+- **The citation gate's verdict depends on transient untracked files (2026-08-19, low, friction:
+  tool_should_decide).** The resolution universe deliberately includes untracked non-ignored files
+  (staged-new files must resolve), but the bare-name EXTENSION-SKIP set is built from that same
+  universe — so an untracked scratch log at the repo root added a new extension to the set and
+  flipped an unrelated durable-traps doc line from skipped to failing: the release gate refused a
+  tree whose identical docs had passed the commit gate minutes earlier. **Property:** the
+  extension-skip set (and any rule that widens/narrows what gets CHECKED) derives from tracked +
+  staged files only; untracked files may join the resolution universe as targets but must not
+  change which citations are examined. [[a-gate-must-not-ask-the-local-disk]]
+
 - **`writeOpenItems` accepts an item with no `subject_key` and persists it; the refusal lands two
   steps later in the HANDOFF generator (2026-08-19, low, friction: tool_should_decide).** The writer
   validates probes exhaustively — four distinct refusals — but never checks the field the whole
