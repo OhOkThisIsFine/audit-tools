@@ -95,6 +95,51 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+/** Heading of the one results-path section any lane prompt carries. */
+export const LANE_RESULTS_HEADING = "## Results path";
+
+/**
+ * The alternative that makes the write imperative SATISFIABLE by any executor.
+ *
+ * The write instruction itself is not negotiable — the bound path is what the
+ * tool's submission reader consumes, so a lane that quietly answers somewhere
+ * else has not answered. But a lane may be executed by a worker with no file
+ * write at all, and ordering it to write a file it cannot write leaves it no
+ * sanctioned way to deliver its answer: it improvises, and the run reports a
+ * lane that "submitted nothing". Stating the fallback keeps the bound path the
+ * destination while making the delivery reachable from every lane class.
+ */
+export const LANE_RESULT_FALLBACK_SENTENCE =
+  "If this lane cannot write files, return the complete JSON object as your final " +
+  "message instead — the dispatching agent must then write it, verbatim, to that exact path.";
+
+/**
+ * The results-path section every materialized lane prompt ends with.
+ *
+ * Minted HERE, at the same chokepoint that derives the bound path, for the same
+ * reason the path is: a per-emitter copy is a second place the path, the write
+ * instruction, and the fallback can drift apart — and the conceptual lanes had
+ * already drifted, telling their worker the path was "provided below" when
+ * nothing was appended below at all.
+ */
+export function renderLaneResultsFooter(resultPath: string): string {
+  return [
+    LANE_RESULTS_HEADING,
+    "",
+    "Write your submission (a single JSON object) to:",
+    "",
+    `  ${resultPath}`,
+    "",
+    LANE_RESULT_FALLBACK_SENTENCE,
+    "",
+  ].join("\n");
+}
+
+/** A lane's prompt body with its bound results-path section appended. */
+function footedPromptText(promptText: string, resultPath: string): string {
+  return `${promptText.replace(/\s+$/, "")}\n\n${renderLaneResultsFooter(resultPath)}`;
+}
+
 /**
  * Write the pending lanes' prompt files, record what the emission owes, and
  * describe the whole fan-out.
@@ -113,6 +158,8 @@ export async function materializeFanoutLanes(params: {
   await mkdir(promptDir, { recursive: true });
 
   const lanes: MaterializedFanoutLane[] = [];
+  /** The text actually written per lane — footed, so the record matches the file. */
+  const writtenText = new Map<string, string>();
   for (const spec of params.lanes) {
     const promptPath = join(promptDir, spec.promptFilename);
     const resultPath = laneSubmissionPath(
@@ -121,12 +168,14 @@ export async function materializeFanoutLanes(params: {
       params.runId,
     );
     const resultExists = await fileExists(resultPath);
+    const promptText = footedPromptText(spec.promptText, resultPath);
+    writtenText.set(spec.id, promptText);
     // Pending lanes always get a fresh prompt. A COMPLETED lane's prompt is
     // left untouched (its content matches the result that was produced) —
     // unless the file is missing, in which case it is re-materialized so
     // `artifact_paths` never names a path that does not exist on disk.
     if (!resultExists || !(await fileExists(promptPath))) {
-      await writeFile(promptPath, spec.promptText, "utf8");
+      await writeFile(promptPath, promptText, "utf8");
     }
     lanes.push({
       id: spec.id,
@@ -142,7 +191,7 @@ export async function materializeFanoutLanes(params: {
     params.runId,
     params.lanes
       .filter((spec) => spec.expected !== false)
-      .map((spec) => ({ lane: spec.id, promptText: spec.promptText })),
+      .map((spec) => ({ lane: spec.id, promptText: writtenText.get(spec.id)! })),
   );
 
   const pendingLanes = lanes.filter((lane) => !lane.resultExists);

@@ -69,9 +69,9 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   test suite per mutant and needs a per-repo test-runner config we don't own, so it either no-ops or is
   its own subsystem. Not an analyzer-registry add. Re-file as a scoped forward track only if a lightweight
   mutation signal appears.)* **Forward constraint:** any future proposal channel for analyzer ids
-  beyond the static registry must route through the same `admitSpawn` chokepoint. Durable choices
-  live only in the strict provider-neutral analyzer policy; per-run consent tokens are never
-  persisted. [[deterministic-analyzers-own-vs-acquire]]
+  beyond the static registry must route through the same `admitSpawn` chokepoint. (The
+  consent-token-never-persisted half is pinned mechanically by
+  `tests/shared/consent-token-not-persisted.test.ts`.) [[deterministic-analyzers-own-vs-acquire]]
   - **⬇ Live-run watch** (audit a **Rust** repo for clippy / a **Ruby** repo for rubocop, with the per-run
     consent token so the gate admits the non-default tool): the tool must actually **spawn and normalize**
     output into leads (cargo-clippy / bundle-rubocop), not skip. FAIL = "skipped" status when the ecosystem

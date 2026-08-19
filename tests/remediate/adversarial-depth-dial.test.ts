@@ -9,16 +9,16 @@
 import { describe, it, expect } from "vitest";
 import { adversarialDepthForTier } from "../../src/remediate/riskSignal.js";
 import { renderContractPipelinePrompt } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { CP_ARTIFACT_NAMES } from "../../src/remediate/contractPipeline/artifactStore.js";
+import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
 
-const ARTIFACT_PATHS = {
-  goal_spec: "/tmp/goal_spec.json",
-  finalized_module_contracts: "/tmp/finalized_module_contracts.json",
-  obligation_ledger: "/tmp/obligation_ledger.json",
-  contract_assessment_report: "/tmp/contract_assessment_report.json",
-  // Output-key paths the renderer also requires per role.
-  conceptual_design_critique: "/tmp/conceptual_design_critique.json",
-  counterexample: "/tmp/counterexample.json",
-} as const;
+// Every artifact path, because a role's required inputs are DERIVED from
+// DEPENDENCY_MAP (C2) — this fixture is about the DEPTH dial, not about which
+// inputs a phase declares, so it supplies the whole map rather than a hand-kept
+// subset that has to be re-edited whenever the DAG gains an edge.
+const ARTIFACT_PATHS = Object.fromEntries(
+  CP_ARTIFACT_NAMES.map((name) => [name, `/tmp/${name}.json`]),
+) as Record<ContractPipelineArtifactName, string>;
 
 function renderPrompt(role: string, adversarialDepth?: "light" | "full"): string {
   return renderContractPipelinePrompt({

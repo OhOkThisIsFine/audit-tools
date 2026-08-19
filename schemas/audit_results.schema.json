@@ -181,26 +181,6 @@
             "evidence_grounded": {
               "type": "boolean"
             },
-            "grounding": {
-              "type": "object",
-              "properties": {
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "grounded",
-                    "ungrounded",
-                    "refuted"
-                  ]
-                },
-                "reason": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "status"
-              ],
-              "additionalProperties": false
-            },
             "executable_anchor": {
               "type": "object",
               "properties": {

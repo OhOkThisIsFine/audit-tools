@@ -27,13 +27,6 @@ current conversation, write its required result artifact, ingest it, and stop
 so the user can resume from fresh context. Do not invent a smaller task or an
 alternate execution path.
 
-## Scope confirmation
-
-After intake, echo the repository root, auditable file count, and git
-availability from `scope_summary.json`. If `mis_scope_smells` is non-empty,
-show them and require confirmation before continuing. Otherwise the scope echo
-is informational and the workflow continues.
-
 ## Loader protocol
 
 Bootstrap once, then request one step at a time:
@@ -49,6 +42,9 @@ When developing audit-tools itself, use the repository-local wrapper:
 node audit-code.mjs ensure --quiet
 node audit-code.mjs next-step
 ```
+
+Pass a user-supplied target directory with `--root <path>` on every command. Do
+not add provider, model, quota, routing, or launch flags.
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
 follow only that prompt. Do not inspect workload, result, schema, or state files

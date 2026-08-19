@@ -124,6 +124,7 @@ await test("confirm_intent prompt surfaces the blocking question and constraint_
       disposition_override_proposals: [],
       lens_propositions: [],
       docs_digest: [],
+      mis_scope_smells: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",

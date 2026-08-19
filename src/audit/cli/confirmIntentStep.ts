@@ -143,6 +143,17 @@ export function renderConfirmIntentPrompt(
     `**Mode:** ${preDigest.mode}${preDigest.since ? ` (since ${preDigest.since})` : ""}`,
     `**Files in scope:** ${preDigest.files_in_scope}`,
     "",
+    ...(preDigest.mis_scope_smells.length > 0
+      ? [
+          "## ⚠ Possible mis-scope",
+          "",
+          "Intake detected signals that the resolved root may be the wrong target.",
+          "Confirm the audit target with the user before writing `intent_checkpoint.json`:",
+          "",
+          ...preDigest.mis_scope_smells.map((smell) => `- ${smell}`),
+          "",
+        ]
+      : []),
     ...(preDigest.docs_digest.length > 0
       ? [
           "## Repository purpose (from its docs)",

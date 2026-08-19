@@ -492,7 +492,9 @@ export function renderContractReviewPrompt(
       "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",
     ),
     "",
-    "Write the JSON object to the contract review results path provided below. Use finding IDs starting with DR-001.",
+    // Where the object goes (and what to do when this lane cannot write files)
+    // is stated once, by the lane materializer's results-path footer.
+    "Use finding IDs starting with DR-001.",
     "",
     "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
     "",
@@ -527,7 +529,7 @@ export function renderConceptualReviewPrompt(
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
-      "Write the JSON object to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
+      "Use finding IDs starting with DR-001.",
     ),
   ].join("\n");
 }
@@ -566,7 +568,7 @@ export function renderConceptualPerspectivePrompt(
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
-      "Write the JSON object of findings *from your perspective only* to the results path provided below. Use finding IDs starting with DR-001.",
+      "Report findings *from your perspective only*. Use finding IDs starting with DR-001.",
     ),
   ].join("\n");
 }
@@ -607,7 +609,7 @@ export function renderConceptualJudgePrompt(
     "- **Flag what the perspectives MISSED.** You are the final reviewer, not only a merger. If, across every perspective, a significant whole-system issue went unraised — a shared assumption none of them questioned, a structural risk no lens covered, a doubt about whether the fundamental approach is even right — add it as a finding, mark its title with `(judge-added)`, and hold it to the same evidence and grounding bar as any other finding. Add only what genuinely matters and is genuinely absent; do not pad.",
     "",
     ...conceptualOutputFormat(
-      "Write the merged, ranked JSON object to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
+      "Produce ONE merged, ranked object. Renumber finding IDs sequentially from DR-001.",
     ),
   ].join("\n");
 }

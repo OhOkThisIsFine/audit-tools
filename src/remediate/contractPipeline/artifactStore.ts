@@ -230,6 +230,38 @@ export async function writeContractArtifact(
   return envelope;
 }
 
+/**
+ * Write a TOOL-DERIVED artifact to BOTH path roles: the plain payload at the
+ * host-input path `<name>.input.json` and the canonical envelope at
+ * `<name>.json`.
+ *
+ * Why the input path too. Every host-facing artifact path the pipeline renders —
+ * both where a role WRITES its output and where it READS its upstreams — is
+ * `<name>.input.json` (D3: the host's world is entirely plain input files). An
+ * artifact the TOOL derives (the obligation ledger, the finalized contracts, a
+ * degenerate seam report, a no-cycles seam resolution, a merged shard aggregate)
+ * used to land only in the canonical envelope, so any downstream prompt naming
+ * it pointed a worker at a file that never existed. Materializing it here makes
+ * that ENOENT class unrepresentable: the write map and the prompts' input map
+ * are the same map.
+ *
+ * Deliberately NOT folded into `writeContractArtifact`: that one is also how
+ * INGEST wraps a host-authored payload, and writing back there would mutate the
+ * host's own input file in place — the exact separation D3 exists to keep. The
+ * derived input file is idempotent for ingest: its semantic projection matches
+ * the canonical envelope's, so the ingest idempotency guard skips it on every
+ * later pass rather than re-deriving.
+ */
+export async function writeDerivedContractArtifact(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+  payload: unknown,
+): Promise<ContractPipelineArtifactEnvelope> {
+  await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
+  await writeJsonFile(contractInputFilePath(artifactsDir, name), payload);
+  return writeContractArtifact(artifactsDir, name, payload);
+}
+
 // ── Incremental reconvergence: empty-delta copy-forward (INV-IR-2) ─────────────
 
 /** The branch a re-emit took: a verbatim carry-forward, or a genuine re-emit. */

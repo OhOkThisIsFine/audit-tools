@@ -41,7 +41,7 @@ const CLOSED_BY_TOOLING = [
     friction: "the offload proxy dying silently between laps, discovered only by a failed batch",
     guard: {
       file: join(".claude", "hooks", "session-start-guards.mjs"),
-      evidence: [/httpGet\(PROXY_URL/, /OFFLOAD LANE DOWN/],
+      evidence: [/probeLane\(/, /OFFLOAD LANE DOWN/],
     },
     restatement: /LiteLLM proxy[\s\S]{0,80}?died/i,
   },

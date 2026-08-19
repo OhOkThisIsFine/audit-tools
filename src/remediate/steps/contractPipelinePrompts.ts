@@ -4,6 +4,7 @@
  * fails fast when any required path is missing. Prompts stay path-based and
  * schema-grounded rather than embedding raw artifact content.
  */
+import { DEPENDENCY_MAP } from "../contractPipeline/artifactStore.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import type { AdversarialDepth } from "../riskSignal.js";
 import { renderIndependentReviewMandate } from "audit-tools/shared";
@@ -14,9 +15,15 @@ import { loaderCommand } from "./prompts.js";
 interface ContractPipelineRole {
   /** Display title for the role step heading. */
   title: string;
-  /** Artifact path keys required as input (must all be provided). */
-  requiredInputKeys: ContractPipelineArtifactName[];
-  /** Artifact path key that this role produces as output. */
+  /**
+   * Artifact path key that this role produces as output.
+   *
+   * This is also, transitively, its INPUT declaration: the required inputs are
+   * read off `DEPENDENCY_MAP[outputKey]` at render time (see
+   * `requiredInputKeysFor`), never re-listed here. One map decides both what
+   * makes this artifact stale and what its prompt tells the worker to read, so a
+   * hand-kept per-role list cannot drift out of agreement with the write map.
+   */
   outputKey: ContractPipelineArtifactName;
   /** JSON schema / contract shape description for the output. */
   outputSchema: string;
@@ -29,7 +36,6 @@ interface ContractPipelineRole {
 export const ROLES: Record<string, ContractPipelineRole> = {
   goal_normalization: {
     title: "Goal Normalization",
-    requiredInputKeys: [],
     outputKey: "goal_spec",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/goal-spec/v1alpha1",
@@ -44,7 +50,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   context_collection: {
     title: "Context Collection",
-    requiredInputKeys: ["goal_spec"],
     outputKey: "context_bundle",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/context-bundle/v1alpha1",
@@ -57,7 +62,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   decomposition: {
     title: "Module Decomposition",
-    requiredInputKeys: ["goal_spec", "context_bundle"],
     outputKey: "module_decomposition",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
@@ -75,7 +79,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   module_contract_drafting: {
     title: "Per-Module Contract Drafting",
-    requiredInputKeys: ["goal_spec", "context_bundle", "module_decomposition"],
     outputKey: "module_contracts",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/module-contracts/v1alpha1",
@@ -99,7 +102,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   seam_reconciliation: {
     title: "Seam Reconciliation",
-    requiredInputKeys: ["module_decomposition", "module_contracts"],
     outputKey: "seam_reconciliation_report",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
@@ -120,7 +122,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   contract_finalization: {
     title: "Per-Module Contract Finalization",
-    requiredInputKeys: ["module_contracts", "seam_reconciliation_report"],
     outputKey: "finalized_module_contracts",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
@@ -141,7 +142,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   cyclic_seam_resolution: {
     title: "Cyclic Seam Resolution",
-    requiredInputKeys: ["obligation_ledger"],
     outputKey: "cyclic_seam_resolution",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
@@ -164,7 +164,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   // `obligation_ledger`) and as the canonical shape documentation.
   obligation_ledger: {
     title: "Obligation Ledger",
-    requiredInputKeys: ["goal_spec", "finalized_module_contracts"],
     outputKey: "obligation_ledger",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
@@ -182,7 +181,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   critique: {
     title: "Conceptual Design Critique",
-    requiredInputKeys: ["goal_spec", "finalized_module_contracts"],
     outputKey: "conceptual_design_critique",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
@@ -196,7 +194,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   test_validator_plan: {
     title: "Test and Validator Plan",
-    requiredInputKeys: ["goal_spec", "obligation_ledger"],
     outputKey: "test_validator_plan",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
@@ -217,7 +214,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   assessment: {
     title: "Contract Assessment",
-    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger"],
     outputKey: "contract_assessment_report",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
@@ -230,7 +226,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   critic: {
     title: "Adversarial Critic (Counterexample Search)",
-    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report"],
     outputKey: "counterexample",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/counterexample/v1alpha1",
@@ -250,7 +245,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   judge: {
     title: "Adversarial Judge",
-    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report", "counterexample"],
     outputKey: "judge_report",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/judge-report/v1alpha1",
@@ -272,7 +266,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   implementation_planning: {
     title: "Implementation Planning (DAG)",
-    requiredInputKeys: ["goal_spec", "context_bundle", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report", "counterexample", "judge_report"],
     outputKey: "implementation_dag",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
@@ -296,7 +289,6 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   },
   closing: {
     title: "Contract Pipeline Closing",
-    requiredInputKeys: ["goal_spec", "implementation_dag"],
     outputKey: "verification_report",
     outputSchema: `{
   "contract_version": "remediate-code-verification-report/v1alpha1",
@@ -396,6 +388,24 @@ export interface ContractPipelineRenderResult {
 }
 
 /**
+ * The artifacts a role must read, DERIVED from the artifact store's dependency
+ * DAG rather than re-declared per role.
+ *
+ * `DEPENDENCY_MAP[outputKey]` is already the authoritative statement of what
+ * this artifact is built from — it is what re-stales the artifact when an
+ * upstream changes, and (with `writeDerivedContractArtifact`) every entry in it
+ * is a file some producer actually wrote. Reading the prompt's input list off
+ * the same map means the two can never disagree: a prompt cannot name an input
+ * nothing produces, and a new dependency cannot be added to the DAG while the
+ * prompt still withholds it from the worker.
+ */
+function requiredInputKeysFor(
+  role: ContractPipelineRole,
+): readonly ContractPipelineArtifactName[] {
+  return DEPENDENCY_MAP[role.outputKey];
+}
+
+/**
  * Render a bounded prompt for the given contract-pipeline role.
  * Throws a descriptive error when any required artifact path is missing.
  */
@@ -408,9 +418,10 @@ export function renderContractPipelinePrompt(
       `Unknown contract-pipeline role: "${input.role}". Valid roles: ${Object.keys(ROLES).join(", ")}.`,
     );
   }
+  const requiredInputKeys = requiredInputKeysFor(role);
 
   // Validate required inputs.
-  for (const key of role.requiredInputKeys) {
+  for (const key of requiredInputKeys) {
     if (!input.artifactPaths[key]) {
       throw new Error(
         `Contract-pipeline role "${input.role}" requires artifact path for "${key}" but it was not provided.`,
@@ -425,7 +436,7 @@ export function renderContractPipelinePrompt(
     );
   }
 
-  const inputSections = role.requiredInputKeys.map((key) => {
+  const inputSections = requiredInputKeys.map((key) => {
     const path = input.artifactPaths[key]!;
     return `- \`${path}\` (${key})`;
   });

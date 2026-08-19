@@ -55,6 +55,7 @@ import {
   readContractArtifact,
   stampToolCreatedAt,
   writeContractArtifact,
+  writeDerivedContractArtifact,
 } from "../contractPipeline/artifactStore.js";
 import {
   readIntakeRiskSignal,
@@ -1843,7 +1844,11 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
       "";
 
     const merged = mergeModuleShards(modules, scan.present, goalId);
-    await writeContractArtifact(artifactsDir, PARALLEL_MODULE_PHASES[phase], merged);
+    await writeDerivedContractArtifact(
+      artifactsDir,
+      PARALLEL_MODULE_PHASES[phase],
+      merged,
+    );
     return "merged";
   };
 
@@ -2115,7 +2120,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
       await readContractArtifact(artifactsDir, "finalized_module_contracts"),
     );
     const ledger = deriveObligationLedger(finalizedPayload);
-    await writeContractArtifact(artifactsDir, "obligation_ledger", ledger);
+    await writeDerivedContractArtifact(artifactsDir, "obligation_ledger", ledger);
     return buildNextContractPipelineStep(options);
   }
 
@@ -2134,7 +2139,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
       );
       const goalId =
         isRecord(drafted) && typeof drafted.goal_id === "string" ? drafted.goal_id : "";
-      await writeContractArtifact(artifactsDir, "seam_reconciliation_report", {
+      await writeDerivedContractArtifact(artifactsDir, "seam_reconciliation_report", {
         contract_version:
           "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
         goal_id: goalId,
@@ -2164,7 +2169,11 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
       await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
     );
     const finalized = deriveFinalizedModuleContracts(drafted, seamReport);
-    await writeContractArtifact(artifactsDir, "finalized_module_contracts", finalized);
+    await writeDerivedContractArtifact(
+      artifactsDir,
+      "finalized_module_contracts",
+      finalized,
+    );
     return buildNextContractPipelineStep(options);
   }
 
@@ -2491,7 +2500,7 @@ ${rejectionRewriteInstruction(archived)}`,
 
     if (detectedCycles.length === 0) {
       // No cycles — write the no_cycles artifact and let the pipeline proceed.
-      await writeContractArtifact(artifactsDir, "cyclic_seam_resolution", {
+      await writeDerivedContractArtifact(artifactsDir, "cyclic_seam_resolution", {
         contract_version:
           "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
         goal_id: obligationLedgerPayload?.goal_id ?? "",

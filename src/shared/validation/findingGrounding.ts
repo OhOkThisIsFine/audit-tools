@@ -154,6 +154,27 @@ const defaultSourceReader: SourceReader = (absolutePath) =>
   readFile(absolutePath, "utf8");
 
 /**
+ * A {@link SourceReader} memoized by absolute path, for ONE grounding pass: a
+ * batch whose findings all cite the same file reads that file once rather than
+ * once per finding. The promise is cached — including a rejecting one — so an
+ * unreadable path is not retried per citation either.
+ *
+ * Scope it to a single pass and discard it: a reader that outlived the pass
+ * would serve stale bytes after a later edit, which is exactly what quote-and-
+ * verify exists to catch.
+ */
+export function createMemoizedSourceReader(): SourceReader {
+  const cache = new Map<string, Promise<string>>();
+  return (absolutePath) => {
+    const cached = cache.get(absolutePath);
+    if (cached !== undefined) return cached;
+    const pending = defaultSourceReader(absolutePath);
+    cache.set(absolutePath, pending);
+    return pending;
+  };
+}
+
+/**
  * Re-verify a finding's cited verbatim span(s) against disk. A finding is
  * `grounded` as soon as ONE of its `affected_files[].quoted_text` spans matches
  * its cited file; it is `ungrounded` when it carries no quote at all, or when no

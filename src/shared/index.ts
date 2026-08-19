@@ -857,6 +857,7 @@ export {
   resolveBasenameToTrackedPath,
   enumerateTrackedFilePaths,
   quoteMatches,
+  createMemoizedSourceReader,
   verifyFindingGrounding,
   findingIsGrounded,
   findingNeedsVerificationBeforeFix,

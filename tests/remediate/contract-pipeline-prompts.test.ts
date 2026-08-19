@@ -5,13 +5,24 @@ import {
   renderContractRepairPrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
-import { contractPipelineDir } from "../../src/remediate/contractPipeline/artifactStore.js";
+import {
+  DEPENDENCY_MAP,
+  contractPipelineDir,
+} from "../../src/remediate/contractPipeline/artifactStore.js";
 
 const FAKE_ARTIFACTS_DIR = "/project/.audit-tools/remediation";
 const FAKE_REPO_ROOT = "/project";
 
 function cpPath(name: string): string {
   return join(contractPipelineDir(FAKE_ARTIFACTS_DIR), `${name}.json`);
+}
+
+/** The artifact keys a rendered "## Required Inputs" block lists, in order. */
+function requiredInputKeysIn(prompt: string): string[] {
+  const section = prompt.split(/^## Required Inputs$/m)[1];
+  if (section === undefined) return [];
+  const body = section.split(/^## /m)[0]!;
+  return [...body.matchAll(/^- `[^`]+` \(([a-z_]+)\)$/gm)].map((match) => match[1]!);
 }
 
 const ALL_PATHS = {
@@ -79,14 +90,22 @@ describe("contract pipeline prompt renderer — all roles", () => {
         expect(result.prompt).toContain(result.outputPath);
       });
 
-      it("prompt includes required artifact paths", () => {
+      it("prompt lists exactly the DEPENDENCY_MAP inputs of its output artifact", () => {
         const result = renderContractPipelinePrompt({
           role,
           artifactPaths: ALL_PATHS,
           repoRoot: FAKE_REPO_ROOT,
         });
-        // Each role has either no required inputs or they appear in the prompt.
-        expect(result.prompt).toContain("Required Inputs");
+        // C2: the input list is DERIVED from the artifact store's dependency
+        // DAG, so a prompt cannot name an input nothing produces and cannot
+        // withhold one the DAG added. (The prior assertion only checked that the
+        // literal heading appeared — true for every role even with an empty or
+        // wrong list, so it could not fail.)
+        const expected = DEPENDENCY_MAP[result.role.outputKey];
+        expect(requiredInputKeysIn(result.prompt)).toEqual([...expected]);
+        for (const key of expected) {
+          expect(result.prompt).toContain(ALL_PATHS[key]);
+        }
       });
 
       it("prompt includes stop-after-writing instructions", () => {

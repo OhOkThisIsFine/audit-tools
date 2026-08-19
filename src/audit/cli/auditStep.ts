@@ -1,8 +1,10 @@
 import { basename, join } from "node:path";
 import {
   artifactTreeLockPath,
+  createMemoizedSourceReader,
   readJsonFile,
   RunLogger,
+  verifyFindingGrounding,
   withFileLock,
   CharterSubmissionSchema,
   CharterDeltaSubmissionSchema,
@@ -30,7 +32,7 @@ import { formatAuditResultValidationError } from "./workerResult.js";
 import { looksLikeCliFlag, listBatchResultFiles } from "./args.js";
 import { buildLineIndex } from "./lineIndex.js";
 import type { AuditResult } from "../types.js";
-import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
+import type { AnalyzerSetting, Finding, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
@@ -251,6 +253,40 @@ async function executeAdvance(
   return result;
 }
 
+/**
+ * The CLI batch lane's half of the S7 grounding contract (docs-16): overwrite
+ * every finding's `grounding` with the TOOL's own re-check before the payload
+ * reaches validation or the ledger.
+ *
+ * OVERWRITE, not refuse: unlike the host-handoff boundary — whose worker
+ * submissions are raw and where a supplied verdict is rejected outright — this
+ * lane also carries results a previous ingest already grounded, so a refusal
+ * would reject legitimate re-imports. Recomputing is idempotent on those and
+ * strips a self-reported verdict from the rest. Runs BEFORE `validateAuditResults`
+ * and shape-guards its own traversal, so a malformed payload still fails at the
+ * validation gate with its normal message instead of throwing here.
+ *
+ * Exported so the contract is tested against THIS mechanism directly: the only
+ * alternative seam is the multi-minute end-to-end batch-ingest fixture, and a
+ * test that cannot reach the code it names is not a guard.
+ */
+export async function stampToolComputedGrounding(
+  root: string,
+  results: readonly unknown[],
+): Promise<void> {
+  const readSource = createMemoizedSourceReader();
+  for (const result of results) {
+    if (typeof result !== "object" || result === null) continue;
+    const findings = (result as { findings?: unknown }).findings;
+    if (!Array.isArray(findings)) continue;
+    for (const finding of findings) {
+      if (typeof finding !== "object" || finding === null) continue;
+      const typed = finding as Finding;
+      typed.grounding = await verifyFindingGrounding(root, typed, readSource);
+    }
+  }
+}
+
 export async function ingestBatchAuditResults(options: {
   root: string;
   artifactsDir: string;
@@ -267,6 +303,7 @@ export async function ingestBatchAuditResults(options: {
   const auditResultsData = payloads.flatMap((payload) =>
     Array.isArray(payload) ? payload : [payload],
   ) as AuditResult[];
+  await stampToolComputedGrounding(options.root, auditResultsData);
   const step = batchFiles.length > 0
     ? await runAuditStep({
         root: options.root,

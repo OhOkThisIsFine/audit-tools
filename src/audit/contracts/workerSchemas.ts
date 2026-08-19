@@ -5,7 +5,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   FindingSchema,
   FindingLocationSchema,
-  FindingGroundingSchema,
   LensSchema,
 } from "audit-tools/shared";
 import {
@@ -19,17 +18,23 @@ export const WorkerFindingLocationSchema = FindingLocationSchema.extend({
   line_end: z.number().int().min(1).optional(),
 }).strict();
 
-export const WorkerFindingSchema = FindingSchema.extend({
-  category: z.string().min(1),
-  lens: LensSchema.describe(
-    "Optional: defaults from the enclosing AuditResult lens when omitted.",
-  ).optional(),
-  affected_files: z.array(WorkerFindingLocationSchema).min(1),
-  evidence: z.array(z.string()).min(1),
-  reproduction: z.array(z.string()).min(1).optional(),
-  related_findings: z.array(z.string()).min(1).optional(),
-  grounding: FindingGroundingSchema.strict().optional(),
-}).strict();
+// `grounding` is OMITTED, not merely left un-extended: it is the tool's own
+// re-check of the worker's quote (computed at ingest by `ingestAuditHostResults`),
+// so the worker-facing contract must not advertise it. `.extend` inherits the
+// parent's optional field, so the omit is what makes the trailing `.strict()`
+// — and the generated `additionalProperties: false` — reject a supplied verdict.
+export const WorkerFindingSchema = FindingSchema.omit({ grounding: true })
+  .extend({
+    category: z.string().min(1),
+    lens: LensSchema.describe(
+      "Optional: defaults from the enclosing AuditResult lens when omitted.",
+    ).optional(),
+    affected_files: z.array(WorkerFindingLocationSchema).min(1),
+    evidence: z.array(z.string()).min(1),
+    reproduction: z.array(z.string()).min(1).optional(),
+    related_findings: z.array(z.string()).min(1).optional(),
+  })
+  .strict();
 
 export const WorkerAuditTaskSchema = AuditTaskSchema.extend({
   lens: LensSchema,

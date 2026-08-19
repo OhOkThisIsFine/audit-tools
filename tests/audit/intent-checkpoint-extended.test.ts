@@ -8,6 +8,9 @@
  *  - IntentCheckpoint round-trip (disposition_overrides + lens_selection)
  */
 import { test, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   computeScopePreDigest,
   type ExcludedSummaryRow,
@@ -197,6 +200,32 @@ test("computeScopePreDigest marks mandatory lenses as mandatory, never recommend
   for (const m of MANDATORY) {
     const row = digest.lens_propositions.find((p) => p.lens === m);
     expect(row?.disposition, `${m} must be disposition=mandatory`).toBe("mandatory");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// docsN-5: mis-scope smells reach the confirm-intent pre-digest
+// ---------------------------------------------------------------------------
+
+test("computeScopePreDigest carries mis_scope_smells for a subdirectory of a git repo", () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), "audit-tools-misscope-"));
+  try {
+    const repo = join(tmpRoot, "repo");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    const sub = join(repo, "sub");
+    mkdirSync(sub, { recursive: true });
+
+    const digest = computeScopePreDigest(makeBaseBundle(), sub);
+    expect(
+      digest.mis_scope_smells.some((s) => s.includes("git repository")),
+      `expected an ancestor-git-root smell, got: ${JSON.stringify(digest.mis_scope_smells)}`,
+    ).toBeTruthy();
+
+    // The repo root itself IS the git root → no ancestor-git smell.
+    const rootDigest = computeScopePreDigest(makeBaseBundle(), repo);
+    expect(rootDigest.mis_scope_smells.some((s) => s.includes("git repository"))).toBe(false);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 

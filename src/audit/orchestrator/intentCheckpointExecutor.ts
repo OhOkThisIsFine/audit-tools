@@ -4,6 +4,7 @@ import type { Lens } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { DocsDigestEntry } from "../types/docsDigest.js";
 import { resolveAuditScope } from "./scope.js";
+import { detectMisScopeSmells } from "./intakeExecutors.js";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
   isBuildOutput,
@@ -106,6 +107,14 @@ export interface ScopePreDigest {
    * has no prose docs — the render omits the section then.
    */
   docs_digest: DocsDigestEntry[];
+  /**
+   * Signals that the resolved root may be the wrong audit target (docsN-5) —
+   * recomputed deterministically from the root, the same input intake used.
+   * Intake only folds a COUNT into its progress summary, so the confirm-intent
+   * pause is the first place a host both sees the warning text and can act on
+   * it. Empty on a well-targeted root — the render omits the section then.
+   */
+  mis_scope_smells: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -437,5 +446,6 @@ export function computeScopePreDigest(
     disposition_override_proposals,
     lens_propositions,
     docs_digest: bundle.docs_digest?.docs ?? [],
+    mis_scope_smells: detectMisScopeSmells(root),
   };
 }

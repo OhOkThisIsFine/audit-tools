@@ -19,6 +19,11 @@ audit-code ensure --quiet
 When developing audit-tools itself, use `node audit-code.mjs` from the
 repository root.
 
+Preserve user arguments:
+
+- pass a typed target directory with `--root <path>` on every `audit-code`
+  command (`ensure` and each `next-step`)
+
 Ask for exactly one step:
 
 ```bash
@@ -34,15 +39,6 @@ subagent facilities when available. Do not send provider, model, quota,
 context-window, routing, or launch configuration to audit-tools. Write the
 prompt-bound result artifacts exactly where requested and let the next backend
 step validate and ingest them.
-
-After intake, read `.audit-tools/audit/scope_summary.json` and echo:
-
-```text
-Auditing <repo_root>, <auditable_file_count> files, git: <yes|no>
-```
-
-If `mis_scope_smells` is non-empty, show each warning and wait for explicit
-confirmation. Otherwise continue without interrupting the workflow.
 
 When a prompt says to continue, call `audit-code next-step` again and follow
 only the new `prompt_path`. Stop when the current prompt says to stop.

@@ -213,13 +213,11 @@ async function prepareContractDispatch(opts: {
         id: GATE_LANES.design_review_contract,
         label: "Contract review (adversarial)",
         promptFilename: "design-review-contract-prompt.md",
+        // No results-path section here: `materializeFanoutLanes` appends the one
+        // canonical footer (bound path + the read-only-executor alternative) to
+        // every lane prompt it writes.
         promptText: [
           renderContractReviewPrompt(opts.bundle, { max_units: opts.maxUnits }),
-          "## Results path",
-          "",
-          'Write the JSON object ({ "findings": [ ... ] }) of contract-review findings to:',
-          "",
-          `  ${resultsPath}`,
           ...(notesSection ? ["", notesSection] : []),
         ].join("\n"),
       },
@@ -1110,16 +1108,9 @@ async function cmdNextStepBody(
       ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows)
       : "# Critical-flow fallback\n\nNo critical_flows manifest is available; write an empty flows array.";
     // Always-materialized (design resolution 2): the (potentially ~340-line)
-    // flow-stub prompt is a lane FILE, never inlined into the step prompt.
-    const lanePrompt = [
-      basePrompt,
-      "## Results path",
-      "",
-      "Write the CriticalFlowFallbackResult JSON object to:",
-      "",
-      `  ${fallbackResultsPath}`,
-      "",
-    ].join("\n");
+    // flow-stub prompt is a lane FILE, never inlined into the step prompt. The
+    // results-path section is the lane materializer's, not this emitter's.
+    const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
@@ -1186,15 +1177,8 @@ async function cmdNextStepBody(
     // Always-materialized (design resolution 2): the findings digest (up to 120
     // findings) is a lane FILE, never inlined into the step prompt. This step
     // previously carried no access block at all — the lane form declares one.
-    const lanePrompt = [
-      basePrompt,
-      "## Results path",
-      "",
-      "Write the SynthesisNarrative JSON object to:",
-      "",
-      `  ${narrativeResultsPath}`,
-      "",
-    ].join("\n");
+    // The results-path section is the lane materializer's, not this emitter's.
+    const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,

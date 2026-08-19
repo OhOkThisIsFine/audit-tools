@@ -224,6 +224,7 @@ await test("renderConfirmIntentPrompt renders the docs digest as the repo's stat
     excluded_summary: [],
     disposition_override_proposals: [],
     lens_propositions: [],
+    mis_scope_smells: [],
   };
   const opts = {
     intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -250,6 +251,45 @@ await test("renderConfirmIntentPrompt renders the docs digest as the repo's stat
   expect(withoutDocs).not.toMatch(/Repository purpose/);
 });
 
+await test("renderConfirmIntentPrompt surfaces mis_scope_smells at the confirm-intent pause, and omits the section when empty", () => {
+  const base = {
+    mode: "full" as const,
+    since: null,
+    files_in_scope: 3,
+    scope_dirs: [{ dir: "src", files: 2 }],
+    excluded_summary: [],
+    disposition_override_proposals: [],
+    lens_propositions: [],
+    docs_digest: [],
+    mis_scope_smells: [],
+  };
+  const opts = {
+    intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
+    continueCommand: "audit-code next-step",
+  };
+
+  const withSmells = renderConfirmIntentPrompt(
+    {
+      ...base,
+      mis_scope_smells: [
+        "root has no .git but ancestor '/repo' is a git repository — you may have targeted a subdirectory instead of the repo root",
+        "root package 'child' is a workspace member of ancestor package 'parent'",
+      ],
+    },
+    opts,
+  );
+  expect(withSmells).toMatch(/Possible mis-scope/);
+  for (const smell of [
+    "root has no .git but ancestor '/repo' is a git repository — you may have targeted a subdirectory instead of the repo root",
+    "root package 'child' is a workspace member of ancestor package 'parent'",
+  ]) {
+    expect(withSmells.includes(smell), `rendered prompt must carry the smell verbatim: ${smell}`).toBeTruthy();
+  }
+
+  const withoutSmells = renderConfirmIntentPrompt(base, opts);
+  expect(withoutSmells).not.toMatch(/Possible mis-scope/);
+});
+
 // ── Confirm-intent prompt rendering ─────────────────────────────────────────
 
 await test("renderConfirmIntentPrompt includes the scope picture, target path, and the JSON shape", () => {
@@ -263,6 +303,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       disposition_override_proposals: [],
       lens_propositions: [],
       docs_digest: [],
+      mis_scope_smells: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -290,6 +331,7 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
       // A lens proposition so the table + the mandatory-set prose render.
       lens_propositions: [{ lens: "operability", disposition: "recommend_exclude", reason: "no ops surface" }],
       docs_digest: [],
+      mis_scope_smells: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -316,6 +358,7 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
       disposition_override_proposals: [],
       lens_propositions: [],
       docs_digest: [],
+      mis_scope_smells: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",

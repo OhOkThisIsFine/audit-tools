@@ -445,6 +445,26 @@ export const GUARDS = [
       'every lane-answered row, and the read-verbatim coverage-stamp field names/order the nightly ' +
       'routine consumes',
   },
+  {
+    id: 'prompt-capability-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/prompt-capability.test.ts',
+    note:
+      'C2 (sol-10/P35): a rendered imperative must be satisfiable by the worker it is handed to — ' +
+      'contract-pipeline Required Inputs are DERIVED from DEPENDENCY_MAP (no hand-kept per-role list), ' +
+      'a tool-derived artifact is materialized at the host-facing input path as well as the canonical ' +
+      'envelope, and every fan-out lane prompt ends with the chokepoint footer carrying its own bound ' +
+      'path plus the read-only-executor alternative. Uncovered halves, declared: whether a named path ' +
+      'EXISTS on disk is a run property (pinned only for the targeted single-phase scenario in ' +
+      'tests/remediate/contract-pipeline-required-inputs.test.ts — a collapsed framing step ' +
+      'legitimately names paths written later in the same round-trip); archived-artifact references ' +
+      'are not pinned; renderContractRepairPrompt keeps its own declared six-input list and its ' +
+      '"Regenerate IN FULL" instruction, so the INV-CO-13 in-full-vs-targeted trap (durable-traps) is ' +
+      'out of this guard\'s reach; and the src scan is LITERAL (the "## Results path" heading and the ' +
+      '"results path provided below" dangling reference), so a differently-worded per-emitter write ' +
+      'imperative — including the driver-facing "The executor must write ... to:" step-prompt lines, ' +
+      'which are deliberately in scope for neither — goes unflagged',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -461,6 +481,7 @@ export const REACH = [
       'check:dup',
       'check:depgraph',
       'pre-commit-gate',
+      'prompt-capability-test',
     ],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only the LOOP_CORE_PATTERNS prefixes ' +

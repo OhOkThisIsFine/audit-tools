@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import {
   FindingSchema,
+  createMemoizedSourceReader,
   findingContractPromptLines,
   assertSubmissionRunId,
   hashContent,
@@ -13,6 +14,7 @@ import {
   resolveContainedPath,
   stableStringify,
   submissionPathFor,
+  verifyFindingGrounding,
   writeJsonFile,
   type SubmissionIssue,
 } from "audit-tools/shared";
@@ -335,6 +337,7 @@ function buildPrompt(task: AuditHostTask, resultPath: string): string {
     // The finding contract is CARRIED, not referenced: it is rendered from the
     // very schema ingestion enforces, so a host never has to remember or fetch it.
     ...findingContractPromptLines(),
+    "Do not supply a `grounding` field on any finding — grounding is computed by the tool at ingest by re-reading your cited quoted_text from disk, and a supplied one rejects the whole submission.",
   ].join("\n");
 }
 
@@ -739,6 +742,15 @@ function issueLocation(
 
 function parseFindings(findings: readonly unknown[]): HostResultParse | null {
   for (const [index, finding] of findings.entries()) {
+    // S7: `grounding` is the TOOL's re-check of the worker's own quote — the one
+    // bit ingestion exists to compute. A submission that supplies it is
+    // self-certifying that bit, so it is REFUSED (never silently overwritten):
+    // the host must see that the field is not its to send.
+    if (isRecord(finding) && "grounding" in finding) {
+      return refuse(
+        `findings[${index}].grounding: grounding is tool-computed at ingest and must not be supplied`,
+      );
+    }
     const parsed = FindingSchema.safeParse(finding);
     if (parsed.success) continue;
     const issue = parsed.error.issues[0];
@@ -972,6 +984,8 @@ export async function ingestAuditHostResults(params: {
   const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
   const additions: AcceptedResultEntry[] = [];
   const issues: SubmissionIssue[] = [];
+  // One memoized reader for the whole ingest: N findings citing one file read it once.
+  const readSource = createMemoizedSourceReader();
 
   for (const entry of resultMap.entries) {
     if (acceptedBindings.has(bindingIdentity(entry))) continue;
@@ -1017,6 +1031,18 @@ export async function ingestAuditHostResults(params: {
         result_path: entry.result_path,
       });
       continue;
+    }
+    // S7 quote-and-verify: the tool re-reads each cited span from disk and
+    // stamps the verdict. It NEVER rejects — a quote that does not re-verify
+    // rides through as `ungrounded` and synthesis surfaces it under "Ungrounded
+    // Findings (not confirmed)"; refusing here would discard the whole
+    // submission over one bad citation.
+    for (const finding of converted.auditResult.findings) {
+      finding.grounding = await verifyFindingGrounding(
+        paths.root,
+        finding,
+        readSource,
+      );
     }
     resultIds.add(result.result_id);
     additions.push({

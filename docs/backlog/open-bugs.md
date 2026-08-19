@@ -293,12 +293,6 @@
   imports it. Auditor-agnostic rule exactly — it worked only when the DAG author happened to restate
   every declared value in the node description. [[enforce-robustness-in-tooling-not-host-discretion]]
 
-- **The `.input.json` form of `obligation_ledger` is listed as a required input but never written (2026-08-09, low).**
-  Every contract-pipeline step prompt lists it under Required Inputs; only the enveloped
-  `obligation_ledger` form exists on disk. Its five sibling artifacts each have both forms. A host
-  following the prompt literally gets ENOENT. Either write the `.input.json` form like the siblings or
-  point the prompt at the envelope.
-
 - **A delegated step prompt can turn its executor into a second driver (2026-07-16,
   tool-should-decide, medium).** A host worker given one bounded `charter_extraction` prompt followed
   that prompt's embedded `next-step` command and advanced the workflow itself. The same happened in a
