@@ -1330,7 +1330,9 @@
     "answer": "Run the audit first: run the documented tested-but-unwired manual audit (knip --production filtered by grep-zero production callers) across the tree and handle the whole class at once — ensureGlobalAssets included.",
     "subject": "ensureGlobalAssets is unreachable through the bin — decide whether it is duplicated elsewhere or genuinely dead code to delete",
     "path": "docs/backlog/forward-tracks.md",
-    "decided_at": "2026-08-18T20:05:45.379Z"
+    "decided_at": "2026-08-18T20:05:45.379Z",
+    "completed_at": "2026-08-19T06:40:09.500Z",
+    "completed_ref": "ab1e9598"
   },
   "241c6d16088979e9": {
     "disposition": "settled",
