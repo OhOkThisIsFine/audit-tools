@@ -185,7 +185,7 @@
   a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
   only if a second instance appears — one occurrence is not yet a pattern.
 
-- **⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
+- **⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a
   malformed-JSON result file — result validity must be checked mechanically, never trusted from
   the worker's claim.** The merge correctly rejected it, but the failure surfaced only as an
   unexplained same-packet re-grant. Properties: (a) results are parse- and
@@ -193,7 +193,7 @@
   names WHICH per task (file absent vs parse error vs contract mismatch). Record:
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #12.
 
-- **⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
+- **⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
   completion cleanup removes the friction dir before the session stop-gate's close-out walk runs
   against it.** Ordering property: the close-out walk is part of run completion — cleanup preserves
   (or the close step completes) the friction record before archiving. Record:
@@ -500,7 +500,7 @@
   convergence also rested on host prompt-craft (8/7/4/8→0 only after hardened dispatch framing).
   **Property to hold:** the tool namespaces challenge ids per round; the round prompt itself
   carries a covered-themes digest and an explicit variation bar.
-  ⬇ Reproduced in full 2026-08-08 (O7 in the run record below).
+  Reproduced in full 2026-08-08 (O7 in the run record below).
 
 - **The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to
   fabricate.** `MAX_DRAIN_STEPS` bounds the deterministic drain; this loop has none, and

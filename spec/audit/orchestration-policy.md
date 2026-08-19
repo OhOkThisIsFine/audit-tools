@@ -6,7 +6,7 @@ This document defines how the single entrypoint chooses the next step.
 
 ## Core rule
 
-The orchestrator must choose the **highest-priority valid next obligation** and execute one bounded step toward satisfying it.
+The orchestrator must choose the **highest-priority valid next obligation** and satisfy it within a fold-aware drain of the deterministic obligation frontier — the bounded-step guarantee is defined once in [`entrypoint-contract.md`](entrypoint-contract.md) (*Bounded-step guarantee*), not restated here.
 
 ## Priority order
 

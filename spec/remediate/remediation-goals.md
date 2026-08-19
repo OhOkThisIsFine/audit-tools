@@ -28,8 +28,10 @@ but runs independently; when the two are paired, read alongside the auditor's
    at all is exactly what `abandoned` exists to prevent, and abandonment is
    deliberately distinct from ignoring, so "the tool gave up" is never recorded as
    "the user decided not to act".
-4. The final retained output is deterministic Markdown at
-   `remediation-report.md`.
+4. The final retained outputs are the machine contract
+   `remediation-outcomes.json` (the source of truth) and its deterministic
+   Markdown render `remediation-report.md`; both are written under
+   `.audit-tools/` on completion.
 5. Remediation must resume cleanly after interruption at any phase boundary.
 
 ## Inputs
@@ -247,13 +249,9 @@ Phase 2. If Phase 3 produces no blocked items, Phase 3b is skipped.
   (combined tests passed, e2e passed, closing actions completed, nothing
   blocked). Otherwise the artifacts directory is preserved for diagnosis.
 - Execute the confirmed closing action. The fixed enumeration is:
-  `commit`, `push`, `open-pr`, `publish`, `tag`, `merge-to-base`, `none`, `custom`.
-  `merge-to-base` lands the run as a single revertable `--no-ff` merge into the
-  branch it was launched from (aborting safely on conflict) — the opt-in fix
-  for runs dispatched on an isolated `remediation/<runId>` branch that would
-  otherwise never reach the base branch. The `custom` option takes a
-  user-supplied command and records its exit code and output; it is an
-  explicit opt-out from Phase 4 determinism.
+  `commit`, `push`, `open-pr`, `publish`, `tag`, `none`, `custom`. The
+  `custom` option takes a user-supplied command and records its exit code
+  and output; it is an explicit opt-out from Phase 4 determinism.
 
 ## Deterministic vs LLM boundaries
 
@@ -347,7 +345,8 @@ Remediation is complete only when:
 - end-to-end tests pass (if an `e2e_command` was detected),
 - the configured closing action has either executed or been explicitly
   recorded as skipped,
-- `remediation-report.md` has been rendered under `.audit-tools/`,
+- `remediation-outcomes.json` and its render `remediation-report.md` have been
+  written under `.audit-tools/`,
 - `.audit-tools/remediation/` has been cleared.
 
 If any condition fails, the run is not complete and resumable state is
@@ -355,6 +354,7 @@ retained.
 
 ## Final output
 
+The machine contract is `remediation-outcomes.json`; its render
 `remediation-report.md` lists, in order:
 
 - items resolved (with finding id, summary, and verification evidence),

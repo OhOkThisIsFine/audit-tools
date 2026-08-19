@@ -229,9 +229,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 - **The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file
   wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the
   whole suite — rank 1 in every profiled run that listed it
-  (`.audit-tools-profile/vitest-history.ndjson`), 285-470s file wall — until it was split five ways over
-  `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments now top out
-  around 135s. The CLI handlers are imported and called directly rather than subprocess-spawned, and
+  (`.audit-tools-profile/vitest-history.ndjson`) — until it was split over
+  `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments are still
+  among the slowest files in the suite. The CLI handlers are imported and called directly rather than subprocess-spawned, and
   `HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000` is a PER-TEST timeout, so a long wall is the shape of the
   workload. **Confirmed, do not re-chase:** production
   does NOT redundantly re-extract on an unchanged repo. `repo_manifest` *specifically* is presence-gated
@@ -242,8 +242,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `syntax_resolved`, `external_analyzers_current`, …) *is* staleness-checked via `staleOrSatisfied` — the
   presence gate is one artifact, not a suite-wide rule. The wall is legitimate one-time-per-phase
   extraction, not a caching bug. Remaining lever (test-side only): pre-seed artifacts to cut pump
-  iterations — each of the 4 tests builds a fresh temp repo and pumps up to `MAX_PRE_DISPATCH_PAUSES` (8) +
-  `MAX_FINALIZE_STEPS` (10) next-step calls. Full investigation record: memory
+  iterations — each test builds a fresh temp repo and pumps up to `MAX_FINALIZE_STEPS` next-step calls
+  (`tests/audit/helpers/completion-harness.ts`). Full investigation record: memory
   `audit-no-redundant-reextraction-verified`.
 
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
@@ -311,7 +311,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   in `dist/` on a production path, confirm the package is under `dependencies`; bit once 2026-07-04 by
   `zod-to-json-schema` in `src/audit/contracts/workerSchemas.ts` — now correctly a `dependency`);
   (2) deleting a *shipped* file that the `requiredPackagedPaths` list asserts — that list lives ONLY in
-  `scripts/audit/smoke-packaged-audit-code.mjs` (defined `:21`, asserted `:505`); the remediate smoke
+  `scripts/audit/smoke-packaged-audit-code.mjs`; the remediate smoke
   packs+installs but asserts no path list, and `scripts/audit/verify-hosts.mjs` is a *sibling* gate over
   the rendered HOST assets, not a second copy of the list. Diagnostic, not a silent trap: if
   `smoke:packaged` errors on a missing module or path, this is why.
@@ -444,14 +444,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, and `-ingest-dir`
   failed in one full run with `next-step did not reach present_report within
   10 calls` and `expected only blocked/present_report while finalizing, got design_review_parallel`.
-  All four passed **alone**, and a second full run on the **identical tree** was green — 597 files,
+  All passed **alone**, and a second full run on the **identical tree** was green — 597 files,
   0 failed. They are not in `scripts/shared/test-flake-baseline.json`, so nothing tells you this.
   The symptom is a *call-count* limit, not a timeout, which is why it does not look load-related:
   under contention a step can come back `blocked` (or re-enter an obligation after a staleness
   cascade) and burn one of the 10 allowed calls. Before treating this cluster as a regression: run
   the current completion files alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
-  is the bar — a single alone-pass is not, because these are the slowest four files in the suite
-  (155-165s each in-suite) and spin real audit runs through real subprocesses.
+  is the bar — a single alone-pass is not, because these are the slowest files in the suite
+  and spin real audit runs through real subprocesses.
 
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
   (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the
@@ -549,7 +549,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 - **A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).**
   CDC-T1 said to widen a module's `file_scope`, but `file_scope` lives in the module decomposition —
   *"the finalized contracts carry interface fields, not paths"*
-  (`src/remediate/steps/contractPipeline.ts:2951-2953, 2978`) — and the only route back to the
+  (`src/remediate/steps/contractPipeline.ts`) — and the only route back to the
   decomposition is the pre-critic citation-grounding gate, which fires on a non-existent cited path,
   never on a critique repair. So the repair step could not do what its own critique asked. Nothing
   validates that a critique's remedy is reachable from the phase it is dispatched to; when one is not,

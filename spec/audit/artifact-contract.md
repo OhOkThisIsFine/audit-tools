@@ -61,7 +61,7 @@ staleness DAG (see dependency-map.md).
 | `charter_clarification.json` | JSON | Phase-D charter-alignment triangulation loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
 | `systemic_challenge.json` | JSON | Phase-E second-order-adversary improvement-seeking challenge loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
 | `analyzer_capability.json` | JSON | Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance. |
-| `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record (gitleaks + consent-gated eslint/semgrep/jscpd). |
+| `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record over the curated `EXTERNAL_ANALYZER_CANDIDATES` registry in `src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the per-run consent token; every other candidate requires it. |
 
 `flow_coverage.json` is listed here at `analysis` phase per `ARTIFACT_DEFINITIONS`
 even though it's computed after execution — the phase tag reflects where it's
@@ -90,9 +90,9 @@ audit-code into an implementation pipeline.
 | `audit_results.jsonl` | **NDJSON** | Ingested `AuditResult` records, one per line — not a `.json` array. |
 | `audit_tasks.json` | JSON | Task specifications for external (host-delegated) audit execution. |
 | `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
-| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed when forming complete host work items. |
+| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed during planning packet composition. |
 | `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
-| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses), used to bias later host-work composition toward continuity. |
+| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses) — a write-only record with no audit-side reader; reserved to bias later host-work composition toward continuity. |
 
 Run-scoped host handoff adds `host-workload.json`, `host-result-map.json`,
 `host-task-bindings.json`, host result files, and the accepted-results ledger.

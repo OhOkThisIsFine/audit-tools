@@ -30,8 +30,10 @@ scan — they run only via an explicit `preferredExecutor` override:
 `runtime_validation_update_executor` (imported runtime-validation evidence) and
 `external_analyzer_import_executor` (imported normalized external-analyzer
 results). `friction_capture_executor` is retained for schema compatibility but
-is currently **unreachable** — its obligation (`friction_capture_current`) is
-not in `deriveAuditState`'s priority chain, so the engine never selects it; the
+is **unreachable** — its obligation (`friction_capture_current`) is never
+emitted by `deriveAuditState`'s obligation scan, though its id sits in
+`PRIORITY` to satisfy the executor-registry-coverage invariant, so the engine
+never selects it; the
 actual friction triage fires from the `present_report` terminal step
 (`decideAuditFrictionCloseout`, called from `nextStepHelpers.ts`/
 `executorRunners.ts`) instead.
@@ -42,7 +44,7 @@ actual friction triage fires from the `present_report` terminal step
 
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | one call, one obligation with two artifact names |
+| `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | one call satisfies two obligations, each with its own satisfaction rule (`repo_manifest`: presence-only; `file_disposition`: presence + staleness) |
 | `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | — |
 | `intent_equivalence_executor` | host_delegation | `intent_equivalence_current` | DD-9 intent-equivalence gate. A prose-only delta emits the bounded judge step; every other arm (baseline stamp, gate-version stale, structured delta) resolves deterministically via the runner — mirroring `charter_extraction`'s emit-vs-run gating in `nextStepHelpers` |
 | `auto_fix_executor` | deterministic | `auto_fixes_applied` | — |

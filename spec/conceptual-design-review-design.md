@@ -243,8 +243,7 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 - **`intent_checkpoint` carries the CEILING only** — the consent meta-intent that seeds the charter
   layer. Charters, teleologies, deltas and the goal graph live on `charter_register.json` (the
   OUTPUT artifact); embedding them back on the checkpoint would create a staleness cycle with the
-  checkpoint the register depends on (the never-written checkpoint embeds were deleted 2026-08-06,
-  design resolution 4).
+  checkpoint the register depends on.
 - **Charter-clarification reuses the clarification-pause *pattern*, NOT remediate's
   `ClarificationRequest` type or `waiting_for_clarification` status.** Charter-alignment questions are
   symmetric charter-pair arbitrations (VOI-ranked, risk-gated) resolved by an inline symmetric answer
@@ -268,7 +267,6 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 - **Reconciling the charters, or the decompositions, into one truth** — the deltas are the
   product; a merge that DESTROYS them is rejected. (The miner's triangulated telos is in-design
   precisely because it is not that: a downstream estimate held BESIDE the charters and deltas, a
-  lead the owner reacts to — never a replacement any consumer keys on. Settled at the resolution-4
-  design check, 2026-08-05/06.)
+  lead the owner reacts to — never a replacement any consumer keys on.)
 - **A separate "independent vs guided" knob** — it collapses into the ceiling.
 - **Assuming Stated is ground truth** — it forfeits the highest-value findings.

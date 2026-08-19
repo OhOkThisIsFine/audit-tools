@@ -99,7 +99,9 @@ host-input leaf whose revision mirrors the intent baseline, and an edge here
 would re-stale a confirmed checkpoint on every doc edit.
 
 `external_analyzer_acquisition.json` is the external-analyzer acquisition marker
-(gitleaks + consent-gated eslint/semgrep/jscpd) — a run-record + staleness anchor
+(over the curated `EXTERNAL_ANALYZER_CANDIDATES` registry in
+`src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the
+per-run consent token; every other candidate requires it) — a run-record + staleness anchor
 with no downstream of its own; the findings it produces land in
 `external_analyzer_results.json` (a leaf input to Phase 3, absent from THIS
 dependency table because nothing declares an upstream dependency for it — it does
@@ -124,11 +126,12 @@ three writers).
 result ledger (which files/lenses each step covered, with recency in
 step-ordinal space) — the ingestion executor writes it in the same
 `advanceAudit` call that appends the ledger, so it records the post-append
-`audit_results.jsonl` revision (dependency-first, no cycle). Nothing plans off
-it yet: it exists to bias later host-work composition toward continuity, and that
-bias threads in at the handoff code level (reading `bundle.access_memory`),
-deliberately **not** as a DAG edge — a `coverage_matrix → audit_results →
-access_memory → coverage_matrix` edge would be a cycle.
+`audit_results.jsonl` revision (dependency-first, no cycle). No audit-side reader
+exists — the artifact is write-only, reserved to bias later host-work composition
+toward continuity (remediate's `computeBlockContinuityScores` is the intended
+shape of that consumer). The bias is deliberately **not** a DAG edge — a
+`coverage_matrix → audit_results → access_memory → coverage_matrix` edge would
+be a cycle.
 
 `scope.json` records how a run was scoped (the `--since` delta mode): `full`
 (default) or `delta` with the seed (changed) + expanded (graph-neighbour) file
@@ -139,8 +142,9 @@ matrix (same files/buckets) still re-stales tasks. No cycle: planning writes
 `advanceAudit` call, dependency-first.
 
 `task_affinity_graph.json` is the provider-neutral task-affinity graph derived
-from `audit_tasks.json`; the host-handoff builder consumes it to form complete
-bounded work items and persists no executor choice — see
+from `audit_tasks.json`; planning's packet composition consumes it
+(`buildReviewPackets` / plan metrics in `src/audit/orchestrator/reviewPackets.ts`)
+to form complete bounded work items and persists no executor choice — see
 [`audit-workflow-design.md`](../audit-workflow-design.md).
 
 Findings land in `audit_results.jsonl` (NDJSON, one `AuditResult` per line) —
@@ -219,7 +223,7 @@ truth remains the pair of registries — `EXECUTOR_REGISTRY`
 | `runtime_validation_report.json` | `runtime_validation_executor` | `planning_executor` (when tasks exist), `result_ingestion_executor`, `runtime_validation_update_executor` (`preferredExecutor` only) |
 | `audit_tasks.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
 | `audit_plan_metrics.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
-| `task_affinity_graph.json` | `planning_executor` | — |
+| `task_affinity_graph.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening) |
 | `requeue_tasks.json` | `planning_executor` | `result_ingestion_executor` |
 | `audit_results.jsonl` | `result_ingestion_executor` (appends validated results returned through `semantic_review_executor`) | — |
 | `access_memory.json` | `result_ingestion_executor` | — |

@@ -677,8 +677,6 @@ export {
   remediationArtifactsDir,
   stepsDir,
   artifactTreeLockPath,
-  nodeClaimsPath,
-  taskClaimsPath,
   submissionsDir,
   expectedSubmissionsPath,
   laneAssetsDir,

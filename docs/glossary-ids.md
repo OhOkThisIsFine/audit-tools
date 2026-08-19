@@ -28,7 +28,7 @@ is deleted too.
 | INV-ID | Idempotent, content-hash-keyed remediation intake. | src/remediate/intake.ts |
 | INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | src/remediate/contractPipeline/derive.ts; src/remediate/contractPipeline/artifactStore.ts |
 | INV-O1 | Best-effort, deduplicated, lock-safe friction capture at workflow step boundaries. | src/shared/friction/captureFrictionEvent.ts; src/shared/friction/stepBoundaryCapture.ts |
-| INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | src/audit/orchestrator/ledger.ts; src/audit/orchestrator/resultBaseline.ts; src/audit/orchestrator/intentCheckpointGate.ts |
+| INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | src/audit/orchestrator/ledger.ts; src/audit/orchestrator/resultBaseline.ts; src/audit/orchestrator/intentCheckpointGate.ts; src/audit/types/artifactMetadata.ts |
 | INV-PENDING-SINGLE-SOURCE | One pending-task partition feeds both audit workload emission and completion state. | src/audit/orchestrator/pendingTasks.ts; src/audit/orchestrator/state.ts |
 | INV-PHASE | Lower remediation phases complete before higher phases become ready. | src/remediate/steps/nextStep.ts |
 | INV-PLAN-FROZEN-ESTIMATES | Planned audit tasks persist provider-neutral token and risk estimates. | src/audit/orchestrator/planningExecutors.ts |
@@ -45,7 +45,7 @@ is deleted too.
 | INV-S04 | Verbatim free-form intent is never copied into a host workload or output; only interpreted signals cross the boundary. | src/shared/intent/freeFormIntentInterpreter.ts; src/shared/intent/pathScope.ts |
 | INV-SCC | Portable run-id path encoding and live-holder file-lock freshness. | src/shared/io/frictionCapture.ts; src/shared/io/fileLock.ts; src/shared/friction/triage.ts |
 | INV-SOO | Canonical physical-file identity for ownership and overlap checks. | src/shared/io/pathIdentity.ts |
-| INV-WTS | Remediation worktree containment, locking, ancestry, and no-clobber acceptance. | src/remediate/steps/dispatch/worktreeLifecycle.ts; src/remediate/steps/dispatch/acceptNode.ts |
+| INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | src/remediate/steps/dispatch/common.ts |
 
 The source also contains local numeric invariants such as INV-1, INV-2, INV-3, INV-09, and INV-10.
 Those numbers are file-local; resolve them at the citing module rather than treating them as a global

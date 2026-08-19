@@ -118,3 +118,12 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   `knip --production` audit. The open question is whether the wrapper's `ensureBootstrap` already
   covers the global-asset half it writes, in which case both it and
   `src/remediate/utils/hostAssets.ts`'s comment naming it go too.
+
+- **Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>`
+  branch has no closing action that lands it on the base branch.** `CLOSING_ACTIONS`
+  (`src/remediate/state/closingActions.ts`) is commit/push/open-pr/publish/tag/none/custom; the
+  retired `merge-to-base` (deleted in `467b1e8f` with the execution substrate) was the opt-in fix —
+  one revertable `--no-ff` merge into the launch branch, aborting safely on conflict. A host
+  dispatching on an isolated branch must land the work itself (`custom` or a manual merge). If
+  isolated-branch dispatch returns as a first-class flow, re-add a landing action in tooling rather
+  than relying on the host remembering.

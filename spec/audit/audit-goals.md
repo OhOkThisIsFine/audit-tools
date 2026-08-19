@@ -49,9 +49,16 @@ Deterministic responsibilities:
 
 - repository intake and file discovery
 - scope exclusion
+- mechanical auto-fixes (`auto_fixes_applied`) and syntax resolution (`syntax_resolved`)
+- external-analyzer acquisition (`external_analyzers_current`)
 - unit, graph, surface, and initial critical-flow inference (graph enrichment's edge-reasoning,
   `edgeReasoning.ts`, may take an OPTIONAL additive host/LLM rewrite for low-confidence edges —
   mirroring the synthesis-narrative carve-out; edge identity/confidence stays deterministic)
+- design assessment (`design_assessment_current` — deterministic design pass; the two design-review
+  host steps may take an OPTIONAL additive host/LLM refresh of `design_assessment.json` —
+  mirroring the edge-reasoning carve-out; the deterministic findings stay authoritative)
+- structure decomposition (`structure_decomposition_current`)
+- docs-digest telos extraction (`docs_digest_current`)
 - task generation
 - result validation and coverage accounting
 - runtime command discovery and execution
@@ -59,6 +66,8 @@ Deterministic responsibilities:
 - work-block generation
 - final Markdown rendering
 - cleanup and resume behavior
+- the terminal friction close-out (resolved deterministically off the on-disk friction artifact at
+  the completion boundary, after synthesis)
 
 LLM responsibilities:
 

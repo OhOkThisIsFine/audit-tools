@@ -112,32 +112,6 @@ export function artifactTreeLockPath(artifactsDir: string): string {
 }
 
 /**
- * `<artifactsDir>/node-claims.json` — the shared cross-process `ClaimRegistry`
- * file for cooperative multi-agent runs (see
- * `spec/multi-ide-concurrent-runs-design.md`). Peers claim the current
- * bundle-mutating obligation (`obligation:<id>`) and — from slice 2 — individual
- * `audit_tasks` (`<task_id>`) here so no two agents run the same unit. Distinct
- * from `artifact-tree.lock` (a short atomicity lock); a claim is a heartbeated
- * work-lease that survives a long executor.
- */
-export function nodeClaimsPath(artifactsDir: string): string {
-  return join(artifactsDir, "node-claims.json");
-}
-
-/**
- * `<artifactsDir>/task-claims.json` — a SEPARATE `ClaimRegistry` file for
- * per-`task_id` audit-task claims (slice 2). Kept distinct from
- * `node-claims.json` (the short-lived, heartbeated `bundle-mutation` mutex)
- * because task claims use a much LONGER lease: they are held across an
- * out-of-process host worker run with no live heartbeat, so their reclaim window
- * must bound a worker's whole runtime. Separate files keep the two lease windows
- * from cross-contaminating (a registry's stale-window is per-instance).
- */
-export function taskClaimsPath(artifactsDir: string): string {
-  return join(artifactsDir, "task-claims.json");
-}
-
-/**
  * `<artifactsDir>/submissions` — where host submissions land, one file per
  * tool-minted submission id (`<sha256(submission_id)>.json`). Takes an
  * already-resolved artifacts dir.

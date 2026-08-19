@@ -211,13 +211,15 @@ parallel-dispatch-optimistic-not-anchors)*
 ## A9. Multi-agent cooperative runs
 
 Arbitrary host agents and IDEs may contribute to the SAME audit/remediation (JOIN, not isolate) — symmetric
-peers, no primary/secondary. Needs per-run state namespaces + task-claim locking, not single-writer state.
+peers, no primary/secondary. Safety comes from persisted workload/result bindings + idempotent ingestion —
+no claim registry, lease, or per-IDE namespace.
 *(home: `spec/multi-ide-concurrent-runs-design.md`; memory: multi-ide-concurrent-runs-design)*
 
 ## A10. Analyzers & dependencies (the product's ingestion of external tools)
 
-- **Own-vs-acquire; agnostic engine over a fixed bundle.** Own only truly-agnostic extractors (git-mining,
-  secret-scan); acquire ecosystem-native tools dynamically + normalize via an adapter seam. Gate =
+- **Own-vs-acquire; agnostic engine over a fixed bundle.** Own only truly-agnostic extractors (git-mining);
+  acquire ecosystem-native tools — secret-scan (gitleaks) among them — dynamically + normalize via an
+  adapter seam. Gate =
   mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist.
 - **Two-tier dependency policy.** Import vetted pure-JS libs for correctness-sensitive parsing/schema/lock
   (`smol-toml`, `yaml`); own only tiny domain bits; wrap parsers so malformed input degrades to empty.

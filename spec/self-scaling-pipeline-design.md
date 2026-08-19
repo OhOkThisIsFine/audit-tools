@@ -21,9 +21,9 @@ below for the shape.
 
 ## Two distinct cost drivers (measured)
 
-1. **Phase round-trip ceremony** — ~12 artifact writes + validates per run. The *content* already
-   scales (a 1-module decomposition is short; an empty seam report is empty), but the *number of
-   gated steps* is fixed regardless of complexity. Latency/ceremony cost.
+1. **Phase round-trip ceremony** — one artifact write + validate per pipeline phase, every run. The
+   *content* already scales (a 1-module decomposition is short; an empty seam report is empty), but
+   the *number of gated steps* is fixed regardless of complexity. Latency/ceremony cost.
 2. **Mandatory independent adversarial passes** — the critique + counterexample sub-agents
    (~50–90k tokens *each*, every run) spin up full independent reviewers even for a trivial change
    that warrants none. The dominant token cost, and the most disproportionate.
@@ -50,7 +50,8 @@ pipeline on any concern — a mandatory light-review floor, not a zero-scrutiny 
   contracts + seam + finalize for a single-module change) can be ONE round-trip producing several
   artifacts. The fine split buys failure-isolation + per-phase gating — valuable only when there is
   real complexity to isolate.
-- **Granularity = `f(complexity)`**: round-trip count is not a fixed 17. Trivial → a few coarse
+- **Granularity = `f(complexity)`**: round-trip count follows the phase structure — one
+  write+validate per phase, degenerate phases collapse — never a fixed total. Trivial → a few coarse
   steps; complex multi-module → stays fine-grained (that is exactly when the isolation + per-phase
   validation gates earn their cost).
 - **Degenerate phases collapse by structure** with no risk call at all (1 module ⇒ seam-reconciliation

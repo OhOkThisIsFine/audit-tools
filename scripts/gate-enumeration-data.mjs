@@ -1,23 +1,25 @@
 // The human-readable gloss for every step of the release gate, HELD AS DATA.
 //
 // WHY THIS EXISTS. `package.json`'s `verify:checks` / `verify:release` are the
-// real gate. Two docs also restate that list in prose — `docs/audit-pkg/release.md`
-// as glossed bullets, `.claude/skills/ship/SKILL.md` as an inline sentence — and
-// both were maintained BY HAND, so every new gate step silently invalidated both
-// copies and nothing failed until a human diffed them.
+// real gate. The ship skill (`.claude/skills/ship/SKILL.md`) restates that list
+// in prose as an inline sentence — and a prose restatement maintained BY HAND
+// goes silently stale on every new gate step, with nothing failing until a
+// human diffs it.
 //
 // That is not hypothetical: on 2026-07-29 the nightly review added a missing
-// `check:doc-links` row to release.md and missing `doc-links` + `nightly-routine-prompt`
-// rows to the ship skill, recording that the latter "now matches package.json in
-// exact order". It stopped matching the next day, when `check:guard-reach` landed
-// in a commit that had no reason to know two prose restatements existed.
+// `check:doc-links` row to the glossed-bullet copy then in release.md (since
+// folded into the ship skill, the flow's one home) and missing `doc-links` +
+// `nightly-routine-prompt` rows to the ship skill, recording that the latter
+// "now matches package.json in exact order". It stopped matching the next day,
+// when `check:guard-reach` landed in a commit that had no reason to know any
+// prose restatement existed.
 //
-// So the lists are GENERATED from package.json's real step order, and this module
+// So the list is GENERATED from package.json's real step order, and this module
 // supplies only the one thing package.json cannot: what each step means to a
-// human. `scripts/check-gate-enumeration.mjs` renders both docs between markers
-// and byte-compares (`--write` regenerates). A step present in package.json with
-// no gloss here is a BUILD FAILURE — adding a gate step forces you to name it
-// once, in one place, and both docs follow.
+// human. `scripts/check-gate-enumeration.mjs` renders every registered target
+// between markers and byte-compares (`--write` regenerates). A step present in
+// package.json with no gloss here is a BUILD FAILURE — adding a gate step forces
+// you to name it once, in one place, and every rendered copy follows.
 //
 // This is the same shape as `scripts/doc-manifest-data.mjs` and the README
 // philosophy block: one source, rendered per consumer, parity-gated. CLAUDE.md's
@@ -63,12 +65,6 @@ export const STEP_GLOSS = {
 
 /** Where a generated enumeration lives, and how that consumer wants it shaped. */
 export const ENUMERATION_TARGETS = [
-  {
-    file: "docs/audit-pkg/release.md",
-    marker: "gate-enumeration",
-    // Glossed bullets, one per line — the reference form.
-    render: (steps) => steps.map((s) => `- ${STEP_GLOSS[s]} (\`${s}\`)`).join("\n"),
-  },
   {
     file: ".claude/skills/ship/SKILL.md",
     marker: "gate-enumeration",

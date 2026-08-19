@@ -1,7 +1,6 @@
 ---
 name: remediate-code
 description: Conversation-first remediation of audit findings or feedback through provider-neutral host work items.
-version: 0.3.0
 ---
 
 # remediate-code skill

@@ -9,7 +9,8 @@ to narrate past defects.
 Companion to [`audit-workflow-design.md`](audit-workflow-design.md) — the two
 share principles (complete host workloads, bound untrusted results, prompt
 caching, structured output, roundtrip minimization). Shared infrastructure lives
-in `audit-tools/shared` and is listed under *Cross-tool alignment* in both.
+in `audit-tools/shared` and is stated once in
+[`cross-tool-alignment.md`](cross-tool-alignment.md).
 
 ---
 
@@ -396,26 +397,12 @@ grants) scoped to the node's package.
 
 ## Cross-tool alignment (shared with the auditor)
 
-- **Shared host-handoff guarantees.** Both tools emit complete provider-neutral
-  work, bind prompts and result paths before execution, validate returned records
-  as untrusted input, and make accepted replay idempotent.
-- **`free_form_intent` interpretation parity.** Interpret-don't-thread is the rule
-  in both tools; the interpretation logic (intent → priority/lens weighting) is a
-  shared concern.
-- **Prompt-caching principle** (shared context first, agent-specific payload last)
-  applies to seam-negotiation agents, audit design-review agents, and auditor
-  workers identically.
-- **Token estimation** uses the shared byte-based `estimateTokensFromBytes`.
-- **Audit findings as contract-pipeline seed (Path A).** The auditor's findings
-  contract stays rich enough to seed goal normalization: stable IDs, affected
-  files with line evidence, lens/severity, theme links.
-- **Pinned shared seam contracts.** Session intent, affinity/coherence
-  artifacts, provider-agnostic execution records, and the `free_form_intent`
-  interpreter are pinned/versioned and validated through real consumers.
+The contract shared with the auditor — implement once, in `audit-tools/shared`
+— is stated once in [`cross-tool-alignment.md`](cross-tool-alignment.md).
 
 ---
 
-## Unchanged from the prior architecture
+## Retained invariants
 
 - State persistence model (file-backed, pessimistic locking) and the
   one-bounded-step-per-invocation contract.

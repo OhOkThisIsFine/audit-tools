@@ -16,7 +16,7 @@ intake
   → critical_flow_fallback  [host_delegation, conditional — only when deterministic flow
                              inference falls below the confidence bar]
   → batch_deterministic     [graph_enrichment → design_assessment
-                             → structure_decomposition]
+                             → structure_decomposition → docs_digest]
   → intent_checkpoint       [user gate]
   → intent_equivalence      [host_delegation for a prose-only delta; every other arm
                              (baseline stamp, gate-version stale, structured delta)
@@ -30,6 +30,7 @@ intake
   → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
   → planning
   → host_review_handoff     [complete provider-neutral workload + bound result ingestion]
+  → runtime_validation      [deterministic — runs planned runtime-validation commands]
   → synthesis
   → synthesis_narrative     [host_delegation]
 ```
@@ -39,7 +40,7 @@ intake
 ## Batch deterministic block
 
 The deterministic obligations (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
-→ graph_enrichment → design_assessment → structure_decomposition) run in a single next-step call. The orchestrator advances
+→ graph_enrichment → design_assessment → structure_decomposition → docs_digest) run in a single next-step call. The orchestrator advances
 through all pending deterministic obligations before returning. No separate
 roundtrip per step. Execution halts at the first host_delegation obligation or
 when all obligations are satisfied.
@@ -326,25 +327,9 @@ and executor registration integrate it into the persisted step workflow.
 ## Cross-tool alignment
 
 The remediation walkthrough produced a companion design
-([`remediation-workflow-design.md`](remediation-workflow-design.md)). Items
-shared between the two tools — implement once, in `audit-tools/shared`:
-
-- **Host-handoff guarantees.** Both tools emit complete provider-neutral work,
-  bind prompts and result paths before execution, treat returned records as
-  untrusted, and make accepted replay idempotent. Their domain payloads differ;
-  containment, binding, and content-addressed evidence rules stay aligned.
-- **`free_form_intent` interpretation** (interpret to shape weighting/priority;
-  never thread verbatim into worker prompts) is the rule in both tools; the
-  interpretation logic is a shared concern.
-- **Findings contract as remediation seed.** Remediation's contract pipeline
-  consumes `audit-findings.json` to seed goal normalization (both-paths
-  design). The findings contract must stay rich enough for that: stable IDs,
-  affected files with line evidence, lens/severity, theme links — kept rich
-  enough to seed remediation through any audit-side refactor.
-- **Token estimation** (`estimateTokensFromBytes`) and the **prompt-caching
-  principle** (shared prefix first, per-agent payload last) apply identically
-  to auditor workers, design-review agents, and remediation seam-negotiation
-  agents.
+([`remediation-workflow-design.md`](remediation-workflow-design.md)). The
+contract shared between the two tools — implement once, in `audit-tools/shared`
+— is stated once in [`cross-tool-alignment.md`](cross-tool-alignment.md).
 
 ---
 

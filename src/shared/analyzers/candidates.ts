@@ -17,11 +17,11 @@ import { parseRubocop } from "./rubocop.js";
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place
- * concrete tools are named; the engine is tool-agnostic. gitleaks is the DEFAULT
- * member (high-value, low-overhead secret scanning, agnostic to the repo's
- * ecosystem); semgrep + eslint are registered but CONSENT-GATED (defaultRun:
- * false) — they pull rule sets / need repo config and so only run when the
- * operator supplies a per-run consent token.
+ * concrete tools are named; the engine is tool-agnostic. Membership in the
+ * DEFAULT set is per-candidate `defaultRun: true` — those run without the
+ * per-run consent token; every `defaultRun: false` candidate runs only when the
+ * operator supplies the token. The flag on each registry row below is the
+ * authoritative roster — this comment enumerates nothing.
  */
 
 // Pinned gitleaks release (own-vs-acquire: acquire the mature tool, pinned for
@@ -1067,7 +1067,7 @@ const lizardCandidate: ExternalAnalyzerCandidate = {
   parse: parseLizard,
 };
 
-/** The curated external analyzer candidate set. gitleaks is the default member. */
+/** The curated external analyzer candidate set. `defaultRun` marks the consent-free default members. */
 export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   gitleaksCandidate,
   semgrepCandidate,

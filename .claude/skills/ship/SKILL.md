@@ -91,10 +91,17 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or
 manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version)
 → `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded
-`vitest run`) jobs → `publish` (needs both).
+`vitest run`) jobs → `publish` (needs both). The `publish` job requests `id-token: write` for the npm
+OIDC exchange, pins the Node + npm versions declared in the workflow, rebuilds `dist/` for packing,
+previews the tarball with `npm pack --dry-run`, publishes with public access + provenance, verifies the
+published version resolves from the registry, and uploads `*-npm-logs` artifacts on failure.
 
 Bump/tag scripts: `release:patch` / `:minor` / `:major` (bump + commit + tag), or the `:publish`
 variants (also push + create GitHub Release + wait for CI).
+
+The manual halves stay in `docs/audit-pkg/release.md`: per-host validation checklists, manual
+`workflow_dispatch` usage, trusted-publisher configuration, troubleshooting (incl. the
+`AUDIT_CODE_VERBOSE=1` smoke-debug tip and the smokes' `npm_config_*`/token isolation note).
 
 ## Pipeline profiling (always-on)
 

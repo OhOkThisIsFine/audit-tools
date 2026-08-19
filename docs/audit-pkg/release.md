@@ -1,63 +1,15 @@
 # Release
 
-## Release gate
+The maintainer land-and-publish flow — release gate, publication, version bumps —
+is owned by the ship skill (`.claude/skills/ship/SKILL.md`), including the
+generated gate-step list. `npm run release:patch` bumps + tags;
+`npm run release:patch:publish` runs the full flow (`release:minor` /
+`release:major` variants likewise). Routine CI exercises the
+Node majors matrixed in `.github/workflows/*.yml` (the matrix there is
+self-describing).
 
-Run from the repository root:
-
-```bash
-npm ci
-npm run verify:release
-```
-
-`verify:release` runs `verify:checks` first, then the full vitest suite, then both
-linked-install smokes. The `verify:checks` half is generated from `package.json`
-below — in its real order, so this list cannot drift from the gate:
-
-<!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
-
-- raw control-byte gate (`check:control-bytes`)
-- version-gate scan (`check:version-gates`)
-- guard wiring/reach reconciliation (`check:guard-reach`)
-- loop-core pattern-list drift check (`check:loop-core-patterns`)
-- constitutional-doc-path parity (`check:constitutional-doc-paths`)
-- dead-code export gate (`check:deadcode`)
-- curated lint gate (eslint, zero-tolerance) (`check:lint`)
-- duplication ratchet (jscpd) (`check:dup`)
-- dependency-graph rules (dependency-cruiser) (`check:depgraph`)
-- doc-manifest reconciliation gate (`check:doc-manifest`)
-- relative-link resolution gate (`check:doc-links`)
-- backticked repo-path citation gate (`check:doc-code-citations`)
-- gate-enumeration parity (this list) (`check:gate-enumeration`)
-- README philosophy-brief parity (`check:philosophy-brief`)
-- nightly scheduler-prompt parity (`check:nightly-routine-prompt`)
-- HANDOFF roadmap parity (`check:handoff-roadmap`)
-- backlog seek-index parity (`check:backlog-index`)
-- memory-citation check (`check:memory-citations`)
-- backlog size-budget gate (`check:backlog-budget`)
-- backlog status-token gate (`check:backlog-status`)
-- test-tree typecheck (`check:tests`)
-- TypeScript typecheck (`build`)
-- host-install verification (audit) (`verify:hosts`)
-- host-install verification (remediate) (`verify:remediate-hosts`)
-- single-tarball pack smoke (`pack:smoke`)
-- packaged-install smoke (audit-code) (`smoke:packaged-audit-code`)
-- packaged-install smoke (remediate-code) (`smoke:packaged-remediate-code`)
-
-<!-- END gate-enumeration -->
-
-…followed by the full automated test suite (`vitest`), then
-`smoke:linked-audit-code` and `smoke:linked-remediate-code`.
-
-For live child-process output while debugging smoke tests:
-
-```bash
-AUDIT_CODE_VERBOSE=1 npm run smoke:packaged-audit-code
-AUDIT_CODE_VERBOSE=1 npm run smoke:linked-audit-code
-```
-
-The packaged smoke path strips inherited `npm_config_*`, `NODE_AUTH_TOKEN`, and
-`NPM_TOKEN` values before nested npm operations so dry runs and smoke installs
-do not accidentally inherit publish credentials or suppress tarball generation.
+This page keeps what the skill does not carry: manual host validation, manual
+workflow dispatch, trusted-publisher configuration, and troubleshooting.
 
 ## Host validation — the manual half of the release gate
 
@@ -130,63 +82,6 @@ Notes / failures (file each as a backlog item):
 
 -
 
-## Publication
-
-Publication is operational through GitHub Actions Trusted Publishing.
-
-Workflow:
-
-```text
-.github/workflows/publish-package.yml
-```
-
-The release gate is split into two parallel jobs — `gate` (`npm run verify:checks`) and `test` (the
-vitest suite, sharded 4 ways) — so publish latency is bounded by the slowest gate job rather than their
-sum. The `publish` job needs both, then:
-
-- requests `id-token: write` for npm OIDC exchange
-- pins the Node and npm versions declared in `.github/workflows/publish-package.yml`
-- rebuilds `dist/` for packing (the `gate`/`test` jobs already ran the full verify chain)
-- previews the packed tarball with `npm pack --dry-run`
-- publishes with public access and provenance
-- defaults semver prerelease versions to the `next` dist-tag unless overridden
-- verifies that the published version resolves from the registry
-- uploads `*-npm-logs` artifacts on failure
-
-Routine CI exercises the Node majors matrixed in `.github/workflows/*.yml` (the matrix there is self-describing).
-
-## Version bump helpers
-
-Use:
-
-```bash
-npm run release:patch
-```
-
-That bumps the version, updates `package.json` and `package-lock.json`, and
-creates the release commit and annotated tag.
-
-Available variants:
-
-- `npm run release:minor`
-- `npm run release:major`
-
-Full maintainer flow:
-
-```bash
-npm run release:patch:publish
-```
-
-That command checks the worktree, runs the full local pre-tag gate (`npm run verify:checks` — every
-non-test check, so a tag can never be cut over a red one), bumps the version, commits,
-tags, pushes `main` and the tag, creates the GitHub Release, waits for `publish-package.yml`, and
-confirms the new npm version resolves.
-
-Minor and major publish variants:
-
-- `npm run release:minor:publish`
-- `npm run release:major:publish`
-
 ## Manual workflow dispatch
 
 Use GitHub Actions `workflow_dispatch` to exercise or run the publish workflow.
@@ -224,6 +119,17 @@ If a GitHub Actions run fails:
 2. rerun `npm ci` and `npm run verify:release` locally from the same commit
 3. for publish failures, rerun `publish-package.yml` with `dry_run=true`
 4. confirm npm Trusted Publishing still targets `publish-package.yml`
+
+For live child-process output while debugging the packaged/linked smokes:
+
+```bash
+AUDIT_CODE_VERBOSE=1 npm run smoke:packaged-audit-code
+AUDIT_CODE_VERBOSE=1 npm run smoke:linked-audit-code
+```
+
+The packaged smoke path strips inherited `npm_config_*`, `NODE_AUTH_TOKEN`, and
+`NPM_TOKEN` values before nested npm operations so dry runs and smoke installs
+do not accidentally inherit publish credentials or suppress tarball generation.
 
 Post-publish checks:
 

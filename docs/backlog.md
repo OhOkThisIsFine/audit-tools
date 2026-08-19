@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 121 entr(y/ies) indexed.
+> and at commit). 122 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -45,8 +45,8 @@
 - `open-bugs.md:142` — Backlog prose paraphrased an incident in a way that INVERTED its mechanism, costing a wrong implementation (2026-07-24, medium, friction: ambiguous-direction).
 - `open-bugs.md:152` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 - `open-bugs.md:177` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `open-bugs.md:188` — ⬇ LIVE (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
-- `open-bugs.md:196` — ⬇ LIVE (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `open-bugs.md:188` — ⬇ Live-run watch (re-dogfood 2026-07-22, medium): a worker self-reported "valid, verified" on a malformed-JSON result file — result validity must be checked mechanically, never trusted from the worker's claim.
+- `open-bugs.md:196` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
 - `open-bugs.md:214` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
 - `open-bugs.md:219` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
 - `open-bugs.md:240` — A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.
@@ -97,6 +97,7 @@
 - `forward-tracks.md:87` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:99` — Wave-friendly host dispatch: run identity survives partial ingest.
 - `forward-tracks.md:113` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
+- `forward-tracks.md:122` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -182,9 +183,9 @@ budget; condense at write time, and put the narrative in `git log` or a `docs/re
 ## Live-validation guide — READ FIRST if you're running a live audit/remediate
 
 
-Most open items below are **code-complete and only await a real run to confirm**. Each such item
-carries a **⬇ Live-run watch** line: exactly what to observe during the run to confirm it validated —
-or to catch it failing. Pick a run config from this matrix; watch the items it lights up.
+Some open items carry a **⬇ Live-run watch** line: exactly what to observe during a real run to
+confirm the fix validated — or to catch it failing. Pick a run config from this matrix; watch the
+items it lights up.
 
 | Run config | Items it exercises (watch their ⬇ lines) |
 |---|---|
