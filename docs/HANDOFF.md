@@ -25,20 +25,6 @@
    build queue below overlaps several themes; land those builds first where they coincide.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **11 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `docsN-1` — instruction-file edit: CLAUDE.md cites a half-closed trap whose mechanism was deleted with the execution substrate — one of its "two live examples" has no backlog home
-  - `docsN-2` — instruction-file edit: CLAUDE.md says a non-default analyzer "requires the per-run consent token" — the code also admits on a persisted recorded grant
-  - `docsN-3` — instruction-file edit: CLAUDE.md warns that consent-token redaction is "not yet implemented" and tracked in open-bugs — it is neither tracked there nor unimplemented
-  - `docsN-4` — A loader still tells the host to echo the scope line — the tool took that job over deliberately, so a compliant host now prints it twice in two formats
-  - `docsN-5` — A loader promises a scope-confirmation gate the tool cannot honour — the warning text reaches no prompt, and the drain has already folded past intake before any host can act
-  - `docsN-6` — The audit loader advertises a target-dir argument nothing honours — a typed path is shown back to the user and silently dropped; the remediate loader does the opposite
-  - `docsN-7` — The loop-core module header names a consumer deleted with the execution substrate, and its exported predicate has zero production callers while the hook re-implements it
-  - `solN-1` — The lane-liveness guard covers one lane of several, and the one probe it runs cannot fail — tonight the Codex lane was dead all run and nothing said so
-  - `docsN-8` — Constitutional goals doc defines the remediator's output as Markdown only — the machine contract is missing from all three output statements, and its audit sibling states the pair correctly
-  - `docsN-9` — Batched de-status: two design docs that declare "no dated status here" carry dated process provenance and a heading defined against a superseded state
-  - `docsN-10` — Doc-set condensation: the shared cross-tool contract is deliberately listed in both workflow designs — and the two copies have already drifted to four bullets versus six
-
 <!-- END GENERATED LIVE STATUS -->
 
 ## Immediate next

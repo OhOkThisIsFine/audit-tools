@@ -1265,5 +1265,82 @@
     "subject": "ensureGlobalAssets is unreachable through the bin — decide whether it is duplicated elsewhere or genuinely dead code to delete",
     "path": "docs/backlog/forward-tracks.md",
     "decided_at": "2026-08-18T20:05:45.379Z"
+  },
+  "241c6d16088979e9": {
+    "disposition": "settled",
+    "answer": "Delete the stale example: keep the surviving checkJs holdout example, reword 'two live examples' to 'a live example'.",
+    "subject": "instruction-file edit: CLAUDE.md cites a half-closed trap whose mechanism was deleted with the execution substrate — one of its \"two live examples\" has no backlog home",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-19T00:12:50.326Z"
+  },
+  "f25faecc5b987cd7": {
+    "disposition": "settled",
+    "answer": "Name both channels: correct CLAUDE.md to 'requires first-use consent — either a durable recorded granted decision in analyzer-policy.json, or a per-run consent token'. The recorded-decline-not-a-veto defect stays a remediation item.",
+    "subject": "instruction-file edit: CLAUDE.md says a non-default analyzer \"requires the per-run consent token\" — the code also admits on a persisted recorded grant",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-19T00:12:50.719Z"
+  },
+  "8fa364b21bc8fc8a": {
+    "disposition": "settled",
+    "answer": "Add a contract test asserting no persisted schema admits a consent token, then reword the clause to point at the test — the guarantee becomes mechanical.",
+    "subject": "instruction-file edit: CLAUDE.md warns that consent-token redaction is \"not yet implemented\" and tracked in open-bugs — it is neither tracked there nor unimplemented",
+    "path": "CLAUDE.md",
+    "decided_at": "2026-08-19T00:12:51.069Z"
+  },
+  "72d7ccc74740cd88": {
+    "disposition": "settled",
+    "answer": "Delete the echo instruction from both loader bodies (the tool renders scopeEchoLine itself); regenerate the mirrored host assets in the same commit.",
+    "subject": "A loader still tells the host to echo the scope line — the tool took that job over deliberately, so a compliant host now prints it twice in two formats",
+    "path": "skills/audit-code/audit-code.prompt.md",
+    "decided_at": "2026-08-19T00:12:51.385Z"
+  },
+  "7c9b3d891e3d9364": {
+    "disposition": "settled",
+    "answer": "Render at the existing pause: surface mis_scope_smells in the confirm-intent pause (which already renders ScopePreDigest — the first place a host can act) and delete the loader sentence.",
+    "subject": "A loader promises a scope-confirmation gate the tool cannot honour — the warning text reaches no prompt, and the drain has already folded past intake before any host can act",
+    "path": "skills/audit-code/SKILL.md",
+    "decided_at": "2026-08-19T00:13:29.715Z"
+  },
+  "0dfed52f4bd6d828": {
+    "disposition": "settled",
+    "answer": "Wire it and keep the hint: add the preserve-user-arguments mapping of a typed directory onto --root <path>, matching the remediate loader, so advertised and actual behaviour agree.",
+    "subject": "The audit loader advertises a target-dir argument nothing honours — a typed path is shown back to the user and silently dropped; the remediate loader does the opposite",
+    "path": "skills/audit-code/audit-code.prompt.md",
+    "decided_at": "2026-08-19T00:13:29.971Z"
+  },
+  "6ee16e365c866811": {
+    "disposition": "settled",
+    "answer": "Fix header and wire the predicate: correct the header to the surviving consumer, and have the pre-commit hook import the shared isLoopCorePath instead of re-implementing it — collapse the duplicate copy.",
+    "subject": "The loop-core module header names a consumer deleted with the execution substrate, and its exported predicate has zero production callers while the hook re-implements it",
+    "path": "src/shared/loopCorePaths.ts",
+    "decided_at": "2026-08-19T00:13:30.205Z"
+  },
+  "ba1870fe98c61657": {
+    "disposition": "settled",
+    "answer": "Lane registry plus real probe: hold the lanes as declared data (scripts/shared/offload-lane-data.mjs), guard iterates it, router probe moves to /v1/models accepting 200 or 401 — fixes the vacuous probe and the coverage gap, reconciled like guard-reach.",
+    "subject": "The lane-liveness guard covers one lane of several, and the one probe it runs cannot fail — tonight the Codex lane was dead all run and nothing said so",
+    "path": ".claude/hooks/session-start-guards.mjs",
+    "decided_at": "2026-08-19T00:13:30.407Z"
+  },
+  "0ba01687e163daf8": {
+    "disposition": "settled",
+    "answer": "State the pair in all three places: remediation-outcomes.json is the machine contract and source of truth, remediation-report.md its render — matching audit-goals and the one-pipeline symmetry. Attested constitutional-doc edit.",
+    "subject": "Constitutional goals doc defines the remediator's output as Markdown only — the machine contract is missing from all three output statements, and its audit sibling states the pair correctly",
+    "path": "spec/remediate/remediation-goals.md",
+    "decided_at": "2026-08-19T00:15:10.489Z"
+  },
+  "a7403a2c1c04df98": {
+    "disposition": "settled",
+    "answer": "Strip both in place: delete the dated parentheticals and rename the heading to what the section holds (e.g. Retained invariants). Content unchanged. Attested edits.",
+    "subject": "Batched de-status: two design docs that declare \"no dated status here\" carry dated process provenance and a heading defined against a superseded state",
+    "path": "spec/conceptual-design-review-design.md",
+    "decided_at": "2026-08-19T00:15:10.638Z"
+  },
+  "7e881704566349d8": {
+    "disposition": "settled",
+    "answer": "A third shared home: move the cross-tool shared contract to its own spec/ shared-boundary doc and point at it from both workflow designs — one home per fact. Attested edit.",
+    "subject": "Doc-set condensation: the shared cross-tool contract is deliberately listed in both workflow designs — and the two copies have already drifted to four bullets versus six",
+    "path": "spec/remediation-workflow-design.md",
+    "decided_at": "2026-08-19T00:15:10.725Z"
   }
 }
