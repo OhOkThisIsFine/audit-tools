@@ -16,21 +16,13 @@
   `subject` itself or refuses at write; a persisted item missing it is unreachable for
   [[settled-subject-slips-through-a-reword]] and cannot be re-asked correctly.
 
-- **The nightly inbox wipes doc-citation-exempt markers on every render, so its stale-path citation
-  reds recur (2026-08-19, low, owner decision pending).** `docs/nightly-inbox.md` is generator-owned
-  (`scripts/nightly/render-inbox.mjs` rewrites everything but ticks and notes), so the two inline
-  exempt markers placed there by the citation-gate widening are deleted on the next render and the
-  widened gate goes red again on quoted stale paths inside item prose. **Property:** exemption
-  survives a re-render. Options put to the owner: (a) `render-inbox.mjs` emits the exempt marker
-  around quoted item content, (b) `docs/nightly-inbox.md` moves to the doc-manifest excluded row.
-
 - **`HOST_GATE_DESCRIPTORS` / `HOST_GATE_KINDS` is a write-only registry — completed by P25, read by
-  nothing in production (2026-08-19, low, owner decision pending).** The dead-code sweep kept it as
+  nothing in production (2026-08-19, low, owner-decided: DELETE).** The dead-code sweep kept it as
   deliberately-staged (landed six days prior), but `GATE_LANES` is the live registry and the two
-  tests over it compare hardcoded lists to hardcoded lists. **Property:** a registry either has a
-  production reader or is deleted; invested-in-but-write-only is the shape
-  [[write-only-data-looks-authoritative]] warns about. Owner call: wire a reader, or delete on the
-  next tested-but-unwired pass.
+  tests over it compare hardcoded lists to hardcoded lists. **Owner decision (2026-08-19): delete it
+  and its tests on the next tested-but-unwired pass unless a production reader lands first** — the
+  invested-in-but-write-only shape [[write-only-data-looks-authoritative]] warns about does not earn
+  a keep.
 
 - **Coherence components have no granularity control, so a whole audit collapses into one work block
   (2026-08-13, high).** `buildContentCoherenceTrace` unions on a DISJUNCTIVE threshold — 4 of 6 evidence

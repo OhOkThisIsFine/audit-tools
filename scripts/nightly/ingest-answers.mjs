@@ -20,9 +20,17 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { recordDecision, readOpenItems, INBOX_RELPATH } from './items.mjs';
-import { MARKER_RE, writeInbox } from './render-inbox.mjs';
+import { MARKER_RE, CITATION_EXEMPT_RE, writeInbox } from './render-inbox.mjs';
 
 const TICK_RE = /^\s*-\s*\[([ xX])\]\s*\*\*(.+?)\*\*\s*(?:—\s*([\s\S]*?))?$/;
+
+/**
+ * Drop the renderer's citation-exempt markers before parsing. An option line
+ * quoting a code path carries one (the gate reads per line), and a numbered
+ * option's recorded answer is the prose rendered beside it — so without this the
+ * gate scaffolding would be recorded verbatim into the durable ledger.
+ */
+const stripExempt = (line) => line.replace(CITATION_EXEMPT_RE, '');
 
 /** Pull the ```notes fenced block out of an item body. */
 export function extractNote(block) {
@@ -36,8 +44,8 @@ export function extractNote(block) {
  */
 export function parseItemBlock(key, block) {
   const ticked = [];
-  for (const line of block.split(/\r?\n/)) {
-    const m = line.match(TICK_RE);
+  for (const rawLine of block.split(/\r?\n/)) {
+    const m = stripExempt(rawLine).match(TICK_RE);
     if (!m) continue;
     if (m[1] === ' ') continue;
     ticked.push({ label: m[2].trim(), answer: (m[3] ?? '').trim() });

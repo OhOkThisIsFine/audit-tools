@@ -33,9 +33,9 @@ records them in the tracked ledger, and does the work.
 
 <!-- nightly:item key=e7846967872260ea -->
 
-## `backlogN-1` — A friction-walk entry has no open work left, but deleting it would orphan the one uncovered property it deliberately states outright
+## `backlogN-1` — A friction-walk entry has no open work left, but deleting it would orphan the one uncovered property it deliberately states outright <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`*
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -72,50 +72,11 @@ The 2026-07-28 friction-walk entry in docs/backlog/open-bugs.md has no open work
 ---
 
 
-<!-- nightly:item key=6959443d8781f8ee -->
-
-## `backlogN-2` — The nightly inbox wipes its own citation-exemption markers on every render — pick the mechanism that makes an exemption survive
-
-*Backlog disambiguation · open 1 night · `scripts/nightly/render-inbox.mjs`*
-
-### In plain terms
-
-The nightly inbox file is machine-generated: every run, a script rewrites the whole thing except your ticked boxes and notes. Separately, there is a check that verifies every code path quoted in a document still exists. Inbox items often quote a path precisely BECAUSE it was deleted — that is the finding — so someone hand-added two little exemption comments to keep the check quiet. Those comments live in the generated part of the file, so the very next run deletes them and the check goes red again on the same quoted paths. It is a loop: the fix gets erased by the thing it was meant to fix. Two ways out. Either the generator itself emits the exemption around quoted item text, so it is regenerated along with everything else, or the inbox is declared out of scope for the citation check entirely — which is defensible, since a work queue quoting broken paths is its normal condition, not a defect. This was logged in the backlog yesterday but never actually put to you as a question. It is live again tonight: this run regenerates the inbox and wipes both markers.
-
-### The question
-
-How should an exemption survive a re-render of docs/nightly-inbox.md: (a) render-inbox.mjs emits the doc-citation-exempt marker around quoted item content, or (b) docs/nightly-inbox.md moves to the doc-manifest excluded row?
-
-### Your answer
-
-- [ ] **1. (a) Generator emits the marker** — Change scripts/nightly/render-inbox.mjs to emit a doc-citation-exempt marker around quoted item content, so the exemption is regenerated with the file.
-- [ ] **2. (b) Exclude the inbox from the gate** — Move docs/nightly-inbox.md to the doc-manifest excluded row — a generated work queue that quotes deleted paths by design is not a doc the citation gate should police.
-- [ ] **3. Neither — leave it** — Leave it as is; hand-replace the exempt markers when the gate goes red, accepting the recurrence.
-- [ ] **Other** — record what I write in Notes below.
-- [ ] **Won't fix** — not doing this; reason in Notes.
-- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
-
-```notes
-
-```
-
-<details>
-<summary>Evidence (3) — what was verified against code, and how</summary>
-
-- docs/nightly-inbox.md carries 2 hand-placed markers at lines 1028 and 1561; scripts/nightly/render-inbox.mjs contains zero occurrences of doc-citation-exempt, so it cannot reproduce them.
-- Live tonight: this run regenerates the inbox, which deletes both markers.
-- Logged in docs/backlog/open-bugs.md on 2026-08-19 as 'owner decision pending' with these two options, but recorded as a backlog pointer rather than asked as a question.
-
-</details>
-
----
-
-
 <!-- nightly:item key=8d7b9bb8d978307d -->
 
-## `backlogN-3` — HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass
+## `backlogN-3` — HOST_GATE_DESCRIPTORS is a finished registry that nothing in production reads — wire a reader, or delete it on the next unwired pass <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `src/audit/cli/nextStepHelpers.ts`*
+*Backlog disambiguation · open 1 night · `src/audit/cli/nextStepHelpers.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -152,9 +113,9 @@ HOST_GATE_DESCRIPTORS / HOST_GATE_KINDS has no production reader (GATE_LANES is 
 
 <!-- nightly:item key=48295eac950efe87 -->
 
-## `backlogN-4` — Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick
+## `backlogN-4` — Work blocks no longer bound anything: 98.3% of one audit's findings landed in a single block — four fixes are characterized and it needs your pick <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `src/shared/decompose/contentCoherence.ts`*
+*Backlog disambiguation · open 1 night · `src/shared/decompose/contentCoherence.ts`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -196,9 +157,9 @@ How should work-block size be bounded now that backend sizing is gone: conjuncti
 
 <!-- nightly:item key=587c1796832c5cbc -->
 
-## `solN-2` — The citation gate only sees BACKTICKED citations, and the glossary writes all 45 of its citations as bare table cells — third recurrence of a stale citation the gate structurally cannot see
+## `solN-2` — The citation gate only sees BACKTICKED citations, and the glossary writes all 45 of its citations as bare table cells — third recurrence of a stale citation the gate structurally cannot see <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `scripts/check-doc-code-citations.mjs`*
+*Recurring-problem solutions · open 1 night · `scripts/check-doc-code-citations.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -222,7 +183,7 @@ Apply P37 — backtick the 45 code citations in docs/glossary-ids.md and add the
 
 ```
 
-Full proposal: [`.audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/`](../.audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/)
+Full proposal: [`.audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/`](../.audit-tools/nightly/proposals/P37-citation-gate-blind-to-unbackticked/) <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 <details>
 <summary>Evidence (5) — what was verified against code, and how</summary>

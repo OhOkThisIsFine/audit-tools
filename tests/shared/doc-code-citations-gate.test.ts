@@ -5,8 +5,12 @@ import { execFileSyncHidden } from "../helpers/spawn.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { renderInbox, CITATION_EXEMPT_RE } from "../../scripts/nightly/render-inbox.mjs";
 
 const CHECKER = resolve(process.cwd(), "scripts/check-doc-code-citations.mjs");
+
+/** A fresh matcher per use — the exported one is global, so `lastIndex` is state. */
+const EXEMPT_MARKER_RE = new RegExp(CITATION_EXEMPT_RE.source, "g");
 
 interface Repo {
   dir: string;
@@ -272,6 +276,47 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     repo.git("add", "-A");
     const { code, out } = runChecker(repo.dir);
     expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("a rendered nightly inbox is green on a stale path quoted in item prose — and RED without the emitted marker", () => {
+    // The inbox is WHOLE-FILE generated, so a hand-placed exemption is wiped by
+    // the next render and the gate goes red on the same quoted paths again. The
+    // renderer therefore emits the marker itself; this pins both halves — green
+    // as rendered, red once the emitted markers are stripped back out — so a
+    // regression in the emission cannot pass as "the doc happened to be clean".
+    const inbox = renderInbox({
+      items: [
+        {
+          id: "backlogN-9",
+          leg: "backlog",
+          path: "docs/backlog/open-bugs.md",
+          title: "The retired `src/gone.ts` pass",
+          subject_key: "0123456789abcdef",
+          eli5: "The old `src/gone.ts` fast path was deleted; the entry still describes it.",
+          question: "Delete the entry that documents `src/gone.ts`?",
+          options: [
+            { label: "Delete", answer: "Delete it — `src/gone.ts` no longer exists." },
+            { label: "Keep", answer: "Keep it as history." },
+          ],
+          evidence: ["`src/gone.ts` matches no tracked file; `vanished/` is gone too."],
+          nights_open: 2,
+        },
+      ],
+    });
+
+    write(repo.dir, "docs/nightly-inbox.md", inbox);
+    repo.git("add", "-A");
+    const green = runChecker(repo.dir);
+    expect(green.code, `expected green, got:\n${green.out}`).toBe(0);
+
+    write(repo.dir, "docs/nightly-inbox.md", inbox.replace(EXEMPT_MARKER_RE, ""));
+    repo.git("add", "-A");
+    const red = runChecker(repo.dir);
+    expect(red.code).toBe(1);
+    expect(red.out).toMatch(/src\/gone\.ts/);
+
+    rmSync(join(repo.dir, "docs", "nightly-inbox.md"));
+    repo.git("add", "-A");
   });
 
   it("an exempt marker suppresses directory and bare-filename reds too", () => {

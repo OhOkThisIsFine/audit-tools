@@ -306,6 +306,25 @@ describe('inbox render — the tracked markdown answering surface', () => {
     expect(md).toContain('```notes');
   });
 
+  it('emits the citation exemption on quoted item content, and nowhere else', () => {
+    // The file is whole-file generated, so a hand-placed exemption is wiped by
+    // the next render. Emitting it is the only placement that survives — but it
+    // must stay narrow: prose this renderer authors keeps being citation-checked.
+    const md = renderInbox({
+      items: [
+        item({
+          eli5: 'The old `src/gone.ts` fast path was deleted.',
+          question: 'Drop the claim about `src/gone.ts`?',
+          evidence: ['`src/gone.ts` matches no tracked file'],
+        }),
+      ],
+    });
+    expect(md).toMatch(/The old `src\/gone\.ts` fast path was deleted\. <!-- doc-citation-exempt:/);
+    expect(md).toMatch(/- `src\/gone\.ts` matches no tracked file <!-- doc-citation-exempt:/);
+    // The preamble cites this repo's own scripts — renderer-authored, still checked.
+    expect(md.slice(0, md.indexOf('<!-- nightly:item'))).not.toContain('doc-citation-exempt');
+  });
+
   it('always offers the three escape hatches, not just the routine\'s proposed options', () => {
     const md = renderInbox({ items: [item()] });
     // An item that only offers the answers the routine thought of cannot record
@@ -366,6 +385,26 @@ describe('inbox ingest — a ticked box becomes a ledger entry', () => {
     const rec = Object.values(decisions)[0] as { answer: string; disposition: string };
     expect(rec.answer).toBe('Keep the pin, it is a deliberate anchor.');
     expect(rec.disposition).toBe('settled');
+  });
+
+  it('never records the rendered citation-exempt marker into the ledger', () => {
+    // A numbered option's recorded answer is the prose rendered beside it, so an
+    // option quoting a code path carries the emitted marker on its line — gate
+    // scaffolding that must not reach the durable answer.
+    writeInboxFor([
+      item({
+        id: 'DOC-1',
+        options: [
+          { label: 'Delete it', answer: 'Delete the retired `src/gone.ts` fast path.' },
+          { label: 'Keep it', answer: 'Keep the pin, it is a deliberate anchor.' },
+        ],
+      }),
+    ]);
+    expect(readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8')).toContain('doc-citation-exempt');
+    tick('1. Delete it');
+    const res = ingestAnswers(root);
+    expect(res.errors).toHaveLength(0);
+    expect(res.recorded[0].answer).toBe('Delete the retired `src/gone.ts` fast path.');
   });
 
   it('drops an answered item from the inbox on re-render', () => {
