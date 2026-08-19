@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 122 entr(y/ies) indexed.
+> and at commit). 121 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -73,15 +73,14 @@
 - `open-bugs.md:492` — `StepArtifactSchema` is `.strict()` but `writeStepContract` injects `agent_id`.
 - `open-bugs.md:498` — systemic_challenge findings ids are adversary-invented and round-colliding.
 - `open-bugs.md:505` — The systemic_challenge loop has no ceiling — its only exit is a dry signal the host may have to fabricate.
-- `open-bugs.md:512` — CI trigger paths omit `.claude/
-- `open-bugs.md:519` — `ensure` writes opencode.json with unstable key order.
-- `open-bugs.md:524` — Two run-id notions; friction record keyed both ways.
-- `open-bugs.md:530` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:535` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
-- `open-bugs.md:544` — `writeOpenItems` reads `subject_key` but never computes or requires it; the HANDOFF generator hard-requires it (2026-08-14, nightly, low).
-- `open-bugs.md:554` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
-- `open-bugs.md:565` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
-- `open-bugs.md:575` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
+- `open-bugs.md:512` — `ensure` writes opencode.json with unstable key order.
+- `open-bugs.md:517` — Two run-id notions; friction record keyed both ways.
+- `open-bugs.md:523` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `open-bugs.md:528` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:537` — `writeOpenItems` reads `subject_key` but never computes or requires it; the HANDOFF generator hard-requires it (2026-08-14, nightly, low).
+- `open-bugs.md:547` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
+- `open-bugs.md:558` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
+- `open-bugs.md:568` — The report renderer emits control characters from finding prose raw (hit 2026-08-18).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -159,8 +158,8 @@
 - `durable-traps.md:558` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
 - `durable-traps.md:565` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
 - `durable-traps.md:571` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
-- `durable-traps.md:585` — `docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is
-- `durable-traps.md:596` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
+- `durable-traps.md:586` — `docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is
+- `durable-traps.md:597` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
 
 <!-- END GENERATED SEEK INDEX -->
 

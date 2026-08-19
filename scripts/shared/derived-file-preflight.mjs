@@ -1,29 +1,38 @@
-// Single source for the pre-commit gate's DERIVED-FILE trigger predicates and
-// their check commands — imported by `.claude/hooks/pre-commit-gate.mjs` AND
-// both attest scripts (P19, owner decision sol-1, 2026-08-12).
+// Single source for the pre-commit gate's DERIVED leg set — imported by
+// `.claude/hooks/pre-commit-gate.mjs` AND both attest scripts (P19, owner
+// decision sol-1, 2026-08-12; leg DERIVATION P34+P26, owner decision
+// 2026-08-18).
 //
-// The trap this exists to remove: an attestation binds to the exact staged
+// The P19 trap this exists to remove: an attestation binds to the exact staged
 // tree (`git write-tree`), but the gate that judges that tree runs later, at
 // `git commit`. When a derived file (backlog seek index, HANDOFF roadmap, doc
 // manifest, guard-reach registry) is stale, the gate demands a regeneration
 // that edits a tracked file — which changes the staged tree and voids the
 // attestation that was just written, so the same review is attested twice
 // (4 records / 3 dates; S1 100b9117 verbatim in HANDOFF). The attest scripts
-// therefore run the SAME derived-file checks the gate will run, BEFORE
-// binding, and refuse to write an attestation for a tree the gate would
-// reject. Nothing is bound, so nothing is wasted.
+// therefore run the SAME checks the gate will run, BEFORE binding, and refuse
+// to write an attestation for a tree the gate would reject.
 //
-// These predicates must never be copied — five copies of a guard hid two bugs
-// once already. The gate imports the predicates from here and keeps its own
-// per-leg block messages; the attest scripts consume runDerivedFilePreflight.
+// The P34 change: the leg set and every trigger are DERIVED from the
+// guard-reach registry (scripts/guard-reach-data.mjs) instead of hand-accreted
+// here and in the hook. A gate row's `preCommit` flag states its pre-commit
+// behavior as data (false | 'reach' | 'always' | 'final'); a 'reach' trigger is
+// the union of the `files` globs of every REACH row citing the gate, plus the
+// gate's own impl script path and package.json. `check:guard-reach` reconciles
+// the flags (a gate without one, or a 'reach' gate no row cites, is a red
+// build), so the leg set can no longer drift narrower than the gates it
+// mirrors. Both consumers (gate hook, attest preflight) derive from this one
+// module — they cannot diverge, which is what keeps the P19 guarantee intact
+// as the leg set grows.
 //
-// Deliberately NOT covered: the doc-contract test leg (up to 240s) — including
-// it would make attest cost as much as the gate. This module owns the four
-// derived-file legs, whose failures are the ones that force a tracked-file
-// edit. That bound is stated in docs/backlog/durable-traps.md.
+// Deliberately NOT covered: the doc-contract test leg (`test:doc-contract`, up
+// to 240s) — including it would make attest cost as much as the gate. That
+// bound is stated in docs/backlog/durable-traps.md.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
+import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
+import { GUARDS, REACH } from '../guard-reach-data.mjs';
 import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -40,42 +49,16 @@ function gitRun(root, args) {
   return { ok: r.status === 0, status: r.status, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
 
-// 2b. Doc-manifest reconciliation — whenever the staged set carries ANY
-// markdown or the canonical manifest data that renders the guidelines table.
-// (The checker reconciles the WHOLE tracked markdown tree; a trigger narrower
-// than the check it fires plants violations the gate never runs on.)
-export function pinsDocManifest(p) {
-  const n = norm(p);
-  return /\.md$/i.test(n) || n === 'scripts/doc-manifest-data.mjs';
-}
-
-// 2b-iii. Backlog seek-index parity — whenever the staged set touches
-// `docs/backlog.md` or any `docs/backlog/*.md`.
-export function pinsBacklogIndex(p) {
-  const n = norm(p);
-  return n === 'docs/backlog.md' || /^docs\/backlog\/[^/]+\.md$/.test(n);
-}
-
-// 2b-i. Guard-reach reconciliation is UNCONDITIONAL when wired — tree
-// membership changes on ANY staged add/delete/rename, so there is no narrower
-// honest trigger. Repos that don't wire the script (fixture repos) skip with
-// an ANNOUNCED fail-open.
-export function guardReachWired(root) {
-  try {
-    return Boolean(
-      JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.['check:guard-reach'],
-    );
-  } catch {
-    return false;
-  }
-}
-
-// 2b-ii. HANDOFF generated-state parity — whenever the staged set touches
-// HANDOFF, a backlog source, the persisted nightly queue, its decision ledger,
-// a current premise-probe source, or the code that projects those sources.
-// Positive probes use repo-wide git-grep for rename/move protection, so a
-// staged pickaxe hit on a probe needle outside probe.file can change a
-// presentation-time verdict too — both scans ride the staged snapshot.
+// HANDOFF generated-state parity: custom WIDENING predicate for the
+// check:handoff-roadmap leg — the current premise-probe sources and the two
+// staged-pickaxe scans are underivable from reach globs, so this predicate
+// stays hand-written and is OR-ed onto the derived trigger. Fires whenever the
+// staged set touches HANDOFF, a backlog source, the persisted nightly queue,
+// its decision ledger, a current premise-probe source, or the code that
+// projects those sources. Positive probes use repo-wide git-grep for
+// rename/move protection, so a staged pickaxe hit on a probe needle outside
+// probe.file can change a presentation-time verdict too — both scans ride the
+// staged snapshot.
 export function handoffStateTriggered({ root, staged, git = (args) => gitRun(root, args) }) {
   const fixed = (p) => {
     const n = norm(p);
@@ -134,32 +117,14 @@ export function handoffStateTriggered({ root, staged, git = (args) => gitRun(roo
   return false;
 }
 
-// The four derived-file checks, keyed by what regenerates them — the fix line
-// is what an attest refusal prints, so it must name the exact command.
-export const DERIVED_FILE_CHECKS = [
-  {
-    id: 'doc-manifest',
-    script: 'check:doc-manifest',
-    fix: 'register the doc in scripts/doc-manifest-data.mjs and re-render with `node scripts/check-doc-manifest.mjs --write`',
-  },
-  {
-    id: 'guard-reach',
-    script: 'check:guard-reach',
-    fix: 'register the file or guard in scripts/guard-reach-data.mjs',
-  },
-  {
-    id: 'handoff-roadmap',
-    script: 'check:handoff-roadmap',
-    fix: 'run `node scripts/shared/generate-handoff-roadmap.mjs`, then re-stage docs/HANDOFF.md',
-  },
-  {
-    id: 'backlog-index',
-    script: 'check:backlog-index',
-    fix: 'run `node scripts/shared/generate-backlog-index.mjs`, then re-stage docs/backlog.md',
-  },
-];
+// Per-gate custom widening predicates, OR-ed onto the derived reach trigger.
+// A widening may only ADD firings — narrowing belongs in the registry as data.
+const CUSTOM_WIDENING = {
+  'check:handoff-roadmap': handoffStateTriggered,
+};
 
-function scriptWired(root, script) {
+/** Whether `root`'s package.json wires `script`. Unreadable reads as unwired. */
+export function scriptWired(root, script) {
   try {
     return Boolean(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.[script]);
   } catch {
@@ -167,33 +132,103 @@ function scriptWired(root, script) {
   }
 }
 
-/** Which of the four checks the gate would run for this staged set. */
-export function evaluateTriggeredChecks({ root, staged, git = (args) => gitRun(root, args) }) {
-  const triggered = [];
-  if (staged.some(pinsDocManifest)) triggered.push('doc-manifest');
-  triggered.push('guard-reach'); // unconditional when wired — see above
-  if (handoffStateTriggered({ root, staged, git })) triggered.push('handoff-roadmap');
-  if (staged.some(pinsBacklogIndex)) triggered.push('backlog-index');
-  return DERIVED_FILE_CHECKS.filter((c) => triggered.includes(c.id));
+// The first repo-relative .mjs path in an npm-script command string —
+// `node scripts/check-doc-manifest.mjs` → `scripts/check-doc-manifest.mjs`.
+// Appending it (plus package.json) to every reach trigger makes "editing the
+// gate's own script re-runs the gate" a derived property instead of a
+// hand-listed one.
+function implPathFrom(command) {
+  if (typeof command !== 'string') return null;
+  const m = command.match(/(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.mjs)(?=\s|$)/);
+  return m ? m[1] : null;
 }
 
 /**
- * Attest-side preflight: run exactly the derived-file checks the gate would
- * run for this staged set. An unwired check FAILS OPEN with an announcement
+ * Derive the ordered pre-commit leg set from the guard-reach registry.
+ *
+ * Returns `[{ id, script, phase: 'main'|'final', fix, triggered({root, staged,
+ * git?}) }]` — phase-'main' legs first, then phase-'final' (check:doc-links:
+ * the broadest trigger must run AFTER every structural refusal or it masks
+ * them), registry order within each phase. A leg's trigger:
+ *   'always'        → true for every staged set.
+ *   'reach'/'final' → the staged set intersects the union of the `files` globs
+ *                     of every REACH row citing the gate ∪ { the gate's impl
+ *                     script path (from packageScripts), 'package.json' } — OR
+ *                     the gate's custom widening predicate fires.
+ * Callers still own wiring (scriptWired) and execution; a leg carries no
+ * environment of its own, so fixture repos derive the same set and skip
+ * unwired legs with an announcement.
+ */
+export function buildPreCommitLegs({ guards = GUARDS, reach = REACH, packageScripts = {} } = {}) {
+  const legs = [];
+  for (const g of guards) {
+    if (g.kind !== 'gate' || g.preCommit === false || g.preCommit == null) continue;
+    const phase = g.preCommit === 'final' ? 'final' : 'main';
+    const fix = g.fix ?? `investigate with \`npm run ${g.impl}\``;
+    if (g.preCommit === 'always') {
+      // Same arity as the reach triggers — a mixed-arity union breaks typed
+      // consumers (TS resolves a union of signatures to the stricter one).
+      legs.push({ id: g.id, script: g.impl, phase, fix, triggered: (_ctx) => true });
+      continue;
+    }
+    const patterns = new Set(['package.json']);
+    for (const row of reach) {
+      if (row.guardedBy === 'declared-gap' || !row.guardedBy.includes(g.id)) continue;
+      for (const f of row.files) patterns.add(norm(f));
+    }
+    const impl = implPathFrom(packageScripts[g.impl]);
+    if (impl) patterns.add(norm(impl));
+    const matchers = [...patterns].map((p) => ({ p, re: isGlob(p) ? globToRegExp(p) : null }));
+    const widen = CUSTOM_WIDENING[g.id];
+    legs.push({
+      id: g.id,
+      script: g.impl,
+      phase,
+      fix,
+      triggered: ({ root, staged, git }) => {
+        const hit = staged.some((s) => {
+          const n = norm(s);
+          return matchers.some((m) => (m.re ? m.re.test(n) : m.p === n));
+        });
+        if (hit) return true;
+        if (!widen) return false;
+        // Omit `git` when the caller did, so the widening's own default runner
+        // (which carries `.status` for the staged-pickaxe scans) kicks in.
+        return widen(git ? { root, staged, git } : { root, staged });
+      },
+    });
+  }
+  return [...legs.filter((l) => l.phase === 'main'), ...legs.filter((l) => l.phase === 'final')];
+}
+
+function readPackageScripts(root) {
+  try {
+    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Attest-side preflight: run exactly the derived pre-commit legs the gate
+ * would run for this staged set — ALL of them, phase-'final' included (a
+ * doc-links failure forces a tracked-file edit and voids an attestation the
+ * same way a stale index does). An unwired leg FAILS OPEN with an announcement
  * (matching the gate's noteFailOpen parity) — a missing script must never make
  * a repo un-attestable. Returns { failures, skipped }; the caller refuses to
  * bind when failures is non-empty.
  */
-export function runDerivedFilePreflight({ root, staged, git = (args) => gitRun(root, args) }) {
+export function runDerivedFilePreflight({ root, staged, git }) {
   const failures = [];
   const skipped = [];
-  for (const check of evaluateTriggeredChecks({ root, staged, git })) {
-    if (!scriptWired(root, check.script)) {
-      skipped.push(`${check.script} is not wired in this repo — preflight leg SKIPPED (fail-open)`);
+  for (const leg of buildPreCommitLegs({ packageScripts: readPackageScripts(root) })) {
+    if (!leg.triggered(git ? { root, staged, git } : { root, staged })) continue;
+    if (!scriptWired(root, leg.script)) {
+      skipped.push(`${leg.script} is not wired in this repo — preflight leg SKIPPED (fail-open)`);
       continue;
     }
     try {
-      execSync(`npm run ${check.script}`, {
+      execSync(`npm run ${leg.script}`, {
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -202,7 +237,7 @@ export function runDerivedFilePreflight({ root, staged, git = (args) => gitRun(r
       });
     } catch (err) {
       const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
-      failures.push({ ...check, tail });
+      failures.push({ id: leg.id, script: leg.script, fix: leg.fix, tail });
     }
   }
   return { failures, skipped };

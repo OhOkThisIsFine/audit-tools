@@ -72,15 +72,15 @@ import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
 // file there is silently dropped from commits until someone adds the allowlist
 // line. `npm run check:constitutional-doc-paths` fails the build on drift.
 import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
-// The derived-file trigger predicates are SINGLE-SOURCED with both attest
-// scripts (P19): the attest preflight must fire on exactly the staged sets
-// this gate fires on, or an attestation binds to a tree this gate rejects.
-// (The nightly queue path and grep domain they depend on ride along inside.)
+// The derived leg set is SINGLE-SOURCED with both attest scripts (P19 + P34):
+// legs and triggers are DERIVED from the guard-reach registry
+// (scripts/guard-reach-data.mjs — plain-data ESM, importable pre-build), so
+// the attest preflight fires on exactly the staged sets this gate fires on, or
+// an attestation would bind to a tree this gate rejects. (The nightly queue
+// path and grep domain the handoff widening depends on ride along inside.)
 import {
-  pinsDocManifest,
-  pinsBacklogIndex,
-  guardReachWired,
-  handoffStateTriggered,
+  buildPreCommitLegs,
+  scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 
 // Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
@@ -580,272 +580,66 @@ function runGate(committedPaths) {
     }
   }
 
-  // 2b. Doc-manifest reconciliation — whenever the STAGED set carries ANY
-  // markdown or the canonical manifest data that renders the guidelines table.
-  // `check:doc-manifest` lives in `verify:checks` (the CI gate job),
-  // which no local preflight runs in full, so an unregistered doc rode to CI and
-  // burned a release tag three times (v0.33.8, v0.34.4, v0.34.17). The checker
-  // enumerates GIT-TRACKED docs — which is exactly why running it here is
-  // correct and running it ad-hoc is not: this gate has materialized the staged
-  // snapshot, so `git ls-files` sees the same tree CI will, including a
-  // brand-new doc that an untracked-file check would miss.
-  //
-  // The trigger was `^docs/.*\.md$` while the checker only enumerated `docs/`.
-  // The checker now reconciles the WHOLE tracked markdown tree (that narrowness
-  // is how a retired proxy-setup example sat unregistered with
-  // nothing to catch it), so the trigger must widen with it — a trigger narrower
-  // than the check it fires plants violations the gate never runs on. Same
-  // reasoning as the `paths:` filters in .github/workflows/ci.yml.
-  // Predicate imported from derived-file-preflight.mjs (P19 single source).
-  if (staged.some(pinsDocManifest)) {
-    try {
-      execSync('npm run check:doc-manifest', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: doc-manifest check FAILED — commit blocked. A staged markdown file is not ` +
-          `registered in the canonical doc manifest (scripts/doc-manifest-data.mjs), or a row points at a ` +
-          `deleted file, or the rendered table in docs/doc-review-guidelines.md is out of date. This is the ` +
-          `check that fails RELEASE CI and burns a release tag.\n` +
-          `Register the doc (type + reason to exist) in scripts/doc-manifest-data.mjs and re-render with ` +
-          `\`node scripts/check-doc-manifest.mjs --write\`, or delete the doc.\n${tail}`,
-      };
-    }
-  }
-
-  // 2b-ii. Guard-reach reconciliation — UNCONDITIONAL, deliberately. The check
-  // reconciles the whole tracked tree against the guard registry
-  // (scripts/guard-reach-data.mjs), and tree membership changes on ANY staged
-  // add/delete/rename while wiring changes ride package.json, settings.json or
-  // a hook edit — a trigger list would have to name all of that and would drift
-  // narrower than the check (the exact trap 2b documents above). The check is
-  // ~1s against the materialized snapshot; the typecheck leg above already
-  // costs an order of magnitude more on every commit.
-  // Repos that don't wire the script (the contract tests' fixture repos) skip
-  // with an ANNOUNCED fail-open. A commit deleting the script from this repo's
-  // package.json therefore skips too — a gate cannot report its own deletion
-  // (same accepted property as the doc-manifest leg); the announcement is what
-  // keeps the skip from reading as a pass.
-  // Wiring probe imported from derived-file-preflight.mjs (P19 single source);
-  // an unreadable package.json reads as unwired — the typecheck leg above
-  // already dealt with worse.
-  const hasGuardReachScript = guardReachWired(root);
-  if (!hasGuardReachScript) {
-    noteFailOpen('check:guard-reach is not wired in this repo — guard-reach leg SKIPPED');
-  } else
-  try {
-    execSync('npm run check:guard-reach', {
-      cwd: root,
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 60_000,
-      windowsHide: true,
-    });
-  } catch (err) {
-    const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-    return {
-      blocked: true,
-      message:
-        `pre-commit gate: guard-reach check FAILED — commit blocked. A tracked file is claimed by no ` +
-        `guard row, a guard is wired into no gate, or a hook/check script landed outside the registry ` +
-        `(scripts/guard-reach-data.mjs). This is a verify:checks gate — unfixed it fails release CI.\n` +
-        `Register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or ` +
-        `'declared-gap' with the reason), then retry.\n${tail}`,
-    };
-  }
-
-  // 2b-i. Nightly scheduler prompt ↔ canonical-source parity. The target is
-  // WHOLE-FILE generated from the routine contract plus the leg-1 rubric. The
-  // old target hand-restated both behind a precedence rule and drifted into
-  // banning the shared helper its sources require. Fire on either direction of
-  // drift, on the generator itself, and on package.json (which owns the check
-  // and release-chain wiring); a verify:checks-only gate first fails in release
-  // CI, after the bad second copy has already landed.
-  const nightlyPromptInputs = new Set([
-    'docs/nightly-routine.md',
-    'docs/doc-review-guidelines.md',
-    'docs/nightly-routine-prompt.md',
-    'scripts/check-nightly-routine-prompt.mjs',
-    'package.json',
-  ]);
-  if (staged.some((p) => nightlyPromptInputs.has(p.replace(/\\/g, '/')))) {
-    try {
-      execSync('npm run check:nightly-routine-prompt', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: nightly scheduler prompt check FAILED — commit blocked. ` +
-          `docs/nightly-routine-prompt.md is generated from docs/nightly-routine.md + ` +
-          `docs/doc-review-guidelines.md and may not carry a hand-maintained summary.\n` +
-          `Fix: node scripts/check-nightly-routine-prompt.mjs --write — then re-stage the target.\n${tail}`,
-      };
-    }
-  }
-
-  // 2b-ii. HANDOFF generated-state parity — whenever the STAGED set touches
-  // HANDOFF, a backlog source, the persisted nightly queue, its decision
-  // ledger, a current premise-probe source, or the code that projects those
-  // sources. The roadmap used to duplicate full backlog specs, while the
-  // nightly status used to be a hand-written snapshot that said EMPTY after
-  // five new items existed. Every authoritative input must therefore trigger
-  // parity.
+  // 2b. DERIVED verify:checks legs (P34, owner decision 2026-08-18). The leg
+  // set and every trigger come from the guard-reach registry
+  // (scripts/guard-reach-data.mjs) via buildPreCommitLegs — a gate row's
+  // preCommit flag states its pre-commit behavior as data ('reach' = staged ∩
+  // its REACH-row globs ∪ its impl script ∪ package.json, plus any custom
+  // widening; 'always' = unconditional when wired; 'final' = runs LAST, after
+  // the structural refusals below; false = deliberate CI-only). The retired
+  // shape was eight hand-accreted legs whose trigger lists drifted narrower
+  // than the checks they fired — three of them were added one-at-a-time only
+  // AFTER each had burned a release tag or turned main red. Now a
+  // verify:checks gate cannot be missing here without the registry saying so
+  // (check:guard-reach reds a flagless gate row), and a trigger narrower than
+  // the check it fires cannot be hand-typed here at all.
   //
   // Wired HERE as well as in `verify:checks` deliberately: the pre-commit hook
-  // does NOT run `verify:checks`, so a gate wired only there first fails in
-  // RELEASE CI and burns a tag — the class that burned v0.34.17.
-  // Trigger imported from derived-file-preflight.mjs (P19 single source): the
-  // fixed authoritative inputs, the current premise-probe sources, and the two
-  // staged-pickaxe scans (a probe needle moving anywhere in the grep domain can
-  // change a presentation-time verdict) all live there now.
-  if (handoffStateTriggered({ root, staged, git })) {
-    try {
-      execSync('npm run check:handoff-roadmap', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: HANDOFF roadmap check FAILED — commit blocked. One or both generated blocks ` +
-          `no longer match the nightly queue + decision ledger and docs/backlog/, so HANDOFF is once ` +
-          `again a separate, stale home for the same state.\n` +
-          `Fix: node scripts/shared/generate-handoff-roadmap.mjs — then re-stage docs/HANDOFF.md.\n` +
-          `Do NOT hand-edit inside either generated block; queue detail lives in docs/nightly-inbox.md ` +
-          `and roadmap entry text lives in the backlog.\n${tail}`,
-      };
-    }
-  }
-
-  // 2b-iii. Backlog seek-index ↔ backlog parity — whenever the STAGED set
-  // touches `docs/backlog.md` or any `docs/backlog/*.md`. The index gives every
-  // entry a `file:line` anchor so `open-bugs.md` is navigable in bounded reads
-  // without being split. Line numbers move under EVERY edit to a backlog file,
-  // so this stales far more easily than the roadmap does — and a stale anchor is
-  // worse than no anchor, because it sends the reader to confidently wrong prose
-  // rather than to nothing.
+  // does NOT run verify:checks, so a gate wired only there first fails in
+  // RELEASE CI and burns a tag (the v0.33.8/v0.34.4/v0.34.17 class). This gate
+  // has materialized the staged snapshot, so tree-enumerating checks (doc
+  // manifest, guard-reach) see the same tree CI will.
   //
-  // Wired HERE as well as in `verify:checks` for the same reason as 2b-ii.
-  // Predicate imported from derived-file-preflight.mjs (P19 single source).
-  if (staged.some(pinsBacklogIndex)) {
-    try {
-      execSync('npm run check:backlog-index', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: backlog seek-index check FAILED — commit blocked. docs/backlog.md's generated ` +
-          `index no longer matches docs/backlog/, so its line anchors point at the wrong entries.\n` +
-          `Fix: node scripts/shared/generate-backlog-index.mjs — then re-stage docs/backlog.md.\n` +
-          `Do NOT hand-patch line numbers inside the BEGIN/END GENERATED SEEK INDEX markers; they are ` +
-          `derived, and the next backlog edit moves them again.\n${tail}`,
-      };
-    }
+  // Repos that don't wire a leg's script (the contract tests' fixture repos)
+  // skip that leg with an ANNOUNCED per-leg fail-open. A commit deleting a
+  // script from this repo's package.json therefore skips too — a gate cannot
+  // report its own deletion (accepted property); the announcement is what
+  // keeps the skip from reading as a pass.
+  let rootScripts = {};
+  try {
+    rootScripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts ?? {};
+  } catch {
+    /* unreadable package.json reads as nothing wired — every leg skips, announced */
   }
-
-  // 2b-iv. Backlog SIZE budget — whenever the STAGED set touches any
-  // `docs/backlog/*.md`. Sibling of 2b-iii and wired for exactly the same
-  // reason, but it catches a different failure: 2b-iii catches a stale derived
-  // index, this catches an entry (or a file) that outgrew its ceiling. An
-  // over-budget file may only SHRINK, so the longer it goes unnoticed the more
-  // expensive the eventual condensation.
-  //
-  // Bit 2026-08-08: a docs-only commit verified with `npm run build && npm run
-  // check` — neither of which can see a budget — landed on main and turned BOTH
-  // CI workflows red (`verify:checks`, plus two cases in
-  // tests/shared/backlog-budget-unit.test.ts, one of which asserts "the live
-  // backlog passes the gate it ships with"). The index leg beside this one DID
-  // fire on the same commit, which is what makes the omission a gap rather than
-  // a judgement call.
-  const pinsBacklogBudget = (p) => /^docs\/backlog\/[^/]+\.md$/.test(p.replace(/\\/g, '/'));
-  if (staged.some(pinsBacklogBudget)) {
+  const derivedLegs = buildPreCommitLegs({ packageScripts: rootScripts });
+  const runDerivedLeg = (leg) => {
+    if (!leg.triggered({ root, staged, git })) return null;
+    if (!scriptWired(root, leg.script)) {
+      noteFailOpen(`${leg.script} is not wired in this repo — ${leg.id} leg SKIPPED`);
+      return null;
+    }
     try {
-      execSync('npm run check:backlog-budget', {
+      execSync(`npm run ${leg.script}`, {
         cwd: root,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 60_000,
         windowsHide: true,
       });
+      return null;
     } catch (err) {
       const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
       return {
         blocked: true,
         message:
-          `pre-commit gate: backlog budget check FAILED — commit blocked. A staged backlog entry or file ` +
-          `is over its size ceiling, and an over-budget file may only shrink.\n` +
-          `Fix: condense at write time — keep the MECHANISM and the open PROPERTY in the entry, and LINK ` +
-          `the primary record (git log, a docs/reviews/ file) instead of retelling how it was found.\n` +
-          `There is no per-entry ceiling to raise: an entry that must grow is paid for by shrinking its ` +
-          `file elsewhere.\n${tail}`,
+          `pre-commit gate: ${leg.script} FAILED — commit blocked. This is a verify:checks gate — ` +
+          `unfixed it fails release CI.\nFix: ${leg.fix}\n${tail}`,
       };
     }
-  }
-
-  // 2b-v. Backlog STATUS-LABEL ban — same trigger as 2b-iii/2b-iv, third sibling
-  // of the same family. `check:backlog-status` refuses a leading status label on
-  // an entry ("Resolved …", "Done …"), because the backlog is a living to-do
-  // list, not a status log — a closed entry is DELETED, a partial one TRIMMED.
-  //
-  // Bit 2026-08-08, and by the same shape the 2b-iv comment above describes: a
-  // docs-only commit ran `check:backlog-budget` (the check its edit obviously
-  // touched) plus build+check, landed on main, and turned `ci` RED on this leg
-  // alone. Its two siblings here DID fire on that commit, which is what makes
-  // the omission a gap rather than a judgement call — the same sentence the
-  // budget leg was added under. Three checks share one trigger condition; a
-  // family where one member is missing is how "run the whole gate" degrades
-  // into "run the check you happened to think of".
-  const pinsBacklogStatus = (p) => /^docs\/backlog\/[^/]+\.md$/.test(p.replace(/\\/g, '/'));
-  if (staged.some(pinsBacklogStatus)) {
-    try {
-      execSync('npm run check:backlog-status', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: backlog status-label check FAILED — commit blocked. A staged entry leads with a ` +
-          `status label, and the backlog is a living to-do list rather than a status log.\n` +
-          `Fix: a fully-closed entry is DELETED (move anything durable to its real home first — spec/ or ` +
-          `project memory for design, docs/backlog/durable-traps.md for an environment gotcha, CLAUDE.md for ` +
-          `a how-to); a partial entry is TRIMMED to its open remainder.\n` +
-          `Only the LABEL form is refused — a status word inside a sentence is fine. Move it out of the ` +
-          `leading position rather than reaching for a synonym.\n${tail}`,
-      };
-    }
+  };
+  for (const leg of derivedLegs.filter((l) => l.phase === 'main')) {
+    const result = runDerivedLeg(leg);
+    if (result) return result;
   }
 
   // 2c. Hook-tracking invariant. `.gitignore` ignores `.claude/hooks/*` and
@@ -1045,51 +839,22 @@ function runGate(committedPaths) {
     }
   }
 
-  // 4. Relative-link resolution. A dead relative link is fully mechanical (the
-  // target resolves or it does not) and had recurred on three dates before this
-  // gate existed; three links in the last occurrence were created by that run's
-  // own doc moves, because a mover fixes the file it moved and cannot see the
-  // inbound links elsewhere. Fires on the generators too — they copy entry titles
-  // VERBATIM one directory up, so a link correct at the source dies at the
-  // destination, and the fix belongs in the lift, never in the generated file.
+  // 4. Phase-'final' derived legs — today exactly check:doc-links (relative
+  // markdown links resolve on disk; recurred on three dates before the gate
+  // existed, three of the last occurrence's dead links created by that run's
+  // own doc moves).
   //
-  // ⚠ THIS RUNS LAST, DELIBERATELY. It is the broadest trigger in the gate (any
-  // staged markdown), so placing it earlier made it mask every more-specific
-  // refusal behind it — the constitutional-doc escalation, the generator-parity
-  // checks, and the loop-core attestation all reported "doc-links FAILED" instead
-  // of their own actionable message. A broad mechanical check must never preempt
-  // a structural one; the specific refusal is the more useful signal.
-  const pinsDocLinks = (p) => {
-    const normalized = p.replace(/\\/g, '/');
-    return (
-      /\.md$/i.test(normalized) ||
-      normalized === 'scripts/shared/rebase-relative-links.mjs' ||
-      normalized === 'scripts/shared/generate-handoff-roadmap.mjs' ||
-      normalized === 'scripts/shared/generate-backlog-index.mjs' ||
-      normalized === 'scripts/check-doc-links.mjs'
-    );
-  };
-  if (staged.some(pinsDocLinks)) {
-    try {
-      execSync('npm run check:doc-links', {
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      });
-    } catch (err) {
-      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim().split('\n').slice(-30).join('\n');
-      return {
-        blocked: true,
-        message:
-          `pre-commit gate: doc-links check FAILED — commit blocked. A relative markdown link does not ` +
-          `resolve on disk.\n` +
-          `⚠ If the dead link is in a GENERATED doc (docs/HANDOFF.md, docs/backlog.md), fix the LIFT in ` +
-          `scripts/shared/rebase-relative-links.mjs — editing the generated file is overwritten by the ` +
-          `next regeneration.\n${tail}`,
-      };
-    }
+  // ⚠ THESE RUN LAST, DELIBERATELY. doc-links is the broadest trigger in the
+  // gate (any staged markdown), so placing it earlier made it mask every
+  // more-specific refusal behind it — the constitutional-doc escalation, the
+  // generator-parity checks, and the loop-core attestation all reported
+  // "doc-links FAILED" instead of their own actionable message. A broad
+  // mechanical check must never preempt a structural one; the specific refusal
+  // is the more useful signal. The ordering is REGISTRY DATA, not hook code:
+  // preCommit 'final' in scripts/guard-reach-data.mjs puts a leg here.
+  for (const leg of derivedLegs.filter((l) => l.phase === 'final')) {
+    const result = runDerivedLeg(leg);
+    if (result) return result;
   }
 
   return { blocked: false };

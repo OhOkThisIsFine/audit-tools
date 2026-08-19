@@ -509,13 +509,6 @@
   not demonstrated exhaustion. **Property to hold:** a round ceiling ends the loop without a false dry signal, and a
   host-forced stop is recordable as such. Run record O7.
 
-- **CI trigger paths omit `.claude/**`, which `check:guard-reach` INSPECTS.** `ci.yml`'s own path-filter
-  comment states the invariant ("a gate's trigger paths must cover every path the gate INSPECTS", after
-  a 2026-07-19 incident of this exact shape), yet `.claude/**` is absent — a hook-only push runs NO CI
-  while `verify:checks` reconciles the guard registry against those files, so a hook missing its registry
-  row or `.gitignore` re-include lands green and detonates on the next unrelated push. Seen 2026-08-08:
-  `ce83638f` triggered zero runs. **Property to hold:** trigger paths cover every inspected path.
-
 - **`ensure` writes opencode.json with unstable key order.** Pure key-reorder diff (edit-permission
   map) on every ensure — a generated config violating the stable content-derived ordering invariant,
   dirtying every tree it touches. **Property to hold:** generated host configs are byte-stable

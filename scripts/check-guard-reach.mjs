@@ -111,6 +111,44 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
     );
   }
 
+  // ── preCommit flag discipline (P34) ────────────────────────────────────────
+  // The pre-commit hook's leg set is DERIVED from this registry
+  // (scripts/shared/derived-file-preflight.mjs `buildPreCommitLegs`), so every
+  // gate must STATE its pre-commit behavior — false is a deliberate CI-only
+  // decision as data, never an omission. A 'reach'/'final' gate cited by zero
+  // REACH rows has an empty trigger and can never fire: a dead flag that reads
+  // as coverage.
+  const PRECOMMIT_VALUES = new Set([false, 'reach', 'always', 'final']);
+  const citedGateIds = new Set(
+    reach.flatMap((row) => (row.guardedBy === 'declared-gap' ? [] : row.guardedBy)),
+  );
+  for (const g of guards) {
+    if (g.kind === 'gate') {
+      if (!('preCommit' in g)) {
+        errors.push(
+          `Gate guard "${g.id}" declares no preCommit flag — the pre-commit leg set is derived from ` +
+            `this registry, so omission must be a statement (preCommit: false), never silence. (${DATA_FILE})`,
+        );
+      } else if (!PRECOMMIT_VALUES.has(g.preCommit)) {
+        errors.push(
+          `Gate guard "${g.id}" has invalid preCommit value ${JSON.stringify(g.preCommit)} — ` +
+            `expected false | 'reach' | 'always' | 'final'.`,
+        );
+      } else if ((g.preCommit === 'reach' || g.preCommit === 'final') && !citedGateIds.has(g.id)) {
+        errors.push(
+          `Gate guard "${g.id}" is preCommit:'${g.preCommit}' but no REACH row cites it — a ` +
+            `reach-triggered leg with no reach can never fire. Cite it from the row(s) it actually ` +
+            `scans, or set preCommit: false.`,
+        );
+      }
+    } else if ((g.kind === 'hook' || g.kind === 'contract-test') && 'preCommit' in g) {
+      errors.push(
+        `Guard "${g.id}" (kind "${g.kind}") carries a preCommit flag — only gates run as derived ` +
+          `pre-commit legs.`,
+      );
+    }
+  }
+
   // ── union coverage + dead patterns ─────────────────────────────────────────
   const patterns = reach.flatMap((row) =>
     row.files.map((pattern) => ({ pattern: norm(pattern), row, matcher: matcherFor(norm(pattern)) })),

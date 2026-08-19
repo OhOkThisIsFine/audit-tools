@@ -15,10 +15,8 @@ import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  pinsDocManifest,
-  pinsBacklogIndex,
-  guardReachWired,
-  evaluateTriggeredChecks,
+  buildPreCommitLegs,
+  scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -95,37 +93,40 @@ describe("attest preflight refuses to bind a tree the gate would reject", () => 
   });
 });
 
-describe("the trigger predicates are the gate's, single-sourced", () => {
-  it("pinsDocManifest fires on any markdown and the manifest data, nothing else", () => {
-    expect(pinsDocManifest("docs/HANDOFF.md")).toBe(true);
-    expect(pinsDocManifest("spec\\audit\\audit-goals.md")).toBe(true);
-    expect(pinsDocManifest("scripts/doc-manifest-data.mjs")).toBe(true);
-    expect(pinsDocManifest("src/audit/cli.ts")).toBe(false);
-  });
+describe("the leg set is the gate's, derived from the registry — single-sourced", () => {
+  /** The leg ids buildPreCommitLegs would fire for a staged set in `root`. */
+  function triggeredIds(root: string, staged: string[]): string[] {
+    return buildPreCommitLegs({})
+      .filter((leg) => leg.triggered({ root, staged }))
+      .map((leg) => leg.id);
+  }
 
-  it("pinsBacklogIndex fires on the backlog index and its sources only", () => {
-    expect(pinsBacklogIndex("docs/backlog.md")).toBe(true);
-    expect(pinsBacklogIndex("docs/backlog/open-bugs.md")).toBe(true);
-    expect(pinsBacklogIndex("docs/backlog/sub/deep.md")).toBe(false);
-    expect(pinsBacklogIndex("docs/reviews/x.md")).toBe(false);
-  });
-
-  it("guard-reach is included only when the repo wires it", () => {
+  it("script wiring is probed per repo (fixture unwired, this repo wired)", () => {
     const root = makeFixture();
-    expect(guardReachWired(root)).toBe(false);
-    expect(guardReachWired(REPO_ROOT)).toBe(true);
-    const triggered = evaluateTriggeredChecks({ root, staged: ["src/audit/orchestrator/advance.ts"] });
-    expect(triggered.map((c) => c.id)).not.toContain("doc-manifest");
+    expect(scriptWired(root, "check:guard-reach")).toBe(false);
+    expect(scriptWired(REPO_ROOT, "check:guard-reach")).toBe(true);
   });
 
-  it("a loop-core-only staged set triggers no doc/backlog checks", () => {
+  it("a loop-core-only staged set triggers no doc/backlog legs — only the unconditional guard-reach", () => {
     const root = makeFixture();
-    const ids = evaluateTriggeredChecks({ root, staged: ["src/audit/orchestrator/advance.ts"] }).map(
-      (c) => c.id,
-    );
-    expect(ids).not.toContain("doc-manifest");
-    expect(ids).not.toContain("backlog-index");
-    expect(ids).not.toContain("handoff-roadmap");
+    const ids = triggeredIds(root, ["src/audit/orchestrator/advance.ts"]);
+    expect(ids).toEqual(["check:guard-reach"]);
+  });
+
+  it("a staged backlog doc triggers the whole backlog family plus the md-corpus gates", () => {
+    const root = makeFixture();
+    const ids = triggeredIds(root, ["docs/backlog/open-bugs.md"]);
+    for (const expected of [
+      "check:doc-manifest",
+      "check:backlog-index",
+      "check:backlog-budget",
+      "check:backlog-status",
+      "check:handoff-roadmap",
+      "check:doc-links",
+      "check:guard-reach",
+    ]) {
+      expect(ids, `staged backlog md must trigger ${expected}`).toContain(expected);
+    }
   });
 
   it("the gate and BOTH attest scripts import the shared module — no second copy", () => {
@@ -138,5 +139,20 @@ describe("the trigger predicates are the gate's, single-sourced", () => {
         /derived-file-preflight\.mjs/,
       );
     }
+  });
+
+  it("P19 parity holds by construction: the hook hard-codes no derived leg script of its own", () => {
+    // The hook may only reach a verify:checks gate through the derived loop —
+    // a hand-typed `npm run check:<derived leg>` in the hook would be a second
+    // copy of the leg set, the exact divergence P19/P34 removed. The two
+    // hand-coded legs (`npm run check`, `npm run test:doc-contract`) are not
+    // check:* gates.
+    const hook = readFileSync(join(REPO_ROOT, ".claude", "hooks", "pre-commit-gate.mjs"), "utf8");
+    const code = hook
+      .split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n");
+    const hardcoded = [...code.matchAll(/npm run (check:[A-Za-z0-9:._-]+)/g)].map((m) => m[1]);
+    expect(hardcoded).toEqual([]);
   });
 });

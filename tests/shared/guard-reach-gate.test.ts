@@ -33,6 +33,11 @@ interface GuardRow {
    *  script; hook: the hook file's repo path; contract-test: the test file's
    *  repo path (must live under tests/ — vitest excludes .claude/**). */
   impl: string;
+  /** REQUIRED on gates (P34): the derived pre-commit leg behavior, as data.
+   *  Typed loosely here so the invalid-enum case can be expressed. */
+  preCommit?: false | 'reach' | 'always' | 'final' | string | boolean;
+  /** Per-leg remediation hint the derived gate leg prints. */
+  fix?: string;
   note?: string;
 }
 interface ReachRow {
@@ -70,9 +75,9 @@ const HOOK_COMMANDS = [
   'node "$CLAUDE_PROJECT_DIR/.claude/hooks/beta-guard.mjs"',
 ];
 const GUARDS: GuardRow[] = [
-  { id: 'check:alpha', kind: 'gate', impl: 'check:alpha' },
-  { id: 'build', kind: 'gate', impl: 'build' },
-  { id: 'vitest-gate', kind: 'gate', impl: 'scripts/shared/run-vitest-gate.mjs' },
+  { id: 'check:alpha', kind: 'gate', impl: 'check:alpha', preCommit: 'reach' },
+  { id: 'build', kind: 'gate', impl: 'build', preCommit: false },
+  { id: 'vitest-gate', kind: 'gate', impl: 'scripts/shared/run-vitest-gate.mjs', preCommit: false },
   { id: 'beta-guard', kind: 'hook', impl: '.claude/hooks/beta-guard.mjs' },
   { id: 'gamma-contract', kind: 'contract-test', impl: 'tests/shared/gamma.test.ts' },
 ];
@@ -155,7 +160,7 @@ describe('registry rot — dead patterns and phantom guards', () => {
 describe('wiring — a script in no gate is not a gate', () => {
   it('a gate row whose npm script is not reachable from verify:release is an error', () => {
     const errors = run({
-      guards: [...GUARDS, { id: 'check:stray', kind: 'gate', impl: 'check:stray' }],
+      guards: [...GUARDS, { id: 'check:stray', kind: 'gate', impl: 'check:stray', preCommit: false }],
       packageScripts: { ...SCRIPTS, 'check:stray': 'node scripts/check-stray.mjs' },
     });
     expect(errors.some((e) => e.includes('check:stray'))).toBe(true);
@@ -232,6 +237,70 @@ describe('win32 — comparisons survive backslashed inputs', () => {
     const errors = run({
       settingsHookCommands: ['node "$CLAUDE_PROJECT_DIR/.claude\\hooks\\beta-guard.mjs"'],
       onDisk: ON_DISK.map((f) => f.replace(/\//g, '\\')),
+    });
+    expect(errors).toEqual([]);
+  });
+});
+
+describe('preCommit flag discipline (P34) — the derived leg set is stated, never silent', () => {
+  it('a gate row with no preCommit flag is an error naming the gate', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => {
+        if (g.id !== 'check:alpha') return g;
+        const { preCommit: _preCommit, ...rest } = g;
+        return rest as GuardRow;
+      }),
+    });
+    expect(errors.some((e) => e.includes('check:alpha') && e.includes('preCommit'))).toBe(true);
+  });
+
+  it('a preCommit flag on a hook row is an error', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'beta-guard' ? { ...g, preCommit: false as const } : g)),
+    });
+    expect(errors.some((e) => e.includes('beta-guard') && e.includes('preCommit'))).toBe(true);
+  });
+
+  it('a preCommit flag on a contract-test row is an error', () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'gamma-contract' ? { ...g, preCommit: 'reach' } : g)),
+    });
+    expect(errors.some((e) => e.includes('gamma-contract') && e.includes('preCommit'))).toBe(true);
+  });
+
+  it('an invalid enum value is an error (true is not a value — the statement must be one of the four)', () => {
+    for (const bad of [true, 'sometimes'] as const) {
+      const errors = run({
+        guards: GUARDS.map((g) => (g.id === 'check:alpha' ? { ...g, preCommit: bad } : g)),
+      });
+      expect(
+        errors.some((e) => e.includes('check:alpha') && e.includes('invalid preCommit')),
+        `preCommit ${JSON.stringify(bad)} must be refused`,
+      ).toBe(true);
+    }
+  });
+
+  it("a 'reach' gate cited by zero REACH rows is an error — an empty trigger can never fire", () => {
+    // Rewire the 'gates' row to a different guard so check:alpha keeps its
+    // wiring but loses every citation.
+    const errors = run({
+      reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)),
+    });
+    expect(errors.some((e) => e.includes('check:alpha') && e.includes('no REACH row'))).toBe(true);
+  });
+
+  it("a 'final' gate cited by zero REACH rows is an error too", () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'check:alpha' ? { ...g, preCommit: 'final' as const } : g)),
+      reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)),
+    });
+    expect(errors.some((e) => e.includes('check:alpha') && e.includes('no REACH row'))).toBe(true);
+  });
+
+  it("an 'always' gate needs no citation — its trigger is unconditional", () => {
+    const errors = run({
+      guards: GUARDS.map((g) => (g.id === 'check:alpha' ? { ...g, preCommit: 'always' as const } : g)),
+      reach: REACH.map((r) => (r.area === 'gates' ? { ...r, guardedBy: ['build'] } : r)),
     });
     expect(errors).toEqual([]);
   });

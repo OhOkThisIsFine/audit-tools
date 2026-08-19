@@ -4,53 +4,141 @@ on:
   push:
     branches:
       - main
+    # BEGIN generated ci-trigger-paths — derived from scripts/guard-reach-data.mjs by scripts/shared/generate-ci-trigger-paths.mjs. DO NOT EDIT between markers.
     paths:
+      # Derived: the union of every non-declared-gap REACH row's file globs in
+      # scripts/guard-reach-data.mjs, plus the always-trigger base (workflow +
+      # lockfile edits must run CI even though both live in declared-gap rows).
       # A gate's trigger paths must cover every path the gate INSPECTS.
       # verify:checks runs check:doc-manifest, which reconciles EVERY tracked
       # *.md in the repo, not just docs/ — without "**/*.md" a markdown-only
       # push outside docs/ plants a violation CI never runs, which then
       # detonates on the next unrelated src/ commit. Happened 2026-07-19.
       - "**/*.md"
-      - docs/**
-      - src/**
-      - tests/**
-      - schemas/**
-      - dispatch/**
-      - templates/**
-      - skills/**
-      - scripts/**
-      - "*.mjs"
-      - .github/workflows/**
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - tsconfig.base.json
-      - vitest.config.ts
+      - ".agent/**"
+      - ".audit-tools/nightly/open-items.json"
+      - ".claude/hooks/**"
+      - ".claude/nightly-decisions.json"
+      - ".claude/settings.json"
+      - ".claude/skills/**"
+      - ".claude/skills/ship/SKILL.md"
+      - ".dependency-cruiser.cjs"
+      - ".gemini/**"
+      - ".github/agents/**"
+      - ".github/prompts/**"
+      - ".github/workflows/**"
+      - ".github/workflows/ci.yml"
+      - ".jscpd.json"
+      - "README.md"
+      - "audit-code.mjs"
+      - "dispatch/**"
+      - "docs/HANDOFF.md"
+      - "docs/backlog.md"
+      - "docs/backlog/*.md"
+      - "docs/backlog/.size-baseline.json"
+      - "docs/doc-review-guidelines.md"
+      - "docs/nightly-routine-prompt.md"
+      - "docs/nightly-routine.md"
+      - "docs/project-philosophy.md"
+      - "eslint.config.js"
+      - "knip.json"
+      - "opencode.json"
+      - "package-lock.json"
+      - "package.json"
+      - "remediate-code.mjs"
+      - "schemas/**"
+      - "scripts/attest-constitutional-doc-change.mjs"
+      - "scripts/audit/**"
+      - "scripts/check-*.mjs"
+      - "scripts/doc-manifest-data.mjs"
+      - "scripts/gate-enumeration-data.mjs"
+      - "scripts/guard-reach-data.mjs"
+      - "scripts/nightly/**"
+      - "scripts/poll-log-throttle.mjs"
+      - "scripts/postinstall.mjs"
+      - "scripts/release-and-publish.mjs"
+      - "scripts/remediate/**"
+      - "scripts/shared/**"
+      - "scripts/shared/generate-*.mjs"
+      - "scripts/shared/rebase-relative-links.mjs"
+      - "skills/**"
+      - "src/**"
+      - "tests/**"
+      - "tsconfig.base.json"
+      - "tsconfig.json"
+      - "tsconfig.test.json"
+      - "vitest.config.ts"
+      - "wrapper/**"
+    # END generated ci-trigger-paths
   pull_request:
     branches:
       - main
+    # BEGIN generated ci-trigger-paths — derived from scripts/guard-reach-data.mjs by scripts/shared/generate-ci-trigger-paths.mjs. DO NOT EDIT between markers.
     paths:
+      # Derived: the union of every non-declared-gap REACH row's file globs in
+      # scripts/guard-reach-data.mjs, plus the always-trigger base (workflow +
+      # lockfile edits must run CI even though both live in declared-gap rows).
       # A gate's trigger paths must cover every path the gate INSPECTS.
       # verify:checks runs check:doc-manifest, which reconciles EVERY tracked
       # *.md in the repo, not just docs/ — without "**/*.md" a markdown-only
       # push outside docs/ plants a violation CI never runs, which then
       # detonates on the next unrelated src/ commit. Happened 2026-07-19.
       - "**/*.md"
-      - docs/**
-      - src/**
-      - tests/**
-      - schemas/**
-      - dispatch/**
-      - templates/**
-      - skills/**
-      - scripts/**
-      - "*.mjs"
-      - .github/workflows/**
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - tsconfig.base.json
-      - vitest.config.ts
+      - ".agent/**"
+      - ".audit-tools/nightly/open-items.json"
+      - ".claude/hooks/**"
+      - ".claude/nightly-decisions.json"
+      - ".claude/settings.json"
+      - ".claude/skills/**"
+      - ".claude/skills/ship/SKILL.md"
+      - ".dependency-cruiser.cjs"
+      - ".gemini/**"
+      - ".github/agents/**"
+      - ".github/prompts/**"
+      - ".github/workflows/**"
+      - ".github/workflows/ci.yml"
+      - ".jscpd.json"
+      - "README.md"
+      - "audit-code.mjs"
+      - "dispatch/**"
+      - "docs/HANDOFF.md"
+      - "docs/backlog.md"
+      - "docs/backlog/*.md"
+      - "docs/backlog/.size-baseline.json"
+      - "docs/doc-review-guidelines.md"
+      - "docs/nightly-routine-prompt.md"
+      - "docs/nightly-routine.md"
+      - "docs/project-philosophy.md"
+      - "eslint.config.js"
+      - "knip.json"
+      - "opencode.json"
+      - "package-lock.json"
+      - "package.json"
+      - "remediate-code.mjs"
+      - "schemas/**"
+      - "scripts/attest-constitutional-doc-change.mjs"
+      - "scripts/audit/**"
+      - "scripts/check-*.mjs"
+      - "scripts/doc-manifest-data.mjs"
+      - "scripts/gate-enumeration-data.mjs"
+      - "scripts/guard-reach-data.mjs"
+      - "scripts/nightly/**"
+      - "scripts/poll-log-throttle.mjs"
+      - "scripts/postinstall.mjs"
+      - "scripts/release-and-publish.mjs"
+      - "scripts/remediate/**"
+      - "scripts/shared/**"
+      - "scripts/shared/generate-*.mjs"
+      - "scripts/shared/rebase-relative-links.mjs"
+      - "skills/**"
+      - "src/**"
+      - "tests/**"
+      - "tsconfig.base.json"
+      - "tsconfig.json"
+      - "tsconfig.test.json"
+      - "vitest.config.ts"
+      - "wrapper/**"
+    # END generated ci-trigger-paths
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

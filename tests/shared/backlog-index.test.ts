@@ -34,7 +34,7 @@ import {
   renderIndex,
   spliceIndex,
 } from '../../scripts/shared/generate-backlog-index.mjs';
-import { pinsBacklogIndex } from '../../scripts/shared/derived-file-preflight.mjs';
+import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const GATE = join(REPO_ROOT, '.claude', 'hooks', 'pre-commit-gate.mjs');
@@ -145,20 +145,27 @@ describe('splicing — hand-written prose is untouched', () => {
 describe('the gate fires at COMMIT, not only in verify:checks', () => {
   const gate = readFileSync(GATE, 'utf8');
 
-  it('the pre-commit hook runs check:backlog-index', () => {
-    expect(gate).toContain('check:backlog-index');
+  it('the derived leg set carries a check:backlog-index leg the hook runs', () => {
+    // The hook no longer names any check:* leg by hand (P34) — the leg comes
+    // from the guard-reach registry through buildPreCommitLegs, which the hook
+    // imports. Assert the import plus the derived leg's existence.
+    expect(gate).toContain('derived-file-preflight.mjs');
+    expect(gate).toContain('buildPreCommitLegs');
+    const leg = buildPreCommitLegs({}).find((l) => l.script === 'check:backlog-index');
+    expect(leg).toBeDefined();
+    expect(leg!.phase).toBe('main');
   });
 
   it('it triggers on docs/backlog.md AND on any docs/backlog/*.md', () => {
     // Both directions stale the index: editing a backlog file moves the
     // anchors, and editing docs/backlog.md can clobber the block itself.
-    // pinsBacklogIndex is single-sourced in scripts/shared/derived-file-preflight.mjs
-    // (P19) — the gate only imports it, so assert the import plus the predicate's
-    // own behavior instead of grepping a local declaration that no longer exists.
-    expect(gate).toContain('derived-file-preflight.mjs');
-    expect(pinsBacklogIndex('docs/backlog.md')).toBe(true);
-    expect(pinsBacklogIndex('docs/backlog/open-bugs.md')).toBe(true);
-    expect(pinsBacklogIndex('docs/backlog/sub/deep.md')).toBe(false);
+    // The trigger is DERIVED from the backlog-family REACH row (P34), so its
+    // shape is asserted through the derived leg rather than a hand predicate.
+    const leg = buildPreCommitLegs({}).find((l) => l.script === 'check:backlog-index')!;
+    const fires = (path: string) => leg.triggered({ root: REPO_ROOT, staged: [path] });
+    expect(fires('docs/backlog.md')).toBe(true);
+    expect(fires('docs/backlog/open-bugs.md')).toBe(true);
+    expect(fires('docs/backlog/sub/deep.md')).toBe(false);
   });
 
   it('is wired into verify:checks as well', () => {

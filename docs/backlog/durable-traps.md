@@ -572,15 +572,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).** Loop-core and constitutional
   commits carry an attestation bound to the exact staged tree; a stale derived file (backlog seek
   index, HANDOFF roadmap, doc manifest, guard-reach registry) makes the gate demand a regeneration
-  that changes that tree and voids the attestation. Both attest scripts now run the gate's own four
-  derived-file checks BEFORE binding (single-sourced predicates in
-  `scripts/shared/derived-file-preflight.mjs`) and refuse to write an attestation the gate would
+  that changes that tree and voids the attestation. Both attest scripts now run the SAME derived leg
+  set the gate runs BEFORE binding — since P34 (2026-08-18) both sides derive it from the guard-reach
+  registry through one module (`scripts/shared/derived-file-preflight.mjs` `buildPreCommitLegs`), so
+  the two cannot diverge as legs are added — and refuse to write an attestation the gate would
   reject. (An earlier remedy here prescribed reordering the gate's legs — falsified: the derived
   checks already ran first; leg order was never the mechanism, because the gate runs at commit time
   and the attestation is written in an earlier tool call.) ⚠ The uncovered half, stated outright:
-  the preflight covers only the four derived-file legs. The doc-contract test leg (`test:doc-contract`,
-  up to 240s) is deliberately excluded — including it would make attest cost as much as the gate —
-  so a doc-contract failure can still void an attestation and force a second attest.
+  the preflight covers only the derived `preCommit` legs. The doc-contract test leg
+  (`test:doc-contract`, up to 240s) is deliberately excluded — including it would make attest cost as
+  much as the gate — so a doc-contract failure can still void an attestation and force a second attest.
 
 - **`docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is** (hit
   2026-08-13). `isRecordPath` (`scripts/nightly/items.mjs`) matches the `docs/backlog/` prefix, so

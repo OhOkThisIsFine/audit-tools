@@ -524,7 +524,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF roadmap check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     expect(stderr).toMatch(/generate-handoff-roadmap\.mjs/);
     reset();
   });
@@ -534,7 +534,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF roadmap check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -543,7 +543,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -552,7 +552,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-f', '.claude/nightly-decisions.json']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -564,7 +564,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -573,7 +573,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -581,7 +581,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['mv', 'src/probed.ts', 'src/renamed.ts']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -590,7 +590,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/HANDOFF.*check FAILED/);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 
@@ -618,7 +618,7 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     // The roadmap check is rigged to exit 1 in this fixture, so if the ROADMAP
     // trigger fired the gate would block with its message. It must not.
     expect(code, stderr).toBe(0);
-    expect(stderr).not.toMatch(/HANDOFF roadmap check FAILED/);
+    expect(stderr).not.toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 

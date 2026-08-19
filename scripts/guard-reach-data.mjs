@@ -29,6 +29,22 @@
  *   repo path (must be registered in .claude/settings.json); contract-test:
  *   the test file's repo path (must live under tests/ — vitest excludes
  *   .claude/**).
+ * @property {false|'reach'|'always'|'final'} [preCommit] gates only, REQUIRED
+ *   there (reconciled — a gate row without it is a red build): whether and how
+ *   the pre-commit hook runs this gate as a derived leg
+ *   (scripts/shared/derived-file-preflight.mjs `buildPreCommitLegs`).
+ *   `false`   = deliberate CI-only. Omission is a STATEMENT, never silence.
+ *   `'reach'` = run when the staged set intersects the union of the `files`
+ *               globs of every REACH row citing this gate, ∪ the gate's own
+ *               impl script path (parsed from package.json) ∪ package.json.
+ *   `'always'`= unconditional whenever the repo wires the script
+ *               (check:guard-reach — tree membership changes on ANY staged
+ *               add/delete/rename, so there is no narrower honest trigger).
+ *   `'final'` = reach-triggered but runs AFTER every structural refusal
+ *               (check:doc-links only — the broadest trigger in the gate must
+ *               never mask a more specific refusal behind it).
+ * @property {string} [fix] one-line remediation hint printed by the pre-commit
+ *   gate leg and the attest preflight when this gate fails.
  * @property {string} [note]
  */
 
@@ -44,44 +60,160 @@
 /** @type {GuardRow[]} */
 export const GUARDS = [
   // ── gates (npm scripts reachable from verify:release) ──────────────────────
-  { id: 'build', kind: 'gate', impl: 'build', note: 'tsc over src/ + data-asset copy' },
-  { id: 'check:tests', kind: 'gate', impl: 'check:tests', note: 'tsc over the test tree (tsconfig.test.json)' },
-  { id: 'check:control-bytes', kind: 'gate', impl: 'check:control-bytes' },
-  { id: 'check:deadcode', kind: 'gate', impl: 'check:deadcode', note: 'knip, default mode' },
-  { id: 'check:doc-manifest', kind: 'gate', impl: 'check:doc-manifest' },
+  { id: 'build', kind: 'gate', impl: 'build', preCommit: false, note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg' },
+  { id: 'check:tests', kind: 'gate', impl: 'check:tests', preCommit: false, note: 'tsc over the test tree (tsconfig.test.json)' },
+  {
+    id: 'check:control-bytes',
+    kind: 'gate',
+    impl: 'check:control-bytes',
+    preCommit: false,
+    note: 'preCommit false is deliberate (CI-only; the tool-input-guard hook already refuses control bytes at write time) — cheap, flip to reach if wanted',
+  },
+  { id: 'check:deadcode', kind: 'gate', impl: 'check:deadcode', preCommit: false, note: 'knip, default mode' },
+  {
+    id: 'check:doc-manifest',
+    kind: 'gate',
+    impl: 'check:doc-manifest',
+    preCommit: 'reach',
+    fix:
+      'register the staged doc (type + reason to exist) in scripts/doc-manifest-data.mjs and re-render ' +
+      'with `node scripts/check-doc-manifest.mjs --write`, or delete the doc — this is the check that ' +
+      'fails RELEASE CI and burns a release tag',
+  },
   {
     id: 'check:doc-links',
     kind: 'gate',
     impl: 'check:doc-links',
+    preCommit: 'final',
+    fix:
+      'a relative markdown link does not resolve on disk — if the dead link is in a GENERATED doc ' +
+      '(docs/HANDOFF.md, docs/backlog.md), fix the LIFT in scripts/shared/rebase-relative-links.mjs; ' +
+      'editing the generated file is overwritten by the next regeneration',
     note:
       'uncovered half: generated deliverable renders are excluded (shared/generated-renders.mjs) — ' +
       'their worker-authored prose may quote link-shaped text (2026-08-18)',
   },
-  { id: 'check:doc-code-citations', kind: 'gate', impl: 'check:doc-code-citations' },
-  { id: 'check:gate-enumeration', kind: 'gate', impl: 'check:gate-enumeration' },
-  { id: 'check:philosophy-brief', kind: 'gate', impl: 'check:philosophy-brief' },
-  { id: 'check:nightly-routine-prompt', kind: 'gate', impl: 'check:nightly-routine-prompt' },
-  { id: 'check:loop-core-patterns', kind: 'gate', impl: 'check:loop-core-patterns' },
-  { id: 'check:constitutional-doc-paths', kind: 'gate', impl: 'check:constitutional-doc-paths' },
-  { id: 'check:handoff-roadmap', kind: 'gate', impl: 'check:handoff-roadmap' },
-  { id: 'check:backlog-index', kind: 'gate', impl: 'check:backlog-index' },
-  { id: 'check:backlog-budget', kind: 'gate', impl: 'check:backlog-budget' },
-  { id: 'check:backlog-status', kind: 'gate', impl: 'check:backlog-status' },
+  {
+    id: 'check:doc-code-citations',
+    kind: 'gate',
+    impl: 'check:doc-code-citations',
+    preCommit: 'reach',
+    fix: 'a backticked repo path cited by a staged doc does not exist — fix the citation, or the rename/delete that broke it',
+  },
+  {
+    id: 'check:gate-enumeration',
+    kind: 'gate',
+    impl: 'check:gate-enumeration',
+    preCommit: 'reach',
+    fix:
+      'add the step gloss to scripts/gate-enumeration-data.mjs and re-render with ' +
+      '`node scripts/check-gate-enumeration.mjs --write`',
+  },
+  {
+    id: 'check:philosophy-brief',
+    kind: 'gate',
+    impl: 'check:philosophy-brief',
+    preCommit: 'reach',
+    fix:
+      "README.md's Philosophy section is GENERATED from docs/project-philosophy.md — regenerate with " +
+      '`npm run check:philosophy-brief -- --write`; never hand-edit the rendered block',
+  },
+  {
+    id: 'check:nightly-routine-prompt',
+    kind: 'gate',
+    impl: 'check:nightly-routine-prompt',
+    preCommit: 'reach',
+    fix:
+      'docs/nightly-routine-prompt.md is generated from docs/nightly-routine.md + ' +
+      'docs/doc-review-guidelines.md — run `node scripts/check-nightly-routine-prompt.mjs --write`, then re-stage the target',
+  },
+  { id: 'check:loop-core-patterns', kind: 'gate', impl: 'check:loop-core-patterns', preCommit: false },
+  { id: 'check:constitutional-doc-paths', kind: 'gate', impl: 'check:constitutional-doc-paths', preCommit: false },
+  {
+    id: 'check:handoff-roadmap',
+    kind: 'gate',
+    impl: 'check:handoff-roadmap',
+    preCommit: 'reach',
+    fix:
+      'run `node scripts/shared/generate-handoff-roadmap.mjs`, then re-stage docs/HANDOFF.md. Do NOT ' +
+      'hand-edit inside either generated block; queue detail lives in docs/nightly-inbox.md and ' +
+      'roadmap entry text lives in the backlog',
+  },
+  {
+    id: 'check:backlog-index',
+    kind: 'gate',
+    impl: 'check:backlog-index',
+    preCommit: 'reach',
+    fix:
+      'run `node scripts/shared/generate-backlog-index.mjs`, then re-stage docs/backlog.md. Do NOT ' +
+      'hand-patch line numbers inside the generated seek-index markers; they are derived, and the ' +
+      'next backlog edit moves them again',
+  },
+  {
+    id: 'check:backlog-budget',
+    kind: 'gate',
+    impl: 'check:backlog-budget',
+    preCommit: 'reach',
+    fix:
+      'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
+      'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
+      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise',
+  },
+  {
+    id: 'check:backlog-status',
+    kind: 'gate',
+    impl: 'check:backlog-status',
+    preCommit: 'reach',
+    fix:
+      'a staged backlog entry leads with a status label, and the backlog is a living to-do list, not a ' +
+      'status log — a fully-closed entry is DELETED (durables move to their real home first), a ' +
+      'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
+  },
   {
     id: 'check:memory-citations',
     kind: 'gate',
     impl: 'check:memory-citations',
+    preCommit: 'reach',
+    fix: 'a staged doc cites a memory file that does not exist — fix the citation or restore the memory file',
     note:
       'uncovered halves: [[name]] cross-links between memory files are not checked; generated ' +
       'deliverable renders (.audit-tools/audit-report.md, remediation-report.md) are excluded — ' +
       'their worker-authored prose may quote citation-shaped text (2026-08-18)',
   },
-  { id: 'check:version-gates', kind: 'gate', impl: 'check:version-gates' },
-  { id: 'check:guard-reach', kind: 'gate', impl: 'check:guard-reach', note: 'this registry, reconciled' },
+  {
+    id: 'check:version-gates',
+    kind: 'gate',
+    impl: 'check:version-gates',
+    preCommit: false,
+    note: 'preCommit false is deliberate (CI-only) — cheap, flip to reach if wanted',
+  },
+  {
+    id: 'check:guard-reach',
+    kind: 'gate',
+    impl: 'check:guard-reach',
+    preCommit: 'always',
+    fix:
+      "register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or " +
+      "'declared-gap' with the reason in note)",
+    note: 'this registry, reconciled; always: tree membership changes on ANY staged add/delete/rename',
+  },
+  {
+    id: 'check:ci-trigger-paths',
+    kind: 'gate',
+    impl: 'check:ci-trigger-paths',
+    preCommit: 'reach',
+    fix:
+      "ci.yml's paths: blocks are GENERATED from this registry — regenerate with " +
+      '`node scripts/shared/generate-ci-trigger-paths.mjs` and re-stage .github/workflows/ci.yml',
+    note:
+      'derives the ci.yml trigger-path list from non-declared-gap REACH rows + the always-trigger ' +
+      'base, so a new claimed tree cannot land outside the CI trigger set',
+  },
   {
     id: 'check:lint',
     kind: 'gate',
     impl: 'check:lint',
+    preCommit: false,
     note:
       'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
       'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
@@ -91,27 +223,30 @@ export const GUARDS = [
     id: 'check:dup',
     kind: 'gate',
     impl: 'check:dup',
+    preCommit: false,
     note: 'jscpd duplication ratchet (.jscpd.json threshold) over src+scripts+tests',
   },
   {
     id: 'check:depgraph',
     kind: 'gate',
     impl: 'check:depgraph',
+    preCommit: false,
     note:
       'dependency-cruiser (.dependency-cruiser.cjs): no runtime import cycles in src; ' +
       'src/shared never imports src/audit|src/remediate',
   },
-  { id: 'verify:hosts', kind: 'gate', impl: 'verify:hosts' },
-  { id: 'verify:remediate-hosts', kind: 'gate', impl: 'verify:remediate-hosts' },
-  { id: 'pack:smoke', kind: 'gate', impl: 'pack:smoke' },
-  { id: 'smoke:packaged-audit-code', kind: 'gate', impl: 'smoke:packaged-audit-code' },
-  { id: 'smoke:packaged-remediate-code', kind: 'gate', impl: 'smoke:packaged-remediate-code' },
-  { id: 'smoke:linked-audit-code', kind: 'gate', impl: 'smoke:linked-audit-code' },
-  { id: 'smoke:linked-remediate-code', kind: 'gate', impl: 'smoke:linked-remediate-code' },
+  { id: 'verify:hosts', kind: 'gate', impl: 'verify:hosts', preCommit: false },
+  { id: 'verify:remediate-hosts', kind: 'gate', impl: 'verify:remediate-hosts', preCommit: false },
+  { id: 'pack:smoke', kind: 'gate', impl: 'pack:smoke', preCommit: false },
+  { id: 'smoke:packaged-audit-code', kind: 'gate', impl: 'smoke:packaged-audit-code', preCommit: false },
+  { id: 'smoke:packaged-remediate-code', kind: 'gate', impl: 'smoke:packaged-remediate-code', preCommit: false },
+  { id: 'smoke:linked-audit-code', kind: 'gate', impl: 'smoke:linked-audit-code', preCommit: false },
+  { id: 'smoke:linked-remediate-code', kind: 'gate', impl: 'smoke:linked-remediate-code', preCommit: false },
   {
     id: 'vitest-gate',
     kind: 'gate',
     impl: 'scripts/shared/run-vitest-gate.mjs',
+    preCommit: false,
     note: 'the full suite, invoked by path in verify:release',
   },
 
@@ -211,6 +346,26 @@ export const GUARDS = [
     impl: 'tests/shared/attest-derived-file-preflight.test.ts',
     note: 'P19: attest scripts run the gate-shared derived-file checks before binding and refuse a tree the gate would reject',
   },
+  {
+    id: 'precommit-leg-derivation-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/precommit-leg-derivation.test.ts',
+    note:
+      'P34 unit matrix over buildPreCommitLegs: every derived leg trigger reproduces (or safely ' +
+      'widens) the retired hand-coded trigger it replaced, against the LIVE registry',
+  },
+  {
+    id: 'pre-commit-derived-legs-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-derived-legs.test.ts',
+    note: 'P34 spawn smoke: the real hook runs the derived leg loop end-to-end (block on a wired failing leg, announced skip on an unwired one)',
+  },
+  {
+    id: 'ci-trigger-paths-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/ci-trigger-paths.test.ts',
+    note: 'P26: derivation excludes declared-gap rows, keeps the always-trigger base, and the tracked ci.yml matches the generator byte-for-byte',
+  },
 ];
 
 /** @type {ReachRow[]} */
@@ -245,10 +400,11 @@ export const REACH = [
   {
     area: 'markdown corpus',
     files: ['**/*.md'],
-    guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations'],
+    guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations', 'check:memory-citations'],
     note:
-      'backlog, HANDOFF, README and memory citations additionally gated by check:backlog-*, ' +
-      'check:handoff-roadmap, check:philosophy-brief, check:memory-citations',
+      'the four whole-corpus doc gates (memory-citations scans every tracked *.md for memory-file ' +
+      'cites); backlog, HANDOFF, README and the nightly-prompt sources are additionally claimed by ' +
+      'their own precise rows below',
   },
   {
     area: 'hooks',
@@ -268,6 +424,7 @@ export const REACH = [
       'pre-commit-attestation-test',
       'pre-commit-branch-strand-test',
       'pre-commit-child-session-test',
+      'pre-commit-derived-legs-test',
       'loop-core-gate-parity-test',
       'check:loop-core-patterns',
       'check:guard-reach',
@@ -289,7 +446,19 @@ export const REACH = [
       'scripts/shared/generate-*.mjs',
       'scripts/attest-constitutional-doc-change.mjs',
     ],
-    guardedBy: ['check:guard-reach', 'doc-manifest-gate-test', 'guard-reach-gate-test', 'check:lint', 'check:dup'],
+    guardedBy: [
+      'check:guard-reach',
+      'doc-manifest-gate-test',
+      'guard-reach-gate-test',
+      'check:lint',
+      'check:dup',
+      // Area-granular citations (existing precedent in this row): each gate
+      // READS its own data module here — doc-manifest-data.mjs,
+      // gate-enumeration-data.mjs, guard-reach-data.mjs respectively.
+      'check:doc-manifest',
+      'check:gate-enumeration',
+      'check:ci-trigger-paths',
+    ],
     uncovered:
       'scripts/ is reached by no tsconfig — deliberate (validate at the construction site; check:lint ' +
       'gives an untyped no-undef/no-unused-vars floor, not a typecheck); ' +
@@ -314,6 +483,8 @@ export const REACH = [
       'vitest-gate',
       'check:lint',
       'check:dup',
+      // Executes scripts/shared/derived-file-preflight.mjs directly (P34).
+      'precommit-leg-derivation-test',
     ],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
@@ -342,12 +513,23 @@ export const REACH = [
     note: 'rendered per-IDE from universal sources; renderer drift is what the two gates pin',
   },
   {
+    area: 'CI workflow trigger paths',
+    files: ['.github/workflows/ci.yml'],
+    guardedBy: ['check:ci-trigger-paths', 'ci-trigger-paths-test'],
+    note:
+      "ci.yml's two paths: blocks are GENERATED from this registry (non-declared-gap rows + the " +
+      'always-trigger base) and reconciled by the gate; the rest of the yml is still unparsed locally',
+  },
+  {
     area: 'CI workflows',
     files: ['.github/workflows/**'],
     guardedBy: 'declared-gap',
     note:
       'CI definitions — validated by GitHub at push; latest-run OUTCOMES are surfaced by the closeout ' +
-      'gate via scripts/shared/ciRedWorkflows.mjs, but no local gate parses the yml',
+      'gate via scripts/shared/ciRedWorkflows.mjs, but no local gate parses the yml beyond ci.yml\'s ' +
+      'generated paths blocks (row above). audit-code-test-suite.yml carries its OWN hand-written ' +
+      'duplicated paths block — a known un-generated sibling (the P26 decision scoped generation to ' +
+      'ci.yml only)',
   },
   {
     area: 'worker dispatch assets',
@@ -411,6 +593,60 @@ export const REACH = [
     files: ['.claude/skills/**'],
     guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations'],
     note: 'markdown skills for the owner-side workflow; routed like any tracked doc',
+  },
+  // ── precise per-gate rows (P34): each names exactly what its gate READS, so
+  // the derived pre-commit triggers reproduce the retired hand-coded ones
+  // rather than silently narrowing them. Overlap with the markdown-corpus row
+  // is expected — a file may be claimed by several rows.
+  {
+    area: 'backlog entry files',
+    files: ['docs/backlog/*.md'],
+    guardedBy: ['check:backlog-index', 'check:backlog-budget', 'check:backlog-status', 'check:handoff-roadmap'],
+    note:
+      'the four gates that actually read the split backlog files (seek-index parity, size budget, ' +
+      'status-label ban, roadmap title lift); the markdown-corpus row carries the generic doc gates',
+  },
+  {
+    area: 'backlog seek index',
+    files: ['docs/backlog.md'],
+    guardedBy: ['check:backlog-index'],
+    note:
+      'the GENERATED router/index file — only the index-parity gate reads it (the budget, status and ' +
+      'roadmap gates read the split entry files above, deliberately: firing the roadmap check on the ' +
+      'generated index would train the regenerate step into noise)',
+  },
+  {
+    area: 'nightly-prompt sources',
+    files: ['docs/nightly-routine.md', 'docs/doc-review-guidelines.md', 'docs/nightly-routine-prompt.md'],
+    guardedBy: ['check:nightly-routine-prompt'],
+    note: 'the generated scheduler prompt and its two canonical sources — either direction of drift fails the gate',
+  },
+  {
+    area: 'philosophy pair',
+    files: ['docs/project-philosophy.md', 'README.md'],
+    guardedBy: ['check:philosophy-brief'],
+    note: 'the gate reads ONLY these two — the README Philosophy block is generated from the brief',
+  },
+  {
+    area: 'gate-enumeration render target',
+    files: ['.claude/skills/ship/SKILL.md'],
+    guardedBy: ['check:gate-enumeration'],
+    note: 'the one rendered enumeration block (ENUMERATION_TARGETS); step membership/order come from package.json',
+  },
+  {
+    area: 'HANDOFF',
+    files: ['docs/HANDOFF.md'],
+    guardedBy: ['check:handoff-roadmap'],
+    note: 'generated-block parity over the handoff itself; its queue/ledger sources have their own rows below',
+  },
+  {
+    area: 'relative-link lift',
+    files: ['scripts/shared/rebase-relative-links.mjs'],
+    guardedBy: ['check:handoff-roadmap', 'check:backlog-index'],
+    note:
+      'both generators IMPORT the lift, so the two parity gates execute it — a lift edit stales the ' +
+      'generated docs and the parity legs catch it (the retired hand trigger ran check:doc-links here, ' +
+      'which scans only markdown and could never see a lift-only change)',
   },
   {
     area: 'backlog size ratchet baseline',

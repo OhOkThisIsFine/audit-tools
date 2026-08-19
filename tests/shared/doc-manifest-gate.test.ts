@@ -549,7 +549,7 @@ describe('pre-commit gate — the doc-manifest trigger covers every manifest inp
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/doc-manifest check FAILED/);
+    expect(stderr).toMatch(/check:doc-manifest FAILED/);
     git(['reset', '--hard', 'HEAD']);
     git(['clean', '-fd']);
   });
@@ -559,7 +559,7 @@ describe('pre-commit gate — the doc-manifest trigger covers every manifest inp
     git(['add', '-A']);
     const { code, stderr } = runGate();
     expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/doc-manifest check FAILED/);
+    expect(stderr).toMatch(/check:doc-manifest FAILED/);
     git(['reset', '--hard', 'HEAD']);
     git(['clean', '-fd']);
   });

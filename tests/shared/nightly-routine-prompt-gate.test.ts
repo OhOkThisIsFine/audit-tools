@@ -25,6 +25,7 @@ import {
   SOURCE_ROUTINE,
   TARGET_PROMPT,
 } from "../../scripts/check-nightly-routine-prompt.mjs";
+import { buildPreCommitLegs } from "../../scripts/shared/derived-file-preflight.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const GENERATOR = join(REPO_ROOT, "scripts", "check-nightly-routine-prompt.mjs");
@@ -186,7 +187,11 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
             // Broadest trigger in the same hook and it runs LAST; a no-op keeps
             // these cases about the nightly-prompt trigger alone.
             "check:doc-links": 'node -e ""',
-            "check:nightly-routine-prompt": 'node -e "process.exit(1)"',
+            // Named as a real script path — the derived trigger's impl-path
+            // rule (P34) rides the command string, and running it in this
+            // fixture always FAILS (the module either does not exist or is the
+            // staged "changed" stub), so the gate blocking proves the trigger.
+            "check:nightly-routine-prompt": "node scripts/check-nightly-routine-prompt.mjs",
           },
         },
         null,
@@ -223,7 +228,7 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
     git(["add", "-A"]);
     const result = runGate();
     expect(result.status, result.stderr ?? "").toBe(2);
-    expect(result.stderr).toMatch(/nightly scheduler prompt check FAILED/);
+    expect(result.stderr).toMatch(/check:nightly-routine-prompt FAILED/);
     expect(result.stderr).toMatch(/check-nightly-routine-prompt\.mjs --write/);
   });
 
@@ -234,7 +239,7 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
     git(["add", "-A"]);
     const result = runGate();
     expect(result.status, result.stderr ?? "").toBe(2);
-    expect(result.stderr).toMatch(/nightly scheduler prompt check FAILED/);
+    expect(result.stderr).toMatch(/check:nightly-routine-prompt FAILED/);
   });
 
   it("does not run the narrow parity check for an unrelated doc", () => {
@@ -242,7 +247,7 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
     git(["add", "-A"]);
     const result = runGate();
     expect(result.status, result.stderr ?? "").toBe(0);
-    expect(result.stderr).not.toMatch(/nightly scheduler prompt/);
+    expect(result.stderr).not.toMatch(/check:nightly-routine-prompt/);
   });
 
   it("does not run the narrow parity check for unrelated source", () => {
@@ -250,7 +255,7 @@ describe("pre-commit gate runs nightly-prompt parity on every owned path", () =>
     git(["add", "-A"]);
     const result = runGate();
     expect(result.status, result.stderr ?? "").toBe(0);
-    expect(result.stderr).not.toMatch(/nightly scheduler prompt/);
+    expect(result.stderr).not.toMatch(/check:nightly-routine-prompt/);
   });
 });
 
@@ -303,7 +308,18 @@ describe("nightly scheduler prompt live parity", () => {
   });
 
   it("the pre-commit gate runs parity for either source, the target, or the generator", () => {
+    // The hook no longer hand-codes this trigger (P34): the leg and its
+    // trigger derive from the guard-reach registry through the module the hook
+    // imports. Assert the import, then assert the DERIVED leg fires on every
+    // owned path against the live registry + live package.json.
     const hook = readFileSync(PRE_COMMIT_GATE, "utf8");
+    expect(hook).toContain("derived-file-preflight.mjs");
+    expect(hook).toContain("buildPreCommitLegs");
+    const packageScripts = JSON.parse(readFileSync(join(REPO_ROOT, PACKAGE_JSON), "utf8")).scripts;
+    const leg = buildPreCommitLegs({ packageScripts }).find(
+      (l: { script: string }) => l.script === "check:nightly-routine-prompt",
+    );
+    expect(leg).toBeDefined();
     for (const path of [
       SOURCE_ROUTINE,
       SOURCE_GUIDELINES,
@@ -311,8 +327,7 @@ describe("nightly scheduler prompt live parity", () => {
       "scripts/check-nightly-routine-prompt.mjs",
       PACKAGE_JSON,
     ]) {
-      expect(hook).toContain(path);
+      expect(leg!.triggered({ root: REPO_ROOT, staged: [path] }), `${path} must trigger the leg`).toBe(true);
     }
-    expect(hook).toContain("npm run check:nightly-routine-prompt");
   });
 });

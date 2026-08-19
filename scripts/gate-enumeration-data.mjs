@@ -32,6 +32,7 @@ export const STEP_GLOSS = {
   "check:control-bytes": "raw control-byte gate",
   "check:version-gates": "version-gate scan",
   "check:guard-reach": "guard wiring/reach reconciliation",
+  "check:ci-trigger-paths": "CI trigger-path parity (derived from guard-reach)",
   "check:loop-core-patterns": "loop-core pattern-list drift check",
   "check:constitutional-doc-paths": "constitutional-doc-path parity",
   "check:deadcode": "dead-code export gate",
