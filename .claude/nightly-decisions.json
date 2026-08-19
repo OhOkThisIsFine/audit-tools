@@ -889,7 +889,9 @@
     "answer": "Probe, then both: first run the SessionStart probe to confirm child sessions do not fire SessionStart. If confirmed, build both legs (session tagging + commit/push refusal from unregistered sessions with per-dispatch allow token); if not confirmed, build leg (b) alone.",
     "subject": "A child agent session looks exactly like yours to the repo Stop gates — so the gates recruit read-only subagents into committing and pushing",
     "path": "docs/backlog/durable-traps.md",
-    "decided_at": "2026-08-12T15:01:11.653Z"
+    "decided_at": "2026-08-12T15:01:11.653Z",
+    "completed_at": "2026-08-19T02:23:36.290Z",
+    "completed_ref": "8bc6f6d9"
   },
   "c8f7271ba4aafee7": {
     "disposition": "settled",
@@ -1038,7 +1040,9 @@
     "answer": "Baseline + scoping (owner accepted the re-worked design 2026-08-12): SessionStart hook records a tree-dirt baseline; every gate scopes its porcelain read to the paths it owns (pattern already in-repo twice) and treats dirt pre-existing the session as foreign (reported, not fired on) and dirt that appeared during the session as challengeable. Own-session work can never be silently missed; residual failure is today's over-firing, no worse. Supersedes P24's classifier shape.",
     "subject": "Every gate reads the whole working tree and cannot tell whose mess it is — one such gate abandoned all 13 items of a run",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T18:20:15.025Z"
+    "decided_at": "2026-08-12T18:20:15.025Z",
+    "completed_at": "2026-08-19T02:23:36.236Z",
+    "completed_ref": "ae66740c"
   },
   "72f6ee7c1d1b7cb3": {
     "disposition": "settled",
