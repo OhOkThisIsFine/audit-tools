@@ -370,7 +370,6 @@ export {
 } from "./stepUtils.js";
 export { isTerminalStatus, isVerifiedCompleteStatus };
 export { hostDependencyLevels };
-export { rollingDependencyLevels } from "./dispatch/hostHandoff.js";
 
 function documentableFindings(state: RemediationState): Finding[] {
   if (!state.plan || !state.items) return [];

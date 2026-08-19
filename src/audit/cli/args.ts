@@ -39,14 +39,6 @@ export function hasFlag(argv: string[], name: string): boolean {
   return argv.includes(name);
 }
 
-export function optionalBooleanEnv(
-  value: string | undefined,
-): boolean | undefined {
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return undefined;
-}
-
 export { digestId, safeArtifactStem } from "audit-tools/shared";
 export { artifactNameForId, isCanonicalResultFilename };
 

@@ -101,11 +101,14 @@ describe("the installer verb list has ONE source, pinned across the copies", () 
     expect(registered.sort()).toEqual([...INSTALLER_VERBS].sort());
   });
 
-  it("the dist CLI no longer carries an ensure ACTION that the bin shadows", () => {
+  it("the dist CLI carries no asset installer for the bin to shadow", () => {
     const text = readFileSync(join(REPO_ROOT, "src", "remediate", "index.ts"), "utf8");
     // The shadowed registration was `.command("ensure")` followed by an action
-    // calling ensureGlobalAssets — the bin calls installer.ensureBootstrap
-    // instead, so that action could never run.
+    // calling a dist-side asset installer; the bin calls
+    // `installer.ensureBootstrap` instead, so that action could never run. The
+    // whole dist-side installer is deleted, so the guard is that no definition
+    // of one comes back — not merely that `ensure` is not wired to it.
+    expect(text).not.toMatch(/function\s+ensureGlobalAssets\b/);
     expect(text).not.toMatch(/\.command\("ensure"\)[\s\S]{0,400}?ensureGlobalAssets/);
   });
 });

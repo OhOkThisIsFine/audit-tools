@@ -1,8 +1,6 @@
 /**
- * Tests for intake-sources-and-digest (N-intake-digest):
- *   - buildFindingsDigest + buildFindingEnumeration: bounded digest + complete
- *     enumeration for enumerable (structured_audit) sources (INV-ID-08)
- *   - computeContentHash: deterministic SHA-256 prefix
+ * Tests for intake sources (N-intake-digest):
+ *   - buildDocumentSourceManifest: idempotent source registration
  *   - readIntakeArtifacts / validateIntakeSummary: CP-NODE-2 invariants[11]
  *     read-time schema validation for the host-authored intake-summary.json
  */
@@ -11,21 +9,12 @@ import { rm, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  buildAuditFindingsDeliverable,
-  type AuditFindingsReport,
-} from "audit-tools/shared";
-import {
-  computeContentHash,
-  buildFindingsDigest,
-  buildFindingEnumeration,
   buildDocumentSourceManifest,
   readIntakeArtifacts,
   validateIntakeSummary,
   intakePaths,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
-  FINDINGS_DIGEST_SCHEMA_VERSION,
-  FINDING_ENUMERATION_SCHEMA_VERSION,
 } from "../../src/remediate/intake.js";
 import { resolve } from "node:path";
 import { scratchDir } from "../helpers/scratch.js";
@@ -41,46 +30,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
 });
-
-// ── computeContentHash ────────────────────────────────────────────────────────
-
-describe("computeContentHash", () => {
-  it("returns a 16-char hex string", () => {
-    const h = computeContentHash("hello world");
-    expect(typeof h).toBe("string");
-    expect(h).toHaveLength(16);
-    expect(/^[0-9a-f]+$/.test(h)).toBe(true);
-  });
-
-  it("is deterministic for the same content", () => {
-    expect(computeContentHash("abc")).toBe(computeContentHash("abc"));
-  });
-
-  it("differs for different content", () => {
-    expect(computeContentHash("abc")).not.toBe(computeContentHash("xyz"));
-  });
-});
-
-// ── buildFindingsDigest ───────────────────────────────────────────────────────
-
-function makeReport(findingCount: number): AuditFindingsReport {
-  const severities = ["critical", "high", "medium", "low", "info"] as const;
-  const lenses = ["correctness", "security", "reliability"] as const;
-  const findings = Array.from({ length: findingCount }, (_, i) => ({
-    id: `F-${String(i + 1).padStart(3, "0")}`,
-    title: `Finding ${i + 1}`,
-    category: "correctness",
-    severity: severities[i % severities.length],
-    confidence: "high" as const,
-    lens: lenses[i % lenses.length],
-    summary: `Summary for finding ${i + 1}`,
-    affected_files: [{ path: `src/module-${i % 3}/file.ts` }],
-  }));
-
-  return buildAuditFindingsDeliverable(findings);
-}
-
-// ── buildDocumentSourceManifest — first-wins union dedup (B4 / CP-NODE-4) ──────
 
 describe("buildDocumentSourceManifest", () => {
   it("maps each path to an order-stable input-NN document source", () => {
@@ -129,120 +78,6 @@ describe("buildDocumentSourceManifest", () => {
     expect(manifest.created_from).toBe("default_candidates");
   });
 });
-
-describe("buildFindingsDigest", () => {
-  it("returns correct schema_version", () => {
-    const digest = buildFindingsDigest(makeReport(0));
-    expect(digest.schema_version).toBe(FINDINGS_DIGEST_SCHEMA_VERSION);
-  });
-
-  it("total_count matches finding count", () => {
-    const digest = buildFindingsDigest(makeReport(5));
-    expect(digest.total_count).toBe(5);
-  });
-
-  it("severity_counts sums correctly", () => {
-    const report = makeReport(5);
-    const digest = buildFindingsDigest(report);
-    const total = Object.values(digest.severity_counts).reduce((a, b) => a + b, 0);
-    expect(total).toBe(5);
-  });
-
-  it("lens_counts sums correctly", () => {
-    const report = makeReport(6);
-    const digest = buildFindingsDigest(report);
-    const total = Object.values(digest.lens_counts).reduce((a, b) => a + b, 0);
-    expect(total).toBe(6);
-  });
-
-  it("package_counts are derived from first path segment", () => {
-    const report = makeReport(3);
-    const digest = buildFindingsDigest(report);
-    // All findings have paths like src/module-*/file.ts → first segment is "src"
-    expect(digest.package_counts["src"]).toBeGreaterThan(0);
-  });
-
-  it("top_findings is bounded to top-N (20)", () => {
-    const digest = buildFindingsDigest(makeReport(25));
-    expect(digest.top_findings.length).toBeLessThanOrEqual(20);
-  });
-
-  it("omitted_count is zero when count ≤ 20", () => {
-    const digest = buildFindingsDigest(makeReport(10));
-    expect(digest.omitted_count).toBe(0);
-  });
-
-  it("omitted_count is correct when count > 20", () => {
-    const digest = buildFindingsDigest(makeReport(25));
-    expect(digest.omitted_count).toBe(5);
-  });
-
-  it("top_findings are sorted by severity (critical first)", () => {
-    const report = makeReport(5);
-    const digest = buildFindingsDigest(report);
-    // makeReport(5) cycles severities critical,high,medium,low,info, so exactly
-    // one critical finding exists and the severity sort puts it first.
-    expect(digest.top_findings[0].severity).toBe("critical");
-  });
-
-  it("work_block_map reflects report work_blocks", () => {
-    const report = makeReport(2);
-    const digest = buildFindingsDigest(report);
-    expect(digest.work_block_map).toEqual({
-      "block-1": ["F-001"],
-      "block-2": ["F-002"],
-    });
-  });
-
-  it("handles empty findings array", () => {
-    const digest = buildFindingsDigest(makeReport(0));
-    expect(digest.total_count).toBe(0);
-    expect(digest.top_findings).toHaveLength(0);
-    expect(digest.omitted_count).toBe(0);
-  });
-});
-
-// ── buildFindingEnumeration ───────────────────────────────────────────────────
-
-describe("buildFindingEnumeration", () => {
-  it("returns correct schema_version", () => {
-    const enm = buildFindingEnumeration(makeReport(0));
-    expect(enm.schema_version).toBe(FINDING_ENUMERATION_SCHEMA_VERSION);
-  });
-
-  it("total_count matches report finding count", () => {
-    const enm = buildFindingEnumeration(makeReport(7));
-    expect(enm.total_count).toBe(7);
-  });
-
-  it("findings array contains all entries (no omission)", () => {
-    const enm = buildFindingEnumeration(makeReport(25));
-    expect(enm.findings).toHaveLength(25);
-  });
-
-  it("each entry has required fields: id, title, severity, lens, summary", () => {
-    const enm = buildFindingEnumeration(makeReport(3));
-    for (const entry of enm.findings) {
-      expect(typeof entry.id).toBe("string");
-      expect(typeof entry.title).toBe("string");
-      expect(typeof entry.severity).toBe("string");
-      expect(typeof entry.lens).toBe("string");
-      expect(typeof entry.summary).toBe("string");
-    }
-  });
-
-  it("finding ids round-trip correctly", () => {
-    const report = makeReport(3);
-    const enm = buildFindingEnumeration(report);
-    const ids = enm.findings.map((f) => f.id);
-    expect(ids).toEqual(["F-001", "F-002", "F-003"]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// readIntakeArtifacts / validateIntakeSummary — CP-NODE-2 invariants[11]:
-// intake-summary.json is validated at READ TIME, not trusted as a bare cast.
-// ---------------------------------------------------------------------------
 
 describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json schema validation", () => {
   const WELL_FORMED_SUMMARY = {

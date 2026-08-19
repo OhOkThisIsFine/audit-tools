@@ -6,7 +6,7 @@ import type { ReviewPacket } from "../../src/audit/types/reviewPlanning.js";
 const { computeContinuityScores } = await import(
   "../../src/audit/orchestrator/continuityScore.js"
 );
-const { buildReviewPackets, orderReviewPackets } = await import(
+const { buildReviewPacketPlanningData, orderReviewPackets } = await import(
   "../../src/audit/orchestrator/reviewPackets.js"
 );
 
@@ -202,7 +202,7 @@ describe("continuity scores do not bias packet ordering", () => {
     };
   }
 
-  test("buildReviewPackets returns the same canonical order with or without scores", () => {
+  test("review packets keep the same canonical order with or without scores", () => {
     // Two independent single-file packets, same priority, no shared files/edges.
     const tasks = [task("lo", "src/lo.ts"), task("hi", "src/hi.ts")];
     const scores = new Map([
@@ -210,16 +210,16 @@ describe("continuity scores do not bias packet ordering", () => {
       ["src/lo.ts", 0.1],
     ]);
 
-    const biased = buildReviewPackets(tasks, { continuityScores: scores });
-    const unbiased = buildReviewPackets(tasks, {});
+    const biased = buildReviewPacketPlanningData(tasks, { continuityScores: scores }).packets;
+    const unbiased = buildReviewPacketPlanningData(tasks, {}).packets;
     expect(biased.map((p) => p.packet_id)).toEqual(unbiased.map((p) => p.packet_id));
     expect(biased.map((p) => p.file_paths)).toEqual(unbiased.map((p) => p.file_paths));
   });
 
   test("empty continuity scores behave identically to omitting them", () => {
     const tasks = [task("a", "src/a.ts"), task("b", "src/b.ts")];
-    const withEmpty = buildReviewPackets(tasks, { continuityScores: new Map() });
-    const without = buildReviewPackets(tasks, {});
+    const withEmpty = buildReviewPacketPlanningData(tasks, { continuityScores: new Map() }).packets;
+    const without = buildReviewPacketPlanningData(tasks, {}).packets;
     expect(withEmpty.map((p) => p.packet_id)).toEqual(without.map((p) => p.packet_id));
   });
 });

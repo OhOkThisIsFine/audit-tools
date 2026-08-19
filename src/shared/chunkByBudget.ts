@@ -1,16 +1,16 @@
 /**
- * Generic greedy token/size-budget chunker. Three independently duplicated
+ * Generic greedy token/size-budget chunker. Independently duplicated
  * "accumulate items into `current`, flush when adding the next one would
  * exceed budget" loops shared this exact shape: the audit review-packet
- * chunker (`chunkPacketTasks` in src/audit/orchestrator/reviewPackets.ts),
+ * chunker (`chunkPacketTasks` in src/audit/orchestrator/reviewPackets.ts) and
  * audit's per-task-block file chunker (`chunkByTaskBudget` in
- * src/audit/orchestrator/taskBuilder.ts), and remediate's per-overlap-group
- * finding chunker (`splitOversizedOverlapGroup` in
- * src/remediate/phases/plan.ts). Single-sourced here as the common core; each
- * original function becomes a thin adapter over it, keeping its own
- * cost-model/bypass specifics.
+ * src/audit/orchestrator/taskBuilder.ts). (Remediate had a third, its
+ * per-overlap-group finding chunker, retired with context-budget block
+ * splitting — planning reports size and never reshapes work to a backend
+ * window.) Single-sourced here as the common core; each original function
+ * becomes a thin adapter over it, keeping its own cost-model/bypass specifics.
  *
- * The shared invariants across all three original loops:
+ * The shared invariants across the original loops:
  *  - Items are appended one at a time; before adding item N, the WOULD-BE
  *    candidate (`current` + item N) is cost-checked — and count-checked when
  *    `maxItems` is supplied — but ONLY once `current` already holds at least

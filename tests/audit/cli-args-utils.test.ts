@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, sep } from "node:path";
 
 const {
-  optionalBooleanEnv,
   getArtifactsDir,
   getRootDir,
 } = await import("../../src/audit/cli/args.js");
@@ -18,38 +17,6 @@ const ARGS_SOURCE_PATH = resolve(
   "cli",
   "args.ts",
 );
-
-// ---------------------------------------------------------------------------
-// optionalBooleanEnv
-// ---------------------------------------------------------------------------
-
-test("optionalBooleanEnv: 'true' → true", () => {
-  expect(optionalBooleanEnv("true")).toBe(true);
-});
-
-test("optionalBooleanEnv: 'false' → false", () => {
-  expect(optionalBooleanEnv("false")).toBe(false);
-});
-
-test("optionalBooleanEnv: undefined → undefined", () => {
-  expect(optionalBooleanEnv(undefined)).toBe(undefined);
-});
-
-test("optionalBooleanEnv: empty string → undefined", () => {
-  expect(optionalBooleanEnv("")).toBe(undefined);
-});
-
-test("optionalBooleanEnv: '1' → undefined", () => {
-  expect(optionalBooleanEnv("1")).toBe(undefined);
-});
-
-test("optionalBooleanEnv: 'yes' → undefined", () => {
-  expect(optionalBooleanEnv("yes")).toBe(undefined);
-});
-
-test("optionalBooleanEnv: 'TRUE' (uppercase) → undefined", () => {
-  expect(optionalBooleanEnv("TRUE")).toBe(undefined);
-});
 
 // ---------------------------------------------------------------------------
 // getArtifactsDir / getRootDir — default rebases onto --root (latent bug fix)

@@ -20,9 +20,6 @@
  *          pure addition needs neither half.
  *   inv-5  scope predicate: a negative naming the changed symbol/file is scoped;
  *          an unscoped repo-wide negative is rejected even with a polarity keyword.
- *   inv-6  verification helper: only-one-polarity (or unscoped negative) for a
- *          change → block reason; a full scoped pair → null; addition → null.
- *   inv-7  the test-plan gate and verification helper share one evaluation.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -31,7 +28,6 @@ import {
   negativeAssertionIsScoped,
   evaluatePairing,
   assertionPolarity,
-  verifyPairingForFinding,
   obligationScopeAnchors,
   readObligationChangeClassification,
 } from "../../src/remediate/contractPipeline/changeClassification.js";
@@ -220,7 +216,7 @@ describe("negativeAssertionIsScoped (anti-rot scope predicate, CE-006)", () => {
   });
 });
 
-// ── inv-4 + inv-7: test-plan derivation gate ───────────────────────────────────
+// ── inv-4: test-plan derivation gate ───────────────────────────────────
 
 describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
   const ledger = (obligations: unknown[]) => ({
@@ -316,85 +312,6 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
   it("inv-4: an addition still fails when it has NO covering spec at all", () => {
     const issues = validatePairedObligations(ledger([additionObl("O-2")]), plan([]));
     expect(issues.some((i) => i.message.includes("no test spec"))).toBe(true);
-  });
-});
-
-// ── inv-6 + inv-7: verification helper (parity with the test-plan gate) ─────────
-
-describe("verifyPairingForFinding", () => {
-  const ledger = (obligations: unknown[]) => ({
-    contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-    goal_id: "G1",
-    obligations,
-    created_at: CREATED_AT,
-  });
-  const plan = (specs: unknown[]) => ({
-    contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
-    goal_id: "G1",
-    test_specs: specs,
-    created_at: CREATED_AT,
-  });
-  const changeObl = {
-    id: "O-1",
-    description: "writeRecord must hold",
-    kind: "behavioral",
-    depends_on: [],
-    status: "pending",
-    change_classification: { change_kind: "change", touched_symbols: ["writerecord"], determined_by: "touches_existing_symbol" },
-  };
-
-  it("inv-6: returns null when the change obligation is fully scoped-paired", () => {
-    const reason = verifyPairingForFinding(
-      ["O-1"],
-      ledger([changeObl]),
-      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["writeRecord returns ack", "writeRecord rejects missing id"] }]),
-    );
-    expect(reason).toBeNull();
-  });
-
-  it("inv-6: blocks (only one polarity) when the negative half is missing", () => {
-    const reason = verifyPairingForFinding(
-      ["O-1"],
-      ledger([changeObl]),
-      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["writeRecord returns ack"] }]),
-    );
-    expect(reason).not.toBeNull();
-    expect(reason).toContain("only one polarity");
-  });
-
-  it("inv-6: blocks when the negative is unscoped (CE-006)", () => {
-    const reason = verifyPairingForFinding(
-      ["O-1"],
-      ledger([changeObl]),
-      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["writeRecord returns ack", "fails for a raw write anywhere in the repo"] }]),
-    );
-    expect(reason).not.toBeNull();
-    expect(reason).toContain("CE-006");
-  });
-
-  it("inv-6: returns null for a pure addition (never paired)", () => {
-    const additionObl = { ...changeObl, id: "O-2", change_classification: { change_kind: "addition", touched_symbols: [], determined_by: "no_existing_symbol" } };
-    const reason = verifyPairingForFinding(
-      ["O-2"],
-      ledger([additionObl]),
-      plan([{ obligation_id: "O-2", name: "t", kind: "unit", assertions: ["emits a counter"] }]),
-    );
-    expect(reason).toBeNull();
-  });
-
-  it("inv-6: returns null when the finding covers no obligation (audit-findings intake)", () => {
-    expect(verifyPairingForFinding([], ledger([changeObl]), plan([]))).toBeNull();
-  });
-
-  it("inv-7: the verify gate and the test-plan gate agree on the same only-one-polarity case", () => {
-    const onlyPositive = plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["writeRecord returns ack"] }]);
-    const verifyReason = verifyPairingForFinding(["O-1"], ledger([changeObl]), onlyPositive);
-    const planIssues = validatePairedObligations(ledger([changeObl]), onlyPositive).filter(
-      (i) => i.severity === "error",
-    );
-    // Both gates flag the same gap (parity): one blocks, the other errors.
-    expect(verifyReason).not.toBeNull();
-    expect(planIssues.length).toBeGreaterThan(0);
   });
 });
 

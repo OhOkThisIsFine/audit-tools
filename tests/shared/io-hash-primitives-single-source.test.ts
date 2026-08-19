@@ -80,7 +80,6 @@ const HASH_CONTENT_CONSUMERS = [
   join(AUDIT_SRC, "orchestrator", "fileIntegrity.ts"),
   join(AUDIT_SRC, "reporting", "findingIdentity.ts"),
   join(REMEDIATE_SRC, "utils", "fileIntegrity.ts"),
-  join(REMEDIATE_SRC, "intake.ts"),
   join(REMEDIATE_SRC, "contractPipeline", "artifactStore.ts"),
 ];
 

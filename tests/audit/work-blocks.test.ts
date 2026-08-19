@@ -2,10 +2,7 @@ import { expect, test } from "vitest";
 
 import type { Finding, UnitManifest } from "../../src/audit/types.js";
 import type { FindingSeverity } from "audit-tools/shared";
-import {
-  buildWorkBlockPartition,
-  buildWorkBlocks,
-} from "../../src/audit/reporting/workBlocks.js";
+import { buildWorkBlockPartition } from "../../src/audit/reporting/workBlocks.js";
 
 function finding(
   id: string,
@@ -82,13 +79,13 @@ test("systemic presentation changes role without changing membership", () => {
 });
 
 test("advisory estimates count canonical unique physical file bytes once", () => {
-  const [block] = buildWorkBlocks({
+  const [block] = buildWorkBlockPartition({
     findings: [
       finding("a", "high", ["src/shared.ts"]),
       finding("b", "medium", ["src\\shared.ts"]),
     ],
     sizeIndex: { "src/shared.ts": 100 },
-  });
+  }).blocks;
 
   expect(block.owned_files).toEqual(["src/shared.ts"]);
   expect(block.unit_ids).toEqual([]);

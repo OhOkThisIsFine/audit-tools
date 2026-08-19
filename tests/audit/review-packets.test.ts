@@ -3,8 +3,7 @@ import { expect, test } from "vitest";
 import type { AuditTask } from "../../src/audit/types.js";
 import {
   buildAuditPlanMetrics,
-  buildReviewPackets,
-  orderTasksForPacketReview,
+  buildReviewPacketPlanningData,
 } from "../../src/audit/orchestrator/reviewPackets.js";
 
 function task(
@@ -33,7 +32,7 @@ test("review packets materialize canonical shared-coherence components", () => {
     task("b", "src/shared.ts", { lens: "reliability" }),
     task("a", "src/shared.ts", { lens: "security", priority: "high" }),
   ];
-  const packets = buildReviewPackets(tasks);
+  const packets = buildReviewPacketPlanningData(tasks).packets;
 
   expect(packets.map((packet) => packet.task_ids)).toEqual([
     ["a", "b"],
@@ -51,22 +50,22 @@ test("import/call/reference adjacency is a membership signal", () => {
     task("a", "src/a.ts", { lens: "security" }),
     task("b", "lib/b.ts", { lens: "reliability" }),
   ];
-  const packets = buildReviewPackets(tasks, {
+  const packets = buildReviewPacketPlanningData(tasks, {
     graphBundle: {
       graphs: {
         imports: [{ from: "src/a.ts", to: "lib/b.ts", kind: "imports" }],
       },
     },
-  });
+  }).packets;
   expect(packets.map((packet) => packet.task_ids)).toEqual([["a", "b"]]);
   expect(packets[0].quality.internal_edge_count).toBe(1);
 });
 
 test("directory and lens similarity below threshold does not invent a cluster", () => {
-  const packets = buildReviewPackets([
+  const packets = buildReviewPacketPlanningData([
     task("a", "src/a.ts", { lens: "security" }),
     task("b", "src/b.ts", { lens: "security" }),
-  ]);
+  ]).packets;
   expect(packets.map((packet) => packet.task_ids)).toEqual([["a"], ["b"]]);
 });
 
@@ -76,11 +75,11 @@ test("task order and plan metrics consume the same canonical components", () => 
     task("a", "src/shared.ts", { unit_id: "shared" }),
     task("b", "other/b.ts", { unit_id: "shared" }),
   ];
-  expect(orderTasksForPacketReview(tasks).map((entry) => entry.task_id)).toEqual([
-    "a",
-    "b",
-    "z",
-  ]);
+  // Packet order is the review order: the packetization walks tasks in the
+  // canonical component order the metrics projection also consumes.
+  expect(
+    buildReviewPacketPlanningData(tasks).packets.flatMap((packet) => packet.task_ids),
+  ).toEqual(["a", "b", "z"]);
   const metrics = buildAuditPlanMetrics(tasks, {
     generatedAt: new Date("2026-04-22T00:00:00Z"),
   });

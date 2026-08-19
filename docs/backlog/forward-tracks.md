@@ -111,15 +111,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   re-mints, or an accepted ledger keyed by work item rather than by run — which is a change to the
   host-handoff contract itself, so it takes a `/design-check` before any build.
 
-- **`ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely
-  dead.** Deleting the shadowed `ensure` ACTION (sol-2, 2026-08-09) removed its only non-test caller:
-  the bin routes `ensure` to `installer.ensureBootstrap` in `wrapper/`, never to
-  `src/remediate/index.ts`. It stays exported and its tests still pass, so default-mode knip cannot
-  see it — this is exactly the tested-but-unwired class CLAUDE.md assigns to the periodic manual
-  `knip --production` audit. The open question is whether the wrapper's `ensureBootstrap` already
-  covers the global-asset half it writes, in which case both it and
-  `src/remediate/utils/hostAssets.ts`'s comment naming it go too.
-
 - **Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>`
   branch has no closing action that lands it on the base branch.** `CLOSING_ACTIONS`
   (`src/remediate/state/closingActions.ts`) is commit/push/open-pr/publish/tag/none/custom; the

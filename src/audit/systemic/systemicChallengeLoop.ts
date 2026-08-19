@@ -25,7 +25,6 @@ import type { Finding } from "../types.js";
 import type { GoalGraph } from "audit-tools/shared";
 import { groundDesignFindings, findingReEmissionKey } from "audit-tools/shared";
 import { goalBlastRadius } from "../clarification/blastRadius.js";
-import { DEFAULT_RISK_GATE_THRESHOLDS } from "../clarification/riskGate.js";
 
 /**
  * Resolve the blast radius of an improvement finding over the goal DAG. A finding
@@ -126,12 +125,3 @@ export function foldChallengeRound(params: {
   return { findings, new_finding_ids, dry, validation_issues };
 }
 
-/**
- * The blast threshold at/above which an improvement finding is "high-blast" — a
- * categorically-better-approach claim whose fix re-draws a boundary. Single-sourced
- * from the Phase-D risk gate so Phase E's notion of "high blast" cannot drift from
- * the clarification loop's. A high-blast improvement is surfaced as a lead like any
- * other (leads-not-verdicts), but flagged so synthesis weights it as higher-risk.
- */
-export const SYSTEMIC_HIGH_BLAST_THRESHOLD =
-  DEFAULT_RISK_GATE_THRESHOLDS.highBlastThreshold;

@@ -463,9 +463,6 @@ export function hostDependencyLevels(
   return levels;
 }
 
-// Frozen v1alpha1 contract spelling. Product code uses hostDependencyLevels.
-export const rollingDependencyLevels = hostDependencyLevels;
-
 function buildPrompt(item: {
   readonly blockId: string;
   readonly findingIds: readonly string[];
@@ -915,6 +912,9 @@ function gitCommitExists(root: string, commit: string): boolean {
   return !result.error && result.status === 0;
 }
 
+// INV-WTS-3 (landed-node ancestry): a landed node's commit must be an ancestor
+// of the ref it claims to have landed on. `git merge-base --is-ancestor` exits 0
+// exactly when that holds.
 function gitCommitIsAncestor(
   root: string,
   ancestor: string,

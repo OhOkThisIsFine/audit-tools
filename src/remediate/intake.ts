@@ -1,14 +1,10 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { AuditFindingsReport, Finding, WorkBlock, FindingSeverity } from "audit-tools/shared";
 import {
-  hashContent,
   readOptionalJsonFile,
   readOptionalTextFile,
   isRecord,
-  severityCompare,
-  countBy,
 } from "audit-tools/shared";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
@@ -228,140 +224,6 @@ export function buildMixedSourceManifest(
  */
 export function manifestIsInputBound(manifest: IntakeSourceManifest): boolean {
   return manifest.created_from === "input" || manifest.created_from === "mixed";
-}
-
-// ── Content hashing ───────────────────────────────────────────────────────────
-
-/**
- * Compute a short SHA-256 hex digest for the given content string.
- * Used as the content-hash key for idempotent source registration (INV-ID-04).
- */
-export function computeContentHash(content: string): string {
-  return hashContent(content, { length: 16 });
-}
-
-// ── Findings digest + enumeration ─────────────────────────────────────────────
-
-export const FINDINGS_DIGEST_SCHEMA_VERSION =
-  "remediate-code-intake-findings-digest/v1alpha1" as const;
-
-export const FINDING_ENUMERATION_SCHEMA_VERSION =
-  "remediate-code-intake-finding-enumeration/v1alpha1" as const;
-
-/** Maximum number of findings surfaced verbatim in the bounded digest. */
-const DIGEST_TOP_N = 20;
-
-export interface FindingDigestEntry {
-  id: string;
-  title: string;
-  severity: FindingSeverity;
-  lens: string;
-  /** First affected file path (representative). */
-  file?: string;
-}
-
-export interface FindingsDigest {
-  schema_version: typeof FINDINGS_DIGEST_SCHEMA_VERSION;
-  total_count: number;
-  severity_counts: Record<string, number>;
-  lens_counts: Record<string, number>;
-  /** Counts by first-listed package/directory (top-level path segment). */
-  package_counts: Record<string, number>;
-  /** Work-block map: block id → finding ids. */
-  work_block_map: Record<string, string[]>;
-  top_findings: FindingDigestEntry[];
-  omitted_count: number;
-}
-
-export interface FindingEnumerationEntry {
-  id: string;
-  title: string;
-  severity: FindingSeverity;
-  lens: string;
-  /** First affected file path. */
-  file?: string;
-  summary: string;
-}
-
-/** Complete enumeration of all findings for enumerable sources. */
-export interface FindingEnumeration {
-  schema_version: typeof FINDING_ENUMERATION_SCHEMA_VERSION;
-  total_count: number;
-  findings: FindingEnumerationEntry[];
-}
-
-/**
- * Build the bounded `FindingsDigest` from an AuditFindingsReport.
- *
- * The digest is bounded (top-N + omitted_count) so it fits cleanly in prompt
- * context; the complete enumeration is in `finding-enumeration.json`.
- */
-export function buildFindingsDigest(report: AuditFindingsReport): FindingsDigest {
-  const findings: Finding[] = report.findings ?? [];
-  const workBlocks: WorkBlock[] = report.work_blocks ?? [];
-
-  const severity_counts = countBy(findings, (f) => f.severity);
-  const lens_counts = countBy(findings, (f) => f.lens);
-  // NOT converted to countBy: a finding with no affected_files yields pkg ===
-  // "" (split() of the "" fallback always returns a defined, empty first
-  // segment, so the `?? "(root)"` never actually fires) — countBy's
-  // skip-falsy-key contract would silently drop that bucket instead of
-  // counting it under "", changing this digest's output. Kept as a manual
-  // loop to preserve that exact (if likely unintended) original behavior.
-  const package_counts: Record<string, number> = {};
-  for (const f of findings) {
-    const firstFile = f.affected_files?.[0]?.path ?? "";
-    const pkg = firstFile.split(/[\\/]/)[0] ?? "(root)";
-    package_counts[pkg] = (package_counts[pkg] ?? 0) + 1;
-  }
-
-  // Sort by severity priority (most-severe-first) for top-N selection, using the
-  // shared single-source comparator instead of a local inverted rank table.
-  const sorted = [...findings].sort((a, b) => severityCompare(a.severity, b.severity));
-
-  const top_findings: FindingDigestEntry[] = sorted.slice(0, DIGEST_TOP_N).map((f) => ({
-    id: f.id,
-    title: f.title,
-    severity: f.severity,
-    lens: f.lens,
-    file: f.affected_files?.[0]?.path,
-  }));
-
-  const work_block_map: Record<string, string[]> = {};
-  for (const wb of workBlocks) {
-    work_block_map[wb.id] = wb.finding_ids ?? [];
-  }
-
-  return {
-    schema_version: FINDINGS_DIGEST_SCHEMA_VERSION,
-    total_count: findings.length,
-    severity_counts,
-    lens_counts,
-    package_counts,
-    work_block_map,
-    top_findings,
-    omitted_count: Math.max(0, findings.length - DIGEST_TOP_N),
-  };
-}
-
-/**
- * Build the complete `FindingEnumeration` from an AuditFindingsReport.
- * Every finding id and compact descriptor is included — no omission.
- */
-export function buildFindingEnumeration(report: AuditFindingsReport): FindingEnumeration {
-  const findings: Finding[] = report.findings ?? [];
-  return {
-    schema_version: FINDING_ENUMERATION_SCHEMA_VERSION,
-    total_count: findings.length,
-    findings: findings.map((f) => ({
-      id: f.id,
-      title: f.title,
-      severity: f.severity,
-      lens: f.lens,
-      file: f.affected_files?.[0]?.path,
-      summary: f.summary,
-    })),
-  };
 }
 
 export function sourceManifestsEquivalent(

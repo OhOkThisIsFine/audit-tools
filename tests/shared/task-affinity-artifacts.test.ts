@@ -13,7 +13,6 @@ import { runResultIngestionExecutor } from "../../src/audit/orchestrator/ingesti
 import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
 import {
   buildTaskAffinityGraph,
-  filterTaskAffinityGraph,
   TaskAffinityGraphSchema,
   type TaskAffinityEdge,
   type TaskAffinityGraph,
@@ -165,14 +164,6 @@ function expectCanonicalGraph(graph: TaskAffinityGraph): void {
   expect(graph.edges).toEqual([...graph.edges].sort(compareEdges));
 }
 
-function normalizeEdge(edge: TaskAffinityEdge): TaskAffinityEdge {
-  const [from, to] =
-    compareCodeUnits(edge.from, edge.to) <= 0
-      ? [edge.from, edge.to]
-      : [edge.to, edge.from];
-  return { ...edge, from, to };
-}
-
 function requireTasks(bundle: ArtifactBundle): AuditTask[] {
   expect(bundle.audit_tasks).toBeDefined();
   return bundle.audit_tasks ?? [];
@@ -267,100 +258,6 @@ describe("stable task-affinity artifacts", () => {
     }
   });
 
-  it("canonicalizes filtered nodes and full edge tuples without aliasing", () => {
-    const input = deepFreeze<TaskAffinityGraph>({
-      schema_version: "task-affinity-graph/v1",
-      nodes: [
-        {
-          task_id: "task-z",
-          unit_id: "unit-leaf",
-          lens: "security",
-          file_paths: ["src/z.ts", "src/a.ts"],
-          token_estimate: 30,
-          risk_estimate: 0.2,
-        },
-        {
-          task_id: "task-a",
-          unit_id: "unit-shared",
-          lens: "correctness",
-          file_paths: ["src/shared.ts", "src/a.ts"],
-          token_estimate: 140,
-          risk_estimate: 0.6,
-        },
-        {
-          task_id: "task-Z",
-          unit_id: "unit-shared",
-          lens: "security",
-          file_paths: ["src/z.ts", "src/shared.ts"],
-          token_estimate: 120,
-          risk_estimate: 0.8,
-        },
-      ],
-      edges: [
-        {
-          from: "task-a",
-          to: "task-Z",
-          kind: "same_unit",
-          reason: "z-reason",
-          weight: 0.55,
-        },
-        {
-          from: "task-z",
-          to: "task-a",
-          kind: "same_flow",
-          weight: 0.6,
-        },
-        {
-          from: "task-a",
-          to: "task-Z",
-          kind: "same_dir",
-          reason: "a-reason",
-          weight: 0.35,
-        },
-        {
-          from: "task-Z",
-          to: "task-a",
-          kind: "same_dir",
-          weight: 0.3,
-        },
-      ],
-    });
-    const before = stableStringify(input);
-    const filtered = filterTaskAffinityGraph(
-      input,
-      new Set(["task-z", "task-a", "task-Z"]),
-    );
-
-    expectCanonicalGraph(filtered);
-    expect(filtered.edges).toEqual(
-      input.edges.map(normalizeEdge).sort(compareEdges),
-    );
-    expect(stableStringify(input)).toBe(before);
-    for (const node of filtered.nodes) {
-      const source = input.nodes.find(
-        (candidate) => candidate.task_id === node.task_id,
-      );
-      expect(node).not.toBe(source);
-      expect(node.file_paths).not.toBe(source?.file_paths);
-    }
-
-    const pair = filterTaskAffinityGraph(
-      input,
-      new Set(["task-Z", "task-a"]),
-    );
-    expect(pair.nodes.map((node) => node.task_id)).toEqual(["task-Z", "task-a"]);
-    expect(pair.edges.every((edge) =>
-      pair.nodes.some((node) => node.task_id === edge.from) &&
-      pair.nodes.some((node) => node.task_id === edge.to),
-    )).toBe(true);
-    expect(filterTaskAffinityGraph(input, new Set(["task-a"])).edges).toEqual([]);
-    expect(filterTaskAffinityGraph(input, new Set())).toEqual({
-      schema_version: "task-affinity-graph/v1",
-      nodes: [],
-      edges: [],
-    });
-  });
-
   it("rejects duplicate task ids plus self and dangling graph endpoints", () => {
     const tasks = makeTasks(false);
     expect(() =>
@@ -407,12 +304,7 @@ describe("stable task-affinity artifacts", () => {
 
     for (const graph of invalidGraphs) {
       expect(TaskAffinityGraphSchema.safeParse(graph).success).toBe(false);
-      expect(() =>
-        filterTaskAffinityGraph(
-          graph,
-          new Set(graph.nodes.map((node) => node.task_id)),
-        ),
-      ).toThrow();
+      expect(() => TaskAffinityGraphSchema.parse(graph)).toThrow();
     }
   });
 

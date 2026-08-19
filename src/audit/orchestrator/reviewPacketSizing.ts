@@ -9,17 +9,11 @@ import {
 // extracted from reviewPackets.ts. Estimates derive from manifest byte counts
 // (recorded at intake) with a line-count fallback for manually built tasks.
 
-const DEFAULT_TARGET_PACKET_LINES = 8000;
 // ESTIMATED_TOKENS_PER_LINE and ESTIMATED_PROMPT_OVERHEAD_TOKENS are single-sourced
 // from audit-tools/shared; ESTIMATED_TOKENS_PER_LINE is re-exported so reviewPackets.ts
 // consumers remain stable. ESTIMATED_PACKET_PROMPT_TOKENS aliases the shared constant.
 export { ESTIMATED_TOKENS_PER_LINE };
 export const ESTIMATED_PACKET_PROMPT_TOKENS = ESTIMATED_PROMPT_OVERHEAD_TOKENS;
-// Default per-packet content-token budget. Kept equal to the legacy
-// line-target × per-line estimate so byte-derived sizing lands on the same
-// thresholds as the old line-based sizing when the line fallback is in effect.
-export const DEFAULT_TARGET_PACKET_TOKENS =
-  DEFAULT_TARGET_PACKET_LINES * ESTIMATED_TOKENS_PER_LINE;
 
 /**
  * Build a path → size_bytes index from a repo manifest. Byte counts are

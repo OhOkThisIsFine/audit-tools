@@ -71,10 +71,6 @@ const ALLOWLIST = new Map<string, string>([
     "skip-dir name list for input discovery over the audited repo, not a join",
   ],
   [
-    "src/remediate/steps/dispatch/implementPrompt.ts",
-    "skip-dir name list embedded in the worker prompt text, not a join",
-  ],
-  [
     "src/audit/cli/args.ts",
     "commander default SENTINEL '.audit-tools/audit' — equality-compared then " +
       "routed through the shared helper (see resolver comment there), not joined",

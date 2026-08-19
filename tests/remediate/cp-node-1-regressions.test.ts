@@ -25,10 +25,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { isBuildFreeVerifyCommand } from "../../src/remediate/steps/dispatch/verifyCommands.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
-import { splitBlocksByContextBudget } from "../../src/remediate/phases/plan.js";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import {
   buildReviewRequest,
@@ -40,7 +38,7 @@ import {
   createNextStepHarness,
   AUDIT_FIXTURE,
 } from "./helpers/nextStepHarness.js";
-import type { Finding, RemediationBlock } from "../../src/remediate/state/types.js";
+import type { Finding } from "../../src/remediate/state/types.js";
 
 // Scratch off the repo tree (the worktree may itself live under .audit-tools —
 // tests must never root fixtures inside the tree the shared paths guard scans).
@@ -68,45 +66,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(SCRATCH, { recursive: true, force: true });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COR-8c497987 — INV-RSM-VERIFY-01: per-invocation build-free validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("COR-8c497987 isBuildFreeVerifyCommand judges each invocation, not the whole string", () => {
-  it("NEGATIVE: a compound command whose second tsc invocation emits is forbidden", () => {
-    expect(
-      isBuildFreeVerifyCommand("npx tsc --noEmit && npx tsc -p tsconfig.build.json"),
-    ).toBe(false);
-  });
-
-  it("NEGATIVE: a semicolon-chained bare tsc after a noEmit segment is forbidden", () => {
-    expect(isBuildFreeVerifyCommand("tsc --noEmit; tsc")).toBe(false);
-  });
-
-  it("NEGATIVE: a newline-chained npm run build hidden behind a check is forbidden", () => {
-    expect(isBuildFreeVerifyCommand("npm run check\nnpm run build")).toBe(false);
-  });
-
-  it("NEGATIVE: a pipe-chained npm test segment is forbidden", () => {
-    expect(isBuildFreeVerifyCommand("npm run check || npm test")).toBe(false);
-  });
-
-  it("POSITIVE: compound commands whose every invocation is build-free stay allowed", () => {
-    expect(
-      isBuildFreeVerifyCommand("npx tsc --noEmit && npx vitest run tests/x.test.ts"),
-    ).toBe(true);
-    expect(isBuildFreeVerifyCommand("npm run check")).toBe(true);
-    expect(isBuildFreeVerifyCommand("npx vitest run tests/a.test.ts")).toBe(true);
-  });
-
-  it("POSITIVE: single-invocation build commands are still forbidden", () => {
-    expect(isBuildFreeVerifyCommand("npm run build")).toBe(false);
-    expect(isBuildFreeVerifyCommand("tsc -b")).toBe(false);
-    expect(isBuildFreeVerifyCommand("npm test")).toBe(false);
-    expect(isBuildFreeVerifyCommand("")).toBe(false);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,62 +176,6 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     await expect(closingStore.loadState()).resolves.toMatchObject({
       status: "closing",
     });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COR-46fff0ec — INV-RSM-SPLIT-01: split preserves verification + phase metadata
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("COR-46fff0ec splitBlocksByContextBudget preserves targeted_commands + phase_ordinal", () => {
-  const splitRoot = join(SCRATCH, "split-root");
-  const findings = [mkFinding("F-A", "src/a.ts"), mkFinding("F-B", "src/b.ts")];
-  const block: RemediationBlock = {
-    block_id: "B-SPLIT",
-    items: ["F-A", "F-B"],
-    parallel_safe: true,
-    touched_files: ["src/a.ts", "src/b.ts"],
-    phase_ordinal: 3,
-    targeted_commands: [
-      "npm run check",
-      "npx vitest run src/a.ts",
-      "node scripts/check-unrelated.mjs",
-    ],
-  };
-
-  it("NEGATIVE→POSITIVE: every sub-block carries the parent phase_ordinal unchanged", () => {
-    // Budget below two per-item costs forces a two-way split (0-byte files, so
-    // each singleton group costs 900 base + 600 item overhead = 1500 tokens).
-    const result = splitBlocksByContextBudget([block], findings, splitRoot, 2000);
-    expect(result.length).toBe(2);
-    for (const sub of result) {
-      // A split must never erase the phase barrier — a consumer sub-block with
-      // no ordinal dispatches alongside its foundations (INV-RSM-SPLIT-01).
-      expect(sub.phase_ordinal).toBe(3);
-    }
-  });
-
-  it("NEGATIVE→POSITIVE: targeted_commands partition by relevance; path-less and unmatched carry to all", () => {
-    const result = splitBlocksByContextBudget([block], findings, splitRoot, 2000);
-    expect(result.length).toBe(2);
-    const subA = result.find((b) => b.items.includes("F-A"))!;
-    const subB = result.find((b) => b.items.includes("F-B"))!;
-    // Path-less command → every sub-block (no false-red, no vacuous pass).
-    expect(subA.targeted_commands).toContain("npm run check");
-    expect(subB.targeted_commands).toContain("npm run check");
-    // Pathful command citing src/a.ts → ONLY the sub-block owning F-A.
-    expect(subA.targeted_commands).toContain("npx vitest run src/a.ts");
-    expect(subB.targeted_commands ?? []).not.toContain("npx vitest run src/a.ts");
-    // Pathful command matching no sub-block → carried to all, never dropped.
-    expect(subA.targeted_commands).toContain("node scripts/check-unrelated.mjs");
-    expect(subB.targeted_commands).toContain("node scripts/check-unrelated.mjs");
-  });
-
-  it("POSITIVE: an unsplit block passes through with its metadata intact", () => {
-    const result = splitBlocksByContextBudget([block], findings, splitRoot, 10_000_000);
-    expect(result.length).toBe(1);
-    expect(result[0]!.phase_ordinal).toBe(3);
-    expect(result[0]!.targeted_commands).toEqual(block.targeted_commands);
   });
 });
 

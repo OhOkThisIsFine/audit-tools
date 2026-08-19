@@ -3,15 +3,11 @@ import { describe, test, expect } from "vitest";
 // Phase E — the systemic improvement-seeking challenge loop. Import the pure module
 // + the executor from source (tsx loader) so un-rebuilt changes are caught.
 import { aggregateMetricsDigest } from "../../src/audit/systemic/aggregateMetricsDigest.js";
-import {
-  foldChallengeRound,
-  SYSTEMIC_HIGH_BLAST_THRESHOLD,
-} from "../../src/audit/systemic/systemicChallengeLoop.js";
+import { foldChallengeRound } from "../../src/audit/systemic/systemicChallengeLoop.js";
 import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
 import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 import { mergeFindings } from "../../src/audit/reporting/mergeFindings.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
-import { DEFAULT_RISK_GATE_THRESHOLDS } from "../../src/audit/clarification/riskGate.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { Finding, RepoManifest } from "../../src/audit/types.js";
 import type { SystemicChallengeRegister } from "../../src/audit/types/systemicChallenge.js";
@@ -217,11 +213,6 @@ describe("foldChallengeRound", () => {
     expect(folded.findings[0].blast_radius).toBe(1);
   });
 
-  test("the high-blast threshold is single-sourced from the Phase D risk gate", () => {
-    expect(SYSTEMIC_HIGH_BLAST_THRESHOLD).toBe(
-      DEFAULT_RISK_GATE_THRESHOLDS.highBlastThreshold,
-    );
-  });
 });
 
 // ── The mergeFindings true-lens seam ─────────────────────────────────────────

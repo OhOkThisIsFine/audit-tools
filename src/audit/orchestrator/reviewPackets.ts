@@ -223,7 +223,13 @@ function materializeProjectedPacket(
   };
 }
 
-function buildReviewPacketPlanningData(
+/**
+ * Project tasks onto the affinity graph and derive the full packetization
+ * (packets + the graph edges the packets were cut against). `buildAuditPlanMetrics`
+ * is the production consumer; exported so packetization can be asserted at its own
+ * seam rather than through the metrics projection that wraps it.
+ */
+export function buildReviewPacketPlanningData(
   tasks: AuditTask[],
   options: BuildReviewPacketOptions = {},
 ): ReviewPacketPlanningData {
@@ -231,23 +237,6 @@ function buildReviewPacketPlanningData(
     graphBundle: options.graphBundle,
   });
   return planningDataFromProjection(tasks, graph, options);
-}
-
-export function buildReviewPackets(
-  tasks: AuditTask[],
-  options: BuildReviewPacketOptions = {},
-): ReviewPacket[] {
-  return buildReviewPacketPlanningData(tasks, options).packets;
-}
-
-export function orderTasksForPacketReview(
-  tasks: AuditTask[],
-  options: BuildReviewPacketOptions = {},
-): AuditTask[] {
-  const taskById = new Map(tasks.map((task) => [task.task_id, task]));
-  return buildReviewPackets(tasks, options).flatMap((packet) =>
-    packet.task_ids.map((taskId) => taskById.get(taskId)!),
-  );
 }
 
 export function buildAuditPlanMetrics(

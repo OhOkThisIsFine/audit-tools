@@ -96,28 +96,6 @@ export const TaskAffinityGraphSchema = z
   });
 export type TaskAffinityGraph = z.infer<typeof TaskAffinityGraphSchema>;
 
-/**
- * Restrict a task-affinity graph to a set of task ids, keeping only nodes whose
- * task survives and edges whose both endpoints survive. Used when projecting
- * only the still-pending tasks from a persisted full-run graph.
- */
-export function filterTaskAffinityGraph(
-  graph: TaskAffinityGraph,
-  keep: ReadonlySet<string>,
-): TaskAffinityGraph {
-  const validated = TaskAffinityGraphSchema.parse(graph);
-  const nodes = validated.nodes.filter((n) => keep.has(n.task_id));
-  const have = new Set(nodes.map((n) => n.task_id));
-  const edges = validated.edges.filter(
-    (e) => have.has(e.from) && have.has(e.to),
-  );
-  return canonicalizeTaskAffinityGraph({
-    schema_version: validated.schema_version,
-    nodes,
-    edges,
-  });
-}
-
 // Per-kind base weights. Tuned so stronger structural coupling packs first.
 const KIND_WEIGHT: Record<TaskAffinityEdgeKind, number> = {
   shared_file: 0.9,

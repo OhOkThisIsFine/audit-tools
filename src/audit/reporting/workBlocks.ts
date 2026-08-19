@@ -367,7 +367,3 @@ export function buildWorkBlockPartition(
     seams: deriveSeams(withDependencies),
   };
 }
-
-export function buildWorkBlocks(params: WorkBlockPartitionInput): WorkBlock[] {
-  return buildWorkBlockPartition(params).blocks;
-}

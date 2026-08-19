@@ -1522,9 +1522,9 @@ export function validateFinalizedModuleSetPreserved(
   const invented = [...finalized].filter((name) => !drafted.has(name)).sort();
   // Multiplicity, not just membership: a name repeated in the finalized contracts
   // is set-equal to the drafts and would slip past the comparison above, but every
-  // consumer keys modules BY NAME and keeps the first occurrence
-  // (`finalizedModulesByName`, contractPipeline/derive.ts) — so the second entry's
-  // interface is silently discarded, which is the same content loss by another route.
+  // consumer keys modules BY NAME and keeps the first occurrence — so the second
+  // entry's interface is silently discarded, which is the same content loss by
+  // another route.
   const duplicated = [
     ...new Set(finalizedNames.filter((name, i) => finalizedNames.indexOf(name) !== i)),
   ].sort();

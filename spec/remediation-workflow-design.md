@@ -340,9 +340,11 @@ stale installed bin or isolated worktree.
 **Token estimation** uses the shared `estimateTokensFromBytes`: node estimates
 from contract scope file sizes + spec length + pulled-in test files.
 
-**Convention scan** is cached once per run. `collectReferencingTests` uses
-deliberately-loose basename matching (false positives are harmless extra write
-grants) scoped to the node's package.
+**Convention scan** was cached once per run and used deliberately-loose
+basename matching to widen a node's write grant to the tests that reference its
+files. It was retired with the tool-side implement-prompt assembly: the host
+owns worker prompting, and the enforced scope is `block.touched_files`
+normalized into the work item's `allowed_files`.
 
 ---
 

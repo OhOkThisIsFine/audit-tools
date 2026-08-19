@@ -1,9 +1,7 @@
 import { Command } from "commander";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { splitFrontmatter, writeGeneratedFile, objectValue } from "./utils/hostAssets.js";
 import { decideNextStep } from "./steps/nextStep.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import {
@@ -25,10 +23,6 @@ import {
   assertCliCommandAllowedFromCwd,
   remediationArtifactsDir,
   resolveRepoRoot,
-  mergeOpenCodeAgentPermissionRule,
-  mergeOpenCodeGlobalPermissionRule,
-  migrateOpenCodeGlobalExternalDirectory,
-  withoutOpenCodeWildcard,
   readOptionalJsonFile,
   recoverSubmission,
   runTracked,
@@ -47,24 +41,6 @@ const { version: pkgVersion } = JSON.parse(
 // opencode.json is optional package data (shipped with the package). Read it
 // best-effort so a missing/unshipped config can never crash the CLI on startup —
 // default to no extra permissions instead.
-let _opencodeJson: {
-  agent?: {
-    remediator?: {
-      permission?: { edit?: Record<string, string>; bash?: Record<string, string> };
-    };
-  };
-} = {};
-try {
-  _opencodeJson = JSON.parse(readFileSync(join(pkgRoot, "opencode.json"), "utf8"));
-} catch {
-  // No opencode config available — proceed with empty permissions.
-}
-const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};
-const OPENCODE_REMEDIATE_EDIT_PERMISSION: Record<string, string> =
-  _remediatorPermission.edit ?? {};
-const OPENCODE_REMEDIATE_BASH_PERMISSION: Record<string, string> =
-  _remediatorPermission.bash ?? {};
-
 const program = new Command();
 
 program
@@ -170,10 +146,11 @@ program
 
 // The four installer verbs are intercepted by the remediate-code bin BEFORE the
 // dist CLI is reached (`remediate-code.mjs` main), so nothing registered here can
-// run them. `ensure` used to be registered WITH an action calling
-// `ensureGlobalAssets` — unreachable through the bin, which calls
+// run them. `ensure` used to be registered WITH an action calling a second,
+// dist-side asset installer — unreachable through the bin, which calls
 // `installer.ensureBootstrap` instead. So the help page described one
 // implementation while the bin ran another, and the dead one was invisible.
+// That shadow implementation is now deleted, so the bin's is the only one.
 //
 // They stay registered, description-only, because `--help` must list the bin's
 // real surface. `wrapper/installer-verb-help.mjs` is the single source for these
@@ -537,177 +514,4 @@ export function runValidateCommand(
   }
   log("validate: TypeScript types OK");
   return 0;
-}
-
-// Remediator agent scope: managed rules win for specific patterns; an
-// existing user wildcard survives (the managed set is passed without "*").
-function renderOpenCodeAgentPermissionConfig(existing?: unknown): Record<string, unknown> {
-  const existingPermission = objectValue(existing);
-  return {
-    ...existingPermission,
-    read: "allow",
-    glob: "allow",
-    grep: "allow",
-    edit: mergeOpenCodeAgentPermissionRule(
-      existingPermission.edit,
-      OPENCODE_REMEDIATE_EDIT_PERMISSION,
-      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
-    ),
-    bash: mergeOpenCodeAgentPermissionRule(
-      existingPermission.bash,
-      OPENCODE_REMEDIATE_BASH_PERMISSION,
-      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
-    ),
-  };
-}
-
-// Global top-level scope: never seeds a bash wildcard or
-// external_directory['*']='allow', keeps the denylist hygiene rules, and
-// migrates away previously deployed broad rules whose value exactly matches
-// the historically managed value ('allow'). Non-matching values are untouched.
-function renderOpenCodeGlobalPermissionConfig(existing?: unknown): Record<string, unknown> {
-  const existingPermission = objectValue(existing);
-  const merged: Record<string, unknown> = {
-    ...existingPermission,
-    read: "allow",
-    glob: "allow",
-    grep: "allow",
-    edit: mergeOpenCodeAgentPermissionRule(
-      existingPermission.edit,
-      OPENCODE_REMEDIATE_EDIT_PERMISSION,
-      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
-    ),
-    bash: mergeOpenCodeGlobalPermissionRule(
-      existingPermission.bash,
-      OPENCODE_REMEDIATE_BASH_PERMISSION,
-      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
-    ),
-  };
-  const externalDirectory = migrateOpenCodeGlobalExternalDirectory(
-    existingPermission.external_directory,
-  );
-  if (externalDirectory === undefined) {
-    delete merged.external_directory;
-  } else {
-    merged.external_directory = externalDirectory;
-  }
-  return merged;
-}
-
-function installOpenCodeGlobalConfig(promptBody: string, homeDir = homedir()): string {
-  const configPath = join(homeDir, ".config", "opencode", "opencode.json");
-  const parsed = existsSync(configPath)
-    ? JSON.parse(readFileSync(configPath, "utf8"))
-    : {};
-  const agent = objectValue(parsed.agent);
-  const existingRemediator = objectValue(agent.remediator);
-  const merged = {
-    ...parsed,
-    command: {
-      ...objectValue(parsed.command),
-      "remediate-code": {
-        template: promptBody.trimStart(),
-        description: "Conversation-first code remediation",
-        agent: "remediator",
-        subtask: false,
-      },
-    },
-    permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
-    agent: {
-      ...agent,
-      remediator: {
-        ...existingRemediator,
-        description:
-          "Bounded remediation orchestration agent for the /remediate-code workflow.",
-        permission: renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
-      },
-    },
-  };
-  const action = existsSync(configPath) ? "updated" : "installed";
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
-  return `${action} global OpenCode command in ${configPath}`;
-}
-
-export function ensureGlobalAssets(
-  quiet: boolean,
-  log: (msg: string) => void = console.log,
-  homeDir = homedir(),
-  root = process.cwd(),
-): void {
-  const promptSource = join(
-    pkgRoot,
-    "skills",
-    "remediate-code",
-    "remediate-code.prompt.md",
-  );
-  const skillSource = join(pkgRoot, "skills", "remediate-code", "SKILL.md");
-  const metadataSource = join(
-    pkgRoot,
-    "skills",
-    "remediate-code",
-    "agents",
-    "openai.yaml",
-  );
-
-  const prompt = readFileSync(promptSource);
-  const skill = readFileSync(skillSource);
-  const installs = [
-    {
-      label: "Claude command",
-      path: join(homeDir, ".claude", "commands", "remediate-code.md"),
-      content: prompt,
-    },
-    {
-      label: "Codex skill",
-      path: join(homeDir, ".codex", "skills", "remediate-code", "SKILL.md"),
-      content: skill,
-    },
-    {
-      label: "Codex prompt",
-      path: join(
-        homeDir,
-        ".codex",
-        "skills",
-        "remediate-code",
-        "remediate-code.prompt.md",
-      ),
-      content: prompt,
-    },
-    ...(existsSync(metadataSource)
-      ? [
-          {
-            label: "Codex skill UI metadata",
-            path: join(
-              homeDir,
-              ".codex",
-              "skills",
-              "remediate-code",
-              "agents",
-              "openai.yaml",
-            ),
-            content: readFileSync(metadataSource),
-          },
-        ]
-      : []),
-  ];
-
-  for (const install of installs) {
-    const action = writeGeneratedFile(install.path, install.content);
-    if (!quiet) {
-      log(`remediate-code: ${action} global ${install.label} at ${install.path}`);
-    }
-  }
-
-  const message = installOpenCodeGlobalConfig(
-    splitFrontmatter(prompt.toString("utf8")).body,
-    homeDir,
-  );
-  if (!quiet) log(`remediate-code: ${message}`);
-
-  const antigravitySkillPath = join(resolve(root), ".agent", "skills", "remediate-code", "SKILL.md");
-  const antigravityAction = writeGeneratedFile(antigravitySkillPath, skill);
-  if (!quiet) {
-    log(`remediate-code: ${antigravityAction} Antigravity skill at ${antigravitySkillPath}`);
-  }
 }

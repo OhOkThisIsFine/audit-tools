@@ -5,8 +5,6 @@
  *   - grounding.ts groundAffectedFiles / evidenceCitesRealPath resolve a bare
  *     basename to its NESTED tracked path instead of `existsSync(root/<name>)`
  *     (INV-B3-3), while a hallucinated path stays phantom (INV-B3-6).
- *   - implementPrompt.ts resolveCitationPathForPrompt surfaces a bare basename as
- *     its resolved tracked path, never a broken `<root>/<name>` prefix (INV-B3-5).
  *   - the M-B3 gate (validateContractCitationGrounding) grounds a dotfile-only
  *     node end-to-end with zero severity:error issues (INV-B3-4).
  *
@@ -22,7 +20,6 @@ import {
   groundAffectedFiles,
   evidenceCitesRealPath,
 } from "../../src/remediate/phases/grounding.js";
-import { resolveCitationPathForPrompt } from "../../src/remediate/steps/dispatch/implementPrompt.js";
 import { validateContractCitationGrounding } from "../../src/remediate/validation/contractPipelineGates.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 
@@ -112,44 +109,6 @@ describe("grounding.ts consumers resolve bare basenames + dotfile paths", () => 
   it("INV-B3-6 NEGATIVE: evidence with an out-of-range line or hallucinated name stays ungrounded", () => {
     expect(evidenceCitesRealPath(root, "advance.ts:9999 does not exist")).toBe(false);
     expect(evidenceCitesRealPath(root, "phantom in doesnotexist.ts:1")).toBe(false);
-  });
-});
-
-describe("INV-B3-5: implementPrompt.ts resolveCitationPathForPrompt", () => {
-  const corpus = new Set([NESTED, "src/top.ts"]);
-  const worktree = "/wt";
-
-  it("POSITIVE: a bare basename surfaces as the resolved tracked path, never `<root>/<name>`", () => {
-    const out = resolveCitationPathForPrompt("advance.ts", worktree, corpus);
-    // Resolved to the nested tracked path, prefixed with the worktree root.
-    expect(out).toBe("/wt/src/audit/orchestrator/advance.ts");
-    // Never the broken top-level prefix that would misdirect the worker.
-    expect(out).not.toBe("/wt/advance.ts");
-  });
-
-  it("POSITIVE: a full repo-relative path is prefixed onto the worktree unchanged", () => {
-    expect(resolveCitationPathForPrompt(NESTED, worktree, corpus)).toBe(
-      "/wt/src/audit/orchestrator/advance.ts",
-    );
-  });
-
-  it("POSITIVE: already-absolute / drive-letter paths pass through", () => {
-    expect(resolveCitationPathForPrompt("/abs/x.ts", worktree, corpus)).toBe("/abs/x.ts");
-    expect(resolveCitationPathForPrompt("C:\\abs\\x.ts", worktree, corpus)).toBe(
-      "C:\\abs\\x.ts",
-    );
-  });
-
-  it("POSITIVE: without a worktree root, a bare basename still resolves to its tracked path", () => {
-    expect(resolveCitationPathForPrompt("advance.ts", undefined, corpus)).toBe(NESTED);
-  });
-
-  it("NEGATIVE: an ambiguous / unresolvable bare basename is left as-is (monotonic)", () => {
-    const ambiguous = new Set([NESTED, "src/remediate/steps/advance.ts"]);
-    // >1 match → not rewritten; falls through to the worktree prefix on the raw name.
-    expect(resolveCitationPathForPrompt("advance.ts", worktree, ambiguous)).toBe("/wt/advance.ts");
-    // No match → unchanged pass-through.
-    expect(resolveCitationPathForPrompt("nope.ts", undefined, corpus)).toBe("nope.ts");
   });
 });
 

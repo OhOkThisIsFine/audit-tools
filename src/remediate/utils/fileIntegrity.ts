@@ -5,7 +5,6 @@ import {
   existsSync,
   realpathSync,
   readFileSync,
-  readdirSync,
   statSync,
   type Dirent,
 } from "node:fs";
@@ -32,17 +31,6 @@ function reportHashIoError(absolutePath: string, err: unknown): void {
   );
 }
 
-export function hashFileSync(absolutePath: string): string | undefined {
-  if (!existsSync(absolutePath)) return undefined;
-  try {
-    const content = readFileSync(absolutePath);
-    return hashContent(content);
-  } catch (err) {
-    reportHashIoError(absolutePath, err);
-    return undefined;
-  }
-}
-
 export async function hashFile(absolutePath: string): Promise<string | undefined> {
   if (!existsSync(absolutePath)) return undefined;
   try {
@@ -62,31 +50,10 @@ function sortDirents(a: Dirent, b: Dirent): number {
   return a.name.localeCompare(b.name);
 }
 
-// Directory digest: build a canonical "directory\n" + (relpath \0 file-hash \0)
-// manifest string from a depth-first, name-sorted walk, then hash it once via
-// the shared primitive. Per-file content hashes also route through hashContent —
-// no inline createHash remains.
-function hashDirectorySync(root: string, absolutePath: string): string {
-  const parts: string[] = ["directory\n"];
-
-  const visit = (dir: string): void => {
-    const entries = readdirSync(dir, { withFileTypes: true }).sort(sortDirents);
-    for (const entry of entries) {
-      const child = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(child);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const content = readFileSync(child);
-      parts.push(toDisplayRelativePath(root, child), "\0", hashContent(content), "\0");
-    }
-  };
-
-  visit(absolutePath);
-  return hashContent(parts.join(""));
-}
-
+// Directory digest: build a canonical manifest string (a "directory" marker,
+// then NUL-separated relpath/file-hash pairs) from a depth-first, name-sorted
+// walk, then hash it once via the shared primitive. Per-file content hashes
+// also route through hashContent — no inline createHash remains.
 async function hashDirectory(root: string, absolutePath: string): Promise<string> {
   const parts: string[] = ["directory\n"];
 
@@ -112,22 +79,6 @@ export function resolveAffectedPath(root: string, affectedPath: string): string 
   return isAbsolute(affectedPath) ? affectedPath : join(root, affectedPath);
 }
 
-export function hashAffectedPathSync(
-  root: string,
-  affectedPath: string,
-): string | undefined {
-  const absolutePath = resolveAffectedPath(root, affectedPath);
-  if (!existsSync(absolutePath)) return undefined;
-  try {
-    const pathStat = statSync(absolutePath);
-    if (pathStat.isDirectory()) return hashDirectorySync(root, absolutePath);
-    if (pathStat.isFile()) return hashFileSync(absolutePath);
-    return undefined;
-  } catch (err) {
-    reportHashIoError(absolutePath, err);
-    return undefined;
-  }
-}
 
 export async function hashAffectedPath(
   root: string,
@@ -282,22 +233,6 @@ export function snapshotAffectedFileHashes(
     for (const af of finding.affected_files) {
       const hash = hashPlanningBaselineSync(root, af.path);
       if (!af.hash_at_plan_time) af.hash_at_plan_time = hash;
-    }
-  }
-}
-
-/**
- * Force-update every affected file's stored hash to its current content. Use
- * after the implement phase legitimately rewrites files, so a later integrity
- * check does not flag the run's own edits as a stale plan.
- */
-export function resnapshotAffectedFileHashes(
-  root: string,
-  findings: Finding[],
-): void {
-  for (const finding of findings) {
-    for (const af of finding.affected_files) {
-      af.hash_at_plan_time = hashAffectedPathSync(root, af.path);
     }
   }
 }

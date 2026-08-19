@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { ensureGlobalAssets } from "../../src/remediate/index.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const TEMP_HOME = scratchDir(".test-home-postinstall-contract");
@@ -166,23 +165,6 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     // No duplicate or mutated rules in either scope.
     expect(secondConfig.agent.remediator).toEqual(firstConfig.agent.remediator);
     expect(secondConfig.permission).toEqual(firstConfig.permission);
-  });
-
-  it("ensureGlobalAssets (remediate-code ensure) applies the same scoped behavior", async () => {
-    await seedConfig({
-      permission: {
-        bash: { "*": "allow" },
-        external_directory: { "*": "allow" },
-      },
-    });
-
-    ensureGlobalAssets(true, () => {}, TEMP_HOME);
-
-    const config = await readConfig();
-    expect(config.permission.bash["*"]).toBeUndefined();
-    expect(config.permission.external_directory).toBeUndefined();
-    expect(config.permission.bash["remediate-code ensure*"]).toBe("allow");
-    expect(config.agent.remediator.permission.bash["*"]).toBe("ask");
   });
 
   it("exits non-zero when at least one file install fails (INV-remediate-infra-08)", async () => {

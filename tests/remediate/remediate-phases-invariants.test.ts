@@ -1,8 +1,8 @@
 /**
- * INV-remediate-phases-01: applyPlanPipeline always runs mergeBlocksSharingFiles before
- *   splitBlocksByContextBudget (post-dedup pipeline order invariant)
+ * INV-remediate-phases-01: applyPlanPipeline runs mergeBlocksSharingFiles over the
+ *   post-dedup plan (membership is a content-coherence contract; planning reports
+ *   size but never reshapes work around a backend window)
  * INV-remediate-phases-02: mergeBlocksSharingFiles never merges serialized (dep-ordered) blocks
- * INV-remediate-phases-03: splitBlocksByContextBudget rewrites ALL dep references when a dep is split
  * INV-remediate-phases-04: buildCoverageLedger — every source finding has exactly one disposition
  * INV-remediate-phases-05: runTriagePhase uses a unified auto-retry cap
  * INV-remediate-phases-06: runClosePhase preview gate blocks unconfirmed closing actions
@@ -23,7 +23,6 @@ import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import {
   applyPlanPipeline,
   mergeBlocksSharingFiles,
-  splitBlocksByContextBudget,
   buildCoverageLedger,
 } from "../../src/remediate/phases/plan.js";
 import { collectStagingFiles, executeClosingAction, runClosePhase, buildRemediationOutcomesReport } from "../../src/remediate/phases/close.js";
@@ -36,13 +35,13 @@ import { scratchDir } from "../helpers/scratch.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// INV-remediate-phases-01: applyPlanPipeline — post-dedup pipeline order invariant
-// mergeBlocksSharingFiles runs first (preventing parallel clobber), then
-// splitBlocksByContextBudget (keeping each block within context budget).
-// A plan with two parallel-safe blocks sharing a file must come out merged.
+// INV-remediate-phases-01: applyPlanPipeline — post-dedup pipeline
+// mergeBlocksSharingFiles runs over the deduped blocks (preventing parallel
+// clobber). A plan with two parallel-safe blocks sharing a file must come out
+// annotated, never reshaped to fit a context window.
 // ---------------------------------------------------------------------------
 
-describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline applies merge before split", () => {
+describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline merges co-file blocks", () => {
   const TEST_DIR = scratchDir(".test-phases-inv-01");
 
   function mkFinding(id: string, filePath: string) {
@@ -94,8 +93,7 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
       candidate_closing_actions: ["none" as const],
     };
     const result = await applyPlanPipeline(plan, { root: TEST_DIR });
-    // A3: independent same-file blocks stay separate + flagged (merge still runs
-    // before split — the pipeline order invariant is preserved).
+    // A3: independent same-file blocks stay separate + flagged.
     expect(result.blocks.length).toBe(2);
     for (const b of result.blocks) expect(b.cofile_parallel_safe).toBe(true);
   });
@@ -181,75 +179,6 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
     expect(result).toHaveLength(1);
     expect(result[0].block_id).toBe("B1");
     expect(result[0].parallel_safe).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-remediate-phases-03: splitBlocksByContextBudget rewrites dep references
-// ---------------------------------------------------------------------------
-
-describe("splitBlocksByContextBudget — INV-remediate-phases-03: dep-remap covers ALL sub-block IDs", () => {
-  function mkFinding(id: string, bytes: number) {
-    return {
-      id,
-      title: id,
-      category: "General",
-      severity: "low" as const,
-      confidence: "low" as const,
-      lens: "correctness",
-      summary: id,
-      // Distinct file per finding so no file-overlap grouping
-      affected_files: [{ path: `src/${id}.ts`, _fakeSizeBytes: bytes }],
-      evidence: ["evidence"],
-    };
-  }
-
-  it("a block depending on a split dep now depends on ALL its sub-blocks", () => {
-    // Budget is tight so B-base (two large findings) must split into two sub-blocks.
-    const findings = [
-      mkFinding("F1", 0),
-      mkFinding("F2", 0),
-      mkFinding("F3", 0),
-    ] as any;
-
-    // Set a very small budget so B-base inevitably splits when we simulate tokens.
-    // We use the real function but pass budget=0 so every block is individually
-    // above budget → each finding becomes its own sub-block.
-    const baseBudget = 0; // force split
-    const blocks: RemediationBlock[] = [
-      { block_id: "B-base", items: ["F1", "F2"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-dep", items: ["F3"], dependencies: ["B-base"], parallel_safe: false, touched_files: [] },
-    ];
-
-    const result = splitBlocksByContextBudget(blocks, findings, "/tmp", baseBudget);
-
-    // B-base must have been split into at least 2 sub-blocks.
-    const subBlocks = result.filter((b) => b.block_id.startsWith("B-base-"));
-    expect(subBlocks.length).toBeGreaterThanOrEqual(2);
-
-    // B-dep must depend on ALL the sub-blocks of B-base, not just the original "B-base".
-    const depBlock = result.find((b) => b.block_id === "B-dep");
-    expect(depBlock).toBeDefined();
-    const subBlockIds = subBlocks.map((b) => b.block_id).sort();
-    const depDeps = (depBlock!.dependencies ?? []).sort();
-    // Every sub-block of B-base must appear in B-dep's dependency list.
-    for (const subId of subBlockIds) {
-      expect(depDeps).toContain(subId);
-    }
-    // The original "B-base" must NOT appear in B-dep's deps after remap.
-    expect(depDeps).not.toContain("B-base");
-  });
-
-  it("does not remap when no block is split", () => {
-    const findings = [mkFinding("F1", 0), mkFinding("F2", 0)] as any;
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
-    ];
-    // Large budget — no split.
-    const result = splitBlocksByContextBudget(blocks, findings, "/tmp", 1_000_000);
-    const b2 = result.find((b) => b.block_id === "B2")!;
-    expect(b2.dependencies).toEqual(["B1"]);
   });
 });
 

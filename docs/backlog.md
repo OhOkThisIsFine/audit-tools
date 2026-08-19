@@ -23,7 +23,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 120 entr(y/ies) indexed.
+> and at commit). 119 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -94,8 +94,7 @@
 - `forward-tracks.md:81` — CI wall-clock: shard balance and the single-file floor.
 - `forward-tracks.md:88` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
 - `forward-tracks.md:100` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:114` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
-- `forward-tracks.md:123` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:114` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
 
 ### [`deferred.md`](backlog/deferred.md)
 

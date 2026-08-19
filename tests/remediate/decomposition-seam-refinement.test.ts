@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   mergeBlocksSharingFiles,
-  splitBlocksByContextBudget,
 } from "../../src/remediate/phases/plan.js";
 import type { Finding, RemediationBlock } from "../../src/remediate/state/types.js";
 
@@ -117,44 +116,5 @@ describe("A3 decomposition seam refinement — mergeBlocksSharingFiles", () => {
     expect(result[0].items).toEqual(["F-1"]);
     // A lone block (nothing else shares its file) is not flagged.
     expect(result[0].cofile_parallel_safe).toBeUndefined();
-  });
-});
-
-describe("A3 decomposition seam refinement — splitBlocksByContextBudget (INV-A3-07)", () => {
-  it("a split flagged block yields sub-blocks that retain cofile_parallel_safe", () => {
-    // Two independent findings on the SAME file, in one flagged block, with a
-    // tiny context budget that forces the block to split. Each sub-block must
-    // keep the flag.
-    const findings = [
-      finding("F-1", ["src/A.ts"]),
-      finding("F-2", ["src/A.ts"]),
-    ];
-    const flaggedBlock = block("B-001", ["F-1", "F-2"], {
-      cofile_parallel_safe: true,
-    });
-
-    // Budget of 1 token guarantees each finding lands in its own sub-block.
-    const result = splitBlocksByContextBudget(
-      [flaggedBlock],
-      findings,
-      ".",
-      1,
-    );
-
-    expect(result.length).toBeGreaterThan(1);
-    for (const b of result) {
-      expect(b.cofile_parallel_safe).toBe(true);
-    }
-  });
-
-  it("INV-A3-08: a single-finding block below budget stays one block, unsplit", () => {
-    const findings = [finding("F-1", ["src/A.ts"])];
-    const blocks = [block("B-001", ["F-1"], { cofile_parallel_safe: true })];
-
-    const result = splitBlocksByContextBudget(blocks, findings, ".", 1);
-
-    expect(result).toHaveLength(1);
-    expect(result[0].block_id).toBe("B-001");
-    expect(result[0].items).toEqual(["F-1"]);
   });
 });

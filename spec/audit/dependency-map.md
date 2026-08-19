@@ -143,7 +143,7 @@ matrix (same files/buckets) still re-stales tasks. No cycle: planning writes
 
 `task_affinity_graph.json` is the provider-neutral task-affinity graph derived
 from `audit_tasks.json`; planning's packet composition consumes it
-(`buildReviewPackets` / plan metrics in `src/audit/orchestrator/reviewPackets.ts`)
+(`buildReviewPacketPlanningData` / plan metrics in `src/audit/orchestrator/reviewPackets.ts`)
 to form complete bounded work items and persists no executor choice — see
 [`audit-workflow-design.md`](../audit-workflow-design.md).
 

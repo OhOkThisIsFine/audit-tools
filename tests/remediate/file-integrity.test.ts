@@ -5,11 +5,9 @@ import { fileURLToPath } from "node:url";
 import type { Finding } from "../../src/remediate/state/types.js";
 import {
   checkAffectedFileIntegrity,
-  hashAffectedPathSync,
+  hashAffectedPath,
   hashFile,
-  hashFileSync,
   snapshotAffectedFileHashes,
-  resnapshotAffectedFileHashes,
 } from "../../src/remediate/utils/fileIntegrity.js";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -39,25 +37,7 @@ describe("fileIntegrity re-snapshot", () => {
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("detects a changed file, then re-snapshot re-baselines so integrity is clean", async () => {
-    const rel = "src.ts";
-    await writeFile(join(TEST_DIR, rel), "original", "utf8");
-    const findings = [mkFinding(rel)];
-
-    // initial baseline
-    snapshotAffectedFileHashes(TEST_DIR, findings);
-    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(true);
-
-    // the implement phase legitimately rewrites the file
-    await writeFile(join(TEST_DIR, rel), "rewritten by implement", "utf8");
-    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(false);
-
-    // re-baseline (what mergeImplementResults now does) -> integrity clean again
-    resnapshotAffectedFileHashes(TEST_DIR, findings);
-    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(true);
-  });
-
-  it("snapshot preserves an existing hash, but resnapshot forces an update", async () => {
+  it("snapshot preserves an existing hash rather than overwriting it", async () => {
     const rel = "x.ts";
     await writeFile(join(TEST_DIR, rel), "v1", "utf8");
     const findings = [mkFinding(rel)];
@@ -69,9 +49,6 @@ describe("fileIntegrity re-snapshot", () => {
     await writeFile(join(TEST_DIR, rel), "v2", "utf8");
     snapshotAffectedFileHashes(TEST_DIR, findings); // must NOT overwrite an existing hash
     expect(findings[0].affected_files[0].hash_at_plan_time).toBe(h1);
-
-    resnapshotAffectedFileHashes(TEST_DIR, findings); // forces re-baseline to current
-    expect(findings[0].affected_files[0].hash_at_plan_time).not.toBe(h1);
   });
 });
 
@@ -150,7 +127,7 @@ describe("directory affected_files hashing", () => {
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a1", "utf8");
     const findings = [mkFinding(rel)];
 
-    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
+    findings[0].affected_files[0].hash_at_plan_time = await hashAffectedPath(TEST_DIR, rel);
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a2", "utf8");
 
     const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
@@ -165,11 +142,11 @@ describe("directory affected_files hashing", () => {
     await writeFile(join(TEST_DIR, rel, "a.ts"), "a", "utf8");
     const findings = [mkFinding(rel)];
 
-    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
+    findings[0].affected_files[0].hash_at_plan_time = await hashAffectedPath(TEST_DIR, rel);
     await writeFile(join(TEST_DIR, rel, "b.ts"), "b", "utf8");
     expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).changed).toContain(rel);
 
-    resnapshotAffectedFileHashes(TEST_DIR, findings);
+    findings[0].affected_files[0].hash_at_plan_time = await hashAffectedPath(TEST_DIR, rel);
     await rm(join(TEST_DIR, rel, "a.ts"), { force: true });
     const removed = await checkAffectedFileIntegrity(TEST_DIR, findings);
     expect(removed.changed).toContain(rel);
@@ -177,22 +154,9 @@ describe("directory affected_files hashing", () => {
     expect(removed.io_errors).toEqual([]);
   });
 
-  it("resnapshotAffectedFileHashes re-baselines directory affected_files paths", async () => {
-    const rel = "pkg";
-    await mkdir(join(TEST_DIR, rel), { recursive: true });
-    await writeFile(join(TEST_DIR, rel, "index.ts"), "v1", "utf8");
-    const findings = [mkFinding(rel)];
-
-    findings[0].affected_files[0].hash_at_plan_time = hashAffectedPathSync(TEST_DIR, rel);
-    await writeFile(join(TEST_DIR, rel, "index.ts"), "v2", "utf8");
-    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(false);
-
-    resnapshotAffectedFileHashes(TEST_DIR, findings);
-    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(true);
-  });
 });
 
-describe("hashFile / hashFileSync on a missing path", () => {
+describe("hashFile on a missing path", () => {
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
     await mkdir(TEST_DIR, { recursive: true });
@@ -201,9 +165,8 @@ describe("hashFile / hashFileSync on a missing path", () => {
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("both return undefined for a non-existent path (existsSync-false branch)", async () => {
+  it("returns undefined for a non-existent path (existsSync-false branch)", async () => {
     const missing = join(TEST_DIR, "does-not-exist.ts");
-    expect(hashFileSync(missing)).toBeUndefined();
     expect(await hashFile(missing)).toBeUndefined();
   });
 });

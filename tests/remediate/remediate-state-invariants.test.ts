@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { blockingIntakeQuestions } from "../../src/remediate/intake.js";
 import { isAuditFindingsReport } from "../../src/remediate/phases/plan.js";
-import { hashFile, hashFileSync } from "../../src/remediate/utils/fileIntegrity.js";
+import { hashFile } from "../../src/remediate/utils/fileIntegrity.js";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,16 +138,10 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
 // INV-remediate-state-10: fileIntegrity TOCTOU-safe path + ENOENT vs io_errors
 // ---------------------------------------------------------------------------
 
-describe("hashFile / hashFileSync — INV-remediate-state-10: ENOENT returns undefined, not io_error", () => {
+describe("hashFile — INV-remediate-state-10: ENOENT returns undefined, not io_error", () => {
   it("hashFile returns undefined for a nonexistent path (ENOENT = missing, not io_error)", async () => {
     const missing = "/nonexistent/path/that/does/not/exist.ts";
     const result = await hashFile(missing);
-    expect(result).toBeUndefined();
-  });
-
-  it("hashFileSync returns undefined for a nonexistent path", () => {
-    const missing = "/nonexistent/path/that/does/not/exist.ts";
-    const result = hashFileSync(missing);
     expect(result).toBeUndefined();
   });
 

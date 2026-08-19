@@ -33,7 +33,6 @@ import {
 import {
   validateDesignSpecGates,
 } from "../../src/remediate/validation/contractPipeline.js";
-import { isInfraModifyingBlock } from "../../src/remediate/steps/dispatch.js";
 import {
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
@@ -723,46 +722,6 @@ describe("deterministic design gates: circular interface detection via validateD
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors).toHaveLength(0);
   });
-});
-
-// ---------------------------------------------------------------------------
-// 6. Infra-node live-surface verification
-// ---------------------------------------------------------------------------
-
-describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
-  it("block touching nextStep.ts is identified as infra-modifying", () => {
-    expect(
-      isInfraModifyingBlock(["src/remediate/steps/nextStep.ts"]),
-    ).toBe(true);
-  });
-
-  it("block touching dispatch.ts is identified as infra-modifying", () => {
-    expect(
-      isInfraModifyingBlock(["src/remediate/steps/dispatch.ts"]),
-    ).toBe(true);
-  });
-
-  it("block touching store.ts is identified as infra-modifying", () => {
-    expect(
-      isInfraModifyingBlock(["src/remediate/state/store.ts"]),
-    ).toBe(true);
-  });
-
-  it("block touching only plan.ts is NOT infra-modifying", () => {
-    expect(
-      isInfraModifyingBlock(["src/remediate/phases/plan.ts"]),
-    ).toBe(false);
-  });
-
-  it("block with mixed infra and non-infra paths IS infra-modifying", () => {
-    expect(
-      isInfraModifyingBlock([
-        "src/remediate/phases/plan.ts",
-        "src/remediate/steps/nextStep.ts",
-      ]),
-    ).toBe(true);
-  });
-
 });
 
 // ---------------------------------------------------------------------------

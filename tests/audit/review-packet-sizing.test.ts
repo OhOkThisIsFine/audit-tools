@@ -7,7 +7,6 @@ import type { AuditTask } from "../../src/audit/types.js";
 const {
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PACKET_PROMPT_TOKENS,
-  DEFAULT_TARGET_PACKET_TOKENS,
   taskContentTokens,
 } = await import("../../src/audit/orchestrator/reviewPacketSizing.js");
 
@@ -18,11 +17,6 @@ test("reviewPacketSizing uses shared ESTIMATED_TOKENS_PER_LINE (no local duplica
   // The value sourced from reviewPacketSizing must equal the shared one.
   expect(ESTIMATED_TOKENS_PER_LINE).toBe(sharedETPL);
   expect(ESTIMATED_TOKENS_PER_LINE).toBe(4);
-});
-
-test("DEFAULT_TARGET_PACKET_TOKENS equals 8000 * sharedESTIMATED_TOKENS_PER_LINE (32000)", () => {
-  expect(DEFAULT_TARGET_PACKET_TOKENS).toBe(8000 * sharedETPL);
-  expect(DEFAULT_TARGET_PACKET_TOKENS).toBe(32000);
 });
 
 test("ESTIMATED_PACKET_PROMPT_TOKENS aliases the shared ESTIMATED_PROMPT_OVERHEAD_TOKENS (900)", () => {

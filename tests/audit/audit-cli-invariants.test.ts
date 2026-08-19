@@ -1,7 +1,9 @@
 /**
  * Invariant tests for the audit-code CLI layer.
  * Locks the contract guarantees established by the N-audit-cli-inv remediation
- * block (INV-audit-cli-01 through INV-audit-cli-07).
+ * block. INV-audit-cli-03/05/06/07 covered the dist-side worker-result,
+ * envelope and boolean-env helpers, all of which were unwired by the
+ * zero-adapter retirement and deleted with the tested-but-unwired sweep.
  *
  * These are deterministic, in-process tests — no file system IO, no providers,
  * no LLM calls.
@@ -13,11 +15,6 @@ import { fileURLToPath } from "node:url";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import type { AnalyzerSetting } from "audit-tools/shared";
-import type { WorkerResultStatus } from "../../src/audit/types/workerResult.js";
-import type {
-  AuditCodeHandoff,
-  AuditCodeHandoffArtifactPaths,
-} from "../../src/audit/supervisor/operatorHandoff.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -58,45 +55,6 @@ test("INV-audit-cli-02: handleGraphEnrichmentBranch does not crash when analyzer
   expect(result.action, "no manifest → no unresolved installs → fallthrough").toBe("fallthrough");
 });
 
-// ── INV-audit-cli-03: mergeAndIngestCommand status consistency ─────────────────
-// workerResult.status must use the same logic as the outer `status` variable
-// rather than a divergent expression that always returns 'no_progress' when
-// failing.length > 0 (COR-48c05a13 fix). We verify via the buildWorkerResult
-// helper which accepts WorkerResultStatus — if 'partial' is passed it would
-// be a TS compile error caught at build time.
-//
-// The runtime invariant: WorkerResultStatus is a closed set
-// (completed|blocked|failed|no_progress); "partial" is not valid.
-
-const { WORKER_RESULT_CONTRACT_VERSION } = await import("../../src/audit/cli/workerResult.js");
-const { buildWorkerResult } = await import("../../src/audit/cli/workerResult.js");
-
-test("INV-audit-cli-03: buildWorkerResult accepts all valid WorkerResultStatus values", () => {
-  const statuses: WorkerResultStatus[] = ["completed", "blocked", "failed", "no_progress"];
-  for (const status of statuses) {
-    const r = buildWorkerResult({
-      runId: "r1",
-      obligationId: "ob-1",
-      status,
-      progressMade: status === "completed",
-      selectedExecutor: "worker-command",
-      artifactsWritten: [],
-      summary: "test",
-      nextLikelyStep: null,
-      errors: [],
-    });
-    expect(r.status, `status '${status}' round-trips through buildWorkerResult`).toBe(status);
-    expect(r.contract_version).toBe(WORKER_RESULT_CONTRACT_VERSION);
-  }
-});
-
-test("INV-audit-cli-03: WorkerResultStatus does not include 'partial'", async () => {
-  // The TS type is the authoritative guard; this test documents the contract for
-  // future readers and catches accidental runtime coercions.
-  const validStatuses = new Set(["completed", "blocked", "failed", "no_progress"]);
-  expect(!validStatuses.has("partial"), "'partial' must not be a valid WorkerResultStatus").toBeTruthy();
-});
-
 // ── INV-audit-cli-04: getFlag never silently drops an explicit value ──────────
 // When the token after a flag looks like another long flag, getFlag returns the
 // fallback silently (COR-4c72c062). The invariant: documented behavior tested
@@ -127,84 +85,6 @@ test("INV-audit-cli-04: getFlag returns fallback when next token is a long flag"
   // looks like another flag. Callers must not pass ambiguous argv.
   const result = getFlag(["--root", "--artifacts-dir", "something"], "--root");
   expect(result, "getFlag returns undefined when next token is a long flag").toBe(undefined);
-});
-
-// ── INV-audit-cli-05: optionalBooleanEnv strict parsing ───────────────────────
-// Only 'true' and 'false' are accepted; anything else returns undefined.
-
-const { optionalBooleanEnv } = await import("../../src/audit/cli/args.js");
-
-test("INV-audit-cli-05: optionalBooleanEnv returns true/false/undefined strictly", () => {
-  expect(optionalBooleanEnv("true")).toBe(true);
-  expect(optionalBooleanEnv("false")).toBe(false);
-  expect(optionalBooleanEnv(undefined)).toBe(undefined);
-  expect(optionalBooleanEnv("")).toBe(undefined);
-  expect(optionalBooleanEnv("1")).toBe(undefined);
-  expect(optionalBooleanEnv("yes")).toBe(undefined);
-  expect(optionalBooleanEnv("TRUE")).toBe(undefined);
-});
-
-// ── INV-audit-cli-06: envelope contract version is stable ─────────────────────
-// The ADVANCE_AUDIT_CONTRACT_VERSION is a wire-protocol constant; any change
-// breaks in-flight orchestration round-trips.
-
-const { ADVANCE_AUDIT_CONTRACT_VERSION, buildEnvelope } = await import("../../src/audit/cli/envelope.js");
-
-function minimalHandoff(): AuditCodeHandoff {
-  const artifactPaths: AuditCodeHandoffArtifactPaths = {
-    operator_inputs_dir: "/repo/.audit-tools/audit/operator-inputs",
-    operator_handoff_json: "/repo/.audit-tools/audit/operator-handoff.json",
-    operator_handoff_markdown: "/repo/.audit-tools/audit/operator-handoff.md",
-    session_config: "/repo/.audit-tools/audit/session-config.json",
-    run_ledger: "/repo/.audit-tools/audit/run-ledger.json",
-    current_review_run: null,
-    current_prompt: null,
-    current_tasks: null,
-    audit_tasks: null,
-    runtime_validation_tasks: null,
-    friction_record: "/repo/.audit-tools/audit/friction-record.json",
-  };
-  return {
-    status: "active",
-    repo_root: "/repo",
-    artifacts_dir: "/repo/.audit-tools/audit",
-    summary: "test",
-    pending_obligations: [],
-    suggested_inputs: [],
-    suggested_commands: [],
-    artifact_paths: artifactPaths,
-  };
-}
-
-test("INV-audit-cli-06: ADVANCE_AUDIT_CONTRACT_VERSION is the expected constant", () => {
-  expect(ADVANCE_AUDIT_CONTRACT_VERSION).toBe("audit-code/v1alpha1");
-});
-
-test("INV-audit-cli-06: buildEnvelope includes contract_version in output", () => {
-  const envelope = buildEnvelope({
-    audit_state: { status: "active" },
-    selected_obligation: "repo_manifest",
-    selected_executor: "worker-command",
-    progress_made: true,
-    artifacts_written: [],
-    progress_summary: "done",
-    next_likely_step: null,
-    handoff: minimalHandoff(),
-  });
-  expect(envelope.contract_version).toBe(ADVANCE_AUDIT_CONTRACT_VERSION);
-  expect(envelope.selected_obligation).toBe("repo_manifest");
-  expect(envelope.selected_executor).toBe("worker-command");
-  expect(envelope.progress_made).toBe(true);
-});
-
-// ── INV-audit-cli-07: semantic review is always host-executed ────────────────
-
-const { isSemanticReviewExecutor } = await import("../../src/audit/cli/envelope.js");
-
-test("INV-audit-cli-07: only semantic_review_executor identifies the review frontier", () => {
-  expect(isSemanticReviewExecutor("semantic_review_executor")).toBe(true);
-  expect(isSemanticReviewExecutor("design_review_contract")).toBe(false);
-  expect(isSemanticReviewExecutor(null)).toBe(false);
 });
 
 // ── INV-audit-cli-08: NextStepParams carries no token-wrap option (COR-0ae3577b) ──

@@ -88,7 +88,7 @@ interface HostBoundary {
 }
 
 interface SchedulerBoundary {
-  readonly rollingDependencyLevels: (
+  readonly hostDependencyLevels: (
     state: unknown,
   ) => readonly (readonly HostBlock[])[];
 }
@@ -126,8 +126,8 @@ async function loadScheduler(): Promise<SchedulerBoundary> {
   const loaded = (await import(
     "../../src/remediate/steps/nextStep.js"
   )) as unknown as Partial<SchedulerBoundary>;
-  if (typeof loaded.rollingDependencyLevels !== "function") {
-    throw new Error(`${FAILURE_SIGNATURE}: rollingDependencyLevels is absent`);
+  if (typeof loaded.hostDependencyLevels !== "function") {
+    throw new Error(`${FAILURE_SIGNATURE}: hostDependencyLevels is absent`);
   }
   return loaded as SchedulerBoundary;
 }
@@ -308,10 +308,10 @@ async function prepareFixture(): Promise<{
 }
 
 describe(FAILURE_SIGNATURE, () => {
-  it("emits exactly rollingDependencyLevels(state)[0] as a provider-neutral, bound handoff", async () => {
+  it("emits exactly hostDependencyLevels(state)[0] as a provider-neutral, bound handoff", async () => {
     const scheduler = await loadScheduler();
     const { root, artifactsDir, runId, state, handoff } = await prepareFixture();
-    const expected = (scheduler.rollingDependencyLevels(state)[0] ?? [])
+    const expected = (scheduler.hostDependencyLevels(state)[0] ?? [])
       .map((entry) => entry.block_id)
       .sort();
     expect(expected).toEqual(["block-a", "block-b"]);

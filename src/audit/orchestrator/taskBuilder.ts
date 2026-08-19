@@ -101,8 +101,7 @@ interface TaskBudgetLimits {
 // Split a flat list of file paths into review-task-sized chunks, bounded by both
 // an aggregate line budget and a max file count. Thin adapter over the shared
 // `chunkByBudget` greedy chunker (extracted alongside chunkPacketTasks in
-// reviewPackets.ts and splitOversizedOverlapGroup in remediate's plan.ts —
-// three previously byte-identical loop shapes); the two trivial-bypass
+// reviewPackets.ts — previously byte-identical loop shapes); the two trivial-bypass
 // shortcuts (empty input, both budgets disabled) are kept as-is since they are
 // cheap and avoid ever invoking the generic loop for the common unbounded case.
 function chunkByTaskBudget(

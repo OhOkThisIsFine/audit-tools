@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ensureGlobalAssets, runValidateCommand } from "../../src/remediate/index.js";
+import { runValidateCommand } from "../../src/remediate/index.js";
 import { rm, mkdir } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,69 +22,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(TEST_ROOT, { recursive: true, force: true });
   await rm(TEST_HOME, { recursive: true, force: true });
-});
-
-describe("global-first install helpers", () => {
-  it("ensureGlobalAssets installs Claude, Codex, metadata, and OpenCode files", () => {
-    const logs: string[] = [];
-    ensureGlobalAssets(false, (m) => logs.push(m), TEST_HOME);
-
-    expect(existsSync(join(TEST_HOME, ".claude", "commands", "remediate-code.md"))).toBe(true);
-    expect(existsSync(join(TEST_HOME, ".codex", "skills", "remediate-code", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(TEST_HOME, ".codex", "skills", "remediate-code", "remediate-code.prompt.md"))).toBe(true);
-    expect(existsSync(join(TEST_HOME, ".codex", "skills", "remediate-code", "agents", "openai.yaml"))).toBe(true);
-    expect(existsSync(join(TEST_HOME, ".config", "opencode", "opencode.json"))).toBe(true);
-    expect(logs.some((line) => line.includes("global OpenCode command"))).toBe(true);
-  });
-
-  it("quiet mode suppresses all log output", () => {
-    const logs: string[] = [];
-    ensureGlobalAssets(true, (m) => logs.push(m), TEST_HOME);
-    expect(logs).toHaveLength(0);
-  });
-
-  it("ensureGlobalAssets reads edit permission rules from opencode.json (not hardcoded)", () => {
-    ensureGlobalAssets(true, () => {}, TEST_HOME);
-
-    const globalConfig = JSON.parse(
-      readFileSync(join(TEST_HOME, ".config", "opencode", "opencode.json"), "utf8"),
-    ) as Record<string, unknown>;
-    const sourceOpencode = JSON.parse(
-      readFileSync(join(PKG_ROOT, "opencode.json"), "utf8"),
-    ) as { agent?: { remediator?: { permission?: { edit?: Record<string, string> } } } };
-    const sourceEdit = sourceOpencode.agent?.remediator?.permission?.edit ?? {};
-
-    const agentPermission = (globalConfig.agent as any)?.remediator?.permission ?? {};
-    const generatedEdit: Record<string, string> = agentPermission.edit ?? {};
-
-    // Every key from opencode.json's agent.remediator.permission.edit must appear
-    for (const [pattern, action] of Object.entries(sourceEdit)) {
-      expect(generatedEdit[pattern]).toBe(action);
-    }
-    // The closing-result path from opencode.json must be present
-    expect(generatedEdit["remediation-closing-result.json"]).toBe("allow");
-  });
-
-  it("ensureGlobalAssets reads bash permission rules from opencode.json (not hardcoded)", () => {
-    ensureGlobalAssets(true, () => {}, TEST_HOME);
-
-    const globalConfig = JSON.parse(
-      readFileSync(join(TEST_HOME, ".config", "opencode", "opencode.json"), "utf8"),
-    ) as Record<string, unknown>;
-    const sourceOpencode = JSON.parse(
-      readFileSync(join(PKG_ROOT, "opencode.json"), "utf8"),
-    ) as { agent?: { remediator?: { permission?: { bash?: Record<string, string> } } } };
-    const sourceBash = sourceOpencode.agent?.remediator?.permission?.bash ?? {};
-
-    const agentPermission = (globalConfig.agent as any)?.remediator?.permission ?? {};
-    const generatedBash: Record<string, string> = agentPermission.bash ?? {};
-
-    for (const [pattern, action] of Object.entries(sourceBash)) {
-      expect(generatedBash[pattern]).toBe(action);
-    }
-    // deny rules that should propagate from opencode.json
-    expect(generatedBash["rm *"]).toBe("deny");
-  });
 });
 
 describe("committed host-asset no-drift guard", () => {
