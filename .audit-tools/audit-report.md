@@ -5477,14 +5477,14 @@ The declined_review_count comment in types.ts:266-273 states that declined findi
 
 ### COR-bf47cd8b — decomposeIntent splits on ` and `, fragmenting the exact multi-target directive its contract promises to keep whole
 
-clauseInterpreter.decomposeIntent documents that commas do not split because 'focus on modules A, B, and C' must stay one independently assessable directive, but the pipeline splits every segment on /and/i first.
+clauseInterpreter.decomposeIntent documents that commas do not split because 'focus on modules A, B, and C' must stay one independently assessable directive, but the pipeline splits every segment on /\band\b/i first.
 
 - Severity: medium
 - Confidence: high
 - Lens: correctness
 - Grounding: not assessed
 - Files: `src/shared/intent/clauseInterpreter.ts`
-- Details: clauseInterpreter.decomposeIntent documents that commas do not split because 'focus on modules A, B, and C' must stay one independently assessable directive, but the pipeline splits every segment on /and/i first. That input becomes 'focus on modules A, B,' plus 'C'; the trailing 'C' matches no lens/priority/scope pattern, is marked unencodable, and is promoted to a blocking checkpoint question — the spurious-clause failure mode the comma rule exists to prevent.
+- Details: clauseInterpreter.decomposeIntent documents that commas do not split because 'focus on modules A, B, and C' must stay one independently assessable directive, but the pipeline splits every segment on /\band\b/i first. That input becomes 'focus on modules A, B,' plus 'C'; the trailing 'C' matches no lens/priority/scope pattern, is marked unencodable, and is promoted to a blocking checkpoint question — the spurious-clause failure mode the comma rule exists to prevent.
 - Evidence: 4 items (top: "src/shared/intent/clauseInterpreter.ts:72-77 — 'A comma within a clause (e.g. "focus on modules A, B, and C") is part of that directive, not a clause separator …") — see audit-findings.json for the full list
 
 ### TST-413858c6 — Dedup test named for anchor deduplication only checks that one boundary anchor exists

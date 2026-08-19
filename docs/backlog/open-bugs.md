@@ -567,3 +567,10 @@
   the tool cannot deliver); fold into that build or carry `verification` through the envelope.
   **Property to hold:** every instruction a step prompt emits has a deliverable channel the
   ingest actually reads.
+
+- **The report renderer emits control characters from finding prose raw (hit 2026-08-18).** A
+  worker summary containing a JSON-escaped backspace (a mangled regex  word boundary) is stored
+  safely in audit-findings.json but rendered as the raw 0x08 byte into audit-report.md, where
+  check:control-bytes correctly reds CI. Scrubbed by hand this lap. **Property to hold:** the
+  render step sanitizes C0 control characters out of worker-authored strings (or re-escapes them
+  as text), so a contract-valid finding can never produce a tracked file the byte gate refuses.
