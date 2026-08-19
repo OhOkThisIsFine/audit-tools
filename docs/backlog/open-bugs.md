@@ -6,6 +6,22 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The nightly inbox wipes doc-citation-exempt markers on every render, so its stale-path citation
+  reds recur (2026-08-19, low, owner decision pending).** `docs/nightly-inbox.md` is generator-owned
+  (`scripts/nightly/render-inbox.mjs` rewrites everything but ticks and notes), so the two inline
+  exempt markers placed there by the citation-gate widening are deleted on the next render and the
+  widened gate goes red again on quoted stale paths inside item prose. **Property:** exemption
+  survives a re-render. Options put to the owner: (a) `render-inbox.mjs` emits the exempt marker
+  around quoted item content, (b) `docs/nightly-inbox.md` moves to the doc-manifest excluded row.
+
+- **`HOST_GATE_DESCRIPTORS` / `HOST_GATE_KINDS` is a write-only registry — completed by P25, read by
+  nothing in production (2026-08-19, low, owner decision pending).** The dead-code sweep kept it as
+  deliberately-staged (landed six days prior), but `GATE_LANES` is the live registry and the two
+  tests over it compare hardcoded lists to hardcoded lists. **Property:** a registry either has a
+  production reader or is deleted; invested-in-but-write-only is the shape
+  [[write-only-data-looks-authoritative]] warns about. Owner call: wire a reader, or delete on the
+  next tested-but-unwired pass.
+
 - **Coherence components have no granularity control, so a whole audit collapses into one work block
   (2026-08-13, high).** `buildContentCoherenceTrace` unions on a DISJUNCTIVE threshold — 4 of 6 evidence
   weights (`shared_file` 100, `shared_unit` 80, `call_import_reference_adjacency` 70,

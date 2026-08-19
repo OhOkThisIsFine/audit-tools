@@ -5,7 +5,7 @@
 
 ## Live state
 
-- Published state: v0.41.1 (the tag, not a sha — a sha here restales on every commit). The
+- Published state: v0.42.0 (the tag, not a sha — a sha here restales on every commit). The
   zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
   and ingests bound results. Host submissions ride tool-computed sha256-bound paths under
   `<artifactsDir>/submissions/`; the flat `incoming/` scheme is gone, so anything still writing <!-- doc-citation-exempt: deleted incoming/ scheme narrative (P25) -->
@@ -26,25 +26,18 @@
 
 ## Immediate next
 
-1. The owner-approved build queue — each item is an answered subject in the durable decision
-   ledger (named, never numbered, since per-run `sol-N` labels recycle); the ledger owns the
-   full list and each item's spec, and stamps `completed_ref` as items land, so the ledger —
-   not this doc — says what remains. Still open here:
-   - **Child-session split follow-ups that live OUTSIDE this repo** (the in-repo half is
-     stamped in the ledger):
-     1. `C:\Users\ethan\freellmapi\claude.ps1` (pool-lane launcher): set
-        `AUDIT_TOOLS_CHILD_SESSION=1` in the child environment when the working directory is this
-        repo — owner/next-session action; this repo cannot carry it.
-     2. Any scheduled task or wrapper OUTSIDE the repo that runs the `/insights` maintenance
-        invocation needs the same env prefix (the in-repo routine doc already carries it; lane
-        list in the child-sessions entry of `docs/backlog/durable-traps.md`).
-     3. Transitional: any OTHER live session predating the feature is child-classified now that
-        enforcement is armed; it self-registers from the repo root with
-        `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
-   - The rest of the decided build batch — the decision ledger owns the item list and specs;
-     work it from there, newest unstamped subjects first.
-2. The remediate phase over the promoted findings (see *Next: remediate phase* above) — sequence
-   it against the build queue where themes and builds coincide.
+1. The remediate phase over the promoted findings (see *Next: remediate phase* above). The
+   decision-batch build queue is fully landed and stamped in the ledger (`completed_ref` per
+   subject) — the ledger, not this doc, says what if anything remains.
+2. Outside-repo residue this repo cannot carry:
+   - The freellmapi MCP offload `pool` lane spawns `claude.exe -p` with repo cwd and no
+     `AUDIT_TOOLS_CHILD_SESSION=1`, so the child self-registers as an owner and its Stop
+     closeout-challenge replaces the returned answer — the env must be set in the freellmapi
+     server's lane config (`claude.ps1` already carries it; lane list in the child-sessions
+     entry of `docs/backlog/durable-traps.md`).
+   - Transitional: any live session predating the session registry is child-classified while
+     enforcement is armed; it self-registers from the repo root with
+     `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
