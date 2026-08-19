@@ -22,6 +22,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { sessionHasLiveBackgroundWork } from "../../scripts/shared/liveSessionWork.mjs";
+import { readSessionRegistry } from "../../scripts/shared/sessionRegistry.mjs";
 
 // Fail open on the kill-switch or a re-entrant stop (already blocked once).
 if (process.env.AUDIT_TOOLS_NO_FRICTION_STOP_GATE) process.exit(0);
@@ -45,8 +46,17 @@ if (sessionHasLiveBackgroundWork(payload)) process.exit(0);
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-// Session-activity window: only runs whose newest artifact was touched this recently
-// count as "this session" (no exact per-session signal is available to a Stop hook).
+// Build 1 (P23): a child session's stop must not be recruited into the friction
+// walk. An unregistered session while the registry is ARMED is a dispatched
+// child — its stop is a deliverable hand-back, so exit silently before the disk
+// scan. No session_id in the payload → legacy behavior (fire as today); any
+// registry fault fails open inside the predicate.
+if (readSessionRegistry(root, payload?.session_id).isUnregisteredChild) process.exit(0);
+
+// Session-activity window: only runs whose newest artifact was touched this
+// recently count as "this session". The payload's session_id names WHO is
+// stopping (the registry skip above keys on it), but which RUN on disk belongs
+// to this session still has no exact signal — the mtime window stays the proxy.
 const RECENT_MS = 12 * 60 * 60 * 1000;
 
 // The three required friction categories. Hardcoded (a hook can't import the TS

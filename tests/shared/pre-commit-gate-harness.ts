@@ -34,11 +34,29 @@ export function g(repo: string, ...args: string[]) {
 }
 
 // Run the gate with a fake `git commit` payload, CLAUDE_PROJECT_DIR = repo.
-export function runGate(repo: string, command: string = "git commit -m x") {
+// `sessionId` (when given) rides the payload as `session_id` — the child-session
+// refusal keys on it; existing callers omit it and the payload stays shape-
+// identical to before. The spawn env SCRUBS the two dispatch vars before
+// applying overrides: a dispatched child session carries
+// AUDIT_TOOLS_CHILD_SESSION=1 and an exported AUDIT_TOOLS_AGENT_GIT in the dev
+// shell would silently disable the very refusal under test (the
+// hook-trap-guards scrub rationale). A case testing one re-adds it via `env`.
+export function runGate(
+  repo: string,
+  command: string = "git commit -m x",
+  { sessionId, env = {} }: { sessionId?: string; env?: NodeJS.ProcessEnv } = {},
+) {
+  const inherited = { ...process.env };
+  delete inherited.AUDIT_TOOLS_AGENT_GIT;
+  delete inherited.AUDIT_TOOLS_CHILD_SESSION;
   return spawnSync(process.execPath, [GATE], {
-    input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
+    input: JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command },
+      ...(sessionId === undefined ? {} : { session_id: sessionId }),
+    }),
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    env: { ...inherited, CLAUDE_PROJECT_DIR: repo, ...env },
   });
 }
 

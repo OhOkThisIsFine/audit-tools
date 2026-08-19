@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { sessionHasLiveBackgroundWork } from '../../scripts/shared/liveSessionWork.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter } from 'node:path';
 
@@ -510,6 +510,24 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
     expect(runHook(CLOSEOUT_GATE, stopPayload(sid('unregistered-child')), { root: repo }).code).toBe(0);
   });
 
+  it('a skipped child stop spends NOTHING — no marker written, full cap available after registration', async () => {
+    // The skip must cost the child nothing AND leave the session's cap intact:
+    // if the skip wrote a marker or spent a cap slot, registering the same id
+    // later would find a half-spent gate it never interacted with.
+    const repo = freshRepo({ backdatedHours: 0 });
+    await register(repo, 'someone-else', []);
+    writeFileSync(join(repo, 'work.txt'), "a child's deliverable\n");
+    const child = sid('cap-not-spent');
+    expect(runHook(CLOSEOUT_GATE, stopPayload(child), { root: repo }).code).toBe(0);
+    // The skip recorded no state for the child id.
+    expect(
+      existsSync(join(repo, '.claude', 'hooks', '.state', 'closeout-challenge', `${child}.json`)),
+    ).toBe(false);
+    // Same id, now registered: the full cap is available, so this challenges.
+    await register(repo, child, []);
+    expect(runHook(CLOSEOUT_GATE, stopPayload(child), { root: repo }).code).toBe(2);
+  });
+
   it('a CORRUPT record degrades to whole-tree challenging, never to gate silence', () => {
     // Near-miss for the child skip: corrupt ≠ absent. A corrupt record still
     // arms the registry, but the session counts as REGISTERED with an empty
@@ -531,6 +549,75 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
     const { code, stderr } = runHook(CLOSEOUT_GATE, stopPayload(sid('unarmed')), { root: repo });
     expect(code).toBe(2);
     expect(stderr).toContain('pre-existing.txt');
+  });
+});
+
+// The question gate's Build 1 leg: the unregistered-child skip is STOP-LEG ONLY.
+// A child's closing question is part of its returned deliverable — exit-2'ing it
+// hijacks the hand-back (P23). A child that explicitly calls AskUserQuestion is
+// performing an interactive act the philosophy injection legitimately governs,
+// so that leg still fires.
+describe('question-philosophy-gate: unregistered-child skip is Stop-leg only (Build 1)', () => {
+  const childRoots: string[] = [];
+  afterAll(() => {
+    for (const root of childRoots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  async function armedQuestionRoot(finalText: string): Promise<{ root: string; transcript: string }> {
+    const root = mkdtempSync(join(tmpdir(), 'philgate-child-'));
+    childRoots.push(root);
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    cpSync(join(REPO_ROOT, 'docs', 'project-philosophy.md'), join(root, 'docs', 'project-philosophy.md'));
+    const transcript = join(root, 'transcript.jsonl');
+    writeFileSync(
+      transcript,
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: finalText }] } }) +
+        '\n',
+    );
+    // Arm the registry with a resident owner — same writer the SessionStart leg
+    // uses, so the fixture can never drift from the frozen record shape.
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    lib.writeSessionRecord(root, {
+      version: 1,
+      session_id: 'resident-owner',
+      registered_at: new Date().toISOString(),
+      source: 'test',
+      baseline: [],
+    });
+    return { root, transcript };
+  }
+
+  it("skips the Stop leg for an unregistered session — the closing question is the child's deliverable", async () => {
+    const { root, transcript } = await armedQuestionRoot('Diff attached. Anything else before I hand back?');
+    const payload: HookPayload = {
+      hook_event_name: 'Stop',
+      session_id: sid('child-stop-q'),
+      transcript_path: transcript,
+    };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(0);
+  });
+
+  it('still injects on the AskUserQuestion leg for the same unregistered session', async () => {
+    const { root } = await armedQuestionRoot('irrelevant');
+    const { code, stderr } = runHook(QUESTION_GATE, askPayload(sid('child-ask')), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('ASK IT AGAIN');
+  });
+
+  it("a REGISTERED session's closing question is still gated under an armed registry", async () => {
+    const { root, transcript } = await armedQuestionRoot('Shall I split the backlog too?');
+    const payload: HookPayload = {
+      hook_event_name: 'Stop',
+      session_id: 'resident-owner',
+      transcript_path: transcript,
+    };
+    expect(runHook(QUESTION_GATE, payload, { root }).code).toBe(2);
   });
 });
 

@@ -32,9 +32,22 @@
 1. The owner-approved build queue (all decided 2026-08-18, owner present; each is an answered
    subject in the durable decision ledger — named, never numbered, since per-run `sol-N` labels
    recycle). The owner approved landing the three hook builds this session; the rest follow:
-   - **Child-session/Stop-gate split** (`820ba998`): probe whether child sessions fire SessionStart,
-     then session tagging + unregistered-session commit/push refusal. Unblocks the freellmapi
-     `pool` lane for this repo.
+   - **Child-session/Stop-gate split** (`820ba998`) — DONE (landed on the session-registry lib:
+     unregistered sessions under an armed registry are skipped by all three Stop gates and refused
+     `git commit`/`git push`; per-dispatch allow token via the shared bypassEnabled mechanic).
+     Named follow-ups that live OUTSIDE this repo:
+     1. `C:\Users\ethan\freellmapi\claude.ps1` (pool-lane launcher): set
+        `AUDIT_TOOLS_CHILD_SESSION=1` in the child environment when the working directory is this
+        repo — owner/next-session action; this repo cannot carry it.
+     2. The `/insights` command in `docs/nightly-routine.md` now carries the prefix; any scheduled
+        task or wrapper OUTSIDE the repo that runs it needs the same prefix.
+     3. Memory sync at closeout: `dispatch-lane-children-hit-repo-stop-gates.md` ("kill-switch env
+        required" — superseded by the registry split) and
+        `pool-lane-needs-verification-shaped-prompts.md` ("Stop gates eat the child's deliverable
+        until P23" — P23 is now shipped).
+     4. Transitional: any OTHER live session predating this feature is child-classified the moment
+        enforcement arms; it self-registers from the repo root with
+        `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
    - **Record-update pre-commit gate** (`a360d399`): a commit touching a tracked-work path must
      carry the corresponding record update.
    - **Tree-dirt baseline + per-gate pathspec scoping** (`f65ec9c9`), superseding P24's shape —

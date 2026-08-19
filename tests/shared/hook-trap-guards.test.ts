@@ -710,8 +710,10 @@ describe('the harness itself cannot be disabled by the ambient shell', () => {
   });
 
   it('lists every bypass the guard actually reads, so a new one cannot be forgotten', () => {
+    // bypassEnabled moved to shell-split.mjs with an explicit cmd parameter, so
+    // the call shape scanned here is `bypassEnabled('NAME', cmd)`.
     const guard = readFileSync(SHELL_GUARD, 'utf8');
-    const used = [...guard.matchAll(/bypassEnabled\('([A-Z_]+)'\)/g)].map((m) => m[1]);
+    const used = [...guard.matchAll(/bypassEnabled\('([A-Z_]+)', cmd\)/g)].map((m) => m[1]);
     expect(used.length).toBeGreaterThan(0);
     for (const name of new Set(used)) expect(BYPASS_VARS).toContain(name);
   });

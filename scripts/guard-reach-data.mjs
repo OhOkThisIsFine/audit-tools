@@ -194,6 +194,12 @@ export const GUARDS = [
     note: 'branch-strand refusal + fail-open announcement leg of the pre-commit-gate family',
   },
   {
+    id: 'pre-commit-child-session-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/pre-commit-gate-child-session.test.ts',
+    note: 'Build 1 (P23) child-session commit/push refusal + push narrowness leg of the pre-commit-gate family',
+  },
+  {
     id: 'loop-core-gate-parity-test',
     kind: 'contract-test',
     impl: 'tests/shared/loop-core-gate-parity.test.ts',
@@ -261,13 +267,15 @@ export const REACH = [
       'pre-commit-commit-creating-test',
       'pre-commit-attestation-test',
       'pre-commit-branch-strand-test',
+      'pre-commit-child-session-test',
       'loop-core-gate-parity-test',
       'check:loop-core-patterns',
       'check:guard-reach',
     ],
     uncovered:
-      'shell-split (the trap-guard split helper) has no dedicated contract test — it is exercised only ' +
-      'through hook-trap-guards-test. (question-philosophy-gate and closeout-challenge-gate are covered ' +
+      'shell-split (the trap-guard split helper, home of bypassEnabled) has no dedicated contract test ' +
+      '— it is exercised only through hook-trap-guards-test and pre-commit-child-session-test. ' +
+      '(question-philosophy-gate and closeout-challenge-gate are covered ' +
       'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests; ' +
       'nightly-surface by nightly-routine-test.)',
   },

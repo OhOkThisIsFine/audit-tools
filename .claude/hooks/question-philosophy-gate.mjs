@@ -24,6 +24,7 @@
 // fault). A gate on the question path must never wedge a session.
 import { readFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/sessionRegistry.mjs';
 
 if (process.env.AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY) process.exit(0);
 
@@ -50,8 +51,15 @@ if (isStop && payload?.stop_hook_active) process.exit(0);
 // ── Once per session ─────────────────────────────────────────────────────────
 // No session_id (older payload shape) → fail open rather than guess, or the gate
 // would fire on every single question.
-const sessionId = String(payload?.session_id ?? '').replace(/[^\w.-]/g, '');
+const sessionId = sanitizeSessionId(payload?.session_id);
 if (!sessionId) process.exit(0);
+// Build 1 (P23): Stop leg only — an unregistered (child) session's closing
+// question is part of its returned deliverable, not a question to the owner.
+// The AskUserQuestion leg still fires for children on purpose: explicitly
+// calling the question interface is an interactive act the philosophy
+// injection legitimately governs. Unarmed registry / any registry fault →
+// legacy behavior.
+if (isStop && readSessionRegistry(ROOT, sessionId).isUnregisteredChild) process.exit(0);
 const marker = join(STATE_DIR, `${sessionId}.json`);
 if (existsSync(marker)) process.exit(0);
 

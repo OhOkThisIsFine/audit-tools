@@ -31,7 +31,17 @@ import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { stripQuoted, collapseQuoted, splitShellStatements } from './shell-split.mjs';
+import {
+  stripQuoted,
+  collapseQuoted,
+  splitShellStatements,
+  stripHeredocBodies,
+  bypassEnabled,
+} from './shell-split.mjs';
+// ── Session registry (Build 1 / P23) ─────────────────────────────────────────
+// The child-session refusal below keys on the payload's session_id against the
+// registry SessionStart writes; the same lib serves the three Stop gates.
+import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/sessionRegistry.mjs';
 
 // ── Loop-core adversarial-review gate ────────────────────────────────────────
 // Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
@@ -92,8 +102,11 @@ let raw = '';
 for await (const chunk of process.stdin) raw += chunk;
 
 let cmd = '';
+let payloadSessionId = '';
 try {
-  cmd = JSON.parse(raw)?.tool_input?.command ?? '';
+  const payload = JSON.parse(raw);
+  cmd = payload?.tool_input?.command ?? '';
+  payloadSessionId = sanitizeSessionId(payload?.session_id);
 } catch {
   // Never wedge the session — but the gate did NOT run, and a silent exit 0 is
   // indistinguishable from a pass.
@@ -228,8 +241,13 @@ const commitSubCmds = subCmds.filter((s) =>
   COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s)),
 );
 
-// Exit early if no commit-creating git invocation exists in any shell statement.
-if (commitSubCmds.length === 0) process.exit(0);
+// Build 1 (P23): `git push` is detected ONLY for the child-session refusal
+// below. It must never enter the commit machinery — no hook-bypass scan, no
+// staged-set reads, no runGate, no staged-snapshot round-trip.
+const pushSubCmds = subCmds.filter((s) => isGitSubcommand('push')(s));
+
+// Exit early if no commit-creating or push invocation exists in any statement.
+if (commitSubCmds.length === 0 && pushSubCmds.length === 0) process.exit(0);
 
 // Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,
 // so refuse it outright (the gate can't run `check` if git skips the hook, and
@@ -252,11 +270,16 @@ if (commitSubCmds.length === 0) process.exit(0);
 // real flag to the shell (`git -c "core.hooksPath=x" commit`), so blanking
 // quoted spans there would open an evasion, and a commit message that merely
 // MENTIONS `--no-verify` is rare enough to accept the false block.
+// Guarded to commit-bearing commands: push detection (above) must not NEWLY
+// route a push-only `git push --no-verify` — which exited 0 before pushes were
+// detected at all — into this refusal. Every command that previously reached
+// it had commitSubCmds non-empty, so the guard is a strict no-behavior-change.
 if (
-  /--no-verify\b|\bcore\.hooksPath\b/.test(cmd) ||
-  commitSubCmds
-    .filter((sub) => isGitSubcommand('commit')(sub))
-    .some((sub) => /(?:^|\s)-n(?=\s|$)/.test(stripQuoted(sub)))
+  commitSubCmds.length > 0 &&
+  (/--no-verify\b|\bcore\.hooksPath\b/.test(cmd) ||
+    commitSubCmds
+      .filter((sub) => isGitSubcommand('commit')(sub))
+      .some((sub) => /(?:^|\s)-n(?=\s|$)/.test(stripQuoted(sub))))
 ) {
   console.error(
     'pre-commit gate: commit rejected — hook-bypass detected (`--no-verify`/`-n` or a `core.hooksPath` override anywhere in the command). ' +
@@ -264,6 +287,41 @@ if (
   );
   process.exit(2);
 }
+
+// ── Child-session refusal (Build 1 / P23) ────────────────────────────────────
+// A session with no record in .claude/hooks/.state/sessions/ while the registry
+// is armed is a child agent sharing this checkout. Children return work; the
+// dispatching session owns git. The allow token is honored through the shared
+// bypassEnabled mechanic (hook env or per-dispatch inline assignment); the scan
+// runs on heredoc-blanked text so a commit-message BODY naming the token cannot
+// enable it. Registry faults degrade to unarmed inside the read (fail open). A
+// missing session_id fails open too, but ANNOUNCED when the registry is armed —
+// a silent fail-open is indistinguishable from a clean pass; an unarmed
+// registry is the normal state and warrants no announcement. The refusal text
+// deliberately names no token, script, or doc (P27: a guard must not prescribe
+// its own bypass — owners find recovery in durable-traps without being routed).
+const registry = readSessionRegistry(root, payloadSessionId);
+if (!payloadSessionId) {
+  if (registry.armed) {
+    noteFailOpen('child-session refusal skipped: the hook payload carried no session_id');
+  }
+} else if (
+  registry.isUnregisteredChild &&
+  !bypassEnabled('AUDIT_TOOLS_AGENT_GIT', stripHeredocBodies(cmd))
+) {
+  console.error(
+    'pre-commit gate: commit/push refused — this session has no record in the session registry ' +
+      '(.claude/hooks/.state/sessions/), so it is treated as a CHILD session working in the shared ' +
+      'checkout. Child sessions do not mutate git state here: leave your changes in the tree and ' +
+      'return your work as a diff / file list / summary to the dispatching session, which owns ' +
+      'commit and push.',
+  );
+  process.exit(2);
+}
+
+// Push-only command from a permitted session: done. `git push` must not start
+// the commit machinery (staged reads, round-trip, runGate).
+if (commitSubCmds.length === 0) process.exit(0);
 
 // Whether the command sequence stages changes (e.g. `git add -A && git commit` or `git commit -a`).
 // When true, the gate inspects both currently staged files and pending modified/untracked files

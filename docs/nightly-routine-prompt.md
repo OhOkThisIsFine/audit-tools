@@ -136,14 +136,18 @@ When due, run `/insights` as a nested non-interactive session from the repo
 root:
 
 ```bash
-MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' claude -p "/insights"
+AUDIT_TOOLS_CHILD_SESSION=1 MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' claude -p "/insights"
 ```
 
-Both environment variables are load-bearing under Git Bash: without them the
-leading slash is rewritten to `C:/Program Files/Git/insights`, and the nested
-session answers "no such slash command", which looks like the feature does not
-exist. The PowerShell tool is an alternative because it does not perform that
-rewrite. The pass takes minutes while it analyses every session not already
+All three environment variables are load-bearing. `AUDIT_TOOLS_CHILD_SESSION=1`
+marks the nested session as a dispatched child so it does not self-register in
+the session registry — the insights child writes report files and needs neither
+Stop-gate challenges nor git rights (the child-session entry in
+`docs/backlog/durable-traps.md`). The `MSYS*` pair matters under Git Bash:
+without them the leading slash is rewritten to `C:/Program Files/Git/insights`,
+and the nested session answers "no such slash command", which looks like the
+feature does not exist. The PowerShell tool is an alternative because it does
+not perform that rewrite (set `AUDIT_TOOLS_CHILD_SESSION` there too). The pass takes minutes while it analyses every session not already
 cached in `~/.claude/usage-data/facets/`; run it in the background rather than
 raising the Bash tool's 600000 ms timeout clamp. The command prints the path of
 the HTML report it wrote.

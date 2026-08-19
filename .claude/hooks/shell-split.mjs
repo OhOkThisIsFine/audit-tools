@@ -1,5 +1,8 @@
-// Quote-aware shell statement utilities, single-sourced for the PreToolUse
-// hooks (shell-trap-guard.mjs, pre-commit-gate.mjs). Plain node — no deps.
+// Quote-aware shell statement utilities plus the shared bypass-token check
+// (stripQuoted, collapseQuoted, stripHeredocBodies, findLiveBackticks,
+// findLiveExpansions, splitShellStatements, bypassEnabled), single-sourced for
+// the PreToolUse hooks (shell-trap-guard.mjs, pre-commit-gate.mjs). Plain node
+// — no deps.
 //
 // A quote-BLIND split on `&&`/`||`/`;`/newline breaks statements apart at
 // separators INSIDE quoted strings — e.g. a `codex exec "long prompt; with
@@ -180,6 +183,35 @@ export function findLiveExpansions(s, names) {
     if (c === "'" || c === '"') quote = c;
   }
   return hits;
+}
+
+/**
+ * Is a named bypass enabled for THIS call?
+ *
+ * Every bypass used to be read from `process.env` alone — which is the HOOK's
+ * environment, not the command's. So the escape each denial text advertises
+ * (`re-run with AUDIT_TOOLS_ALLOW_X=1`) did not work in the form a caller
+ * actually reaches for: an inline prefix, `AUDIT_TOOLS_ALLOW_X=1 git restore …`,
+ * sets the variable for the child process the guard never sees, so the refusal
+ * simply repeated. A guard whose stated escape does not work trains the reader to
+ * believe the guard is broken, which is worse than having no escape documented.
+ *
+ * So a bypass is honored when the hook's own env carries it OR the command sets
+ * it, as a statement-leading prefix or via `export`. Anchoring to a statement
+ * boundary (or `export`) is what keeps a command that merely MENTIONS the
+ * variable — `echo "set AUDIT_TOOLS_ALLOW_BACKTICKS=1"` — from enabling it, since
+ * there the name is preceded by a quote rather than a separator.
+ *
+ * `cmd` is the caller's policy text — both consumers pass the heredoc-blanked
+ * command, so a heredoc BODY naming the token is data, never a grant.
+ *
+ * Fixes the CLASS: every bypass routes through here, so the next one added
+ * cannot reintroduce the defect. [[fix-the-defect-class-not-the-named-instance]]
+ */
+export function bypassEnabled(name, cmd) {
+  if (process.env[name] === '1') return true;
+  const assign = String.raw`${name}=(?:'1'|"1"|1)(?=\s|$|;|&)`;
+  return new RegExp(String.raw`(?:^|[;&|]\s*|\bexport\s+)${assign}`).test(cmd);
 }
 
 // Split a command into shell statements on `&&`, `||`, `;`, and newlines that

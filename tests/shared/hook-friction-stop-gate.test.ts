@@ -25,12 +25,19 @@ function runHook(
   payload: unknown,
   { root = REPO_ROOT, env = {}, input = JSON.stringify(payload) }: HookOptions = {},
 ) {
+  // Scrub the child/dispatch env before every spawn: a dispatched child session
+  // carries AUDIT_TOOLS_CHILD_SESSION=1 (and may carry the git allow token) —
+  // inherited, either would flip behavior these tests pin. A case testing one
+  // re-adds it via `env`.
+  const inherited = { ...process.env };
+  delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+  delete inherited.AUDIT_TOOLS_AGENT_GIT;
   const r = spawnSyncHidden(process.execPath, [hook], {
     input,
     encoding: 'utf8',
     timeout: 60_000,
     windowsHide: true,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
+    env: { ...inherited, CLAUDE_PROJECT_DIR: root, ...env },
   });
   return { code: r.status, stderr: r.stderr ?? '' };
 }
@@ -249,6 +256,48 @@ describe('friction-stop-gate: skip in-flight runs', () => {
     );
     // No steps/ dir at all. Friction is complete → allows stop.
     expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(0);
+  });
+});
+
+// Build 1 (P23): a child session's stop must not be recruited into the friction
+// walk — an unregistered session under an ARMED registry exits 0 silently.
+describe('friction-stop-gate: unregistered-child skip (Build 1)', () => {
+  async function arm(root: string, ...ids: string[]): Promise<void> {
+    // The lib's own writer — the same write path the SessionStart leg uses, so
+    // this fixture can never drift from the frozen record shape.
+    const lib = await import('../../scripts/shared/sessionRegistry.mjs');
+    for (const id of ids) {
+      lib.writeSessionRecord(root, {
+        version: 1,
+        session_id: id,
+        registered_at: new Date().toISOString(),
+        source: 'test',
+        baseline: [],
+      });
+    }
+  }
+
+  it("skips an unregistered session under an armed registry — the child's stop is not recruited", async () => {
+    const root = tempRoot('child-skip');
+    markRemediationRun(root);
+    await arm(root, 'resident-owner');
+    expect(runHook(FRICTION_GATE, stop({ session_id: 'stranger' }), { root }).code).toBe(0);
+  });
+
+  it('a REGISTERED session still owes its friction walk', async () => {
+    const root = tempRoot('registered-walk');
+    markRemediationRun(root);
+    await arm(root, 'resident-owner');
+    const { code, stderr } = runHook(FRICTION_GATE, stop({ session_id: 'resident-owner' }), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('recent remediate-code run');
+  });
+
+  it("no session_id in the payload → legacy behavior even when armed (Build 3's no-id pin)", async () => {
+    const root = tempRoot('no-sid');
+    markRemediationRun(root);
+    await arm(root, 'resident-owner');
+    expect(runHook(FRICTION_GATE, stop(), { root }).code).toBe(2);
   });
 });
 

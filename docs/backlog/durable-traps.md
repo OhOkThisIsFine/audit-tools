@@ -410,16 +410,35 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `` `tests/**` `` renders truncated ("Convert `tests/") in BOTH generated docs, silently. Seen
   2026-07-28. Write the glob in prose, or drop it to the entry body.
 
-- **A nested `claude -p` launched with this repo as its cwd is a FULL session in the SHARED
-  checkout — it runs this repo's hooks and can mutate git state (2026-08-07).** Observed: a
-  trivial one-prompt probe (`ANTHROPIC_BASE_URL` overlay onto the local router)
-  hit the closeout-challenge Stop hook, spent its whole reply answering it, and PUSHED the
-  checkout's unpushed commits on its way out — an uninstructed `git push` of another session's
-  in-flight work (benign that day only because every commit was green). The overlay lane DOES
-  work mechanically (the CLI accepts the env override + a router model string), but before
-  using it as a worker harness: run workers in an isolated worktree or neutral cwd, set the hook
-  bypass envs (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`, `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`),
-  and expect unknown-model context-window warnings (`CLAUDE_CODE_MAX_CONTEXT_TOKENS` to silence).
+- **Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized;
+  supersedes the 2026-08-07/09 kill-switch advice).** SessionStart registers each session in
+  `.claude/hooks/.state/sessions/`; while ≥1 record exists (enforcement armed), an unregistered
+  session gets exit-0 from all three Stop gates (closeout-challenge, friction, question-philosophy
+  Stop leg) and its `git commit` / `git push` is refused by the pre-commit gate. In-process
+  Agent/Workflow subagents never fire SessionStart, so they are covered automatically — they DO
+  get Stop events under their own session_id, and two once answered the closeout challenge by
+  committing to main mid-fan-out (`00d6fbfd`, `c687fed9`). No record at all (fresh clone, wiped
+  `.state/`) = everything behaves pre-feature. Uncovered halves, stated outright:
+  - A NESTED `claude -p` with this repo as cwd DOES fire SessionStart and self-registers as an
+    owner. The dispatcher must set `AUDIT_TOOLS_CHILD_SESSION=1` on the child's environment, per
+    dispatch — a nested child launched without it is owner-classified. Lanes: the freellmapi pool
+    launcher (`claude.ps1`) pointed at this repo, the nightly `/insights` invocation
+    (docs/nightly-routine.md), any ad-hoc `claude -p` worker.
+  - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
+    a child process the PreToolUse hook never sees.
+  - The refusal is a footgun guard, not an adversary gate: the allow token and the recovery CLI
+    are repo-readable (a determined child can grep them; the refusal text just must not route it).
+  - Registry wipe = silent disarm: `.state/` is gitignored, so `git clean -xdf` (or a manual
+    wipe) returns every gate to legacy until the next SessionStart — the named cause when the
+    closeout challenge "stopped firing".
+  - The PowerShell-form inline token (`$env:…='1'; git …`) is NOT recognized — dispatchers use
+    the bash-form inline prefix or the hook-env form.
+  Per-dispatch git allowance: the dispatching session grants an intentional agent commit by
+  leading the child's specific git command with `AUDIT_TOOLS_AGENT_GIT=1` inline (visible in
+  transcript, per-dispatch, never standing config); the hook-env form exists for lanes that
+  cannot inline. Owner-session recovery (registration lost, or the session predates the feature):
+  from the repo root, `node scripts/shared/sessionRegistry.mjs --register <session-id>` —
+  explicit id from a hook payload; deliberately no discovery mode.
 
 - **The `audit-code-completion-*` files can flake together under full-suite load, and the symptom
   reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, and `-ingest-dir`
@@ -433,18 +452,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the current completion files alone, then re-run the FULL suite on the same tree. Two greens plus a mechanism argument
   is the bar — a single alone-pass is not, because these are the slowest four files in the suite
   (155-165s each in-suite) and spin real audit runs through real subprocesses.
-
-- **In-process `Agent`/`Workflow` subagents ALSO trip this repo's Stop gates — and they commit
-  (2026-08-09).** Same failure as the nested `claude -p` entry above, but with no subprocess and no
-  env to set: a read-only recon fan-out ended its turns inside the checkout, the closeout-challenge
-  gate fired on each, and two of them answered it by editing docs and committing to `main`
-  (`00d6fbfd`, `c687fed9`) while the parent was still mapping. The gate's own state marker is keyed by
-  the CHILD's session id, so the parent's cap never sees it and the parent's `git status` silently
-  changes underfoot mid-task. The bypass envs exist (`AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE=1`,
-  `AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY=1`) but a subagent inherits the parent's environment, so there
-  is no per-call place to set them — the parent would have to be launched with them, which disarms
-  the gate for the parent too. Until that is fixed mechanically: re-read `git log` after any fan-out
-  in this checkout and treat a moved HEAD as expected, not as a concurrent human session.
 
 - **An offload recon lane reading a file you are concurrently editing reports the POST-edit tree
   (2026-08-07).** An offload lane dispatched to analyze a duplication and left running while the
