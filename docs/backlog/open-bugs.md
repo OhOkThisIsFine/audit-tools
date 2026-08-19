@@ -569,7 +569,7 @@
   ingest actually reads.
 
 - **The report renderer emits control characters from finding prose raw (hit 2026-08-18).** A
-  worker summary containing a JSON-escaped backspace (a mangled regex  word boundary) is stored
+  worker summary containing a JSON-escaped backspace (a mangled regex \b word boundary) is stored
   safely in audit-findings.json but rendered as the raw 0x08 byte into audit-report.md, where
   check:control-bytes correctly reds CI. Scrubbed by hand this lap. **Property to hold:** the
   render step sanitizes C0 control characters out of worker-authored strings (or re-escapes them
