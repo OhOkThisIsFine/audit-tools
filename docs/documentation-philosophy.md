@@ -40,7 +40,9 @@ field-bump:
 - **Pinned version / date / status strings** — "expected version 0.30.5", "plan of record
   (2026-06-24)", "THIS RUN implements…", "shipped 0.28.10 on line X". Derive the value or drop it.
   A doc whose only diffs across runs are version bumps is a status doc masquerading as a concept doc.
-- **Changelog / progress creep** — "now in `dispatch.ts`", "former `document.ts` inlined", "A12
+- **Changelog / progress creep** —
+  <!-- doc-citation-exempt: illustrative changelog-creep phrasings, not citations -->
+  "now in `dispatch.ts`", "former `document.ts` inlined", "A12
   collapsed…". The current shape is read from code; the doc states the durable concept.
 - **Dated run-narratives / plans-of-record** — a design captured as "the plan for this run" is
   current-state. Re-state it timelessly as the architecture, or it's not a concept doc.

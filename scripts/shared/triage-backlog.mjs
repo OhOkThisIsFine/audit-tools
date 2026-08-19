@@ -81,6 +81,12 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  coverageStampPath,
+  dispatchBoundedItems,
+  LanePreflightError,
+  writeAbortStamp,
+} from './lane-dispatch.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -180,15 +186,6 @@ export function resolveTriageModel(env = process.env, rosterSource = defaultRost
   // heavy reasoner at ~4min/entry vs seconds). `auto` delegates that choice to
   // the router, which is the only thing that knows live health and quota.
   return ids.includes('auto') ? 'auto' : ids[0];
-}
-
-/** `<out minus .jsonl>-coverage.json` — the leg-2 coverage stamp sidecar. */
-export function coverageStampPath(outPath) {
-  return outPath.replace(/\.jsonl$/, '') + '-coverage.json';
-}
-
-export function writeCoverageStamp(path, stamp) {
-  fs.writeFileSync(path, JSON.stringify(stamp, null, 2) + '\n');
 }
 
 /** Tracked files matching a git query, or null when git cannot answer. */
@@ -445,121 +442,69 @@ function post(body) {
   });
 }
 
+// A provider/router error body has no choices array. Surface ITS message — it
+// names the real cause (and often its own retry-after) — never the
+// information-free `finish_reason=undefined` it used to be reported as.
+// Deliberately NO retry/backoff anywhere in this lane: failover is the
+// router's job, and duplicating it in the caller would hide a router defect.
+function chatFailure(status, r) {
+  const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
+  return new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
+}
+
+// The sweep itself — resume, worker pool, coverage stamp — is the shared
+// one-item-per-call driver (scripts/shared/lane-dispatch.mjs). This file owns
+// only the triage DOMAIN: backlog chunking, the schema, premise probing, and
+// the HTTP router lane.
 async function main() {
   let MODEL;
   const stampPath = coverageStampPath(OUT);
-  // Best-effort telemetry: a failed stamp write (missing dir, locked file) must
-  // never mask the real abort message or kill a healthy sweep.
-  let stampWarned = false;
-  const stampSafe = (data) => {
-    try {
-      writeCoverageStamp(stampPath, data);
-    } catch (err) {
-      if (!stampWarned) {
-        stampWarned = true;
-        process.stderr.write(`coverage stamp not writable (${err?.message ?? err}) — continuing without it\n`);
-      }
-    }
-  };
   try {
     MODEL = resolveTriageModel();
   } catch (err) {
-    stampSafe({
-      model: null,
-      started_at: new Date().toISOString(),
-      finished_at: null,
+    writeAbortStamp(stampPath, {
       aborted: String(err.message || err),
-      total_entries: entries.length,
-      prior_classified: 0,
-      attempted: 0,
-      classified: 0,
-      classified_total: 0,
-      errored: 0,
+      totalEntries: entries.length,
     });
     process.stderr.write(`${err.message}\n`);
     process.exit(1);
   }
 
-  // Re-evaluate the premise of every stored record before doing anything else:
-  // running this script IS the presentation event for triage verdicts, so a
-  // record whose quoted code vanished since the last run must read
-  // `premise: "gone"` now, not carry last week's stamp.
-  const done = new Set();
-  if (fs.existsSync(OUT)) {
-    const kept = [];
-    for (const l of fs.readFileSync(OUT, 'utf8').split('\n')) {
-      if (!l.trim()) continue;
-      try {
-        const rec = JSON.parse(l);
-        // Errored rows are DROPPED and their entries re-queued: an id in `done`
-        // means a verdict exists, never that an attempt happened. (The old
-        // behaviour added errored ids too, so a re-run retried nothing and
-        // exited 0 — a false green.)
-        if (rec.error) continue;
-        done.add(rec.id);
-        {
-          const { stamp, recovered } = premiseVerdict(rec);
-          kept.push({
-            ...rec,
-            premise: stamp,
-            ...(recovered.length > 0 ? { premise_probes_recovered: recovered } : {}),
-          });
-        }
-      } catch {}
-    }
-    fs.writeFileSync(OUT, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
-  }
-
-  const queue = entries.filter((e) => !done.has(e.id));
-  const stamp = {
-    model: MODEL,
-    started_at: new Date().toISOString(),
-    finished_at: null,
-    aborted: null,
-    total_entries: entries.length,
-    prior_classified: done.size,
-    attempted: 0,
-    classified: 0,
-    classified_total: done.size,
-    errored: 0,
-    // Counted so "the sweep covered 121 entries" cannot hide how many of those
-    // carried probes that could not be evaluated at all. 30 of 121 did on
-    // 2026-08-09, indistinguishable from an honest `unprobed` until now.
-    probes_unusable: 0,
-  };
-  stampSafe(stamp);
-
-  // Preflight: one call before the sweep, SINGLE attempt (matching the
-  // per-entry no-retry policy — failover is the router's job). A dead lane must
-  // fail loudly at entry 0, with the router's own message, not silently at
-  // entry 154.
+  let stamp;
   try {
-    const { status, body: r } = await post({
-      model: MODEL,
-      max_tokens: 16,
-      messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
-    });
-    if (r?.error || !Array.isArray(r?.choices)) {
-      const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
-      throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
-    }
-  } catch (err) {
-    stamp.aborted = `preflight failed: ${String(err.message || err)}`;
-    stampSafe(stamp);
-    process.stderr.write(
-      `${stamp.aborted}\nThe lane is DEAD, not slow — nothing was attempted. ` +
-        `Fix the router, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
-    );
-    process.exit(1);
-  }
-
-  let cursor = 0;
-
-  async function worker() {
-    while (cursor < queue.length) {
-      const e = queue[cursor++];
-      let rec;
-      try {
+    ({ stamp } = await dispatchBoundedItems({
+      items: entries,
+      outPath: OUT,
+      concurrency: CONCURRENCY,
+      stampSeed: { model: MODEL },
+      // Counted so "the sweep covered 121 entries" cannot hide how many of
+      // those carried probes that could not be evaluated at all. 30 of 121 did
+      // on 2026-08-09, indistinguishable from an honest `unprobed` until now.
+      stampInit: { probes_unusable: 0 },
+      stampExtra: (s, rec) => {
+        if (rec.premise === 'probes_unusable') s.probes_unusable += 1;
+      },
+      // Re-evaluate the premise of every stored record on load: running this
+      // script IS the presentation event for triage verdicts, so a record
+      // whose quoted code vanished since the last run must read as
+      // unconfirmed now, not carry last week's stamp.
+      reviveRecord: (rec) => {
+        const { stamp: premise, recovered } = premiseVerdict(rec);
+        return {
+          ...rec,
+          premise,
+          ...(recovered.length > 0 ? { premise_probes_recovered: recovered } : {}),
+        };
+      },
+      preflight: async () => {
+        const { status, body: r } = await post({
+          model: MODEL,
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+        });
+        if (r?.error || !Array.isArray(r?.choices)) throw chatFailure(status, r);
+      },
+      callLane: async (e) => {
         const { status, body: r } = await post({
           model: MODEL,
           max_tokens: 4000,
@@ -569,50 +514,43 @@ async function main() {
           ],
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         });
-        // A provider/router error body has no choices array. Surface ITS message —
-        // it names the real cause (and often its own retry-after) — never the
-        // information-free `finish_reason=undefined` it used to be reported as.
-        // Deliberately NO retry/backoff here: failover is the router's job,
-        // and duplicating it in the caller would hide a router defect.
-        if (r?.error || !Array.isArray(r?.choices)) {
-          const msg = r?.error?.message ?? JSON.stringify(r).slice(0, 400);
-          throw new Error(`HTTP ${status} ${r?.error?.code ?? r?.error?.type ?? ''}: ${msg}`.trim());
-        }
+        if (r?.error || !Array.isArray(r?.choices)) throw chatFailure(status, r);
         const c = r.choices?.[0];
-        if (c?.finish_reason !== 'stop') throw new Error(`finish_reason=${c?.finish_reason}`);
+        // The content is returned even on a non-stop finish: the driver
+        // records its byte size, which is the truncation diagnostic (P28 —
+        // near-zero = dialect death, large-but-truncated = a cap to raise).
+        return { raw: c?.message?.content ?? '', finishReason: c?.finish_reason };
+      },
+      buildRecord: (e, { raw, finishReason }) => {
+        // `finish_reason !== 'stop'` is OpenAI-chat policy, so it lives HERE,
+        // never in the lane-agnostic driver — but AFTER the lane returned, so
+        // the error row still carries finish_reason/output_bytes.
+        if (finishReason !== 'stop') throw new Error(`finish_reason=${finishReason}`);
         // Some lanes prepend prose before the JSON despite the schema. Salvage +
         // parse + shape-validate live in buildTriageRecord — only a response that
         // finished cleanly (checked above) reaches it, so a truncated body can
         // never be laundered into a valid-looking record.
-        rec = buildTriageRecord(e, c.message.content ?? '');
-        {
-          const { stamp, recovered } = premiseVerdict(rec);
-          rec.premise = stamp;
-          if (recovered.length > 0) rec.premise_probes_recovered = recovered;
-        }
-      } catch (err) {
-        rec = { id: e.id, file: e.file, error: String(err.message || err) };
-      }
-      stamp.attempted += 1;
-      if (rec.error) stamp.errored += 1;
-      else stamp.classified += 1;
-      // Cumulative, because the per-pass `classified` reads as near-total
-      // failure after a retry pass (a 2-entry retry stamped "classified: 2"
-      // while true coverage was 120) and the routine's contract reads the
-      // stamp verbatim.
-      stamp.classified_total = stamp.prior_classified + stamp.classified;
-      if (rec.premise === 'probes_unusable') stamp.probes_unusable += 1;
-      // Rewritten per completion (cheap, atomic-enough for a progress sidecar):
-      // a killed run leaves an honest partial stamp, not silence.
-      stampSafe(stamp);
-      fs.appendFileSync(OUT, JSON.stringify(rec) + '\n');
-      process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
+        const rec = buildTriageRecord(e, raw);
+        const { stamp: premise, recovered } = premiseVerdict(rec);
+        rec.premise = premise;
+        if (recovered.length > 0) rec.premise_probes_recovered = recovered;
+        return rec;
+      },
+      onProgress: (e, rec) => {
+        process.stderr.write(`${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}]` : 'ERR:' + rec.error}\n`);
+      },
+    }));
+  } catch (err) {
+    if (err instanceof LanePreflightError) {
+      process.stderr.write(
+        `${err.message}\nThe lane is DEAD, not slow — nothing was attempted. ` +
+          `Fix the router, or set TRIAGE_MODEL=<spec> to try a different target.\n`,
+      );
+      process.exit(1);
     }
+    throw err;
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-  stamp.finished_at = new Date().toISOString();
-  stampSafe(stamp);
   process.stderr.write(
     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
       `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +

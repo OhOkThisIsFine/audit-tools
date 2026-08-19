@@ -314,9 +314,10 @@ refined once the first runs produce real clarification batches.
 
 Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation
 contract (`RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `ClosingPlan`,
-`TestSpec`, the remediation report) is validated by hand-written TypeScript validator functions in
-`src/remediate/validation/` (`remediationState.ts`, `contractPipeline.ts`, `contractPipelineGates.ts`,
-`artifacts.ts`), not JSON Schema files. `TriageBatch` is an internal wire type local to
+`TestSpec`, the remediation report) is validated by hand-written TypeScript validator functions
+(`src/remediate/validation/remediationState.ts`, `src/remediate/validation/contractPipeline.ts`,
+`src/remediate/validation/contractPipelineGates.ts`, `src/remediate/validation/artifacts.ts`),
+not JSON Schema files. `TriageBatch` is an internal wire type local to
 `src/remediate/phases/triage.ts`, not a `state/types.ts` contract type.
 
 Every phase transition validates its output against the relevant validator before the next phase may

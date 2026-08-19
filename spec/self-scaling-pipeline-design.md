@@ -92,7 +92,7 @@ Four mechanisms implement the two dials and their shared signal:
 - **Dial A — adversarial depth** (`adversarialDepthForTier`, consumed in
   `src/remediate/steps/contractPipeline.ts`) — light inline self-check vs full independent sub-agents,
   selected by the signal; floor = light, so the pre-vetted audit path gets light review rather than a skip.
-- **Dial B — granularity** (`contractPipeline.ts`) — collapse coherent phases into fewer round-trips for
+- **Dial B — granularity** (`src/remediate/steps/contractPipeline.ts`) — collapse coherent phases into fewer round-trips for
   low-complexity work, keep fine-grained for high, and escalate-on-evidence.
 
 ## Invariants this must preserve

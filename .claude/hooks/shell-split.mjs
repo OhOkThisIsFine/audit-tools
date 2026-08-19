@@ -222,17 +222,88 @@ export function bypassEnabled(name, cmd) {
 // bypass). stripQuoted is length-preserving over the joined text, so separator
 // positions found on the stripped text index directly into the raw text —
 // each returned statement keeps its original quoted content intact.
+//
+// Return shape (string[]) is shared with the pre-commit gate and stays
+// untouched; callers that also need the CONNECTIVES use the
+// …WithSeparators sibling below, which this delegates to.
 export function splitShellStatements(cmd) {
+  return splitShellStatementsWithSeparators(cmd).map((p) => p.text);
+}
+
+// Like splitShellStatements, but each statement carries the separator that
+// CONNECTS it to the previous one — `[{ text, sepBefore }]` with `sepBefore`
+// one of '&&' | '||' | ';' | '\n' (null for the first statement). A run of
+// separators around EMPTY statements collapses to the run's FIRST separator:
+// `A && <newline> B` is a line continuation of the `&&` chain, so B's
+// connective is '&&', not '\n' (the inverted orders — a line STARTING with
+// `&&`/`||`/`;` — are shell syntax errors, so first-wins is safe). Exists for
+// rules that reason about exit-status FLOW: `&&` short-circuits and preserves
+// a failure, while `;` / `||` / newline let a trailing statement replace it.
+export function splitShellStatementsWithSeparators(cmd) {
   const joined = cmd.replace(/\\\r?\n/g, ' ').replace(/`\r?\n/g, ' ');
   const stripped = stripQuoted(joined);
-  const parts = [];
+  const rawParts = [];
   let start = 0;
   const sep = /&&|\|\||;|\n/g;
+  let prevSep = null;
   let m;
   while ((m = sep.exec(stripped)) !== null) {
-    parts.push(joined.slice(start, m.index));
+    rawParts.push({ text: joined.slice(start, m.index), sepBefore: prevSep });
+    prevSep = m[0];
     start = m.index + m[0].length;
   }
-  parts.push(joined.slice(start));
-  return parts.map((s) => s.trim()).filter(Boolean);
+  rawParts.push({ text: joined.slice(start), sepBefore: prevSep });
+  const out = [];
+  let pendingSep;
+  for (const part of rawParts) {
+    const sepBefore = pendingSep !== undefined ? pendingSep : part.sepBefore;
+    const text = part.text.trim();
+    if (!text) {
+      pendingSep = sepBefore; // empty statement — carry the run's first separator
+      continue;
+    }
+    out.push({ text, sepBefore });
+    pendingSep = undefined;
+  }
+  return out;
+}
+
+// Locate the single/double-quoted spans of a statement on its RAW text —
+// `[{ start, end, quote, content }]`, `content` being the text BETWEEN the
+// quote characters (`start`/`end` index the quotes themselves; an unterminated
+// span runs to end-of-string). stripQuoted is length-preserving, so an index
+// found on the stripped text maps directly onto these spans — that is how a
+// rule pairs a flag matched OUTSIDE quotes with the quoted argument that
+// follows it. Same escape model as stripQuoted: inside DOUBLE quotes a
+// backslash escapes the next char (so an embedded `\"` does not close the
+// span), single quotes have no escapes, and outside quotes an escaped quote
+// never OPENS a span.
+export function findQuotedSpans(s) {
+  const spans = [];
+  let quote = null;
+  let open = -1;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === '"' && c === '\\' && i + 1 < s.length) {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (c === quote) {
+        spans.push({ start: open, end: i, quote, content: s.slice(open + 1, i) });
+        quote = null;
+      }
+      continue;
+    }
+    if (c === '\\' && i + 1 < s.length) {
+      i++;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      open = i;
+    }
+  }
+  if (quote) spans.push({ start: open, end: s.length, quote, content: s.slice(open + 1) });
+  return spans;
 }

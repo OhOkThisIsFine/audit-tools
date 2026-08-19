@@ -48,15 +48,15 @@ import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/ses
 // orchestrator-step substrate carry the highest blast radius and have no
 // automated adversarial-review gate; three author-green defects reached main
 // this way. Block a commit whose STAGED set touches a loop-core path unless a
-// FRESH, staged-tree-hash-bound review attestation exists. The pattern list is
-// IMPORTED from a generated sibling rather than re-declared here: this hook runs
-// under plain node pre-build and cannot import `src/shared/loopCorePaths.ts`,
-// but it can import a .mjs generated FROM it, so the list keeps exactly one
-// hand-maintained home. `npm run check:loop-core-patterns` (in verify:checks)
-// fails the build if the generated file drifts from the source of truth.
-// A "/"-terminated pattern is a directory prefix; every other entry is an exact
-// repo-relative path.
-import { LOOP_CORE_PATTERNS } from "./loop-core-patterns.mjs";
+// FRESH, staged-tree-hash-bound review attestation exists. The pattern list AND
+// the membership predicate are IMPORTED from a generated sibling rather than
+// re-declared here: this hook runs under plain node pre-build and cannot import
+// `src/shared/loopCorePaths.ts`, but it can import a .mjs generated FROM it, so
+// both keep exactly one hand-maintained home. `npm run check:loop-core-patterns`
+// (in verify:checks) fails the build if the generated file drifts from the
+// source of truth. A "/"-terminated pattern is a directory prefix; every other
+// entry is an exact repo-relative path.
+import { isLoopCorePath } from "./loop-core-patterns.mjs";
 
 // ── Constitutional-doc refusal ───────────────────────────────────────────────
 // A constitutional doc states what this project IS (the two philosophies, the
@@ -82,21 +82,6 @@ import {
   buildPreCommitLegs,
   scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
-
-// Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
-// from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a
-// "/"-terminated pattern matches the directory prefix, else exact match.
-function pinsLoopCore(p) {
-  const norm = p.replace(/\\/g, '/').replace(/^\.\//, '');
-  for (const pattern of LOOP_CORE_PATTERNS) {
-    if (pattern.endsWith('/')) {
-      if (norm.startsWith(pattern)) return true;
-    } else if (norm === pattern) {
-      return true;
-    }
-  }
-  return false;
-}
 
 let raw = '';
 for await (const chunk of process.stdin) raw += chunk;
@@ -769,8 +754,8 @@ function runGate(committedPaths) {
   // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
   // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
   // write-tree fault.
-  if (staged.some(pinsLoopCore)) {
-    const loopCoreStaged = staged.filter(pinsLoopCore);
+  if (staged.some(isLoopCorePath)) {
+    const loopCoreStaged = staged.filter(isLoopCorePath);
     const sha = bindStagedTreeSha();
     if (!sha) {
       noteFailOpen(

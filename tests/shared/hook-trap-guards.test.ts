@@ -70,6 +70,8 @@ const BYPASS_VARS = [
   'AUDIT_TOOLS_ALLOW_MASKED_EXIT',
   'AUDIT_TOOLS_ALLOW_UNSET_ENV',
   'AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH',
+  'AUDIT_TOOLS_ALLOW_INLINE_SCRIPT',
+  'AUDIT_TOOLS_ALLOW_LONG_DISPATCH',
 ];
 
 interface HookPayload {
@@ -100,6 +102,18 @@ function runHook(
 }
 
 const bash = (command: string): HookPayload => ({ tool_name: 'Bash', tool_input: { command } });
+const bashBg = (command: string): HookPayload => ({
+  tool_name: 'Bash',
+  tool_input: { command, run_in_background: true },
+});
+const ps = (command: string): HookPayload => ({
+  tool_name: 'PowerShell',
+  tool_input: { command },
+});
+const psBg = (command: string): HookPayload => ({
+  tool_name: 'PowerShell',
+  tool_input: { command, run_in_background: true },
+});
 
 describe('shell-trap-guard: codex stdin (backlog: logged 3x, hangs at exit 0 + empty output)', () => {
   it('blocks `codex exec` with no stdin redirect', () => {
@@ -328,11 +342,20 @@ describe('shell-trap-guard: a masked suite exit code is REFUSED (manufactured fa
   // tail -50` and was read past: the suite was RED, the status said 0, and the
   // buffered `tail` output held only build notices. An advisory cannot fix a
   // signal that reads green — hence the promotion to DENY.
-  it('blocks `npm test` piped into tail', () => {
+  it('blocks `npm test` piped into tail, with the BACKGROUND-SAFE remedy', () => {
     const { code, stderr } = runHook(SHELL_GUARD, bash('npm test 2>&1 | tail -50'));
     expect(code).toBe(2);
     expect(stderr).toMatch(/masked suite exit code/);
-    expect(stderr).toMatch(/EXIT=\$\?/);
+    // The old remedy (`; echo "EXIT=$?"`) IS the laundering trap when the
+    // command is backgrounded — the guard must never prescribe it.
+    expect(stderr).toMatch(/let the suite's exit BE/);
+    expect(stderr).not.toMatch(/echo "EXIT=\$\?"/);
+  });
+
+  it('PowerShell branch remedy is a real status pass-through (`exit $LASTEXITCODE`)', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, ps('npm test 2>&1 | Select-String error'));
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/exit \$LASTEXITCODE/);
   });
 
   it('blocks a verify command piped into grep', () => {
@@ -368,6 +391,62 @@ describe('shell-trap-guard: a masked suite exit code is REFUSED (manufactured fa
 
   it('does not fire on an unrelated command piped into a filter', () => {
     expect(runHook(SHELL_GUARD, bash('git log --oneline | head -20')).code).toBe(0);
+  });
+});
+
+describe('shell-trap-guard: a BACKGROUNDED suite exit laundered by a trailing statement (2026-08-12)', () => {
+  // Under run_in_background the harness completion notice reads the COMPOUND's
+  // exit — the LAST statement's — so `suite > log; echo "EXIT=$?"` reported
+  // exit 0 for a RED suite with two TS2345 errors in the unread log. Detected
+  // from exit-status FLOW (a suite statement followed transitively by a
+  // non-`&&` separator), not as a third named syntactic instance.
+  it('blocks bash `npm test > run.log 2>&1; echo "EXIT=$?"` when backgrounded', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bashBg('npm test > run.log 2>&1; echo "EXIT=$?"'),
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/laundered/i);
+  });
+
+  it('blocks PowerShell `npm test *> run.log; "EXIT=$LASTEXITCODE"` when backgrounded', () => {
+    const { code, stderr } = runHook(SHELL_GUARD, psBg('npm test *> run.log; "EXIT=$LASTEXITCODE"'));
+    expect(code, stderr).toBe(2);
+  });
+
+  it('blocks a backgrounded `|| true` tail — same laundering, different separator', () => {
+    expect(runHook(SHELL_GUARD, bashBg('npm test > log 2>&1 || true')).code).toBe(2);
+  });
+
+  it('allows the same commands FOREGROUND — the status is read directly there', () => {
+    expect(runHook(SHELL_GUARD, bash('npm test > run.log 2>&1; echo "EXIT=$?"')).code).toBe(0);
+    expect(runHook(SHELL_GUARD, bash('npm test > log 2>&1 || true')).code).toBe(0);
+  });
+
+  it('allows a backgrounded suite in TERMINAL position (its exit IS the compound exit)', () => {
+    expect(runHook(SHELL_GUARD, bashBg('npm test > run.log 2>&1')).code).toBe(0);
+  });
+
+  it('allows a backgrounded `&&`-chain — short-circuit preserves the failure', () => {
+    expect(runHook(SHELL_GUARD, bashBg('npm install && npm test > run.log 2>&1')).code).toBe(0);
+  });
+
+  it('allows a terminal status pass-through — the shape its own remedies prescribe', () => {
+    const powershell = runHook(SHELL_GUARD, psBg('npm test *> run.log; exit $LASTEXITCODE'));
+    expect(powershell.code, powershell.stderr).toBe(0);
+    const posix = runHook(SHELL_GUARD, bashBg('npm test > run.log 2>&1; exit $?'));
+    expect(posix.code, posix.stderr).toBe(0);
+  });
+
+  it('honors AUDIT_TOOLS_ALLOW_MASKED_EXIT — same trap class, same escape', () => {
+    const r = runHook(SHELL_GUARD, bashBg('npm test > run.log 2>&1; echo "EXIT=$?"'), {
+      env: { AUDIT_TOOLS_ALLOW_MASKED_EXIT: '1' },
+    });
+    expect(r.code, r.stderr).toBe(0);
+  });
+
+  it('a QUOTED mention of the shape in a backgrounded command is not the trap', () => {
+    expect(runHook(SHELL_GUARD, bashBg('rg "npm test; echo" docs/')).code).toBe(0);
   });
 });
 
@@ -424,6 +503,120 @@ describe('shell-trap-guard: a peer-CLI dispatch piped into a buffering filter (2
       env: { AUDIT_TOOLS_ALLOW_BUFFERED_DISPATCH: '1' },
     });
     expect(r.code).toBe(0);
+  });
+});
+
+describe('shell-trap-guard: inline interpreter payload with shell-active escapes (P31, 2026-08-14)', () => {
+  // A `node -e "…"` payload that needs `\``/`\"`/`\$`/`\\` escaping is the exact
+  // shape that got mangled: the shell ate one level of escaping, the escaped
+  // backtick went inert and the regex around it became invalid — the
+  // interpreter ran a DIFFERENT program from the one written. Two or more
+  // shell-active escapes in one double-quoted payload = a script, not a flag
+  // argument. Bash path only: PowerShell's escape char is the backtick, and
+  // backslashes are literal there.
+  it('blocks a node -e payload carrying two escaped backticks', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash('node -e "const s = \\`a\\`; console.log(s)"'),
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/write the script/i);
+    expect(stderr).toMatch(/scratchpad/);
+  });
+
+  it('blocks python -c and bash -c variants the same way', () => {
+    expect(runHook(SHELL_GUARD, bash('python -c "print(\\"a\\"); print(\\"b\\")"')).code).toBe(2);
+    expect(runHook(SHELL_GUARD, bash('bash -c "echo \\"hi \\$USER\\""')).code).toBe(2);
+  });
+
+  it('allows the escape-free one-liner shape (used successfully 4x)', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('node -e "console.log(require(\'./x.json\').v)"')).code,
+    ).toBe(0);
+  });
+
+  it('allows exactly ONE shell-active escape — pins the >= 2 floor', () => {
+    expect(runHook(SHELL_GUARD, bash('node -e "console.log(\'cost: \\$5\')"')).code).toBe(0);
+  });
+
+  it('regex escapes (`\\d`, `\\s`) pass through double quotes untouched and do not count', () => {
+    expect(
+      runHook(SHELL_GUARD, bash('node -e "console.log(/\\d+\\s/.test(\'1 \'))"')).code,
+    ).toBe(0);
+  });
+
+  it('does NOT apply to PowerShell', () => {
+    expect(runHook(SHELL_GUARD, ps('node -e "const s = \\`a\\`; console.log(s)"')).code).toBe(0);
+  });
+
+  it('a QUOTED textual mention (`rg "node -e" docs/`) is not an invocation', () => {
+    expect(runHook(SHELL_GUARD, bash('rg "node -e" docs/')).code).toBe(0);
+  });
+
+  it('a heredoc body naming node -e does not fire (stdin data, not argv)', () => {
+    const cmd = [
+      "cat > note.md <<'EOF'",
+      'use node -e "console.log(\\`x\\` + \\`y\\`)" for quick checks',
+      'EOF',
+    ].join('\n');
+    const { code, stderr } = runHook(SHELL_GUARD, bash(cmd));
+    expect(code, `expected allow; stderr:\n${stderr}`).toBe(0);
+  });
+
+  it('honours AUDIT_TOOLS_ALLOW_INLINE_SCRIPT (env and inline-prefix forms)', () => {
+    const cmd = 'node -e "const s = \\`a\\`; console.log(s)"';
+    expect(
+      runHook(SHELL_GUARD, bash(cmd), { env: { AUDIT_TOOLS_ALLOW_INLINE_SCRIPT: '1' } }).code,
+    ).toBe(0);
+    expect(runHook(SHELL_GUARD, bash(`AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1 ${cmd}`)).code).toBe(0);
+  });
+});
+
+describe('shell-trap-guard: an over-long ad-hoc peer-CLI dispatch prompt (P28)', () => {
+  // A mega-prompt inlined into `codex exec` / `agy -p` / `claude.ps1 -p` loses
+  // the whole answer silently — nothing back, truncation, or max_tokens spent
+  // reasoning. The reliable unit is ONE bounded item per call, via the
+  // lane-dispatch driver.
+  const LONG = 'x'.repeat(4500);
+  const AT_LIMIT = 'x'.repeat(4000);
+
+  it('blocks a >4000-char codex exec prompt and points at the lane-dispatch driver', () => {
+    // Composed with stdin closed + a file redirect so the sibling rules stay
+    // silent — this case isolates the prompt-size refusal.
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash(`codex exec "${LONG}" < /dev/null > run.log 2>&1 &`),
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/lane-dispatch\.mjs/);
+  });
+
+  it('blocks a long agy -p prompt', () => {
+    expect(runHook(SHELL_GUARD, bash(`agy --sandbox -p "${LONG}"`)).code).toBe(2);
+  });
+
+  it('blocks a long claude.ps1 -p prompt (the third dispatch lane)', () => {
+    expect(
+      runHook(
+        SHELL_GUARD,
+        ps(`powershell -File C:/Users/ethan/freellmapi/claude.ps1 -p "${LONG}"`),
+      ).code,
+    ).toBe(2);
+  });
+
+  it('allows a prompt AT the threshold — fires only above it', () => {
+    const { code, stderr } = runHook(
+      SHELL_GUARD,
+      bash(`codex exec "${AT_LIMIT}" < /dev/null > run.log 2>&1 &`),
+    );
+    expect(code, stderr).toBe(0);
+  });
+
+  it('honours AUDIT_TOOLS_ALLOW_LONG_DISPATCH', () => {
+    const r = runHook(SHELL_GUARD, bash(`codex exec "${LONG}" < /dev/null > run.log 2>&1 &`), {
+      env: { AUDIT_TOOLS_ALLOW_LONG_DISPATCH: '1' },
+    });
+    expect(r.code, r.stderr).toBe(0);
   });
 });
 

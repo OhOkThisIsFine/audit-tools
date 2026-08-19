@@ -13,6 +13,15 @@ import { join, resolve } from 'node:path';
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const GUARDS = join(REPO_ROOT, '.claude', 'hooks', 'session-start-guards.mjs');
 
+// Hermetic lane probes for every hook spawn in this file: http lanes point at
+// an unroutable loopback port (refused instantly), the command-probe lane is
+// skipped — no live service is probed and no probe timeout is burned.
+const LANE_PROBE_OVERRIDES = {
+  AUDIT_TOOLS_OFFLOAD_PROBE_URL: 'http://127.0.0.1:9/',
+  AUDIT_TOOLS_HEADROOM_PROBE_URL: 'http://127.0.0.1:9/',
+  AUDIT_TOOLS_AGY_PROBE_CMD: 'skip',
+};
+
 describe('session-start-guards: stale agent worktrees are reaped', () => {
   let base: string;
   let repo: string;
@@ -83,7 +92,7 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
       encoding: 'utf8',
       timeout: 120_000,
       windowsHide: true,
-      env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+      env: { ...process.env, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
     });
     pass = { code: r.status, stdout: r.stdout ?? '' };
   });
@@ -148,7 +157,7 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
       }),
       timeout: 120_000,
       windowsHide: true,
-      env: { ...inherited, CLAUDE_PROJECT_DIR: repo },
+      env: { ...inherited, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
     });
     expect(r.status).toBe(0);
     expect(r.stdout ?? '').toMatch(/landed2/);

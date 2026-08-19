@@ -10,7 +10,7 @@ The canonical, machine-readable registry is `EXECUTOR_REGISTRY` in
 `src/audit/orchestrator/executors.ts` — one entry per executor, each declaring an `id`, a
 `kind` (`deterministic` runs inline; `host_delegation` pauses the pipeline and
 asks the active LLM/host agent to do the work), and the `obligation_ids` it
-satisfies. `nextStep.ts`'s priority chain (see `CLAUDE.md` → audit-code
+satisfies. The `src/audit/orchestrator/nextStep.ts` priority chain (see `CLAUDE.md` → audit-code
 architecture) picks the highest-priority unsatisfied obligation and dispatches
 to whichever executor's `obligation_ids` includes it. This document is the
 declarative reference; that table is authoritative. For each artifact's exact

@@ -30,6 +30,7 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   file:lines that drift within days, so a labeled run is a one-shot number, never a regression
   gate; (b) labeling only what the tool FOUND measures precision only — misses are invisible, so
   recall is unmeasurable without ground truth the tool didn't author.
+  <!-- doc-citation-exempt: proposed dir, not yet created -->
   **SPEC:** `corpus/` becomes a manifest of pinned public repos — `{repo_url, commit_sha,
   labels[]}`, each label a ground-truth defect (file, region, kind, evidence — ideally the upstream
   FIX commit that proves it). Ground truth comes from someone-else-maintained inventories where
@@ -101,7 +102,7 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   `ensureSemanticReviewRun` in `src/audit/cli/reviewRun.ts`), so ingesting even one accepted result
   mints a new run id — new run directory, workload, task bindings, result map, and new bound result
   paths. Two consequences, both observed on the 2026-08-12 dogfood lap: a worker still writing into
-  the prior run's `host-results/` is silently orphaned (ingest reads only the current run id), and
+  the prior run's `.audit-tools/audit/runs/<id>/host-results/` is silently orphaned (ingest reads only the current run id), and
   the per-run accepted ledger does not carry forward. Accepted work itself is durable — it folds
   into `audit_results.jsonl` and the coverage matrix — so the failure mode is wasted work, not lost
   work. The tool therefore supports exactly ONE dispatch shape: publish the whole workload, execute

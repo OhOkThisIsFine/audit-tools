@@ -11,11 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { resolveTriageModel } from "../../scripts/shared/triage-backlog.mjs";
 import {
-  resolveTriageModel,
   coverageStampPath,
   writeCoverageStamp,
-} from "../../scripts/shared/triage-backlog.mjs";
+} from "../../scripts/shared/lane-dispatch.mjs";
 
 describe("resolveTriageModel", () => {
   it("uses an explicit TRIAGE_MODEL verbatim, never touching discovery", () => {

@@ -53,7 +53,7 @@
 - `open-bugs.md:260` — Friction walk (determinations-execution lap, 2026-07-29):
 - `open-bugs.md:274` — Friction walk (duplicated-guard lap, 2026-07-25):
 - `open-bugs.md:286` — Implementation workers are never given the contract they must satisfy (2026-08-09, high).
-- `open-bugs.md:296` — `obligation_ledger.input.json` is listed as a required input but never written (2026-08-09, low).
+- `open-bugs.md:296` — The `.input.json` form of `obligation_ledger` is listed as a required input but never written (2026-08-09, low).
 - `open-bugs.md:302` — A delegated step prompt can turn its executor into a second driver (2026-07-16, tool-should-decide, medium).
 - `open-bugs.md:318` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
 - `open-bugs.md:334` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
@@ -76,7 +76,7 @@
 - `open-bugs.md:512` — `ensure` writes opencode.json with unstable key order.
 - `open-bugs.md:517` — Two run-id notions; friction record keyed both ways.
 - `open-bugs.md:523` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
-- `open-bugs.md:528` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `analyzer-policy.json` (2026-08-12, nightly, low).
+- `open-bugs.md:528` — `hostInputPause.ts` says analyzer consent lives in session config; it lives in `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).
 - `open-bugs.md:537` — `writeOpenItems` reads `subject_key` but never computes or requires it; the HANDOFF generator hard-requires it (2026-08-14, nightly, low).
 - `open-bugs.md:547` — `check:memory-citations` cannot see a `[[name]]` cross-link, and 4 are already dangling (2026-08-14, nightly, low).
 - `open-bugs.md:558` — Steward verification metadata is undeliverable through the host-result envelope (hit 2026-08-18).
@@ -89,14 +89,14 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:25` — A2 finding-quality oracle — the corpus is SMALL, PUBLIC, PINNED git repos, never labeled self-audit runs.
-- `forward-tracks.md:50` — Generate the executor↔artifact mapping from the registries (anti-drift).
-- `forward-tracks.md:57` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
-- `forward-tracks.md:65` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:80` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:87` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
-- `forward-tracks.md:99` — Wave-friendly host dispatch: run identity survives partial ingest.
-- `forward-tracks.md:113` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
-- `forward-tracks.md:122` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
+- `forward-tracks.md:51` — Generate the executor↔artifact mapping from the registries (anti-drift).
+- `forward-tracks.md:58` — End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).
+- `forward-tracks.md:66` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:81` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:88` — Obligation-id slugs and decomposed-module names are two name spaces joined by a prefix match.
+- `forward-tracks.md:100` — Wave-friendly host dispatch: run identity survives partial ingest.
+- `forward-tracks.md:114` — `ensureGlobalAssets` is now production-unwired — decide whether it is duplicated or genuinely dead.
+- `forward-tracks.md:123` — Isolated-branch landing gap — a remediation run dispatched on its own `remediation/<runId>` branch has no closing action that lands it on the base branch.
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -113,53 +113,53 @@
 - `durable-traps.md:55` — An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).
 - `durable-traps.md:60` — Never delete from a backlog file by LINE NUMBER.
 - `durable-traps.md:66` — A Claude lane whose isolated `CLAUDE_CONFIG_DIR` has not TRUSTED the workspace answers from nothing rather than failing (2026-08-15).
-- `durable-traps.md:79` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
-- `durable-traps.md:106` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
-- `durable-traps.md:114` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
-- `durable-traps.md:123` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
-- `durable-traps.md:132` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
-- `durable-traps.md:146` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
-- `durable-traps.md:154` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
-- `durable-traps.md:164` — The free offload lane is a local router — it must be RUNNING, and callers should request the `auto` alias.
-- `durable-traps.md:189` — After an unattended run, `git diff` the tracked docs before committing.
-- `durable-traps.md:201` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
-- `durable-traps.md:223` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:229` — The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file wall is expected, not a hang.
-- `durable-traps.md:249` — One test runner: vitest
-- `durable-traps.md:263` — Don't mask the test exit code with a REDIRECT.
-- `durable-traps.md:278` — Global `-g` install BLOCKS `postinstall`
-- `durable-traps.md:288` — A global junction to a LIVE working tree silently shadows a registry install.
-- `durable-traps.md:294` — PowerShell
-- `durable-traps.md:303` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
-- `durable-traps.md:319` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
-- `durable-traps.md:332` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
-- `durable-traps.md:339` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
-- `durable-traps.md:344` — Do not hand-edit a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:349` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:351` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:359` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
-- `durable-traps.md:364` — After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of re-reading the whole file (2026-07-16).
-- `durable-traps.md:368` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:376` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:397` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
-- `durable-traps.md:408` — A backlog entry's bold title must not contain `
-- `durable-traps.md:413` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
-- `durable-traps.md:443` — The `audit-code-completion-*` files can flake together under full-suite load, and the symptom reads exactly like a regression (2026-08-09).
-- `durable-traps.md:456` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:463` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:477` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
-- `durable-traps.md:488` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:497` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
-- `durable-traps.md:514` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
-- `durable-traps.md:521` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
-- `durable-traps.md:532` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
-- `durable-traps.md:541` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
-- `durable-traps.md:549` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
-- `durable-traps.md:558` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
-- `durable-traps.md:565` — `MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:571` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
-- `durable-traps.md:586` — `docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is
-- `durable-traps.md:597` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
+- `durable-traps.md:80` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
+- `durable-traps.md:109` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
+- `durable-traps.md:117` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
+- `durable-traps.md:126` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
+- `durable-traps.md:135` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
+- `durable-traps.md:149` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
+- `durable-traps.md:157` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
+- `durable-traps.md:167` — The free offload lane is a local router — it must be RUNNING, and callers should request the `auto` alias.
+- `durable-traps.md:194` — After an unattended run, `git diff` the tracked docs before committing.
+- `durable-traps.md:206` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
+- `durable-traps.md:228` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
+- `durable-traps.md:234` — The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file wall is expected, not a hang.
+- `durable-traps.md:254` — One test runner: vitest
+- `durable-traps.md:268` — Don't mask the test exit code with a REDIRECT.
+- `durable-traps.md:286` — Global `-g` install BLOCKS `postinstall`
+- `durable-traps.md:296` — A global junction to a LIVE working tree silently shadows a registry install.
+- `durable-traps.md:302` — PowerShell
+- `durable-traps.md:311` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
+- `durable-traps.md:327` — A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.
+- `durable-traps.md:340` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
+- `durable-traps.md:347` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
+- `durable-traps.md:352` — Do not hand-edit a wedged audit run — use `audit-code force-synthesis`.
+- `durable-traps.md:357` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:359` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:367` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
+- `durable-traps.md:372` — After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of re-reading the whole file (2026-07-16).
+- `durable-traps.md:376` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:384` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:405` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
+- `durable-traps.md:416` — A backlog entry's bold title must not contain `
+- `durable-traps.md:421` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
+- `durable-traps.md:453` — The `audit-code-completion-*` files can flake together under full-suite load, and the symptom reads exactly like a regression (2026-08-09).
+- `durable-traps.md:466` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
+- `durable-traps.md:473` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:487` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
+- `durable-traps.md:498` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
+- `durable-traps.md:507` — Right after the free router restarts, its `/v1` Anthropic surface can forward a router-local key UPSTREAM — a transient 401 window, not a permanent property (2026-08-09).
+- `durable-traps.md:524` — A trivial `claude.ps1 -p` prompt did not return in 5 min while the router answered in 0.4s (2026-08-09).
+- `durable-traps.md:531` — A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak model (2026-08-09).
+- `durable-traps.md:542` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:551` — The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).
+- `durable-traps.md:559` — A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).
+- `durable-traps.md:568` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
+- `durable-traps.md:575` — The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).
+- `durable-traps.md:581` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
+- `durable-traps.md:596` — `docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is
+- `durable-traps.md:607` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
 
 <!-- END GENERATED SEEK INDEX -->
 

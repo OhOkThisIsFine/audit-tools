@@ -56,23 +56,13 @@ function fail(msg) {
 }
 
 // ── loop-core predicate ──
-// The pattern list is IMPORTED from a generated sibling, not re-declared: this
-// runs under plain node pre-build and cannot import src/shared/loopCorePaths.ts,
-// but it can import a .mjs generated FROM it. One hand-maintained home; drift is
-// caught by `npm run check:loop-core-patterns` in verify:checks.
-import { LOOP_CORE_PATTERNS } from './loop-core-patterns.mjs';
+// The pattern list and membership predicate are IMPORTED from a generated
+// sibling, not re-declared: this runs under plain node pre-build and cannot
+// import src/shared/loopCorePaths.ts, but it can import a .mjs generated FROM
+// it. One hand-maintained home; drift is caught by
+// `npm run check:loop-core-patterns` in verify:checks.
+import { isLoopCorePath } from './loop-core-patterns.mjs';
 import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
-function pinsLoopCore(p) {
-  const norm = p.replace(/\\/g, '/').replace(/^\.\//, '');
-  for (const pattern of LOOP_CORE_PATTERNS) {
-    if (pattern.endsWith('/')) {
-      if (norm.startsWith(pattern)) return true;
-    } else if (norm === pattern) {
-      return true;
-    }
-  }
-  return false;
-}
 
 // ── parse argv ────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -152,7 +142,7 @@ const staged = cached.stdout
   .split(/\r?\n/)
   .map((p) => p.trim())
   .filter(Boolean);
-const loopCoreFiles = staged.filter(pinsLoopCore);
+const loopCoreFiles = staged.filter(isLoopCorePath);
 if (loopCoreFiles.length === 0) {
   fail('nothing loop-core staged to attest — the staged set touches no loop-core path.');
 }

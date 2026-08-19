@@ -72,8 +72,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   executed (recorded as the symptom in `23d2a1e8`; cause found two nights later). For a
   corroboration lane this is worse than silence: it manufactures agreement
   ([[lane-agreement-is-not-evidence]]). Check line 1 of the lane's log before believing any reply.
-  UNENFORCED — no guard checks lane workspace trust; `session-start-guards.mjs`'s offload leg probes
-  only whether the router is UP. Fix + guard proposed as nightly P33.
+  UNENFORCED — no guard checks lane workspace trust; the session-start lane leg (P36) probes
+  per-lane TRANSPORT liveness from the declared registry (`scripts/shared/offload-lane-data.mjs`)
+  and cannot see trust. Fix + guard proposed as nightly P33.
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
@@ -97,9 +98,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   ⚠ Rank is not latency: rank-1 `glm-5.2` returned nothing in >15min where `deepseek-v4-flash` answered
   in seconds. Rank-1 is no default for a blocking call. Re-confirmed 2026-07-28: an 836-line analytical
   call to `nim/z-ai/glm-5.2` died `HTTP 504 backend timed out` where small probes answered instantly.
-  ⚠ Dead-lane detection is NOT automatic any more. The helper that preflighted `/health` and exited 3
-  naming the restart command was retired 2026-07-28 and nothing replaced it, so probe the router
-  yourself before a long dispatch — otherwise a dead lane is indistinguishable from a slow one.
+  ⚠ Dead-lane detection at SESSION START is mechanical again (P36): `session-start-guards.mjs`
+  iterates the declared lane registry (`scripts/shared/offload-lane-data.mjs`, reconciled by
+  `npm run check:offload-lanes`) and names each down lane with its remedy. That is a lap-start
+  snapshot only — before a LONG mid-lap dispatch, probe the router yourself (`/v1/models`;
+  200-with-JSON or 401 = up), or a lane that died mid-lap is indistinguishable from a slow one.
   **OPEN:** the lane states its concurrency nowhere a caller reads it, and a call it cannot serve
   returns an empty document instead of refusing loudly.
 
@@ -178,7 +181,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `/this-path-does-not-exist-xyz` → 200, `/v1/models` → 401). So a status-only probe of `/health`
   passes whenever *a web server is listening*, including when the inference surface is dead. Probe
   `/v1/models` instead and treat `200` or `401` as up — `401` is "router up, key wrong", which is a
-  different failure with a different fix.
+  different failure with a different fix. The session-start guard and its reconciler now enforce
+  this probe shape mechanically (P36: the hook may not carry `/health` or any hardcoded lane URL);
+  this paragraph remains for AD-HOC callers probing by hand.
   (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
   Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
   (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:
@@ -227,7 +232,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   failed on seeing the advisory. Observed 2026-07-08.
 
 - **The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file
-  wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the
+  wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the <!-- doc-citation-exempt: names the pre-split file deliberately -->
   whole suite — rank 1 in every profiled run that listed it
   (`.audit-tools-profile/vitest-history.ndjson`) — until it was split over
   `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments are still
@@ -272,8 +277,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   for a RED suite — the real status lives only in the task's unread stdout, and the log held two
   TS2345 errors nobody opened before "green" was claimed (CI caught it). In a background task let
   the suite's exit BE the command's exit (`suite > log 2>&1`, no trailing echo), then read the log
-  on a non-zero notice. Enforceable half, not yet enforced: the shell-trap guard sees the Bash tool
-  payload and could refuse a `; echo` / `; $?`-swallowing tail on a backgrounded verify command.
+  on a non-zero notice. The BACKGROUND variant is now ENFORCED: the shell-trap guard refuses a
+  backgrounded suite command whose exit a trailing `;`/`||`/newline statement would launder
+  (escape: `AUDIT_TOOLS_ALLOW_MASKED_EXIT=1`; a terminal `exit $?` / `exit $LASTEXITCODE`
+  pass-through and `&&`-chains are allowed; in-statement `&` backgrounding stays undetected). The
+  foreground redirect form above is still not detectable without false positives, so it stays yours.
 
 - **Global `-g` install BLOCKS `postinstall`** (npm 12 `allowScripts`) → the host-integration deploy
   (`~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.gemini`) never runs. npm *does* warn on stderr and
@@ -415,30 +423,32 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `.claude/hooks/.state/sessions/`; while ≥1 record exists (enforcement armed), an unregistered
   session gets exit-0 from all three Stop gates (closeout-challenge, friction, question-philosophy
   Stop leg) and its `git commit` / `git push` is refused by the pre-commit gate. In-process
-  Agent/Workflow subagents never fire SessionStart, so they are covered automatically — they DO
-  get Stop events under their own session_id, and two once answered the closeout challenge by
-  committing to main mid-fan-out (`00d6fbfd`, `c687fed9`). No record at all (fresh clone, wiped
-  `.state/`) = everything behaves pre-feature. Uncovered halves, stated outright:
+  Agent/Workflow subagents never fire SessionStart, so they are covered automatically, though
+  they DO get Stop events (two once committed to main mid-fan-out:
+  `00d6fbfd`, `c687fed9`). No record at all (fresh clone, wiped
+  `.claude/hooks/.state/`) = pre-feature behavior. Uncovered halves, stated outright:
   - A NESTED `claude -p` with this repo as cwd DOES fire SessionStart and self-registers as an
-    owner. The dispatcher must set `AUDIT_TOOLS_CHILD_SESSION=1` on the child's environment, per
-    dispatch — a nested child launched without it is owner-classified. Lanes: the freellmapi pool
-    launcher (`claude.ps1`) pointed at this repo, the nightly `/insights` invocation
-    (docs/nightly-routine.md), any ad-hoc `claude -p` worker.
+    owner unless the dispatcher sets `AUDIT_TOOLS_CHILD_SESSION=1` on the child env, per
+    dispatch. Lanes: the freellmapi pool launcher (`claude.ps1`) pointed at this repo, the
+    nightly `/insights` invocation (docs/nightly-routine.md), any ad-hoc `claude -p` worker, and
+    the freellmapi MCP offload pool lane (`claude.exe -p`, repo cwd, server-side env, marker
+    absent — STILL OPEN; observed 2026-08-18: the child
+    self-registered and its Stop closeout-challenge REPLACED the final answer; `claude.ps1` was
+    fixed the same day; recorded on the `mcp-pool` row of `scripts/shared/offload-lane-data.mjs`).
   - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
     a child process the PreToolUse hook never sees.
-  - The refusal is a footgun guard, not an adversary gate: the allow token and the recovery CLI
-    are repo-readable (a determined child can grep them; the refusal text just must not route it).
-  - Registry wipe = silent disarm: `.state/` is gitignored, so `git clean -xdf` (or a manual
-    wipe) returns every gate to legacy until the next SessionStart — the named cause when the
+  - The refusal is a footgun guard, not an adversary gate: the allow token and recovery CLI are
+    repo-readable; the refusal text just must not route a child to them.
+  - Registry wipe = silent disarm: `.claude/hooks/.state/` is gitignored, so `git clean -xdf`
+    returns every gate to legacy until the next SessionStart — the named cause when the
     closeout challenge "stopped firing".
   - The PowerShell-form inline token (`$env:…='1'; git …`) is NOT recognized — dispatchers use
     the bash-form inline prefix or the hook-env form.
-  Per-dispatch git allowance: the dispatching session grants an intentional agent commit by
-  leading the child's specific git command with `AUDIT_TOOLS_AGENT_GIT=1` inline (visible in
-  transcript, per-dispatch, never standing config); the hook-env form exists for lanes that
-  cannot inline. Owner-session recovery (registration lost, or the session predates the feature):
-  from the repo root, `node scripts/shared/sessionRegistry.mjs --register <session-id>` —
-  explicit id from a hook payload; deliberately no discovery mode.
+  Per-dispatch git allowance: lead the child's specific git command with
+  `AUDIT_TOOLS_AGENT_GIT=1` inline (visible in transcript, never standing config); the hook-env
+  form exists for lanes that cannot inline. Owner-session recovery:
+  `node scripts/shared/sessionRegistry.mjs --register <session-id>` from the repo root — explicit
+  id from a hook payload; deliberately no discovery mode.
 
 - **The `audit-code-completion-*` files can flake together under full-suite load, and the symptom
   reads exactly like a regression (2026-08-09).** Seen: `-present`, `-promote`, and `-ingest-dir`
@@ -557,12 +567,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **The per-project memory store has NO locking, and a concurrent session silently reverts your edits
   (2026-08-09).** Two Claude sessions purging `~/.claude/projects/<slug>/memory/` at once: three files
-  deleted at 17:29 were re-created byte-identical at 17:30:57, and `MEMORY.md` was rewritten three
+  deleted at 17:29 were re-created byte-identical at 17:30:57, and `~/.claude/…/memory/MEMORY.md` was rewritten three
   times by the other session mid-pass. There is no lock and no conflict signal — the loser's work just
   disappears. Detect it by `stat`-ing mtimes before and after a write; when a second session is live,
   stop and let one own the store rather than interleaving.
 
-- **`MEMORY.md` has no size gate, and the harness read limit is a hard cliff (2026-08-09).** The index
+- **The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).** The index
   is bounded by a ~24.4KB read limit with no check enforcing it; adding one index line plus a note
   pushed it to 24,414 bytes — over — and it was caught only by a manual `wc -c`. Measure after any
   index edit. The prescribed reduction is MERGING closed sagas and cutting obsolete memories, never a

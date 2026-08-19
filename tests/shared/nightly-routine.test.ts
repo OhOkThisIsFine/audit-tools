@@ -88,9 +88,13 @@ const item = (over: Partial<NightlyItemFixture> = {}): NightlyItemFixture => ({
   question: 'Should this stay?',
   evidence: ['grep found zero hits'],
   subject_key: subjectKey('spec/foo.md', 'the claim prose'),
-  // Every item carries options: an item without them degrades to a bare text
-  // box, which is what shipped on 2026-07-29 and made 18 items cost an essay
-  // each to answer.
+  // Every item carries an eli5 and options: an item without them degrades to a
+  // bare text box, which is what shipped on 2026-07-29 and made 18 items cost
+  // an essay each to answer. Both are now REFUSED at write (P32), so every
+  // success-path fixture must carry them.
+  eli5:
+    'The spec claims a behavior the code no longer has; grep finds zero hits, so either ' +
+    'the claim comes out of the doc or the code grew a gap worth fixing.',
   options: [
     { label: 'Keep it', answer: 'Keep the pin, it is a deliberate anchor.' },
     { label: 'Drop it', answer: 'Remove the claim; it no longer holds.' },

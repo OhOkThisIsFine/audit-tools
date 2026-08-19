@@ -20,9 +20,11 @@ import { spawnSync } from 'node:child_process';
 import {
   stripQuoted,
   splitShellStatements,
+  splitShellStatementsWithSeparators,
   stripHeredocBodies,
   findLiveBackticks,
   findLiveExpansions,
+  findQuotedSpans,
   bypassEnabled,
 } from './shell-split.mjs';
 
@@ -44,6 +46,10 @@ try {
 
 const rawCmd = payload?.tool_input?.command ?? '';
 const toolName = payload?.tool_name ?? '';
+// The full tool parameter object arrives on stdin, so the background flag is
+// part of the payload. Absent => foreground => the background-only rules stay
+// silent (the fail-open direction).
+const runInBackground = payload?.tool_input?.run_in_background === true;
 if (!rawCmd.trim()) process.exit(0);
 
 // Rules read the command with HEREDOC BODIES BLANKED. A body is stdin data, not
@@ -314,6 +320,47 @@ if (isBash) {
         '  deliberate: re-run with AUDIT_TOOLS_ALLOW_BACKTICKS=1.',
     );
   }
+
+  // An inline interpreter payload (`node -e "…"` / `python -c "…"` / …) whose
+  // double-quoted body needs SHELL-ACTIVE escapes — `\` before one of
+  // `` ` `` `"` `$` `\` — is the exact shape that got mangled 2026-08-14: the
+  // shell ate one level of escaping, the escaped backtick went inert and the
+  // regex around it became invalid, so the interpreter ran a DIFFERENT program
+  // from the one written. One escape is survivable; a payload needing two or
+  // more (TOTAL count, not adjacent — the motivating incident's escapes were
+  // separated by regex text) is a script, not a flag argument. Shell-INERT
+  // escapes (`\d`, `\s`, …) pass through double quotes untouched in bash and
+  // never count, so the escape-free `node -e "…require('./x.json')…"` shape —
+  // used successfully 4x — stays allowed, as does any single-quoted payload
+  // (no escapes exist inside single quotes). Bash path only: PowerShell's
+  // escape char is the backtick, backslashes are literal there, and the PS
+  // half of the class has its own guard.
+  const INLINE_INTERPRETER =
+    /\b(?:node\s+(?:-e|--eval)|python3?\s+-c|perl\s+-e|ruby\s+-e|(?:bash|sh)\s+-c)\b/;
+  for (const sub of subCmds) {
+    // Matched on the STRIPPED statement — `rg "node -e" docs/` is a quoted
+    // textual mention, not an invocation, and must not fire.
+    const flag = INLINE_INTERPRETER.exec(stripQuoted(sub));
+    if (!flag) continue;
+    if (bypassEnabled('AUDIT_TOOLS_ALLOW_INLINE_SCRIPT', cmd)) continue;
+    // stripQuoted is length-preserving (collapseQuoted is NOT), so the flag's
+    // index on the stripped text maps directly onto the raw statement's quoted
+    // spans; the payload is the first span at or after the flag.
+    const payloadSpan = findQuotedSpans(sub).find((sp) => sp.start >= flag.index);
+    if (!payloadSpan || payloadSpan.quote !== '"') continue;
+    const activeEscapes = payloadSpan.content.match(/\\[`"$\\]/g) ?? [];
+    if (activeEscapes.length < 2) continue;
+    denials.push(
+      `inline interpreter payload with ${activeEscapes.length} shell-active escapes ` +
+        '(`\\` before one of `` ` `` `"` `$` `\\`) — the exact shape that got mangled: the shell ' +
+        'eats one level of escaping, so the interpreter runs a DIFFERENT program from the one ' +
+        'written (2026-08-14: an escaped backtick went inert and the regex around it became invalid).\n' +
+        '  fix: write the script to the session scratchpad and run it by path — re-runnable, ' +
+        'diffable, no double-escaping.\n' +
+        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_INLINE_SCRIPT=1.\n' +
+        `  offending statement: ${sub.slice(0, 200)}`,
+    );
+  }
 }
 
 // ── Rule: a suite/verify exit code masked by a pipe ──────────────────────────
@@ -346,10 +393,15 @@ for (const sub of subCmds) {
     'masked suite exit code — a test/verify command piped into a filter reports the FILTER\'s status, ' +
       'so a RED suite comes back EXIT 0. `tail` also buffers to EOF, so the captured text holds only the ' +
       'early build notices: green status AND green-looking output, both false.\n' +
+      // Background-safe remedies ONLY: the old `; echo "EXIT=$?"` suggestion
+      // IS the laundering trap when the command is backgrounded (the rule
+      // below), so the guard must never prescribe it.
       (isBash
-        ? '  fix: `npm test > run.log 2>&1; echo "EXIT=$?"` then read/grep `run.log` separately ' +
-          '(`set -o pipefail` also propagates the real status if you must pipe).\n'
-        : '  fix: `npm test *> run.log; "EXIT=$LASTEXITCODE"` then read/grep `run.log` separately.\n') +
+        ? "  fix: `npm test > run.log 2>&1` — let the suite's exit BE the command's exit (no " +
+          "trailing `; echo`: backgrounded, a trailing statement becomes the compound's exit and " +
+          'fakes green), then read/grep `run.log` in a separate call (`set -o pipefail` also ' +
+          'propagates the real status if you must pipe).\n'
+        : '  fix: `npm test *> run.log; exit $LASTEXITCODE` then read/grep `run.log` in a separate call.\n') +
       `  offending statement: ${sub.slice(0, 200)}`,
   );
   break;
@@ -392,6 +444,82 @@ for (const sub of subCmds) {
       `  offending statement: ${sub.slice(0, 200)}`,
   );
   break;
+}
+
+// ── Rule: an over-long ad-hoc peer-CLI dispatch prompt (P28) ─────────────────
+// A mega-prompt inlined into `codex exec` / `agy -p` / `claude.ps1 -p` loses
+// the whole answer SILENTLY — nothing back, hard truncation, or max_tokens
+// spent reasoning out loud (six dated incidents, including an 836-line prompt
+// and the broad multi-file scopes that killed both peer-CLI lanes four times).
+// The reliable unit is ONE bounded item per call. Threshold: well above any
+// one-bounded-item prompt, well below the lane-killing mega-prompts, measured
+// on the statement's longest quoted span (the prompt argument). Uncovered
+// halves, stated outright: a prompt delivered via a stdin file
+// (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc (bodies are blanked
+// above) escapes measurement — the lane-dispatch driver is the primary fix;
+// this refusal is the backstop on the inline form.
+const MAX_DISPATCH_PROMPT_CHARS = 4000;
+const CLI_DISPATCH_PROMPT_CMD =
+  /\bcodex\s+exec\b|\bagy\b[^|;&]*\s(?:-p|--print)\b|\bclaude\.ps1\b[^|;&]*\s(?:-p|--print)\b/;
+for (const sub of subCmds) {
+  if (!CLI_DISPATCH_PROMPT_CMD.test(stripQuoted(sub))) continue;
+  if (bypassEnabled('AUDIT_TOOLS_ALLOW_LONG_DISPATCH', cmd)) continue;
+  const longest = Math.max(0, ...findQuotedSpans(sub).map((sp) => sp.content.length));
+  if (longest <= MAX_DISPATCH_PROMPT_CHARS) continue;
+  denials.push(
+    `over-long inline dispatch prompt (${longest} chars > ${MAX_DISPATCH_PROMPT_CHARS}) — an ` +
+      'over-scoped peer-CLI dispatch loses the WHOLE answer silently: nothing back, truncation, ' +
+      'or max_tokens spent reasoning out loud (six dated incidents; a broad multi-file scope ' +
+      'killed both lanes four times).\n' +
+      '  fix: dispatch one bounded item per call via `node scripts/shared/lane-dispatch.mjs` — ' +
+      'per-item logs, finish_reason + output size recorded, coverage stamp.\n' +
+      '  deliberate: re-run with AUDIT_TOOLS_ALLOW_LONG_DISPATCH=1.',
+  );
+  break;
+}
+
+// ── Rule: a backgrounded suite exit LAUNDERED by a trailing statement ────────
+// Under run_in_background the harness completion notice reads the COMPOUND's
+// exit — i.e. the LAST statement's — so `suite > log; echo "EXIT=$?"` reports
+// exit 0 for a RED suite. 2026-08-12: a red suite reported 0 with two TS2345
+// errors sitting in the unread log; CI caught it, the notice did not. This is
+// the GENERAL status-laundering rule: detected from exit-status FLOW (the
+// statement sequence's last exit-producing element), never a third named
+// syntactic instance. A statement matching SUITE_CMD followed transitively by
+// any non-`&&` separator (`;`, `||`, newline) can have its red replaced by
+// the trailing statement's status; `&&` chains short-circuit and PRESERVE a
+// failure, and a terminal `exit $?` / `exit $LASTEXITCODE` /
+// `exit ${PIPESTATUS[0]}` passes the status through — the prescribed fixes'
+// own shapes, whitelisted so the guard never refuses its own remedy.
+// Foreground runs are exempt (the status is read directly there). Known false
+// negative, accepted: in-statement `&` backgrounding (`npm test … & echo`) is
+// not a split separator and stays uncovered. Bypass reuses
+// AUDIT_TOOLS_ALLOW_MASKED_EXIT — same trap class as the pipe rule above.
+if (runInBackground && !bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) {
+  const seq = splitShellStatementsWithSeparators(cmd);
+  const PASSES_STATUS_THROUGH = /^exit\s+(?:\$\?|\$LASTEXITCODE\b|\$\{?PIPESTATUS)/;
+  const finalPassesThrough = seq.length > 0 && PASSES_STATUS_THROUGH.test(seq[seq.length - 1].text);
+  const laundered =
+    !finalPassesThrough &&
+    seq.some(
+      (part, i) =>
+        SUITE_CMD.test(stripQuoted(part.text)) &&
+        seq.slice(i + 1).some((later) => later.sepBefore !== '&&'),
+    );
+  if (laundered) {
+    denials.push(
+      'backgrounded suite exit LAUNDERED by a trailing statement — under run_in_background the ' +
+        "harness completion notice reads the LAST statement's exit, so a RED suite reports 0 " +
+        '(2026-08-12: two TS2345 errors sat in an unread log while the notice said exit 0).\n' +
+        (isBash
+          ? "  fix: `npm test > run.log 2>&1` — let the suite's exit BE the command's exit (no " +
+            'trailing `; echo`), then read/grep `run.log` in a separate call; `&&`-chaining and a ' +
+            'terminal `exit $?` also preserve the status.\n'
+          : '  fix: `npm test *> run.log; exit $LASTEXITCODE` then read/grep `run.log` in a ' +
+            'separate call.\n') +
+        '  deliberate: re-run with AUDIT_TOOLS_ALLOW_MASKED_EXIT=1.',
+    );
+  }
 }
 
 // ── Emit ─────────────────────────────────────────────────────────────────────

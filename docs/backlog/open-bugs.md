@@ -29,7 +29,7 @@
   declared `uncovered` in guard-reach — never discoverable only by the full suite.
 
 - **`runCommand` buffers child output unboundedly (2026-08-13, medium).**
-  `src/audit/orchestrator/runtimeCommand.ts:48-55` does `stdout += String(chunk)` and truncates only
+  `runCommand` (`src/audit/orchestrator/runtimeCommand.ts`) does `stdout += String(chunk)` and truncates only
   after `close`, so a verbose suite can exhaust memory or throw a `RangeError` from inside a stream
   `data` listener — **uncaught**, killing the process with no recoverable state (the awaiting caller
   never sees it). Same defect class as the coherence-trace blowup, one layer over. **Property:**
@@ -87,8 +87,8 @@
   exit-1 + 0-failed + the `[vitest-worker]: Timeout calling "onTaskUpdate"` stderr marker into a loud
   PASS — the 2026-08-06 red exits were raw `npx vitest run` invocations that bypass it. What stays open
   is the starvation itself: the worker-side birpc reply timeout is a hard 60s
-  (`rpc.-pEldfrD.js` onTimeoutError), so the error means ONE continuous ≥60s sync stretch in some
-  worker. `audit-code-completion.test.ts` is ruled out as sole cause — a solo run does not reproduce and
+  (`rpc.-pEldfrD.js` onTimeoutError), so the error means ONE continuous ≥60s sync stretch in some <!-- doc-citation-exempt: vitest worker bundle chunk -->
+  worker. `audit-code-completion-*.test.ts` is ruled out as sole cause — a solo run does not reproduce and
   an event-loop stall probe recorded ZERO stalls during a full run in which the error fired. Candidate
   sweep: [`reviews/rpc-starvation-candidates-2026-08-07.md`](../reviews/rpc-starvation-candidates-2026-08-07.md)
   — its one confirmed instance (sync full-CLI `next-step` children in
@@ -151,7 +151,7 @@
 
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
   accepted).** The pair itself SHIPPED (intent-equivalence gate wired as the
-  `intent_equivalence_current` obligation — `nextStep.ts` PRIORITY slot between
+  `intent_equivalence_current` obligation — `src/audit/orchestrator/nextStep.ts` PRIORITY slot between
   `intent_checkpoint_current` and `charter_extraction_current` — with
   `artifact_metadata.intent_baseline` as the intent entry's revision authority; per-edge dependency
   slices for `charter_register.json` in `src/audit/orchestrator/dependencySlices.ts`; mechanism
@@ -176,7 +176,7 @@
 
 - **A spec row's category prefix is load-bearing enough to manufacture work — and one was false
   (2026-07-28, low, RESOLVED; the open half is the class).** `spec/audit/artifact-contract.md` gave a
-  TRANSIENT host submission (`intent-equivalence-verdict.json`) the same `Durable host input:` prefix as
+  TRANSIENT host submission (`intent-equivalence-verdict.json`) the same `Durable host input:` prefix as <!-- doc-citation-exempt: transient host submission, written and deleted at runtime -->
   a registered staleness-DAG leaf, so nightly `docs-3` correctly inferred "register it for consistency"
   and collided with DD-9's deliberate no-verdict-pair-cache retirement. Fixed by relabelling the row and
   making the durable row state its registry+DAG membership explicitly; endpoint traces in
@@ -200,12 +200,12 @@
   [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #13.
   ⚠ **Three findings from the reverted attempt — a naive "exempt friction/ from the rm" does NOT work
   and introduces a regression.** (1) The audit half's completion cleanup is `promoteFinalAuditReport`
-  (`src/audit/io/artifacts.ts`, called from `nextStepHelpers.ts` and
-  `advanceAuditCommand.ts`), NOT `cleanupStaleArtifactsDir` — the latter runs at the START of
+  (`src/audit/io/artifacts.ts`, called only from `nextStepHelpers.ts`), NOT
+  `cleanupStaleArtifactsDir` — the latter runs at the START of
   the next advance, so patching it changes nothing at completion. (2) The remediate half's stop-gate is
   MARKER-gated: `.claude/hooks/friction-stop-gate.mjs` requires a recent `state.json` before it reads
-  `friction/` at all, and a fully-green close deletes `state.json` — so preserving the record alone
-  still leaves the gate skipping the area. (3) Preserving `friction/` across cleanups REGRESSES the
+  `.audit-tools/audit/friction/` at all, and a fully-green close deletes `state.json` — so preserving the record alone
+  still leaves the gate skipping the area. (3) Preserving `.audit-tools/audit/friction/` across cleanups REGRESSES the
   audit side, where the run id is the hardcoded literal `"run"` (`nextStepHelpers.ts`,
   `executorRunners.ts`, `operatorHandoff.ts`): every run shares one `friction/run.json`, so a
   prior run's complete record permanently satisfies both the blocking close-out and the hook's
@@ -240,7 +240,7 @@
 - **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
   The idea: revert each site of a change individually and require each reversion to turn the suite red,
   so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
-  A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch, reachable from NO ref at HEAD.
+  A prototype (`assert-sites-pinned.mjs`) existed on an unmerged branch, reachable from NO ref at HEAD. <!-- doc-citation-exempt: prototype on an unmerged branch, reachable from no ref -->
   The independent review that exercised it named both fail-open shapes
   ([`account-metering-round2-independent-review-2026-07-19.md`](../reviews/account-metering-round2-independent-review-2026-07-19.md),
   *The evidence apparatus is itself fail-open*): it measured *"the suite went red"*, not *"a test
@@ -293,9 +293,9 @@
   imports it. Auditor-agnostic rule exactly — it worked only when the DAG author happened to restate
   every declared value in the node description. [[enforce-robustness-in-tooling-not-host-discretion]]
 
-- **`obligation_ledger.input.json` is listed as a required input but never written (2026-08-09, low).**
+- **The `.input.json` form of `obligation_ledger` is listed as a required input but never written (2026-08-09, low).**
   Every contract-pipeline step prompt lists it under Required Inputs; only the enveloped
-  `obligation_ledger.json` exists on disk. Its five sibling artifacts each have both forms. A host
+  `obligation_ledger` form exists on disk. Its five sibling artifacts each have both forms. A host
   following the prompt literally gets ENOENT. Either write the `.input.json` form like the siblings or
   point the prompt at the envelope.
 
@@ -526,7 +526,7 @@
   should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?
 
 - **`hostInputPause.ts` says analyzer consent lives in session config; it lives in
-  `analyzer-policy.json` (2026-08-12, nightly, low).** `src/audit/orchestrator/hostInputPause.ts:31`
+  `.audit-tools/audit/analyzer-policy.json` (2026-08-12, nightly, low).** `src/audit/orchestrator/hostInputPause.ts`
   documents `analyzerConsent` as "recorded per-candidate consent decisions (session config)". It
   cannot be: `SessionIntentV1Schema` is `.strict()` with exactly `review_mode` and `observability`.
   Consent persists via `AnalyzerPolicySchema` at `.audit-tools/audit/analyzer-policy.json`. The

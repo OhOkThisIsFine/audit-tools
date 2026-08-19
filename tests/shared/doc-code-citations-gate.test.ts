@@ -69,7 +69,9 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     repo.git("add", "-A");
     const { code, out } = runChecker(repo.dir);
     expect(code, `expected green, got:\n${out}`).toBe(0);
-    expect(out).toMatch(/every one names a tracked file/);
+    expect(out).toMatch(/every one resolves/);
+    // The tally reports all three citation classes, not just slashed file paths.
+    expect(out).toMatch(/\d+ path \+ \d+ directory \+ \d+ bare-filename citation\(s\)/);
   });
 
   it("is RED on a citation of a non-tracked path under a tracked top-level dir", () => {
@@ -103,7 +105,7 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
       "Globs `src/**/*.ts` and templates `docs/reviews/*-<date>.md` are patterns.\n" +
         "Runtime layout `.audit-tools/audit/steps/current-step.json` is a run artifact.\n" +
         "Prose `src/thing.ts and friends` has whitespace.\n" +
-        "No slash: `package.json`. Unknown top dir: `node_modules/x/y.js`.\n",
+        "Unknown top dir: `node_modules/x/y.js`. Elision: `src/…/deep.ts`.\n",
     );
     repo.git("add", "-A");
     const { code, out } = runChecker(repo.dir);
@@ -132,7 +134,7 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
 
     const { code, out } = runChecker(repo.dir);
     expect(code, `expected green, got:\n${out}`).toBe(0);
-    expect(out).toMatch(/every one names a tracked file/);
+    expect(out).toMatch(/every one resolves/);
 
     repo.git("add", "-u", "docs/deleted.md");
   });
@@ -148,5 +150,140 @@ describe("check-doc-code-citations — backticked repo paths must name tracked f
     rmSync(join(repo.dir, "src", "new-source.ts"));
     rmSync(join(repo.dir, "docs", "new-source.md"));
     repo.git("add", "-u", "docs/new-source.md");
+  });
+
+  // ── directory citations (trailing slash → the tracked dir must exist) ──────
+
+  it("resolves a trailing-slash citation of a tracked root-relative directory", () => {
+    write(repo.dir, "docs/dirs-green.md", "The `src/` tree and the `docs/` tree.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("resolves a trailing-slash citation doc-relative when it misses at the root", () => {
+    write(repo.dir, "docs/sub/x.md", "leaf\n");
+    write(repo.dir, "docs/rel.md", "See the `sub/` folder beside this doc.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("is RED on a trailing-slash citation of a directory that exists nowhere", () => {
+    write(repo.dir, "docs/dir-dead.md", "Prompts live under `prompts/` now.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toMatch(/docs[/\\]?dir-dead\.md:1/);
+    expect(out).toMatch(/prompts\//);
+    expect(out).toMatch(/missing directory/);
+    rmSync(join(repo.dir, "docs", "dir-dead.md"));
+    repo.git("add", "-A");
+  });
+
+  it("never resolves a directory anywhere-in-tree — the P29 stale-`prompts/` regression", () => {
+    // A tracked .github/prompts/ dir must NOT green a `prompts/` citation in a
+    // doc elsewhere: that anywhere-match is exactly how the stale citation P29
+    // caught would have stayed invisible.
+    write(repo.dir, ".github/prompts/x.md", "prompt\n");
+    write(repo.dir, "src/audit/README.md", "Prompt templates live in `prompts/`.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toMatch(/src[/\\]audit[/\\]README\.md:1/);
+    expect(out).toMatch(/missing directory/);
+    rmSync(join(repo.dir, "src", "audit", "README.md"));
+    repo.git("add", "-A");
+  });
+
+  it("skips gitignored and non-repo directory citations", () => {
+    write(repo.dir, ".gitignore", "dist/\nnode_modules/\n");
+    write(
+      repo.dir,
+      "docs/dir-skips.md",
+      "Build output lands in `dist/`. External homes: `~/.claude/x/`, `C:/tmp/`, `file://x/`.\n" +
+        "Runtime layout: `.audit-tools/audit/`.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  // ── bare filename citations (resolved against the tracked set) ─────────────
+
+  it("resolves a bare filename with exactly one tracked match — line suffix included", () => {
+    write(repo.dir, "package.json", '{ "name": "fixture" }\n');
+    write(
+      repo.dir,
+      "docs/bare-green.md",
+      "Entries live in `package.json`; the helper is `thing.ts`, anchored as `thing.ts:1`.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("is RED on a bare filename matching no tracked file", () => {
+    write(repo.dir, "docs/bare-dead.md", "The old test was `removed.ts` here.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toMatch(/docs[/\\]?bare-dead\.md:1/);
+    expect(out).toMatch(/removed\.ts/);
+    expect(out).toMatch(/matches no tracked file/);
+    rmSync(join(repo.dir, "docs", "bare-dead.md"));
+    repo.git("add", "-A");
+  });
+
+  it("is RED on an ambiguous bare filename and names every candidate", () => {
+    write(repo.dir, "a/dup.ts", "export const a = 1;\n");
+    write(repo.dir, "b/dup.ts", "export const b = 2;\n");
+    write(repo.dir, "docs/bare-ambiguous.md", "See `dup.ts` for details.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code).toBe(1);
+    expect(out).toMatch(/ambiguous/);
+    expect(out).toMatch(/a\/dup\.ts/);
+    expect(out).toMatch(/b\/dup\.ts/);
+    rmSync(join(repo.dir, "docs", "bare-ambiguous.md"));
+    rmSync(join(repo.dir, "a"), { recursive: true });
+    rmSync(join(repo.dir, "b"), { recursive: true });
+    repo.git("add", "-A");
+  });
+
+  it("resolves an ambiguous bare filename to a repo-root candidate when exactly one exists", () => {
+    // `README.md`-style: the root file is only citable bare (it has no longer
+    // form), so a single root-level candidate wins the tie.
+    write(repo.dir, "notes.md", "root notes\n");
+    write(repo.dir, "src/notes.md", "nested notes\n");
+    write(repo.dir, "docs/bare-root.md", "Read `notes.md` first.\n");
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("skips leading-dot names, untracked extensions, and runtime artifact names", () => {
+    write(
+      repo.dir,
+      "docs/bare-skips.md",
+      "Dotfile mention `.npmrc`; binary `claude.exe`; method `vi.spyOn`;\n" +
+        "run artifact `repo_manifest.json` is written by the audit, never tracked.\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
+  });
+
+  it("an exempt marker suppresses directory and bare-filename reds too", () => {
+    write(
+      repo.dir,
+      "docs/exempt-new-classes.md",
+      "<!-- doc-citation-exempt: deleted dir narrative -->\n" +
+        "The retired `gone-away/` directory held state.\n" +
+        "`long-gone.ts` was deleted. <!-- doc-citation-exempt: narrative -->\n",
+    );
+    repo.git("add", "-A");
+    const { code, out } = runChecker(repo.dir);
+    expect(code, `expected green, got:\n${out}`).toBe(0);
   });
 });

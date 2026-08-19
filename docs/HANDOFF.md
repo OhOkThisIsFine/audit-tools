@@ -8,14 +8,11 @@
 - Published state: v0.41.1 (the tag, not a sha — a sha here restales on every commit). The
   zero-adapter retirement is live; audit-tools emits complete provider-neutral host workloads
   and ingests bound results. Host submissions ride tool-computed sha256-bound paths under
-  `<artifactsDir>/submissions/`; the flat `incoming/` scheme is gone, so anything still writing
+  `<artifactsDir>/submissions/`; the flat `incoming/` scheme is gone, so anything still writing <!-- doc-citation-exempt: deleted incoming/ scheme narrative (P25) -->
   to it will be rejected.
-- The dogfood audit lap is COMPLETE (2026-08-18): all review, deepening, conflict and
-  runtime-reconciliation passes ingested; synthesis narrative accepted; deliverables promoted to
-  `.audit-tools/audit-report.md` + `.audit-tools/audit-findings.json` (3,230 findings, 10 themes).
-  Executed on the freellmapi pool via a direct `/v1` tool-loop harness with mechanical
-  quote-grounding (agy and codex were quota-walled). A pre-promotion snapshot of the full
-  artifacts tree sits in the session scratchpad if anything from the run is needed.
+- Promoted audit deliverables are live at `.audit-tools/audit-findings.json` (machine contract)
+  and `.audit-tools/audit-report.md` (render); the remediate phase below consumes them. Run
+  history and measurements live in the decision ledger and project memory, not here.
 
 ## Next: remediate phase (fresh conversation)
 
@@ -29,11 +26,12 @@
 
 ## Immediate next
 
-1. The owner-approved build queue (all decided 2026-08-18, owner present; each is an answered
-   subject in the durable decision ledger — named, never numbered, since per-run `sol-N` labels
-   recycle). The owner approved landing the three hook builds this session; the rest follow:
-   - **Child-session split follow-ups that live OUTSIDE this repo** (the split itself and the
-     tree-dirt baseline are landed and stamped in the ledger):
+1. The owner-approved build queue — each item is an answered subject in the durable decision
+   ledger (named, never numbered, since per-run `sol-N` labels recycle); the ledger owns the
+   full list and each item's spec, and stamps `completed_ref` as items land, so the ledger —
+   not this doc — says what remains. Still open here:
+   - **Child-session split follow-ups that live OUTSIDE this repo** (the in-repo half is
+     stamped in the ledger):
      1. `C:\Users\ethan\freellmapi\claude.ps1` (pool-lane launcher): set
         `AUDIT_TOOLS_CHILD_SESSION=1` in the child environment when the working directory is this
         repo — owner/next-session action; this repo cannot carry it.
@@ -43,13 +41,8 @@
      3. Transitional: any OTHER live session predating the feature is child-classified now that
         enforcement is armed; it self-registers from the repo root with
         `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
-   - The 2026-08-18 decision batch: wire `verifyFindingGrounding` into ingest; P34+P26
-     registry-derived pre-commit legs + CI trigger paths; P35 Required-Inputs derivation +
-     prompt-capability test; P32 writeOpenItems refusals; general status-laundering guard rule;
-     citation-gate widening; shared one-item-per-call dispatch wrapper + size guard; HANDOFF
-     heuristic gate; escape-run deny rule; build the pre-run sweep; the constitutional doc edits
-     (all attested); release-flow fold into the ship skill; backlog-1..3 edits; the
-     tested-but-unwired dead-code audit.
+   - The rest of the decided build batch — the decision ledger owns the item list and specs;
+     work it from there, newest unstamped subjects first.
 2. The remediate phase over the promoted findings (see *Next: remediate phase* above) — sequence
    it against the build queue where themes and builds coincide.
 

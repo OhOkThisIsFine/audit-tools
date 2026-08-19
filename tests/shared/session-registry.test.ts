@@ -305,9 +305,12 @@ function runGuards(
     env: {
       ...inherited,
       CLAUDE_PROJECT_DIR: root,
-      // The offload-lane probe would otherwise wait out its 2s timeout on
-      // every spawn; an unroutable loopback port fails instantly.
-      AUDIT_TOOLS_OFFLOAD_PROBE_URL: 'http://127.0.0.1:9/health',
+      // Hermetic lane probes: EVERY http lane is pointed at an unroutable
+      // loopback port (refused instantly — no live service is probed and no 2s
+      // timeout is burned per spawn), and the command-probe lane is skipped.
+      AUDIT_TOOLS_OFFLOAD_PROBE_URL: 'http://127.0.0.1:9/',
+      AUDIT_TOOLS_HEADROOM_PROBE_URL: 'http://127.0.0.1:9/',
+      AUDIT_TOOLS_AGY_PROBE_CMD: 'skip',
       ...env,
     },
   });

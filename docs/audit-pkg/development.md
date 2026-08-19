@@ -44,7 +44,7 @@ task planning, provider-neutral host workloads, strict result ingestion, and syn
 are not audit-tools configuration.
 
 **The ordering has one home** — the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`, walked by
-`decideNextStep`. `README.md` carries the conceptual grouping with the disclaimer that `PRIORITY` is
+`decideNextStep`. `src/audit/README.md` carries the conceptual grouping with the disclaimer that `PRIORITY` is
 authoritative; read the array for the real sequence. Copies of it have drifted before, which is why
 neither this file nor any other keeps a second one.
 

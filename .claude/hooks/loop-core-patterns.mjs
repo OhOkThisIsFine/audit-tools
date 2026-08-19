@@ -3,8 +3,9 @@
 //
 // The .claude hooks run under plain node before any build, so they cannot
 // import the TypeScript module. They import THIS generated sibling instead,
-// so the list has exactly one hand-maintained home. Run the generator (or
-// `npm run check:loop-core-patterns`) after editing the source.
+// so the list and its membership predicate have exactly one hand-maintained
+// home. Run the generator (or `npm run check:loop-core-patterns`) after
+// editing the source.
 export const LOOP_CORE_PATTERNS = [
   "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
@@ -19,3 +20,18 @@ export const LOOP_CORE_PATTERNS = [
   "src/shared/engine/",
   "src/shared/submission/",
 ];
+
+/** Whether a repo-relative path is in the loop-core set; mirrors isLoopCorePath
+ * in the TS source: normalize backslashes + a leading "./"; a "/"-terminated
+ * pattern matches the directory prefix, else exact match. */
+export function isLoopCorePath(path) {
+  const p = String(path).replace(/\\/g, "/").replace(/^\.\//, "");
+  for (const pattern of LOOP_CORE_PATTERNS) {
+    if (pattern.endsWith("/")) {
+      if (p.startsWith(pattern)) return true;
+    } else if (p === pattern) {
+      return true;
+    }
+  }
+  return false;
+}

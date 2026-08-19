@@ -206,6 +206,16 @@ describe("record-path probes are refused by direction, not outright", () => {
     id: "backlog-1",
     subject_key: "kb1",
     auto_close: false,
+    // P32: options[] and eli5 are refused at write when missing — the probe
+    // refusals under test here all fire BEFORE those two, so the throw tests
+    // are unaffected, but the success-path writes need both fields.
+    eli5:
+      "This backlog entry has no code side left to probe, so only the owner can say " +
+      "whether it is still worth keeping or what it should turn into next.",
+    options: [
+      { label: "Keep it", answer: "The entry still earns its place; keep it as is." },
+      { label: "Retire it", answer: "Drop the entry; it no longer describes live work." },
+    ],
     premise_probes: [{ file: RECORD, contains: FRAGMENT }],
     ...overrides,
   });
@@ -320,6 +330,13 @@ describe(".claude/hooks is probe-able source; the rest of .claude stays a record
         {
           id: "h-1",
           subject_key: "kh1",
+          eli5:
+            "A guard hook still carries this rule while the docs say it was retired; " +
+            "either the rule should come out of the hook or the docs need to admit it.",
+          options: [
+            { label: "Keep the rule", answer: "The rule is live and wanted; fix the docs." },
+            { label: "Delete it", answer: "Remove the rule from the hook; the docs are right." },
+          ],
           premise_probes: [{ file: HOOK, contains: FRAGMENT }],
         },
       ],

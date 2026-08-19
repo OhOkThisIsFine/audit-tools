@@ -1,18 +1,24 @@
 // Single source of truth for the "loop-core" path set — the persisted workflow,
 // host-handoff, verification, and orchestrator-step substrate whose changes carry
-// the highest blast radius. Two independent tool-enforcement mechanisms consume it:
+// the highest blast radius. The surviving consumers are the two pre-build
+// enforcement hooks:
 //
-//   • the per-node merged-base GUARD (`acceptNode.ts`) runs the cross-cutting
-//     invariant suite when a remediate node's edits touch loop-core paths, and
 //   • the pre-commit ADVERSARIAL GATE (`.claude/hooks/pre-commit-gate.mjs`)
 //     blocks a hand-authored loop-core commit that lacks a fresh review
-//     attestation.
+//     attestation, and
+//   • the attestation WRITER (`.claude/hooks/attest-loop-core-review.mjs`)
+//     scopes what it binds to the same set.
 //
-// The `.mjs` hook cannot import this TypeScript module (it runs under plain
-// node, pre-build), so it re-declares the same pattern list; a parity test
-// (`tests/shared/loop-core-paths.test.ts`) pins the two lists byte-equal so they
-// can never drift. Keep the array below the ONE canonical definition — edit here,
-// and the parity test forces the hook to follow.
+// Both run under plain node BEFORE any build, so they cannot import this
+// TypeScript module. They import a GENERATED sibling instead
+// (`.claude/hooks/loop-core-patterns.mjs`, emitted by
+// `scripts/shared/generate-loop-core-patterns.mjs`), which carries the pattern
+// list AND the `isLoopCorePath` predicate — so neither the set nor the matching
+// semantics has a second hand-maintained home. `npm run check:loop-core-patterns`
+// (in verify:checks) fails on a stale generated file, and
+// `tests/shared/loop-core-gate-parity.test.ts` pins byte-equality plus
+// behavioral parity of the two predicates. Keep the array below the ONE
+// canonical definition — edit here, then regenerate.
 //
 // A pattern ending in "/" matches any path under that directory prefix; any other
 // pattern matches that exact repo-relative path. Paths are compared with forward

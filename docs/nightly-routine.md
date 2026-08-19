@@ -85,8 +85,9 @@ hand (P11, sol-4 decision 2026-08-06).
 ### Leg 3 — recurring-problem solutions
 
 Read the project memory store
-(`~/.claude/projects/C--Code-audit-tools/memory/`, including its `MEMORY.md`
-index), the global `~/.claude/CLAUDE.md`, backlog *Durable traps* and *Open
+(`~/.claude/projects/C--Code-audit-tools/memory/`, including its
+`…/memory/MEMORY.md` index), the global `~/.claude/CLAUDE.md`, backlog
+*Durable traps* and *Open
 bugs*, and the run's friction records. These are separate recurrence surfaces;
 do not silently narrow the pass to whichever one is easiest to search.
 
@@ -142,7 +143,7 @@ raising the Bash tool's 600000 ms timeout clamp. The command prints the path of
 the HTML report it wrote.
 
 Two reasons it is not nightly. The analysis pass costs primary quota for every
-session not already cached in `facets/`, and — the real one — its suggestions are
+session not already cached in `~/.claude/usage-data/facets/`, and — the real one — its suggestions are
 drawn from a window that reaches back weeks, so night-over-night they barely
 change. A recommendation that reappears nightly is the shape that taught the old
 digest to be ignored.

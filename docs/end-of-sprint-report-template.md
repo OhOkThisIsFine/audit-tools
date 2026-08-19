@@ -34,7 +34,7 @@ so a silent omission can't masquerade as "nothing to report".
 > Never leave a step implied or living only in chat.
 - <next step> → `docs/HANDOFF.md` (immediate next)
 - <open bug> → `docs/backlog/open-bugs.md`; <forward track> → `docs/backlog/forward-tracks.md`
-- <durable design / status> → project memory + `MEMORY.md`
+- <durable design / status> → project memory + `~/.claude/…/memory/MEMORY.md`
 - <durable how-to> → `CLAUDE.md`
 
 ### Decisions needed from you — ASKED here, not pointed at

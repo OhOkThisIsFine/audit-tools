@@ -35,6 +35,15 @@
 // in words rather than rendering as an absent section, which would be
 // indistinguishable from a generator that never ran.
 //
+// HAND-WRITTEN HYGIENE (sol-5 / P30). The generated blocks stopped SPEC drift,
+// but changelog narration regrew in the HAND-WRITTEN region too — a dated
+// bullet, "P25 … is LANDED" paragraphs, a "## Verification state" section. So
+// `--check` also refuses the OBSERVED creep shapes in the hand-written region
+// (`HANDWRITTEN_CREEP_RULES` below), and write mode refuses to regenerate
+// around them: trim the hand-written line first, then rerun. A shape-catch,
+// not semantics — prose that avoids the shapes passes, and the nightly doc leg
+// stays the semantic backstop.
+//
 //   node scripts/shared/generate-handoff-roadmap.mjs           # write
 //   node scripts/shared/generate-handoff-roadmap.mjs --check    # verify only
 //
@@ -53,8 +62,6 @@ import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 import { splitBacklogEntries } from "./backlog-entry-grammar.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
-const handoffPath = join(repoRoot, "docs", "HANDOFF.md");
 
 export const BEGIN_MARKER =
   "<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->";
@@ -463,15 +470,132 @@ export function assertGeneratedTopology(handoffText) {
   return handoffText;
 }
 
-function readSources() {
+// ── hand-written creep heuristics (sol-5 / P30) ──────────────────────────────
+//
+// The hand-written region is everything OUTSIDE the two generated marker
+// ranges. The exclusion is mandatory, not tidy: nightly pointer titles and
+// lifted backlog titles legitimately carry dates and landing words (the
+// 2026-08-13 creep sat INSIDE the live-status block), so scanning generated
+// text would turn the gate red on its own output.
+//
+// Every rule is grounded in an OBSERVED creep instance (removed in 03468b4a)
+// and tuned against the live HANDOFF's legitimate lines so the tree is green
+// at land time. Known uncovered halves, stated in the guard-reach registry
+// note: mid-line dates ("decided 2026-08-18"), a date as the bullet's second
+// word ("- The 2026-08-18 decision batch"), lowercase "are landed" context
+// lines, "is COMPLETE", and any novel phrasing.
+export const HANDWRITTEN_CREEP_RULES = [
+  {
+    id: "dated-bullet",
+    // A bullet that OPENS with an ISO date is a changelog line by shape:
+    // `- 2026-08-12: the day's decision queue was answered in full`. Anchored
+    // to the bullet start ON PURPOSE — an anywhere-date form false-positives
+    // the live-state context lines above.
+    regex: /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\*\*)?\d{4}-\d{2}-\d{2}/,
+    hint: "a bullet that opens with a date is a changelog line",
+  },
+  {
+    id: "landed-narrative",
+    // CASE-SENSITIVE: the observed creep shouted `is LANDED`; lowercase
+    // "are landed" appears in legitimate live context, so /i would misfire.
+    regex: /\b(?:is|are) LANDED\b/,
+    hint: "past-tense landing narrative",
+  },
+  {
+    id: "shipped-narrative",
+    regex: /\bshipped in\b/i,
+    hint: "version-attribution narrative — git log owns what shipped where",
+  },
+  {
+    id: "built-first-narrative",
+    // Grounded: `Built red-tests-first (7 contract tests)`. Capital B keeps
+    // ordinary prose ("built …-first") out of scope.
+    regex: /\bBuilt\b.*-first/,
+    hint: "how-it-was-built narrative",
+  },
+  {
+    id: "verification-state-heading",
+    regex: /^#{1,6}[ \t]+Verification state\b/i,
+    hint: "a verification-evidence section is a run record — CI and git log own it",
+  },
+];
+
+const GENERATED_RANGE_PAIRS = [
+  [LIVE_STATUS_BEGIN_MARKER, LIVE_STATUS_END_MARKER],
+  [BEGIN_MARKER, END_MARKER],
+];
+
+/**
+ * Scan the HAND-WRITTEN region for the banned creep shapes. Returns one
+ * violation per matching (line, rule) with 1-based line numbers into the
+ * ORIGINAL text: generated ranges are blanked line-preserving, never removed,
+ * so a violation after a generated block still names its real line. Split is
+ * `/\r?\n/` and every rule matches per-line — a CRLF working copy must behave
+ * exactly like the LF one in CI.
+ *
+ * Marker validation is not this function's job: callers splice/assert topology
+ * first (the clearer error). An unterminated range is blanked to end-of-file —
+ * conservative, and unreachable from the CLI, which throws on broken markers
+ * before this runs.
+ */
+export function findHandwrittenCreep(text) {
+  const lines = text.split(/\r?\n/);
+  for (const [beginMarker, endMarker] of GENERATED_RANGE_PAIRS) {
+    const begin = lines.findIndex((l) => l.includes(beginMarker));
+    if (begin === -1) continue;
+    const end = lines.findIndex((l, i) => i >= begin && l.includes(endMarker));
+    const stop = end === -1 ? lines.length - 1 : end;
+    for (let i = begin; i <= stop; i++) lines[i] = "";
+  }
+  const violations = [];
+  lines.forEach((line, i) => {
+    for (const rule of HANDWRITTEN_CREEP_RULES) {
+      if (rule.regex.test(line)) {
+        violations.push({ line: i + 1, rule: rule.id, hint: rule.hint, text: line.trim() });
+      }
+    }
+  });
+  return violations;
+}
+
+function creepReport(violations) {
+  const listed = violations
+    .map((v) => `  docs/HANDOFF.md:${v.line}: ${v.rule} (${v.hint})\n      ${v.text}`)
+    .join("\n");
+  return (
+    `\ndocs/HANDOFF.md's HAND-WRITTEN region carries changelog creep — ${violations.length} ` +
+    `line(s) match a banned shape:\n${listed}\n` +
+    `HANDOFF is immediate state and next action only (its own header): shipped-work narration\n` +
+    `belongs in git log, the backlog, or project memory. Trim or reword the line — regenerating\n` +
+    `does NOT fix hand-written creep.\n\n`
+  );
+}
+
+function readSources(backlogDir) {
   const files = [...new Set(ROADMAP_SOURCES.map((s) => s.file))];
   return new Map(files.map((f) => [f, readFileSync(join(backlogDir, f), "utf8")]));
 }
 
-function main() {
-  const nightlyItems = readOpenNightlyItems(repoRoot);
+/**
+ * The CLI body, root-parameterized so the contract test can drive it against a
+ * throwaway tree in-process (the default root is baked from this file's
+ * location, so the spawned CLI always targets the real repo). Returns the
+ * process exit code; `out`/`err` receive what the CLI would print.
+ */
+export function runGenerator({
+  root = repoRoot,
+  check = false,
+  out = (s) => {
+    process.stdout.write(s);
+  },
+  err = (s) => {
+    process.stderr.write(s);
+  },
+} = {}) {
+  const handoffPath = join(root, "docs", "HANDOFF.md");
+  const nightlyItems = readOpenNightlyItems(root);
   const liveStatusBlock = renderNightlyQueue(nightlyItems);
-  const roadmapBlock = renderRoadmap(collectRoadmap(readSources()));
+  const roadmapBlock = renderRoadmap(collectRoadmap(readSources(join(root, "docs", "backlog"))));
   const current = readFileSync(handoffPath, "utf8");
   const rendered = assertGeneratedTopology(
     spliceRoadmap(
@@ -479,27 +603,45 @@ function main() {
       roadmapBlock,
     ),
   );
+  // Splicing above has validated the marker topology, so the creep scan's
+  // range blanking cannot misfire on broken markers.
+  const creep = findHandwrittenCreep(current);
 
-  if (process.argv.includes("--check")) {
+  if (check) {
+    // Creep is reported FIRST but never masks staleness — both halves print,
+    // so one fix-and-retry lap surfaces every problem.
+    if (creep.length > 0) err(creepReport(creep));
     if (current !== rendered) {
-      process.stderr.write(
+      err(
         `\ndocs/HANDOFF.md's generated state is STALE — it no longer matches the nightly queue,\n` +
           `decision ledger, and/or docs/backlog/. A stale generated block is a second, drifting\n` +
           `home for state that already has an authoritative source.\n` +
           `Fix: node scripts/shared/generate-handoff-roadmap.mjs\n\n`,
       );
-      process.exit(1);
+      return 1;
     }
+    if (creep.length > 0) return 1;
     const roadmapCount = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
-    process.stdout.write(
+    out(
       `✓ handoff-roadmap: generated HANDOFF state matches its sources ` +
-        `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s))\n`,
+        `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s)); ` +
+        `hand-written region carries no changelog creep\n`,
     );
-    process.exit(0);
+    return 0;
+  }
+
+  if (creep.length > 0) {
+    // The generator must not regenerate AROUND hand-written creep — a silent
+    // write would launder the changelog line into the next commit. Trim the
+    // hand-written region first, then rerun.
+    err(creepReport(creep));
+    err(`refusing to write docs/HANDOFF.md until the hand-written creep above is trimmed.\n`);
+    return 1;
   }
 
   writeFileSync(handoffPath, rendered, "utf8");
-  process.stdout.write(`wrote ${handoffPath}\n`);
+  out(`wrote ${handoffPath}\n`);
+  return 0;
 }
 
 // Importable as a library (the contract test drives the pure functions with
@@ -508,4 +650,6 @@ function main() {
 const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-if (invokedDirectly) main();
+if (invokedDirectly) {
+  process.exit(runGenerator({ check: process.argv.includes("--check") }));
+}

@@ -38,7 +38,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 ## 2. Commit + push
 
-- Review `git status`. Exclude stray run artifacts (`tmp*.json`, `result.json`, worker payloads). Unexplained foreign working-tree edits → partial-stage around them and ask — may be a concurrent session in this checkout.
+- Review `git status`. Exclude stray run artifacts (`tmp*.json`, `*result.json`, worker payloads). Unexplained foreign working-tree edits → partial-stage around them and ask — may be a concurrent session in this checkout.
 - Conventional commit message. Push `main` to the `audit-tools` remote.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
@@ -60,7 +60,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 <!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
 
-`verify:checks` = `check:control-bytes` + `check:version-gates` + `check:guard-reach` + `check:ci-trigger-paths` + `check:loop-core-patterns` + `check:constitutional-doc-paths` + `check:deadcode` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:nightly-routine-prompt` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:tests` + `build` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
+`verify:checks` = `check:control-bytes` + `check:version-gates` + `check:guard-reach` + `check:ci-trigger-paths` + `check:offload-lanes` + `check:loop-core-patterns` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:deadcode` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:nightly-routine-prompt` + `check:handoff-roadmap` + `check:backlog-index` + `check:memory-citations` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:tests` + `build` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code`
 
 <!-- END gate-enumeration -->
 
@@ -109,8 +109,8 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
 `scripts/shared/profile.mjs` (never a manual flag). Ledgers land in `.audit-tools-profile/` (gitignored);
 under GitHub Actions each profile also appends a markdown table to the job summary.
 
-- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
-- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
+- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `.audit-tools-profile/verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
+- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `.audit-tools-profile/vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
   profile name, not the file suffix).
 - **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
 

@@ -27,17 +27,20 @@ import { join, resolve, dirname } from 'node:path';
 import {
   BEGIN_MARKER,
   END_MARKER,
+  HANDWRITTEN_CREEP_RULES,
   LIVE_STATUS_BEGIN_MARKER,
   LIVE_STATUS_END_MARKER,
   PIN_MARKER,
   ROADMAP_SOURCES,
   assertGeneratedTopology,
   collectRoadmap,
+  findHandwrittenCreep,
   parseBulletEntries,
   parseTrackEntries,
   readOpenNightlyItems,
   renderNightlyQueue,
   renderRoadmap,
+  runGenerator,
   sectionText,
   spliceLiveStatus,
   spliceRoadmap,
@@ -427,6 +430,229 @@ describe('the live tree', () => {
   // through scripts/shared/backlog-entry-grammar.mjs, so there is one grammar and
   // nothing left to drift — extraction replaces the drift test rather than
   // sitting beside it.
+});
+
+// ── hand-written creep heuristics (sol-5 / P30) ──────────────────────────────
+// The generated blocks stopped SPEC drift, but changelog narration regrew in
+// the HAND-WRITTEN region too (a dated 2026-08-12 bullet; a "P25 … is LANDED"
+// paragraph; a "## Verification state" section — all removed in 03468b4a).
+// These heuristics refuse exactly the OBSERVED shapes. A shape-catch, not
+// semantics: prose that avoids all three still passes, and the nightly doc leg
+// stays the semantic backstop.
+describe('hand-written creep heuristics — refuse the observed changelog shapes', () => {
+  it('the rule table is well-formed data: unique ids, a regex and a hint each', () => {
+    const ids = HANDWRITTEN_CREEP_RULES.map((r: { id: string }) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const rule of HANDWRITTEN_CREEP_RULES) {
+      expect(rule.regex).toBeInstanceOf(RegExp);
+      expect(rule.hint.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses a bullet that OPENS with an ISO date — the observed changelog line', () => {
+    const creep = findHandwrittenCreep(
+      "- 2026-08-12: the day's decision queue was answered in full; the executable items landed",
+    );
+    expect(creep).toHaveLength(1);
+    expect(creep[0]).toMatchObject({ line: 1, rule: 'dated-bullet' });
+  });
+
+  it('catches numbered and bold-dated bullet variants of the same shape', () => {
+    expect(findHandwrittenCreep('1. 2026-08-01: something happened')).toMatchObject([
+      { line: 1, rule: 'dated-bullet' },
+    ]);
+    expect(findHandwrittenCreep('  * **2026-08-12: bold date.** body')).toMatchObject([
+      { line: 1, rule: 'dated-bullet' },
+    ]);
+  });
+
+  it('refuses the observed past-tense landing narratives', () => {
+    expect(
+      findHandwrittenCreep('- P25 (sol-9) is LANDED: every host submission rides bound paths'),
+    ).toMatchObject([{ line: 1, rule: 'landed-narrative' }]);
+    expect(findHandwrittenCreep('the fix shipped in v0.41.0')).toMatchObject([
+      { line: 1, rule: 'shipped-narrative' },
+    ]);
+    expect(findHandwrittenCreep('Built red-tests-first (7 contract tests)')).toMatchObject([
+      { line: 1, rule: 'built-first-narrative' },
+    ]);
+  });
+
+  it('refuses a Verification-state heading at any level, case-insensitively', () => {
+    expect(findHandwrittenCreep('## Verification state')).toMatchObject([
+      { line: 1, rule: 'verification-state-heading' },
+    ]);
+    expect(findHandwrittenCreep('### verification state — all green')).toMatchObject([
+      { line: 1, rule: 'verification-state-heading' },
+    ]);
+  });
+
+  it('passes the legitimate live-state shapes the rules were tuned against (false-positive analysis)', () => {
+    // MID-LINE dates are context, not changelog — the leading-date anchor
+    // exists for exactly these lines (all live in HANDOFF when the gate landed).
+    expect(
+      findHandwrittenCreep(
+        '- The dogfood audit lap is COMPLETE (2026-08-18): all review, deepening, conflict and',
+      ),
+    ).toEqual([]);
+    expect(
+      findHandwrittenCreep(
+        '1. The owner-approved build queue (all decided 2026-08-18, owner present; each is an answered',
+      ),
+    ).toEqual([]);
+    // Date as the SECOND word of a bullet — the nearest miss, deliberately uncovered.
+    expect(
+      findHandwrittenCreep('   - The 2026-08-18 decision batch: wire `verifyFindingGrounding` into ingest'),
+    ).toEqual([]);
+    // Lowercase landing prose is legitimate context; the phrase rule is
+    // CASE-SENSITIVE on purpose and lowercase stays a stated uncovered half.
+    expect(
+      findHandwrittenCreep('     tree-dirt baseline are landed and stamped in the ledger):'),
+    ).toEqual([]);
+  });
+
+  it('ignores creep-shaped text INSIDE both generated marker ranges', () => {
+    // Nightly pointer titles and lifted backlog titles legitimately carry dates
+    // and landing words — the 2026-08-13 creep sat INSIDE the live-status block.
+    // Skipping the range exclusion would turn the gate red on its own output.
+    const text = [
+      '# HANDOFF',
+      LIVE_STATUS_BEGIN_MARKER,
+      '- 2026-08-12: generated pointer titles may carry dates',
+      LIVE_STATUS_END_MARKER,
+      BEGIN_MARKER,
+      '- P25 is LANDED inside the roadmap block',
+      '## Verification state',
+      END_MARKER,
+    ].join('\n');
+    expect(findHandwrittenCreep(text)).toEqual([]);
+  });
+
+  it('keeps line numbers correct AFTER a generated block (line-preserving blanking), CRLF included', () => {
+    const lines = [
+      '# HANDOFF', // 1
+      LIVE_STATUS_BEGIN_MARKER, // 2
+      '- 2026-08-12: generated, must not trip', // 3
+      LIVE_STATUS_END_MARKER, // 4
+      '', // 5
+      '- 2026-08-12: hand-written creep below the block', // 6
+    ];
+    // A CRLF working copy must report the same line numbers as the LF one.
+    for (const eol of ['\n', '\r\n']) {
+      const creep = findHandwrittenCreep(lines.join(eol));
+      expect(creep).toHaveLength(1);
+      expect(creep[0]).toMatchObject({ line: 6, rule: 'dated-bullet' });
+    }
+  });
+
+  it('the REAL docs/HANDOFF.md hand-written region is creep-free', () => {
+    // Keeps HEAD demonstrably green, and makes future creep red under plain
+    // `npm test`, not only under verify:checks.
+    const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
+    expect(findHandwrittenCreep(onDisk)).toEqual([]);
+  });
+});
+
+// ── the creep leg wired into --check and write mode, on a throwaway tree ─────
+// The generator's repo root is baked from its own location, so the CLI cannot
+// be spawned against a fixture tree; `runGenerator` is the same body main()
+// runs, root-parameterized, driven in-process here.
+describe('runGenerator — the creep leg refuses at --check and at write time', () => {
+  const backlogSources = () =>
+    new Map([
+      ['open-bugs.md', '# open bugs\n'],
+      ['forward-tracks.md', '## Open tracks\n\n## Forward tracks\n'],
+      ['deferred.md', '# deferred\n'],
+    ]);
+
+  const makeTree = (handwritten: string) => {
+    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-creep-'));
+    mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
+    mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
+    for (const [file, body] of backlogSources()) {
+      writeFileSync(join(root, 'docs', 'backlog', file), body, 'utf8');
+    }
+    writeFileSync(join(root, '.audit-tools', 'nightly', 'open-items.json'), '{"items":[]}', 'utf8');
+    const handoff =
+      `# HANDOFF\n\n${handwritten}\n\n` +
+      `${renderNightlyQueue([])}\n\n${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
+    writeFileSync(join(root, 'docs', 'HANDOFF.md'), handoff, 'utf8');
+    return { root, handoff };
+  };
+
+  const run = (root: string, check: boolean) => {
+    let out = '';
+    let err = '';
+    const code = runGenerator({
+      root,
+      check,
+      out: (s: string) => {
+        out += s;
+      },
+      err: (s: string) => {
+        err += s;
+      },
+    });
+    return { code, out, err };
+  };
+
+  it('--check exits 1 on hand-written creep, naming file, line and rule', () => {
+    const { root } = makeTree("- 2026-08-12: the day's decision queue was answered in full");
+    try {
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/docs\/HANDOFF\.md:3/);
+      expect(err).toMatch(/dated-bullet/);
+      // Creep alone fails the check — the generated blocks in this fixture are
+      // FRESH, so a staleness message here would be a false signal.
+      expect(err).not.toMatch(/STALE/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('write mode REFUSES to regenerate around creep, leaving the file byte-identical', () => {
+    const { root, handoff } = makeTree('- P25 (sol-9) is LANDED: narrative');
+    try {
+      const { code, err } = run(root, false);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/refus/i);
+      expect(readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8')).toBe(handoff);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a creep-free tree stays green in --check and writable in write mode', () => {
+    const { root } = makeTree('- Published state: v0.0.0 (fixture).');
+    try {
+      const checked = run(root, true);
+      expect(checked.code, checked.err).toBe(0);
+      expect(checked.out).toMatch(/pointer\(s\)/);
+      const written = run(root, false);
+      expect(written.code, written.err).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('creep and staleness are BOTH reported — creep does not mask a stale block', () => {
+    const { root, handoff } = makeTree('- 2026-08-12: creep');
+    try {
+      // Stale the roadmap slot by hand-editing inside the markers.
+      writeFileSync(
+        join(root, 'docs', 'HANDOFF.md'),
+        handoff.replace('*(nothing pinned', '*(hand-edited'),
+        'utf8',
+      );
+      const { code, err } = run(root, true);
+      expect(code, err).toBe(1);
+      expect(err).toMatch(/dated-bullet/);
+      expect(err).toMatch(/STALE/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── the pre-commit gate, end to end in a throwaway repo ──────────────────────

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Regenerate `.claude/hooks/loop-core-patterns.mjs` from the canonical
-// TypeScript source of truth (`src/shared/loopCorePaths.ts`).
+// Regenerate `.claude/hooks/loop-core-patterns.mjs` (pattern list + membership
+// predicate) from the canonical TypeScript source of truth
+// (`src/shared/loopCorePaths.ts`).
 //
 // WHY THIS EXISTS. The loop-core path list had THREE homes: the TS module plus a
 // hand-maintained copy inside each of the two hooks (`pre-commit-gate.mjs`,
@@ -11,6 +12,11 @@
 // the discovery path. Adding `src/audit/cli/dispatchAttempted.ts` meant editing
 // two copies and finding the third only when the parity test went red. The
 // property that should hold: ONE edit adds a loop-core path.
+//
+// The same argument covered the PREDICATE: each hook re-implemented the
+// matching logic as a local `pinsLoopCore`, so the SEMANTICS could fork even
+// while the list stayed byte-equal. The generated module therefore also emits
+// `isLoopCorePath`, mirroring the TS body, and the hooks import it.
 //
 // This is the project's standing "never hand-maintain a table something else can
 // generate" rule applied to our own tree.
@@ -48,11 +54,27 @@ export function renderModule(patterns) {
     `//\n` +
     `// The .claude hooks run under plain node before any build, so they cannot\n` +
     `// import the TypeScript module. They import THIS generated sibling instead,\n` +
-    `// so the list has exactly one hand-maintained home. Run the generator (or\n` +
-    `// \`npm run check:loop-core-patterns\`) after editing the source.\n` +
+    `// so the list and its membership predicate have exactly one hand-maintained\n` +
+    `// home. Run the generator (or \`npm run check:loop-core-patterns\`) after\n` +
+    `// editing the source.\n` +
     `export const LOOP_CORE_PATTERNS = [\n` +
     patterns.map((p) => `  ${JSON.stringify(p)},\n`).join("") +
-    `];\n`
+    `];\n` +
+    `\n` +
+    `/** Whether a repo-relative path is in the loop-core set; mirrors isLoopCorePath\n` +
+    ` * in the TS source: normalize backslashes + a leading "./"; a "/"-terminated\n` +
+    ` * pattern matches the directory prefix, else exact match. */\n` +
+    `export function isLoopCorePath(path) {\n` +
+    `  const p = String(path).replace(/\\\\/g, "/").replace(/^\\.\\//, "");\n` +
+    `  for (const pattern of LOOP_CORE_PATTERNS) {\n` +
+    `    if (pattern.endsWith("/")) {\n` +
+    `      if (p.startsWith(pattern)) return true;\n` +
+    `    } else if (p === pattern) {\n` +
+    `      return true;\n` +
+    `    }\n` +
+    `  }\n` +
+    `  return false;\n` +
+    `}\n`
   );
 }
 
@@ -70,14 +92,14 @@ function main() {
     if (current !== rendered) {
       process.stderr.write(
         `\n${outputPath} is stale or missing.\n` +
-          `The loop-core gate would run against a DIFFERENT path list than the source of truth, ` +
+          `The loop-core gate would run against a DIFFERENT path list or predicate than the source of truth, ` +
           `which silently narrows or widens which commits require review attestation.\n` +
           `Fix: node scripts/shared/generate-loop-core-patterns.mjs\n\n`,
       );
       process.exit(1);
     }
     process.stdout.write(
-      `✓ loop-core-patterns: generated hook list matches ${patterns.length} canonical pattern(s)\n`,
+      `✓ loop-core-patterns: generated hook module matches ${patterns.length} canonical pattern(s) + predicate\n`,
     );
     process.exit(0);
   }

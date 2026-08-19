@@ -225,7 +225,7 @@ export const DOC_MANIFEST = [
       "`scripts/nightly/ingest-answers.mjs` reads the ticks into `.claude/nightly-decisions.json` and " +
       "re-renders, so answered items drop out on their own. Everything except the ticked boxes and the " +
       "`notes` blocks is rewritten on each run — review the item CONTENT at its source " +
-      "(`open-items.json`), never by hand-editing this file. Its status-noise is the point: it is a " +
+      "(`.audit-tools/nightly/open-items.json`), never by hand-editing this file. Its status-noise is the point: it is a " +
       "work queue, the same sanctioned exception as `docs/HANDOFF.md`.",
     autoApply: "**No — generator-owned** (and the owner's answers are the only hand-written part).",
   },

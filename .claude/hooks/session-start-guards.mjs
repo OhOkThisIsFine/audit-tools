@@ -8,8 +8,8 @@
 // git faults degrade to silence.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
-import { get as httpGet } from 'node:http';
 import { join, resolve } from 'node:path';
+import { OFFLOAD_LANES, probeLane } from '../../scripts/shared/offload-lane-data.mjs';
 import {
   baselineFromEntries,
   pruneStaleSessionRecords,
@@ -287,40 +287,27 @@ try {
 }
 
 // ── Offload-lane liveness ────────────────────────────────────────────────────
-// The local router is the free offload lane and it has no standalone fallback,
-// so when it is down every delegated call fails — but only once the lap has
-// already planned around delegation. Ten seconds at session start converts a
-// mid-lap stall into a known constraint. Probe only; starting it is the owner's
-// call (a second instance would collide on the port).
-const PROXY_URL = process.env.AUDIT_TOOLS_OFFLOAD_PROBE_URL ?? 'http://127.0.0.1:3001/health';
-const proxyUp = await new Promise((resolve) => {
-  let settled = false;
-  const done = (v) => {
-    if (!settled) {
-      settled = true;
-      resolve(v);
-    }
-  };
-  try {
-    const req = httpGet(PROXY_URL, (res) => {
-      res.resume(); // drain — status is the whole signal
-      done(res.statusCode !== undefined && res.statusCode < 500);
-    });
-    req.setTimeout(2_000, () => {
-      req.destroy();
-      done(false);
-    });
-    req.on('error', () => done(false));
-  } catch {
-    done(false);
-  }
-});
-if (!proxyUp) {
-  notes.push(
-    `OFFLOAD LANE DOWN — the local router is not answering on ${PROXY_URL}, and it has no standalone ` +
-      'fallback: every delegated recon/review call will fail. Plan this lap without delegation, or start it:\n' +
-      '    powershell -File C:\\Users\\ethan\\freellmapi\\start.ps1',
+// The delegation lanes are DECLARED DATA (scripts/shared/offload-lane-data.mjs,
+// reconciled by check:offload-lanes the way guard reach is) and this leg probes
+// every probeable row CONCURRENTLY, each bounded by its own timeout, so a dead
+// lane is a named constraint at session start rather than a mid-lap stall.
+// Probe only; bringing a lane up is the owner's call — each down note carries
+// its row's remedy verbatim. Silent-unless-down: unprobeable rows state their
+// reasons as registry data and produce no every-session line (the reap leg
+// above states why — a note that fires every session gets read past).
+try {
+  const probed = await Promise.all(
+    OFFLOAD_LANES.map(async (lane) => ({ lane, up: await probeLane(lane, process.env) })),
   );
+  for (const { lane, up } of probed) {
+    if (up !== false) continue; // up, or unprobeable (null) — silent either way
+    notes.push(
+      `OFFLOAD LANE DOWN — ${lane.label} is not answering (${lane.transport}). ` +
+        `Plan this lap without it, or bring it up:\n    ${lane.remedy}`,
+    );
+  }
+} catch {
+  /* lane probing is best-effort — a probe must never block a session */
 }
 
 if (notes.length > 0) {

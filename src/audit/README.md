@@ -5,7 +5,7 @@ picks the highest-priority unsatisfied obligation, runs one bounded unit, persis
 
 ## Module index
 
-- `orchestrator/` — core loop (`advance.ts` → `advanceAudit`), `nextStep.ts` priority chain, staleness DAG.
+- `orchestrator/` — core loop (`advance.ts` → `advanceAudit`), the `src/audit/orchestrator/nextStep.ts` priority chain, staleness DAG.
 - `extractors/` — deterministic repo analysis (graph, git-history, structure).
 - `decompose/` — structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent
   sources), emitting `structure_decomposition.json` and the two non-co-localization findings.

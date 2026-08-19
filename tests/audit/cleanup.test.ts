@@ -5,6 +5,9 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -16,6 +19,15 @@ async function dirExists(dirPath: string): Promise<boolean> {
   try {
     const s = await stat(dirPath);
     return s.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const s = await stat(filePath);
+    return s.isFile();
   } catch {
     return false;
   }
@@ -356,5 +368,134 @@ test("cmdCleanup: stdout is always valid JSON", async () => {
     }
     expect(typeof parsed.action === "string", "action should be a string").toBeTruthy();
     expect(typeof parsed.artifacts_dir === "string", "artifacts_dir should be a string").toBeTruthy();
+  });
+});
+
+// ── Pre-run sweep eligibility (docs-14) ───────────────────────────────────────
+// preRun=true is the next-step pre-run sweep mode: NOT_STARTED-ONLY. A lingering
+// `complete` dir at next-step time is a live continuation (friction triage
+// pending, or an unpromoted report the completion transition itself deletes) —
+// sweeping it would be destroy-before-verify. The manual verb keeps its
+// complete+not_started semantics unchanged.
+
+test("preRun sweep: deletes when status is not_started", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "not_started" }),
+    );
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("not_started");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed for not_started status in pre-run mode").toBeTruthy();
+  });
+});
+
+test("preRun sweep: preserves a complete dir (live continuation, never pre-run junk)", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "complete" }),
+    );
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("complete");
+    if (typeof result.reason !== "string") {
+      throw new Error("Expected the pre-run complete skip to carry a reason");
+    }
+    expect(result.reason.includes("complete"), "reason should name the complete status").toBeTruthy();
+    expect(await dirExists(artifactsDir), "a complete dir must survive the pre-run sweep — promotion / friction triage own it").toBeTruthy();
+  });
+});
+
+test("preRun sweep: preserves active and blocked dirs", async () => {
+  for (const status of ["active", "blocked"] as const) {
+    await withTempDir("audit-cleanup-test-", async (tempDir) => {
+      const artifactsDir = join(tempDir, ".audit-tools/audit");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeFile(
+        join(artifactsDir, "audit_state.json"),
+        JSON.stringify({ status }),
+      );
+
+      const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+
+      expect(result.action).toBe("skipped");
+      expect(result.status).toBe(status);
+      expect(await dirExists(artifactsDir), `a ${status} dir must survive the pre-run sweep`).toBeTruthy();
+    });
+  }
+});
+
+test("preRun sweep: preserves a dir with no audit_state.json", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // No audit_state.json written — status unknown, never pre-run eligible.
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir, { preRun: true });
+
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("unknown");
+    expect(await dirExists(artifactsDir), "an unknown-status dir must survive the pre-run sweep").toBeTruthy();
+  });
+});
+
+test("cleanup verb semantics unchanged: complete stays eligible without preRun", async () => {
+  await withTempDir("audit-cleanup-test-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "complete" }),
+    );
+
+    const result = await cleanupStaleArtifactsDir(artifactsDir);
+
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("complete");
+    expect(!(await dirExists(artifactsDir)), "the manual verb must still clear a complete dir").toBeTruthy();
+  });
+});
+
+// ── Pre-run sweep wiring (next-step entry) ────────────────────────────────────
+// The sweep runs at the top of cmdNextStepBody: a stale not_started dir left by
+// a crashed prior run is cleared before the fresh run bootstraps. The
+// complete-dir preservation half of the wiring is anchored by
+// tests/audit/next-step-core-report.test.ts (promotion + pending-friction-triage
+// steps both require the complete dir to survive next-step entry).
+
+test("next-step clears a stale not_started artifacts dir before the fresh run", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "not_started" }) + "\n",
+    );
+    const junkPath = join(artifactsDir, "stale-junk.txt");
+    await writeFile(junkPath, "left by a crashed prior run\n");
+
+    // Isolated, empty analyzer cache so the run pauses deterministically
+    // regardless of what the host machine's shared cache holds.
+    const analyzerCache = join(dirname(root), "empty-analyzer-cache");
+    await mkdir(analyzerCache, { recursive: true });
+
+    const { stdout } = await runWrapper(["next-step"], {
+      cwd: root,
+      env: { AUDIT_TOOLS_ANALYZER_CACHE: analyzerCache },
+    });
+    const step = JSON.parse(stdout);
+
+    expect(!(await fileExists(junkPath)), "the stale not_started dir (and its junk) should be swept at next-step entry").toBeTruthy();
+    expect(await dirExists(artifactsDir), "the artifacts dir should be recreated for the fresh run").toBeTruthy();
+    expect(typeof step.step_kind === "string" && step.step_kind.length > 0, "the fresh run should proceed to a real step").toBeTruthy();
   });
 });

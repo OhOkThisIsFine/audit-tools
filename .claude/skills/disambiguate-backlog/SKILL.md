@@ -29,7 +29,9 @@ Scope is two raw-signal sources, nothing else:
 - **`docs/backlog/`** — every entry in *open-bugs.md*, *forward-tracks.md*, *deferred.md* (was: *Open bugs / frictions*, *Forward
   tracks*, *Deferred / waiting*. (Skip *Durable traps* — it's reference, not
   work-to-spec; only touch a trap if the owner asks.)
-- **meta-audit reflections** — worker feedback: `meta-audit-log.md` if present
+- **meta-audit reflections** — worker feedback:
+  <!-- doc-citation-exempt: meta-audit-log.md is untracked by convention -->
+  `meta-audit-log.md` if present
   (untracked by convention, append-only) plus any `agent-feedback.jsonl` under
   `.audit-tools/**`. Shape: `{ instruction_clarity, ambiguities[],
   tool_friction[], suggestions[], severity }` (`src/shared/agentReflections.ts`).
@@ -58,7 +60,7 @@ Read the SEEK INDEX in [`docs/backlog.md`](../../../docs/backlog.md) first — i
 entry. Enumerate the items from that index, then read each entry with an OFFSET read at its anchor.
 Do not read the backlog files in full: they no longer fit one call, so a "read it in full" pass
 silently truncates and the items past the cut go missing without a signal. Each item is a discrete
-unit (one bullet = one item; a bullet with sub-bullets is one item). Glob `.audit-tools/**/agent-feedback.jsonl` and read `meta-audit-log.md`
+unit (one bullet = one item; a bullet with sub-bullets is one item). Glob `.audit-tools/**/agent-feedback.jsonl` and read `meta-audit-log.md` <!-- doc-citation-exempt: untracked-by-convention log -->
 if it exists; parse reflections, group recurring ambiguities/frictions into
 candidate items. Hold the full list — don't drop anything yet.
 

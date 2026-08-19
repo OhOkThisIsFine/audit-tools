@@ -590,6 +590,35 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
           `Otherwise fix the probe to quote the exact current text.`,
       );
     }
+    // The two fields that make an item ANSWERABLE, enforced beside the probe
+    // rules that make it CLOSABLE. The contract calls both mandatory
+    // ("Every item carries them", "Every item gets one"); on 2026-07-29 18 items
+    // shipped with neither, because the contract only NAMED the fields and the
+    // renderer degrades silently (render-inbox.mjs:78 defaults options to [],
+    // :90-95 renders eli5 only when truthy). A named requirement is not a
+    // refusal — CLAUDE.md, auditor-agnostic robustness.
+    const options = Array.isArray(item?.options) ? item.options : [];
+    const malformed = options.filter(
+      (o) => typeof o?.label !== 'string' || !o.label.trim() ||
+             typeof o?.answer !== 'string' || !o.answer.trim(),
+    );
+    if (options.length === 0 || malformed.length > 0) {
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable options[] ` +
+          `(need [{label, answer}, ...] with non-empty strings; ` +
+          `${options.length === 0 ? 'none were supplied' : `${malformed.length} are malformed`}). ` +
+          `Without them the item renders as a bare text box and answering costs an essay ` +
+          `instead of a press. Offer the real alternatives including the do-nothing one.`,
+      );
+    }
+    if (typeof item?.eli5 !== 'string' || item.eli5.trim().length < 80) {
+      throw new Error(
+        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable eli5 ` +
+          `(need full sentences for a non-expert reader: what the doc/backlog claims, ` +
+          `what the code does, why they diverge, and what each answer means going forward — ` +
+          `not an internal id or symbol-name shorthand).`,
+      );
+    }
   }
 
   const previous = readOpenItems(root);

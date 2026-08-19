@@ -98,7 +98,18 @@ export const GUARDS = [
     kind: 'gate',
     impl: 'check:doc-code-citations',
     preCommit: 'reach',
-    fix: 'a backticked repo path cited by a staged doc does not exist — fix the citation, or the rename/delete that broke it',
+    fix:
+      'a backticked citation in a staged doc does not resolve — a slashed path must name a tracked file, ' +
+      'a trailing-slash directory must exist (root- or doc-relative), and a bare filename must match ' +
+      'exactly one tracked basename (a lone repo-root candidate wins a tie; run-artifact names from ' +
+      'scripts/shared/runtime-artifact-names.generated.mjs are skipped) — fix the citation, cite the ' +
+      'full path, or add a doc-citation-exempt marker',
+    note:
+      'uncovered halves, declared: unbackticked path mentions in prose/tables (the P29 glossary case) ' +
+      'are out of scope; bare names with a leading dot or dash (.gitignore/.npmrc — extension-mention ' +
+      'idiom) and bare names whose extension no tracked file uses go unchecked; slashed tokens with no ' +
+      'extension and no trailing slash, and backslashed Windows-path prose, are skipped; gitignored and ' +
+      'non-repo (~/drive/URL) citations are out of scope by construction (2026-08-18)',
   },
   {
     id: 'check:gate-enumeration',
@@ -130,6 +141,13 @@ export const GUARDS = [
   { id: 'check:loop-core-patterns', kind: 'gate', impl: 'check:loop-core-patterns', preCommit: false },
   { id: 'check:constitutional-doc-paths', kind: 'gate', impl: 'check:constitutional-doc-paths', preCommit: false },
   {
+    id: 'check:runtime-artifact-names',
+    kind: 'gate',
+    impl: 'check:runtime-artifact-names',
+    preCommit: false,
+    fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
+  },
+  {
     id: 'check:handoff-roadmap',
     kind: 'gate',
     impl: 'check:handoff-roadmap',
@@ -137,7 +155,15 @@ export const GUARDS = [
     fix:
       'run `node scripts/shared/generate-handoff-roadmap.mjs`, then re-stage docs/HANDOFF.md. Do NOT ' +
       'hand-edit inside either generated block; queue detail lives in docs/nightly-inbox.md and ' +
-      'roadmap entry text lives in the backlog',
+      'roadmap entry text lives in the backlog. If the check instead names hand-written changelog ' +
+      'creep (dated bullet / landing narrative / Verification-state heading), regenerating fixes ' +
+      'NOTHING — trim or reword the named line; shipped-work narration belongs in git log, the ' +
+      'backlog, or memory',
+    note:
+      'uncovered half of the hand-written creep leg: narration avoiding all three shapes passes — ' +
+      'mid-line dates ("decided 2026-08-18"), a date as the bullet\'s second word, lowercase ' +
+      '"landed", "is COMPLETE", novel phrasings; the nightly doc leg remains the semantic backstop ' +
+      '(2026-08-18)',
   },
   {
     id: 'check:backlog-index',
@@ -168,6 +194,16 @@ export const GUARDS = [
       'a staged backlog entry leads with a status label, and the backlog is a living to-do list, not a ' +
       'status log — a fully-closed entry is DELETED (durables move to their real home first), a ' +
       'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
+  },
+  {
+    id: 'check:backlog-line-numbers',
+    kind: 'gate',
+    impl: 'check:backlog-line-numbers',
+    preCommit: 'reach',
+    fix:
+      'a staged backlog entry cites a bare line number (a backticked `path:123` or a bare `:21` span) — ' +
+      'cite the SYMBOL instead, or the file alone when no good symbol exists; never auto-resolve a ' +
+      'drifted number to the nearest declaration (dropping the number beats false precision)',
   },
   {
     id: 'check:memory-citations',
@@ -208,6 +244,21 @@ export const GUARDS = [
     note:
       'derives the ci.yml trigger-path list from non-declared-gap REACH rows + the always-trigger ' +
       'base, so a new claimed tree cannot land outside the CI trigger set',
+  },
+  {
+    id: 'check:offload-lanes',
+    kind: 'gate',
+    impl: 'check:offload-lanes',
+    preCommit: 'reach',
+    fix:
+      'reconcile scripts/shared/offload-lane-data.mjs: every lane row needs a valid bounded probe or an ' +
+      'unprobeableReason, plus a remedy; the session-start hook must iterate the registry (no /health, ' +
+      'no hardcoded lane URL); DOC_LANE_MARKERS must map every documented lane spelling to a live row',
+    note:
+      'uncovered halves, stated as data: ~/.claude/CLAUDE.md is the true lane authority but untracked — ' +
+      'a gate must not ask the local disk, so its lane list is NOT reconciled (scanned docs: ' +
+      'docs/nightly-routine.md + docs/backlog/durable-traps.md only); and a probe proves reachable ' +
+      'TRANSPORT only, never that a model, quota, or dispatched session will serve',
   },
   {
     id: 'check:lint',
@@ -275,6 +326,7 @@ export const GUARDS = [
       'gates import',
   },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
+  { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
@@ -338,7 +390,7 @@ export const GUARDS = [
     id: 'loop-core-gate-parity-test',
     kind: 'contract-test',
     impl: 'tests/shared/loop-core-gate-parity.test.ts',
-    note: 'pins pattern parity between pre-commit-gate and attest-loop-core-review',
+    note: 'pins pattern + predicate parity between pre-commit-gate and attest-loop-core-review',
   },
   {
     id: 'attest-derived-file-preflight-test',
@@ -365,6 +417,33 @@ export const GUARDS = [
     kind: 'contract-test',
     impl: 'tests/shared/ci-trigger-paths.test.ts',
     note: 'P26: derivation excludes declared-gap rows, keeps the always-trigger base, and the tracked ci.yml matches the generator byte-for-byte',
+  },
+  {
+    id: 'runtime-artifact-names-drift-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/runtime-artifact-names-drift.test.ts',
+    note:
+      'drift pin for the generated run-artifact name set the doc-citation gate consumes — re-runs the ' +
+      'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
+  },
+  {
+    id: 'offload-lane-probe-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/offload-lane-probe.test.ts',
+    note:
+      'P36 red-green: a catch-all 200 classifies DOWN, the registry declares the headroom lane, the live ' +
+      'registry/hook/docs reconcile clean, and the hook lane leg runs end-to-end against fake lane servers',
+  },
+  {
+    id: 'lane-dispatch-driver-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/lane-dispatch.test.ts',
+    note:
+      'P28 wrapper half (sol-3): the shared one-item-per-call dispatch driver — one lane call per ' +
+      'item, resume drops errored rows and re-queues exactly them, preflight aborts with a stamped ' +
+      'sidecar and a typed throw, per-item log redirect before parse, finish_reason/output_bytes on ' +
+      'every lane-answered row, and the read-verbatim coverage-stamp field names/order the nightly ' +
+      'routine consumes',
   },
 ];
 
@@ -426,6 +505,8 @@ export const REACH = [
       'pre-commit-child-session-test',
       'pre-commit-derived-legs-test',
       'loop-core-gate-parity-test',
+      'offload-lane-probe-test',
+      'check:offload-lanes',
       'check:loop-core-patterns',
       'check:guard-reach',
     ],
@@ -434,7 +515,10 @@ export const REACH = [
       '— it is exercised only through hook-trap-guards-test and pre-commit-child-session-test. ' +
       '(question-philosophy-gate and closeout-challenge-gate are covered ' +
       'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests; ' +
-      'nightly-surface by nightly-routine-test.)',
+      'nightly-surface by nightly-routine-test.)' +
+      ' The P28 long-dispatch refusal in shell-trap-guard measures only the INLINE quoted prompt — a ' +
+      'prompt delivered via a stdin file (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc body ' +
+      '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix.',
   },
   {
     area: 'gate scripts (the guards themselves)',
@@ -458,6 +542,8 @@ export const REACH = [
       'check:doc-manifest',
       'check:gate-enumeration',
       'check:ci-trigger-paths',
+      // Parity over its own generator (scripts/shared/generate-runtime-artifact-names.mjs --check).
+      'check:runtime-artifact-names',
     ],
     uncovered:
       'scripts/ is reached by no tsconfig — deliberate (validate at the construction site; check:lint ' +
@@ -485,26 +571,39 @@ export const REACH = [
       'check:dup',
       // Executes scripts/shared/derived-file-preflight.mjs directly (P34).
       'precommit-leg-derivation-test',
+      'lane-dispatch-driver-test',
     ],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
-      'poll-log-throttle run only at release/maintenance time — no build gate executes them; no ' +
-      'typecheck over scripts/ (deliberate; check:lint is an untyped floor)',
+      'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
+      "(triage-backlog's sweep driver is now shared lane-dispatch.mjs, gate-executed via " +
+      "tests/shared/lane-dispatch.test.ts — the uncovered half is triage-backlog's HTTP lane + CLI " +
+      'shell only); no typecheck over scripts/ (deliberate; check:lint is an untyped floor)',
   },
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'check:lint', 'check:dup'],
+    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup'],
     note:
       'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
       'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
-      'refusals. scope-ledger.mjs is covered by tests/shared/nightly-scope-ledger.test.ts — item ' +
+      'refusals. The P32 answerability refusals in writeOpenItems (options[]/eli5) are pinned by ' +
+      'tests/shared/nightly-items-mandatory-fields.test.ts. ' +
+      'scope-ledger.mjs is covered by tests/shared/nightly-scope-ledger.test.ts — item ' +
       'identity, the refusal of an unanchored stamp, the never-examined window, and the coverage ' +
       'record. UNCOVERED HALF: nothing executes the routine end-to-end, so the ORDER of the legs, the ' +
       'decision to escalate-vs-apply, and whether a run actually CALLS `stamp` for the docs it claims ' +
       'to have examined all remain behavioural, guarded by docs/nightly-routine.md and the three-agent ' +
       'gate rather than by a test.',
+  },
+  {
+    area: 'offload lane registry',
+    files: ['scripts/shared/offload-lane-data.mjs'],
+    guardedBy: ['check:offload-lanes', 'offload-lane-probe-test', 'check:lint', 'check:dup'],
+    note:
+      'lane rows + probe substrate the session-start lane-liveness leg iterates; reconciled against the ' +
+      'hook source and the two tracked docs by check:offload-lanes',
   },
   {
     area: 'rendered host assets',
@@ -601,10 +700,11 @@ export const REACH = [
   {
     area: 'backlog entry files',
     files: ['docs/backlog/*.md'],
-    guardedBy: ['check:backlog-index', 'check:backlog-budget', 'check:backlog-status', 'check:handoff-roadmap'],
+    guardedBy: ['check:backlog-index', 'check:backlog-budget', 'check:backlog-status', 'check:backlog-line-numbers', 'check:handoff-roadmap'],
     note:
-      'the four gates that actually read the split backlog files (seek-index parity, size budget, ' +
-      'status-label ban, roadmap title lift); the markdown-corpus row carries the generic doc gates',
+      'the five gates that actually read the split backlog files (seek-index parity, size budget, ' +
+      'status-label ban, line-number-citation ban, roadmap title lift); the markdown-corpus row ' +
+      'carries the generic doc gates',
   },
   {
     area: 'backlog seek index',
@@ -622,6 +722,12 @@ export const REACH = [
     note: 'the generated scheduler prompt and its two canonical sources — either direction of drift fails the gate',
   },
   {
+    area: 'offload-lane doc markers',
+    files: ['docs/nightly-routine.md', 'docs/backlog/durable-traps.md'],
+    guardedBy: ['check:offload-lanes'],
+    note: 'the two TRACKED docs the lane reconciler scans for DOC_LANE_MARKERS (SCANNED_DOCS in the registry)',
+  },
+  {
     area: 'philosophy pair',
     files: ['docs/project-philosophy.md', 'README.md'],
     guardedBy: ['check:philosophy-brief'],
@@ -637,7 +743,7 @@ export const REACH = [
     area: 'HANDOFF',
     files: ['docs/HANDOFF.md'],
     guardedBy: ['check:handoff-roadmap'],
-    note: 'generated-block parity over the handoff itself; its queue/ledger sources have their own rows below',
+    note: 'generated-block parity PLUS hand-written-region creep heuristics over the handoff itself; its queue/ledger sources have their own rows below',
   },
   {
     area: 'relative-link lift',

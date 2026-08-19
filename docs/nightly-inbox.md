@@ -1025,6 +1025,7 @@ src/shared/loopCorePaths.ts is the single list of "loop-core" file patterns — 
 
 ### The question
 
+<!-- doc-citation-exempt: quotes a deleted file by design -->
 src/shared/loopCorePaths.ts:5 names `acceptNode.ts` as a consumer, but that file was deleted in 467b1e8f; and `isLoopCorePath` has zero production callers while .claude/hooks/pre-commit-gate.mjs re-implements the predicate. Correct the header only, or also resolve the unwired predicate?
 
 ### Your answer
@@ -1557,6 +1558,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P29-citation-gate-blind-spots/PR
 <summary>Evidence (5) — what was verified against code, and how</summary>
 
 - The gate skips a token without a slash, and skips a path whose last segment does not match a file-extension pattern; only after both gates does it increment the checked tally.
+<!-- doc-citation-exempt: quotes the P29 stale citations verbatim -->
 - Two findings tonight sat in the blind spot: src/audit/README.md cited a `prompts/` directory that does not exist, and src/audit/adapters/README.md cited a bare `normalizeExternal.ts` that lives under src/shared/analyzers/.
 - A third, in docs/glossary-ids.md, was missed for a related reason — the citation is unbackticked, so the gate never sees it.
 - Skipped citations do not appear in the printed coverage count, so the number overstates real coverage.
