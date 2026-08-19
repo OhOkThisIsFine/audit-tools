@@ -354,11 +354,14 @@
   live-ledger partition).
 
 - **Friction walk (queue-closeout + first `.ts`-conversion lap, 2026-07-28):**
-  (1) **inefficient-feeding (medium):** execution state lived only in an untracked checkpoint
-  (`.audit-tools/nightly/execution-checkpoint-2026-07-28.md`) while HANDOFF, the backlog entry and
-  the answer queue all still said the opposite — reconciling cost a full re-verification of every
-  claim against HEAD. Property: when a lap executes tracked work, the tracked record updates in the
-  SAME commit, or the next reader re-derives everything.
+  (1) **inefficient-feeding (medium): CLOSED covered-by-neighbors (owner re-decision 2026-08-18).**
+  The incident (execution state only in an untracked checkpoint while HANDOFF/backlog/queue said
+  the opposite) stated a property — record updates ride the work commit — that measurement showed
+  has no honest mechanical enforcement; its mechanical halves are now individually enforced
+  (handoff-roadmap parity at commit/CI/Stop; answered≠done ledger + SessionStart nudge; closeout
+  evidence legs), and the semantic half (record PROSE says the right thing) is the unscriptable
+  sol-5 class — uncovered, stated here outright. Measurement + re-decision:
+  [`reviews/record-update-gate-measurement-2026-08-18.md`](../reviews/record-update-gate-measurement-2026-08-18.md).
   (2) **ambiguous-direction (low):** the nightly deletion item's "two durable rules would be
   orphaned" caveat named rules that did not map onto the three entries being deleted — each had to
   be independently located and verified untouched. Advisory imprecision, consistent with the

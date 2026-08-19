@@ -1003,10 +1003,12 @@
   },
   "a360d39985d537e8": {
     "disposition": "settled",
-    "answer": "Build the gate: keep the entry open as real work — a commit that touches a tracked-work path must carry the corresponding record update, enforced in the pre-commit gate rather than asked about at session end.",
+    "answer": "RE-DECIDED 2026-08-18 (owner, presented with the 180-commit measurement): close as covered-by-neighbors — no new gate. The stated property has no honest mechanical enforcement (0 true positives in 180 commits; declared work-record pair set empty); its mechanical halves are individually enforced (handoff-roadmap parity, answered-vs-done ledger + SessionStart nudge, closeout evidence legs) and the residue is the unscriptable sol-5 semantic class. Evidence: docs/reviews/record-update-gate-measurement-2026-08-18.md. Original answer (superseded): build the gate — a commit touching a tracked-work path must carry the corresponding record update.",
     "subject": "The 2026-07-28 friction walk states a property nothing enforces — enforce it, accept it as advice, or close the entry",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-08-12T16:36:40.386Z"
+    "decided_at": "2026-08-12T16:36:40.386Z",
+    "completed_at": "2026-08-19T02:31:44.264Z",
+    "completed_ref": "owner re-decision 2026-08-18: closed covered-by-neighbors, evidence in docs/reviews/record-update-gate-measurement-2026-08-18.md (7b2af7f3)"
   },
   "afd1e4a354daafce": {
     "disposition": "settled",

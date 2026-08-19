@@ -43,11 +43,6 @@
      3. Transitional: any OTHER live session predating the feature is child-classified now that
         enforcement is armed; it self-registers from the repo root with
         `node scripts/shared/sessionRegistry.mjs --register <session-id>`.
-   - **Record-update pre-commit gate** (`a360d399`): measurement falsified the stated property's
-     mechanical enforceability (0 true positives in 180 commits; declared-pair set empty) — owner
-     re-scope question PENDING, evidence in
-     [`docs/reviews/record-update-gate-measurement-2026-08-18.md`](reviews/record-update-gate-measurement-2026-08-18.md).
-     Do not build or close without the owner's pick.
    - The 2026-08-18 decision batch: wire `verifyFindingGrounding` into ingest; P34+P26
      registry-derived pre-commit legs + CI trigger paths; P35 Required-Inputs derivation +
      prompt-capability test; P32 writeOpenItems refusals; general status-laundering guard rule;
