@@ -277,9 +277,25 @@ export async function prepareConceptualDispatch(opts: {
     promptPath: promptPathFor(f.lane),
   }));
 
-  const perspectiveLines = perspectivePrompts.map(
-    (f, i) =>
-      `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
+  // Resume (COR-4c8bd93a) narrows the INSTRUCTION surface only. writePaths/
+  // readPaths/artifactPaths below stay the full, stable perspective set —
+  // round identity (conceptual-perspective-round-identity.test.ts) pins a
+  // re-emission of the SAME round to re-declare identical bound paths
+  // regardless of partial delivery, so they are a stable per-round access
+  // declaration, not a must-write list. What resume changes is which lanes
+  // the narrative tells the host to actually run: a delivered lane is never
+  // re-instructed and its landed submission is never clobbered, because the
+  // host is simply never told to write there again.
+  const pendingLaneIds = new Set(fanout.pendingLanes.map((lane) => lane.id));
+  const pendingPerspectives = perspectivePrompts
+    .map((f, i) => ({ ordinal: i + 1, f }))
+    .filter(({ f }) => pendingLaneIds.has(f.lane));
+  const pendingCount = pendingPerspectives.length;
+  const deliveredCount = perspectivePrompts.length - pendingCount;
+
+  const perspectiveLines = pendingPerspectives.map(
+    ({ ordinal, f }) =>
+      `   - Perspective ${ordinal} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
   );
 
   const artifactPaths: Record<string, string> = {
@@ -297,8 +313,25 @@ export async function prepareConceptualDispatch(opts: {
     instructionLines: [
       ...(settings.reuse_notice ? [settings.reuse_notice] : []),
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
-      `1. Execute these ${total} independent perspective lanes — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
-      ...perspectiveLines,
+      // A resumed round with some (but not all) perspectives already delivered
+      // renders this notice so the host sees, in prose, exactly which lanes are
+      // being skipped and why — the mechanical guarantee is the narrowed
+      // perspectiveLines/step-1 list below; this line is purely informational,
+      // the same "state what changed, never rely on the host noticing" pattern
+      // `reuse_notice` above uses for checkpoint reuse.
+      ...(deliveredCount > 0
+        ? [
+            `_${deliveredCount} of ${total} perspective lane(s) already delivered a submission this round — reusing that output, not re-executing them._`,
+          ]
+        : []),
+      ...(pendingCount > 0
+        ? [
+            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
+            ...perspectiveLines,
+          ]
+        : [
+            `1. All ${total} perspective lanes have already delivered a submission this round — nothing to execute here.`,
+          ]),
       `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
       "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
     ],
