@@ -54,7 +54,7 @@ export function validateDesignSpecGates(
   obligationLedger?: unknown,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(designSpec)) return issues;
+  if (!canEvaluateDesignSpec(designSpec)) return issues;
 
   // Gate 1: every module entry must have non-empty inputs and outputs.
   // Checks both DesignSpec.modules (optional annotation array) and
@@ -115,8 +115,13 @@ export function validateDesignSpecGates(
         const oblId = typeof obl.id === "string" ? obl.id : "";
         const oblDesc = typeof obl.description === "string" ? obl.description : "";
         // Exact id match or word-boundary containment in description to avoid
-        // substring false-positives (e.g. "INV-1" ⊂ "INV-10").
-        return oblId === invId || new RegExp(`(?<![\\w-])${invId}(?![\\w-])`).test(oblDesc);
+        // substring false-positives (e.g. "INV-1" ⊂ "INV-10"). COR-cca3801c:
+        // invId is worker-authored and must be escaped before interpolation —
+        // unescaped, a metacharacter id (e.g. "INV-(1") threw and aborted the
+        // whole evaluateContractPipelineCrossGates array literal, losing all
+        // eight gate results, not just this one. Mirrors the sibling fix
+        // already applied to fid in validateDigestCoverage below.
+        return oblId === invId || new RegExp(`(?<![\\w-])${escapeRegExp(invId)}(?![\\w-])`).test(oblDesc);
       });
       if (!covered) {
         pushValidationIssue(
@@ -287,7 +292,7 @@ export function validateImplementationDAGIntegrity(
   judgeReportPayload: unknown,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(dagPayload) || !Array.isArray(dagPayload.nodes)) return issues;
+  if (!canEvaluateImplementationDagIntegrity(dagPayload)) return issues;
 
   // Build reference sets from sibling artifacts.
   const obligationIds = new Set<string>();
@@ -437,7 +442,32 @@ export function validateImplementationDAGIntegrity(
 //             derivation gate: every reconciled seam mismatch is derived into
 //             the finalized module contracts.
 
-const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
+/**
+ * Testable obligation kinds — THE single source of truth for whether an
+ * obligation needs a test-plan spec (derive.ts's buildTestValidatorPlanScaffold)
+ * and whether the coverage gate below requires that spec to be filled
+ * (validatePairedObligations). MNT-e10b9d9b: previously duplicated by hand as
+ * TESTABLE_KINDS in derive.ts and TESTABLE_OBLIGATION_KINDS here, and the two
+ * copies had already diverged — derive.ts failed OPEN on an unrecognized kind
+ * (conservatively testable) while this file failed CLOSED (silently skipped,
+ * i.e. treated as non-testable, so a scaffold-offered spec was never actually
+ * required). Single-sourced here; derive.ts imports isTestablePhaseObligation
+ * from this module instead of re-declaring it.
+ */
+export const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
+
+/**
+ * testable (invariant/behavioral) → true; the structural contract-conformance
+ * kind → false; an unrecognized/unexpected kind → true (fail-OPEN into the
+ * paired-test gate rather than silently skipping coverage — matches
+ * derive.ts's original scaffold semantics, which this predicate now also
+ * governs on the coverage-gate side, closing the divergence).
+ */
+export function isTestablePhaseObligation(kind: string): boolean {
+  if (TESTABLE_OBLIGATION_KINDS.has(kind)) return true;
+  if (kind === "structural") return false;
+  return true;
+}
 
 /**
  * OBL-CO-01 / DC-5 — paired-obligation gate (fail-closed, change-scoped).
@@ -473,9 +503,7 @@ export function validatePairedObligations(
   testValidatorPlanPayload: unknown,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(obligationLedgerPayload) || !Array.isArray(obligationLedgerPayload.obligations)) {
-    return issues;
-  }
+  if (!canEvaluatePairedObligations(obligationLedgerPayload)) return issues;
 
   // Index covering test specs by obligation id: gather every assertion string and
   // whether any spec declares the obligation inapplicable with a falsifiable claim.
@@ -522,7 +550,7 @@ export function validatePairedObligations(
 
   for (const obl of obligationLedgerPayload.obligations as unknown[]) {
     if (!isRecord(obl) || typeof obl.id !== "string") continue;
-    if (typeof obl.kind !== "string" || !TESTABLE_OBLIGATION_KINDS.has(obl.kind)) continue;
+    if (typeof obl.kind !== "string" || !isTestablePhaseObligation(obl.kind)) continue;
     const id = obl.id;
     const entry = coverage.get(id);
 
@@ -707,12 +735,11 @@ export function validateDigestCoverage(
   const issues: ValidationIssue[] = [];
 
   // Non-enumerable sources have no closed finding set: pass vacuously.
-  if (sourceType !== "structured_audit" && sourceType !== "mixed") return issues;
-  if (!isRecord(findingEnumerationPayload)) return issues;
-  if (findingEnumerationPayload.is_enumerable === false) return issues;
+  if (!canEvaluateDigestCoverage(sourceType, findingEnumerationPayload)) return issues;
 
-  const findingIds: string[] = Array.isArray(findingEnumerationPayload.findings)
-    ? (findingEnumerationPayload.findings as unknown[])
+  const findingEnumeration = findingEnumerationPayload as Record<string, unknown>;
+  const findingIds: string[] = Array.isArray(findingEnumeration.findings)
+    ? (findingEnumeration.findings as unknown[])
         .map((f) => (isRecord(f) && typeof f.id === "string" ? f.id : undefined))
         .filter((id): id is string => id !== undefined)
     : [];
@@ -921,13 +948,9 @@ export function validateReconciliationDerivation(
   finalizedModuleContractsPayload: unknown,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (
-    !isRecord(seamReconciliationReportPayload) ||
-    !Array.isArray(seamReconciliationReportPayload.mismatches)
-  ) {
-    return issues;
-  }
-  const mismatches = seamReconciliationReportPayload.mismatches as unknown[];
+  if (!canEvaluateReconciliationDerivation(seamReconciliationReportPayload)) return issues;
+  const mismatches = (seamReconciliationReportPayload as Record<string, unknown>)
+    .mismatches as unknown[];
   if (mismatches.length === 0) return issues;
 
   // Build a single normalized corpus of all finalized-contract interface text.
@@ -1383,13 +1406,8 @@ export function validateDecompositionFileScope(
   repoRoot: string,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (
-    !isRecord(moduleDecompositionPayload) ||
-    !Array.isArray(moduleDecompositionPayload.modules)
-  ) {
-    return issues;
-  }
-  const modules = moduleDecompositionPayload.modules as unknown[];
+  if (!canEvaluateDecompositionFileScope(moduleDecompositionPayload)) return issues;
+  const modules = (moduleDecompositionPayload as Record<string, unknown>).modules as unknown[];
 
   // Does any module actually declare a file_scope? If not, nothing to ground —
   // do not spawn git or fail-closed on an unrelated empty tree.
@@ -1520,13 +1538,7 @@ export function validateFinalizedModuleSetPreserved(
   finalizedModuleContracts: unknown,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(draftedModuleContracts) || !Array.isArray(draftedModuleContracts.module_contracts)) {
-    return issues;
-  }
-  if (
-    !isRecord(finalizedModuleContracts) ||
-    !Array.isArray(finalizedModuleContracts.module_contracts)
-  ) {
+  if (!canEvaluateFinalizedModuleSet(draftedModuleContracts, finalizedModuleContracts)) {
     return issues;
   }
   const drafted = new Set(moduleContractNames(draftedModuleContracts));
@@ -1567,6 +1579,145 @@ export function validateFinalizedModuleSetPreserved(
     );
   }
   return issues;
+}
+
+// ── Gate-outcome classification (OBS-cca3801c / OBS-cca3801c-2) ────────────────
+//
+// A skipped cross-gate and a passing one both return an empty ValidationIssue[]
+// — nothing before this section told them apart. Each predicate below is the
+// SAME boolean condition the corresponding gate's own early-return already
+// calls (see the edits above): never a second, hand-mirrored copy of the
+// condition, which is exactly the class of drift MNT-e10b9d9b names for
+// TESTABLE_KINDS vs TESTABLE_OBLIGATION_KINDS. A gate and its own
+// evaluated/skipped classification therefore cannot diverge — there is one
+// boolean expression per gate, called from both places.
+
+function canEvaluatePairedObligations(
+  x: unknown,
+): x is Record<string, unknown> & { obligations: unknown[] } {
+  return isRecord(x) && Array.isArray(x.obligations);
+}
+
+function canEvaluateEvidenceThreaded(
+  assessmentReportPayload: unknown,
+  judgeReportPayload: unknown,
+  dagPayload: unknown,
+): boolean {
+  return (
+    isRecord(assessmentReportPayload) ||
+    isRecord(judgeReportPayload) ||
+    isRecord(dagPayload)
+  );
+}
+
+function canEvaluateDigestCoverage(
+  sourceType: string | undefined,
+  findingEnumerationPayload: unknown,
+): boolean {
+  return (
+    (sourceType === "structured_audit" || sourceType === "mixed") &&
+    isRecord(findingEnumerationPayload) &&
+    findingEnumerationPayload.is_enumerable !== false
+  );
+}
+
+function digestCoverageSkipReason(
+  sourceType: string | undefined,
+  findingEnumerationPayload: unknown,
+): string {
+  if (sourceType !== "structured_audit" && sourceType !== "mixed") {
+    return "source not enumerable — source_type is not structured_audit or mixed";
+  }
+  if (!isRecord(findingEnumerationPayload)) {
+    return "finding-enumeration payload is absent or malformed";
+  }
+  return "source not enumerable — is_enumerable is false";
+}
+
+function canEvaluateReconciliationDerivation(
+  x: unknown,
+): x is Record<string, unknown> & { mismatches: unknown[] } {
+  return isRecord(x) && Array.isArray(x.mismatches);
+}
+
+function canEvaluateDesignSpec(x: unknown): x is Record<string, unknown> {
+  return isRecord(x);
+}
+
+function canEvaluateImplementationDagIntegrity(
+  x: unknown,
+): x is Record<string, unknown> & { nodes: unknown[] } {
+  return isRecord(x) && Array.isArray(x.nodes);
+}
+
+function canEvaluateDecompositionFileScope(
+  x: unknown,
+): x is Record<string, unknown> & { modules: unknown[] } {
+  return isRecord(x) && Array.isArray(x.modules);
+}
+
+function canEvaluateFinalizedModuleSet(
+  draftedModuleContracts: unknown,
+  finalizedModuleContracts: unknown,
+): boolean {
+  if (
+    !isRecord(draftedModuleContracts) ||
+    !Array.isArray(draftedModuleContracts.module_contracts)
+  ) {
+    return false;
+  }
+  if (
+    !isRecord(finalizedModuleContracts) ||
+    !Array.isArray(finalizedModuleContracts.module_contracts)
+  ) {
+    return false;
+  }
+  return moduleContractNames(draftedModuleContracts).length > 0;
+}
+
+/**
+ * Whether one of the eight cross-artifact gates genuinely ran (`evaluated`),
+ * or was skipped because its primary input was absent, malformed, or (digest
+ * coverage only) its source was not enumerable — OBS-cca3801c / OBS-cca3801c-2.
+ * An empty `issues` array alone cannot distinguish "ran clean" from "never
+ * ran"; `evaluated` can. `reason` is present only when `evaluated` is false.
+ *
+ * INV-CPGV-OUTCOME-RECORD-OWNER: this module owns this record. The finalized
+ * module contract's fuller design places the shared type in audit-tools/shared
+ * so both adopters (contract-pipeline-orchestration,
+ * remediate-nextstep-and-final-gate) import one shape — that relocation needs
+ * an edit outside this work item's write scope (src/remediate/validation/ +
+ * src/remediate/contractPipeline/ only), so it is deliberately deferred to
+ * whichever work item can touch src/shared. The type is defined here,
+ * additively, alongside the gates it classifies, so the OBS-cca3801c /
+ * OBS-cca3801c-2 signalling obligation is discharged now rather than blocked
+ * on that follow-up; see CP-BLOCK-CP-NODE-14's result deviations.
+ */
+export interface GateOutcome {
+  /** Stable identity, in evaluateContractPipelineCrossGates's fixed canonical order. */
+  gate:
+    | "paired_obligations"
+    | "evidence_threaded"
+    | "digest_coverage"
+    | "reconciliation_derivation"
+    | "design_spec"
+    | "implementation_dag_integrity"
+    | "decomposition_file_scope"
+    | "finalized_module_set_preserved";
+  evaluated: boolean;
+  issues: ValidationIssue[];
+  /** Present only when `evaluated` is false. */
+  reason?: string;
+}
+
+/** Build one GateOutcome — the single place `reason` is attached only when `evaluated` is false. */
+function gateOutcome(
+  gate: GateOutcome["gate"],
+  evaluated: boolean,
+  issues: ValidationIssue[],
+  reason: string,
+): GateOutcome {
+  return evaluated ? { gate, evaluated, issues } : { gate, evaluated, issues, reason };
 }
 
 // ── Single-sourced cross-gate SET (MNT — validate-artifact self-check parity) ──
@@ -1665,6 +1816,89 @@ export function evaluateContractPipelineCrossGates(
     validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
     validateDecompositionFileScope(moduleDecomposition, root),
     validateFinalizedModuleSetPreserved(draftedContracts, finalizedContracts),
+  ];
+}
+
+/**
+ * Evaluate the SAME 8 cross-artifact gates {@link evaluateContractPipelineCrossGates}
+ * calls, in the SAME canonical order, additionally classifying each as
+ * evaluated or skipped-with-reason (OBS-cca3801c / OBS-cca3801c-2, see
+ * {@link GateOutcome}). Additive: evaluateContractPipelineCrossGates keeps its
+ * existing `ValidationIssue[][]` shape unchanged for its existing callers
+ * (validation/artifacts.ts, index.ts) — this is a parallel, richer view for a
+ * caller that must refuse an empty `issues` array as proof-of-clean without
+ * checking `evaluated` first.
+ */
+export function evaluateContractPipelineCrossGateOutcomes(
+  inputs: ContractPipelineCrossGateInputs,
+): GateOutcome[] {
+  const { payloads, findingEnumeration, root } = inputs;
+
+  const goalSpec = payloads.get("goal_spec");
+  const sourceType =
+    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
+      ? goalSpec.source_type
+      : undefined;
+  const obligationLedger = payloads.get("obligation_ledger");
+  const testValidatorPlan = payloads.get("test_validator_plan");
+  const finalizedContracts = payloads.get("finalized_module_contracts");
+  const draftedContracts = payloads.get("module_contracts");
+  const seamReport = payloads.get("seam_reconciliation_report");
+  const assessment = payloads.get("contract_assessment_report");
+  const judge = payloads.get("judge_report");
+  const counterexample = payloads.get("counterexample");
+  const dag = payloads.get("implementation_dag");
+  const moduleDecomposition = payloads.get("module_decomposition");
+
+  return [
+    gateOutcome(
+      "paired_obligations",
+      canEvaluatePairedObligations(obligationLedger),
+      validatePairedObligations(obligationLedger, testValidatorPlan),
+      "obligation_ledger payload is absent or malformed (not a record with an obligations array)",
+    ),
+    gateOutcome(
+      "evidence_threaded",
+      canEvaluateEvidenceThreaded(assessment, judge, dag),
+      validateEvidenceThreaded(assessment, judge, dag),
+      "all three input payloads (contract_assessment_report, judge_report, implementation_dag) are absent or malformed",
+    ),
+    gateOutcome(
+      "digest_coverage",
+      canEvaluateDigestCoverage(sourceType, findingEnumeration),
+      validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
+      digestCoverageSkipReason(sourceType, findingEnumeration),
+    ),
+    gateOutcome(
+      "reconciliation_derivation",
+      canEvaluateReconciliationDerivation(seamReport),
+      validateReconciliationDerivation(seamReport, finalizedContracts),
+      "seam_reconciliation_report payload is absent or malformed (not a record with a mismatches array)",
+    ),
+    gateOutcome(
+      "design_spec",
+      canEvaluateDesignSpec(finalizedContracts),
+      validateDesignSpecGates(finalizedContracts, obligationLedger),
+      "design payload (finalized_module_contracts) is absent or malformed",
+    ),
+    gateOutcome(
+      "implementation_dag_integrity",
+      canEvaluateImplementationDagIntegrity(dag),
+      validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
+      "implementation_dag payload is absent or malformed (not a record with a nodes array)",
+    ),
+    gateOutcome(
+      "decomposition_file_scope",
+      canEvaluateDecompositionFileScope(moduleDecomposition),
+      validateDecompositionFileScope(moduleDecomposition, root),
+      "module_decomposition payload is absent or malformed (not a record with a modules array)",
+    ),
+    gateOutcome(
+      "finalized_module_set_preserved",
+      canEvaluateFinalizedModuleSet(draftedContracts, finalizedContracts),
+      validateFinalizedModuleSetPreserved(draftedContracts, finalizedContracts),
+      "drafted or finalized module_contracts payload is absent, malformed, or names no modules",
+    ),
   ];
 }
 

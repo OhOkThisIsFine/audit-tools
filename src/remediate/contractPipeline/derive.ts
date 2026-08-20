@@ -36,6 +36,7 @@ import {
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
 import { obligationId } from "./idRegistry.js";
 import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
+import { isTestablePhaseObligation } from "../validation/contractPipelineGates.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
 interface DerivableModuleContract {
@@ -257,30 +258,22 @@ export function deriveFinalizedModuleContracts(
 // fields fail validation by design (that is the point — the model must fill
 // them). They are rendered into the dispatch prompt as a pre-filled skeleton.
 
-// NOTE(follow-up unification): this testable-kind set is duplicated in
-// `../validation/contractPipelineGates.ts` (~438, `TESTABLE_OBLIGATION_KINDS`).
-// The two should be single-sourced; for now they are kept in parity by hand.
-// Do NOT edit gates.ts here — that unification is tracked separately.
-const TESTABLE_KINDS = new Set(["invariant", "behavioral"]);
-
 /**
  * Shared obligation-membership predicates — the single source for which
  * obligations each downstream scaffold covers.
  *
- * `isTestablePhaseObligation`: testable (invariant/behavioral) → true; the
- * structural contract-conformance kind → false; an unknown/unexpected kind →
- * conservatively true (fail-OPEN into the paired-test gate rather than silently
- * skipping coverage).
+ * `isTestablePhaseObligation` (imported above) is now single-sourced in
+ * `../validation/contractPipelineGates.ts` (MNT-e10b9d9b: this file's former
+ * local TESTABLE_KINDS set and that file's TESTABLE_OBLIGATION_KINDS were
+ * "kept in parity by hand" and had already diverged — fail-open here,
+ * fail-closed there, on an identical unrecognized-kind input). Re-exported
+ * here so every existing importer of derive.js keeps working unchanged.
  *
  * `isDagPhaseObligation`: every obligation is covered by the implementation DAG,
  * so this is always true. It exists so both scaffolds derive their membership
  * from a named predicate rather than an inline ad-hoc filter.
  */
-export function isTestablePhaseObligation(kind: string): boolean {
-  if (TESTABLE_KINDS.has(kind)) return true;
-  if (kind === "structural") return false;
-  return true; // unknown kind → conservatively testable
-}
+export { isTestablePhaseObligation };
 
 export function isDagPhaseObligation(_kind: string): boolean {
   return true;
